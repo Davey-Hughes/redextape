@@ -1,0 +1,16 @@
+# Keep the build context small and the image clean.
+target/
+**/target/
+node_modules/
+**/node_modules/
+web/dist/
+pkg/
+
+# Docs, VCS, and local cruft aren't needed to build or run the static site.
+.git/
+.forgejo/
+docs/
+**/*.md
+scratchpad/
+**/*.log
+.DS_Store

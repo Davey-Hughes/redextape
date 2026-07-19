@@ -1,0 +1,8 @@
+# Track the latest stable toolchain (rather than a pinned version) so contributors and CI always
+# build with current Rust. Trade-off: a new stable release can introduce rustfmt/clippy changes that
+# surface as fmt diffs or `-D warnings` failures with no code change — pin an exact `channel` here if
+# you ever need lockstep reproducibility. rustfmt + clippy are the components CI runs; the wasm
+# target is added on demand in CI / the Docker build, not pinned here.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

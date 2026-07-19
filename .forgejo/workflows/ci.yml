@@ -1,0 +1,167 @@
+# Forgejo Actions CI for Redextape (self-hosted runner on git.daveynet.xyz).
+# Adapted from the ws-sim setup for a Rust -> WASM static site + CLI (no server process).
+#
+# The project has no code yet. The `detect` job checks what exists and gates the rest, so this
+# pipeline SKIPS cleanly (green) until the crates / web app land — then activates automatically
+# with no edits. See docs/ for the design spec.
+#
+# Forgejo specifics (vs GitHub): actions come from the code.forgejo.org mirror, toolchains are
+# installed as steps (no fat preinstalled image), the image is built with `docker buildx build
+# --push` against the host daemon, and the registry is the Forgejo instance (auth via PAT secrets
+# REGISTRY_USER / REGISTRY_TOKEN). First run will need tuning (tool versions, runner networking).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths-ignore: ["docs/**", "**/*.md", "LICENSE*"]
+  pull_request:
+    paths-ignore: ["docs/**", "**/*.md", "LICENSE*"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Detect what exists so the pipeline no-ops until code lands, then auto-activates.
+  detect:
+    runs-on: docker
+    outputs:
+      has_rust: ${{ steps.c.outputs.has_rust }}
+      has_web: ${{ steps.c.outputs.has_web }}
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - id: c
+        run: |
+          if [ -f Cargo.toml ]; then echo "has_rust=true" >> "$GITHUB_OUTPUT"; else echo "has_rust=false" >> "$GITHUB_OUTPUT"; fi
+          if [ -f web/package.json ]; then echo "has_web=true" >> "$GITHUB_OUTPUT"; else echo "has_web=false" >> "$GITHUB_OUTPUT"; fi
+
+  rust:
+    needs: detect
+    if: needs.detect.outputs.has_rust == 'true'
+    runs-on: docker                    # -> catthehacker/ubuntu:act-latest (node+git+curl)
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust (respects rust-toolchain.toml) + coverage tooling
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+          . "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup show                        # installs the toolchain + rustfmt/clippy from rust-toolchain.toml
+          rustup component add llvm-tools-preview
+          curl -fsSL https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.8.7/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz \
+            | tar xzf - -C "$HOME/.cargo/bin"
+      - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test + coverage
+        run: cargo llvm-cov --workspace --all-targets --fail-under-lines 80   # tune the gate as the code grows
+
+  web:
+    needs: detect
+    if: needs.detect.outputs.has_web == 'true'
+    runs-on: docker
+    container:
+      image: node:24-bookworm          # node + git present; JS actions work
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust + wasm-pack (the web build compiles the core crate to WASM)
+        working-directory: ${{ github.workspace }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+          . "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup show
+          rustup target add wasm32-unknown-unknown
+          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz \
+            | tar xzf - --strip-components=1 -C /usr/local/bin --wildcards '*/wasm-pack'
+      - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('web/package-lock.json') }}
+          restore-keys: npm-
+      - run: npm ci
+      - name: Lint + format check
+        run: npx biome ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Build (invokes wasm-pack, then the bundler)
+        run: npm run build
+
+  # Build + push the static-site image — only after rust + web pass, never on a PR.
+  docker:
+    needs: [detect, rust, web]
+    if: >-
+      !cancelled()
+      && github.event_name != 'pull_request'
+      && needs.detect.outputs.has_rust == 'true'
+      && needs.detect.outputs.has_web == 'true'
+      && needs.rust.result == 'success'
+      && needs.web.result == 'success'
+    runs-on: docker                    # node:lts (runner default) + the host docker socket the runner mounts
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install the docker CLI + buildx plugin
+        run: |
+          curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz | tar xz -C /usr/local/bin --strip-components=1 docker/docker
+          mkdir -p "$HOME/.docker/cli-plugins"
+          curl -fsSL https://github.com/docker/buildx/releases/download/v0.19.3/buildx-v0.19.3.linux-amd64 -o "$HOME/.docker/cli-plugins/docker-buildx"
+          chmod +x "$HOME/.docker/cli-plugins/docker-buildx"
+      - name: Log in to the Forgejo registry
+        run: echo "${{ secrets.REGISTRY_TOKEN }}" | docker login forge.daveynet.xyz -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+      # Build in an isolated docker-container builder, NOT the daemon's default driver, so CI never
+      # touches the host image store — otherwise a build would drag the local :latest tag onto the new
+      # image and What's-Up-Docker would miss the update. The named builder persists its BuildKit cache
+      # across runs; `buildx create` isn't idempotent, so drop any stale container by name first
+      # (`docker rm`, NOT `docker buildx rm`, which would also delete the cache volume).
+      - name: Set up an isolated buildx builder (keeps CI out of the host image store)
+        run: |
+          docker rm -f buildx_buildkit_wud-safe0 >/dev/null 2>&1 || true
+          docker buildx create --name wud-safe --driver docker-container --use
+      - name: Compute tags
+        id: t
+        env:                       # values via env, not inline ${{ }}, so a crafted ref name can't inject shell
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          IMG="forge.daveynet.xyz/$(echo "$REPO" | tr '[:upper:]' '[:lower:]')"
+          TAGS="$IMG:sha-$(echo "$SHA" | cut -c1-7)"
+          [ "$REF" = 'refs/heads/main' ] && TAGS="$TAGS,$IMG:latest"
+          case "$REF" in
+            refs/tags/v*) V="$REF_NAME"; TAGS="$TAGS,$IMG:${V#v}" ;;
+          esac
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+      # No registry cache export: Forgejo behind Cloudflare rejects large mode=max blobs (413). The
+      # persistent wud-safe builder keeps a local BuildKit cache instead — warm across runs. provenance
+      # /sbom OFF so Forgejo registers a plain manifest. --push ships every tag in one pass.
+      - name: Build & push
+        env:
+          TAGS: ${{ steps.t.outputs.tags }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          ARGS=""
+          for t in $(echo "$TAGS" | tr ',' ' '); do ARGS="$ARGS -t $t"; done
+          docker buildx build --builder wud-safe $ARGS \
+            --build-arg COMMIT_HASH="$SHA" \
+            --provenance=false --sbom=false \
+            --push .

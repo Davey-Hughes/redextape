@@ -1,0 +1,31 @@
+# Local pre-commit hooks mirroring the CI gates (.forgejo/workflows/ci.yml). Install with:
+#   pre-commit install
+# Hooks only fire when matching files are staged, so they stay dormant until the crates / web app
+# exist. Rust hooks run on *.rs; web hooks run on the web/ sources.
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all --check
+        language: system
+        files: \.rs$
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --workspace --all-targets -- -D warnings
+        language: system
+        files: \.rs$
+        pass_filenames: false
+      - id: biome-ci
+        name: biome ci
+        entry: bash -c 'cd web && npx biome ci --error-on-warnings src'
+        language: system
+        files: ^web/.*\.(js|ts|jsx|tsx|json|css)$
+        pass_filenames: false
+      - id: web-typecheck
+        name: web typecheck
+        entry: bash -c 'cd web && npm run typecheck'
+        language: system
+        files: ^web/.*\.(ts|tsx)$
+        pass_filenames: false

@@ -1,0 +1,6 @@
+# Formatting is enforced in CI (.forgejo/workflows/ci.yml). max_width = 120 and
+# use_small_heuristics = "Max" keep single-line struct literals and chained iterators on one line
+# instead of exploding vertically — a dense hand-style.
+edition = "2024"
+max_width = 120
+use_small_heuristics = "Max"

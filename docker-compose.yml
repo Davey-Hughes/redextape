@@ -1,0 +1,17 @@
+# Redextape — a static browser app served by nginx. Bring it up with:  docker compose up -d
+# Then open http://<host>:8085 . Front it with your reverse proxy / Cloudflare Tunnel for HTTPS.
+#
+# To build from this repo instead of pulling the published image, replace the `image:` line with:
+#   build: .
+services:
+  redextape:
+    image: forge.daveynet.xyz/davey/redextape:latest
+    container_name: redextape
+    restart: unless-stopped
+    ports:
+      - "8085:80" # host 8085 -> container 80. Point your reverse proxy here.
+    labels:
+      # What's-Up-Docker auto-updates (matches the home-server stack): watch the :latest tag and
+      # pull when CI publishes a new one.
+      wud.watch: "true"
+      wud.tag.include: "^latest$"
