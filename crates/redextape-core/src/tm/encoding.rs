@@ -5,7 +5,7 @@
 //! (build a tiny machine → run → decode).
 
 use crate::core::BinOp;
-use crate::tm::build::{Builder, MARK, REG, RuleSpec, SEP, Slot, WORK};
+use crate::tm::build::{Builder, FIELD_WIDTH, MARK, REG, RuleSpec, SEP, Slot, WORK};
 use crate::tm::machine::{BLANK, Move, StateId, Symbol};
 
 /// The pluggable numeric encoding (the swappable seam). `Unary` is the v1 implementation; a `Binary`
@@ -28,6 +28,16 @@ pub trait Encoding {
     fn compare(&self, b: &mut Builder, entry: StateId, exit: StateId, op: BinOp, ra: Slot, rb: Slot, rd: Slot);
     /// Decode field `slot` of a materialized `reg` tape to its unary value (`None` if the field is absent).
     fn decode_nat(&self, reg_cells: &[Symbol], slot: Slot) -> Option<u64>;
+    /// The initial REG tape for a `slots`-field bank: `#` then (`FIELD_WIDTH` blanks + `#`)*`slots`.
+    /// Head begins at cell 0 (the leading `#` = home). Encoding-specific (a zero field's contents).
+    fn init_reg(&self, slots: u32) -> Vec<Symbol>;
+    /// `slot rd <- slot rs`. Flows `entry -> exit`; both heads home on entry and exit. Safe when
+    /// `rs == rd` (identity). Encoding-specific (copies the value representation).
+    fn mov(&self, b: &mut Builder, entry: StateId, exit: StateId, rs: Slot, rd: Slot);
+    /// From `entry` (REG at home), seek field `r`: if it is zero (unary: first cell blank) flow to
+    /// `if_zero`, else to `if_nonzero`. REG head home on both exits; WORK untouched. Encoding-specific
+    /// (what "zero" looks like on the tape).
+    fn jz(&self, b: &mut Builder, entry: StateId, if_zero: StateId, if_nonzero: StateId, r: Slot);
 }
 
 pub struct Unary;
@@ -424,6 +434,42 @@ impl Encoding for Unary {
         let after_wr = append_work_to_field(b, result, rd, &format!("{l}.wr")); // rd <- the `0`/`1` result
         b.add_rule(after_wr, RuleSpec::new(), exit);
     }
+
+    fn init_reg(&self, slots: u32) -> Vec<Symbol> {
+        // Fixed-width all-zero bank: `#` then (FIELD_WIDTH blanks + `#`) per field.
+        let mut cells = vec![SEP];
+        for _ in 0..slots {
+            cells.extend(std::iter::repeat_n(BLANK, FIELD_WIDTH));
+            cells.push(SEP);
+        }
+        cells
+    }
+
+    fn mov(&self, b: &mut Builder, entry: StateId, exit: StateId, rs: Slot, rd: Slot) {
+        // WORK <- rs (clears WORK, copies its marks); rd <- WORK (blanks rd's window, rewrites). Both
+        // sub-primitives restore the home convention, so this composes. `rs == rd` round-trips the
+        // same value through WORK -> identity.
+        let l = format!("mv{rd}s{entry}"); // `entry` (fresh per call site) uniquifies derived states
+        let after_copy = copy_field_to_work(b, entry, rs, &format!("{l}.c"));
+        let after_wr = append_work_to_field(b, after_copy, rd, &format!("{l}.d"));
+        b.add_rule(after_wr, RuleSpec::new(), exit);
+    }
+
+    fn jz(&self, b: &mut Builder, entry: StateId, if_zero: StateId, if_nonzero: StateId, r: Slot) {
+        // Seek field r; its first cell is a MARK (nonzero) or a BLANK (zero, all padding). Each branch
+        // rewinds REG home to its own exit. rewind_home's precondition (head inside the field, not on
+        // its trailing `#`) holds: the first cell is a mark or an interior padding blank.
+        let l = format!("jz{r}s{entry}"); // `entry` (fresh per call site) uniquifies derived states
+        let at = seek_slot(b, entry, r, &format!("{l}.s")); // REG on field r's first cell
+        let nz = b.state(format!("{l}.nz"));
+        b.add_rule(at, RuleSpec::new().on(REG, Some(MARK), None, Move::S), nz);
+        let z = b.state(format!("{l}.z"));
+        b.add_rule(at, RuleSpec::new().on(REG, Some(BLANK), None, Move::S), z);
+        let home_nz = rewind_home(b, nz, r, &format!("{l}.rn"));
+        b.add_rule(home_nz, RuleSpec::new(), if_nonzero);
+        let home_z = rewind_home(b, z, r, &format!("{l}.rz"));
+        b.add_rule(home_z, RuleSpec::new(), if_zero);
+    }
 }
 
 #[cfg(test)]
@@ -549,5 +595,65 @@ mod tests {
         assert_eq!(cmp(BinOp::Gt, 1, 3), Some(0));
         assert_eq!(cmp(BinOp::Ge, 3, 3), Some(1));
         assert_eq!(cmp(BinOp::Ge, 1, 3), Some(0));
+    }
+
+    #[test]
+    fn init_reg_lays_out_a_fixed_width_bank() {
+        // `#` then (FIELD_WIDTH blanks + `#`) per slot; every field decodes to 0.
+        let cells = Unary.init_reg(2);
+        assert_eq!(cells.len(), 1 + 2 * (FIELD_WIDTH + 1));
+        assert_eq!(cells[0], SEP);
+        assert_eq!(Unary.decode_nat(&cells, 0), Some(0));
+        assert_eq!(Unary.decode_nat(&cells, 1), Some(0));
+        assert_eq!(Unary.decode_nat(&cells, 2), None); // no field past the trailing `#`
+    }
+
+    #[test]
+    fn mov_copies_a_field() {
+        // slot0 <- v; mov slot1 <- slot0; decode slot1 == v (and slot0 is unchanged).
+        fn body(b: &mut Builder, e: StateId, x: StateId) {
+            Unary.mov(b, e, x, 0, 1);
+        }
+        assert_eq!(run_gadget(2, &[(0, 5)], 1, body), Some(5));
+        assert_eq!(run_gadget(2, &[(0, 0)], 1, body), Some(0));
+        // Source is preserved by the copy.
+        assert_eq!(run_gadget(2, &[(0, 3)], 0, body), Some(3));
+    }
+
+    #[test]
+    fn mov_into_self_is_identity() {
+        assert_eq!(run_gadget(1, &[(0, 4)], 0, |b, e, x| Unary.mov(b, e, x, 0, 0)), Some(4));
+    }
+
+    /// Build a 2-field machine: init slot0 <- `v`; `jz(slot0, zero_exit, nonzero_exit)`; the zero exit
+    /// writes 7 into slot1, the nonzero exit writes 9. Decode slot1 to see which branch ran.
+    fn run_jz(v: u64) -> Option<u64> {
+        let enc = Unary;
+        let mut b = Builder::new();
+        let halt = b.accept("halt");
+        let zero_exit = b.state("zexit");
+        let nz_exit = b.state("nzexit");
+        enc.write_literal(&mut b, zero_exit, halt, 7, 1);
+        enc.write_literal(&mut b, nz_exit, halt, 9, 1);
+        let jz_entry = b.state("jz");
+        enc.jz(&mut b, jz_entry, zero_exit, nz_exit, 0);
+        // Prepend: init slot0 <- v, flowing into the jz entry.
+        let start = b.state("start");
+        enc.write_literal(&mut b, start, jz_entry, v, 0);
+        // Initial 2-field bank.
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(2);
+        let m = b.finish(start);
+        assert!(m.validate().is_empty(), "invalid machine: {:?}", m.validate());
+        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+        assert_eq!(status, Status::Halted, "jz machine did not halt");
+        enc.decode_nat(&tapes[REG].snapshot().0, 1)
+    }
+
+    #[test]
+    fn jz_branches_on_zero() {
+        assert_eq!(run_jz(0), Some(7)); // zero -> zero_exit
+        assert_eq!(run_jz(1), Some(9)); // nonzero -> nonzero_exit
+        assert_eq!(run_jz(5), Some(9));
     }
 }
