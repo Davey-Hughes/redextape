@@ -8,6 +8,7 @@ pub mod core;
 pub mod desugar;
 pub mod diagnostic;
 pub mod interp;
+pub mod lambda;
 pub mod lexer;
 pub mod parser;
 pub mod prelude;
