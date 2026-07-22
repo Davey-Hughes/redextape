@@ -1,0 +1,379 @@
+//! Reference tree-walker over the Core AST — the oracle later backends are checked against. Every
+//! binding is a mutable `Rc<RefCell<Value>>` slot so `while`/assignment and closures share one
+//! mechanism. Subtraction is monus (saturating). A step budget guards against nontermination.
+
+use crate::core::{BinOp, Core};
+use crate::prelude::runtime_env;
+use crate::value::{Builtin, Env, Frame, Value};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+/// Default step budget for `eval` — high enough for the demo suite, low enough to fail fast in
+/// tests instead of hanging. (§6.4 makes caps first-class; this is the interpreter's own guard.)
+pub const DEFAULT_BUDGET: u64 = 5_000_000;
+
+/// Maximum total interpreter recursion depth before `eval` returns a `RuntimeError` instead of
+/// letting native (Rust) recursion overflow the stack. This bounds EVERY `eval` call — user
+/// function calls AND purely structural nesting (deep lists desugar to deep `cons`-Apply chains;
+/// long statement sequences desugar to deep `Seq` chains) — not just closure application, because
+/// any of those can recurse the tree-walker arbitrarily deep on valid input. The mutually-recursive
+/// `eval`/`apply` tree-walker uses fat frames in debug builds — reaching this depth needs on the
+/// order of a few MiB of stack — so the guard is only effective when the running thread has enough
+/// stack. We ensure that by raising the test/coverage thread stack via `RUST_MIN_STACK` in
+/// `.cargo/config.toml`; the CLI runs on the ~8 MiB main thread. (The WASM build, added in a
+/// later plan, must size its shadow stack to match — tracked as a Plan 4 follow-up.)
+pub const MAX_EVAL_DEPTH: u32 = 700;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeError {
+    pub message: String,
+}
+
+impl RuntimeError {
+    fn new(message: impl Into<String>) -> Self {
+        RuntimeError { message: message.into() }
+    }
+}
+
+type EResult = Result<Value, RuntimeError>;
+
+pub fn eval(core: &Core) -> EResult {
+    eval_with_budget(core, DEFAULT_BUDGET)
+}
+
+pub fn eval_with_budget(core: &Core, budget: u64) -> EResult {
+    let mut env: Env = None;
+    for (name, value) in runtime_env() {
+        env = Some(Rc::new(Frame { name, slot: Rc::new(RefCell::new(value)), parent: env }));
+    }
+    let mut ev = Evaluator { steps: 0, budget, depth: 0, letrec_slots: Vec::new() };
+    let result = ev.eval(core, &env);
+    // Break the `Frame -> slot -> Closure -> env -> Frame` reference cycles that recursive
+    // bindings create, so every environment frame this run allocated is reclaimed when `env` and
+    // `ev` drop (Rc has no cycle collector). Evaluation has finished, so no slot is borrowed, and
+    // the result value (never re-applied) is unaffected.
+    for slot in &ev.letrec_slots {
+        *slot.borrow_mut() = Value::Unit;
+    }
+    result
+}
+
+struct Evaluator {
+    steps: u64,
+    budget: u64,
+    depth: u32,
+    letrec_slots: Vec<Rc<RefCell<Value>>>,
+}
+
+impl Evaluator {
+    fn tick(&mut self) -> Result<(), RuntimeError> {
+        self.steps += 1;
+        if self.steps > self.budget {
+            return Err(RuntimeError::new(format!("exceeded step budget of {}", self.budget)));
+        }
+        Ok(())
+    }
+
+    /// Wraps `eval_inner` with the total-recursion depth guard so every nested `eval` call (user
+    /// calls and structural nesting alike) is counted and every return path decrements `self.depth`.
+    fn eval(&mut self, node: &Core, env: &Env) -> EResult {
+        self.tick()?;
+        self.depth += 1;
+        if self.depth > MAX_EVAL_DEPTH {
+            self.depth -= 1;
+            return Err(RuntimeError::new(format!(
+                "evaluation exceeded maximum depth of {MAX_EVAL_DEPTH} (deeply recursive or deeply nested)"
+            )));
+        }
+        let r = self.eval_inner(node, env);
+        self.depth -= 1;
+        r
+    }
+
+    fn eval_inner(&mut self, node: &Core, env: &Env) -> EResult {
+        match node {
+            Core::Nat(_, n) => Ok(Value::Nat(*n)),
+            Core::Bool(_, b) => Ok(Value::Bool(*b)),
+            Core::Unit(_) => Ok(Value::Unit),
+            Core::Var(_, name) => {
+                lookup(env, name).ok_or_else(|| RuntimeError::new(format!("unbound variable `{name}`")))
+            }
+            Core::BinOp(_, op, a, b) => {
+                let x = self.eval(a, env)?;
+                let y = self.eval(b, env)?;
+                eval_binop(*op, x, y)
+            }
+            Core::If(_, c, t, e) => match self.eval(c, env)? {
+                Value::Bool(true) => self.eval(t, env),
+                Value::Bool(false) => self.eval(e, env),
+                other => Err(RuntimeError::new(format!("`if` condition was not a Bool: {other:?}"))),
+            },
+            Core::Lambda(_, params, body) => {
+                Ok(Value::Closure { params: params.clone(), body: Rc::new((**body).clone()), env: env.clone() })
+            }
+            Core::Apply(_, callee, args) => {
+                let f = self.eval(callee, env)?;
+                let mut argv = Vec::with_capacity(args.len());
+                for a in args {
+                    argv.push(self.eval(a, env)?);
+                }
+                self.apply(f, argv)
+            }
+            Core::Let { name, value, body, .. } => {
+                let v = self.eval(value, env)?;
+                let env2 = push(env, name, v);
+                self.eval(body, &env2)
+            }
+            Core::LetRec { name, value, body, .. } => {
+                // Pre-bind the name to a placeholder slot, evaluate the (lambda) value in that
+                // extended env so it can see itself, then patch the slot.
+                let slot = Rc::new(RefCell::new(Value::Unit));
+                self.letrec_slots.push(slot.clone());
+                let env2 = Some(Rc::new(Frame { name: name.clone(), slot: slot.clone(), parent: env.clone() }));
+                let v = self.eval(value, &env2)?;
+                *slot.borrow_mut() = v;
+                self.eval(body, &env2)
+            }
+            Core::Seq(_, first, then) => {
+                self.eval(first, env)?;
+                self.eval(then, env)
+            }
+            Core::Assign(_, name, value) => {
+                let v = self.eval(value, env)?;
+                let slot =
+                    find_slot(env, name).ok_or_else(|| RuntimeError::new(format!("unbound variable `{name}`")))?;
+                *slot.borrow_mut() = v;
+                Ok(Value::Unit)
+            }
+            Core::While(_, cond, body) => {
+                loop {
+                    self.tick()?;
+                    match self.eval(cond, env)? {
+                        Value::Bool(true) => {
+                            self.eval(body, env)?;
+                        }
+                        Value::Bool(false) => break,
+                        other => return Err(RuntimeError::new(format!("`while` condition was not a Bool: {other:?}"))),
+                    }
+                }
+                Ok(Value::Unit)
+            }
+        }
+    }
+
+    fn apply(&mut self, callee: Value, args: Vec<Value>) -> EResult {
+        // Match by reference: `Value` now has a hand-written `Drop`, so its fields cannot be moved
+        // out by value. Borrowing the closure's parts is sufficient here (`env`/`body` are only
+        // cloned/borrowed) and keeps behavior identical.
+        match &callee {
+            Value::Closure { params, body, env } => {
+                if params.len() != args.len() {
+                    return Err(RuntimeError::new(format!(
+                        "closure expects {} argument(s), got {}",
+                        params.len(),
+                        args.len()
+                    )));
+                }
+                let mut env2 = env.clone();
+                for (p, a) in params.iter().zip(args) {
+                    env2 = push(&env2, p, a);
+                }
+                self.eval(body, &env2)
+            }
+            Value::Builtin(b) => apply_builtin(*b, args),
+            other => Err(RuntimeError::new(format!("attempted to call a non-function: {other:?}"))),
+        }
+    }
+}
+
+fn eval_binop(op: BinOp, x: Value, y: Value) -> EResult {
+    let (a, b) = match (x, y) {
+        (Value::Nat(a), Value::Nat(b)) => (a, b),
+        (x, y) => return Err(RuntimeError::new(format!("arithmetic on non-Nat operands: {x:?}, {y:?}"))),
+    };
+    Ok(match op {
+        BinOp::Add => Value::Nat(a.saturating_add(b)),
+        BinOp::Sub => Value::Nat(a.saturating_sub(b)), // monus
+        BinOp::Mul => Value::Nat(a.saturating_mul(b)),
+        BinOp::Eq => Value::Bool(a == b),
+        BinOp::Ne => Value::Bool(a != b),
+        BinOp::Lt => Value::Bool(a < b),
+        BinOp::Le => Value::Bool(a <= b),
+        BinOp::Gt => Value::Bool(a > b),
+        BinOp::Ge => Value::Bool(a >= b),
+    })
+}
+
+fn apply_builtin(b: Builtin, args: Vec<Value>) -> EResult {
+    match (b, args.as_slice()) {
+        (Builtin::Cons, [h, t]) => Ok(Value::Cons(Rc::new(h.clone()), Rc::new(t.clone()))),
+        (Builtin::Head, [Value::Cons(h, _)]) => Ok((**h).clone()),
+        (Builtin::Head, [Value::Nil]) => Err(RuntimeError::new("head of empty list")),
+        (Builtin::Tail, [Value::Cons(_, t)]) => Ok((**t).clone()),
+        (Builtin::Tail, [Value::Nil]) => Err(RuntimeError::new("tail of empty list")),
+        (Builtin::IsEmpty, [Value::Nil]) => Ok(Value::Bool(true)),
+        (Builtin::IsEmpty, [Value::Cons(_, _)]) => Ok(Value::Bool(false)),
+        _ => Err(RuntimeError::new(format!("builtin {b:?} applied to bad arguments: {args:?}"))),
+    }
+}
+
+fn push(env: &Env, name: &str, value: Value) -> Env {
+    Some(Rc::new(Frame { name: name.to_string(), slot: Rc::new(RefCell::new(value)), parent: env.clone() }))
+}
+
+fn find_slot(env: &Env, name: &str) -> Option<Rc<RefCell<Value>>> {
+    let mut cur = env.clone();
+    while let Some(frame) = cur {
+        if frame.name == name {
+            return Some(frame.slot.clone());
+        }
+        cur = frame.parent.clone();
+    }
+    None
+}
+
+fn lookup(env: &Env, name: &str) -> Option<Value> {
+    find_slot(env, name).map(|slot| slot.borrow().clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::desugar::desugar;
+    use crate::parser::parse;
+
+    fn run(src: &str) -> Value {
+        let (prog, ds) = parse(src);
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let core = desugar(&prog.unwrap());
+        eval(&core).expect("runtime error")
+    }
+
+    #[test]
+    fn arithmetic_with_monus() {
+        assert_eq!(run("1 + 2 * 3"), Value::Nat(7));
+        assert_eq!(run("3 - 5"), Value::Nat(0)); // monus
+    }
+
+    #[test]
+    fn comparisons_and_if() {
+        assert_eq!(run("if 2 > 1 { 10 } else { 20 }"), Value::Nat(10));
+        assert_eq!(run("if 1 == 2 { 10 } else { 20 }"), Value::Nat(20));
+    }
+
+    #[test]
+    fn all_comparison_operators_evaluate() {
+        // `==`, `>`, `<` are covered above/below; this pins the remaining three (`!=`, `<=`, `>=`).
+        assert_eq!(run("1 != 2"), Value::Bool(true));
+        assert_eq!(run("2 != 2"), Value::Bool(false));
+        assert_eq!(run("1 <= 1"), Value::Bool(true));
+        assert_eq!(run("2 <= 1"), Value::Bool(false));
+        assert_eq!(run("2 >= 1"), Value::Bool(true));
+        assert_eq!(run("1 >= 2"), Value::Bool(false));
+        assert_eq!(run("1 < 2"), Value::Bool(true));
+    }
+
+    #[test]
+    fn let_closure_application() {
+        assert_eq!(run("let add1 = |x| x + 1; add1(41)"), Value::Nat(42));
+    }
+
+    #[test]
+    fn list_builtins() {
+        assert_eq!(run("head(cons(7, nil))"), Value::Nat(7));
+        assert_eq!(run("is_empty(nil)"), Value::Bool(true));
+        assert_eq!(run("is_empty(cons(1, nil))"), Value::Bool(false));
+        assert_eq!(run("[1, 2, 3]"), Value::list_of_nats(&[1, 2, 3]));
+    }
+
+    #[test]
+    fn recursion_via_fn() {
+        let src = "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)";
+        assert_eq!(run(src), Value::Nat(15));
+    }
+
+    #[test]
+    fn while_and_mutation() {
+        let src = "fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(4)";
+        assert_eq!(run(src), Value::Nat(4));
+    }
+
+    #[test]
+    fn map_and_fold_library_programs_run() {
+        let src = "\
+            fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
+            fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }\n\
+            fn add(a, b) { a + b }\n\
+            fn add1(x) { x + 1 }\n\
+            fold([3, 1, 2].map(add1), 0, add)";
+        // map(add1) -> [4,2,3]; fold add from 0 -> 9
+        assert_eq!(run(src), Value::Nat(9));
+    }
+
+    #[test]
+    fn head_of_empty_is_a_runtime_error() {
+        let (prog, _) = parse("head(nil)");
+        let core = desugar(&prog.unwrap());
+        let err = eval(&core).unwrap_err();
+        assert!(err.message.contains("empty list"), "message: {}", err.message);
+    }
+
+    #[test]
+    fn tail_of_empty_is_a_runtime_error() {
+        let (prog, _) = parse("tail(nil)");
+        let core = desugar(&prog.unwrap());
+        let err = eval(&core).unwrap_err();
+        assert!(err.message.contains("empty list"), "message: {}", err.message);
+    }
+
+    #[test]
+    fn budget_exhaustion_is_an_error_not_a_hang() {
+        let (prog, _) = parse("fn loop_forever(n) { let mut x = 0; while 0 == 0 { x = x + 1; } x } loop_forever(0)");
+        let core = desugar(&prog.unwrap());
+        let err = eval_with_budget(&core, 1000).unwrap_err();
+        assert!(err.message.contains("step budget"), "message: {}", err.message);
+    }
+
+    #[test]
+    fn deep_recursion_is_an_error_not_a_stack_overflow() {
+        // Unbounded user recursion must surface as a RuntimeError, never a native stack overflow
+        // (which aborts the process uncatchably). The depth guard trips well before the step budget.
+        let (prog, _) = parse("fn f(n) { if n == 0 { 0 } else { 1 + f(n - 1) } } f(100000)");
+        let core = desugar(&prog.unwrap());
+        let err = eval(&core).unwrap_err();
+        assert!(err.message.contains("maximum depth"), "message: {}", err.message);
+    }
+
+    #[test]
+    fn huge_list_literal_is_a_runtime_error_not_a_stack_overflow() {
+        // A list literal desugars to a deep `cons`-Apply chain; evaluating one well above
+        // MAX_EVAL_DEPTH must surface as a RuntimeError, never a native eval stack overflow.
+        let src = format!("[{}]", vec!["1"; 10_000].join(", "));
+        let (prog, ds) = parse(&src);
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let core = desugar(&prog.unwrap());
+        let err = eval(&core).unwrap_err();
+        assert!(err.message.contains("maximum depth"), "message: {}", err.message);
+    }
+
+    #[test]
+    fn long_statement_sequence_is_a_runtime_error_not_a_stack_overflow() {
+        // A long statement sequence desugars to a deep Seq chain (desugar itself is now iterative
+        // and won't overflow, but evaluating the resulting deep tree still must not overflow eval).
+        let stmts: Vec<String> = (0..10_000).map(|i| format!("{i};")).collect();
+        let src = stmts.join("");
+        let (prog, ds) = parse(&src);
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let core = desugar(&prog.unwrap());
+        let err = eval(&core).unwrap_err();
+        assert!(err.message.contains("maximum depth"), "message: {}", err.message);
+    }
+
+    #[test]
+    fn tail_less_block_is_unit_not_zero() {
+        // A program that is only statements (no tail expression) evaluates to the internal Unit value,
+        // distinct from the literal `0` — pins the oracle's observable result for later backends.
+        assert_eq!(run("let x = 1;"), Value::Unit);
+        assert_ne!(run("let x = 1;"), Value::Nat(0));
+    }
+}

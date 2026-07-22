@@ -1,0 +1,9 @@
+# The reference interpreter (`redextape-core::interp`) is a recursive tree-walker; its call-depth
+# guard (`MAX_CALL_DEPTH`) converts deep user recursion into a `RuntimeError` instead of a native
+# stack overflow, but only if the running thread has enough stack. `cargo test`/`cargo llvm-cov`
+# run tests on threads whose default stack (~2 MiB) is too small for the guard depth in debug/
+# coverage builds, so raise it here for all cargo-invoked processes. This affects only spawned
+# thread stacks at runtime — it does not change produced-binary behavior (the CLI's main thread
+# stack is set by the OS/linker).
+[env]
+RUST_MIN_STACK = "33554432"  # 32 MiB
