@@ -13,6 +13,7 @@ pub mod lexer;
 pub mod parser;
 pub mod prelude;
 pub mod span;
+pub mod tm;
 pub mod token;
 pub mod ty;
 pub mod typeck;
