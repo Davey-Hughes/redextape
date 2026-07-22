@@ -5,12 +5,16 @@
 //! delivering the intermediate oracle `reference == asm-interpreter`.
 
 pub mod asm;
+pub mod build;
+pub mod encoding;
 pub mod lower_asm;
 pub mod machine;
 pub mod sim;
 pub mod syntax;
 
 pub use asm::{AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, Instr, Program, Reg, decode_asm, print_asm, run_asm};
+pub use build::{Builder, FIELD_WIDTH, HEAP, MARK, REG, RuleSpec, SEP, STACK, Slot, TAPES, WORK};
+pub use encoding::{Encoding, Unary};
 pub use lower_asm::{LowerError, lower_asm};
 pub use machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
 pub use sim::{
