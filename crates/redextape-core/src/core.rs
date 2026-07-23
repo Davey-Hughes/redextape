@@ -132,6 +132,12 @@ pub struct NodeGen {
 }
 
 impl NodeGen {
+    /// A generator whose first `fresh()` returns `next`. Used by synthetic passes (e.g. `defunc`)
+    /// that mint new nodes and must not collide with an existing tree's ids: seed past its max id.
+    pub fn seeded(next: NodeId) -> Self {
+        NodeGen { next }
+    }
+
     pub fn fresh(&mut self) -> NodeId {
         let id = self.next;
         self.next += 1;

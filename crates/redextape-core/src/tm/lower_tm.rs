@@ -502,4 +502,35 @@ mod tests {
         assert_eq!(steps("if 2 > 1 { 10 } else { 20 }"), 2174);
         assert_eq!(steps("head(cons(7, nil))"), 2300);
     }
+
+    #[test]
+    fn tm_step_count_golden_higher_order() {
+        // Mirrors `tm_step_count_goldens` above, but for a demo that is higher-order and so must run
+        // through `defunc` before `lower_asm` (Plan 3b-1). Pins the TM step cost of the defunctionalized
+        // dispatch path (a HEAP closure `cons(tag, env)`, an `$apply1` dispatcher call per list element,
+        // plus the existing list/recursion gadget costs) as a regression guard, same discipline as the
+        // first-order goldens above. Keep the list SMALL (2 elements) so the trace stays cheap.
+        fn steps(src: &str) -> usize {
+            let (prog, ds) = parse(src);
+            assert!(ds.is_empty(), "parse errors: {ds:?}");
+            let core = desugar(&prog.unwrap());
+            let defunced = crate::tm::defunc::defunc(&core).expect("defunc succeeds");
+            let program = lower_asm(&defunced).expect("defunc'd core lowers first-order");
+            let m = lower_tm(&program, &Unary);
+            let sm = SlotMap::of(&program);
+            let mut init = vec![Vec::new(); TAPES];
+            init[REG] = Unary.init_reg(sm.n_slots());
+            let trace = simulate_trace(&m, &init, CAPS);
+            assert_eq!(trace.status, crate::tm::sim::Status::Halted, "demo must halt: {src}");
+            trace.steps.len()
+        }
+        // CAPTURED (run, pasted the real number, re-ran to confirm stable/deterministic).
+        assert_eq!(
+            steps(
+                "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } \
+                 fn add1(x) { x + 1 } [1, 2].map(add1)"
+            ),
+            239_971
+        );
+    }
 }

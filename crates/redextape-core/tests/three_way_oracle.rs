@@ -1,7 +1,9 @@
 //! The three-way oracle (spec §12.1): for every first-order demo, the reference tree-walker's value,
 //! the decoded λ normal form, and the decoded TM final tape all agree. Runtime faults are the shared
-//! "no value" outcome (reference Runtime, λ HitCap, TM HitCap). Higher-order map/fold stays λ-only —
-//! the TM is first-order (Plan 3b), so run_tm returns LowerError. The dual case is the λ-refuses side
+//! "no value" outcome (reference Runtime, λ HitCap, TM HitCap). Higher-order programs (map/fold, a
+//! function-valued argument) are three-way too as of Plan 3b-1: `run_tm` defunctionalizes -- rewrites
+//! higher-order Core into the first-order subset `lower_asm` already handles -- before lowering, so
+//! they run on the TM like everything else. The dual case is the λ-refuses side
 //! (`LAMBDA_LIMITATION_DEMOS`/`assert_tm_only`): Plan-2 latent traps that λ v1 REJECTS (`LowerError`)
 //! while the reference and the first-order TM both run them to a value. The per-category oracles
 //! (tm_oracle.rs's reference==TM / asm-interp==TM, lambda_oracle.rs's reference==λ) stay for
@@ -48,27 +50,7 @@ fn assert_three_way_diverges(src: &str) {
     }
 }
 
-/// A higher-order program: the λ backend handles it (reference == λ), but the TM is first-order
-/// (Plan 3b), so run_tm returns LowerError. Assert both.
-fn assert_lambda_only(src: &str) {
-    let reference = run(src);
-    let (prog, ds) = parse(src);
-    assert!(ds.is_empty(), "parse errors: {ds:?}");
-    let core = desugar(&prog.unwrap());
-    let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
-    assert!(
-        matches!(run_tm(&core, &Unary, TM_DEFAULT_CAPS), TmRun::LowerError(_)),
-        "TM should reject higher-order: {src}"
-    );
-    match (reference, lambda) {
-        (Ok(rv), LambdaRun::Reduced(nf)) => {
-            assert_eq!(decode(&nf, &rv), Some(rv.clone()), "reference vs λ disagree for: {src}")
-        }
-        (r, l) => panic!("reference vs λ mismatch for {src}:\n  reference={r:?}\n  lambda={l:?}"),
-    }
-}
-
-/// The dual of `assert_lambda_only`: a program the λ backend refuses to lower in v1 (`LowerError`),
+/// A program the λ backend refuses to lower in v1 (`LowerError`),
 /// while the reference and the first-order TM agree on the value.
 fn assert_tm_only(src: &str) {
     let reference = run(src);
@@ -88,9 +70,10 @@ fn assert_tm_only(src: &str) {
 }
 
 /// The full first-order demo suite — arithmetic, monus, comparison, if, let/let-mut/assign/while/seq,
-/// calls & recursion, and list construction & access. Every value stays « FIELD_WIDTH (64) and every
-/// program runs to a value on ALL THREE backends. (The Plan-2 latent traps that λ v1 REJECTS live in
-/// LAMBDA_LIMITATION_DEMOS below — they are not three-way.)
+/// calls & recursion, list construction & access, and (Plan 3b-1) higher-order programs that `run_tm`
+/// now defunctionalizes before lowering (a function passed as a value, `map`/`fold`). Every value
+/// stays « FIELD_WIDTH (64) and every program runs to a value on ALL THREE backends. (The Plan-2
+/// latent traps that λ v1 REJECTS live in LAMBDA_LIMITATION_DEMOS below — they are not three-way.)
 const FIRST_ORDER_DEMOS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",
@@ -115,27 +98,34 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "head(tail(cons(1, cons(2, nil))))",
     "head([1, 2, 3])",
     "tail([1, 2, 3])",
+    // Higher-order (Plan 3b-1): a function received as a value, defunctionalized before lowering.
+    "fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)",
+    "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2].map(add1)",
+    // Higher-order with immutable capture (Plan 3b-1 Task 4): `|x| x + n` captures `n` by value.
+    "let n = 5; fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } [1, 2, 3].map(|x| x + n)",
+    "\
+        fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
+        fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }\n\
+        fn add(a, b) { a + b }\n\
+        fn add1(x) { x + 1 }\n\
+        fold([3, 1, 2].map(add1), 0, add)",
+    // Higher-order currying (Plan 3b-1): a value-lambda whose body is ANOTHER value-lambda
+    // (`|y| |z| y + z`). Both nested closures now get guaranteed-unique anon names, so `defunc` no
+    // longer panics on the duplicate key and this defuncs three-way to 9.
+    "fn ap(f, x) { f(x) } let add = |y| |z| y + z; ap(ap(add, 4), 5)",
 ];
 
 /// Runtime-faulting programs: the reference faults, both other backends diverge — all "no value".
 const FAULT_DEMOS: &[&str] = &["head(nil)", "tail(nil)"];
 
-/// The DUAL of HIGHER_ORDER_DEMOS: Plan-2 latent-trap programs the λ backend REJECTS in v1 (an
-/// immutable `let` shadowing a mutable variable; a `fn` inside a mutation region — λ returns
-/// `LowerError` rather than silently miscompile, commit 54aad42), while the reference and the
-/// first-order TM both run them to a value. Asserted reference == TM, and λ is `LowerError`.
+/// Plan-2 latent-trap programs the λ backend REJECTS in v1 (an immutable `let` shadowing a mutable
+/// variable; a `fn` inside a mutation region — λ returns `LowerError` rather than silently miscompile,
+/// commit 54aad42), while the reference and the first-order TM both run them to a value. Asserted
+/// reference == TM, and λ is `LowerError`.
 const LAMBDA_LIMITATION_DEMOS: &[&str] = &[
     "let mut x = 1; x = x + 1; let x = x + 10; x",
     "let mut acc = 0; fn bump(n) { n + 1 } acc = bump(acc); acc = bump(acc); acc",
 ];
-
-/// Higher-order (map/fold receiving a function argument): λ handles it, the TM refuses (LowerError).
-const HIGHER_ORDER_DEMOS: &[&str] = &["\
-        fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
-        fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }\n\
-        fn add(a, b) { a + b }\n\
-        fn add1(x) { x + 1 }\n\
-        fold([3, 1, 2].map(add1), 0, add)"];
 
 #[test]
 fn three_way_oracle_on_the_first_order_suite() {
@@ -148,13 +138,6 @@ fn three_way_oracle_on_the_first_order_suite() {
 fn three_way_faults_diverge_on_all_backends() {
     for src in FAULT_DEMOS {
         assert_three_way_diverges(src);
-    }
-}
-
-#[test]
-fn higher_order_agrees_reference_and_lambda_while_tm_refuses() {
-    for src in HIGHER_ORDER_DEMOS {
-        assert_lambda_only(src);
     }
 }
 
