@@ -1,7 +1,9 @@
 //! The three-way oracle (spec §12.1): for every first-order demo, the reference tree-walker's value,
 //! the decoded λ normal form, and the decoded TM final tape all agree. Runtime faults are the shared
 //! "no value" outcome (reference Runtime, λ HitCap, TM HitCap). Higher-order map/fold stays λ-only —
-//! the TM is first-order (Plan 3b), so run_tm returns LowerError. The per-category oracles
+//! the TM is first-order (Plan 3b), so run_tm returns LowerError. The dual case is the λ-refuses side
+//! (`LAMBDA_LIMITATION_DEMOS`/`assert_tm_only`): Plan-2 latent traps that λ v1 REJECTS (`LowerError`)
+//! while the reference and the first-order TM both run them to a value. The per-category oracles
 //! (tm_oracle.rs's reference==TM / asm-interp==TM, lambda_oracle.rs's reference==λ) stay for
 //! localization; this file is the unified capstone.
 
@@ -163,14 +165,17 @@ fn latent_traps_agree_reference_and_tm_while_lambda_refuses() {
     }
 }
 
-/// A first-order expression generator whose value — AND every intermediate — provably stays under
-/// FIELD_WIDTH (64), so the TM's fixed-width unary fields never overflow. Leaves are `< 8` and the
-/// node budget keeps the total leaf-sum small; it emits only value-non-growing ops: `+` (bounded by
-/// the leaf-sum), monus `-` (shrinks), comparisons and `if` (yield 0/1 or select one branch). It
-/// deliberately OMITS `*` (blows values up) and value-reusing `let` (`let q = v; q + q` doubles) —
-/// the curated demos cover `*`/`let`/`while`/calls/lists; this property stresses the arithmetic /
-/// comparison / if structure three ways. Every generated program terminates to a value (no loops, no
-/// functions, no faults), so the value arm always fires.
+/// A first-order expression generator whose value — AND every intermediate — stays under FIELD_WIDTH
+/// (64) (the `depth=3` recursion cap plus value-non-growing ops keep it there; measured max 27 over 2M
+/// samples), so the TM's fixed-width unary fields never overflow. Leaves are `< 8` and the node budget
+/// keeps the total leaf-sum small; it emits only value-non-growing ops: `+` (bounded by the leaf-sum),
+/// monus `-` (shrinks), comparisons and `if` (yield 0/1 or select one branch). It deliberately OMITS `*`
+/// (blows values up) and value-reusing `let` (`let q = v; q + q` doubles) — the curated demos cover
+/// `*`/`let`/`while`/calls/lists; this property stresses the arithmetic / comparison / if structure
+/// three ways. Every generated program terminates to a value (no loops, no functions, no faults), so
+/// the value arm always fires. SAFETY LEVER: it is `depth=3` (`prop_recursive`'s first argument, the
+/// recursion-depth cap), not `desired_size` (the second argument), that bounds the worst case — a
+/// future editor raising the leaf range (`0u64..8`) must keep the depth cap to preserve this bound.
 fn arb_tm_safe_expr() -> impl Strategy<Value = String> {
     let leaf = (0u64..8).prop_map(|n| n.to_string());
     leaf.prop_recursive(3, 8, 3, |inner| {

@@ -59,12 +59,13 @@ pub trait Encoding {
     /// well-formed program) it clamps to `exits.last()` defensively — never panics, never over-indexes.
     /// An empty `exits` is a no-op (leaves `entry` rule-less, so the machine simply halts there).
     fn dispatch_tag(&self, b: &mut Builder, entry: StateId, exits: &[StateId]);
-    /// Append a cons cell `(head = field `rh`'s value, tail = field `rt`'s value)` at the HEAP top, and
+    /// Append a cons cell (head = field `rh`'s value, tail = field `rt`'s value) at the HEAP top, and
     /// write the new cell's 1-based pointer (= the cell count) into field `rd`. Flows `entry -> exit`,
     /// all heads home/top. PRECONDITION: `rd` distinct from `rh` and `rt` (`rd` is written last from the
     /// count while `rh`/`rt` were already read — but keep them distinct; `lower_asm` emits fresh operands).
     fn cons(&self, b: &mut Builder, entry: StateId, exit: StateId, rh: Slot, rt: Slot, rd: Slot);
-    /// `slot rd <- (field rl == 0) as 0/1`.
+    /// `slot rd <- (field rl == 0) as 0/1`. Safe when `rl == rd` — `rl` is fully copied to WORK before
+    /// `rd` is written.
     fn is_empty_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
     /// `rd <- head(field rl)`: read the pointer in `rl`, seek the cell, write its head-word into `rd`.
     /// Flows `entry -> exit` with all heads home/top on the value exit. A `nil` pointer (`rl == 0`) or a
@@ -143,7 +144,7 @@ fn rewind_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
 /// home. Walks right to the marks' end, then erases right-to-left back to the left-end blank (so the
 /// left end is found by content even after erasure). `from` must have no conflicting rules; returns the
 /// state with WORK empty and the head at home. REG is untouched.
-pub fn clear_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn clear_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
     // `from` is `fwd`: walk right over marks to the first blank past them.
     b.add_rule(from, RuleSpec::new().on(WORK, Some(MARK), None, Move::R), from);
     let back = b.state(format!("{label}.cwb"));
@@ -157,7 +158,7 @@ pub fn clear_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
 /// Copy field `slot`'s marks onto WORK scratch. `from`: REG at home (leading `#`), WORK at home.
 /// Clears WORK, seeks field `slot`, copies each mark (REG read, WORK write) rightward, then rewinds
 /// both heads home. On exit WORK holds `slot`'s value as contiguous marks and both heads are home.
-pub fn copy_field_to_work(b: &mut Builder, from: StateId, slot: Slot, label: &str) -> StateId {
+fn copy_field_to_work(b: &mut Builder, from: StateId, slot: Slot, label: &str) -> StateId {
     let after_clear = clear_work(b, from, &format!("{label}.c")); // scratch clean, WORK home, REG home
     let at = seek_slot(b, after_clear, slot, &format!("{label}.s")); // REG at field `slot` first cell
     let cp = b.state(format!("{label}.cp"));
@@ -173,7 +174,7 @@ pub fn copy_field_to_work(b: &mut Builder, from: StateId, slot: Slot, label: &st
 /// Append WORK's marks into field `rd` (overwriting it). `from`: REG at home (leading `#`), WORK at
 /// home over contiguous marks. Seeks field `rd`, blanks its window, writes one mark per WORK mark
 /// (WORK read, REG write) rightward, then rewinds both heads home. WORK's marks are left INTACT.
-pub fn append_work_to_field(b: &mut Builder, from: StateId, rd: Slot, label: &str) -> StateId {
+fn append_work_to_field(b: &mut Builder, from: StateId, rd: Slot, label: &str) -> StateId {
     let at = seek_slot(b, from, rd, &format!("{label}.s")); // REG at field `rd` first cell
     // Blank the fixed-width window (marks and padding) rightward to the trailing `#`, then step back
     // left over the blanks to the field's first cell.
@@ -201,7 +202,7 @@ pub fn append_work_to_field(b: &mut Builder, from: StateId, rd: Slot, label: &st
 /// marks to the first blank, seeks field `slot`, copies each mark there (REG read, WORK write) rightward
 /// — so `slot`'s marks land right after WORK's existing ones — then rewinds both heads home. On exit
 /// WORK holds `old ++ slot` and both heads are home. Mirrors `copy_field_to_work` minus the clear.
-pub fn append_field_to_work(b: &mut Builder, from: StateId, slot: Slot, label: &str) -> StateId {
+fn append_field_to_work(b: &mut Builder, from: StateId, slot: Slot, label: &str) -> StateId {
     // Walk the WORK head right over its existing marks; when it rests on the trailing blank (REG still on
     // the leading `#`), `seek_slot`'s `#`-rule takes over and seeks field `slot`.
     // INSERTION ORDER IS LOAD-BEARING: this WORK self-loop rule must be pushed onto `from` BEFORE
@@ -225,7 +226,7 @@ pub fn append_field_to_work(b: &mut Builder, from: StateId, slot: Slot, label: &
 /// RIGHTMOST mark (a no-op once WORK is empty, so the result truncates at 0); the padding blank / field
 /// `#` ends the loop. Rewinds REG home (WORK is already home each iteration). On exit WORK holds
 /// `max(0, old - rb)` as contiguous marks and both heads are home.
-pub fn erase_per_field(b: &mut Builder, from: StateId, rb: Slot, label: &str) -> StateId {
+fn erase_per_field(b: &mut Builder, from: StateId, rb: Slot, label: &str) -> StateId {
     let at = seek_slot(b, from, rb, &format!("{label}.s")); // REG at field `rb` first cell
     let head = b.state(format!("{label}.lp")); // loop head: WORK home, REG on the current `rb` cell
     b.add_rule(at, RuleSpec::new(), head);
@@ -363,7 +364,7 @@ fn eq_to_work(b: &mut Builder, from: StateId, ra: Slot, rb: Slot, rd: Slot, labe
 /// trailing `#` and steps STACK onto the new blank top; then rewinds WORK home (marks left INTACT). On
 /// exit the STACK head is at the new top and WORK is home over its (unchanged) marks. Mirrors
 /// `append_field_to_work`'s copy loop, but the destination grows the tape (no fixed window to blank).
-pub fn stack_push_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn stack_push_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
     // Copy loop (self-looping on `from`): for each WORK mark write a STACK mark, advancing both heads.
     b.add_rule(from, RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(STACK, None, Some(MARK), Move::R), from);
     // WORK exhausted (its trailing blank): terminate the field with a `#` and step onto the new top.
@@ -375,7 +376,7 @@ pub fn stack_push_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
 /// Write `c` marks then a `#` as a new field at the STACK top (unrolled, like `write_literal`'s mark
 /// loop but append-only, no fixed window). `from`: STACK head at the top. `c = 0` writes just a `#` (an
 /// empty field). On exit the STACK head is at the new blank top; WORK/REG are untouched.
-pub fn stack_push_literal(b: &mut Builder, from: StateId, c: u64, label: &str) -> StateId {
+fn stack_push_literal(b: &mut Builder, from: StateId, c: u64, label: &str) -> StateId {
     let mut cur = from;
     for i in 0..c {
         let nxt = b.state(format!("{label}.m{i}"));
@@ -394,7 +395,7 @@ pub fn stack_push_literal(b: &mut Builder, from: StateId, c: u64, label: &str) -
 /// top; rewinds WORK home. On exit WORK is home holding the popped field's value (unary count preserved,
 /// order irrelevant) and the STACK head is at the new top with the popped field fully erased. Reuses
 /// `clear_work` and the erase-back-walk shape from `dec_work`.
-pub fn stack_pop_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn stack_pop_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
     let cleared = clear_work(b, from, &format!("{label}.cl")); // WORK empty+home; STACK still at the top
     // Step left off the top blank onto the field's trailing `#`.
     let on_hash = b.state(format!("{label}.oh"));
@@ -420,7 +421,7 @@ pub fn stack_pop_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
 /// left: a `#` (a frame below) -> `if_nonempty`; a blank (origin) -> `if_empty`. Either branch steps
 /// back right in the same transition, so both exits see the STACK head restored to the top. Mirrors
 /// `jz`'s two-exit shape. No `label` param, so derived state names are uniquified from `from`.
-pub fn stack_is_empty(b: &mut Builder, from: StateId, if_empty: StateId, if_nonempty: StateId) {
+pub(crate) fn stack_is_empty(b: &mut Builder, from: StateId, if_empty: StateId, if_nonempty: StateId) {
     let base = format!("se{from}");
     let look = b.state(format!("{base}.look"));
     b.add_rule(from, RuleSpec::new().on(STACK, Some(BLANK), None, Move::L), look); // step off the top blank
@@ -444,7 +445,7 @@ pub fn stack_is_empty(b: &mut Builder, from: StateId, if_empty: StateId, if_none
 /// one HEAP mark per WORK mark (both heads advance R), then the head/tail separator `#`, stepping HEAP
 /// onto the new blank top; then rewinds WORK home (marks left INTACT). On exit the HEAP head is at the
 /// new top and WORK is home over its (unchanged) marks. Pair with `heap_append_work` to write the tail.
-pub fn heap_open_cell_with_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn heap_open_cell_with_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
     // Write the cell's opening `@` and step onto the head-field region.
     let cp = b.state(format!("{label}.cp"));
     b.add_rule(from, RuleSpec::new().on(HEAP, None, Some(AT), Move::R), cp);
@@ -461,7 +462,7 @@ pub fn heap_open_cell_with_work(b: &mut Builder, from: StateId, label: &str) -> 
 /// mark per WORK mark (both heads advance R); an empty tail writes nothing and stays. On exit the HEAP
 /// head is at the (possibly unchanged) new top and WORK is home over its (unchanged) marks. Mirrors
 /// `heap_open_cell_with_work`'s copy loop, minus the `@`/`#` delimiters.
-pub fn heap_append_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn heap_append_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
     // Copy loop (self-looping on `from`): for each WORK mark write a HEAP mark, advancing both heads.
     b.add_rule(from, RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(HEAP, None, Some(MARK), Move::R), from);
     // WORK exhausted: nothing more to write; the HEAP head already rests on the new top.
@@ -470,13 +471,13 @@ pub fn heap_append_work(b: &mut Builder, from: StateId, label: &str) -> StateId 
     rewind_work(b, term, label) // WORK head was left on its trailing blank -> back home, marks intact
 }
 
-/// Count the HEAP's cons cells into WORK. `from`: HEAP head at the top, REG/WORK home. Clears WORK,
+/// Count the HEAP's cons cells into WORK. `from`: HEAP head at the top, WORK home. Clears WORK,
 /// then a two-landmark walk between the top blank and the origin-left blank (no interior blanks exist,
 /// so those are the only two boundaries). Pass 1: step left off the top, then walk left writing one
 /// WORK mark per `@` (skipping `MARK`/`SEP`) until the origin-left blank; rewind WORK home so WORK holds
 /// the cell count. Pass 2: step right off the origin-left blank, walk right over every cell until the
 /// top blank. On exit WORK is home holding the count and the HEAP head is back at the top.
-pub fn heap_count_cells_to_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn heap_count_cells_to_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
     let cleared = clear_work(b, from, &format!("{label}.cl")); // WORK empty+home; HEAP still at the top
     // Pass 1: step left off the top blank, then walk left counting `@`s.
     let scan = b.state(format!("{label}.sl"));
@@ -508,7 +509,7 @@ pub fn heap_count_cells_to_work(b: &mut Builder, from: StateId, label: &str) -> 
 /// is empty) — HEAP position unspecified (the caller halts). Read-only on REG. Derives unique state
 /// names from `from`, like `stack_is_empty`. Totality: the counter strictly decreases each iteration and
 /// the HEAP head strictly advances right over a finite tape, so the loop always reaches an exit.
-pub fn heap_seek_cell(b: &mut Builder, from: StateId, found: StateId, missing: StateId) {
+fn heap_seek_cell(b: &mut Builder, from: StateId, found: StateId, missing: StateId) {
     let base = format!("hs{from}");
     // Pass 1: step left off the top blank, then walk left over the cell region (`AT`/`MARK`/`SEP`) to the
     // origin-left blank — the only blank left of the cells (no interior blanks exist). On reaching it,
@@ -546,7 +547,7 @@ pub fn heap_seek_cell(b: &mut Builder, from: StateId, found: StateId, missing: S
 /// REG home. Steps right off the `@`, copies each head `MARK` into WORK to the head/tail `#`, then walks
 /// right over ALL remaining `MARK`/`SEP`/`AT` to the top blank and rewinds WORK home. On exit WORK holds
 /// the head-word at home and the HEAP head is back at the top. Returns the exit state.
-pub fn heap_read_head_to_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn heap_read_head_to_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
     let copy = b.state(format!("{label}.cp"));
     b.add_rule(from, RuleSpec::new().on(HEAP, Some(AT), None, Move::R), copy); // off the `@` onto the head field
     // Copy each head mark into WORK (both heads advance R); the head/tail `#` ends the field.
@@ -568,7 +569,7 @@ pub fn heap_read_head_to_work(b: &mut Builder, from: StateId, label: &str) -> St
 /// `@` (a following cell) or the top blank (the last cell). Then walks right over any later cells to the
 /// top and rewinds WORK home. A zero-width tail copies nothing (WORK stays empty -> decodes to 0). On
 /// exit WORK holds the tail-word at home and the HEAP head is back at the top. Returns the exit state.
-pub fn heap_read_tail_to_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn heap_read_tail_to_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
     let skip = b.state(format!("{label}.sk"));
     b.add_rule(from, RuleSpec::new().on(HEAP, Some(AT), None, Move::R), skip); // off the `@` onto the head field
     b.add_rule(skip, RuleSpec::new().on(HEAP, Some(MARK), None, Move::R), skip); // skip head marks
@@ -586,6 +587,41 @@ pub fn heap_read_tail_to_work(b: &mut Builder, from: StateId, label: &str) -> St
     b.add_rule(restore, RuleSpec::new().on(HEAP, Some(SEP), None, Move::R), restore);
     b.add_rule(restore, RuleSpec::new().on(HEAP, Some(BLANK), None, Move::S), at_top); // top blank -> done
     rewind_work(b, at_top, &format!("{label}.rw")) // WORK head on its trailing blank (or home if empty) -> home
+}
+
+/// Parse a HEAP tape snapshot into 1-based cons cells `(head, tail)` mark-counts. Marker-delimited (scan
+/// `@`), so it is robust to blanks left of the origin (`Tape::snapshot`'s cell 0 is not necessarily the
+/// origin). Shared by production decode (`decode.rs::decode_tape`) and this module's tests.
+pub(crate) fn parse_heap_cells(cells: &[Symbol]) -> Vec<(u64, u64)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < cells.len() {
+        if cells[i] == AT {
+            let mut j = i + 1;
+            let h = {
+                let s = j;
+                while j < cells.len() && cells[j] == MARK {
+                    j += 1;
+                }
+                (j - s) as u64
+            };
+            if j < cells.len() && cells[j] == SEP {
+                j += 1;
+            }
+            let t = {
+                let s = j;
+                while j < cells.len() && cells[j] == MARK {
+                    j += 1;
+                }
+                (j - s) as u64
+            };
+            out.push((h, t));
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    out
 }
 
 #[allow(clippy::too_many_arguments)] // `arith`/`compare` mirror the trait's three-address signature.
@@ -886,11 +922,7 @@ mod tests {
             entry = w;
         }
         // The reg tape starts as an all-zero FIXED-WIDTH bank: `#` then (FIELD_WIDTH blanks + `#`)*slots.
-        let mut init_reg: Vec<Symbol> = vec![SEP];
-        for _ in 0..slots {
-            init_reg.extend(std::iter::repeat_n(BLANK, FIELD_WIDTH));
-            init_reg.push(SEP);
-        }
+        let init_reg = enc.init_reg(slots);
         let m = b.finish(entry);
         assert!(m.validate().is_empty(), "invalid machine: {:?}", m.validate());
         let mut init = vec![Vec::new(); TAPES];
@@ -1240,39 +1272,6 @@ mod tests {
         tapes[HEAP].snapshot().0
     }
 
-    /// Parse `@ head # tail` cells from a HEAP snapshot into 1-based `(head, tail)` mark counts.
-    fn heap_cells(cells: &[Symbol]) -> Vec<(u64, u64)> {
-        let mut out = Vec::new();
-        let mut i = 0;
-        while i < cells.len() {
-            if cells[i] == AT {
-                let mut j = i + 1;
-                let h = {
-                    let s = j;
-                    while j < cells.len() && cells[j] == MARK {
-                        j += 1;
-                    }
-                    (j - s) as u64
-                };
-                if j < cells.len() && cells[j] == SEP {
-                    j += 1;
-                }
-                let t = {
-                    let s = j;
-                    while j < cells.len() && cells[j] == MARK {
-                        j += 1;
-                    }
-                    (j - s) as u64
-                };
-                out.push((h, t));
-                i = j;
-            } else {
-                i += 1;
-            }
-        }
-        out
-    }
-
     #[test]
     fn heap_open_then_append_builds_one_cell() {
         // Open + append in ISOLATION over an otherwise-empty heap (no REG/count machinery). Stage WORK
@@ -1291,7 +1290,7 @@ mod tests {
             let appended = heap_append_work(b, cleared, "aw"); // (empty tail)
             b.add_rule(appended, RuleSpec::new(), halt);
         });
-        assert_eq!(heap_cells(&cells), vec![(3, 0)], "one cell `@ 3 #` built with an empty tail");
+        assert_eq!(parse_heap_cells(&cells), vec![(3, 0)], "one cell `@ 3 #` built with an empty tail");
     }
 
     #[test]
@@ -1332,7 +1331,7 @@ mod tests {
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
         assert_eq!(status, Status::Halted);
-        assert_eq!(heap_cells(&tapes[HEAP].snapshot().0), vec![(3, 0), (2, 1)], "two cells built in order");
+        assert_eq!(parse_heap_cells(&tapes[HEAP].snapshot().0), vec![(3, 0), (2, 1)], "two cells built in order");
         assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 4), Some(2), "cell count == 2");
     }
 
@@ -1355,7 +1354,7 @@ mod tests {
             assert!(m.validate().is_empty(), "{:?}", m.validate());
             let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
             assert_eq!(status, Status::Halted);
-            (heap_cells(&tapes[HEAP].snapshot().0), enc.decode_nat(&tapes[REG].snapshot().0, 2))
+            (parse_heap_cells(&tapes[HEAP].snapshot().0), enc.decode_nat(&tapes[REG].snapshot().0, 2))
         }
         // cons(7, nil=0): one cell (7,0), pointer 1.
         assert_eq!(run_cons(7, 0), (vec![(7, 0)], Some(1)));
@@ -1409,7 +1408,7 @@ mod tests {
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
         assert_eq!(status, Status::Halted);
-        assert_eq!(heap_cells(&tapes[HEAP].snapshot().0), vec![(3, 0), (2, 1)]);
+        assert_eq!(parse_heap_cells(&tapes[HEAP].snapshot().0), vec![(3, 0), (2, 1)]);
         assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 2), Some(1));
         assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 4), Some(2));
     }
@@ -1508,5 +1507,100 @@ mod tests {
         // ptr in slot 2 = 1 -> cell 1 = (7, 0).
         assert_eq!(run_op(false, 2), Some(7)); // head(ptr1) = 7
         assert_eq!(run_op(true, 2), Some(0)); // tail(ptr1) = 0
+    }
+
+    #[test]
+    fn mul_by_zero_is_zero() {
+        // rd = ra * 0 == 0, and 0 * rb == 0 (the loop-counter drains immediately).
+        assert_eq!(run_gadget(3, &[(0, 7), (1, 0)], 2, |b, e, x| Unary.arith(b, e, x, BinOp::Mul, 0, 1, 2)), Some(0));
+        assert_eq!(run_gadget(3, &[(0, 0), (1, 7)], 2, |b, e, x| Unary.arith(b, e, x, BinOp::Mul, 0, 1, 2)), Some(0));
+    }
+
+    #[test]
+    fn comparison_trichotomy_sweep() {
+        // For a < b, a == b, a > b, every one of the six comparisons must give the right 0/1.
+        fn cmp(op: BinOp, a: u64, bb: u64) -> Option<u64> {
+            run_gadget(3, &[(0, a), (1, bb)], 2, move |b, e, x| Unary.compare(b, e, x, op, 0, 1, 2))
+        }
+        for (a, bb, lt, le, gt, ge, eq, ne) in
+            [(2u64, 5u64, 1, 1, 0, 0, 0, 1), (5, 5, 0, 1, 0, 1, 1, 0), (5, 2, 0, 0, 1, 1, 0, 1)]
+        {
+            assert_eq!(cmp(BinOp::Lt, a, bb), Some(lt), "lt {a},{bb}");
+            assert_eq!(cmp(BinOp::Le, a, bb), Some(le), "le {a},{bb}");
+            assert_eq!(cmp(BinOp::Gt, a, bb), Some(gt), "gt {a},{bb}");
+            assert_eq!(cmp(BinOp::Ge, a, bb), Some(ge), "ge {a},{bb}");
+            assert_eq!(cmp(BinOp::Eq, a, bb), Some(eq), "eq {a},{bb}");
+            assert_eq!(cmp(BinOp::Ne, a, bb), Some(ne), "ne {a},{bb}");
+        }
+    }
+
+    #[test]
+    fn tail_of_a_non_last_cell_with_a_nonempty_tail() {
+        // Build heap [(7,0),(3,1),(9,0)] via cons: cons(7,nil)->p1; cons(3,p1)->p2; cons(9,nil)->p3.
+        // tail(p2) reads cell 2's tail (=1, non-empty) and must STOP on cell 3's `@` then restore the top —
+        // the "copy marks THEN hit AT" path (cell 2 is NOT the last cell). Expect 1.
+        let enc = Unary;
+        let mut b = Builder::new();
+        let halt = b.accept("halt");
+        // slots: 0=7,1=0(nil),2=p1,3=3,4=p2,5=9,6=p3,7=result.
+        let s0 = b.state("s0");
+        let s1 = b.state("s1");
+        enc.write_literal(&mut b, s0, s1, 7, 0);
+        let s2 = b.state("s2");
+        enc.write_literal(&mut b, s1, s2, 0, 1);
+        let s3 = b.state("s3");
+        enc.cons(&mut b, s2, s3, 0, 1, 2); // p1 = (7,0)
+        let s4 = b.state("s4");
+        enc.write_literal(&mut b, s3, s4, 3, 3);
+        let s5 = b.state("s5");
+        enc.cons(&mut b, s4, s5, 3, 2, 4); // p2 = (3,1)
+        let s6 = b.state("s6");
+        enc.write_literal(&mut b, s5, s6, 9, 5);
+        let s7 = b.state("s7");
+        enc.cons(&mut b, s6, s7, 5, 1, 6); // p3 = (9,0)  (tail nil)
+        enc.tail_op(&mut b, s7, halt, 4, 7); // tail(p2) -> slot 7
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(8);
+        let m = b.finish(s0);
+        assert!(m.validate().is_empty(), "{:?}", m.validate());
+        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+        assert_eq!(status, Status::Halted);
+        assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 7), Some(1));
+    }
+
+    #[test]
+    fn cons_after_a_deref_keeps_the_heap_top() {
+        // Build [1,2] (p_outer -> (1, p_inner) -> (2,0)); tail(p_outer) -> p_inner; then cons(9, p_inner).
+        // The deref must have restored the HEAP top, so the new cons appends a correct cell. Decode-check
+        // via the pointer: the new cell's head is 9 and its tail is p_inner (=1). Expect the new ptr's head=9.
+        let enc = Unary;
+        let mut b = Builder::new();
+        let halt = b.accept("halt");
+        // slots: 0=2,1=0,2=p_inner,3=1,4=p_outer,5=t(=p_inner),6=9,7=p_new,8=head-of-p_new.
+        let s0 = b.state("s0");
+        let s1 = b.state("s1");
+        enc.write_literal(&mut b, s0, s1, 2, 0);
+        let s2 = b.state("s2");
+        enc.write_literal(&mut b, s1, s2, 0, 1);
+        let s3 = b.state("s3");
+        enc.cons(&mut b, s2, s3, 0, 1, 2); // p_inner = (2,0)
+        let s4 = b.state("s4");
+        enc.write_literal(&mut b, s3, s4, 1, 3);
+        let s5 = b.state("s5");
+        enc.cons(&mut b, s4, s5, 3, 2, 4); // p_outer = (1, p_inner)
+        let s6 = b.state("s6");
+        enc.tail_op(&mut b, s5, s6, 4, 5); // slot5 = tail(p_outer) = p_inner
+        let s7 = b.state("s7");
+        enc.write_literal(&mut b, s6, s7, 9, 6);
+        let s8 = b.state("s8");
+        enc.cons(&mut b, s7, s8, 6, 5, 7); // p_new = cons(9, p_inner)
+        enc.head_op(&mut b, s8, halt, 7, 8); // slot8 = head(p_new) = 9
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(9);
+        let m = b.finish(s0);
+        assert!(m.validate().is_empty(), "{:?}", m.validate());
+        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+        assert_eq!(status, Status::Halted);
+        assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 8), Some(9));
     }
 }

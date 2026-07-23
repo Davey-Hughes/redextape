@@ -7,9 +7,8 @@
 
 use std::rc::Rc;
 
-use crate::tm::build::{AT, HEAP, MARK, REG, SEP};
-use crate::tm::encoding::Encoding;
-use crate::tm::machine::Symbol;
+use crate::tm::build::{HEAP, REG};
+use crate::tm::encoding::{Encoding, parse_heap_cells};
 use crate::tm::sim::Tape;
 use crate::value::Value;
 
@@ -17,48 +16,15 @@ use crate::value::Value;
 /// The result word is REG slot 0 (`Rr`): a Nat/Bool value, or a list pointer into the HEAP.
 pub fn decode_tape(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) -> Option<Value> {
     let reg = tapes.get(REG)?.snapshot().0;
-    let heap = parse_heap(&tapes.get(HEAP)?.snapshot().0);
+    let heap = parse_heap_cells(&tapes.get(HEAP)?.snapshot().0);
     let word = enc.decode_nat(&reg, 0)?;
     decode_word(word, &heap, expected)
 }
 
-/// Parse the HEAP tape into 1-based cons cells `(head, tail)` mark-counts. Marker-delimited (scan `@`),
-/// so it is robust to blanks left of the origin (`Tape::snapshot`'s cell 0 is not necessarily the origin).
-fn parse_heap(cells: &[Symbol]) -> Vec<(u64, u64)> {
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < cells.len() {
-        if cells[i] == AT {
-            let mut j = i + 1;
-            let h = {
-                let s = j;
-                while j < cells.len() && cells[j] == MARK {
-                    j += 1;
-                }
-                (j - s) as u64
-            };
-            if j < cells.len() && cells[j] == SEP {
-                j += 1;
-            }
-            let t = {
-                let s = j;
-                while j < cells.len() && cells[j] == MARK {
-                    j += 1;
-                }
-                (j - s) as u64
-            };
-            out.push((h, t));
-            i = j;
-        } else {
-            i += 1;
-        }
-    }
-    out
-}
-
 /// Type-directed decode of a word (Nat/Bool value or list pointer), guided by `expected`'s shape.
-/// Mirrors `asm.rs::decode_word`. Terminates because compiled heaps are acyclic (a cons cell's tail
-/// points only at an EARLIER cell), exactly as `decode_asm` assumes.
+/// Mirrors `asm.rs::decode_word`. Terminates by STRUCTURAL RECURSION on `expected` (a finite reference
+/// `Value`), so it halts regardless of heap cycles; acyclicity of the compiled heap (a cons cell's tail
+/// points only at an EARLIER cell) is what makes the RESULT correct, not what makes decoding halt.
 fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value> {
     match expected {
         Value::Nat(_) => Some(Value::Nat(word)),
@@ -136,7 +102,7 @@ mod tests {
     }
 
     #[test]
-    fn non_first_class_and_heap_shapes_decode_to_none() {
+    fn non_first_class_shapes_decode_to_none() {
         let prog = Program { code: vec![Instr::Halt], labels: vec![] };
         let tapes = run_to_tapes(&prog);
         assert_eq!(decode_tape(&tapes, &Value::Unit, &Unary), None);

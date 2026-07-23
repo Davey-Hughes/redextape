@@ -264,7 +264,11 @@ pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tm::encoding::Unary;
+    use crate::tm::lower_asm::lower_asm;
+    use crate::tm::lower_tm::lower_tm;
     use crate::tm::machine::{Rule, State};
+    use crate::{desugar::desugar, parser::parse};
 
     fn increment() -> Machine {
         Machine {
@@ -398,5 +402,20 @@ state halt: accept
         let (parsed, ds) = parse_tm(&print_tm(&m));
         assert!(ds.is_empty(), "unexpected diagnostics: {ds:?}");
         assert_eq!(parsed, Some(m));
+    }
+
+    #[test]
+    fn compiled_machines_round_trip_through_the_text_form() {
+        // parse_tm(print_tm(m)) == (Some(m), []) for machines produced by the real compiler, not just
+        // hand-built ones. lower_tm guarantees validate()-clean machines (state names use only `.` and
+        // alphanumerics — no reserved `; * : [ ]`/whitespace), which is exactly what gates the round-trip.
+        for src in ["1 + 2 * 3", "if 1 == 2 { 10 } else { 20 }", "head(cons(7, nil))", "cons(1, cons(2, nil))"] {
+            let (prog, ds) = parse(src);
+            assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
+            let core = desugar(&prog.unwrap());
+            let m = lower_tm(&lower_asm(&core).expect("lowers"), &Unary);
+            assert!(m.validate().is_empty(), "compiled machine must be validate()-clean for {src}: {:?}", m.validate());
+            assert_eq!(parse_tm(&print_tm(&m)), (Some(m.clone()), vec![]), "round-trip must equal m for {src}");
+        }
     }
 }

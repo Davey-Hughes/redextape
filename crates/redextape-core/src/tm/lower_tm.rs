@@ -202,11 +202,14 @@ pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
 mod tests {
     use super::*;
     use crate::core::BinOp;
+    use crate::desugar::desugar;
+    use crate::parser::parse;
     use crate::tm::asm::{Instr, Program, Reg};
     use crate::tm::build::REG;
     use crate::tm::build::TAPES;
     use crate::tm::encoding::Unary;
-    use crate::tm::sim::{Caps, DEFAULT_CAPS as CAPS, Status, simulate};
+    use crate::tm::lower_asm::lower_asm;
+    use crate::tm::sim::{Caps, DEFAULT_CAPS as CAPS, Status, simulate, simulate_trace};
 
     /// Lower `prog`, run it, and decode field 0 (the `Rr` result) as a unary Nat.
     fn run_nat(prog: &Program) -> Option<u64> {
@@ -473,5 +476,30 @@ mod tests {
         let m = lower_tm(&prog, &Unary);
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         assert!(m.states.len() < 10_000, "must not build an O(n_loc^2) machine; got {}", m.states.len());
+    }
+
+    #[test]
+    fn tm_step_count_goldens() {
+        // The exact number of TM steps a small program takes — a regression guard on gadget step cost and
+        // a demonstration of the unary tape's cost. Deterministic (the TM has no nondeterminism). If a
+        // gadget's step cost changes, re-capture the numbers below (a deliberate re-bless).
+        fn steps(src: &str) -> usize {
+            let (prog, ds) = parse(src);
+            assert!(ds.is_empty(), "parse errors: {ds:?}");
+            let core = desugar(&prog.unwrap());
+            let program = lower_asm(&core).expect("lowers");
+            let m = lower_tm(&program, &Unary);
+            let sm = SlotMap::of(&program);
+            let mut init = vec![Vec::new(); TAPES];
+            init[REG] = Unary.init_reg(sm.n_slots());
+            let trace = simulate_trace(&m, &init, CAPS);
+            assert_eq!(trace.status, crate::tm::sim::Status::Halted, "demo must halt: {src}");
+            trace.steps.len()
+        }
+        // CAPTURE the actual counts (run once, paste the real numbers). Keep the demos SMALL so the trace
+        // stays cheap — avoid step-heavy recursion (sum(5) is ~178k steps).
+        assert_eq!(steps("1 + 2 * 3"), 5724);
+        assert_eq!(steps("if 2 > 1 { 10 } else { 20 }"), 2174);
+        assert_eq!(steps("head(cons(7, nil))"), 2300);
     }
 }

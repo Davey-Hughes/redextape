@@ -70,7 +70,10 @@ fn arb_expr() -> impl Strategy<Value = String> {
             (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("({a} * {b})")),
             (inner.clone(), inner.clone(), inner.clone())
                 .prop_map(|(c, a, b)| format!("if {c} > 0 {{ {a} }} else {{ {b} }}")),
-            (inner.clone(), inner).prop_map(|(v, body)| format!("let q = {v}; ({body} + q)")),
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("(if {a} > {b} {{ {a} }} else {{ {b} }})")),
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("(if {a} == {b} {{ 1 }} else {{ 0 }})")),
+            (inner.clone(), inner.clone()).prop_map(|(v, body)| format!("let q = {v}; ({body} + q)")),
+            (inner.clone(), inner).prop_map(|(v, body)| format!("(let q = {v}; let r = q + q; {body} + r)")),
         ]
     })
 }
@@ -92,7 +95,6 @@ proptest! {
         match (reference, run_asm(&program, DEFAULT_CAPS)) {
             (Ok(rv), AsmRun::Ran(o)) => prop_assert_eq!(decode_asm(&o, &rv), Some(rv)),
             (Err(RunError::Runtime(_)), AsmRun::HitCap | AsmRun::Fault(_)) => {}
-            (Err(RunError::Static(_)), _) => {} // unreachable given prop_assume, but harmless
             (r, a) => prop_assert!(false, "mismatch for {}:\n ref={:?}\n asm={:?}", src, r, a),
         }
     }

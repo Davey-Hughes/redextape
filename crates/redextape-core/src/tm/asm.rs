@@ -72,7 +72,7 @@ fn reg_str(r: Reg) -> String {
     }
 }
 
-fn cmp_mnemonic(op: BinOp) -> &'static str {
+fn bin_mnemonic(op: BinOp) -> &'static str {
     match op {
         BinOp::Add => "add",
         BinOp::Sub => "sub",
@@ -91,7 +91,7 @@ fn instr_str(i: &Instr) -> String {
         Instr::Li(rd, n) => format!("li {}, #{n}", reg_str(*rd)),
         Instr::Mov(rd, rs) => format!("mov {}, {}", reg_str(*rd), reg_str(*rs)),
         Instr::Bin(op, rd, ra, rb) => {
-            format!("{} {}, {}, {}", cmp_mnemonic(*op), reg_str(*rd), reg_str(*ra), reg_str(*rb))
+            format!("{} {}, {}, {}", bin_mnemonic(*op), reg_str(*rd), reg_str(*ra), reg_str(*rb))
         }
         Instr::Jz(r, l) => format!("jz {}, {l}", reg_str(*r)),
         Instr::Jmp(l) => format!("jmp {l}"),
@@ -414,6 +414,9 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::desugar::desugar;
+    use crate::parser::parse;
+    use crate::tm::lower_asm::lower_asm;
 
     #[test]
     fn decodes_nat_and_bool_by_expected_shape() {
@@ -487,6 +490,26 @@ rec:
     ret
 ";
         assert_eq!(print_asm(&prog), expected);
+    }
+
+    #[test]
+    fn print_asm_golden_for_a_small_demo() {
+        // A regression guard on lower_asm's codegen + print_asm's format. If either changes, re-capture
+        // the expected string below (run the test, copy the `left` from the panic) — a deliberate re-bless.
+        let (prog, ds) = parse("let x = 1; let y = x + x; y * 3");
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let core = desugar(&prog.unwrap());
+        let asm = print_asm(&lower_asm(&core).expect("lowers"));
+        let expected = "    li r0, #1
+    mov r2, r0
+    mov r3, r0
+    add r1, r2, r3
+    mov r4, r1
+    li r5, #3
+    mul rr, r4, r5
+    halt
+";
+        assert_eq!(asm, expected);
     }
 
     fn run(prog: Program) -> AsmRun {
