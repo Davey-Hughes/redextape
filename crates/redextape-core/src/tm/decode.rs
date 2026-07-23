@@ -1,27 +1,82 @@
 //! Final tapes -> `Value`, type-directed like the asm/lambda decoders: the reference value supplies
-//! the type witness (a bare tape is ambiguous). Nat/Bool are decoded here; Nil/Cons (heap-pointer
-//! following) arrive with the HEAP tape in Part 2b-2-iii. `expected` is used ONLY for its shape, so a
+//! the type witness (a bare tape is ambiguous). Nat/Bool are decoded directly from the result word;
+//! Nil/Cons are decoded by parsing the HEAP tape into cons cells and following the pointer chain from
+//! the result word, mirroring `asm.rs`'s `decode_word`. `expected` is used ONLY for its shape, so a
 //! machine that computed the wrong value decodes to a different `Value` (or `None`), still failing the
 //! oracle.
 
-use crate::tm::build::REG;
+use std::rc::Rc;
+
+use crate::tm::build::{AT, HEAP, MARK, REG, SEP};
 use crate::tm::encoding::Encoding;
+use crate::tm::machine::Symbol;
 use crate::tm::sim::Tape;
 use crate::value::Value;
 
-/// Decode the machine's final `tapes` to a `Value`, guided by `expected`'s shape. The result word is
-/// REG slot 0 (`Rr`). Returns `None` when the tape shape does not match the expected type.
+/// Decode the machine's final `tapes` to a `Value`, guided by `expected`'s SHAPE (never its contents).
+/// The result word is REG slot 0 (`Rr`): a Nat/Bool value, or a list pointer into the HEAP.
 pub fn decode_tape(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) -> Option<Value> {
     let reg = tapes.get(REG)?.snapshot().0;
+    let heap = parse_heap(&tapes.get(HEAP)?.snapshot().0);
+    let word = enc.decode_nat(&reg, 0)?;
+    decode_word(word, &heap, expected)
+}
+
+/// Parse the HEAP tape into 1-based cons cells `(head, tail)` mark-counts. Marker-delimited (scan `@`),
+/// so it is robust to blanks left of the origin (`Tape::snapshot`'s cell 0 is not necessarily the origin).
+fn parse_heap(cells: &[Symbol]) -> Vec<(u64, u64)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < cells.len() {
+        if cells[i] == AT {
+            let mut j = i + 1;
+            let h = {
+                let s = j;
+                while j < cells.len() && cells[j] == MARK {
+                    j += 1;
+                }
+                (j - s) as u64
+            };
+            if j < cells.len() && cells[j] == SEP {
+                j += 1;
+            }
+            let t = {
+                let s = j;
+                while j < cells.len() && cells[j] == MARK {
+                    j += 1;
+                }
+                (j - s) as u64
+            };
+            out.push((h, t));
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Type-directed decode of a word (Nat/Bool value or list pointer), guided by `expected`'s shape.
+/// Mirrors `asm.rs::decode_word`. Terminates because compiled heaps are acyclic (a cons cell's tail
+/// points only at an EARLIER cell), exactly as `decode_asm` assumes.
+fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value> {
     match expected {
-        Value::Nat(_) => enc.decode_nat(&reg, 0).map(Value::Nat),
-        Value::Bool(_) => match enc.decode_nat(&reg, 0)? {
+        Value::Nat(_) => Some(Value::Nat(word)),
+        Value::Bool(_) => match word {
             0 => Some(Value::Bool(false)),
             1 => Some(Value::Bool(true)),
             _ => None,
         },
-        // Heap-shaped results need the HEAP tape follower (Part 2b-2-iii).
-        Value::Nil | Value::Cons(..) => None,
+        Value::Nil => (word == 0).then_some(Value::Nil),
+        Value::Cons(eh, et) => {
+            if word == 0 {
+                return None;
+            }
+            let &(h, t) = heap.get((word - 1) as usize)?;
+            let head = decode_word(h, heap, eh)?;
+            let tail = decode_word(t, heap, et)?;
+            Some(Value::Cons(Rc::new(head), Rc::new(tail)))
+        }
         Value::Unit | Value::Closure { .. } | Value::Builtin(_) => None,
     }
 }
@@ -85,6 +140,32 @@ mod tests {
         let prog = Program { code: vec![Instr::Halt], labels: vec![] };
         let tapes = run_to_tapes(&prog);
         assert_eq!(decode_tape(&tapes, &Value::Unit, &Unary), None);
-        assert_eq!(decode_tape(&tapes, &Value::Nil, &Unary), None); // until 2b-2-iii
+    }
+
+    #[test]
+    fn decodes_a_constructed_list() {
+        // Build [1, 2] on the TM: nil; cons(2, nil)->p1; cons(1, p1)->rr. Decode guided by a list shape.
+        let prog = Program {
+            code: vec![
+                Instr::Nil(Reg::Loc(0)),
+                Instr::Li(Reg::Loc(1), 2),
+                Instr::Cons(Reg::Loc(2), Reg::Loc(1), Reg::Loc(0)), // cons(2, nil)
+                Instr::Li(Reg::Loc(3), 1),
+                Instr::Cons(Reg::Rr, Reg::Loc(3), Reg::Loc(2)), // cons(1, p1) -> rr
+                Instr::Halt,
+            ],
+            labels: vec![],
+        };
+        let tapes = run_to_tapes(&prog);
+        assert_eq!(decode_tape(&tapes, &Value::list_of_nats(&[1, 2]), &Unary), Some(Value::list_of_nats(&[1, 2])));
+    }
+
+    #[test]
+    fn decodes_nil_result() {
+        let prog = Program { code: vec![Instr::Nil(Reg::Rr), Instr::Halt], labels: vec![] };
+        let tapes = run_to_tapes(&prog);
+        assert_eq!(decode_tape(&tapes, &Value::Nil, &Unary), Some(Value::Nil));
+        // A Cons witness over a nil result decodes to None (pointer 0 is not a cons).
+        assert_eq!(decode_tape(&tapes, &Value::list_of_nats(&[1]), &Unary), None);
     }
 }

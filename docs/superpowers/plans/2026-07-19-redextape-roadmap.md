@@ -122,3 +122,41 @@ Copied verbatim from the spec / existing repo config:
 - **v2:** graphical renderers (TM flow/state diagram, Tromp diagrams), linter rule sets,
   `redextape-lsp`, visible assembly pane, single-tape TM view, signed integers (§11).
 - **Research track:** bidirectional editing feasibility — report + prototype, not a feature (§7.3).
+
+### Extension tracks (raised 2026-07-22 — placement recorded, not yet planned)
+
+Three directions on three different tracks. **None is on the critical path** to finishing Plan 3
+(list access → the N-way oracle); all are post-Plan-3. Suggested order once Plan 3 lands:
+single-tape TM → optimizing compiler → tree-sitter. Closures/higher-order (Plan 3b) is a separate axis.
+
+- **Single-tape TM — backend/theory track, highest thematic payoff.** Build it as a *transformation*
+  on the finished `Machine`, NOT a separate compile target: multi-tape → single-tape via the textbook
+  `2k`-track interleaving simulation (per tape: a content track + a head-marker track on one tape over a
+  product alphabet; each multi-tape step becomes a scan-heads / apply-and-move sweep). This *executes*
+  another theorem — multi-tape ≡ single-tape — extending "watch the Church–Turing thesis happen," and
+  drops straight into the oracle as a new leg: `reference == λ == multitape-TM == singletape-TM`. It is a
+  pure `Machine(k-tape) → Machine(1-tape)` fn + a decode that un-interleaves the tracks; touches nothing
+  in Core/asm/encoding — one interface, one oracle test. **When:** right after 2b-2-iv, while the
+  multi-tape oracle context is warm. **Risk:** quadratic slowdown → generous caps + a product-alphabet
+  decode (keep the alphabet a tuple, not a blown-up power set). This *supersedes* the passive "single-tape
+  TM view" listed under v2 above — the reduction is the interesting artifact; the view falls out of it.
+
+- **Optimizing compiler — IR track, oracle-guarded.** An optimization pass over Core/asm. Motivation:
+  (a) practical — TM step counts explode (unary arithmetic, STACK recursion, quadratic single-tape), and
+  slot-count / register-width drive tape length, so shrinking the program shrinks the machine and its
+  step count; (b) pedagogical — "optimization preserves semantics" is itself an oracle story
+  (`optimized == unoptimized == reference`). The strong existing oracle auto-validates every pass on the
+  demo corpus + proptest, making this project unusually SAFE to optimize. Highest-value first pass:
+  register allocation / slot minimization (shrinks the REG bank + tape length most); then constant
+  folding + DCE + copy propagation. **When:** its own plan, after the backends are complete, with the
+  oracle already green so a regression is unambiguous. **Risk:** miscompilation — mitigated by the
+  oracle; apply YAGNI hard (add a pass only if it helps demos fit under caps or reads more clearly).
+
+- **tree-sitter grammar — frontend/tooling track, defer to the visualizer.** A CST for editor tooling:
+  incremental parsing, error-tolerant highlighting, a live editing surface. It does NOT replace the
+  hand-written front-end parser for the oracle (it produces a CST you'd still lower into the typed Core).
+  **When:** only once the interactive visualizer (Plan 5) exists and wants in-browser editing; nothing on
+  the compiler/oracle path depends on it. **Risk — dual-grammar drift:** pick a lane up front — either
+  tree-sitter for *highlighting only* (hand-parser stays the semantic source of truth; drift is cosmetic)
+  or tree-sitter as the *only* parser (lower CST→Core; couples the build to the tree-sitter toolchain).
+  Never maintain two authoritative grammars.

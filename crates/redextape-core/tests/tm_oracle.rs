@@ -106,6 +106,24 @@ fn asm_interp_matches_tm_on_call_demos() {
     }
 }
 
+/// The list-CONSTRUCTION demo subset: nil, cons, is_empty, and a list literal (desugars to a cons
+/// spine). NO head/tail (those dereference a pointer — Part 2b-2-iii-b). Values/lengths « FIELD_WIDTH.
+const LIST_BUILD_DEMOS: &[&str] = &["is_empty(nil)", "is_empty(cons(1, nil))", "[1, 2, 3]", "cons(1, cons(2, nil))"];
+
+#[test]
+fn tm_agrees_with_reference_on_list_build_demos() {
+    for src in LIST_BUILD_DEMOS {
+        assert_tm_agrees(src);
+    }
+}
+
+#[test]
+fn asm_interp_matches_tm_on_list_build_demos() {
+    for src in LIST_BUILD_DEMOS {
+        assert_asm_interp_matches_tm(src);
+    }
+}
+
 #[test]
 fn tm_cap_matches_a_reference_nonterminating_program() {
     // An unbounded loop: the reference hits its step budget (Runtime error) and the TM hits its cap.

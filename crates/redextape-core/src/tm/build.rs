@@ -16,6 +16,8 @@ pub const HEAP: usize = 3;
 /// Tape data symbols. `BLANK` (`_`) comes from `machine`. `SEP` (`#`) delimits register fields.
 pub const MARK: Symbol = '1';
 pub const SEP: Symbol = '#';
+/// The HEAP cons-cell delimiter: each cell is `@ <head marks> # <tail marks>`.
+pub const AT: Symbol = '@';
 
 /// Fixed width (cells) of every register field: a value `v` is `v` `MARK`s left-justified, then
 /// `FIELD_WIDTH - v` `BLANK`s. Fixed width means a write mutates the field IN PLACE (blank the window,

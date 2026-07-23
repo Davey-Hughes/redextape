@@ -2,8 +2,9 @@
 //! per instruction index; each instruction is a block of states (a delta-gadget) that flows from its
 //! `pc` to a successor `pc`. Straight-line instructions fall through to `pc[i+1]`; `jmp`/`jz` (Task 4)
 //! jump to a label's `pc`. Value gadgets come from the `Encoding` seam. Total and panic-free on any
-//! `Program`. `call`/`ret` lower via STACK frames + return-tag dispatch (Part 2b-2-ii); the heap ops
-//! are Part 2b-2-iii and here defensively halt.
+//! `Program`. `call`/`ret` lower via STACK frames + return-tag dispatch (Part 2b-2-ii); `Nil`/`Cons`/
+//! `IsEmpty` lower via the HEAP tape (Part 2b-2-iii-a); `Head`/`Tail` are Part 2b-2-iii-b and here
+//! defensively halt.
 
 use crate::core::BinOp;
 use crate::tm::asm::{Instr, Program, Reg};
@@ -186,10 +187,11 @@ pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
             }
             // Every `Ret` funnels into the one shared handler built above.
             Instr::Ret => b.add_rule(pc[i], RuleSpec::new(), ret_entry),
-            // 2b-2-iii replaces these — defensively halt for now (never fed to this slice's tests).
-            Instr::Nil(_) | Instr::Cons(..) | Instr::Head(..) | Instr::Tail(..) | Instr::IsEmpty(..) => {
-                b.add_rule(pc[i], RuleSpec::new(), halt)
-            }
+            Instr::Nil(rd) => enc.write_literal(&mut b, pc[i], fall, 0, sm.slot(*rd)),
+            Instr::Cons(rd, rh, rt) => enc.cons(&mut b, pc[i], fall, sm.slot(*rh), sm.slot(*rt), sm.slot(*rd)),
+            Instr::IsEmpty(rd, rl) => enc.is_empty_op(&mut b, pc[i], fall, sm.slot(*rl), sm.slot(*rd)),
+            // `Head`/`Tail` are Part 2b-2-iii-b — defensively halt for now (never fed to this slice's tests).
+            Instr::Head(..) | Instr::Tail(..) => b.add_rule(pc[i], RuleSpec::new(), halt),
         }
     }
 
@@ -381,6 +383,28 @@ mod tests {
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         // One Li gadget seeking slot 2000 is O(2000); a quadratic Ret handler would be ~O(2000^2)=4M.
         assert!(m.states.len() < 50_000, "no-Call program must not build frame gadgets; got {}", m.states.len());
+    }
+
+    #[test]
+    fn is_empty_of_nil_and_of_cons() {
+        // is_empty(nil) == 1 ; and is_empty(cons(1,nil)) == 0.
+        let nil_prog = Program {
+            code: vec![Instr::Nil(Reg::Loc(0)), Instr::IsEmpty(Reg::Rr, Reg::Loc(0)), Instr::Halt],
+            labels: vec![],
+        };
+        assert_eq!(run_nat(&nil_prog), Some(1));
+
+        let cons_prog = Program {
+            code: vec![
+                Instr::Nil(Reg::Loc(0)),
+                Instr::Li(Reg::Loc(1), 1),
+                Instr::Cons(Reg::Loc(2), Reg::Loc(1), Reg::Loc(0)), // cons(1, nil)
+                Instr::IsEmpty(Reg::Rr, Reg::Loc(2)),
+                Instr::Halt,
+            ],
+            labels: vec![],
+        };
+        assert_eq!(run_nat(&cons_prog), Some(0));
     }
 
     #[test]
