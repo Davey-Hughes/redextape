@@ -68,10 +68,10 @@ pub trait Encoding {
     fn is_empty_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
     /// `rd <- head(field rl)`: read the pointer in `rl`, seek the cell, write its head-word into `rd`.
     /// Flows `entry -> exit` with all heads home/top on the value exit. A `nil` pointer (`rl == 0`) or a
-    /// dangling pointer routes to an internal defensive-halt (the machine terminates; `rd` is not
-    /// written). Like `cons`, the structural navigation (seek) is unary-always; only the copied head-word
-    /// follows the encoding. PRECONDITION: `rd` distinct from `rl` (`rd` is written last, after `rl` is
-    /// fully read — but keep them distinct; `lower_asm` emits fresh operands).
+    /// dangling pointer has no value and SPINS to a cap (HitCap), matching λ (Ω) and the reference
+    /// (Runtime); `rd` is not written. Like `cons`, the structural navigation (seek) is unary-always;
+    /// only the copied head-word follows the encoding. PRECONDITION: `rd` distinct from `rl` (`rd` is
+    /// written last, after `rl` is fully read — but keep them distinct; `lower_asm` emits fresh operands).
     fn head_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
     /// As `head_op`, but writes the tail-word into `rd`.
     fn tail_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
@@ -821,9 +821,12 @@ impl Encoding for Unary {
     fn head_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot) {
         let base = format!("hd{entry}");
         let cw = copy_field_to_work(b, entry, rl, &format!("{base}.p")); // WORK <- P (pointer)
-        // Defensive halt: nil (P == 0) and dangling (seek misses) both terminate here. A rule-less
-        // non-accept state -> the simulator halts (stuck == halt). NOT an oracle path (see Task 4).
         let fault = b.state(format!("{base}.fault"));
+        // A runtime fault (nil / dangling deref) has NO value: spin here forever so the machine hits the
+        // step cap (HitCap), matching λ's Ω-divergence and the reference's Runtime error — the three-way
+        // oracle treats all three "no value" outcomes alike. `RuleSpec::new()` reads wildcards / writes
+        // nothing / all Stay, so it always matches and never halts (sim has no fixed-point detector).
+        b.add_rule(fault, RuleSpec::new(), fault);
         let seek = b.state(format!("{base}.sk"));
         b.add_rule(cw, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S), fault); // P == 0 -> nil fault
         b.add_rule(cw, RuleSpec::new().on(WORK, Some(MARK), None, Move::S), seek); // P >= 1 -> seek
@@ -838,6 +841,11 @@ impl Encoding for Unary {
         let base = format!("tl{entry}");
         let cw = copy_field_to_work(b, entry, rl, &format!("{base}.p"));
         let fault = b.state(format!("{base}.fault"));
+        // A runtime fault (nil / dangling deref) has NO value: spin here forever so the machine hits the
+        // step cap (HitCap), matching λ's Ω-divergence and the reference's Runtime error — the three-way
+        // oracle treats all three "no value" outcomes alike. `RuleSpec::new()` reads wildcards / writes
+        // nothing / all Stay, so it always matches and never halts (sim has no fixed-point detector).
+        b.add_rule(fault, RuleSpec::new(), fault);
         let seek = b.state(format!("{base}.sk"));
         b.add_rule(cw, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S), fault);
         b.add_rule(cw, RuleSpec::new().on(WORK, Some(MARK), None, Move::S), seek);

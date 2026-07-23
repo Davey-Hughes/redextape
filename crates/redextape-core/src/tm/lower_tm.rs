@@ -4,7 +4,7 @@
 //! jump to a label's `pc`. Value gadgets come from the `Encoding` seam. Total and panic-free on any
 //! `Program`. `call`/`ret` lower via STACK frames + return-tag dispatch (Part 2b-2-ii); `Nil`/`Cons`/
 //! `IsEmpty` lower via the HEAP tape (Part 2b-2-iii-a); `Head`/`Tail` (Part 2b-2-iii-b) dereference a
-//! pointer over the HEAP — `nil`/dangling defensively halt.
+//! pointer over the HEAP — `nil`/dangling have no value and spin to a cap (matching λ/reference).
 
 use crate::core::BinOp;
 use crate::tm::asm::{Instr, Program, Reg};
@@ -206,7 +206,7 @@ mod tests {
     use crate::tm::build::REG;
     use crate::tm::build::TAPES;
     use crate::tm::encoding::Unary;
-    use crate::tm::sim::{DEFAULT_CAPS as CAPS, Status, simulate};
+    use crate::tm::sim::{Caps, DEFAULT_CAPS as CAPS, Status, simulate};
 
     /// Lower `prog`, run it, and decode field 0 (the `Rr` result) as a unary Nat.
     fn run_nat(prog: &Program) -> Option<u64> {
@@ -427,29 +427,31 @@ mod tests {
     }
 
     #[test]
-    fn head_tail_faults_are_total_defensive_halts() {
-        // head(nil), tail(nil), and a dangling pointer must be TOTAL: a defensive halt, no panic/hang.
-        // NOT an oracle case — the reference faults (RunError::Runtime) while the TM halts; oracle-level
-        // fault-equivalence is Part 2b-2-iv. Here we only assert the machine terminates cleanly.
-        fn halts(prog: &Program) -> bool {
+    fn head_tail_faults_spin_to_a_cap() {
+        // head(nil), tail(nil), and a dangling pointer have no runtime value: the reference faults
+        // (RunError::Runtime), λ's nil-branch is Ω (no normal form). The TM matches by DIVERGING — the
+        // deref's fault state spins, so under any cap the machine hits it (HitCap), never Ran. This is
+        // what lets the three-way oracle (Part 2b-2-iv-a) treat all three "no value" outcomes alike.
+        // A small cap keeps the test fast (the spin has no fixed point; sim runs it to the step cap).
+        fn hits_cap(prog: &Program) -> bool {
             let m = lower_tm(prog, &Unary);
             assert!(m.validate().is_empty(), "{:?}", m.validate());
             let sm = SlotMap::of(prog);
             let mut init = vec![Vec::new(); TAPES];
             init[REG] = Unary.init_reg(sm.n_slots());
-            matches!(simulate(&m, &init, CAPS).1, Status::Halted)
+            matches!(simulate(&m, &init, Caps { steps: 10_000, cells: 10_000 }).1, Status::HitCap)
         }
         // head(nil) / tail(nil): pointer 0.
-        assert!(halts(&Program {
+        assert!(hits_cap(&Program {
             code: vec![Instr::Nil(Reg::Loc(0)), Instr::Head(Reg::Rr, Reg::Loc(0)), Instr::Halt],
             labels: vec![],
         }));
-        assert!(halts(&Program {
+        assert!(hits_cap(&Program {
             code: vec![Instr::Nil(Reg::Loc(0)), Instr::Tail(Reg::Rr, Reg::Loc(0)), Instr::Halt],
             labels: vec![],
         }));
-        // Dangling: pointer 5 into an empty heap (mirrors asm.rs's head_of_invalid_pointer_faults).
-        assert!(halts(&Program {
+        // Dangling: pointer 5 into an empty heap.
+        assert!(hits_cap(&Program {
             code: vec![Instr::Li(Reg::Loc(0), 5), Instr::Head(Reg::Rr, Reg::Loc(0)), Instr::Halt],
             labels: vec![],
         }));
