@@ -124,6 +124,34 @@ fn asm_interp_matches_tm_on_list_build_demos() {
     }
 }
 
+/// The list-ACCESS demo subset: head/tail deref on real (non-nil) lists — head -> a Nat, tail -> nil or
+/// a sub-list pointer, and a nested head(tail(...)). NO faulting access (head/tail of nil): the reference
+/// faults (RunError::Runtime) while the TM defensively halts, which is an oracle mismatch BY DESIGN;
+/// oracle-level fault-equivalence is Part 2b-2-iv. Values/lengths « FIELD_WIDTH.
+const LIST_ACCESS_DEMOS: &[&str] = &[
+    "head(cons(7, nil))",
+    "tail(cons(7, nil))",
+    "head(cons(1, cons(2, nil)))",
+    "tail(cons(1, cons(2, nil)))",
+    "head(tail(cons(1, cons(2, nil))))",
+    "head([1, 2, 3])",
+    "tail([1, 2, 3])",
+];
+
+#[test]
+fn tm_agrees_with_reference_on_list_access_demos() {
+    for src in LIST_ACCESS_DEMOS {
+        assert_tm_agrees(src);
+    }
+}
+
+#[test]
+fn asm_interp_matches_tm_on_list_access_demos() {
+    for src in LIST_ACCESS_DEMOS {
+        assert_asm_interp_matches_tm(src);
+    }
+}
+
 #[test]
 fn tm_cap_matches_a_reference_nonterminating_program() {
     // An unbounded loop: the reference hits its step budget (Runtime error) and the TM hits its cap.

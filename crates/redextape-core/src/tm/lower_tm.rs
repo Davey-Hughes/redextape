@@ -3,8 +3,8 @@
 //! `pc` to a successor `pc`. Straight-line instructions fall through to `pc[i+1]`; `jmp`/`jz` (Task 4)
 //! jump to a label's `pc`. Value gadgets come from the `Encoding` seam. Total and panic-free on any
 //! `Program`. `call`/`ret` lower via STACK frames + return-tag dispatch (Part 2b-2-ii); `Nil`/`Cons`/
-//! `IsEmpty` lower via the HEAP tape (Part 2b-2-iii-a); `Head`/`Tail` are Part 2b-2-iii-b and here
-//! defensively halt.
+//! `IsEmpty` lower via the HEAP tape (Part 2b-2-iii-a); `Head`/`Tail` (Part 2b-2-iii-b) dereference a
+//! pointer over the HEAP — `nil`/dangling defensively halt.
 
 use crate::core::BinOp;
 use crate::tm::asm::{Instr, Program, Reg};
@@ -190,8 +190,8 @@ pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
             Instr::Nil(rd) => enc.write_literal(&mut b, pc[i], fall, 0, sm.slot(*rd)),
             Instr::Cons(rd, rh, rt) => enc.cons(&mut b, pc[i], fall, sm.slot(*rh), sm.slot(*rt), sm.slot(*rd)),
             Instr::IsEmpty(rd, rl) => enc.is_empty_op(&mut b, pc[i], fall, sm.slot(*rl), sm.slot(*rd)),
-            // `Head`/`Tail` are Part 2b-2-iii-b — defensively halt for now (never fed to this slice's tests).
-            Instr::Head(..) | Instr::Tail(..) => b.add_rule(pc[i], RuleSpec::new(), halt),
+            Instr::Head(rd, rl) => enc.head_op(&mut b, pc[i], fall, sm.slot(*rl), sm.slot(*rd)),
+            Instr::Tail(rd, rl) => enc.tail_op(&mut b, pc[i], fall, sm.slot(*rl), sm.slot(*rd)),
         }
     }
 
@@ -405,6 +405,54 @@ mod tests {
             labels: vec![],
         };
         assert_eq!(run_nat(&cons_prog), Some(0));
+    }
+
+    #[test]
+    fn head_tail_deref_reads_a_nested_element() {
+        // rr = head(tail(cons(1, cons(2, nil)))) == 2. Identical to asm.rs's head_tail_deref.
+        let prog = Program {
+            code: vec![
+                Instr::Nil(Reg::Loc(0)), // r0 = nil
+                Instr::Li(Reg::Loc(1), 2),
+                Instr::Cons(Reg::Loc(2), Reg::Loc(1), Reg::Loc(0)), // r2 = cons(2, nil)
+                Instr::Li(Reg::Loc(3), 1),
+                Instr::Cons(Reg::Loc(4), Reg::Loc(3), Reg::Loc(2)), // r4 = cons(1, r2)
+                Instr::Tail(Reg::Loc(5), Reg::Loc(4)),              // r5 = tail(r4) -> ptr to (2,nil)
+                Instr::Head(Reg::Rr, Reg::Loc(5)),                  // rr = head(r5) = 2
+                Instr::Halt,
+            ],
+            labels: vec![],
+        };
+        assert_eq!(run_nat(&prog), Some(2));
+    }
+
+    #[test]
+    fn head_tail_faults_are_total_defensive_halts() {
+        // head(nil), tail(nil), and a dangling pointer must be TOTAL: a defensive halt, no panic/hang.
+        // NOT an oracle case — the reference faults (RunError::Runtime) while the TM halts; oracle-level
+        // fault-equivalence is Part 2b-2-iv. Here we only assert the machine terminates cleanly.
+        fn halts(prog: &Program) -> bool {
+            let m = lower_tm(prog, &Unary);
+            assert!(m.validate().is_empty(), "{:?}", m.validate());
+            let sm = SlotMap::of(prog);
+            let mut init = vec![Vec::new(); TAPES];
+            init[REG] = Unary.init_reg(sm.n_slots());
+            matches!(simulate(&m, &init, CAPS).1, Status::Halted)
+        }
+        // head(nil) / tail(nil): pointer 0.
+        assert!(halts(&Program {
+            code: vec![Instr::Nil(Reg::Loc(0)), Instr::Head(Reg::Rr, Reg::Loc(0)), Instr::Halt],
+            labels: vec![],
+        }));
+        assert!(halts(&Program {
+            code: vec![Instr::Nil(Reg::Loc(0)), Instr::Tail(Reg::Rr, Reg::Loc(0)), Instr::Halt],
+            labels: vec![],
+        }));
+        // Dangling: pointer 5 into an empty heap (mirrors asm.rs's head_of_invalid_pointer_faults).
+        assert!(halts(&Program {
+            code: vec![Instr::Li(Reg::Loc(0), 5), Instr::Head(Reg::Rr, Reg::Loc(0)), Instr::Halt],
+            labels: vec![],
+        }));
     }
 
     #[test]
