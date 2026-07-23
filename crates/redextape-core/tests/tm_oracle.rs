@@ -76,6 +76,36 @@ fn asm_interp_matches_tm_on_control_flow_demos() {
     }
 }
 
+/// The call/recursion demo subset: named-fn calls, recursion, a directly-applied lambda, and a `fn`
+/// inside a mutation region (Plan-2 latent trap). Still NO list/heap ops (Part 2b-2-iii). Values « 64.
+///
+/// Unary recursion is step-heavy (`Call`/`Ret` save/restore a whole frame per level, and each frame op
+/// is many TM steps), so these were checked against `TM_DEFAULT_CAPS` (5,000,000 steps/cells) before
+/// being added: even the heaviest, `sum(5)`, halts in ~178k steps (~3.6% of the cap, no `HitCap`), so
+/// `assert_tm_agrees`/`assert_asm_interp_matches_tm` are used unmodified — no raised-cap variant needed.
+const CALL_DEMOS: &[&str] = &[
+    "let add1 = |x| x + 1; add1(41)",
+    "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)",
+    "fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(4)",
+    "fn add1(x) { x + 1 } fn pair_sum(a, b) { a + b } pair_sum(1, add1(2))",
+    // Plan-2 latent-trap program: a `fn` defined inside a mutation region.
+    "let mut acc = 0; fn bump(n) { n + 1 } acc = bump(acc); acc = bump(acc); acc",
+];
+
+#[test]
+fn tm_agrees_with_reference_on_call_demos() {
+    for src in CALL_DEMOS {
+        assert_tm_agrees(src);
+    }
+}
+
+#[test]
+fn asm_interp_matches_tm_on_call_demos() {
+    for src in CALL_DEMOS {
+        assert_asm_interp_matches_tm(src);
+    }
+}
+
 #[test]
 fn tm_cap_matches_a_reference_nonterminating_program() {
     // An unbounded loop: the reference hits its step budget (Runtime error) and the TM hits its cap.

@@ -5,7 +5,7 @@
 //! (build a tiny machine → run → decode).
 
 use crate::core::BinOp;
-use crate::tm::build::{Builder, FIELD_WIDTH, MARK, REG, RuleSpec, SEP, Slot, WORK};
+use crate::tm::build::{Builder, FIELD_WIDTH, MARK, REG, RuleSpec, SEP, STACK, Slot, WORK};
 use crate::tm::machine::{BLANK, Move, StateId, Symbol};
 
 /// The pluggable numeric encoding (the swappable seam). `Unary` is the v1 implementation; a `Binary`
@@ -38,6 +38,27 @@ pub trait Encoding {
     /// `if_zero`, else to `if_nonzero`. REG head home on both exits; WORK untouched. Encoding-specific
     /// (what "zero" looks like on the tape).
     fn jz(&self, b: &mut Builder, entry: StateId, if_zero: StateId, if_nonzero: StateId, r: Slot);
+    /// The `Call`-side gadget: push a new frame onto STACK. `from` `entry` (REG home, WORK home, STACK
+    /// at top): push the return-tag `tag` at the frame's bottom, then save each `Loc` field (slots
+    /// `1..=n_loc`) above it, in slot order. Flows `entry -> exit` with all heads home/top on exit.
+    /// `n_loc = 0` pushes only the tag. A COPY (not a move): the REG `Loc` fields are left UNCHANGED.
+    fn push_frame(&self, b: &mut Builder, entry: StateId, exit: StateId, n_loc: u32, tag: u64);
+    /// The first half of the `Ret`-side gadget: pop the `Loc` fields (top->down, reverse of the save)
+    /// back into REG, leaving the STACK head on the tag field for `Task 4` to dispatch. `from` `entry`
+    /// (a non-empty STACK at the top, REG/WORK home): pop the top `n_loc` fields — they are
+    /// `Loc_{n_loc-1}` … `Loc0`, since `push_frame` saved `Loc0..Loc_{n_loc-1}` above the tag — and write
+    /// each back into its REG `Loc` slot. Flows `entry -> exit`. On exit the STACK head is at the top
+    /// with the tag now the top field, REG/WORK home. `n_loc = 0` is a no-op leaving the tag on top.
+    fn pop_frame_restore(&self, b: &mut Builder, entry: StateId, exit: StateId, n_loc: u32);
+    /// The second half of the `Ret`-side gadget: with the return-tag as the top STACK field (as left by
+    /// `pop_frame_restore`), read+erase the tag and route to `exits[c]` where `c` is the tag's mark
+    /// count. `from` `entry` (STACK head at the top — the blank right of the tag's `#`; REG/WORK home).
+    /// Erases the whole tag field so on the chosen exit the STACK head is at the NEW top (the caller's
+    /// frame, or an empty stack), REG/WORK untouched (still home). Does NOT flow to a single `exit`: it
+    /// is a finite-state fan-out to one of `exits`. If `c >= exits.len()` (cannot happen for a
+    /// well-formed program) it clamps to `exits.last()` defensively — never panics, never over-indexes.
+    /// An empty `exits` is a no-op (leaves `entry` rule-less, so the machine simply halts there).
+    fn dispatch_tag(&self, b: &mut Builder, entry: StateId, exits: &[StateId]);
 }
 
 pub struct Unary;
@@ -312,6 +333,86 @@ fn eq_to_work(b: &mut Builder, from: StateId, ra: Slot, rb: Slot, rd: Slot, labe
     dec_work(b, sum, &format!("{label}.dc")) // WORK <- monus(sum, 1) = eq(ra, rb)
 }
 
+// ---- STACK tape sub-primitives (free functions; each preserves the STACK "top" invariant) ----
+//
+// The STACK holds `[field]#[field]#…#[field]#` with the head on the BLANK immediately after the last
+// `#` (the "top"); an empty stack has the head at cell 0 over all blanks. Every gadget below takes the
+// head at the top on entry and leaves it at the (possibly new) top on exit. STACK data symbols are only
+// `MARK`/`BLANK`/`SEP` — no new symbol — so empty-vs-frame is a blank-vs-`#` check one cell left of the
+// top. Values are variable-width unary appended at the top (no fixed window, no shifting).
+
+/// Append WORK's marks as a new `#`-terminated field at the STACK top. `from`: WORK at home over
+/// contiguous marks (possibly empty), STACK head at the top. Walks WORK right over its marks, writing
+/// one STACK mark per WORK mark (both heads advance R); when WORK is exhausted writes the field's
+/// trailing `#` and steps STACK onto the new blank top; then rewinds WORK home (marks left INTACT). On
+/// exit the STACK head is at the new top and WORK is home over its (unchanged) marks. Mirrors
+/// `append_field_to_work`'s copy loop, but the destination grows the tape (no fixed window to blank).
+pub fn stack_push_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+    // Copy loop (self-looping on `from`): for each WORK mark write a STACK mark, advancing both heads.
+    b.add_rule(from, RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(STACK, None, Some(MARK), Move::R), from);
+    // WORK exhausted (its trailing blank): terminate the field with a `#` and step onto the new top.
+    let term = b.state(format!("{label}.term"));
+    b.add_rule(from, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S).on(STACK, None, Some(SEP), Move::R), term);
+    rewind_work(b, term, label) // WORK head was left on its trailing blank -> back home, marks intact
+}
+
+/// Write `c` marks then a `#` as a new field at the STACK top (unrolled, like `write_literal`'s mark
+/// loop but append-only, no fixed window). `from`: STACK head at the top. `c = 0` writes just a `#` (an
+/// empty field). On exit the STACK head is at the new blank top; WORK/REG are untouched.
+pub fn stack_push_literal(b: &mut Builder, from: StateId, c: u64, label: &str) -> StateId {
+    let mut cur = from;
+    for i in 0..c {
+        let nxt = b.state(format!("{label}.m{i}"));
+        b.add_rule(cur, RuleSpec::new().on(STACK, None, Some(MARK), Move::R), nxt); // write a mark, advance
+        cur = nxt;
+    }
+    let top = b.state(format!("{label}.top"));
+    b.add_rule(cur, RuleSpec::new().on(STACK, None, Some(SEP), Move::R), top); // terminate + step to new top
+    top
+}
+
+/// Pop the top STACK field into WORK. `from`: STACK head at the top (STACK non-empty), REG/WORK home.
+/// Clears WORK; steps left onto the field's trailing `#` and erases it; walks left erasing each STACK
+/// mark while writing a WORK mark (STACK head L, WORK head R — one rule, opposite directions); stops at
+/// the field's left boundary (a `#` of the frame below, or the origin blank); steps right to the new
+/// top; rewinds WORK home. On exit WORK is home holding the popped field's value (unary count preserved,
+/// order irrelevant) and the STACK head is at the new top with the popped field fully erased. Reuses
+/// `clear_work` and the erase-back-walk shape from `dec_work`.
+pub fn stack_pop_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+    let cleared = clear_work(b, from, &format!("{label}.cl")); // WORK empty+home; STACK still at the top
+    // Step left off the top blank onto the field's trailing `#`.
+    let on_hash = b.state(format!("{label}.oh"));
+    b.add_rule(cleared, RuleSpec::new().on(STACK, Some(BLANK), None, Move::L), on_hash);
+    // Erase that `#` and step left onto the field's content (a mark — or straight onto the boundary if
+    // the popped field is empty).
+    let walk = b.state(format!("{label}.wk"));
+    b.add_rule(on_hash, RuleSpec::new().on(STACK, Some(SEP), Some(BLANK), Move::L), walk);
+    // Walk left erasing each STACK mark, writing one WORK mark per erased mark (heads move opposite ways).
+    b.add_rule(
+        walk,
+        RuleSpec::new().on(STACK, Some(MARK), Some(BLANK), Move::L).on(WORK, None, Some(MARK), Move::R),
+        walk,
+    );
+    // Left boundary: a `#` (the frame below) or the origin blank both end the field -> step right to top.
+    let to_top = b.state(format!("{label}.tt"));
+    b.add_rule(walk, RuleSpec::new().on(STACK, Some(SEP), None, Move::R), to_top);
+    b.add_rule(walk, RuleSpec::new().on(STACK, Some(BLANK), None, Move::R), to_top);
+    rewind_work(b, to_top, &format!("{label}.rw")) // WORK head on its trailing blank -> home w/ the value
+}
+
+/// Branch on whether the STACK is empty WITHOUT mutating any tape. `from`: STACK head at the top. Steps
+/// left: a `#` (a frame below) -> `if_nonempty`; a blank (origin) -> `if_empty`. Either branch steps
+/// back right in the same transition, so both exits see the STACK head restored to the top. Mirrors
+/// `jz`'s two-exit shape. No `label` param, so derived state names are uniquified from `from`.
+pub fn stack_is_empty(b: &mut Builder, from: StateId, if_empty: StateId, if_nonempty: StateId) {
+    let base = format!("se{from}");
+    let look = b.state(format!("{base}.look"));
+    b.add_rule(from, RuleSpec::new().on(STACK, Some(BLANK), None, Move::L), look); // step off the top blank
+    // `#` -> non-empty; blank -> empty. The Move::R restores the head to the top in the same step.
+    b.add_rule(look, RuleSpec::new().on(STACK, Some(SEP), None, Move::R), if_nonempty);
+    b.add_rule(look, RuleSpec::new().on(STACK, Some(BLANK), None, Move::R), if_empty);
+}
+
 #[allow(clippy::too_many_arguments)] // `arith`/`compare` mirror the trait's three-address signature.
 impl Encoding for Unary {
     fn write_literal(&self, b: &mut Builder, entry: StateId, exit: StateId, n: u64, rd: Slot) {
@@ -469,6 +570,58 @@ impl Encoding for Unary {
         b.add_rule(home_nz, RuleSpec::new(), if_nonzero);
         let home_z = rewind_home(b, z, r, &format!("{l}.rz"));
         b.add_rule(home_z, RuleSpec::new(), if_zero);
+    }
+
+    fn push_frame(&self, b: &mut Builder, entry: StateId, exit: StateId, n_loc: u32, tag: u64) {
+        let base = format!("pf{entry}"); // `entry` uniquifies derived state names across call sites
+        // Tag at the frame bottom (pushed first).
+        let mut cur = stack_push_literal(b, entry, tag, &format!("{base}.tag"));
+        // Then Loc0..Loc_{n_loc-1} (slots 1..=n_loc), in order, above the tag.
+        for slot in 1..=n_loc {
+            let after_copy = copy_field_to_work(b, cur, slot, &format!("{base}.c{slot}"));
+            cur = stack_push_work(b, after_copy, &format!("{base}.s{slot}"));
+        }
+        b.add_rule(cur, RuleSpec::new(), exit);
+    }
+
+    fn pop_frame_restore(&self, b: &mut Builder, entry: StateId, exit: StateId, n_loc: u32) {
+        let base = format!("rf{entry}");
+        let mut cur = entry;
+        // The top field is Loc_{n_loc-1} (slot n_loc); pop down to Loc0 (slot 1).
+        for slot in (1..=n_loc).rev() {
+            let after_pop = stack_pop_work(b, cur, &format!("{base}.p{slot}")); // WORK <- Loc_{slot-1}
+            cur = append_work_to_field(b, after_pop, slot, &format!("{base}.w{slot}")); // REG slot <- WORK
+        }
+        b.add_rule(cur, RuleSpec::new(), exit);
+    }
+
+    fn dispatch_tag(&self, b: &mut Builder, entry: StateId, exits: &[StateId]) {
+        // Defensive: nothing to route to. Leave `entry` rule-less so the machine just halts there
+        // (well-formed programs always have >= 1 call site, so this arm never fires in practice).
+        let k = exits.len();
+        if k == 0 {
+            return;
+        }
+        let base = format!("dt{entry}"); // `entry` (fresh per call site) uniquifies derived state names
+        // From `entry` (STACK head on the top blank, right of the tag's `#`): step left onto that `#`.
+        let on_hash = b.state(format!("{base}.oh"));
+        b.add_rule(entry, RuleSpec::new().on(STACK, Some(BLANK), None, Move::L), on_hash);
+        // Erase the tag's `#` and step left onto the tag's marks (or straight onto the boundary if c=0),
+        // entering the walk chain at `e_0`. The chain is `e_0..=e_K` (K+1 states); the count of marks the
+        // walk erases before hitting the boundary is the tag `c`.
+        let e: Vec<StateId> = (0..=k).map(|j| b.state(format!("{base}.e{j}"))).collect();
+        b.add_rule(on_hash, RuleSpec::new().on(STACK, Some(SEP), Some(BLANK), Move::L), e[0]);
+        // `e_j` reads the STACK head; the three arms have DISJOINT reads, so rule order is immaterial.
+        // MARK -> erase it, step L, advance to `e_{j+1}` (`e_K` self-loops, clamping counts >= K).
+        // A boundary (`#` of the frame below, OR the origin blank) means the tag count was `j`: step R to
+        // the new top and fan out to `exits[min(j, K-1)]` (the clamp keeps a `c >= K` tag in range).
+        for j in 0..=k {
+            let next = e[(j + 1).min(k)];
+            b.add_rule(e[j], RuleSpec::new().on(STACK, Some(MARK), Some(BLANK), Move::L), next);
+            let exit = exits[j.min(k - 1)];
+            b.add_rule(e[j], RuleSpec::new().on(STACK, Some(SEP), None, Move::R), exit); // frame `#` below
+            b.add_rule(e[j], RuleSpec::new().on(STACK, Some(BLANK), None, Move::R), exit); // origin blank
+        }
     }
 }
 
@@ -655,5 +808,187 @@ mod tests {
         assert_eq!(run_jz(0), Some(7)); // zero -> zero_exit
         assert_eq!(run_jz(1), Some(9)); // nonzero -> nonzero_exit
         assert_eq!(run_jz(5), Some(9));
+    }
+
+    // ---- STACK tape sub-primitives ----
+
+    /// Run a machine that does `body` over the STACK tape (REG/WORK seeded empty unless the body writes
+    /// them), then return the STACK snapshot cells for inspection.
+    fn run_stack(body: impl FnOnce(&mut Builder, StateId, StateId)) -> Vec<Symbol> {
+        let mut b = Builder::new();
+        let halt = b.accept("halt");
+        let start = b.state("start");
+        body(&mut b, start, halt);
+        let m = b.finish(start);
+        assert!(m.validate().is_empty(), "invalid machine: {:?}", m.validate());
+        let init = vec![Vec::new(); TAPES]; // all tapes empty (STACK starts at home/blank)
+        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+        assert_eq!(status, Status::Halted, "stack gadget did not halt");
+        tapes[STACK].snapshot().0
+    }
+
+    /// Count the marks of the `idx`-th `#`-terminated field in `cells` (STACK layout: `f0 # f1 # …`).
+    fn stack_field(cells: &[Symbol], idx: usize) -> Option<u64> {
+        let mut fields = cells.split(|&c| c == SEP);
+        fields.nth(idx).map(|f| f.iter().filter(|&&c| c == MARK).count() as u64)
+    }
+
+    #[test]
+    fn stack_push_literal_then_snapshot() {
+        // push 3, push 0, push 2  ->  STACK = `1 1 1 # # 1 1 #`
+        let cells = run_stack(|b, e, x| {
+            let a = stack_push_literal(b, e, 3, "p0");
+            let c = stack_push_literal(b, a, 0, "p1");
+            let d = stack_push_literal(b, c, 2, "p2");
+            b.add_rule(d, RuleSpec::new(), x);
+        });
+        assert_eq!(stack_field(&cells, 0), Some(3));
+        assert_eq!(stack_field(&cells, 1), Some(0));
+        assert_eq!(stack_field(&cells, 2), Some(2));
+    }
+
+    #[test]
+    fn stack_push_then_pop_is_lifo() {
+        // push 4 (literal), push 2 (literal); pop -> WORK==2, pop -> WORK==4; STACK empty.
+        // Prove pops by writing the popped WORK value into a REG field and decoding it.
+        let enc = Unary;
+        let mut b = Builder::new();
+        let halt = b.accept("halt");
+        let p0 = b.state("p0");
+        let a = stack_push_literal(&mut b, p0, 4, "a");
+        let c = stack_push_literal(&mut b, a, 2, "b");
+        let pop1 = stack_pop_work(&mut b, c, "pop1"); // WORK <- 2
+        let w1 = append_work_to_field(&mut b, pop1, 0, "w1"); // REG slot0 <- 2
+        let pop2 = stack_pop_work(&mut b, w1, "pop2"); // WORK <- 4
+        let w2 = append_work_to_field(&mut b, pop2, 1, "w2"); // REG slot1 <- 4
+        b.add_rule(w2, RuleSpec::new(), halt);
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(2);
+        let m = b.finish(p0);
+        assert!(m.validate().is_empty(), "{:?}", m.validate());
+        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+        assert_eq!(status, Status::Halted);
+        let reg = tapes[REG].snapshot().0;
+        assert_eq!(enc.decode_nat(&reg, 0), Some(2), "first pop must be the last pushed (LIFO)");
+        assert_eq!(enc.decode_nat(&reg, 1), Some(4));
+        assert!(!tapes[STACK].snapshot().0.contains(&MARK), "STACK must hold no marks after popping all frames");
+    }
+
+    #[test]
+    fn push_frame_saves_tag_then_locals_in_order() {
+        // REG bank slots 0..3 = [Rr, Loc0=4, Loc1=2]; push_frame(n_loc=2, tag=1).
+        // Expect STACK fields: [tag=1][Loc0=4][Loc1=2]  (tag at bottom, locals in slot order above it).
+        let enc = Unary;
+        let mut b = Builder::new();
+        let halt = b.accept("halt");
+        // Seed the Loc fields: slot1<-4, slot2<-2, then push_frame.
+        let s1 = b.state("s1");
+        let s2 = b.state("s2");
+        enc.write_literal(&mut b, s1, s2, 4, 1);
+        let pf = b.state("pf");
+        enc.write_literal(&mut b, s2, pf, 2, 2);
+        enc.push_frame(&mut b, pf, halt, 2, 1);
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(3);
+        let m = b.finish(s1);
+        assert!(m.validate().is_empty(), "{:?}", m.validate());
+        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+        assert_eq!(status, Status::Halted);
+        let st = tapes[STACK].snapshot().0;
+        assert_eq!(stack_field(&st, 0), Some(1), "tag at frame bottom");
+        assert_eq!(stack_field(&st, 1), Some(4), "Loc0");
+        assert_eq!(stack_field(&st, 2), Some(2), "Loc1");
+        // REG Loc fields must be UNCHANGED by the save (copy, not move).
+        assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 1), Some(4));
+        assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 2), Some(2));
+    }
+
+    #[test]
+    fn pop_frame_restore_recovers_clobbered_locals() {
+        // Save [Loc0=4, Loc1=2] under tag=0; CLOBBER the REG Loc fields; restore; they come back.
+        let enc = Unary;
+        let mut b = Builder::new();
+        let halt = b.accept("halt");
+        let s1 = b.state("s1");
+        let s2 = b.state("s2");
+        enc.write_literal(&mut b, s1, s2, 4, 1); // Loc0 = 4
+        let pf = b.state("pf");
+        enc.write_literal(&mut b, s2, pf, 2, 2); // Loc1 = 2
+        let c1 = b.state("c1");
+        enc.push_frame(&mut b, pf, c1, 2, 0); // frame: [tag=0][4][2]
+        let c2 = b.state("c2");
+        enc.write_literal(&mut b, c1, c2, 9, 1); // clobber Loc0 <- 9
+        let rf = b.state("rf");
+        enc.write_literal(&mut b, c2, rf, 9, 2); // clobber Loc1 <- 9
+        enc.pop_frame_restore(&mut b, rf, halt, 2); // restore Loc0=4, Loc1=2
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(3);
+        let m = b.finish(s1);
+        assert!(m.validate().is_empty(), "{:?}", m.validate());
+        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+        assert_eq!(status, Status::Halted);
+        let reg = tapes[REG].snapshot().0;
+        assert_eq!(enc.decode_nat(&reg, 1), Some(4), "Loc0 restored");
+        assert_eq!(enc.decode_nat(&reg, 2), Some(2), "Loc1 restored");
+        // The tag field (0 marks) remains as the top STACK field; only the Loc fields were popped.
+        assert_eq!(stack_field(&tapes[STACK].snapshot().0, 0), Some(0), "tag remains on top");
+    }
+
+    #[test]
+    fn stack_is_empty_branches() {
+        // Empty stack -> if_empty writes 7 to REG slot0; after a push, non-empty -> if_nonempty writes 9.
+        fn check(pushes: u64) -> Option<u64> {
+            let enc = Unary;
+            let mut b = Builder::new();
+            let halt = b.accept("halt");
+            let e7 = b.state("e7");
+            let e9 = b.state("e9");
+            enc.write_literal(&mut b, e7, halt, 7, 0);
+            enc.write_literal(&mut b, e9, halt, 9, 0);
+            let start = b.state("start");
+            // Optionally push one literal, then branch on empty.
+            let after_push = if pushes > 0 { stack_push_literal(&mut b, start, 1, "pp") } else { start };
+            stack_is_empty(&mut b, after_push, e7, e9);
+            let mut init = vec![Vec::new(); TAPES];
+            init[REG] = enc.init_reg(1);
+            let m = b.finish(start);
+            assert!(m.validate().is_empty(), "{:?}", m.validate());
+            let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+            assert_eq!(status, Status::Halted);
+            enc.decode_nat(&tapes[REG].snapshot().0, 0)
+        }
+        assert_eq!(check(0), Some(7), "empty stack -> if_empty");
+        assert_eq!(check(1), Some(9), "non-empty stack -> if_nonempty");
+    }
+
+    #[test]
+    fn dispatch_tag_routes_on_the_tag_count() {
+        // Push a bare tag c (no locals), then dispatch to one of 3 exits, each writing a distinct literal.
+        fn dispatch(c: u64) -> Option<u64> {
+            let enc = Unary;
+            let mut b = Builder::new();
+            let halt = b.accept("halt");
+            let x0 = b.state("x0");
+            let x1 = b.state("x1");
+            let x2 = b.state("x2");
+            enc.write_literal(&mut b, x0, halt, 10, 0);
+            enc.write_literal(&mut b, x1, halt, 11, 0);
+            enc.write_literal(&mut b, x2, halt, 12, 0);
+            let start = b.state("start");
+            let after_push = stack_push_literal(&mut b, start, c, "tag"); // tag is the only/top field
+            enc.dispatch_tag(&mut b, after_push, &[x0, x1, x2]);
+            let mut init = vec![Vec::new(); TAPES];
+            init[REG] = enc.init_reg(1);
+            let m = b.finish(start);
+            assert!(m.validate().is_empty(), "{:?}", m.validate());
+            let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+            assert_eq!(status, Status::Halted);
+            // The dispatched exit wrote 10/11/12; also assert the tag field was erased (STACK has no marks).
+            assert!(!tapes[STACK].snapshot().0.contains(&MARK), "tag field must be erased after dispatch");
+            enc.decode_nat(&tapes[REG].snapshot().0, 0)
+        }
+        assert_eq!(dispatch(0), Some(10)); // tag 0 -> exits[0]
+        assert_eq!(dispatch(1), Some(11)); // tag 1 -> exits[1]
+        assert_eq!(dispatch(2), Some(12)); // tag 2 -> exits[2]
     }
 }
