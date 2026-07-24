@@ -1,0 +1,23 @@
+[package]
+name = "redextape-native"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+
+[features]
+default = ["cranelift"]
+cranelift = ["dep:cranelift-jit", "dep:cranelift-module", "dep:cranelift-frontend", "dep:cranelift-codegen"]
+llvm = [] # phase 2
+
+[dependencies]
+redextape-core = { path = "../redextape-core" }
+cranelift-jit = { version = "0.134", optional = true }
+cranelift-module = { version = "0.134", optional = true }
+cranelift-frontend = { version = "0.134", optional = true }
+cranelift-codegen = { version = "0.134", optional = true }
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

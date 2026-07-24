@@ -172,19 +172,44 @@ produce. The oracle validates every combination.
   miscompilation — mitigated by the oracle; apply YAGNI hard (add a pass only if it helps demos fit under
   caps or reads more clearly).
 
-- **Native code backend — backend track, the 4th oracle leg.** `Core → asm → native machine code`, reusing
-  `lower_asm` + `defunc` UNCHANGED (the register-asm is already conventional three-address code: registers,
-  `Bin` ALU ops, `Jz`/`Jmp`/labels branches, `Call`/`Ret` with an explicit stack, `Cons`/`Box` heap ops).
-  Emit via **Cranelift** (pure-Rust, fast compile, JIT-oriented, lighter opts — quickest to stand up) or
+- **Native code backend — backend track, the 4th oracle leg. v1 (Cranelift JIT) DONE** (merged, crate
+  `redextape-native`; see the design spec `docs/superpowers/specs/2026-07-23-native-backend-design.md` and
+  plan `docs/superpowers/plans/2026-07-23-native-backend-v1-cranelift.md`). `Core → asm → native machine code`,
+  reusing `lower_asm` + `defunc` UNCHANGED (the register-asm is already conventional three-address code:
+  registers, `Bin` ALU ops, `Jz`/`Jmp`/labels branches, `Call`/`Ret` with an explicit stack, `Cons`/`Box`
+  heap ops). Emit via **Cranelift** (pure-Rust, fast compile, JIT-oriented, lighter opts — what v1 uses) or
   **LLVM/inkwell** (heavy dependency + toolchain, but the full −O3 pipeline — deepest native codegen). Both
-  consume the *same* `Program`, so the native backend is the least locked-in decision in the system — start
-  with Cranelift and swap to LLVM later without touching any front-end or optimizer pass. Needs only a tiny
-  runtime (a bump allocator for cons/box cells + a result-decode routine mirroring `decode_asm`). Slots into
-  the oracle as a new leg: `reference == λ == TM == native`. **Nuance:** native uses real `u64`/bignum, so it
-  *escapes* the TM's `FIELD_WIDTH < 64` representability bound — it runs *bigger* programs than the TM, so
-  the honest oracle relation is "native agrees with the reference on the unbounded input set; the TM only on
-  the bounded set." **When:** pairs with the optimizing-compiler track as its Tier C. **Risk:** the runtime
-  (allocation + decode) is the only genuinely new surface; the codegen is a near-1:1 walk of the asm.
+  consume the *same* `Program` behind a `NativeCodegen` seam, so the native backend is the least locked-in
+  decision in the system — v1 stood up on Cranelift and can swap to LLVM later without touching any front-end
+  or optimizer pass. Needs only a tiny runtime (a bump allocator for cons/box cells + a result-decode routine
+  mirroring `decode_asm`). Slots into the oracle as a new leg: `reference == λ == TM == native`, plus a
+  `native == asm-interp` independent-codegen cross-check. **Honest bound (recalibrated during v1):** native
+  runs real `u64`, so it extends the practical reach *beyond* the TM's `FIELD_WIDTH < 64` representability
+  bound — but it does NOT *uniquely* escape it, because the asm INTERPRETER (`run_asm`) already runs `u64`
+  (that bound is the TM's alone). Native's real payoff is the compiled-to-hardware milestone + the Tier-C
+  prerequisite + the codegen cross-check. **When:** pairs with the optimizing-compiler track as its Tier C.
+  **Remaining phases / follow-ons (not yet planned; pursue after confirmation):**
+  - **Phase 2 — LLVM behind the same `NativeCodegen` seam.** The full −O3 native-optimization payoff (the
+    deep-opt goal) + a `cranelift == llvm` codegen-vs-codegen differential. Feature-gated (`--features llvm`);
+    the runtime/decode/oracle are reused UNCHANGED. This is the natural next step toward the optimizer's Tier C.
+  - **Phase 3 — AOT (a real runnable binary), ADDITIVE — JIT and AOT coexist.** v1 JITs-and-runs in-process
+    (the executable buffer is ephemeral, discarded after the run — nothing on disk). Phase 3 does NOT replace
+    that: both `JITModule` (`cranelift-jit`) and `ObjectModule` (`cranelift-object`) implement the SAME
+    `cranelift-module::Module` trait, so the codegen (`declare_function`/`define_function`, the asm→CLIF walk)
+    is written once against `Module` and can target EITHER. The oracle keeps the JIT path (compile-and-run
+    in-process — what the differential test needs); AOT *adds* an object-emit path alongside it to produce a
+    real linkable `.o` / standalone executable — a native binary you can run outside the oracle. Same
+    `NativeCodegen` seam, two module targets. The runtime host functions (`rt_*`) become a small linked object;
+    decode happens at the edge.
+  - **Pedagogical "show the native code" view — cheap, high demo value.** A `print`-style dump of the
+    generated code for a program, sibling to `print_asm` / `print_tm` / `print_lambda`: the human-readable
+    Cranelift IR (`Function::display()`, already available post-`define_function`) and/or a disassembly of the
+    finalized machine bytes (via `cranelift-jit`'s emitted buffer or a `capstone`/`iced-x86` decode). Makes the
+    demo show "here's the actual native code this program compiles to," completing the interpret / reduce /
+    simulate / **compile-and-show** picture. Pure trace/artifact consumer — no codegen change, ~an afternoon.
+  **Risk:** the runtime (allocation + decode) was the only genuinely new surface; the codegen is a near-1:1
+  walk of the asm. (v1's actual surprises: `lower_asm`'s inline fn layout forced a reachability partition, and
+  deep fat-frame recursion forced a frame-size-aware depth cap — both resolved.)
 
 - **Alternative front-ends — frontend track, purely additive; the angle is *paradigm diversity*.** A new
   surface language compiling to the *same* Core needs only lexer → parser → typecheck → desugar-to-Core;
