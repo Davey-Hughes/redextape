@@ -15,7 +15,9 @@ pub mod machine;
 pub mod sim;
 pub mod syntax;
 
-pub use asm::{AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, Instr, Program, Reg, decode_asm, print_asm, run_asm};
+pub use asm::{
+    AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, Instr, Program, Reg, decode_asm, decode_asm_ty, print_asm, run_asm,
+};
 pub use build::{AT, Builder, FIELD_WIDTH, HEAP, MARK, REG, RuleSpec, SEP, STACK, Slot, TAPES, WORK};
 pub use decode::decode_tape;
 pub use defunc::defunc;

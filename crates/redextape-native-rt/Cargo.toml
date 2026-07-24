@@ -1,0 +1,16 @@
+[package]
+name = "redextape-native-rt"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+
+[lib]
+# rlib: the JIT registers these fn pointers in-process. staticlib: the AOT binary links against
+# libredextape_native_rt.a to resolve its rt_* imports.
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+redextape-core = { path = "../redextape-core" }
+
+[lints]
+workspace = true

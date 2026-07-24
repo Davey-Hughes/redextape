@@ -207,6 +207,14 @@ produce. The oracle validates every combination.
     finalized machine bytes (via `cranelift-jit`'s emitted buffer or a `capstone`/`iced-x86` decode). Makes the
     demo show "here's the actual native code this program compiles to," completing the interpret / reduce /
     simulate / **compile-and-show** picture. Pure trace/artifact consumer — no codegen change, ~an afternoon.
+  - **AOT-binary debuggability (tiered, convention-matching).** **Tier 0 (in Phase 3): named function
+    symbols** kept in the emitted object by default (`$main`/`$sum`/`$applyN`/`rt_*`) so `nm`/`objdump`/
+    backtraces are readable — matching `cc`/`ld`/`rustc` (symbols kept, opt-out `strip`). **Tier 1
+    (optional follow-on): opt-in `-g` source-level debug info in each platform's NATIVE format** — DWARF
+    (`gimli::write`) on ELF/Mach-O, CodeView/PDB on Windows (harder — no mature Rust PDB writer). Shared
+    prerequisite: thread source spans `desugar→Core→lower_asm→codegen` + Cranelift `set_srcloc` (the asm
+    IR carries none today). **Tier 2 (not planned):** variable/type info — post-lowering registers aren't
+    user-meaningful. Value is marginal vs. the visualizer track for a mini-language; see the Phase-3 spec.
   **Risk:** the runtime (allocation + decode) was the only genuinely new surface; the codegen is a near-1:1
   walk of the asm. (v1's actual surprises: `lower_asm`'s inline fn layout forced a reachability partition, and
   deep fat-frame recursion forced a frame-size-aware depth cap — both resolved.)

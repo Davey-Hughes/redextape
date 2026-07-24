@@ -6,15 +6,18 @@ license = "GPL-3.0-only"
 
 [features]
 default = ["cranelift"]
-cranelift = ["dep:cranelift-jit", "dep:cranelift-module", "dep:cranelift-frontend", "dep:cranelift-codegen"]
+cranelift = ["dep:cranelift-jit", "dep:cranelift-module", "dep:cranelift-frontend", "dep:cranelift-codegen", "dep:cranelift-object", "dep:cranelift-native"]
 llvm = [] # phase 2
 
 [dependencies]
 redextape-core = { path = "../redextape-core" }
+redextape-native-rt = { path = "../redextape-native-rt" }
 cranelift-jit = { version = "0.134", optional = true }
 cranelift-module = { version = "0.134", optional = true }
 cranelift-frontend = { version = "0.134", optional = true }
 cranelift-codegen = { version = "0.134", optional = true }
+cranelift-object = { version = "0.134", optional = true }
+cranelift-native = { version = "0.134", optional = true }
 
 [dev-dependencies]
 proptest = "1"

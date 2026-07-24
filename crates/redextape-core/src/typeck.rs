@@ -18,6 +18,22 @@ pub fn typecheck(program: &Program) -> Vec<Diagnostic> {
     inf.diags
 }
 
+/// Infer the program's top-level result type (the value `run` would produce), fully resolved.
+/// `Err` carries the type errors when the program is ill-typed. Used by the AOT backend to decode
+/// and print a standalone binary's result without a reference run.
+pub fn result_type(program: &Program) -> Result<Ty, Vec<Diagnostic>> {
+    let mut inf = Infer::new();
+    let mut env = TyEnv::new();
+    for (name, scheme) in type_env() {
+        env.insert(name, scheme, false);
+    }
+    let ty = inf.infer_block(&env, &program.block);
+    if inf.diags.iter().any(|d| d.severity == crate::diagnostic::Severity::Error) {
+        return Err(inf.diags);
+    }
+    Ok(inf.resolve(&ty))
+}
+
 /// One `let`-scope entry.
 struct Binding {
     name: String,
@@ -541,5 +557,16 @@ mod tests {
     fn closure_params_are_assignable_like_fn_params() {
         // A closure may reassign its own parameter, consistent with named `fn`.
         assert_ok("let f = |x| { x = x + 1; x }; f(1)");
+    }
+
+    #[test]
+    fn result_type_infers_top_level() {
+        use crate::parser::parse;
+        let ty = |src: &str| super::result_type(&parse(src).0.unwrap());
+        assert_eq!(ty("1 + 2"), Ok(Ty::Nat));
+        assert_eq!(ty("2 > 1"), Ok(Ty::Bool));
+        assert_eq!(ty("[1, 2, 3]"), Ok(Ty::List(Box::new(Ty::Nat))));
+        assert!(ty("head(nil)").is_ok()); // nil-typed head is polymorphic but well-typed
+        assert!(ty("1 + true").is_err()); // ill-typed → diagnostics
     }
 }

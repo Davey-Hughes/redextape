@@ -126,3 +126,54 @@ impl Value {
         acc
     }
 }
+
+/// Canonical textual form of a decoded value, shared by the AOT runtime (which prints it) and the
+/// oracle (which compares it to the binary's stdout). Lists render `[a, b, c]`; `Nat`/`Bool` render
+/// plainly; `Unit` renders `()`. Non-value variants (closures/builtins/boxes) never reach here as a
+/// top-level result, but render a stable placeholder to keep this total.
+pub fn format_value(v: &Value) -> String {
+    match v {
+        Value::Nat(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Unit => "()".to_string(),
+        Value::Nil => "[]".to_string(),
+        Value::Cons(_, _) => {
+            let mut out = String::from("[");
+            let mut cur: &Value = v;
+            let mut first = true;
+            while let Value::Cons(h, t) = cur {
+                if !first {
+                    out.push_str(", ");
+                }
+                first = false;
+                out.push_str(&format_value(h));
+                cur = t.as_ref();
+            }
+            out.push(']');
+            out
+        }
+        Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => "<non-value>".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_value_canonical_forms() {
+        use super::format_value;
+        assert_eq!(format_value(&Value::Nat(5050)), "5050");
+        assert_eq!(format_value(&Value::Bool(true)), "true");
+        assert_eq!(format_value(&Value::Bool(false)), "false");
+        assert_eq!(format_value(&Value::Nil), "[]");
+        assert_eq!(format_value(&Value::list_of_nats(&[1, 2, 3])), "[1, 2, 3]");
+        assert_eq!(format_value(&Value::Unit), "()");
+        // Nested lists: [[1], [2, 3]] — each element is itself rendered via the same recursive
+        // `format_value(h)` call, not just a flat top-level list of Nats.
+        let inner1 = Value::list_of_nats(&[1]);
+        let inner2 = Value::list_of_nats(&[2, 3]);
+        let nested = Value::Cons(Rc::new(inner1), Rc::new(Value::Cons(Rc::new(inner2), Rc::new(Value::Nil))));
+        assert_eq!(format_value(&nested), "[[1], [2, 3]]");
+    }
+}

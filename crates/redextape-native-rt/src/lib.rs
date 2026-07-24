@@ -1,11 +1,19 @@
-//! The native backend's runtime: heap/box arenas plus the `extern "C"` host functions the
-//! JIT-generated code (Task 4) calls for heap allocation, faults, and cap checks. Semantics
-//! mirror `redextape_core::tm::asm::run_asm`'s `Cons`/`Head`/`Tail`/`IsEmpty`/`Box`/`BoxGet`/
-//! `BoxSet` arms EXACTLY: 1-based heap/box pointers, `0` = nil, the same fault and cap
-//! conditions. This is what lets the native backend reuse `decode_asm` and agree with the asm
+//! `redextape-native-rt`: the native backend's runtime — heap/box arenas plus the `extern "C"`
+//! host functions that JIT-generated code (Task 4) calls for heap allocation, faults, and cap
+//! checks. Semantics mirror `redextape_core::tm::asm::run_asm`'s `Cons`/`Head`/`Tail`/`IsEmpty`/
+//! `Box`/`BoxGet`/`BoxSet` arms EXACTLY: 1-based heap/box pointers, `0` = nil, the same fault and
+//! cap conditions. This is what lets the native backend reuse `decode_asm` and agree with the asm
 //! interpreter in the oracle.
+//!
+//! This crate is split out from `redextape-native` (which depends on Cranelift) so its `rt_*`
+//! functions can be **linked** into a standalone AOT binary without dragging Cranelift along:
+//! `crate-type = ["rlib", "staticlib"]` — the JIT registers these as in-process fn pointers via the
+//! rlib, while a future AOT object resolves its `rt_*` imports against `libredextape_native_rt.a`.
+//! Every `rt_*` function below is `#[unsafe(no_mangle)]` so its linker symbol is the literal name
+//! (`rt_cons`, `rt_head`, …) rather than a mangled Rust symbol — required for the staticlib case.
 
 use redextape_core::tm::{AsmOutcome, Caps};
+use redextape_core::ty::Ty;
 
 /// The native backend's runtime state: heap/box arenas, step/depth counters, and fault/cap
 /// flags. JIT-generated code (Task 4) holds a `*mut Runtime` for the duration of a run and calls
@@ -22,10 +30,10 @@ pub struct Runtime {
     /// The recursion-depth limit `rt_enter` trips at. Distinct from `caps.stack` because native
     /// keeps each frame's locals on the *real* OS call stack (not a `Vec<Frame>`), so the backend
     /// derives a FRAME-SIZE-AWARE cap: `min(caps.stack, safe_depth)`, where `safe_depth` is how many
-    /// worst-case frames fit in the JIT thread's reserved stack (see `cranelift_backend`). This
-    /// guarantees the depth cap always trips *before* the native stack overflows, for any program —
-    /// no process abort. `Runtime::new` defaults it to `caps.stack` (the depth-only bound) for
-    /// callers with no frame-size knowledge (e.g. `runtime.rs` unit tests).
+    /// worst-case frames fit in the run thread's reserved stack (see `redextape_native::codegen`).
+    /// This guarantees the depth cap always trips *before* the native stack overflows, for any
+    /// program — no process abort. `Runtime::new` defaults it to `caps.stack` (the depth-only bound)
+    /// for callers with no frame-size knowledge (e.g. this module's own unit tests below).
     pub depth_cap: u64,
     pub fault: Option<String>,
     pub hit_cap: bool,
@@ -76,6 +84,7 @@ impl Runtime {
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call (the
 /// pointer the JIT-generated code was handed for this run).
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_cons(rt: *mut Runtime, h: u64, t: u64) -> u64 {
     let rt = unsafe { &mut *rt };
     if rt.stopped() {
@@ -95,6 +104,7 @@ pub unsafe extern "C" fn rt_cons(rt: *mut Runtime, h: u64, t: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_head(rt: *mut Runtime, p: u64) -> u64 {
     let rt = unsafe { &mut *rt };
     if rt.stopped() {
@@ -119,6 +129,7 @@ pub unsafe extern "C" fn rt_head(rt: *mut Runtime, p: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_tail(rt: *mut Runtime, p: u64) -> u64 {
     let rt = unsafe { &mut *rt };
     if rt.stopped() {
@@ -143,6 +154,7 @@ pub unsafe extern "C" fn rt_tail(rt: *mut Runtime, p: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_is_empty(_rt: *mut Runtime, p: u64) -> u64 {
     u64::from(p == 0)
 }
@@ -153,6 +165,7 @@ pub unsafe extern "C" fn rt_is_empty(_rt: *mut Runtime, p: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box(rt: *mut Runtime, v: u64) -> u64 {
     let rt = unsafe { &mut *rt };
     if rt.stopped() {
@@ -172,6 +185,7 @@ pub unsafe extern "C" fn rt_box(rt: *mut Runtime, v: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
     let rt = unsafe { &mut *rt };
     if rt.stopped() {
@@ -196,6 +210,7 @@ pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
     let rt = unsafe { &mut *rt };
     if rt.stopped() {
@@ -217,6 +232,7 @@ pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_tick(rt: *mut Runtime) -> u64 {
     let rt = unsafe { &mut *rt };
     // If a fault (or an earlier cap) has already latched, divert immediately *without* touching
@@ -248,6 +264,7 @@ pub unsafe extern "C" fn rt_tick(rt: *mut Runtime) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_enter(rt: *mut Runtime) -> u64 {
     let rt = unsafe { &mut *rt };
     // As in `rt_tick`: once stopped, divert without setting `hit_cap`, so a `Call` reached after a
@@ -270,6 +287,7 @@ pub unsafe extern "C" fn rt_enter(rt: *mut Runtime) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_leave(rt: *mut Runtime) {
     let rt = unsafe { &mut *rt };
     rt.depth = rt.depth.saturating_sub(1);
@@ -283,9 +301,155 @@ pub unsafe extern "C" fn rt_leave(rt: *mut Runtime) {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_faulted(rt: *mut Runtime) -> u64 {
     let rt = unsafe { &*rt };
     u64::from(rt.fault.is_some() || rt.hit_cap)
+}
+
+/// Deserialize the CONFIG data blob `redextape_native::aot::emit_object` writes into an AOT
+/// object's `redextape_config` data section. The byte layout is a forward contract with
+/// `aot::serialize_config`/`serialize_ty` and must be read back byte-for-byte:
+///
+/// ```text
+/// [0..8)   caps.steps  u64 LE
+/// [8..16)  caps.stack  u64 LE
+/// [16..24) caps.heap   u64 LE
+/// [24..32) depth_cap   u64 LE
+/// [32..)   Ty, tag-encoded: 0=Nat 1=Bool 2=Unit 3=List<elem follows recursively>
+/// ```
+pub(crate) mod config {
+    use redextape_core::tm::Caps;
+    use redextape_core::ty::Ty;
+
+    fn read_u64(b: &[u8], at: usize) -> Option<u64> {
+        b.get(at..at + 8)?.try_into().ok().map(u64::from_le_bytes)
+    }
+
+    fn read_ty(b: &[u8], at: &mut usize) -> Option<Ty> {
+        let tag = *b.get(*at)?;
+        *at += 1;
+        Some(match tag {
+            0 => Ty::Nat,
+            1 => Ty::Bool,
+            2 => Ty::Unit,
+            3 => Ty::List(Box::new(read_ty(b, at)?)),
+            _ => return None,
+        })
+    }
+
+    /// Parse a CONFIG blob into `(caps, depth_cap, ty)`. Returns `None` on malformed input — the
+    /// blob is too short for the four `u64`s plus a `Ty`, or the `Ty` carries an unrecognized tag —
+    /// so the caller (`rt_run`) can turn a `None` into exit code `4` rather than panicking. Any
+    /// bytes past the decoded `Ty` are tolerated and ignored (not treated as an error).
+    pub fn deserialize(b: &[u8]) -> Option<(Caps, u64, Ty)> {
+        let steps = read_u64(b, 0)?;
+        let stack = read_u64(b, 8)?;
+        let heap = read_u64(b, 16)?;
+        let depth = read_u64(b, 24)?;
+        let mut at = 32;
+        let ty = read_ty(b, &mut at)?;
+        // caps.mem has no native analog (see the JIT driver note); default it.
+        Some((Caps { steps, stack, heap, mem: u64::MAX }, depth, ty))
+    }
+}
+
+/// Classify + render a finished run. `outcome` is `Some` iff the run produced a value (not a
+/// fault/cap). Returns the process exit code: 0 value, 2 fault, 3 cap, 4 internal/decode failure.
+///
+/// Two writers keep the "value → stdout; everything else → stderr" contract: the decoded value is
+/// the ONLY thing written to `out` (a caller can grep `out` for the result unambiguously), while a
+/// cap trip or a decode failure is a diagnostic and goes to `err`. Pure and `Write`-generic so it
+/// is unit-testable without spawning a thread or capturing real stdout/stderr; `rt_run` wires in
+/// the real `Runtime` and `std::io::stdout()`/`stderr()`. The fault path (which carries a `String`
+/// message) is handled directly in `rt_run` instead of here, since `outcome`/`hit_cap` alone can't
+/// distinguish "faulted" from "internal decode failure" — both would otherwise collapse to
+/// `outcome: None`.
+pub(crate) fn print_outcome(
+    outcome: Option<AsmOutcome>,
+    hit_cap: bool,
+    ty: &Ty,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> i32 {
+    if hit_cap {
+        let _ = writeln!(err, "hit cap");
+        return 3;
+    }
+    match outcome {
+        Some(o) => match redextape_core::tm::decode_asm_ty(&o, ty) {
+            // The value is the sole thing on `out` (stdout) — exit 0.
+            Some(v) => {
+                let _ = writeln!(out, "{}", redextape_core::value::format_value(&v));
+                0
+            }
+            // Decode failure is a diagnostic → `err` (stderr), NOT `out`, so it can't be mistaken
+            // for a value by a caller grepping stdout — exit 4.
+            None => {
+                let _ = writeln!(err, "internal: could not decode result");
+                4
+            }
+        },
+        // Unreachable via `rt_run`: it handles the `fault`/thread-failure cases (its own `None`
+        // outcomes) before ever calling `print_outcome`, and only ever passes `Some(outcome)` here.
+        // Kept as a defensive exit-4 so `print_outcome` is total for any caller.
+        None => 4,
+    }
+}
+
+/// Reserved native-stack size for a run thread — the SINGLE SOURCE OF TRUTH shared by both the JIT
+/// driver (`redextape_native::jit`, which spawns its compile+run thread with this stack size) and
+/// this crate's own `rt_run` (which spawns the AOT run thread with it). `redextape-native`'s
+/// emit-time `codegen::native_depth_cap` computation bakes a frame-size-aware recursion-depth cap
+/// into the AOT CONFIG blob sized against exactly this constant (re-exported from this crate rather
+/// than duplicated, since `redextape-native` already depends on `redextape-native-rt`), so the two
+/// can never drift out of sync: recursion always trips `HitCap` before the OS stack overflows,
+/// whether the code is running under the JIT or as a linked AOT binary.
+pub const RUN_STACK_SIZE: usize = 512 << 20;
+
+/// The AOT binary's entry point (called by the emitted `main`). Deserializes CONFIG, runs `main_fn`
+/// on a big reserved stack with the emit-time frame-size-aware `depth_cap`, then decodes + prints the
+/// result and returns the process exit code. Total: deep recursion → cap (exit 3), fault → exit 2,
+/// a malformed CONFIG or a run-thread failure → exit 4 — `rt_run` never panics.
+///
+/// # Safety
+/// `main_fn` must be the finalized `$main` (`extern "C" fn(*mut Runtime) -> u64`); `config_ptr`/
+/// `config_len` must describe a CONFIG blob produced by `emit_object`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rt_run(
+    main_fn: extern "C" fn(*mut Runtime) -> u64,
+    config_ptr: *const u8,
+    config_len: u64,
+) -> i32 {
+    let bytes = unsafe { std::slice::from_raw_parts(config_ptr, config_len as usize) };
+    let (caps, depth_cap, ty) = match config::deserialize(bytes) {
+        Some(c) => c,
+        None => {
+            eprintln!("internal: malformed AOT config");
+            return 4;
+        }
+    };
+    // Run on a big reserved stack so the emit-time depth_cap trips before the OS stack overflows.
+    let run = std::thread::Builder::new().stack_size(RUN_STACK_SIZE).spawn(move || {
+        let mut rt = Runtime::with_depth_cap(caps, depth_cap);
+        let word = main_fn(&mut rt);
+        (rt.hit_cap, rt.fault.take(), rt.into_outcome(word))
+    });
+    let (hit_cap, fault, outcome) = match run.and_then(|h| h.join().map_err(|_| std::io::Error::other("panic"))) {
+        Ok(t) => t,
+        Err(_) => {
+            eprintln!("internal: AOT run thread failed");
+            return 4;
+        }
+    };
+    if hit_cap {
+        return print_outcome(None, true, &ty, &mut std::io::stdout(), &mut std::io::stderr());
+    }
+    if let Some(msg) = fault {
+        eprintln!("fault: {msg}");
+        return 2;
+    }
+    print_outcome(Some(outcome), false, &ty, &mut std::io::stdout(), &mut std::io::stderr())
 }
 
 #[cfg(test)]
@@ -399,5 +563,55 @@ mod tests {
         assert_eq!(unsafe { rt_enter(&mut r2) }, 0);
         assert_eq!(unsafe { rt_enter(&mut r2) }, 0);
         assert_eq!(unsafe { rt_enter(&mut r2) }, 1); // 3rd enter trips stack=2
+    }
+
+    #[test]
+    fn config_roundtrips() {
+        // Bytes must match aot::serialize_config exactly. Build them the same way here.
+        let caps = Caps { steps: 10, stack: 20, heap: 30, mem: 40 };
+        let mut bytes = Vec::new();
+        for w in [caps.steps, caps.stack, caps.heap, 7u64] {
+            bytes.extend_from_slice(&w.to_le_bytes());
+        }
+        bytes.push(3);
+        bytes.push(0); // List<Nat>
+        let (c, depth, ty) = super::config::deserialize(&bytes).unwrap();
+        assert_eq!((c.steps, c.stack, c.heap), (10, 20, 30));
+        assert_eq!(depth, 7);
+        assert_eq!(ty, redextape_core::ty::Ty::List(Box::new(redextape_core::ty::Ty::Nat)));
+    }
+
+    #[test]
+    fn print_outcome_formats_and_exit_codes() {
+        use redextape_core::ty::Ty;
+        // Ran → value on `out`, nothing on `err`, exit 0.
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code =
+            super::print_outcome(Some(AsmOutcome { result: 5, heap: vec![] }), false, &Ty::Nat, &mut out, &mut err);
+        assert_eq!((code, String::from_utf8(out).unwrap()), (0, "5\n".to_string()));
+        assert!(err.is_empty(), "value run must write nothing to stderr");
+        // Cap → "hit cap" on `err`, nothing on `out`, exit 3.
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(super::print_outcome(None, true, &Ty::Nat, &mut out, &mut err), 3);
+        assert_eq!(String::from_utf8(err).unwrap(), "hit cap\n");
+        assert!(out.is_empty(), "cap trip must write nothing to stdout");
+        // Fault → exit 2 (handled directly in `rt_run`, not via `print_outcome`).
+    }
+
+    #[test]
+    fn print_outcome_routes_decode_failure_to_stderr_not_stdout() {
+        use redextape_core::ty::Ty;
+        // A `Bool` result whose word is 7 (not 0/1) fails `decode_asm_ty`. The failure is a
+        // diagnostic: it must go to `err` (exit 4) and leave `out` EMPTY, so a caller grepping
+        // stdout can never mistake it for a value. (This directly guards the misrouting bug.)
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code =
+            super::print_outcome(Some(AsmOutcome { result: 7, heap: vec![] }), false, &Ty::Bool, &mut out, &mut err);
+        assert_eq!(code, 4);
+        assert!(out.is_empty(), "decode failure must write NOTHING to stdout");
+        assert_eq!(String::from_utf8(err).unwrap(), "internal: could not decode result\n");
     }
 }

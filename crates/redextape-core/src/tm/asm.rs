@@ -4,6 +4,7 @@
 //! `Nat` count, a `0`/`1` `Bool`, or a heap pointer, so there are no runtime type tags.
 
 use crate::core::BinOp;
+use crate::ty::Ty;
 use crate::value::Value;
 use std::rc::Rc;
 
@@ -459,6 +460,37 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
     }
 }
 
+/// Type-directed decode of a run's outcome to a `Value` (the AOT sibling of `decode_asm`, which is
+/// value-directed). Drives off the static `Ty` instead of a reference `Value`, so the standalone
+/// binary can decode without a reference run. Returns `None` on a representation mismatch or a
+/// non-value type (`Fun`/`Var`).
+pub fn decode_asm_ty(outcome: &AsmOutcome, ty: &Ty) -> Option<Value> {
+    decode_word_ty(outcome.result, &outcome.heap, ty)
+}
+
+fn decode_word_ty(word: u64, heap: &[(u64, u64)], ty: &Ty) -> Option<Value> {
+    match ty {
+        Ty::Nat => Some(Value::Nat(word)),
+        Ty::Bool => match word {
+            0 => Some(Value::Bool(false)),
+            1 => Some(Value::Bool(true)),
+            _ => None,
+        },
+        Ty::Unit => Some(Value::Unit),
+        Ty::List(elem) => {
+            // Follow the 1-based pointer chain: 0 = nil, else cell p-1 = (head, tail-ptr).
+            if word == 0 {
+                return Some(Value::Nil);
+            }
+            let &(h, t) = heap.get((word - 1) as usize)?;
+            let head = decode_word_ty(h, heap, elem)?;
+            let tail = decode_word_ty(t, heap, ty)?; // tail has the same list type
+            Some(Value::Cons(Rc::new(head), Rc::new(tail)))
+        }
+        Ty::Fun(..) | Ty::Var(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,6 +526,42 @@ mod tests {
         // Non-first-class expectations never decode.
         let o = AsmOutcome { result: 0, heap: vec![] };
         assert_eq!(decode_asm(&o, &Value::Unit), None);
+    }
+
+    #[test]
+    fn decode_asm_ty_matches_decode_asm() {
+        use crate::ty::Ty;
+        // Nat, Bool, and a list [1,2] via the heap; agree with the Value-directed decoder.
+        let nat = AsmOutcome { result: 5, heap: vec![] };
+        assert_eq!(decode_asm_ty(&nat, &Ty::Nat), Some(Value::Nat(5)));
+        let b = AsmOutcome { result: 1, heap: vec![] };
+        assert_eq!(decode_asm_ty(&b, &Ty::Bool), Some(Value::Bool(true)));
+        let bad = AsmOutcome { result: 7, heap: vec![] };
+        assert_eq!(decode_asm_ty(&bad, &Ty::Bool), None); // Bool word > 1 invalid
+        let list = AsmOutcome { result: 2, heap: vec![(2, 0), (1, 1)] }; // cons(1, cons(2, nil))
+        assert_eq!(decode_asm_ty(&list, &Ty::List(Box::new(Ty::Nat))), Some(Value::list_of_nats(&[1, 2])));
+        let nil = AsmOutcome { result: 0, heap: vec![] };
+        assert_eq!(decode_asm_ty(&nil, &Ty::List(Box::new(Ty::Nat))), Some(Value::Nil));
+
+        // Now actually CROSS-CHECK against `decode_asm`: for each shared concrete case, feed
+        // `decode_asm` a witness `Value` of the SAME shape as the `Ty` (`Ty::Nat` <-> `Value::Nat(0)`,
+        // `Ty::Bool` <-> `Value::Bool(false)`, `Ty::List(Nat)` <-> a `Value::list_of_nats` of the SAME
+        // LENGTH as the outcome actually decodes to -- `decode_asm` is shape-directed by its `expected`
+        // argument, so a length-2 outcome needs a length-2 witness and a nil (length-0) outcome needs
+        // `Value::Nil`/`list_of_nats(&[])`) and assert the two decoders produce the identical
+        // `Option<Value>` on identical `AsmOutcome`s -- so this test earns its name instead of only
+        // exercising `decode_asm_ty` in isolation.
+        assert_eq!(decode_asm_ty(&nat, &Ty::Nat), decode_asm(&nat, &Value::Nat(0)));
+        assert_eq!(decode_asm_ty(&b, &Ty::Bool), decode_asm(&b, &Value::Bool(false)));
+        assert_eq!(decode_asm_ty(&bad, &Ty::Bool), decode_asm(&bad, &Value::Bool(false)));
+        assert_eq!(
+            decode_asm_ty(&list, &Ty::List(Box::new(Ty::Nat))),
+            decode_asm(&list, &Value::list_of_nats(&[0, 0])) // same length (2) as the actual list
+        );
+        assert_eq!(
+            decode_asm_ty(&nil, &Ty::List(Box::new(Ty::Nat))),
+            decode_asm(&nil, &Value::list_of_nats(&[])) // same length (0) == Value::Nil
+        );
     }
 
     #[test]
