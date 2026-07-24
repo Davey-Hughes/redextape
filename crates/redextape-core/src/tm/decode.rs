@@ -43,7 +43,7 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
             let tail = decode_word(t, heap, et)?;
             Some(Value::Cons(Rc::new(head), Rc::new(tail)))
         }
-        Value::Unit | Value::Closure { .. } | Value::Builtin(_) => None,
+        Value::Unit | Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => None,
     }
 }
 

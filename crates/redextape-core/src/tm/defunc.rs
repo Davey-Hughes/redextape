@@ -10,10 +10,14 @@
 //! Task 4 adds **immutable environment capture**: an anonymous `Lambda` used as a value (e.g. as an
 //! `Apply` argument) captures its free immutable variables **by value** — the closure env carries the
 //! captured *values*, built at the creation site, and the dispatcher arm unpacks them from the env
-//! before binding params. Capture-by-value is exact for immutables (they never change). A captured
-//! **mutable** (a `let mut`, or any name assigned anywhere) is `LowerError::Unsupported` — matching the
-//! λ backend, and because by-value capture would be WRONG for a mutable (the reference captures by
-//! reference; boxed mutable capture is Plan 3b-2).
+//! before binding params. Capture-by-value is exact for immutables (they never change).
+//!
+//! Plan 3b-2 adds **mutable environment capture by boxing**: a `let mut` (or any assigned name) that
+//! some lambda captures is BOXED — its binding becomes an immutable handle `let $boxh{k} = $box(v)`,
+//! every read `$box_get($boxh{k})`, every write `$box_set($boxh{k}, v)`, and a capturing closure
+//! carries the *handle* (an immutable, so no closure ever captures a mutable). Capturing the handle by
+//! value is exactly by-reference capture of the shared cell, matching the reference. A mutable NO
+//! lambda captures is left byte-for-byte unchanged (purely-imperative loop counters never box).
 //!
 //! Still `Unsupported` (never a silent miscompile): a builtin used as a bare value, a function both
 //! called-by-name and used-as-a-value, a nested/local function definition, a cyclic higher-order call
@@ -46,8 +50,10 @@ use crate::tm::lower_asm::LowerError;
 /// this must NOT be tuned against a smaller test thread.
 const MAX_DEFUNC_DEPTH: u32 = 580;
 
-/// Prelude functions that are always applied directly (never used as a bare value in 3b-1).
-const BUILTIN_FNS: [&str; 4] = ["cons", "head", "tail", "is_empty"];
+/// Prelude functions that are always applied directly (never used as a bare value). The `$box*`
+/// trio (Plan 3b-2) joins them so `is_builtin_fn` keeps them as static direct-call callees — the
+/// boxing rewrite emits `$box`/`$box_get`/`$box_set` applications, never a bare value-use of them.
+const BUILTIN_FNS: [&str; 7] = ["cons", "head", "tail", "is_empty", "$box", "$box_get", "$box_set"];
 
 fn is_builtin_fn(name: &str) -> bool {
     BUILTIN_FNS.contains(&name)
@@ -108,9 +114,50 @@ pub fn defunc(core: &Core) -> Result<Core, LowerError> {
     let func_names: BTreeSet<String> = funcs.iter().map(|f| f.name.clone()).collect();
     let let_names: BTreeSet<String> = lets.iter().map(|l| l.name.clone()).collect();
 
-    // Names bound `let mut` or `Assign`ed anywhere in the program: capturing one by value would be
-    // wrong (the reference captures a mutable by reference), so such a capture is `Unsupported`.
+    // Names bound `let mut` or `Assign`ed anywhere in the program. A mutable that some lambda
+    // captures must be BOXED (Plan 3b-2): the closure captures a shared mutable cell by reference,
+    // matching the reference's by-reference capture.
     let mutable_names = collect_mutable_names(core);
+
+    // Plan 3b-2: `boxed_names` = the mutables that some lambda captures = mutable_names ∩ (⋃ over
+    // every `Lambda` node of free_vars(body) \ params). A mutable NO lambda captures is left
+    // untouched (purely-imperative mutables — loop counters — stay byte-for-byte unchanged). Each
+    // boxed name gets a stable, uncollidable handle `$boxh{k}` ($-prefixed so no user identifier can
+    // collide), so every site for the same mutable resolves to the same handle. Computed once, up
+    // front, before any recursive rewrite pass runs.
+    let captured_by_lambda = lambda_captured_names(core);
+    let boxed_names: BTreeSet<String> = mutable_names.intersection(&captured_by_lambda).cloned().collect();
+
+    // Plan 3b-2 (Task 7 fix): the by-name box interception (keyed by NAME) fires on ANY use of a name
+    // matching a boxed mutable — but only `let mut` bindings are ever boxed, so two OTHER binder kinds
+    // that reuse a boxed name would be miscompiled:
+    //   - a lambda/fn PARAMETER (`param_names`): a param is never boxed, so its (never-boxed) reads get
+    //     rewritten to `$box_get($boxh…)` — a handle NOT in scope inside that param's body — producing
+    //     malformed `Ok` Core with a FREE `$boxh…`.
+    //   - a top-level `fn`/`LetRec` FUNCTION NAME (`func_names`): the by-name interception in
+    //     `rewrite_value_name` fires on the FUNCTION's value-use too, rewriting it to `$box_get($boxh…)`
+    //     — a MISBOUND handle — again malformed `Ok` Core (`run_tm` then diverges to HitCap).
+    // Either is a miscompile, not an accept, so a boxed mutable whose name ALSO appears as a parameter
+    // OR a function name anywhere degrades the whole program to `Unsupported` (exactly how 3b-1 handled
+    // these). Conservative: it also over-rejects the sound sibling where the name-collision is benign,
+    // which is fine per never-miscompile > always-accept. The sound inner-`let`-shadowing case (an
+    // inner `let n` shadowing an outer boxed `let mut n`) is neither a param nor a function name, so it
+    // still boxes. `func_names` is the top-level function set already computed above.
+    if !boxed_names.is_empty() {
+        let mut clashers = param_names(core);
+        clashers.extend(func_names.iter().cloned());
+        if let Some(clash) = boxed_names.intersection(&clashers).next() {
+            return Err(LowerError::Unsupported {
+                node: core.id(),
+                what: format!("boxed mutable `{clash}` is also used as a parameter or function name"),
+            });
+        }
+    }
+
+    let mut box_handle: BTreeMap<String, String> = BTreeMap::new();
+    for (k, n) in boxed_names.iter().enumerate() {
+        box_handle.insert(n.clone(), format!("$boxh{k}"));
+    }
 
     // 2. Guard: the hoisted functions are emitted OUTER of the `let` bindings (which wrap only main),
     // so no function body may reference a `let` name — it would be out of scope. Reject rather than
@@ -173,6 +220,7 @@ pub fn defunc(core: &Core) -> Result<Core, LowerError> {
         tags: &tags,
         kept: &kept_names,
         mutable_names: &mutable_names,
+        box_handle: &box_handle,
         arities_used: BTreeSet::new(),
         next_tag,
         anon: Vec::new(),
@@ -240,7 +288,26 @@ pub fn defunc(core: &Core) -> Result<Core, LowerError> {
     // an earlier one). Innermost-first here means iterating in reverse.
     let mut let_pairs: Vec<(&LetBinding, Core)> = lets.iter().zip(let_values_rw).collect();
     while let Some((l, v)) = let_pairs.pop() {
-        acc = Core::Let { id: l.id, name: l.name.clone(), mutable: l.mutable, value: Box::new(v), body: Box::new(acc) };
+        // Plan 3b-2: a boxed prelude mutable is re-emitted as an immutable box-handle binding
+        // `let $boxh(n) = $box(value)`, so the closure built at a later let's site captures the box.
+        if let Some(h) = box_handle.get(&l.name) {
+            let boxed_val = box1(&mut g, v);
+            acc = Core::Let {
+                id: l.id,
+                name: h.clone(),
+                mutable: false,
+                value: Box::new(boxed_val),
+                body: Box::new(acc),
+            };
+        } else {
+            acc = Core::Let {
+                id: l.id,
+                name: l.name.clone(),
+                mutable: l.mutable,
+                value: Box::new(v),
+                body: Box::new(acc),
+            };
+        }
     }
     // Function chain OUTERMOST (outermost = `order[0]`).
     for name in order.iter().rev() {
@@ -352,6 +419,10 @@ struct Rewriter<'a> {
     tags: &'a BTreeMap<String, u64>,
     kept: &'a BTreeSet<String>,
     mutable_names: &'a BTreeSet<String>,
+    /// Plan 3b-2: boxed name → its stable immutable handle name `$boxh{k}` (the box the closure
+    /// captures). Its KEY set IS `boxed_names` (the mutables some lambda captures), so a `.get(name)`
+    /// both tests boxed-membership and yields the handle in one lookup.
+    box_handle: &'a BTreeMap<String, String>,
     arities_used: BTreeSet<usize>,
     /// Next free tag per arity, seeded past the named value fns so anonymous lambdas never collide.
     next_tag: BTreeMap<usize, u64>,
@@ -380,11 +451,43 @@ impl Rewriter<'_> {
             Core::While(id, c, b) => {
                 Ok(Core::While(*id, Box::new(self.rewrite(c, locals)?), Box::new(self.rewrite(b, locals)?)))
             }
-            Core::Assign(id, name, v) => Ok(Core::Assign(*id, name.clone(), Box::new(self.rewrite(v, locals)?))),
+            Core::Assign(id, name, v) => {
+                let rv = self.rewrite(v, locals)?;
+                // Plan 3b-2: a write to a boxed mutable is `$box_set($boxh(n), v)`, which (like
+                // `Assign`) evaluates to unit — semantics preserved.
+                if let Some(h) = self.box_handle.get(name).cloned() {
+                    let hv = var(self.g, &h);
+                    return Ok(box_set2(self.g, hv, rv));
+                }
+                Ok(Core::Assign(*id, name.clone(), Box::new(rv)))
+            }
             Core::Let { id, name, mutable, value, body, .. } => {
-                let value = Box::new(self.rewrite(value, locals)?);
-                let body = Box::new(self.rewrite(body, &with(locals, name))?);
-                Ok(Core::Let { id: *id, name: name.clone(), mutable: *mutable, value, body })
+                let value = self.rewrite(value, locals)?;
+                // `body` is rewritten with the ORIGINAL `name` in scope (never the handle): capture
+                // detection in a nested lambda matches on the original free-var name; the read/write
+                // rewrites below intercept the boxed name before the `locals` check.
+                let body = self.rewrite(body, &with(locals, name))?;
+                // Plan 3b-2: a binding of a boxed mutable becomes an IMMUTABLE box-handle binding
+                // `let $boxh(n) = $box(value)`. Keyed on box-set membership (not the `mutable` flag) so
+                // an immutable inner `let n` shadowing an outer boxed mutable is boxed consistently —
+                // otherwise its reads (rewritten to `$box_get($boxh(n))`) would hit the wrong cell.
+                if let Some(h) = self.box_handle.get(name).cloned() {
+                    let boxed_val = box1(self.g, value);
+                    return Ok(Core::Let {
+                        id: *id,
+                        name: h,
+                        mutable: false,
+                        value: Box::new(boxed_val),
+                        body: Box::new(body),
+                    });
+                }
+                Ok(Core::Let {
+                    id: *id,
+                    name: name.clone(),
+                    mutable: *mutable,
+                    value: Box::new(value),
+                    body: Box::new(body),
+                })
             }
             Core::Apply(id, callee, args) => self.rewrite_apply(*id, callee, args, locals),
             // An anonymous lambda used as a value: a closure `cons(tag, env)` capturing its free
@@ -397,6 +500,13 @@ impl Rewriter<'_> {
 
     /// A `Var` in value position (not an immediate static-call callee).
     fn rewrite_value_name(&mut self, id: NodeId, name: &str, locals: &BTreeSet<String>) -> Result<Core, LowerError> {
+        // Plan 3b-2: a read of a boxed mutable is `$box_get($boxh(n))`. Intercepted BEFORE the
+        // `locals` check (a boxed mutable is a local, but its value lives in the box) so every
+        // read site — direct `Var`, or an `Apply` callee routed here — resolves through the cell.
+        if let Some(h) = self.box_handle.get(name).cloned() {
+            let hv = var(self.g, &h);
+            return Ok(box_get1(self.g, hv));
+        }
         if locals.contains(name) || name == "nil" {
             return Ok(Core::Var(id, name.to_string())); // a local value / the empty list
         }
@@ -435,15 +545,26 @@ impl Rewriter<'_> {
         for p in params {
             fv.remove(p);
         }
-        let captures: Vec<String> = fv.iter().filter(|v| locals.contains(*v)).cloned().collect();
-        for c in &captures {
-            if self.mutable_names.contains(c) {
-                // By-value capture of a mutable would diverge from the reference (which captures a
-                // mutable by reference); boxed mutable capture is Plan 3b-2.
+        // Captures in original-name order (BTreeSet). Plan 3b-2: a captured mutable contributes its
+        // IMMUTABLE box HANDLE `$boxh(c)` (not `c`) — capturing the box handle by value is exactly
+        // by-reference capture of the underlying cell. An immutable capture stays by-value (3b-1). The
+        // mapping preserves order, so the creation-site env and the arm-unpack still pair up 1:1; and
+        // since a box handle is immutable, no closure captures a mutable — the 3b-1 rejection is gone.
+        let raw_captures = fv.iter().filter(|v| locals.contains(*v));
+        let mut captures: Vec<String> = Vec::new();
+        for c in raw_captures {
+            if let Some(h) = self.box_handle.get(c) {
+                captures.push(h.clone());
+            } else if self.mutable_names.contains(c) {
+                // Defensive invariant: boxed_names ⊇ every captured mutable, so a captured mutable is
+                // always boxed and this is unreachable. Degrade rather than by-value-capture a mutable
+                // (which would be a silent miscompile) — `defunc` must never miscompile.
                 return Err(LowerError::Unsupported {
                     node: body.id(),
-                    what: format!("lambda captures mutable `{c}`"),
+                    what: format!("lambda captures unboxed mutable `{c}`"),
                 });
+            } else {
+                captures.push(c.clone());
             }
         }
 
@@ -788,6 +909,45 @@ fn collect_mutable_names(core: &Core) -> BTreeSet<String> {
     out
 }
 
+/// The union, over every `Lambda` node in `core`, of the lambda body's free variables minus its
+/// params — every name some lambda captures. Iterative outer walk (explicit worklist, no native
+/// recursion); `free_vars` per lambda recurses only over a lambda body, so it is depth-bounded by the
+/// up-front `too_deep_node` check (see `MAX_DEFUNC_DEPTH`) — totality preserved. Intersected with the
+/// mutables (`collect_mutable_names`) to decide which mutables must be boxed (Plan 3b-2).
+fn lambda_captured_names(core: &Core) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let mut stack = vec![core];
+    while let Some(n) = stack.pop() {
+        if let Core::Lambda(_, params, body) = n {
+            let mut fv = free_vars(body);
+            for p in params {
+                fv.remove(p);
+            }
+            out.extend(fv);
+        }
+        push_children(n, &mut stack);
+    }
+    out
+}
+
+/// Every name that appears as a lambda/fn PARAMETER anywhere in `core`. A `fn` desugars to a `LetRec`
+/// whose value is a `Lambda`, so collecting every `Core::Lambda` node's params covers both bare
+/// value-lambdas and named `fn` definitions. Iterative outer walk (explicit worklist, no native
+/// recursion), so it is unconditionally total, like `collect_mutable_names`/`lambda_captured_names`.
+/// Plan 3b-2 (Task 7 fix): intersected with `boxed_names` to reject a boxed mutable whose name is also
+/// reused as a parameter (the by-name box interception would miscompile such a param — see `defunc`).
+fn param_names(core: &Core) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let mut stack = vec![core];
+    while let Some(n) = stack.pop() {
+        if let Core::Lambda(_, params, _) = n {
+            out.extend(params.iter().cloned());
+        }
+        push_children(n, &mut stack);
+    }
+    out
+}
+
 // --- small Core builders --------------------------------------------------------------------------
 
 fn var(g: &mut NodeGen, name: &str) -> Core {
@@ -815,6 +975,25 @@ fn head1(g: &mut NodeGen, list: Core) -> Core {
 fn tail1(g: &mut NodeGen, list: Core) -> Core {
     let t = var(g, "tail");
     apply(g, t, vec![list])
+}
+
+// Plan 3b-2 box builders: `$box(init)` allocates a fresh cell, `$box_get(h)` reads it, and
+// `$box_set(h, v)` writes it (evaluating to unit). `$box*` are `BUILTIN_FNS`, so these applications
+// stay static direct calls — the reference resolves them to the `Builtin::Box*` builtins and
+// `lower_asm` to the `Box`/`BoxGet`/`BoxSet` instructions.
+fn box1(g: &mut NodeGen, init: Core) -> Core {
+    let f = var(g, "$box");
+    apply(g, f, vec![init])
+}
+
+fn box_get1(g: &mut NodeGen, h: Core) -> Core {
+    let f = var(g, "$box_get");
+    apply(g, f, vec![h])
+}
+
+fn box_set2(g: &mut NodeGen, h: Core, v: Core) -> Core {
+    let f = var(g, "$box_set");
+    apply(g, f, vec![h, v])
 }
 
 /// `cons(c1, cons(c2, … nil))` of the captured names as plain `Var`s (each in scope at the creation
@@ -1015,16 +1194,12 @@ mod tests {
         }
     }
 
+    /// Plan 3b-2: a mutable captured by a VALUE-USED lambda is now BOXED and runs (it was
+    /// `Unsupported` in 3b-1). `m` (a `let mut`) is captured by `|x| x + m`, which is passed to `ap` —
+    /// defunc boxes `m` into a shared cell, and the reference agrees on the value.
     #[test]
-    fn capturing_a_mutable_is_unsupported() {
-        use crate::tm::lower_asm::LowerError;
-        let (prog, ds) = parse("let mut m = 0; fn ap(f) { f(1) } ap(|x| x + m)");
-        assert!(ds.is_empty(), "{ds:?}");
-        let core = desugar(&prog.unwrap());
-        assert!(
-            matches!(defunc(&core), Err(LowerError::Unsupported { .. })),
-            "mutable capture must be Unsupported in 3b-1"
-        );
+    fn value_used_mutable_capture_is_boxed_and_runs() {
+        defunc_preserves_and_lowers("let mut m = 0; fn ap(f) { f(1) } ap(|x| x + m)");
     }
 
     /// Pins the REAL `Unsupported` rejection boundary: every one of these was run individually to
@@ -1060,6 +1235,11 @@ mod tests {
         // value (passed to `ap`), and its body reads the outer `n`.
         rejects("let n = 5; fn f(x) { x + n } fn ap(g,x){g(x)} ap(f, 1)", "references an outer let binding");
 
+        // Plan 3b-2 scope: boxing only helps a mutable captured by a VALUE-USED lambda. A mutable
+        // captured by a NAME-CALLED fn referencing an outer scope stays Unsupported (the pre-existing
+        // closed-subroutine boundary): `f` is only called (`f(1)`), and reads the outer `let mut n`.
+        rejects("let mut n = 5; fn f(x) { x + n } f(1)", "references an outer let binding");
+
         // A cyclic higher-order call graph that reaches defunc's cycle detection: `ap` (kept, dispatches
         // through `$apply1`) and `again` (value-used, arity 1, so its body becomes an `$apply1` arm that
         // calls `ap` by name) form a real cycle in the emitted call graph -- `ap -> $apply1 -> ap` --
@@ -1092,5 +1272,154 @@ mod tests {
         assert!(crate::interp::eval(&core).is_err(), "the reference must fault on a mismatched closure call");
         let d = defunc(&core).expect("defunc must NOT reject an arity mismatch as Unsupported");
         assert!(crate::interp::eval(&d).is_err(), "defunc's output must also fault (never silently wrong)");
+    }
+
+    /// The headline (Plan 3b-2): a value-used closure captures a mutable; a later assignment is
+    /// observed (by-reference). `defunc` must box the mutable and preserve the reference's value.
+    #[test]
+    fn boxed_mutable_capture_is_semantics_preserving() {
+        let src = "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)";
+        let (prog, ds) = parse(src);
+        assert!(ds.is_empty());
+        let core = desugar(&prog.unwrap());
+        let reference = crate::interp::eval(&core).unwrap();
+        assert_eq!(reference, crate::value::Value::Nat(10)); // by-reference: 0 + 10
+        let d = defunc(&core).expect("boxing lowers");
+        assert_eq!(crate::interp::eval(&d).unwrap(), reference); // reference(P) == reference(defunc(P))
+    }
+
+    /// The defunc'd program is first-order: no Lambda survives in value position, and no closure
+    /// captures a mutable (every capture is a $boxh handle, bound immutably).
+    #[test]
+    fn boxed_capture_output_is_first_order_and_captures_no_mutable() {
+        let src = "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)";
+        let core = desugar(&parse(src).0.unwrap());
+        let d = defunc(&core).expect("lowers");
+        // It lowers first-order (the ultimate structural check) and runs on the TM.
+        assert!(crate::tm::lower_asm(&d).is_ok(), "defunc'd boxing program must be first-order");
+    }
+
+    /// A purely imperative mutable (never captured by any lambda) is NOT boxed — no regression.
+    #[test]
+    fn uncaptured_mutable_is_not_boxed() {
+        let src = "let mut n = 3; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc";
+        let core = desugar(&parse(src).0.unwrap());
+        // defunc is only invoked on higher-order fallback; here lower_asm already handles it directly,
+        // but defunc must still be identity-preserving if called: reference matches.
+        let reference = crate::interp::eval(&core).unwrap();
+        let d = defunc(&core).expect("a purely-imperative program (no higher-order construct) must defunc");
+        assert_eq!(crate::interp::eval(&d).unwrap(), reference);
+        // No mutable here is captured by any lambda, so NOTHING is boxed: the output is byte-for-byte
+        // un-boxed — a loop counter never grows a box. (FIX 3: previously vacuous under `if let Ok`.)
+        assert!(!format!("{d:?}").contains("$box"), "an uncaptured loop counter must not be boxed:\n{d:?}");
+    }
+
+    /// End-to-end proof the whole box pipeline runs: `run_tm` defunctionalizes the headline boxing
+    /// program, lowers the `$box*` ops to the BOX tape, simulates, and decodes to the SAME value the
+    /// reference computes — `reference == TM` for mutable capture (λ cannot express it).
+    #[test]
+    fn boxed_mutable_capture_runs_reference_equals_tm() {
+        use crate::tm::{TM_DEFAULT_CAPS, TmRun, Unary, decode_tape, run_tm};
+        let src = "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)";
+        let core = desugar(&parse(src).0.unwrap());
+        let reference = crate::interp::eval(&core).unwrap();
+        match run_tm(&core, &Unary, TM_DEFAULT_CAPS) {
+            TmRun::Ran { tapes } => assert_eq!(
+                decode_tape(&tapes, &reference, &Unary),
+                Some(reference.clone()),
+                "reference vs TM disagree on boxed mutable capture"
+            ),
+            other => panic!("boxed capture must run to a value on the TM: {other:?}"),
+        }
+    }
+
+    /// Two distinct value-lambdas capture the SAME mutable `n`; both must see the by-reference write
+    /// (`n = 5`). They share the one box handle `$boxh0` — each closure carries it, each arm reads
+    /// through it. `ap(a) + ap(b) = 5 + 5 = 10`, reference-exact and first-order.
+    #[test]
+    fn two_lambdas_capture_the_same_mutable_share_one_box() {
+        defunc_preserves_and_lowers(
+            "let mut n = 1; fn ap(f) { f(0) } let a = |x| x + n; let b = |y| y + n; n = 5; ap(a) + ap(b)",
+        );
+    }
+
+    /// A boxed mutable that is ALSO used imperatively (read-modify-write `n = n + 5` on the box)
+    /// between creation and the capturing call: the closure observes the imperative update through the
+    /// shared cell. `g(10) = 10 + 5 = 15`, reference-exact and first-order.
+    #[test]
+    fn mutable_captured_and_mutated_imperatively_is_boxed() {
+        defunc_preserves_and_lowers("let mut n = 0; fn ap(f) { f(10) } let g = |x| x + n; n = n + 5; ap(g)");
+    }
+
+    /// FIX 1 (Task 7 review — the contract hole): a boxed mutable whose NAME is ALSO reused as a
+    /// lambda/fn PARAMETER cannot be boxed safely. The read/write interception (`box_handle.get(name)`)
+    /// is keyed by NAME, so a param that shadows the boxed mutable would have its (never-boxed) reads
+    /// rewritten to `$box_get($boxh)` — a handle NOT in scope inside that param's body — producing
+    /// malformed `Ok` Core with a free `$boxh`. That violates the contract (accept ⟹ semantics-exact),
+    /// so the program must degrade to `Unsupported`, never `Ok` with a free variable.
+    #[test]
+    fn boxed_mutable_reused_as_a_parameter_is_unsupported() {
+        use crate::tm::lower_asm::LowerError;
+        // Both are well-typed programs the full pipeline evaluates to Nat(14); a lambda param `n` (first
+        // case) / fn param `n` (second case) shadows the outer boxed `let mut n`.
+        for src in [
+            "let mut n = 1; fn ap(g){g(0)} let f = |x| x + n; let t = |n| n + 1; n = 10; ap(f) + t(3)",
+            "let mut n = 1; fn ap(g){g(0)} fn t(n){ n + 1 } let f = |x| x + n; n = 10; ap(f) + t(3)",
+        ] {
+            let (prog, ds) = parse(src);
+            assert!(ds.is_empty(), "{src}: {ds:?}");
+            let core = desugar(&prog.unwrap());
+            // Sanity: these are meaningful programs the reference evaluates to 14 (0 + 10, plus 3 + 1).
+            assert_eq!(crate::interp::eval(&core).unwrap(), crate::value::Value::Nat(14), "{src}");
+            // MUST be Unsupported — not `Ok` (with a free `$boxh0`), which would be a silent miscompile.
+            assert!(
+                matches!(defunc(&core), Err(LowerError::Unsupported { .. })),
+                "a boxed mutable reused as a param must be Unsupported (not Ok with a free $boxh): {src}"
+            );
+        }
+    }
+
+    /// FIX C1 (Task 7 whole-branch review — the SAME contract hole as the param case, one rung up): a
+    /// boxed mutable whose NAME is ALSO a top-level `fn`/`LetRec` (FUNCTION) name cannot be boxed
+    /// safely. The by-name box interception in `rewrite_value_name` fires on ANY value-use of that
+    /// name — INCLUDING the FUNCTION's value-use — rewriting it to `$box_get($boxh…)`, which is
+    /// malformed Core `defunc` would otherwise return as `Ok`, making `run_tm` diverge (HitCap) from
+    /// the reference. `param_names` only collects `Lambda` params, NOT function binder names, so the
+    /// original guard let this through; the fix unions `func_names` into the clash set. Must degrade to
+    /// `Unsupported`, never `Ok` with a free/misbound `$boxh`.
+    #[test]
+    fn boxed_mutable_reused_as_a_function_name_is_unsupported() {
+        use crate::tm::lower_asm::LowerError;
+        // Well-typed, 0 diagnostics: the outer boxed `let mut n` (captured by `g`) shares its name with
+        // the top-level `fn n`. Reference = ap(n) + g(5) = n(0) + (5 + 0) = 1 + 5 = 6.
+        let src = "let mut n = 0; let g = |x| x + n; fn n(z) { z + 1 } fn ap(h) { h(0) } ap(n) + g(5)";
+        let (prog, ds) = parse(src);
+        assert!(ds.is_empty(), "{src}: {ds:?}");
+        let core = desugar(&prog.unwrap());
+        // Sanity: a meaningful program the reference evaluates to 6.
+        assert_eq!(crate::interp::eval(&core).unwrap(), crate::value::Value::Nat(6), "{src}");
+        // MUST be Unsupported — not `Ok` (with a misbound `$boxh0` for the fn value-use), which would be
+        // a silent miscompile (`run_tm` then diverges to HitCap while the reference is 6).
+        assert!(
+            matches!(defunc(&core), Err(LowerError::Unsupported { .. })),
+            "a boxed mutable reused as a function name must be Unsupported (not Ok with a misbound $boxh): {src}"
+        );
+    }
+
+    /// FIX 2 (Task 7 review): the SOUND inner-`let`-shadowing-a-boxed-mutable case the `boxed_names`
+    /// membership keying exists for. The inner immutable `let n = 5` shadows the outer boxed `let mut
+    /// n`; because `collect_mutable_names` is name-based, `n ∈ boxed_names`, so the inner `let n` is
+    /// boxed to a fresh `$boxh` that shadows the outer handle exactly as `n` shadows. The closure `f`
+    /// captured the OUTER box (holding 1, un-reassigned here), so `ap(f) = 0 + 1 = 1`; the inner read
+    /// sees 5; `5 + 1 = 6`. `n` is never a PARAMETER, so FIX 1 must NOT reject this (only lets, not
+    /// params, are boxed here).
+    #[test]
+    fn inner_let_shadowing_a_boxed_mutable_is_boxed_consistently() {
+        let src = "let mut n = 1; fn ap(g){g(0)} let f = |x| x + n; { let n = 5; n + ap(f) }";
+        let core = desugar(&parse(src).0.unwrap());
+        let reference = crate::interp::eval(&core).unwrap();
+        assert_eq!(reference, crate::value::Value::Nat(6));
+        let d = defunc(&core).expect("inner-let shadow of a boxed mutable must still box and lower");
+        assert_eq!(crate::interp::eval(&d).unwrap(), reference); // reference(P) == reference(defunc(P))
     }
 }

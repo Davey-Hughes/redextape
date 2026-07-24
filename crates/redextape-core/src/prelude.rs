@@ -30,5 +30,8 @@ pub fn runtime_env() -> Vec<(String, Value)> {
         ("head".into(), Value::Builtin(Builtin::Head)),
         ("tail".into(), Value::Builtin(Builtin::Tail)),
         ("is_empty".into(), Value::Builtin(Builtin::IsEmpty)),
+        ("$box".into(), Value::Builtin(Builtin::Box)),
+        ("$box_get".into(), Value::Builtin(Builtin::BoxGet)),
+        ("$box_set".into(), Value::Builtin(Builtin::BoxSet)),
     ]
 }

@@ -213,6 +213,12 @@ fn apply_builtin(b: Builtin, args: Vec<Value>) -> EResult {
         (Builtin::Tail, [Value::Nil]) => Err(RuntimeError::new("tail of empty list")),
         (Builtin::IsEmpty, [Value::Nil]) => Ok(Value::Bool(true)),
         (Builtin::IsEmpty, [Value::Cons(_, _)]) => Ok(Value::Bool(false)),
+        (Builtin::Box, [init]) => Ok(Value::Box(Rc::new(RefCell::new(init.clone())))),
+        (Builtin::BoxGet, [Value::Box(cell)]) => Ok(cell.borrow().clone()),
+        (Builtin::BoxSet, [Value::Box(cell), v]) => {
+            *cell.borrow_mut() = v.clone();
+            Ok(Value::Unit)
+        }
         _ => Err(RuntimeError::new(format!("builtin {b:?} applied to bad arguments: {args:?}"))),
     }
 }
@@ -375,5 +381,71 @@ mod tests {
         // distinct from the literal `0` — pins the oracle's observable result for later backends.
         assert_eq!(run("let x = 1;"), Value::Unit);
         assert_ne!(run("let x = 1;"), Value::Nat(0));
+    }
+
+    #[test]
+    fn box_get_reads_what_box_set_wrote() {
+        use crate::core::{Core, NodeGen};
+        // let h = $box(1) in { $box_set(h, 9); $box_get(h) }  ==> 9
+        let mut g = NodeGen::default();
+        let apply = |g: &mut NodeGen, name: &str, args: Vec<Core>| {
+            Core::Apply(g.fresh(), Box::new(Core::Var(g.fresh(), name.into())), args)
+        };
+        let one = Core::Nat(g.fresh(), 1);
+        let boxed = apply(&mut g, "$box", vec![one]);
+        // Args are built into a local `Vec` first (rather than inline inside the `apply(&mut g, ...)`
+        // call) so evaluating them doesn't need a second concurrent `&mut g` while the first is live.
+        let hset_args = vec![Core::Var(g.fresh(), "h".into()), Core::Nat(g.fresh(), 9)];
+        let hset = apply(&mut g, "$box_set", hset_args);
+        let hget_args = vec![Core::Var(g.fresh(), "h".into())];
+        let hget = apply(&mut g, "$box_get", hget_args);
+        let seq = Core::Seq(g.fresh(), Box::new(hset), Box::new(hget));
+        let prog =
+            Core::Let { id: g.fresh(), name: "h".into(), mutable: false, value: Box::new(boxed), body: Box::new(seq) };
+        assert_eq!(crate::interp::eval(&prog).unwrap(), Value::Nat(9));
+    }
+
+    #[test]
+    fn a_shared_box_is_seen_by_reference_through_a_closure() {
+        // Mirrors the by-reference contract: two handles to the SAME cell (via a let binding)
+        // observe each other's writes.  let h = $box(0) in let g = h in { $box_set(g, 5); $box_get(h) } == 5
+        use crate::core::{Core, NodeGen};
+        let mut g = NodeGen::default();
+        let apply = |g: &mut NodeGen, name: &str, args: Vec<Core>| {
+            Core::Apply(g.fresh(), Box::new(Core::Var(g.fresh(), name.into())), args)
+        };
+        // As above: args are hoisted into locals so we never need a second `&mut g` while the
+        // `&mut g` passed to `apply` is still live.
+        let boxed_args = vec![Core::Nat(g.fresh(), 0)];
+        let boxed = apply(&mut g, "$box", boxed_args);
+        let set_args = vec![Core::Var(g.fresh(), "g2".into()), Core::Nat(g.fresh(), 5)];
+        let set = apply(&mut g, "$box_set", set_args);
+        let get_args = vec![Core::Var(g.fresh(), "h".into())];
+        let get = apply(&mut g, "$box_get", get_args);
+        let seq = Core::Seq(g.fresh(), Box::new(set), Box::new(get));
+        let inner = Core::Let {
+            id: g.fresh(),
+            name: "g2".into(),
+            mutable: false,
+            value: Box::new(Core::Var(g.fresh(), "h".into())),
+            body: Box::new(seq),
+        };
+        let prog = Core::Let {
+            id: g.fresh(),
+            name: "h".into(),
+            mutable: false,
+            value: Box::new(boxed),
+            body: Box::new(inner),
+        };
+        assert_eq!(crate::interp::eval(&prog).unwrap(), Value::Nat(5));
+    }
+
+    #[test]
+    fn box_get_of_a_non_box_is_a_runtime_error() {
+        use crate::core::{Core, NodeGen};
+        let mut g = NodeGen::default();
+        let get =
+            Core::Apply(g.fresh(), Box::new(Core::Var(g.fresh(), "$box_get".into())), vec![Core::Nat(g.fresh(), 3)]);
+        assert!(crate::interp::eval(&get).is_err());
     }
 }

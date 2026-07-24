@@ -20,6 +20,9 @@ pub enum Builtin {
     Head,
     Tail,
     IsEmpty,
+    Box,
+    BoxGet,
+    BoxSet,
 }
 
 #[derive(Clone)]
@@ -36,6 +39,9 @@ pub enum Value {
     Builtin(Builtin),
     /// Internal statement result (`while`/assignment); never surfaced to the user.
     Unit,
+    /// A mutable box cell (Plan 3b-2). Reuses the frame-slot type; shared by Rc so a box handle
+    /// captured by a closure sees later writes. Never a decoded/final result — an intermediate only.
+    Box(std::rc::Rc<std::cell::RefCell<Value>>),
 }
 
 impl PartialEq for Value {
@@ -46,7 +52,7 @@ impl PartialEq for Value {
             (Value::Nil, Value::Nil) => true,
             (Value::Unit, Value::Unit) => true,
             (Value::Cons(h1, t1), Value::Cons(h2, t2)) => h1 == h2 && t1 == t2,
-            // Functions have no structural equality.
+            // Functions and box handles have no structural equality.
             _ => false,
         }
     }
@@ -62,6 +68,7 @@ impl std::fmt::Debug for Value {
             Value::Closure { params, .. } => write!(f, "Closure(|{}|)", params.join(", ")),
             Value::Builtin(b) => write!(f, "Builtin({b:?})"),
             Value::Unit => write!(f, "Unit"),
+            Value::Box(_) => write!(f, "<box>"),
         }
     }
 }
@@ -82,19 +89,30 @@ impl Drop for Value {
     }
 }
 
-/// Move the head/tail cells of a `Cons` that this owner UNIQUELY holds into `stack`. Shared cells
-/// (`Rc` strong count > 1) stay alive via their other owners, so we must not descend into them —
-/// `Rc::try_unwrap` only yields the inner `Value` when we were the last owner. `Closure`'s `body`
+/// Move the head/tail cells of a `Cons` (or the inner value of a `Box`) that this owner UNIQUELY
+/// holds into `stack`. Shared cells (`Rc` strong count > 1) stay alive via their other owners, so we
+/// must not descend into them — `Rc::try_unwrap` only yields the inner `Value` when we were the last
+/// owner. This is what keeps a `Box` holding a deep list from stack-overflowing on drop: the list
+/// gets unlinked into the same iterative worklist a bare `Cons` spine would use. `Closure`'s `body`
 /// (`Rc<Core>`, torn down by `Core`'s own iterative Drop) and `env` (a depth-bounded `Frame` chain)
 /// need no special handling and drop normally after this returns.
 fn take_owned_value_children(v: &mut Value, stack: &mut Vec<Value>) {
-    if let Value::Cons(h, t) = v {
-        for slot in [h, t] {
-            let rc = std::mem::replace(slot, Rc::new(Value::Nil));
-            if let Ok(inner) = Rc::try_unwrap(rc) {
-                stack.push(inner);
+    match v {
+        Value::Cons(h, t) => {
+            for slot in [h, t] {
+                let rc = std::mem::replace(slot, Rc::new(Value::Nil));
+                if let Ok(inner) = Rc::try_unwrap(rc) {
+                    stack.push(inner);
+                }
             }
         }
+        Value::Box(cell) => {
+            let rc = std::mem::replace(cell, Rc::new(RefCell::new(Value::Nil)));
+            if let Ok(inner) = Rc::try_unwrap(rc) {
+                stack.push(inner.into_inner());
+            }
+        }
+        _ => {}
     }
 }
 

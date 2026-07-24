@@ -7,11 +7,12 @@ pub use crate::tm::machine::BLANK;
 use crate::tm::machine::{Machine, Move, Rule, State, StateId, Symbol};
 
 /// Fixed multi-tape layout (arity shared by every gadget so they compose).
-pub const TAPES: usize = 4;
+pub const TAPES: usize = 5;
 pub const REG: usize = 0;
 pub const WORK: usize = 1;
 pub const STACK: usize = 2;
 pub const HEAP: usize = 3;
+pub const BOX: usize = 4;
 
 /// Tape data symbols. `BLANK` (`_`) comes from `machine`. `SEP` (`#`) delimits register fields.
 pub const MARK: Symbol = '1';
@@ -97,7 +98,7 @@ impl Builder {
         self.states[s as usize].rules.push(spec.into_rule(next));
     }
 
-    /// Finalize into a 4-tape `Machine` starting at `start`.
+    /// Finalize into a `TAPES`-tape `Machine` starting at `start`.
     pub fn finish(self, start: StateId) -> Machine {
         Machine { states: self.states, start, tapes: TAPES }
     }
@@ -110,12 +111,12 @@ mod tests {
 
     #[test]
     fn rulespec_defaults_untouched_tapes() {
-        // Touch only WORK: write a mark, move R. REG/STACK/HEAP default to wildcard/unchanged/stay.
+        // Touch only WORK: write a mark, move R. REG/STACK/HEAP/BOX default to wildcard/unchanged/stay.
         let r = RuleSpec::new().on(WORK, None, Some(MARK), Move::R).into_rule(7);
         assert_eq!(r.next, 7);
-        assert_eq!(r.read, vec![None, None, None, None]);
-        assert_eq!(r.write, vec![None, Some(MARK), None, None]);
-        assert_eq!(r.moves, vec![Move::S, Move::R, Move::S, Move::S]);
+        assert_eq!(r.read, vec![None, None, None, None, None]);
+        assert_eq!(r.write, vec![None, Some(MARK), None, None, None]);
+        assert_eq!(r.moves, vec![Move::S, Move::R, Move::S, Move::S, Move::S]);
     }
 
     #[test]
@@ -130,5 +131,20 @@ mod tests {
         let (tapes, status) = simulate(&m, &[], TM_DEFAULT_CAPS);
         assert_eq!(status, Status::Halted);
         assert_eq!(tapes[WORK].snapshot().0, vec![MARK]);
+    }
+
+    #[test]
+    fn box_tape_exists_and_is_addressable() {
+        // A trivial 5-tape machine that writes a MARK on the BOX tape and halts.
+        let mut b = Builder::new();
+        let halt = b.accept("halt");
+        let s0 = b.state("s0");
+        b.add_rule(s0, RuleSpec::new().on(BOX, None, Some(MARK), Move::S), halt);
+        let m = b.finish(s0);
+        assert_eq!(m.tapes, 5);
+        assert!(m.validate().is_empty(), "{:?}", m.validate());
+        let (tapes, status) = crate::tm::sim::simulate(&m, &vec![Vec::new(); TAPES], crate::tm::sim::DEFAULT_CAPS);
+        assert_eq!(status, crate::tm::sim::Status::Halted);
+        assert_eq!(tapes[BOX].snapshot().0.first(), Some(&MARK));
     }
 }

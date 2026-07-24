@@ -5,7 +5,7 @@
 //! (build a tiny machine → run → decode).
 
 use crate::core::BinOp;
-use crate::tm::build::{AT, Builder, FIELD_WIDTH, HEAP, MARK, REG, RuleSpec, SEP, STACK, Slot, WORK};
+use crate::tm::build::{AT, BOX, Builder, FIELD_WIDTH, HEAP, MARK, REG, RuleSpec, SEP, STACK, Slot, WORK};
 use crate::tm::machine::{BLANK, Move, StateId, Symbol};
 
 /// The pluggable numeric encoding (the swappable seam). `Unary` is the v1 implementation; a `Binary`
@@ -76,6 +76,19 @@ pub trait Encoding {
     fn head_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
     /// As `head_op`, but writes the tail-word into `rd`.
     fn tail_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
+    /// `rd <- box(rv)`: allocate a fresh BOX field holding `rv`'s value and write the new field's
+    /// 1-based pointer (= the field count) into `rd`. Flows `entry -> exit`; the BOX head rests on the
+    /// leading `#` (origin) on entry and exit. PRECONDITION: `rd` distinct from `rv`.
+    fn box_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rv: Slot, rd: Slot);
+    /// `rd <- box_get(rb)`: read the value of the BOX field the pointer `rb` addresses into `rd`. A nil
+    /// pointer (`rb == 0`) or a dangling pointer has no value and SPINS to a cap (HitCap), matching λ (Ω)
+    /// and the reference (Runtime); `rd` is not written. BOX head home (origin) on the value exit.
+    /// PRECONDITION: `rd` distinct from `rb`.
+    fn box_get_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rb: Slot, rd: Slot);
+    /// `*rb <- rv`: overwrite the BOX field the pointer `rb` addresses with `rv`'s value, in place (the
+    /// `#` delimiters never move). Evaluates to unit (no destination). A nil/dangling `rb` SPINS to a cap
+    /// (as `box_get_op`). BOX head home (origin) on the exit.
+    fn box_set_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rb: Slot, rv: Slot);
 }
 
 pub struct Unary;
@@ -624,6 +637,183 @@ pub(crate) fn parse_heap_cells(cells: &[Symbol]) -> Vec<(u64, u64)> {
     out
 }
 
+// ---- BOX tape sub-primitives (free functions; blank-padded fixed-width fields; rest at the ORIGIN) ----
+//
+// The BOX holds `# <field1> # <field2> # …`, each `<fieldi>` EXACTLY `FIELD_WIDTH` cells (the value's
+// marks left-justified, blank-padded), each preceded by a `#`. There is NO trailing `#` after the last
+// field — the blank "top" follows the last field's `FIELD_WIDTH` cells. A 1-based pointer `p` addresses
+// field `p`. BETWEEN box gadgets the BOX head rests on the leading `#` (the ORIGIN); an empty box rests
+// at cell 0 over blanks (origin == top).
+//
+// Why NOT heap-style blank-boundary navigation: a box value may be 0 (a captured counter), so a field can
+// be `FIELD_WIDTH` blanks — interior padding blanks are then INDISTINGUISHABLE from the origin-left / top
+// blanks by a single read (a naive "walk to the first blank" stops on padding, not the boundary). So BOX
+// navigation is CONTENT-BLIND and FIXED-WIDTH: to cross one field the head moves EXACTLY `FIELD_WIDTH + 1`
+// cells (over the `#` and the window), landing on the boundary (`#` or the top blank), which IS then
+// distinguishable. Rightward walks detect the top by a blank landing; leftward returns are
+// COUNTER-BOUNDED by the pointer (cross exactly `p` fields), so no blank-run probing is ever needed.
+
+/// From the BOX head ON a `#` (a field's leading delimiter), move right EXACTLY `FIELD_WIDTH + 1` cells
+/// (off the `#`, over the field's `FIELD_WIDTH` window), landing on the boundary immediately after the
+/// field — the next `#` or the top blank. Content-blind (wildcard reads), so a zero-valued (all-blank)
+/// field is crossed exactly like any other. Returns the boundary state (the caller branches on `#`/blank).
+fn box_skip_field_right(b: &mut Builder, from: StateId, label: &str) -> StateId {
+    let mut cur = from;
+    for k in 0..=FIELD_WIDTH {
+        let nxt = b.state(format!("{label}.sr{k}"));
+        b.add_rule(cur, RuleSpec::new().on(BOX, None, None, Move::R), nxt);
+        cur = nxt;
+    }
+    cur // on the boundary (`#` or top blank)
+}
+
+/// The leftward mirror of `box_skip_field_right`: from the BOX head ON a `#` (or on the top blank), move
+/// left EXACTLY `FIELD_WIDTH + 1` cells, landing on the previous field's leading `#` (or, from the top, on
+/// the last field's leading `#`). Content-blind. Returns the landing state.
+fn box_skip_field_left(b: &mut Builder, from: StateId, label: &str) -> StateId {
+    let mut cur = from;
+    for k in 0..=FIELD_WIDTH {
+        let nxt = b.state(format!("{label}.sl{k}"));
+        b.add_rule(cur, RuleSpec::new().on(BOX, None, None, Move::L), nxt);
+        cur = nxt;
+    }
+    cur // on the previous `#`
+}
+
+/// Append a new field holding WORK's value at the BOX top. `from`: BOX head at the top (a BLANK — cell 0
+/// if the box is empty, else after the last field), WORK at home over the value's marks. Writes the
+/// leading `#`, then the `FIELD_WIDTH` window (one MARK per WORK mark, then blank-pad to `FIELD_WIDTH`),
+/// leaving the head on the new top blank; then rewinds WORK home (marks INTACT). Mirrors
+/// `heap_open_cell_with_work` crossed with `write_literal`'s fixed-width padding.
+fn box_append_field(b: &mut Builder, from: StateId, label: &str) -> StateId {
+    // Write the field's leading `#` and step onto window cell 0.
+    let mut cur = b.state(format!("{label}.w0"));
+    b.add_rule(from, RuleSpec::new().on(BOX, None, Some(SEP), Move::R), cur);
+    // Fixed-width window: FIELD_WIDTH cells. MARK arm copies a WORK mark (both heads R); once WORK is
+    // exhausted the BLANK arm pads (BOX writes a blank, advances; WORK stays on its trailing blank).
+    for k in 0..FIELD_WIDTH {
+        let nxt = b.state(format!("{label}.w{}", k + 1));
+        b.add_rule(cur, RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(BOX, None, Some(MARK), Move::R), nxt);
+        b.add_rule(cur, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S).on(BOX, None, Some(BLANK), Move::R), nxt);
+        cur = nxt;
+    }
+    // `cur` is on the new top blank; WORK head rests on its trailing blank -> home, marks intact.
+    rewind_work(b, cur, label)
+}
+
+/// Count the BOX's fields into WORK and leave the head at the top. `from`: BOX at the origin (on the
+/// leading `#`, or cell 0 over blanks if empty), WORK home. Clears WORK; if empty the count is 0; else
+/// walks right field-by-field, writing one WORK mark per `#` (content-blind `FIELD_WIDTH + 1` skips
+/// between `#`s), stopping when a skip lands on the top blank. On exit WORK is home holding the field
+/// count and the BOX head is at the top. Structurally `heap_count_cells_to_work` over fixed-width fields.
+fn box_count_fields_to_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+    let cleared = clear_work(b, from, &format!("{label}.cl")); // WORK empty+home; BOX at origin
+    let done = b.state(format!("{label}.done"));
+    let at_hash = b.state(format!("{label}.ah")); // BOX on a `#`, WORK at the accumulator's tail
+    // Empty box (origin reads blank) -> count 0; else start counting on the first `#`.
+    b.add_rule(cleared, RuleSpec::new().on(BOX, Some(BLANK), None, Move::S), done);
+    b.add_rule(cleared, RuleSpec::new().on(BOX, Some(SEP), None, Move::S), at_hash);
+    // Count this `#` (write a WORK mark, advance WORK; BOX stays on the `#`), then skip the field right.
+    let after = b.state(format!("{label}.am"));
+    b.add_rule(at_hash, RuleSpec::new().on(WORK, None, Some(MARK), Move::R), after);
+    let boundary = box_skip_field_right(b, after, &format!("{label}.s"));
+    b.add_rule(boundary, RuleSpec::new().on(BOX, Some(SEP), None, Move::S), at_hash); // another field
+    let top = b.state(format!("{label}.top"));
+    b.add_rule(boundary, RuleSpec::new().on(BOX, Some(BLANK), None, Move::S), top); // reached the top
+    let homed = rewind_work(b, top, &format!("{label}.rw")); // WORK head on its tail -> home w/ the count
+    b.add_rule(homed, RuleSpec::new(), done);
+    done // BOX at the top, WORK home = field count
+}
+
+/// Runtime-seek the field the counter in WORK addresses, a two-exit gadget (like `heap_seek_cell`).
+/// PRECONDITION: BOX at the origin (on the leading `#`, or cell 0 over blanks if empty); WORK home holds
+/// the 1-based counter `p`; REG home. Walks right field-by-field, decrementing `p` once per `#`; when it
+/// drains, steps right onto the target field's first cell -> `found` (BOX on that cell, WORK empty home).
+/// `missing`: `p == 0`, an empty box, or a skip that runs off onto the top blank (`p` exceeds the field
+/// count) — the caller routes it to the rule-less `fault` spin. Content-blind skips, so a zero-valued
+/// field is sought exactly like any other.
+fn box_seek_field(b: &mut Builder, from: StateId, found: StateId, missing: StateId, label: &str) {
+    let loop_head = b.state(format!("{label}.lp")); // BOX on a `#`, WORK home = remaining counter (>= 1)
+    // Entry routing (disjoint reads, so order is immaterial): empty box, or p == 0, both -> missing.
+    b.add_rule(from, RuleSpec::new().on(BOX, Some(BLANK), None, Move::S), missing); // empty box
+    b.add_rule(from, RuleSpec::new().on(BOX, Some(SEP), None, Move::S).on(WORK, Some(BLANK), None, Move::S), missing); // p == 0
+    b.add_rule(from, RuleSpec::new().on(BOX, Some(SEP), None, Move::S).on(WORK, Some(MARK), None, Move::S), loop_head);
+    // Loop head: decrement the counter (WORK-only walk, so BOX stays PARKED on the current `#`).
+    let dec = dec_work(b, loop_head, &format!("{label}.dc"));
+    // Drained -> this `#`'s field is the target: step BOX right onto its first cell.
+    b.add_rule(dec, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S).on(BOX, None, None, Move::R), found);
+    let adv = b.state(format!("{label}.av"));
+    b.add_rule(dec, RuleSpec::new().on(WORK, Some(MARK), None, Move::S), adv); // still positive -> advance
+    let boundary = box_skip_field_right(b, adv, &format!("{label}.s"));
+    b.add_rule(boundary, RuleSpec::new().on(BOX, Some(SEP), None, Move::S), loop_head); // next field -> loop
+    b.add_rule(boundary, RuleSpec::new().on(BOX, Some(BLANK), None, Move::S), missing); // ran off the top
+}
+
+/// Copy the marks of the field under the BOX head into WORK, then restore the head to the field's first
+/// cell. `from`: BOX on the field's first cell, WORK empty at home. Copies leading `MARK`s to WORK,
+/// stopping at the first padding blank; then walks left over the field's content to the field's leading
+/// `#` and steps right back onto the first cell; then rewinds WORK home. On exit WORK is home holding the
+/// value and the BOX head is back on the field's first cell.
+fn box_read_field_to_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+    let cp = b.state(format!("{label}.cp"));
+    b.add_rule(from, RuleSpec::new(), cp);
+    b.add_rule(cp, RuleSpec::new().on(BOX, Some(MARK), None, Move::R).on(WORK, None, Some(MARK), Move::R), cp);
+    let back = b.state(format!("{label}.bk"));
+    b.add_rule(cp, RuleSpec::new().on(BOX, Some(BLANK), None, Move::L), back); // first padding blank -> step left
+    b.add_rule(back, RuleSpec::new().on(BOX, Some(MARK), None, Move::L), back); // walk left over the marks
+    let first = b.state(format!("{label}.fc"));
+    b.add_rule(back, RuleSpec::new().on(BOX, Some(SEP), None, Move::R), first); // leading `#` -> onto first cell
+    rewind_work(b, first, label) // WORK head on its tail (or home if the value was 0) -> home w/ the value
+}
+
+/// Overwrite the field under the BOX head with WORK's marks, IN PLACE (the `#` delimiters never move).
+/// `from`: BOX on the field's first cell, WORK home over the new value's marks. Writes one MARK per WORK
+/// mark (both heads R), then blanks any leftover old marks (BOX `MARK -> BLANK`, R) up to the first blank;
+/// then walks left over the field's content to the leading `#` and steps right onto the first cell; then
+/// rewinds WORK home. Bounded by the field's own content (value `< FIELD_WIDTH` guarantees a padding
+/// blank), so it never needs a trailing delimiter and never spills into the next field.
+fn box_overwrite_field(b: &mut Builder, from: StateId, label: &str) -> StateId {
+    let wr = b.state(format!("{label}.wr"));
+    b.add_rule(from, RuleSpec::new(), wr);
+    b.add_rule(wr, RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(BOX, None, Some(MARK), Move::R), wr);
+    let blank = b.state(format!("{label}.bl"));
+    b.add_rule(wr, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S), blank); // WORK done -> blank the leftovers
+    b.add_rule(blank, RuleSpec::new().on(BOX, Some(MARK), Some(BLANK), Move::R), blank); // erase a leftover old mark
+    let restore = b.state(format!("{label}.rs"));
+    b.add_rule(blank, RuleSpec::new().on(BOX, Some(BLANK), None, Move::S), restore); // first padding blank -> done
+    // Restore to the field's first cell: walk left over the content (marks and blanks) to the leading `#`.
+    b.add_rule(restore, RuleSpec::new().on(BOX, Some(MARK), None, Move::L), restore);
+    b.add_rule(restore, RuleSpec::new().on(BOX, Some(BLANK), None, Move::L), restore);
+    let first = b.state(format!("{label}.fc"));
+    b.add_rule(restore, RuleSpec::new().on(BOX, Some(SEP), None, Move::R), first); // leading `#` -> onto first cell
+    rewind_work(b, first, label) // WORK head on its tail -> home, marks intact
+}
+
+/// Return the BOX head from a field's leading `#` to the origin, CONSUMING the counter in WORK. `from`:
+/// BOX on a `#` (field `p`'s leading `#`), WORK home over the counter `= p`, REG home. Decrements the
+/// counter and, while it stays positive, skips one field left per decrement — so exactly `p - 1` leftward
+/// field-skips land the head on the leading `#` (the origin). Counter-bounded, so it never has to detect
+/// the origin-left blank. On exit the BOX head is on the leading `#` and WORK is empty at home.
+fn box_return_to_origin(b: &mut Builder, from: StateId, label: &str) -> StateId {
+    let dec = dec_work(b, from, &format!("{label}.dc")); // WORK <- counter - 1, WORK home
+    let done = b.state(format!("{label}.done"));
+    b.add_rule(dec, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S), done); // drained -> on the origin `#`
+    let more = b.state(format!("{label}.more"));
+    b.add_rule(dec, RuleSpec::new().on(WORK, Some(MARK), None, Move::S), more); // still positive -> skip left
+    let prev = box_skip_field_left(b, more, &format!("{label}.s"));
+    b.add_rule(prev, RuleSpec::new(), from); // back-edge: loop with the BOX head on the previous `#`
+    done
+}
+
+/// Increment WORK's mark-count by one (WORK home over marks, possibly empty). Walks right to the marks'
+/// trailing blank, writes one mark, then rewinds home. Used to turn a field count into its 1-based pointer.
+fn inc_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+    b.add_rule(from, RuleSpec::new().on(WORK, Some(MARK), None, Move::R), from); // walk right over the marks
+    let wrote = b.state(format!("{label}.iw"));
+    b.add_rule(from, RuleSpec::new().on(WORK, Some(BLANK), Some(MARK), Move::R), wrote); // write the new mark
+    rewind_work(b, wrote, label) // WORK head on its trailing blank -> home, marks intact
+}
+
 #[allow(clippy::too_many_arguments)] // `arith`/`compare` mirror the trait's three-address signature.
 impl Encoding for Unary {
     fn write_literal(&self, b: &mut Builder, entry: StateId, exit: StateId, n: u64, rd: Slot) {
@@ -890,6 +1080,65 @@ impl Encoding for Unary {
         let read = heap_read_tail_to_work(b, found, &format!("{base}.rt")); // WORK <- tail-word
         let wr = append_work_to_field(b, read, rd, &format!("{base}.wr"));
         b.add_rule(wr, RuleSpec::new(), exit);
+    }
+
+    fn box_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rv: Slot, rd: Slot) {
+        let base = format!("box{entry}");
+        // 1. Count the current fields (BOX -> top, WORK = N); 2. the new pointer is N + 1.
+        let counted = box_count_fields_to_work(b, entry, &format!("{base}.ct"));
+        let ptr = inc_work(b, counted, &format!("{base}.in")); // WORK = N + 1; BOX at top
+        // 3. Write the pointer into `rd` (only touches REG/WORK; BOX stays at the top).
+        let wrote = append_work_to_field(b, ptr, rd, &format!("{base}.wp")); // rd = N + 1
+        // 4. Load `rv`'s value; 5. append the new field at the top.
+        let clr = clear_work(b, wrote, &format!("{base}.c1"));
+        let val = copy_field_to_work(b, clr, rv, &format!("{base}.cv")); // WORK = value; BOX at top
+        let appended = box_append_field(b, val, &format!("{base}.ap")); // BOX at the NEW top; WORK = value
+        // 6. Reload the pointer as the return counter; 7. walk the head back to the origin.
+        let clr2 = clear_work(b, appended, &format!("{base}.c2"));
+        let cnt = copy_field_to_work(b, clr2, rd, &format!("{base}.cc")); // WORK = N + 1; BOX at new top
+        let last_hash = box_skip_field_left(b, cnt, &format!("{base}.tl")); // new top -> last field's `#`
+        let origin = box_return_to_origin(b, last_hash, &format!("{base}.ro")); // -> origin, WORK drained
+        b.add_rule(origin, RuleSpec::new(), exit);
+    }
+
+    fn box_get_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rb: Slot, rd: Slot) {
+        let base = format!("bget{entry}");
+        let cw = copy_field_to_work(b, entry, rb, &format!("{base}.p")); // WORK = p (the pointer/counter)
+        let fault = b.state(format!("{base}.fault"));
+        // A nil/dangling deref has NO value: spin here so the machine hits the step cap (HitCap), matching
+        // λ's Ω-divergence and the reference's Runtime error — the three-way oracle treats them alike.
+        b.add_rule(fault, RuleSpec::new(), fault);
+        let found = b.state(format!("{base}.fd"));
+        box_seek_field(b, cw, found, fault, &format!("{base}.sk")); // found: BOX on the field's first cell
+        let read = box_read_field_to_work(b, found, &format!("{base}.rd")); // WORK = value; BOX on first cell
+        let wrote = append_work_to_field(b, read, rd, &format!("{base}.wr")); // rd = value; BOX on first cell
+        // Reload the pointer as the return counter, step onto the field's `#`, return to the origin.
+        let clr = clear_work(b, wrote, &format!("{base}.cl"));
+        let cnt = copy_field_to_work(b, clr, rb, &format!("{base}.cc")); // WORK = p; BOX on first cell
+        let on_hash = b.state(format!("{base}.oh"));
+        b.add_rule(cnt, RuleSpec::new().on(BOX, None, None, Move::L), on_hash); // first cell -> field's `#`
+        let origin = box_return_to_origin(b, on_hash, &format!("{base}.ro"));
+        b.add_rule(origin, RuleSpec::new(), exit);
+    }
+
+    fn box_set_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rb: Slot, rv: Slot) {
+        let base = format!("bset{entry}");
+        let cw = copy_field_to_work(b, entry, rb, &format!("{base}.p")); // WORK = p (the pointer/counter)
+        let fault = b.state(format!("{base}.fault"));
+        b.add_rule(fault, RuleSpec::new(), fault); // nil/dangling -> spin -> HitCap (as box_get_op)
+        let found = b.state(format!("{base}.fd"));
+        box_seek_field(b, cw, found, fault, &format!("{base}.sk")); // found: BOX on the field's first cell
+        // Reuse the counter slot: load `rv`'s NEW value, overwrite the field in place.
+        let clr = clear_work(b, found, &format!("{base}.c1"));
+        let val = copy_field_to_work(b, clr, rv, &format!("{base}.cv")); // WORK = new value; BOX on first cell
+        let over = box_overwrite_field(b, val, &format!("{base}.ov")); // in place; BOX back on first cell
+        // Reload the pointer as the return counter, step onto the field's `#`, return to the origin.
+        let clr2 = clear_work(b, over, &format!("{base}.c2"));
+        let cnt = copy_field_to_work(b, clr2, rb, &format!("{base}.cc")); // WORK = p; BOX on first cell
+        let on_hash = b.state(format!("{base}.oh"));
+        b.add_rule(cnt, RuleSpec::new().on(BOX, None, None, Move::L), on_hash); // first cell -> field's `#`
+        let origin = box_return_to_origin(b, on_hash, &format!("{base}.ro"));
+        b.add_rule(origin, RuleSpec::new(), exit);
     }
 }
 
@@ -1602,5 +1851,161 @@ mod tests {
         let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
         assert_eq!(status, Status::Halted);
         assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 8), Some(9));
+    }
+
+    // ---- BOX tape gadgets ----
+
+    /// Build a machine that runs `body` (the gadget under test) between a fresh entry and halt, with the
+    /// REG bank pre-seeded to `slots` fields and `inits` written. Returns the BOX + REG snapshots.
+    fn run_box(
+        slots: u32,
+        inits: &[(u64, Slot)],
+        body: impl FnOnce(&mut Builder, StateId, StateId),
+    ) -> (Vec<Symbol>, Vec<Symbol>) {
+        let enc = Unary;
+        let mut b = Builder::new();
+        let halt = b.accept("halt");
+        let mut cur = b.state("s0");
+        let start = cur;
+        for (n, slot) in inits {
+            let nxt = b.state(format!("init{slot}"));
+            enc.write_literal(&mut b, cur, nxt, *n, *slot);
+            cur = nxt;
+        }
+        body(&mut b, cur, halt);
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(slots);
+        let m = b.finish(start);
+        assert!(m.validate().is_empty(), "{:?}", m.validate());
+        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+        assert_eq!(status, Status::Halted, "gadget must halt");
+        (tapes[BOX].snapshot().0, tapes[REG].snapshot().0)
+    }
+
+    #[test]
+    fn box_op_allocates_and_returns_pointer_one() {
+        // box(7) into rd=1, with the value 7 pre-loaded in slot 0. Pointer must be 1.
+        let (_boxtape, reg) = run_box(2, &[(7, 0)], |b, e, x| Unary.box_op(b, e, x, 0, 1));
+        assert_eq!(Unary.decode_nat(&reg, 1), Some(1));
+    }
+
+    #[test]
+    fn two_box_ops_return_sequential_pointers() {
+        // box(3) -> rd=1 ; box(4) -> rd=2 ; pointers 1 then 2
+        let (_bt, reg) = run_box(3, &[(3, 0)], |b, e, x| {
+            let mid = b.state("mid");
+            Unary.box_op(b, e, mid, 0, 1); // box(slot0=3) -> slot1
+            // reload slot0 = 4, then box again -> slot2
+            let after = b.state("after");
+            Unary.write_literal(b, mid, after, 4, 0);
+            Unary.box_op(b, after, x, 0, 2); // box(slot0=4) -> slot2
+        });
+        assert_eq!(Unary.decode_nat(&reg, 1), Some(1));
+        assert_eq!(Unary.decode_nat(&reg, 2), Some(2));
+    }
+
+    #[test]
+    fn box_get_reads_the_allocated_value() {
+        // box(5) -> rd=1 ; box_get(rd=1) -> slot2 == 5
+        let (_bt, reg) = run_box(3, &[(5, 0)], |b, e, x| {
+            let mid = b.state("mid");
+            Unary.box_op(b, e, mid, 0, 1);
+            Unary.box_get_op(b, mid, x, 1, 2);
+        });
+        assert_eq!(Unary.decode_nat(&reg, 2), Some(5));
+    }
+
+    #[test]
+    fn box_set_overwrites_in_place_and_get_sees_it() {
+        // h = box(5) ; box_set(h, 9) ; box_get(h) == 9
+        let (_bt, reg) = run_box(4, &[(5, 0), (9, 1)], |b, e, x| {
+            let s1 = b.state("s1");
+            Unary.box_op(b, e, s1, 0, 2); // slot2 = box(slot0=5)
+            let s2 = b.state("s2");
+            Unary.box_set_op(b, s1, s2, 2, 1); // *slot2 = slot1 (9)
+            Unary.box_get_op(b, s2, x, 2, 3); // slot3 = box_get(slot2) = 9
+        });
+        assert_eq!(Unary.decode_nat(&reg, 3), Some(9));
+    }
+
+    #[test]
+    fn two_boxes_are_independent_cells() {
+        // a = box(3) ; b = box(4) ; box_set(a, 7) ; box_get(b) == 4
+        let (_bt, reg) = run_box(6, &[(3, 0), (4, 1), (7, 2)], |b, e, x| {
+            let s1 = b.state("s1");
+            Unary.box_op(b, e, s1, 0, 3); // slot3 = box(3) -> ptr 1
+            let s2 = b.state("s2");
+            Unary.box_op(b, s1, s2, 1, 4); // slot4 = box(4) -> ptr 2
+            let s3 = b.state("s3");
+            Unary.box_set_op(b, s2, s3, 3, 2); // *slot3 = 7
+            Unary.box_get_op(b, s3, x, 4, 5); // slot5 = box_get(slot4) = 4
+        });
+        assert_eq!(Unary.decode_nat(&reg, 5), Some(4));
+    }
+
+    // The BOX tape is blank-padded, so a ZERO-valued field is FIELD_WIDTH blanks — indistinguishable
+    // from the origin-left / top blanks by a single read. These probe the content-blind fixed-width
+    // navigation on exactly that case (never exercised by the six contract tests, whose values are all
+    // > 0). A box holds a value 0 <= v < FIELD_WIDTH (a captured counter can start at 0).
+
+    #[test]
+    fn box_of_zero_roundtrips() {
+        // box(0) -> ptr 1 ; box_get(ptr) == 0. The whole field is blank; seek + read must not be fooled.
+        let (_bt, reg) = run_box(3, &[(0, 0)], |b, e, x| {
+            let mid = b.state("mid");
+            Unary.box_op(b, e, mid, 0, 1);
+            Unary.box_get_op(b, mid, x, 1, 2);
+        });
+        assert_eq!(Unary.decode_nat(&reg, 1), Some(1), "an all-blank field still gets pointer 1");
+        assert_eq!(Unary.decode_nat(&reg, 2), Some(0), "box_get of a zero-valued box reads 0");
+    }
+
+    #[test]
+    fn box_set_can_shrink_to_zero_and_regrow() {
+        // box(9) ; set 0 ; get == 0 ; set 4 ; get == 4. Shrinking (blank leftovers) then regrowing.
+        let (_bt, reg) = run_box(6, &[(9, 0), (0, 1), (4, 2)], |b, e, x| {
+            let s1 = b.state("s1");
+            Unary.box_op(b, e, s1, 0, 3); // slot3 = box(9) -> ptr 1
+            let s2 = b.state("s2");
+            Unary.box_set_op(b, s1, s2, 3, 1); // *ptr = 0
+            let s3 = b.state("s3");
+            Unary.box_get_op(b, s2, s3, 3, 4); // slot4 = 0
+            let s4 = b.state("s4");
+            Unary.box_set_op(b, s3, s4, 3, 2); // *ptr = 4
+            Unary.box_get_op(b, s4, x, 3, 5); // slot5 = 4
+        });
+        assert_eq!(Unary.decode_nat(&reg, 4), Some(0), "shrunk to 0");
+        assert_eq!(Unary.decode_nat(&reg, 5), Some(4), "regrew to 4");
+    }
+
+    #[test]
+    fn box_set_shrinks_to_a_shorter_nonzero_value_in_place() {
+        // h = box(9) ; box_set(h, 4) ; box_get(h) == 4. Overwrite a LONGER value with a SHORTER NONZERO
+        // one: exercises BOTH the mark-writing loop (stamping 4's marks) AND the leftover-erasing loop
+        // (blanking 9's five surplus marks) in the SAME set — unlike shrink-to-ZERO (no marks written)
+        // or grow (no leftovers to erase).
+        let (_bt, reg) = run_box(4, &[(9, 0), (4, 1)], |b, e, x| {
+            let s1 = b.state("s1");
+            Unary.box_op(b, e, s1, 0, 2); // slot2 = box(slot0=9) -> ptr 1
+            let s2 = b.state("s2");
+            Unary.box_set_op(b, s1, s2, 2, 1); // *slot2 = slot1 (4)
+            Unary.box_get_op(b, s2, x, 2, 3); // slot3 = box_get(slot2) = 4
+        });
+        assert_eq!(Unary.decode_nat(&reg, 3), Some(4), "shrunk 9 -> 4 in place (marks + leftovers)");
+    }
+
+    #[test]
+    fn seek_crosses_a_zero_valued_field() {
+        // box(0) then box(6): the SECOND box_op must count past a fully-blank first field, and box_get of
+        // the second pointer must seek RIGHT across that all-blank field to land on field 2.
+        let (_bt, reg) = run_box(5, &[(0, 0), (6, 1)], |b, e, x| {
+            let s1 = b.state("s1");
+            Unary.box_op(b, e, s1, 0, 2); // slot2 = box(0) -> ptr 1
+            let s2 = b.state("s2");
+            Unary.box_op(b, s1, s2, 1, 3); // slot3 = box(6) -> ptr 2 (count skipped a zero field)
+            Unary.box_get_op(b, s2, x, 3, 4); // slot4 = box_get(ptr 2) = 6 (sought across a zero field)
+        });
+        assert_eq!(Unary.decode_nat(&reg, 3), Some(2), "second pointer is 2 even past a zero field");
+        assert_eq!(Unary.decode_nat(&reg, 4), Some(6), "box_get sought across the zero field to field 2");
     }
 }

@@ -17,7 +17,7 @@ pub fn decode(nf: &LambdaTerm, expected: &Value) -> Option<Value> {
         Value::Nil => decode_nil(nf),
         Value::Cons(h, t) => decode_cons(nf, h, t),
         // No first-class encoded value to compare against.
-        Value::Unit | Value::Closure { .. } | Value::Builtin(_) => None,
+        Value::Unit | Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => None,
     }
 }
 

@@ -74,15 +74,22 @@ fn main() {
         report(src);
     }
 
-    // 3. The honest boundary: two Plan-2 latent traps the λ backend REFUSES to lower (it returns a
+    // 3. The honest boundary: Plan-2 latent traps the λ backend REFUSES to lower (it returns a
     //    LowerError rather than risk a silent miscompile), while the reference and the first-order TM
     //    both run them to a value. These are `reference == TM` two-way — the dual of a λ-only program.
+    //    The last row is Plan 3b-2's headline: a closure that captures a MUTABLE by reference. λ still
+    //    refuses (it has no notion of a mutable capture), but the TM now runs it via BOXING — defunc
+    //    allocates a heap box for the captured mutable and the closure reads/writes through it.
     println!("\n3. Where λ bows out but the TM does not (reference == TM, two-way)\n");
     println!("   {:<64} {:>9}  {}", "program", "result", "reference == TM ?");
     println!("   {}", "─".repeat(96));
     for src in [
         "let mut x = 1; x = x + 1; let x = x + 10; x",
         "let mut acc = 0; fn bump(n) { n + 1 } acc = bump(acc); acc = bump(acc); acc",
+        // Plan 3b-2: `|x| x + n` captures the MUTABLE `n` by reference; `n` is reassigned to 10 AFTER
+        // the closure is built but BEFORE it's called. λ rejects (mutable-in-closure); the TM boxes the
+        // capture, so the call observes the later write and agrees with the reference at 10.
+        "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)",
     ] {
         report_tm_only(src);
     }

@@ -74,7 +74,13 @@ impl SlotMap {
 fn instr_regs(i: &Instr) -> Vec<Reg> {
     match i {
         Instr::Li(rd, _) | Instr::Jz(rd, _) | Instr::Nil(rd) => vec![*rd],
-        Instr::Mov(a, b) | Instr::Head(a, b) | Instr::Tail(a, b) | Instr::IsEmpty(a, b) => vec![*a, *b],
+        Instr::Mov(a, b)
+        | Instr::Head(a, b)
+        | Instr::Tail(a, b)
+        | Instr::IsEmpty(a, b)
+        | Instr::Box(a, b)
+        | Instr::BoxGet(a, b)
+        | Instr::BoxSet(a, b) => vec![*a, *b],
         Instr::Bin(_, a, b, c) | Instr::Cons(a, b, c) => vec![*a, *b, *c],
         Instr::Jmp(_) | Instr::Call(_) | Instr::Ret | Instr::Halt => vec![],
     }
@@ -85,7 +91,7 @@ fn is_arith(op: BinOp) -> bool {
     matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul)
 }
 
-/// Lower `prog` into a 4-tape `Machine`. Total and panic-free on any `Program`.
+/// Lower `prog` into a `TAPES`-tape `Machine`. Total and panic-free on any `Program`.
 pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
     let sm = SlotMap::of(prog);
     let mut b = Builder::new();
@@ -192,6 +198,9 @@ pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
             Instr::IsEmpty(rd, rl) => enc.is_empty_op(&mut b, pc[i], fall, sm.slot(*rl), sm.slot(*rd)),
             Instr::Head(rd, rl) => enc.head_op(&mut b, pc[i], fall, sm.slot(*rl), sm.slot(*rd)),
             Instr::Tail(rd, rl) => enc.tail_op(&mut b, pc[i], fall, sm.slot(*rl), sm.slot(*rd)),
+            Instr::Box(rd, rv) => enc.box_op(&mut b, pc[i], fall, sm.slot(*rv), sm.slot(*rd)),
+            Instr::BoxGet(rd, rb) => enc.box_get_op(&mut b, pc[i], fall, sm.slot(*rb), sm.slot(*rd)),
+            Instr::BoxSet(rb, rv) => enc.box_set_op(&mut b, pc[i], fall, sm.slot(*rb), sm.slot(*rv)),
         }
     }
 
@@ -532,5 +541,47 @@ mod tests {
             ),
             239_971
         );
+    }
+
+    #[test]
+    fn box_program_runs_end_to_end_on_the_tm() {
+        use crate::core::{Core, NodeGen};
+        use crate::tm::{TM_DEFAULT_CAPS, TmRun, Unary, decode_tape, run_tm};
+        // let h = $box(1) in { $box_set(h, 6); $box_get(h) } ==> 6 on the TM
+        let mut g = NodeGen::default();
+        let ap = |g: &mut NodeGen, n: &str, a: Vec<Core>| {
+            Core::Apply(g.fresh(), Box::new(Core::Var(g.fresh(), n.into())), a)
+        };
+        // Hoist each `vec![...]`'s `g.fresh()` args into `let` bindings before the `ap(&mut g, ...)`
+        // call: passing `&mut g` as `ap`'s first argument while a `vec![Core::Nat(g.fresh(), ..), ..]`
+        // literal in a later argument also needs `&mut g` is two concurrent mutable borrows of `g` —
+        // the same trap Tasks 2/3 hit (a pure NodeId-order change; no semantic difference).
+        let one = Core::Nat(g.fresh(), 1);
+        let boxed = ap(&mut g, "$box", vec![one]);
+        let h_ref_1 = Core::Var(g.fresh(), "h".into());
+        let six = Core::Nat(g.fresh(), 6);
+        let set = ap(&mut g, "$box_set", vec![h_ref_1, six]);
+        let h_ref_2 = Core::Var(g.fresh(), "h".into());
+        let get = ap(&mut g, "$box_get", vec![h_ref_2]);
+        let body = Core::Seq(g.fresh(), Box::new(set), Box::new(get));
+        let prog =
+            Core::Let { id: g.fresh(), name: "h".into(), mutable: false, value: Box::new(boxed), body: Box::new(body) };
+        let expected = crate::interp::eval(&prog).unwrap();
+        assert_eq!(expected, crate::value::Value::Nat(6));
+        match run_tm(&prog, &Unary, TM_DEFAULT_CAPS) {
+            TmRun::Ran { tapes } => assert_eq!(decode_tape(&tapes, &expected, &Unary), Some(expected)),
+            other => panic!("box program did not run on TM: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn box_get_of_null_handle_spins_to_a_cap() {
+        use crate::core::{Core, NodeGen};
+        use crate::tm::{TmCaps, TmRun, Unary, run_tm};
+        // $box_get(0) — a null handle. Mirrors head_tail_faults_spin_to_a_cap.
+        let mut g = NodeGen::default();
+        let get =
+            Core::Apply(g.fresh(), Box::new(Core::Var(g.fresh(), "$box_get".into())), vec![Core::Nat(g.fresh(), 0)]);
+        assert!(matches!(run_tm(&get, &Unary, TmCaps { steps: 50_000, cells: 50_000 }), TmRun::HitCap));
     }
 }

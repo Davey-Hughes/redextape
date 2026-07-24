@@ -203,6 +203,8 @@ fn lower_builtin_apply(ctx: &mut Ctx, id: NodeId, name: &str, args: &[Core], dst
     let expected_arity = match name {
         "cons" => 2,
         "head" | "tail" | "is_empty" => 1,
+        "$box" | "$box_get" => 1,
+        "$box_set" => 2,
         _ => return Err(LowerError::Unsupported { node: id, what: format!("call of unknown function `{name}`") }),
     };
     if args.len() != expected_arity {
@@ -220,6 +222,12 @@ fn lower_builtin_apply(ctx: &mut Ctx, id: NodeId, name: &str, args: &[Core], dst
         "head" => ctx.emit(Instr::Head(dst, regs[0])),
         "tail" => ctx.emit(Instr::Tail(dst, regs[0])),
         "is_empty" => ctx.emit(Instr::IsEmpty(dst, regs[0])),
+        "$box" => ctx.emit(Instr::Box(dst, regs[0])),
+        "$box_get" => ctx.emit(Instr::BoxGet(dst, regs[0])),
+        "$box_set" => {
+            ctx.emit(Instr::BoxSet(regs[0], regs[1]));
+            ctx.emit(Instr::Li(dst, 0)); // $box_set evaluates to unit
+        }
         _ => unreachable!("arity table and dispatch agree"),
     }
     Ok(())
@@ -491,5 +499,35 @@ mod tests {
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         let core = desugar(&prog.unwrap());
         assert!(matches!(lower_asm(&core), Err(LowerError::Unsupported { .. })));
+    }
+
+    #[test]
+    fn box_builtins_lower_and_run_on_the_asm_interpreter() {
+        use crate::core::{Core, NodeGen};
+        use crate::tm::asm::{AsmRun, DEFAULT_CAPS, run_asm};
+        // let h = $box(1) in { $box_set(h, 6); $box_get(h) }  ==> reference 6 == asm-interp 6
+        let mut g = NodeGen::default();
+        let ap = |g: &mut NodeGen, n: &str, a: Vec<Core>| {
+            Core::Apply(g.fresh(), Box::new(Core::Var(g.fresh(), n.into())), a)
+        };
+        // Each call's arguments are built into a local `Vec` first (rather than inline inside the
+        // `ap(&mut g, ...)` call) so evaluating them doesn't need a second concurrent `&mut g` while
+        // the first is still live.
+        let boxed_args = vec![Core::Nat(g.fresh(), 1)];
+        let boxed = ap(&mut g, "$box", boxed_args);
+        let set_args = vec![Core::Var(g.fresh(), "h".into()), Core::Nat(g.fresh(), 6)];
+        let set = ap(&mut g, "$box_set", set_args);
+        let get_args = vec![Core::Var(g.fresh(), "h".into())];
+        let get = ap(&mut g, "$box_get", get_args);
+        let body = Core::Seq(g.fresh(), Box::new(set), Box::new(get));
+        let prog =
+            Core::Let { id: g.fresh(), name: "h".into(), mutable: false, value: Box::new(boxed), body: Box::new(body) };
+        let expected = crate::interp::eval(&prog).unwrap();
+        assert_eq!(expected, crate::value::Value::Nat(6));
+        let asm = lower_asm(&prog).expect("box builtins lower");
+        match run_asm(&asm, DEFAULT_CAPS) {
+            AsmRun::Ran(out) => assert_eq!(out.result, 6),
+            other => panic!("asm did not run: {other:?}"),
+        }
     }
 }

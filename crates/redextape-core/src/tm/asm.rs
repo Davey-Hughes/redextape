@@ -45,6 +45,12 @@ pub enum Instr {
     Tail(Reg, Reg),
     /// `rd <- is_empty(rl)` (1 if nil, else 0)
     IsEmpty(Reg, Reg),
+    /// `rd <- box(rv)` (allocate a fresh mutable box cell holding rv, return its 1-based pointer)
+    Box(Reg, Reg),
+    /// `rd <- box_get(rb)` (read the box; fault if rb is null/dangling)
+    BoxGet(Reg, Reg),
+    /// `box_set(rb, rv)` — overwrite the box in place (fault if rb is null/dangling)
+    BoxSet(Reg, Reg),
 }
 
 /// A whole program: a flat instruction stream plus label positions (name -> index it precedes).
@@ -105,6 +111,9 @@ fn instr_str(i: &Instr) -> String {
         Instr::Head(rd, rl) => format!("head {}, {}", reg_str(*rd), reg_str(*rl)),
         Instr::Tail(rd, rl) => format!("tail {}, {}", reg_str(*rd), reg_str(*rl)),
         Instr::IsEmpty(rd, rl) => format!("isempty {}, {}", reg_str(*rd), reg_str(*rl)),
+        Instr::Box(rd, rv) => format!("box {}, {}", reg_str(*rd), reg_str(*rv)),
+        Instr::BoxGet(rd, rb) => format!("box_get {}, {}", reg_str(*rd), reg_str(*rb)),
+        Instr::BoxSet(rb, rv) => format!("box_set {}, {}", reg_str(*rb), reg_str(*rv)),
     }
 }
 
@@ -175,6 +184,7 @@ struct Vm {
     args: Vec<u64>,
     rr: u64,
     heap: Vec<(u64, u64)>,
+    boxes: Vec<u64>,
     stack: Vec<Frame>,
     pc: usize,
     steps: u64,
@@ -235,9 +245,13 @@ fn reg_over_cap(r: Reg) -> bool {
 fn instr_reg_over_cap(i: &Instr) -> bool {
     match i {
         Instr::Li(rd, _) | Instr::Jz(rd, _) | Instr::Nil(rd) => reg_over_cap(*rd),
-        Instr::Mov(a, b) | Instr::Head(a, b) | Instr::Tail(a, b) | Instr::IsEmpty(a, b) => {
-            reg_over_cap(*a) || reg_over_cap(*b)
-        }
+        Instr::Mov(a, b)
+        | Instr::Head(a, b)
+        | Instr::Tail(a, b)
+        | Instr::IsEmpty(a, b)
+        | Instr::Box(a, b)
+        | Instr::BoxGet(a, b)
+        | Instr::BoxSet(a, b) => reg_over_cap(*a) || reg_over_cap(*b),
         Instr::Bin(_, a, b, c) | Instr::Cons(a, b, c) => reg_over_cap(*a) || reg_over_cap(*b) || reg_over_cap(*c),
         Instr::Jmp(_) | Instr::Call(_) | Instr::Ret | Instr::Halt => false,
     }
@@ -256,6 +270,7 @@ pub fn run_asm(prog: &Program, caps: Caps) -> AsmRun {
         args: Vec::new(),
         rr: 0,
         heap: Vec::new(),
+        boxes: Vec::new(),
         stack: Vec::new(),
         pc: 0,
         steps: 0,
@@ -373,6 +388,39 @@ pub fn run_asm(prog: &Program, caps: Caps) -> AsmRun {
                 vm.write(*rd, empty);
                 vm.pc += 1;
             }
+            Instr::Box(rd, rv) => {
+                if vm.boxes.len() as u64 >= vm.caps.heap {
+                    return AsmRun::HitCap;
+                }
+                let v = vm.read(*rv);
+                vm.boxes.push(v);
+                let ptr = vm.boxes.len() as u64; // 1-based
+                vm.write(*rd, ptr);
+                vm.pc += 1;
+            }
+            Instr::BoxGet(rd, rb) => {
+                let p = vm.read(*rb);
+                if p == 0 {
+                    return AsmRun::Fault("box_get of null handle".to_string());
+                }
+                let Some(&v) = vm.boxes.get((p - 1) as usize) else {
+                    return AsmRun::Fault("box_get of invalid handle".to_string());
+                };
+                vm.write(*rd, v);
+                vm.pc += 1;
+            }
+            Instr::BoxSet(rb, rv) => {
+                let p = vm.read(*rb);
+                if p == 0 {
+                    return AsmRun::Fault("box_set of null handle".to_string());
+                }
+                let v = vm.read(*rv);
+                let Some(slot) = vm.boxes.get_mut((p - 1) as usize) else {
+                    return AsmRun::Fault("box_set of invalid handle".to_string());
+                };
+                *slot = v;
+                vm.pc += 1;
+            }
         }
     }
 }
@@ -407,7 +455,7 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
             let tail = decode_word(t, heap, exp_t)?;
             Some(Value::Cons(Rc::new(head), Rc::new(tail)))
         }
-        Value::Unit | Value::Closure { .. } | Value::Builtin(_) => None,
+        Value::Unit | Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => None,
     }
 }
 
@@ -715,5 +763,81 @@ rec:
             labels: vec![],
         };
         assert!(matches!(run(tail_prog), AsmRun::Fault(_)));
+    }
+
+    #[test]
+    fn box_alloc_get_and_set_roundtrip() {
+        // b = box(7); r1 = box_get(b) == 7; box_set(b, 9); rr = box_get(b) == 9
+        let prog = Program {
+            code: vec![
+                Instr::Li(Reg::Loc(0), 7),
+                Instr::Box(Reg::Loc(1), Reg::Loc(0)),    // r1 = box(7), pointer 1
+                Instr::BoxGet(Reg::Loc(2), Reg::Loc(1)), // r2 = box_get(r1) = 7
+                Instr::Li(Reg::Loc(3), 9),
+                Instr::BoxSet(Reg::Loc(1), Reg::Loc(3)), // *r1 = 9 (in place)
+                Instr::BoxGet(Reg::Rr, Reg::Loc(1)),     // rr = box_get(r1) = 9
+                Instr::Halt,
+            ],
+            labels: vec![],
+        };
+        assert_eq!(ran(prog), 9);
+    }
+
+    #[test]
+    fn boxes_get_sequential_pointers_and_are_independent() {
+        // two boxes are distinct cells; setting one does not touch the other
+        let prog = Program {
+            code: vec![
+                Instr::Li(Reg::Loc(0), 3),
+                Instr::Box(Reg::Loc(1), Reg::Loc(0)), // r1 = box(3) -> ptr 1
+                Instr::Li(Reg::Loc(2), 4),
+                Instr::Box(Reg::Loc(3), Reg::Loc(2)), // r3 = box(4) -> ptr 2
+                Instr::Li(Reg::Loc(4), 5),
+                Instr::BoxSet(Reg::Loc(1), Reg::Loc(4)), // *r1 = 5
+                Instr::BoxGet(Reg::Rr, Reg::Loc(3)),     // rr = box_get(r3) = 4 (unchanged)
+                Instr::Halt,
+            ],
+            labels: vec![],
+        };
+        assert_eq!(ran(prog), 4);
+    }
+
+    #[test]
+    fn box_get_of_null_handle_faults() {
+        let prog = Program {
+            code: vec![Instr::Li(Reg::Loc(0), 0), Instr::BoxGet(Reg::Rr, Reg::Loc(0)), Instr::Halt],
+            labels: vec![],
+        };
+        assert!(matches!(run(prog), AsmRun::Fault(_)));
+    }
+
+    #[test]
+    fn box_set_of_dangling_handle_faults() {
+        // pointer 5 into an empty box store: fault, never index out of bounds
+        let prog = Program {
+            code: vec![
+                Instr::Li(Reg::Loc(0), 5),
+                Instr::Li(Reg::Loc(1), 1),
+                Instr::BoxSet(Reg::Loc(0), Reg::Loc(1)),
+                Instr::Halt,
+            ],
+            labels: vec![],
+        };
+        assert!(matches!(run(prog), AsmRun::Fault(_)));
+    }
+
+    #[test]
+    fn box_alloc_respects_the_allocation_cap() {
+        let prog = Program {
+            code: vec![
+                Instr::Li(Reg::Loc(0), 1),
+                Instr::Box(Reg::Loc(1), Reg::Loc(0)),
+                Instr::Box(Reg::Loc(2), Reg::Loc(0)),
+                Instr::Halt,
+            ],
+            labels: vec![],
+        };
+        // cap of 1 box allocation: the second Box hits the cap
+        assert!(matches!(run_asm(&prog, Caps { heap: 1, ..DEFAULT_CAPS }), AsmRun::HitCap));
     }
 }

@@ -123,11 +123,17 @@ Copied verbatim from the spec / existing repo config:
   `redextape-lsp`, visible assembly pane, single-tape TM view, signed integers (§11).
 - **Research track:** bidirectional editing feasibility — report + prototype, not a feature (§7.3).
 
-### Extension tracks (raised 2026-07-22 — placement recorded, not yet planned)
+### Extension tracks (raised 2026-07-22, expanded 2026-07-23 — placement recorded, not yet planned)
 
-Three directions on three different tracks. **None is on the critical path** to finishing Plan 3
-(list access → the N-way oracle); all are post-Plan-3. Suggested order once Plan 3 lands:
-single-tape TM → optimizing compiler → tree-sitter. Closures/higher-order (Plan 3b) is a separate axis.
+Several directions on different tracks. **None is on the critical path**; all are post-Plan-3.
+Suggested order for the compiler-shaped work: single-tape TM → optimizing compiler (+ native backend,
+its Tier C) → tree-sitter; the alternative front-ends, self-application demos, and terminal
+visualization are each independent and can slot in anywhere. Closures/higher-order (Plan 3b) is a
+separate axis. The unifying architectural fact behind most of these tracks: **the Core AST is the
+front-end hub and the register-asm (`Instr`) IR is the imperative-backend hub** — front-ends plug
+*into* Core, backends plug *out of* Core (λ) or *out of* asm (TM, native), optimizations live at
+whichever hub maximizes reach, and visualizers are pure *consumers* of the traces the backends already
+produce. The oracle validates every combination.
 
 - **Single-tape TM — backend/theory track, highest thematic payoff.** Build it as a *transformation*
   on the finished `Machine`, NOT a separate compile target: multi-tape → single-tape via the textbook
@@ -141,16 +147,120 @@ single-tape TM → optimizing compiler → tree-sitter. Closures/higher-order (P
   decode (keep the alphabet a tuple, not a blown-up power set). This *supersedes* the passive "single-tape
   TM view" listed under v2 above — the reduction is the interesting artifact; the view falls out of it.
 
-- **Optimizing compiler — IR track, oracle-guarded.** An optimization pass over Core/asm. Motivation:
+- **Optimizing compiler — IR track, oracle-guarded.** Optimization passes over the IR. Motivation:
   (a) practical — TM step counts explode (unary arithmetic, STACK recursion, quadratic single-tape), and
   slot-count / register-width drive tape length, so shrinking the program shrinks the machine and its
   step count; (b) pedagogical — "optimization preserves semantics" is itself an oracle story
   (`optimized == unoptimized == reference`). The strong existing oracle auto-validates every pass on the
-  demo corpus + proptest, making this project unusually SAFE to optimize. Highest-value first pass:
-  register allocation / slot minimization (shrinks the REG bank + tape length most); then constant
-  folding + DCE + copy propagation. **When:** its own plan, after the backends are complete, with the
-  oracle already green so a regression is unambiguous. **Risk:** miscompilation — mitigated by the
-  oracle; apply YAGNI hard (add a pass only if it helps demos fit under caps or reads more clearly).
+  demo corpus + proptest, making this project unusually SAFE to optimize.
+  **Optimization lives at three tiers, and the earlier a pass sits, the more backends it helps:**
+  - **Tier A — Core → Core (helps λ *and* TM *and* native).** Constant folding, DCE, CSE, inlining,
+    copy/const propagation, algebraic identities. Backend-agnostic — optimize once on Core and a smaller
+    Core yields a shorter λ term (fewer β-steps), a smaller/faster TM (fewer states + steps), *and* faster
+    native. Highest leverage; `defunc` already proves the Core→Core pass shape.
+  - **Tier B — asm → asm (helps TM + native, not λ — λ lowers Core→λ directly, bypassing asm).**
+    Register allocation / slot minimization (shrinks the REG bank + tape length most), peephole,
+    dead-store elimination, jump threading, strength reduction on the `Instr` stream.
+  - **Tier C — native codegen (native only).** GVN, LICM, loop unrolling, vectorization, native regalloc —
+    the LLVM/Cranelift internal passes, free once native IR is emitted (see the native-backend track).
+  Two properties make this project special: the **oracle is the optimizer's test harness** (every pass must
+  keep `reference == λ == TM (== native)` — a miscompiling pass is refuted instantly by whichever leg
+  breaks), and the **TM makes savings measurable** (the step-count goldens quantify exactly what a pass
+  saved: "DCE cut `sum(5)` from 178k steps to N"; λ shows β-step deltas; native shows wall-clock — three
+  lenses on one optimization). **When:** its own plan(s), after the backends are complete, oracle green so a
+  regression is unambiguous; sequence Tier A → Tier B → (Tier C with the native backend). **Risk:**
+  miscompilation — mitigated by the oracle; apply YAGNI hard (add a pass only if it helps demos fit under
+  caps or reads more clearly).
+
+- **Native code backend — backend track, the 4th oracle leg.** `Core → asm → native machine code`, reusing
+  `lower_asm` + `defunc` UNCHANGED (the register-asm is already conventional three-address code: registers,
+  `Bin` ALU ops, `Jz`/`Jmp`/labels branches, `Call`/`Ret` with an explicit stack, `Cons`/`Box` heap ops).
+  Emit via **Cranelift** (pure-Rust, fast compile, JIT-oriented, lighter opts — quickest to stand up) or
+  **LLVM/inkwell** (heavy dependency + toolchain, but the full −O3 pipeline — deepest native codegen). Both
+  consume the *same* `Program`, so the native backend is the least locked-in decision in the system — start
+  with Cranelift and swap to LLVM later without touching any front-end or optimizer pass. Needs only a tiny
+  runtime (a bump allocator for cons/box cells + a result-decode routine mirroring `decode_asm`). Slots into
+  the oracle as a new leg: `reference == λ == TM == native`. **Nuance:** native uses real `u64`/bignum, so it
+  *escapes* the TM's `FIELD_WIDTH < 64` representability bound — it runs *bigger* programs than the TM, so
+  the honest oracle relation is "native agrees with the reference on the unbounded input set; the TM only on
+  the bounded set." **When:** pairs with the optimizing-compiler track as its Tier C. **Risk:** the runtime
+  (allocation + decode) is the only genuinely new surface; the codegen is a near-1:1 walk of the asm.
+
+- **Alternative front-ends — frontend track, purely additive; the angle is *paradigm diversity*.** A new
+  surface language compiling to the *same* Core needs only lexer → parser → typecheck → desugar-to-Core;
+  everything downstream (`defunc`, λ, asm, TM, native, the entire oracle) is REUSED UNCHANGED — it operates on
+  Core, not surface syntax, so front-ends are cheap and low-risk (the oracle validates each against every
+  backend on the shared demo corpus). The compelling thing isn't more syntaxes — it's spanning *paradigms*,
+  demonstrating the Church–Turing thesis at the level of syntax: wildly different surface languages are the
+  same underlying computation, the same λ-term, the same TM. Candidates, by (easy × compelling):
+  - **C-like (imperative)** — an *easier* fit than the Rust-like one: Core is already imperative-friendly
+    (`let mut`/`Assign`/`While`/`Seq`), so mutable locals / loops / functions map cleanly (`for`/`break`
+    desugar to `while`; `goto` maps to the asm's `Jmp` + labels). Core needs extension only for C-only
+    features — pointers, arrays, structs (a memory model); raw pointer arithmetic has no clean λ encoding, so
+    those programs run on `reference`/TM/native but not λ, landing in the `assert_tm_only` two-way bucket (the
+    same pattern Plan 3b-2's mutable capture uses).
+  - **Lisp / S-expressions (homoiconic)** — highest bang-for-buck: S-exprs are almost free to parse and map
+    near-directly onto Core (it *is* Core in parens). The code-is-data angle pairs perfectly with the
+    self-application track below.
+  - **Concatenative / Forth-like (stack)** — `2 3 + 4 *`: a radically different surface (no variables, a data
+    stack) with a tiny grammar, lowered by threading a *compile-time* stack of Core expressions. Striking
+    precisely because it looks nothing like the others yet is the same computation. (The asm's STACK tape is
+    the *call* stack; the concatenative data stack compiles away entirely.)
+  - **Tiny ML (functional)** — `let`/`fun`/`if`/tuples/lists/`match`: the natural functional companion; Core
+    is already functional-friendly, and pattern-matching is a satisfying desugar. This is also the front-end
+    that most motivates growing Core toward **sum types**, the prerequisite for fuller self-hosting (below).
+
+  Together with the Rust-like original that is four paradigms — imperative, functional, concatenative,
+  homoiconic — one Core, one λ-term, one TM. **Skip:** Prolog/logic (unification + backtracking needs a large
+  new runtime — high risk) and visual/blocks (only meaningful once the web UI exists). **When:** any is a
+  self-contained plan whenever desired; independent of everything else.
+
+- **Self-application & self-hosting — demo/theory track.** Two very different levels:
+  - **Scoped self-application (feasible NOW, and the more on-theme demo):** write a small interpreter *in* the
+    mini-language and run it three ways. The standout: a **λ-calculus reducer** — encode λ-terms as tagged
+    cons-list ASTs (tag in the head: 0 = var as a de Bruijn `Nat`, 1 = `lam`, 2 = `app` — the *same* shape
+    `defunc` uses for closures `cons(tag, env)`), then write a normal-order β-step as recursion over
+    `cons`/`head`/`tail`/`if`. de Bruijn indices avoid fresh-name generation, so no strings/sum-types are
+    needed (ASTs are numeric-tagged trees). Result: **a Turing machine simulating a λ-calculus reducer** — the
+    Church–Turing equivalence made doubly literal and self-referential (the project's two backends, one
+    implemented *inside* the other). The mirror — a TM-simulator written in the mini-language, run on the λ
+    backend — is equally on-theme. Bounded by `FIELD_WIDTH < 64` on the TM leg (small terms); unbounded on
+    `reference`/native.
+  - **Full self-hosting (INFEASIBLE with today's language, and not close):** a real compiler needs *strings*
+    (source text), *sum types + pattern matching* (an AST is a tagged union of many node kinds),
+    *maps/environments*, error handling, and *I/O* (to read source). The mini-language has
+    `Nat`/`Bool`/`List`/functions/closures and none of the rest. **What it would take:** add strings (a
+    `String` type or a `List<Nat>` convention), add **sum types + `match`** (the tiny-ML front-end is the
+    natural motivator), add records, and an input path. Even then, a realistic milestone is self-hosting a
+    **small subset** (the mini-language compiling a stripped-down version of itself), not the whole toolchain —
+    a large undertaking. Honest read: the language is too minimal to host its *compiler* but exactly rich
+    enough to host a small *interpreter*, so pursue scoped self-application first and treat full self-hosting
+    as a north star that the tiny-ML + sum-types work incrementally unlocks.
+
+- **Terminal (TUI) visualization — view-surface track, mostly for fun; a cheap rehearsal of Plan 5.** The
+  render model already exists — every viewer is a pure *consumer* of traces the backends already produce, so
+  this needs ZERO backend changes: the TM's `simulate_trace` → `Trace` carries per-step
+  `(state, tapes-with-head-index)`; the λ reducer's `reduce_trace` carries per-step term + the *redex path*;
+  the asm interpreter (`run_asm`) exposes register/heap/box state; and `print_asm`/`print_lambda`
+  pretty-print. All three backends are visualizable in the terminal:
+  - **TM** — animate the (now 5) tapes as labelled rows with the head cell highlighted, current state name,
+    the δ-rule just fired, step counter. *Tier 1:* a quick auto-play example (crossterm/ANSI + a screen-clear
+    loop, ~100 lines — ships in an afternoon: watch `1 + 2 * 3` grind through 5,724 transitions). *Tier 2:* an
+    interactive stepper (ratatui) — step / play-pause / **scrub-backward** (free: the whole `Trace` is in
+    memory) / speed. **Constraint:** unary tapes are long (a 326-cell REG bank) and programs step-heavy, so
+    render a **viewport window centered on the head** (scroll the tape under a fixed window — more faithful to
+    a real head anyway) plus speed control; lean on small demos; cap Tier 2 to small programs or step
+    `simulate` lazily to avoid materializing a 240k-step trace.
+  - **λ** — scrub the β-reduction: show the term at each step with the **redex highlighted** (the reducer
+    already tracks the redex path), via the existing `print_lambda`. Bonus: an ASCII tree / Tromp-style
+    rendering of the term.
+  - **asm** — a register table + heap/box cells alongside the current `Instr` as `run_asm` steps — a
+    middle-ground view between source and the TM tape.
+
+  **Tech:** ratatui + crossterm (Tier 2), plain crossterm/ANSI (Tier 1). **When:** Tier 1 anytime (it's
+  `tm_demo` + a loop + a sleep); Tier 2 a small plan paired with the CLI (Plan 6). **Payoff:** a standalone
+  fun artifact *and* it validates the view-model ergonomics before the web UI. This complements the passive
+  "assembly pane / single-tape view" notes under v2 — the terminal is the fastest medium to prototype them.
 
 - **tree-sitter grammar — frontend/tooling track, defer to the visualizer.** A CST for editor tooling:
   incremental parsing, error-tolerant highlighting, a live editing surface. It does NOT replace the
