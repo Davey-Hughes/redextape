@@ -20,10 +20,8 @@ use redextape_core::tm::{Caps, LowerError, Program};
 
 use crate::NativeRun;
 use crate::analysis::{Subroutine, partition};
-use crate::codegen::{
-    CodegenError, Decls, MAX_REGISTERS, declare_rt, declare_subroutines, native_depth_cap, param_count, reg_over_cap,
-    translate_subroutine, word_signature,
-};
+use crate::codegen::{CodegenError, Decls, declare_rt, declare_subroutines, translate_subroutine, word_signature};
+use crate::shared::{MAX_REGISTERS, native_depth_cap, param_count, reg_over_cap};
 use redextape_native_rt::{
     RUN_STACK_SIZE, Runtime, rt_box, rt_box_get, rt_box_set, rt_cons, rt_enter, rt_faulted, rt_head, rt_is_empty,
     rt_leave, rt_tail, rt_tick,

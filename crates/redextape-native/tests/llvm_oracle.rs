@@ -1,0 +1,180 @@
+#![cfg(all(feature = "llvm", feature = "cranelift"))]
+//! The LLVM oracle leg (Task 6, native Phase 2): extends `native_oracle.rs`'s four-way oracle
+//! (`reference == λ == TM == native`) with a SECOND native codegen backend behind the same
+//! `Codegen`/`run_native_with` seam. Every case here is checked `reference == cranelift == llvm`.
+//!
+//! Gated on BOTH `llvm` and `cranelift` (not just `llvm`): this file's distinctive job is the DIRECT
+//! `cranelift == llvm` comparison, so it inherently needs both backends compiled in. `llvm`-only
+//! builds (`--no-default-features --features llvm`) still compile this crate/workspace cleanly (the
+//! global constraint) -- this test module just has zero tests in that configuration, rather than
+//! spuriously failing every case on `Codegen::Cranelift` reporting `unsupported("cranelift")`.
+//!
+//! The sharpened claim this file adds (not just each backend separately pinned to the reference,
+//! which would let a cranelift-only or llvm-only bug hide behind "both happen to match the
+//! interpreter"): a DIRECT `cranelift == llvm` comparison, at every `OptLevel` (`O0`..`O3` plus the
+//! size-oriented `Os`/`Oz`). This is the literal cross-backend leg and the headline claim of the LLVM
+//! phase -- that `default<O1..O3>`/`default<Os,Oz>` optimization never changes the observable outcome
+//! relative to the unoptimized `O0` build OR relative to the independently-implemented Cranelift
+//! backend.
+//!
+//! `llvm.rs`'s own unit tests already sweep `OptLevel` against `run_asm` on hand-built `Program`s
+//! (internal, white-box); this file instead drives the PUBLIC surface (`run_native_with`, `Core` ->
+//! `Program` lowering included) the way an external caller — or the other oracle files — would.
+
+use proptest::prelude::*;
+use redextape_core::core::Core;
+use redextape_core::desugar::desugar;
+use redextape_core::parser::parse;
+use redextape_core::tm::{DEFAULT_CAPS, decode_asm};
+use redextape_core::value::Value;
+use redextape_core::{RunError, run};
+use redextape_native::{Codegen, NativeRun, OptLevel, run_native_with};
+
+/// Every level `OptLevel` offers, the size-oriented ones (`Os`/`Oz`) included, swept rather than
+/// spot-checking `O3` and hoping.
+const OPT_LEVELS: [OptLevel; 6] = [OptLevel::O0, OptLevel::O1, OptLevel::O2, OptLevel::O3, OptLevel::Os, OptLevel::Oz];
+
+/// Parse + desugar `src` to Core, panicking on a parse error (every demo string here is known-good).
+fn core_of(src: &str) -> Core {
+    let (prog, ds) = parse(src);
+    assert!(ds.is_empty(), "parse errors for `{src}`: {ds:?}");
+    desugar(&prog.unwrap())
+}
+
+/// Decode a `NativeRun` that must have produced a value, panicking with `label` for context
+/// otherwise -- every call site here expects `Ran`, so a `Fault`/`HitCap`/`LowerError` is itself the
+/// bug the oracle exists to catch.
+fn ran(run: &NativeRun, expected: &Value, label: &str) -> Value {
+    match run {
+        NativeRun::Ran(o) => decode_asm(o, expected).unwrap_or_else(|| panic!("{label}: decode failed")),
+        other => panic!("{label}: expected Ran, got {other:?}"),
+    }
+}
+
+/// `reference == cranelift == llvm` for every `OptLevel`, with an explicit `cranelift == llvm`
+/// comparison at each level (not just each transitively agreeing with `reference`).
+fn assert_cross_backend_agree(src: &str) {
+    let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
+    let core = core_of(src);
+
+    let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift);
+    let cl_value = ran(&cl, &reference, &format!("cranelift `{src}`"));
+    assert_eq!(cl_value, reference, "cranelift vs reference disagree for: {src}");
+
+    for opt in OPT_LEVELS {
+        let llvm = run_native_with(&core, DEFAULT_CAPS, Codegen::Llvm { opt });
+        let llvm_value = ran(&llvm, &reference, &format!("llvm {opt:?} `{src}`"));
+        assert_eq!(llvm_value, reference, "llvm {opt:?} vs reference disagree for: {src}");
+        assert_eq!(llvm_value, cl_value, "llvm {opt:?} vs cranelift disagree for: {src}");
+    }
+}
+
+/// The demo set: arithmetic, comparison, list construction/access, recursion, and a defunctionalized
+/// higher-order program (`map`) -- first-order and higher-order lowering paths both exercised, plus
+/// a value beyond the TM's `FIELD_WIDTH` (native has no such ceiling on either backend).
+const CASES: &[&str] = &[
+    "1 + 2 * 3",
+    "10 > 3",
+    "[1, 2, 3]",
+    "fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(100)",
+    "fn map(xs,f){ if is_empty(xs){nil}else{cons(f(head(xs)),map(tail(xs),f))} } fn add1(x){x+1} [5,6].map(add1)",
+    "head(tail([1, 2, 3]))",
+    "100 * 100",
+];
+
+#[test]
+fn reference_cranelift_llvm_agree() {
+    for src in CASES {
+        assert_cross_backend_agree(src);
+    }
+}
+
+#[test]
+fn llvm_faults_and_caps_match() {
+    // `head(nil)`/`tail(nil)`: the reference faults at runtime, and every codegen backend, at every
+    // opt level, must report `Fault` -- not a value, not a crash, not a spurious `HitCap`.
+    //
+    // The message TEXT is compared too, which the plan's literal Agreement Contract (same outcome
+    // CLASS) does not require. It costs nothing -- both backends route every fault through the same
+    // `rt_*` host functions, so the text is the runtime's, not either codegen's -- and it catches a
+    // whole "right class, wrong message" regression class: a backend synthesizing its own fault, or
+    // tripping a DIFFERENT fault condition than the other while landing in the same class.
+    for src in ["head(nil)", "tail(nil)"] {
+        let core = core_of(src);
+        assert!(matches!(run(src), Err(RunError::Runtime(_))), "the reference must fault on `{src}`");
+        let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift);
+        let NativeRun::Fault(cl_msg) = &cl else { panic!("cranelift `{src}`: {cl:?}") };
+        for opt in OPT_LEVELS {
+            let llvm = run_native_with(&core, DEFAULT_CAPS, Codegen::Llvm { opt });
+            let NativeRun::Fault(llvm_msg) = &llvm else { panic!("llvm {opt:?} `{src}`: {llvm:?}") };
+            assert_eq!(llvm_msg, cl_msg, "llvm {opt:?} vs cranelift fault message for `{src}`");
+        }
+    }
+
+    // `spin(n) = spin(n)`: infinite recursion must trip the depth cap on every backend/opt level, not
+    // overflow the OS stack (an uncatchable process abort) or loop forever.
+    let spin = core_of("fn spin(n){ spin(n) } spin(0)");
+    let cl_spin = run_native_with(&spin, DEFAULT_CAPS, Codegen::Cranelift);
+    assert!(matches!(cl_spin, NativeRun::HitCap), "cranelift spin: {cl_spin:?}");
+    for opt in OPT_LEVELS {
+        let llvm_spin = run_native_with(&spin, DEFAULT_CAPS, Codegen::Llvm { opt });
+        assert!(matches!(llvm_spin, NativeRun::HitCap), "llvm {opt:?} spin: {llvm_spin:?}");
+    }
+}
+
+/// A small first-order expression generator (arithmetic/comparison/if only; shape borrowed from
+/// `native_oracle.rs`'s `arb_native_safe_expr`) for a randomized cross-backend differential. Kept
+/// deliberately SMALL: each generated program here compiles SEVEN times (Cranelift once, plus LLVM at
+/// all six opt levels), unlike the single-backend suite it's borrowed from.
+fn arb_first_order_expr() -> impl Strategy<Value = String> {
+    let leaf = (0u64..1000).prop_map(|n| n.to_string());
+    leaf.prop_recursive(3, 8, 3, |inner| {
+        prop_oneof![
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("({a} + {b})")),
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("({a} - {b})")),
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("if {a} > {b} {{ 1 }} else {{ 0 }}")),
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("if {a} == {b} {{ 1 }} else {{ 0 }}")),
+            (inner.clone(), inner.clone(), inner).prop_map(|(c, a, b)| format!("if {c} > 0 {{ {a} }} else {{ {b} }}")),
+        ]
+    })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 12, ..ProptestConfig::default() })]
+
+    /// The literal cross-backend leg on randomized first-order programs: `cranelift == llvm` at
+    /// every opt level, AND both against `reference`. Bounded to 12 cases (rather than the 64 the
+    /// single-backend generator in `native_oracle.rs` uses) because each case here JIT-compiles
+    /// through Cranelift AND all six LLVM opt levels -- seven compiles, not one.
+    #[test]
+    fn cranelift_and_llvm_agree_on_random_first_order_programs(src in arb_first_order_expr()) {
+        let (prog, ds) = parse(&src);
+        prop_assume!(ds.is_empty()); // skip anything that does not parse/type-check
+        let core = desugar(&prog.unwrap());
+        let reference = run(&src);
+        let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift);
+        match (reference, cl) {
+            (Ok(rv), NativeRun::Ran(cl_outcome)) => {
+                let cl_value = decode_asm(&cl_outcome, &rv).expect("decode cranelift");
+                prop_assert_eq!(&cl_value, &rv, "cranelift vs reference disagree: {}", src);
+                for opt in OPT_LEVELS {
+                    match run_native_with(&core, DEFAULT_CAPS, Codegen::Llvm { opt }) {
+                        NativeRun::Ran(o) => {
+                            let llvm_value = decode_asm(&o, &rv).expect("decode llvm");
+                            prop_assert_eq!(&llvm_value, &rv, "llvm {:?} vs reference disagree: {}", opt, src);
+                            prop_assert_eq!(&llvm_value, &cl_value, "llvm {:?} vs cranelift disagree: {}", opt, src);
+                        }
+                        other => prop_assert!(false, "llvm {:?} did not run {}: {:?}", opt, src, other),
+                    }
+                }
+            }
+            // Unreachable with THIS generator, and deliberately strict about it: `arb_first_order_expr`
+            // emits only `+`, monus `-`, comparisons and `if` over `0..1000` literals, none of which
+            // can error in the reference or fault/cap natively, so `(Ok, Ran)` is the only legitimate
+            // pairing. If the generator ever gains a PARTIAL operation (`head`/`tail`, division, a
+            // recursive `fn`), a "reference errors AND the backend faults" pairing becomes a legitimate
+            // agreement and this arm must grow a case for it rather than staying a blanket failure.
+            (r, n) => prop_assert!(false, "mismatch for {}:\n  reference={:?}\n  cranelift={:?}", src, r, n),
+        }
+    }
+}

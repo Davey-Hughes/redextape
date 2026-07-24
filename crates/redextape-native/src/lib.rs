@@ -1,7 +1,8 @@
-//! The native backend: Core -> register-asm -> machine code (JIT), a fourth oracle leg.
-use redextape_core::core::Core;
+//! The native backend: Core -> register-asm -> machine code (JIT/AOT via Cranelift, or JIT via
+//! LLVM), a fourth oracle leg with two swappable codegen backends behind the `Codegen` seam.
+use redextape_core::core::{Core, NodeId};
 use redextape_core::tm::{AsmOutcome, Caps, LowerError};
-#[cfg(feature = "cranelift")]
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
 use redextape_core::tm::{Program, defunc, lower_asm};
 
 pub mod analysis;
@@ -11,6 +12,10 @@ pub mod aot;
 pub mod codegen;
 #[cfg(feature = "cranelift")]
 pub mod jit;
+#[cfg(feature = "llvm")]
+pub mod llvm;
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
+pub mod shared;
 
 #[cfg(feature = "cranelift")]
 pub use aot::{LinkOptions, LinkerChoice, emit_object, link_executable};
@@ -114,7 +119,8 @@ pub enum NativeRun {
 /// `lower_asm(core)` first; only retry through `defunc` when it rejects the program as higher-order
 /// (`LowerError::Unsupported`). A `LowerError::TooDeep` (the deep-Core stack-safety guard) is
 /// returned immediately rather than retried -- see that function's doc comment for the rationale.
-#[cfg(feature = "cranelift")]
+/// Shared by both backends (Cranelift and LLVM), so its cfg is widened to either being enabled.
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
 fn lower_program(core: &Core) -> Result<Program, LowerError> {
     match lower_asm(core) {
         Ok(p) => return Ok(p),
@@ -125,23 +131,110 @@ fn lower_program(core: &Core) -> Result<Program, LowerError> {
     lower_asm(&defunced)
 }
 
-/// Lower `core` (reusing lower_asm/defunc), JIT-compile, and run. Panic-free, bounded by `caps`.
-#[cfg(feature = "cranelift")]
-pub fn run_native(core: &Core, caps: Caps) -> NativeRun {
-    match lower_program(core) {
-        Ok(prog) => jit::compile_and_run(&prog, caps),
-        Err(e) => NativeRun::LowerError(e),
+/// A `LowerError::Unsupported` reporting that `redextape-native` was built without `feature`'s
+/// codegen backend compiled in. Available in every feature config (including neither), so both
+/// `run_native_with` variants below can name it. When BOTH backends are compiled in, every call site
+/// is `#[cfg]`'d out (every arm has its real backend), so this legitimately goes unused there.
+#[allow(dead_code)]
+fn unsupported(feature: &str) -> NativeRun {
+    NativeRun::LowerError(LowerError::Unsupported {
+        node: NodeId::default(),
+        what: format!("redextape-native built without the `{feature}` feature"),
+    })
+}
+
+/// LLVM optimization level (drives both the IR pass pipeline and the JIT codegen opt level).
+/// Unconditional (no feature gate) so downstream code can name it in any build configuration.
+///
+/// `O0`..`O3` are LLVM's speed-oriented ladder; `Os`/`Oz` are its two SIZE-oriented pipelines, which
+/// are not simply points on that ladder — they trade throughput for code size. They are opt-in: `O3`
+/// remains the default. See `llvm::pass_pipeline` / `llvm::opt_level` / `llvm::size_attributes` for
+/// how each variant reaches LLVM.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OptLevel {
+    /// No optimization: the IR pass pipeline is skipped entirely and codegen runs unoptimized. The
+    /// unoptimized leg the `O0 == O1..O3/Os/Oz` differential compares every other level against.
+    O0,
+    /// `-O1`: the cheap, mostly-local pipeline.
+    O1,
+    /// `-O2`: the standard optimization pipeline.
+    O2,
+    /// `-O3`: the most aggressive speed-oriented pipeline (more inlining and unrolling than `-O2`).
+    #[default]
+    O3,
+    /// `-Os`: optimize for SIZE while keeping most of `-O2`'s speed work — the pipeline backs off
+    /// the transforms that trade code size for throughput (inlining thresholds, loop unrolling,
+    /// vectorization). Carried by the `default<Os>` pipeline plus the `optsize` function attribute.
+    Os,
+    /// `-Oz`: aggressively MINIMIZE size, accepting a speed cost `Os` would not. Carried by the
+    /// `default<Oz>` pipeline plus the `minsize` AND `optsize` function attributes (matching what
+    /// `clang -Oz` emits).
+    Oz,
+}
+
+/// Which native codegen backend to run. Unconditional (no feature gate) for the same reason as
+/// `OptLevel`; an arm whose backend isn't compiled in reports `unsupported(..)` at call time.
+#[derive(Clone, Copy, Debug)]
+pub enum Codegen {
+    Cranelift,
+    Llvm { opt: OptLevel },
+}
+
+/// Lower `core` and run it on the selected native codegen backend. `run_native` == Cranelift.
+///
+/// This is the `any(cranelift, llvm)` half of `run_native_with`: at least one backend is compiled
+/// in, so lowering to `Program` is always worth attempting first; each match arm then runs its own
+/// backend if compiled in, or reports `unsupported(..)` otherwise.
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
+pub fn run_native_with(core: &Core, caps: Caps, codegen: Codegen) -> NativeRun {
+    let prog = match lower_program(core) {
+        Ok(p) => p,
+        Err(e) => return NativeRun::LowerError(e),
+    };
+    match codegen {
+        Codegen::Cranelift => {
+            #[cfg(feature = "cranelift")]
+            {
+                jit::compile_and_run(&prog, caps)
+            }
+            #[cfg(not(feature = "cranelift"))]
+            {
+                let _ = (&prog, caps);
+                unsupported("cranelift")
+            }
+        }
+        Codegen::Llvm { opt } => {
+            #[cfg(feature = "llvm")]
+            {
+                llvm::compile_and_run(&prog, caps, opt)
+            }
+            #[cfg(not(feature = "llvm"))]
+            {
+                let _ = (&prog, caps, opt);
+                unsupported("llvm")
+            }
+        }
     }
 }
 
-/// Without the `cranelift` feature there is no codegen backend to run the lowered program on; report
-/// that plainly (as an unsupported-lowering outcome) rather than making the crate fail to build.
-#[cfg(not(feature = "cranelift"))]
-pub fn run_native(_core: &Core, _caps: Caps) -> NativeRun {
-    NativeRun::LowerError(LowerError::Unsupported {
-        node: redextape_core::core::NodeId::default(),
-        what: "redextape-native built without the `cranelift` feature".into(),
-    })
+/// Neither backend is compiled in: there is no codegen to lower a `Program` for, so this variant
+/// skips `lower_program` entirely and reports `unsupported(..)` for whichever backend was asked for.
+#[cfg(not(any(feature = "cranelift", feature = "llvm")))]
+pub fn run_native_with(_core: &Core, caps: Caps, codegen: Codegen) -> NativeRun {
+    let _ = caps;
+    match codegen {
+        Codegen::Cranelift => unsupported("cranelift"),
+        Codegen::Llvm { opt } => {
+            let _ = opt;
+            unsupported("llvm")
+        }
+    }
+}
+
+/// Lower `core` (reusing lower_asm/defunc), JIT-compile, and run on the Cranelift backend.
+/// Panic-free, bounded by `caps`. Exactly `run_native_with(core, caps, Codegen::Cranelift)`.
+pub fn run_native(core: &Core, caps: Caps) -> NativeRun {
+    run_native_with(core, caps, Codegen::Cranelift)
 }
 
 #[cfg(test)]

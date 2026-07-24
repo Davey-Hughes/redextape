@@ -188,19 +188,53 @@ produce. The oracle validates every combination.
   bound — but it does NOT *uniquely* escape it, because the asm INTERPRETER (`run_asm`) already runs `u64`
   (that bound is the TM's alone). Native's real payoff is the compiled-to-hardware milestone + the Tier-C
   prerequisite + the codegen cross-check. **When:** pairs with the optimizing-compiler track as its Tier C.
+  **Phase 2 — LLVM behind the `Codegen` seam: DONE** (merged 2026-07-24, `782bc73..1fa29fe`; spec
+  `docs/superpowers/specs/2026-07-24-native-llvm-phase2-design.md`, plan
+  `docs/superpowers/plans/2026-07-24-native-llvm-phase2.md`). A second native backend on **inkwell 0.9 /
+  LLVM 22.1.8** behind `--features llvm`, feature-gated so `redextape-core` stays WASM-clean and the default
+  build needs no LLVM toolchain. `src/llvm.rs` is the asm→LLVM-IR walk (mirrors `codegen.rs` arm-for-arm);
+  `src/shared.rs` holds the codegen-agnostic prep both backends now share (`reg_over_cap`, `param_count`,
+  `native_depth_cap`); `Codegen { Cranelift, Llvm { opt } }` + `run_native_with` are the seam. **Real
+  optimization:** `default<O1..O3>` IR pipelines (`O0` deliberately skips the pipeline) plus size levels
+  `Os`/`Oz`. **Oracle:** `reference == cranelift == llvm` with a *direct* per-opt-level cross-backend
+  comparison, faults/caps compared across backends, and a first-order proptest. `cargo run --example
+  llvm_demo -p redextape-native --features llvm`.
+  - **Two findings worth remembering.** (1) The `default<O_>` pipelines *delete unused function
+    declarations*, so `FunctionValue` handles captured before optimizing dangle — mapping one onto the
+    execution engine is UB. The fix is to re-fetch the `rt_*` imports **by name** from the post-pass module.
+    (2) For `-Os`/`-Oz` the **pipeline string alone does nothing**: with the `optsize`/`minsize` function
+    attributes suppressed, `Oz` comes out *larger* than `O3` (63 vs 61 IR instructions); with them, 32 vs 61.
+    The attributes are the entire effect. Caveat: the size levels are near-inert on typical output from this
+    front-end — every emitted callee is either recursive (the inliner declines) or single-call-site (inlined
+    even at `Oz`), so loop unrolling is the only discriminating lever.
+  **Phase 3 — AOT (a real runnable binary): DONE** (merged 2026-07-24, `9f173e8`; spec
+  `docs/superpowers/specs/2026-07-23-native-aot-phase3-design.md`, plan
+  `docs/superpowers/plans/2026-07-23-native-aot-phase3.md`). ADDITIVE — JIT and AOT coexist: both
+  `JITModule` (`cranelift-jit`) and `ObjectModule` (`cranelift-object`) implement the same
+  `cranelift-module::Module` trait, so the asm→CLIF walk is written once against `Module` and targets
+  either. `emit_object` produces a real linkable `.o`; `link_executable` (a platform-aware `cc` link)
+  produces a standalone binary that runs and prints its result. The `rt_*` host functions moved to a new
+  no-Cranelift `redextape-native-rt` crate (rlib + staticlib); decode happens at the edge, driven by a
+  serialized CONFIG blob. `cargo run --example aot_demo -p redextape-native` → `5050` from an actual binary.
+
   **Remaining phases / follow-ons (not yet planned; pursue after confirmation):**
-  - **Phase 2 — LLVM behind the same `NativeCodegen` seam.** The full −O3 native-optimization payoff (the
-    deep-opt goal) + a `cranelift == llvm` codegen-vs-codegen differential. Feature-gated (`--features llvm`);
-    the runtime/decode/oracle are reused UNCHANGED. This is the natural next step toward the optimizer's Tier C.
-  - **Phase 3 — AOT (a real runnable binary), ADDITIVE — JIT and AOT coexist.** v1 JITs-and-runs in-process
-    (the executable buffer is ephemeral, discarded after the run — nothing on disk). Phase 3 does NOT replace
-    that: both `JITModule` (`cranelift-jit`) and `ObjectModule` (`cranelift-object`) implement the SAME
-    `cranelift-module::Module` trait, so the codegen (`declare_function`/`define_function`, the asm→CLIF walk)
-    is written once against `Module` and can target EITHER. The oracle keeps the JIT path (compile-and-run
-    in-process — what the differential test needs); AOT *adds* an object-emit path alongside it to produce a
-    real linkable `.o` / standalone executable — a native binary you can run outside the oracle. Same
-    `NativeCodegen` seam, two module targets. The runtime host functions (`rt_*`) become a small linked object;
-    decode happens at the edge.
+  - **`run_asm` vs native `Loc`/`Rr` frame semantics — a real, pre-existing, backend-agnostic divergence.**
+    `run_asm`'s `Call` clones the caller's locals into the saved frame and leaves `vm.locals` in place, so a
+    callee **inherits** the caller's `Loc` values; both compiled backends give the callee a **zeroed** bank.
+    The same class applies to `Rr` (a single global VM register in the interpreter, a per-function slot in
+    both compilers): `$main: li rr,1; call g; halt` with `g: ret` gives `asm=1`, `cranelift=0`, `llvm=0`.
+    Reachable through the public `compile_and_run` APIs with a hand-built `Program`, but **unreachable from
+    `lower_asm`/`defunc` output** — verified by a definite-assignment dataflow check over 30 real programs
+    (recursion, mutual list recursion, `while`, heap ops, `map`/`fold`, currying, immutable capture,
+    mutable capture via boxing): 0 findings. (`Arg` is structurally immune: `partition` sets
+    `arity = max_arg_read + 1`.) That is exactly why no oracle leg catches it. Fixing it means changing
+    `redextape-core`'s `Call` semantics — a change to the *reference* oracle leg, so it deserves its own
+    slice and a full re-validation, not a drive-by.
+  - **AOT via LLVM.** Phase 3's object emit is Cranelift-only (`aot.rs` is `cranelift`-gated); Phase 2's
+    LLVM backend is JIT-only. Emitting a `.o` through LLVM's `TargetMachine::write_to_memory_buffer` would
+    give the AOT path the `-O3`/`-Os`/`-Oz` pipelines too, and would let the size levels be measured in
+    **machine-code bytes** rather than IR instruction count (the honest observable for `-Oz`, which nothing
+    currently measures).
   - **Pedagogical "show the native code" view — cheap, high demo value.** A `print`-style dump of the
     generated code for a program, sibling to `print_asm` / `print_tm` / `print_lambda`: the human-readable
     Cranelift IR (`Function::display()`, already available post-`define_function`) and/or a disassembly of the

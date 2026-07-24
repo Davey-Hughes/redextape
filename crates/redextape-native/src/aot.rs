@@ -25,6 +25,7 @@ use redextape_core::ty::Ty;
 
 use crate::AotError;
 use crate::codegen::{self, CodegenError};
+use crate::shared::{native_depth_cap, param_count, reg_over_cap};
 
 /// Map a backend-agnostic `CodegenError` (bare cause) into this driver's `AotError::Codegen`.
 fn cg(e: CodegenError) -> AotError {
@@ -63,7 +64,7 @@ fn serialize_ty(ty: &Ty, out: &mut Vec<u8>) -> Result<(), AotError> {
 ///
 /// `caps.mem` is intentionally omitted: it bounds the reference interpreter's cloned-`Vec<Frame>`
 /// words and has no native analog (native recursion is bounded by `depth_cap` instead — see
-/// `codegen::native_depth_cap`).
+/// `shared::native_depth_cap`).
 fn serialize_config(caps: Caps, depth_cap: u64, ty: &Ty) -> Result<Vec<u8>, AotError> {
     let mut b = Vec::new();
     for w in [caps.steps, caps.stack, caps.heap, depth_cap] {
@@ -88,7 +89,7 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty) -> Result<Vec<u8>, AotEr
     // Reject an absurd register index BEFORE building any function (a billion-slot `Variable` bank
     // would attempt a multi-GB allocation whose failure aborts the process). `run_asm`/the JIT guard
     // the same way; here it becomes `Unsupported` (a "not a value" outcome, out of oracle scope).
-    if codegen::reg_over_cap(prog) {
+    if reg_over_cap(prog) {
         return Err(AotError::Unsupported("register index exceeds MAX_REGISTERS".into()));
     }
     let subs = crate::analysis::partition(prog).map_err(AotError::Lower)?;
@@ -111,7 +112,7 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty) -> Result<Vec<u8>, AotEr
     let mut fbctx = cranelift_frontend::FunctionBuilderContext::new();
     for sub in &subs {
         let mut ctx = module.make_context();
-        ctx.func.signature = codegen::word_signature(&module, codegen::param_count(sub));
+        ctx.func.signature = codegen::word_signature(&module, param_count(sub));
         let fid = decls.func_ids[&sub.entry];
         ctx.func.name = UserFuncName::user(0, fid.as_u32());
         codegen::translate_subroutine(&mut module, &mut ctx, &mut fbctx, prog, sub, &decls).map_err(cg)?;
@@ -120,7 +121,7 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty) -> Result<Vec<u8>, AotEr
     }
 
     // CONFIG data object: `caps` + the frame-size-aware `depth_cap` + the result `ty`.
-    let depth_cap = codegen::native_depth_cap(prog, &subs, caps);
+    let depth_cap = native_depth_cap(prog, &subs, caps);
     let config = serialize_config(caps, depth_cap, ty)?;
     let config_len = config.len() as i64;
     let config_id = module
