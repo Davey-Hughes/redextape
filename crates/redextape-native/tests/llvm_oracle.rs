@@ -53,19 +53,28 @@ fn ran(run: &NativeRun, expected: &Value, label: &str) -> Value {
 
 /// `reference == cranelift == llvm` for every `OptLevel`, with an explicit `cranelift == llvm`
 /// comparison at each level (not just each transitively agreeing with `reference`).
+///
+/// BOTH backends are swept: Cranelift's `opt_level` collapses the six levels onto three
+/// (`none`/`speed`/`speed_and_size`), so sweeping it is partly redundant compile work — but it is
+/// what makes "every `(backend, OptLevel)` pair agrees" a checked claim rather than an inference from
+/// how the levels happen to map today.
 fn assert_cross_backend_agree(src: &str) {
     let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
     let core = core_of(src);
 
-    let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift);
-    let cl_value = ran(&cl, &reference, &format!("cranelift `{src}`"));
-    assert_eq!(cl_value, reference, "cranelift vs reference disagree for: {src}");
-
+    let mut cl_values = Vec::new();
     for opt in OPT_LEVELS {
+        let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt });
+        let cl_value = ran(&cl, &reference, &format!("cranelift {opt:?} `{src}`"));
+        assert_eq!(cl_value, reference, "cranelift {opt:?} vs reference disagree for: {src}");
+        cl_values.push(cl_value);
+    }
+
+    for (opt, cl_value) in OPT_LEVELS.into_iter().zip(&cl_values) {
         let llvm = run_native_with(&core, DEFAULT_CAPS, Codegen::Llvm { opt });
         let llvm_value = ran(&llvm, &reference, &format!("llvm {opt:?} `{src}`"));
         assert_eq!(llvm_value, reference, "llvm {opt:?} vs reference disagree for: {src}");
-        assert_eq!(llvm_value, cl_value, "llvm {opt:?} vs cranelift disagree for: {src}");
+        assert_eq!(&llvm_value, cl_value, "llvm {opt:?} vs cranelift {opt:?} disagree for: {src}");
     }
 }
 
@@ -102,21 +111,21 @@ fn llvm_faults_and_caps_match() {
     for src in ["head(nil)", "tail(nil)"] {
         let core = core_of(src);
         assert!(matches!(run(src), Err(RunError::Runtime(_))), "the reference must fault on `{src}`");
-        let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift);
-        let NativeRun::Fault(cl_msg) = &cl else { panic!("cranelift `{src}`: {cl:?}") };
         for opt in OPT_LEVELS {
+            let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt });
+            let NativeRun::Fault(cl_msg) = &cl else { panic!("cranelift {opt:?} `{src}`: {cl:?}") };
             let llvm = run_native_with(&core, DEFAULT_CAPS, Codegen::Llvm { opt });
             let NativeRun::Fault(llvm_msg) = &llvm else { panic!("llvm {opt:?} `{src}`: {llvm:?}") };
-            assert_eq!(llvm_msg, cl_msg, "llvm {opt:?} vs cranelift fault message for `{src}`");
+            assert_eq!(llvm_msg, cl_msg, "llvm {opt:?} vs cranelift {opt:?} fault message for `{src}`");
         }
     }
 
     // `spin(n) = spin(n)`: infinite recursion must trip the depth cap on every backend/opt level, not
     // overflow the OS stack (an uncatchable process abort) or loop forever.
     let spin = core_of("fn spin(n){ spin(n) } spin(0)");
-    let cl_spin = run_native_with(&spin, DEFAULT_CAPS, Codegen::Cranelift);
-    assert!(matches!(cl_spin, NativeRun::HitCap), "cranelift spin: {cl_spin:?}");
     for opt in OPT_LEVELS {
+        let cl_spin = run_native_with(&spin, DEFAULT_CAPS, Codegen::Cranelift { opt });
+        assert!(matches!(cl_spin, NativeRun::HitCap), "cranelift {opt:?} spin: {cl_spin:?}");
         let llvm_spin = run_native_with(&spin, DEFAULT_CAPS, Codegen::Llvm { opt });
         assert!(matches!(llvm_spin, NativeRun::HitCap), "llvm {opt:?} spin: {llvm_spin:?}");
     }
@@ -145,19 +154,27 @@ proptest! {
     /// The literal cross-backend leg on randomized first-order programs: `cranelift == llvm` at
     /// every opt level, AND both against `reference`. Bounded to 12 cases (rather than the 64 the
     /// single-backend generator in `native_oracle.rs` uses) because each case here JIT-compiles
-    /// through Cranelift AND all six LLVM opt levels -- seven compiles, not one.
+    /// thirteen times: one Cranelift pivot run (which establishes the reference/native outcome
+    /// pairing the match below is built on), then BOTH backends at all six opt levels.
     #[test]
     fn cranelift_and_llvm_agree_on_random_first_order_programs(src in arb_first_order_expr()) {
         let (prog, ds) = parse(&src);
         prop_assume!(ds.is_empty()); // skip anything that does not parse/type-check
         let core = desugar(&prog.unwrap());
         let reference = run(&src);
-        let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift);
+        let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt: OptLevel::default() });
         match (reference, cl) {
             (Ok(rv), NativeRun::Ran(cl_outcome)) => {
                 let cl_value = decode_asm(&cl_outcome, &rv).expect("decode cranelift");
                 prop_assert_eq!(&cl_value, &rv, "cranelift vs reference disagree: {}", src);
                 for opt in OPT_LEVELS {
+                    match run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt }) {
+                        NativeRun::Ran(o) => {
+                            let cl_at = decode_asm(&o, &rv).expect("decode cranelift");
+                            prop_assert_eq!(&cl_at, &rv, "cranelift {:?} vs reference disagree: {}", opt, src);
+                        }
+                        other => prop_assert!(false, "cranelift {:?} did not run {}: {:?}", opt, src, other),
+                    }
                     match run_native_with(&core, DEFAULT_CAPS, Codegen::Llvm { opt }) {
                         NativeRun::Ran(o) => {
                             let llvm_value = decode_asm(&o, &rv).expect("decode llvm");

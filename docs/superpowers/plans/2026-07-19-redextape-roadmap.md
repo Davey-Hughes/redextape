@@ -161,8 +161,23 @@ produce. The oracle validates every combination.
   - **Tier B — asm → asm (helps TM + native, not λ — λ lowers Core→λ directly, bypassing asm).**
     Register allocation / slot minimization (shrinks the REG bank + tape length most), peephole,
     dead-store elimination, jump threading, strength reduction on the `Instr` stream.
-  - **Tier C — native codegen (native only).** GVN, LICM, loop unrolling, vectorization, native regalloc —
-    the LLVM/Cranelift internal passes, free once native IR is emitted (see the native-backend track).
+  - **Tier C — native codegen (native only): DONE** (merged 2026-07-24, `e7ca13b..451cbb4`; spec
+    `docs/superpowers/specs/2026-07-24-tier-c-opt-measurement-design.md`, plan
+    `.../plans/2026-07-24-tier-c-opt-measurement.md`). GVN, LICM, loop unrolling, vectorization, native
+    regalloc — the LLVM/Cranelift internal passes. LLVM's arrived with native Phase 2; this slice added
+    **Cranelift's opt levels, which had never been set** (so every native oracle leg had been validating
+    unoptimized codegen), plus the instrumentation that makes the tier falsifiable: `measure`/`opt_report`
+    (compile time, object bytes, end-to-end time per backend × level), a per-target-triple object-size
+    regression gate, `scripts/check-all.sh`, and a Forgejo `rust-llvm` CI job invoking that same script.
+    **Two findings worth remembering.** (1) `native_depth_cap`'s documented safety argument — "`O1+` only
+    ever shrinks frames" — is **backwards for Cranelift**: optimized frames are ~3× *larger*, because
+    live-range splitting spills more distinct values than there are asm registers. The margin survives
+    (worst 2.94 words/register against the 4 that `BYTES_PER_VAR = 32` charges), so the constant was left
+    alone — the right guard is a test that notices if the ratio moves, not a bigger constant. (2) The honest
+    payoff is modest: Cranelift 0.7–1.8% smaller objects with compile time in the noise; LLVM 11–40% smaller
+    for ~2.6× the compile time; and `Os`/`Oz` are byte-identical to `speed` on Cranelift, so six levels yield
+    two distinct outputs there. **Tiers A and B now have a validated `-O3` reference point to measure
+    against — and the TM's step-count goldens, not native wall-clock, are where their value will show.**
   Two properties make this project special: the **oracle is the optimizer's test harness** (every pass must
   keep `reference == λ == TM (== native)` — a miscompiling pass is refuted instantly by whichever leg
   breaks), and the **TM makes savings measurable** (the step-count goldens quantify exactly what a pass

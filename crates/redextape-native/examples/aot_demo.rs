@@ -5,13 +5,13 @@ fn main() {
     use redextape_core::tm::{DEFAULT_CAPS, lower_asm};
     use redextape_core::typeck::result_type;
     use redextape_core::{desugar::desugar, parser::parse};
-    use redextape_native::{LinkOptions, emit_object, link_executable};
+    use redextape_native::{LinkOptions, OptLevel, emit_object, link_executable};
 
     let src = "fn sum(n){ if n == 0 { 0 } else { n + sum(n - 1) } } sum(100)";
     let ast = parse(src).0.unwrap();
     let ty = result_type(&ast).unwrap();
     let prog = lower_asm(&desugar(&ast)).unwrap();
-    let obj = emit_object(&prog, DEFAULT_CAPS, &ty).unwrap();
+    let obj = emit_object(&prog, DEFAULT_CAPS, &ty, OptLevel::default()).unwrap();
     println!("program : {src}");
     println!("emitted : {} bytes of native object code (type {ty:?})", obj.len());
 

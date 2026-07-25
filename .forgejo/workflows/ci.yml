@@ -66,8 +66,62 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Feature matrix (non-LLVM configs)
+        run: ./scripts/check-all.sh --no-llvm
       - name: Test + coverage
         run: cargo llvm-cov --workspace --all-targets --fail-under-lines 80   # tune the gate as the code grows
+
+  # The LLVM backend, in its own job so a cold or upstream-broken LLVM install never delays the fast
+  # default-feature signal from `rust`. Deliberately NOT continue-on-error: a job permitted to fail
+  # is not coverage.
+  #
+  # Caches /var/cache/apt/archives (the downloaded .deb payloads), NOT /usr/lib/llvm-22 itself, and
+  # the install step always runs. Verified by pulling the actual apt.llvm.org .debs and running
+  # `objdump -p` on llvm-config: it dynamically NEEDs libz3.so.4 and libzstd.so.1, which come from
+  # the separate libz3-4/libzstd1 packages that dpkg installs to /usr/lib/x86_64-linux-gnu/, outside
+  # /usr/lib/llvm-22. A directory-only cache that skips the whole install step on a hit would restore
+  # an llvm-config that can't even execute (missing shared libs) on every run after the first, on a
+  # fresh per-job container that never retains apt state. Caching the apt archive instead keeps
+  # `apt-get install` unconditional and idempotent (so the runtime deps are always registered) while
+  # still skipping the network download once the archive cache is warm.
+  rust-llvm:
+    needs: detect
+    if: needs.detect.outputs.has_rust == 'true'
+    runs-on: docker
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust (respects rust-toolchain.toml)
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+          . "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup show
+      - name: Cache the LLVM 22 apt archive (avoids re-downloading ~300MB of .debs)
+        uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: /var/cache/apt/archives
+          key: apt-llvm-22-${{ runner.os }}
+      - name: Install LLVM 22 (unconditional — apt skips re-downloading cached .debs, but always installs)
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends lsb-release wget software-properties-common gnupg
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          /tmp/llvm.sh 22
+          "$LLVM_SYS_221_PREFIX/bin/llvm-config" --version   # fail loudly on a version mismatch
+      - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-llvm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-llvm-
+      - name: Feature matrix (all configs, including LLVM)
+        run: ./scripts/check-all.sh
+      - name: Optimization report (informational, never gating)
+        run: cargo run --release --example opt_report -p redextape-native --features llvm
 
   web:
     needs: detect
@@ -107,13 +161,14 @@ jobs:
 
   # Build + push the static-site image — only after rust + web pass, never on a PR.
   docker:
-    needs: [detect, rust, web]
+    needs: [detect, rust, rust-llvm, web]
     if: >-
       !cancelled()
       && github.event_name != 'pull_request'
       && needs.detect.outputs.has_rust == 'true'
       && needs.detect.outputs.has_web == 'true'
       && needs.rust.result == 'success'
+      && needs.rust-llvm.result == 'success'
       && needs.web.result == 'success'
     runs-on: docker                    # node:lts (runner default) + the host docker socket the runner mounts
     steps:

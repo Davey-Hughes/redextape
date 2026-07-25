@@ -1,0 +1,54 @@
+# redextape native object-size baseline
+# target: aarch64-apple-darwin
+# cranelift: 0.134.2
+# llvm: 221.0.1
+# regenerate: cargo run --release --example opt_report -p redextape-native --features llvm -- --write-baseline
+# program	backend	opt	bytes
+loop1000000	cranelift	O0	1112
+loop1000000	cranelift	O1	1104
+loop1000000	cranelift	O2	1104
+loop1000000	cranelift	O3	1104
+loop1000000	cranelift	Os	1104
+loop1000000	cranelift	Oz	1104
+loop1000000	llvm	O0	1009
+loop1000000	llvm	O1	873
+loop1000000	llvm	O2	873
+loop1000000	llvm	O3	873
+loop1000000	llvm	Os	873
+loop1000000	llvm	Oz	873
+sum30000	cranelift	O0	1304
+sum30000	cranelift	O1	1296
+sum30000	cranelift	O2	1296
+sum30000	cranelift	O3	1296
+sum30000	cranelift	Os	1296
+sum30000	cranelift	Oz	1296
+sum30000	llvm	O0	1393
+sum30000	llvm	O1	1209
+sum30000	llvm	O2	1201
+sum30000	llvm	O3	1217
+sum30000	llvm	Os	1201
+sum30000	llvm	Oz	1265
+list30000	cranelift	O0	1384
+list30000	cranelift	O1	1360
+list30000	cranelift	O2	1360
+list30000	cranelift	O3	1360
+list30000	cranelift	Os	1360
+list30000	cranelift	Oz	1360
+list30000	llvm	O0	1521
+list30000	llvm	O1	1353
+list30000	llvm	O2	1345
+list30000	llvm	O3	1377
+list30000	llvm	Os	1345
+list30000	llvm	Oz	1465
+map30000	cranelift	O0	2440
+map30000	cranelift	O1	2400
+map30000	cranelift	O2	2400
+map30000	cranelift	O3	2400
+map30000	cranelift	Os	2400
+map30000	cranelift	Oz	2400
+map30000	llvm	O0	3281
+map30000	llvm	O1	2297
+map30000	llvm	O2	2289
+map30000	llvm	O3	2337
+map30000	llvm	Os	2289
+map30000	llvm	Oz	2633

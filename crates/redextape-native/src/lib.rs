@@ -15,6 +15,8 @@ pub mod jit;
 #[cfg(feature = "llvm")]
 pub mod llvm;
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
+pub mod measure;
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
 pub mod shared;
 
 #[cfg(feature = "cranelift")]
@@ -66,6 +68,7 @@ pub fn emit_object(
     _prog: &redextape_core::tm::Program,
     _caps: Caps,
     _ty: &redextape_core::ty::Ty,
+    _opt: OptLevel,
 ) -> Result<Vec<u8>, AotError> {
     Err(AotError::Unsupported("redextape-native built without the `cranelift` feature".into()))
 }
@@ -143,13 +146,15 @@ fn unsupported(feature: &str) -> NativeRun {
     })
 }
 
-/// LLVM optimization level (drives both the IR pass pipeline and the JIT codegen opt level).
-/// Unconditional (no feature gate) so downstream code can name it in any build configuration.
+/// The optimization level, shared by BOTH backends. Unconditional (no feature gate) so downstream
+/// code can name it in any build configuration.
 ///
-/// `O0`..`O3` are LLVM's speed-oriented ladder; `Os`/`Oz` are its two SIZE-oriented pipelines, which
-/// are not simply points on that ladder — they trade throughput for code size. They are opt-in: `O3`
-/// remains the default. See `llvm::pass_pipeline` / `llvm::opt_level` / `llvm::size_attributes` for
-/// how each variant reaches LLVM.
+/// The naming follows LLVM, which is the backend that can express every variant distinctly: `O0`..`O3`
+/// are its speed-oriented ladder, and `Os`/`Oz` are its two SIZE-oriented pipelines, which are not
+/// simply points on that ladder — they trade throughput for code size. They are opt-in: `O3` remains
+/// the default. See `llvm::pass_pipeline` / `llvm::opt_level` / `llvm::size_attributes` for how each
+/// variant reaches LLVM, and `codegen::cranelift_opt_level` for how the six collapse onto Cranelift's
+/// three (`none`/`speed`/`speed_and_size`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptLevel {
     /// No optimization: the IR pass pipeline is skipped entirely and codegen runs unoptimized. The
@@ -176,7 +181,13 @@ pub enum OptLevel {
 /// `OptLevel`; an arm whose backend isn't compiled in reports `unsupported(..)` at call time.
 #[derive(Clone, Copy, Debug)]
 pub enum Codegen {
-    Cranelift,
+    /// The Cranelift backend. `opt` selects the ISA's `opt_level` — see `codegen::cranelift_opt_level`
+    /// for the six-to-three collapse. Cranelift has no IR-pass-pipeline knob equivalent to LLVM's
+    /// `default<O_>`; the level reaches instruction selection and register allocation only.
+    Cranelift { opt: OptLevel },
+    /// The LLVM backend. `opt` selects BOTH the IR pass pipeline (`llvm::pass_pipeline`'s
+    /// `default<O_>`, plus the `optsize`/`minsize` attributes for the size levels) and the JIT's own
+    /// codegen level (`llvm::opt_level`) — so all six variants stay distinct here, unlike Cranelift.
     Llvm { opt: OptLevel },
 }
 
@@ -192,14 +203,14 @@ pub fn run_native_with(core: &Core, caps: Caps, codegen: Codegen) -> NativeRun {
         Err(e) => return NativeRun::LowerError(e),
     };
     match codegen {
-        Codegen::Cranelift => {
+        Codegen::Cranelift { opt } => {
             #[cfg(feature = "cranelift")]
             {
-                jit::compile_and_run(&prog, caps)
+                jit::compile_and_run(&prog, caps, opt)
             }
             #[cfg(not(feature = "cranelift"))]
             {
-                let _ = (&prog, caps);
+                let _ = (&prog, caps, opt);
                 unsupported("cranelift")
             }
         }
@@ -223,7 +234,10 @@ pub fn run_native_with(core: &Core, caps: Caps, codegen: Codegen) -> NativeRun {
 pub fn run_native_with(_core: &Core, caps: Caps, codegen: Codegen) -> NativeRun {
     let _ = caps;
     match codegen {
-        Codegen::Cranelift => unsupported("cranelift"),
+        Codegen::Cranelift { opt } => {
+            let _ = opt;
+            unsupported("cranelift")
+        }
         Codegen::Llvm { opt } => {
             let _ = opt;
             unsupported("llvm")
@@ -231,10 +245,11 @@ pub fn run_native_with(_core: &Core, caps: Caps, codegen: Codegen) -> NativeRun 
     }
 }
 
-/// Lower `core` (reusing lower_asm/defunc), JIT-compile, and run on the Cranelift backend.
-/// Panic-free, bounded by `caps`. Exactly `run_native_with(core, caps, Codegen::Cranelift)`.
+/// Lower `core` (reusing lower_asm/defunc), JIT-compile, and run on the Cranelift backend at the
+/// default optimization level. Panic-free, bounded by `caps`. Exactly
+/// `run_native_with(core, caps, Codegen::Cranelift { opt: OptLevel::default() })`.
 pub fn run_native(core: &Core, caps: Caps) -> NativeRun {
-    run_native_with(core, caps, Codegen::Cranelift)
+    run_native_with(core, caps, Codegen::Cranelift { opt: OptLevel::default() })
 }
 
 #[cfg(test)]

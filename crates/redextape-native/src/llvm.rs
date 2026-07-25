@@ -54,7 +54,7 @@ use inkwell::execution_engine::{ExecutionEngine, JitFunction};
 use inkwell::intrinsics::Intrinsic;
 use inkwell::module::{Linkage, Module};
 use inkwell::passes::PassBuilderOptions;
-use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine};
+use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine};
 use inkwell::types::BasicMetadataTypeEnum;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate, OptimizationLevel};
@@ -951,6 +951,44 @@ fn build_and_run(prog: &Program, subs: &[Subroutine], caps: Caps, depth_cap: u64
     }
 }
 
+/// Emit `prog` as a native object file at `opt`, for MEASUREMENT ONLY. This is deliberately NOT an
+/// AOT path: there is no linking step, no `rt_run` driver, and no CONFIG blob (contrast
+/// `aot::emit_object`, which builds one). The `rt_*` imports are left as unresolved external
+/// declarations in the returned bytes — an object file can name symbols it does not define; only a
+/// linker would need to resolve them, and this function never invokes one. It exists purely so the
+/// LLVM backend can be sized in the SAME UNIT as Cranelift's `aot::emit_object` — object bytes —
+/// since LLVM's only other size proxy (`instruction_count`, used by the differential tests above) is
+/// an IR metric, not comparable across backends. Even so, an LLVM object's byte count is only
+/// meaningful compared against ANOTHER LLVM object at a different `opt`: object-format and
+/// symbol-table overhead differ from Cranelift's, so a cross-backend byte comparison is not.
+///
+/// Composes exactly what `build_and_run` does up to (not including) the JIT step:
+/// `host_target_machine` picks the codegen level, `build_module` builds, decorates
+/// (`apply_size_attributes`) and verifies the IR, `optimize` runs the `-O1`..`-Oz` pass pipeline
+/// over the SAME module, and `write_to_memory_buffer` asks the SAME `TargetMachine` to emit the
+/// post-pass module as a real object rather than JIT-compiling it. That is also why no
+/// `FunctionValue` handle is at risk here: `build_module` returns only the entry's NAME (a `String`),
+/// nothing below reads a handle obtained before `optimize`, and the `default<O_>` pipeline deleting
+/// dead functions (the hazard `apply_size_attributes` documents) has nothing to dangle.
+///
+/// `caps` is accepted only for signature parity with `compile_and_run`/`aot::emit_object` (and so a
+/// future AOT-via-LLVM CONFIG blob could reuse this function's shape without a signature change) —
+/// it has NO effect on the emitted object. Every cap, including the frame-size-aware `depth_cap`
+/// derived from it, is threaded through the `Runtime` the compiled code is CALLED with
+/// (`Runtime::with_depth_cap`, above) rather than baked into the IR; this function never constructs
+/// a `Runtime` at all, so there is nothing here for `caps` to reach.
+pub fn object_bytes(prog: &Program, _caps: Caps, opt: OptLevel) -> Result<Vec<u8>, String> {
+    if reg_over_cap(prog) {
+        return Err(format!("register index exceeds MAX_REGISTERS ({MAX_REGISTERS})"));
+    }
+    let subs = partition(prog).map_err(|e| format!("{e:?}"))?;
+    let machine = host_target_machine(opt)?;
+    let ctx = Context::create();
+    let (module, _entry_name) = build_module(&ctx, &machine, prog, &subs, opt)?;
+    optimize(&module, &machine, opt)?;
+    machine.write_to_memory_buffer(&module, FileType::Object).map(|buf| buf.as_slice().to_vec()).map_err(ir_err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1206,9 +1244,17 @@ mod tests {
 
     /// A recursive `countdown(n)` whose subroutine writes `fillers` extra `Loc` registers and reads
     /// every one of them AFTER its self-call, keeping them live across the call so the native frame
-    /// is genuinely FAT. Copied in shape from `jit::tests::fat_recursive_countdown`: the point is to
-    /// check the SHARED `native_depth_cap` frame estimate is still conservative for LLVM's frame
-    /// layout, which is not Cranelift's.
+    /// is genuinely FAT. Deliberately DIFFERS in shape from `jit::tests::fat_recursive_countdown` now:
+    /// that fixture uses mutually INDEPENDENT fillers (`Loc(i) = Arg(0) + (i+1)`, each derived from
+    /// `Arg(0)` alone), because that is what makes optimized Cranelift frames grow (live-range
+    /// splitting spills every independently-live value, ~2.85x at 200 fillers). This fixture instead
+    /// keeps the DEPENDENT saturating chain below (`Loc(i) = Arg(0) + Loc(i-1)`), which barely grows
+    /// under optimization (~1.01x) and so would not exercise Cranelift's growth — but that is fine
+    /// here because LLVM's binding case is `O0`, not its optimized levels: every register slot is
+    /// still its own entry-block `alloca` at `O0` regardless of chain shape, while `O1+`'s
+    /// `mem2reg`/SROA promote them into SSA and shrink the frame instead. That is the CURRENT
+    /// rationale, not an established measurement: a follow-up is filed to actually measure this
+    /// fixture's frame at `O0` vs `O3` and confirm or retract it.
     ///
     /// Each filler is DERIVED from `Arg(0)` rather than being a constant: `Loc(0) = Arg(0) +
     /// Arg(0)`, then `Loc(i) = Arg(0) + Loc(i-1)` — a chain of *saturating* adds (`llvm.uadd.sat`,
@@ -1832,6 +1878,22 @@ mod tests {
             assert_ne!(addr, 0, "`{name}` has a null host address");
         }
         assert_eq!(module.get_functions().count(), rt_symbols().len(), "declare_rt added an unmapped import");
+    }
+
+    /// `object_bytes` must emit a real, host-recognisable object file, and `Oz` must actually shrink
+    /// it relative to `O0` — the same shrink-under-size-pressure evidence
+    /// `the_size_pipelines_produce_strictly_smaller_ir_than_the_speed_pipelines` gives the IR, but
+    /// here on the artifact this function exists to measure.
+    #[test]
+    fn object_bytes_emits_a_real_object_that_shrinks_under_oz() {
+        let core = desugar(&parse("fn twice(x){ x + x } twice(21)").0.unwrap());
+        let prog = crate::lower_program(&core).unwrap();
+        let o0 = object_bytes(&prog, DEFAULT_CAPS, OptLevel::O0).expect("O0 object");
+        let oz = object_bytes(&prog, DEFAULT_CAPS, OptLevel::Oz).expect("Oz object");
+        // Mach-O 64-bit magic (0xFEEDFACF, little-endian) or ELF magic, depending on host.
+        assert!(o0.len() > 64, "object is implausibly small: {} bytes", o0.len());
+        assert!(&o0[..4] == b"\xcf\xfa\xed\xfe" || &o0[..4] == b"\x7fELF", "not a recognizable object file");
+        assert_ne!(o0, oz, "O0 and Oz produced byte-identical objects");
     }
 }
 

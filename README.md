@@ -48,6 +48,21 @@ Infrastructure is in place ahead of the code (config-only until v1 implementatio
 Planned crate layout: `redextape-core` (lib), `redextape-cli` (bin), `redextape-wasm` (cdylib),
 `redextape-lsp` (bin); web app under `web/`.
 
+## Checks
+
+`scripts/check-all.sh` runs the full feature matrix — `cargo fmt` once, then clippy *and* tests for
+each of the four configurations: the default (`cranelift`), `--no-default-features`, `--features
+llvm`, and `--no-default-features --features llvm`. CI runs this same script. Pass `--no-llvm` to
+skip the LLVM configurations when no LLVM 22 toolchain is installed.
+
+The pre-commit hooks intentionally run only `cargo fmt` and `cargo clippy` — fast enough for every
+commit. Run `scripts/check-all.sh` before merging.
+
+Object-size baselines live in `crates/redextape-native/baselines/<target-triple>.txt` and gate the
+`size_baseline` test with a 10% band. Regenerate after an intentional codegen change:
+
+    cargo run --release --example opt_report -p redextape-native --features llvm -- --write-baseline
+
 ## License
 
 [GNU General Public License v3.0](LICENSE.md)

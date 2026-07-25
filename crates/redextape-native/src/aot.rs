@@ -23,9 +23,9 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use redextape_core::tm::{Caps, Program};
 use redextape_core::ty::Ty;
 
-use crate::AotError;
 use crate::codegen::{self, CodegenError};
 use crate::shared::{native_depth_cap, param_count, reg_over_cap};
+use crate::{AotError, OptLevel};
 
 /// Map a backend-agnostic `CodegenError` (bare cause) into this driver's `AotError::Codegen`.
 fn cg(e: CodegenError) -> AotError {
@@ -74,14 +74,15 @@ fn serialize_config(caps: Caps, depth_cap: u64, ty: &Ty) -> Result<Vec<u8>, AotE
     Ok(b)
 }
 
-/// Compile `prog` to a host object file (`.o`) for `caps`, recording `ty` in the CONFIG blob so the
-/// standalone binary can print its result. Returns the object bytes; never panics.
+/// Compile `prog` to a host object file (`.o`) for `caps` at optimization level `opt`, recording
+/// `ty` in the CONFIG blob so the standalone binary can print its result. Returns the object bytes;
+/// never panics.
 ///
 /// The object exports `main` (a shim calling `rt_run`), keeps every subroutine symbol (Tier 0
 /// debuggability), defines a local `redextape_config` data object, and imports `rt_run` plus the
 /// `rt_*` runtime helpers — all resolved at link time (Task 6). A non-value `ty`, an over-cap
 /// register index, or a partition failure is returned as the corresponding `AotError`, not a panic.
-pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty) -> Result<Vec<u8>, AotError> {
+pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result<Vec<u8>, AotError> {
     // Reject a non-value result type up front (before building any IR) so a `Fun`/`Var` program
     // fails cleanly rather than doing codegen work it would only discard.
     serialize_ty(ty, &mut Vec::new())?;
@@ -95,9 +96,15 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty) -> Result<Vec<u8>, AotEr
     let subs = crate::analysis::partition(prog).map_err(AotError::Lower)?;
 
     // Host ISA. `is_pic` (position-independent) is friendliest to the system linker across macOS and
-    // Linux; the JIT does this internally, we make it explicit for the object module.
+    // Linux; the JIT sets it the other way (`false`, which `JITModule` requires), so each driver states
+    // its own. `opt_level` goes through the SAME mapping the JIT uses (`codegen::cranelift_opt_level`),
+    // so an object and a JIT run at the same `OptLevel` share both the codegen (`codegen.rs`, driven
+    // identically here and in `jit.rs`) and the optimization settings; only `is_pic` differs, so the
+    // emitted code is equivalent but not byte-for-byte identical (PIC changes how globals and calls
+    // are addressed).
     let mut flags = settings::builder();
     flags.set("is_pic", "true").map_err(|e| AotError::Object(e.to_string()))?;
+    flags.set("opt_level", codegen::cranelift_opt_level(opt)).map_err(|e| AotError::Object(e.to_string()))?;
     let isa_builder = cranelift_native::builder().map_err(|e| AotError::Object(e.to_string()))?;
     let isa = isa_builder.finish(settings::Flags::new(flags)).map_err(|e| AotError::Object(e.to_string()))?;
     let builder = ObjectBuilder::new(isa, "redextape_aot", cranelift_module::default_libcall_names())
@@ -347,7 +354,7 @@ mod tests {
 
     #[test]
     fn emits_a_valid_object_with_main_and_rt_run() {
-        let bytes = emit_object(&prog("2 + 3"), DEFAULT_CAPS, &Ty::Nat).unwrap();
+        let bytes = emit_object(&prog("2 + 3"), DEFAULT_CAPS, &Ty::Nat, OptLevel::default()).unwrap();
         let obj = cranelift_object::object::File::parse(&*bytes).expect("valid object");
         let syms: Vec<String> = obj.symbols().filter_map(|s| s.name().ok().map(str::to_string)).collect();
         // `main` is defined/exported; the subroutine names are present (Tier 0 debuggability);
@@ -361,7 +368,21 @@ mod tests {
     fn rejects_a_non_value_result_type() {
         // A function-typed result has no runtime representation to print: `Unsupported`, not a panic.
         let ty = Ty::Fun(vec![Ty::Nat], Box::new(Ty::Nat));
-        assert!(matches!(emit_object(&prog("1 + 1"), DEFAULT_CAPS, &ty), Err(AotError::Unsupported(_))));
+        assert!(matches!(
+            emit_object(&prog("1 + 1"), DEFAULT_CAPS, &ty, OptLevel::default()),
+            Err(AotError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn the_opt_level_reaches_the_cranelift_isa() {
+        // `none` and `speed` must not produce byte-identical objects for a program with obvious
+        // optimization headroom. If they do, the flag never reached the ISA builder — which is exactly
+        // the bug this task fixes, so without this test the wiring could silently regress.
+        let p = prog("fn twice(x){ x + x } twice(21)");
+        let o0 = emit_object(&p, DEFAULT_CAPS, &Ty::Nat, OptLevel::O0).expect("O0 object");
+        let o3 = emit_object(&p, DEFAULT_CAPS, &Ty::Nat, OptLevel::O3).expect("O3 object");
+        assert_ne!(o0, o3, "opt_level did not reach the Cranelift ISA (O0 and O3 emitted identical objects)");
     }
 
     #[test]

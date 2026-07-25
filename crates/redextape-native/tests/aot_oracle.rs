@@ -16,7 +16,7 @@ use redextape_core::ty::Ty;
 use redextape_core::typeck::result_type;
 use redextape_core::value::format_value;
 use redextape_core::{desugar::desugar, parser::parse, run};
-use redextape_native::{LinkOptions, emit_object, link_executable};
+use redextape_native::{LinkOptions, OptLevel, emit_object, link_executable};
 
 fn cc_available() -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join("cc").is_file()))
@@ -50,7 +50,7 @@ fn run_binary(src: &str, name: &str) -> (String, i32) {
     let ty = concretize(result_type(&ast).unwrap());
     let core = desugar(&ast);
     let prog = lower_asm(&core).or_else(|_| defunc(&core).and_then(|d| lower_asm(&d))).unwrap();
-    let obj = emit_object(&prog, DEFAULT_CAPS, &ty).unwrap();
+    let obj = emit_object(&prog, DEFAULT_CAPS, &ty, OptLevel::default()).unwrap();
     let out = std::env::temp_dir().join(format!("redextape_aot_{name}"));
     link_executable(&obj, &out, &LinkOptions::default()).expect("link");
     let output = std::process::Command::new(&out).output().expect("run binary");

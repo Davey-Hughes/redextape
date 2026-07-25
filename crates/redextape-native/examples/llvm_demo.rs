@@ -22,11 +22,11 @@ fn main() {
     println!("program  : {src}");
     println!("expected : {}\n", format_value(&expected));
 
-    let cranelift = match run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift) {
+    let cranelift = match run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt: OptLevel::O3 }) {
         NativeRun::Ran(o) => format_value(&decode_asm(&o, &expected).unwrap()),
         other => format!("{other:?}"),
     };
-    println!("cranelift    : {cranelift}");
+    println!("cranelift -O3: {cranelift}");
 
     for (label, opt) in [
         ("llvm -O0", OptLevel::O0),

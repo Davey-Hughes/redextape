@@ -16,16 +16,51 @@ const STACK_MARGIN: usize = 8 << 20;
 /// Deliberately conservative bytes charged per register slot when estimating a native frame — one
 /// Cranelift `Variable`, or one LLVM entry-block `alloca`, depending on the backend.
 ///
-/// Measurements, both backends (this constant now underwrites TWO frame layouts, so tightening it
-/// means clearing BOTH):
-/// * Cranelift, debug build (i64 slot + no-reg-reuse spills): ~8–16 bytes per local.
-/// * LLVM at `O0`, a 203-local frame (`8832` bytes charged): ~1680 bytes actual. `O1+` is
-///   *smaller* still (`mem2reg`/SROA promote the register banks into SSA and the register allocator
-///   keeps most of them in machine registers), so **`O0` is the binding case** for LLVM.
+/// Measurements, both backends (this constant now underwrites TWO frame layouts at SIX opt levels
+/// each, so tightening it means clearing all of them):
+/// * Cranelift at `opt_level=none`: ~8–16 bytes per local (i64 slot + no-reg-reuse spills).
+/// * Cranelift at `speed`/`speed_and_size` — **the binding case for Cranelift, and LARGER than
+///   `none`**: read out of the emitted prologue's `sp` adjustment for a recursive subroutine whose
+///   every local is a non-rematerializable function of the argument and is live across the
+///   self-call. Frames measured (aarch64, `sub sp` + saved-register pushes), unoptimized → optimized:
+///   50 locals `432 → 832`, 100 `832 → 2368`, 200 `1632 → 4656`, 400 `3232 → 9376`,
+///   800 `6432 → 18976`, 1600 `12832 → 38192`, 3200 `25632 → 76592`. Optimization roughly TRIPLES
+///   the frame (live-range splitting spills more distinct values than there are asm registers), and
+///   the ratio converges from below to **~3.0 words per asm register** — bounded, not growing.
+/// * LLVM, a 203-local frame (`8832` bytes charged): ~1680 bytes actual, and the opt level barely
+///   moves it — by under 2%, in a direction that is SHAPE-dependent rather than structural. Measured
+///   the same way (aarch64, `objdump` over `llvm::object_bytes` output, the `countdown` prologue),
+///   200 fillers unless noted:
 ///
-/// `32` over-estimates on purpose — over-estimating yields a SHALLOWER safe depth (earlier, harmless
-/// `HitCap`), whereas under-estimating risks a real stack overflow (a process abort), which is
-/// unacceptable. Totality wins over tightness.
+///   | filler shape | `O0` | `O1`/`O2`/`O3`/`Os`/`Oz` |
+///   | --- | ---: | ---: |
+///   | independent (the shape `jit.rs`'s totality sweep ships) | 1680 B | **1712 B** (+1.9%) |
+///   | dependent chain (the `llvm.rs` fixture) | 1680 B | 1648 B (−1.9%) |
+///   | independent, 800 fillers | 6480 B | **6512 B** (+0.5%) |
+///
+///   An earlier revision of this doc asserted that LLVM's `O1+` is always *smaller* (`mem2reg`/SROA
+///   promoting the register banks into SSA) and concluded that `O0` was LLVM's binding case. The
+///   first row falsifies it: `O1+` is LARGER for the independent shape, and the shrink held only for
+///   the fixture `llvm.rs` happens to use. That is the same "optimization only shrinks frames"
+///   reasoning the Cranelift row above already disproves — do not reintroduce it. No safety
+///   consequence either way: LLVM sits at ~8 bytes per register slot against the 32 charged
+///   (4.3–5.2x headroom) at EVERY level, nowhere near binding.
+///
+/// **Cranelift at `speed`/`speed_and_size` is therefore the binding case for BOTH backends** — the
+/// fattest frame measured anywhere, at any level, on either backend.
+///
+/// The numbers above were read off AOT objects (`aot::emit_object`, the path `objdump` can read) and
+/// transfer to the JIT verbatim: emitting with `is_pic=false` — the JIT's exact flag, see
+/// `jit::host_isa` — produces byte-identical `countdown` prologues (`sub sp` of `0x600` at `none`,
+/// `0x11d0` at `speed`, `0x49c0` at 800 fillers, each plus 96 B of saved-register pushes, i.e. the
+/// 1632 / 4656 / 18976 B rows above) and identical object sizes. There is no separate JIT
+/// calibration to keep in sync with this one.
+///
+/// `32` = 4 words charged per register slot, against the ~3.0 words optimized Cranelift was measured
+/// to use: the margin is ~4.8x at 50 locals and converges to ~1.33x for thousands. It over-estimates
+/// on purpose — over-estimating yields a SHALLOWER safe depth (earlier, harmless `HitCap`), whereas
+/// under-estimating risks a real stack overflow (a process abort), which is unacceptable. Totality
+/// wins over tightness, so this must not be tightened toward the measured numbers.
 ///
 /// Inlining does not break the estimate even though it makes one native frame hold several
 /// subroutines' worth of slots: inlining a call also inlines that callee's own `rt_enter`, so the
@@ -105,10 +140,14 @@ pub(crate) fn n_arg_vars(prog: &Program, sub: &Subroutine) -> u32 {
 /// frame, and `safe_depth = budget / frame_bytes` is how many fit.
 ///
 /// The estimate is BACKEND- and OPT-LEVEL-agnostic by construction: it is computed from the ASM
-/// `Program` alone, and `BYTES_PER_VAR` is calibrated (see its doc) against the largest frame either
-/// backend was measured to build — LLVM at `O0`, which spills every register slot. `O1+` only ever
-/// shrinks frames, and inlining preserves the bytes-per-`rt_enter` ratio, so a level the constant
-/// was not measured at cannot make the bound unsafe.
+/// `Program` alone, and `BYTES_PER_VAR` is calibrated (see its doc) against **Cranelift at
+/// `speed`/`speed_and_size` — the binding case for both backends**, where live-range splitting
+/// spills ~3x what `none` does, i.e. ~3.0 words per asm register against the 4 charged. LLVM is
+/// nowhere near binding at any level: ~8 bytes per slot against 32 charged, with under 2% variation
+/// between its levels (in a shape-dependent direction — `O1+` is not uniformly smaller; see
+/// `BYTES_PER_VAR`). Inlining, where a backend does it, preserves the bytes-per-`rt_enter` ratio. So
+/// a level the constant was not measured at cannot make the bound unsafe — but tightening the
+/// constant toward either backend's measurement would.
 ///
 /// This cap is computed at EMIT time (both for the JIT, immediately before running, and for AOT,
 /// baked into the CONFIG blob `emit_object` writes) against `RUN_STACK_SIZE` — the same constant the

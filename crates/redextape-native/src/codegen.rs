@@ -44,6 +44,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use redextape_core::core::BinOp;
 use redextape_core::tm::{Instr, Program, Reg};
 
+use crate::OptLevel;
 use crate::analysis::Subroutine;
 use crate::shared::{n_arg_vars, param_count};
 
@@ -56,6 +57,22 @@ pub(crate) struct CodegenError(pub String);
 /// this into its outcome type, so the message here is the bare cause.
 fn codegen_error(msg: impl std::fmt::Display) -> CodegenError {
     CodegenError(msg.to_string())
+}
+
+/// The single mapping from this crate's six-level `OptLevel` onto Cranelift's three-level
+/// `opt_level` ISA setting. The collapse is deliberate: Cranelift exposes `none`/`speed`/
+/// `speed_and_size` only, so `O1..O3` all mean `speed` and both size levels mean `speed_and_size`.
+/// LLVM's finer ladder lives in `llvm::opt_level`/`llvm::pass_pipeline`; keeping both mappings
+/// single-sourced is what stops the two backends from drifting apart on what a level means.
+///
+/// Both Cranelift drivers (`jit::build_and_run` and `aot::emit_object`) route through here, so the
+/// JIT and the AOT object can never be built at different levels for the same `OptLevel`.
+pub(crate) fn cranelift_opt_level(opt: OptLevel) -> &'static str {
+    match opt {
+        OptLevel::O0 => "none",
+        OptLevel::O1 | OptLevel::O2 | OptLevel::O3 => "speed",
+        OptLevel::Os | OptLevel::Oz => "speed_and_size",
+    }
 }
 
 /// The host pointer type (`module.target_config().pointer_type()`), e.g. `I64` on 64-bit targets.
