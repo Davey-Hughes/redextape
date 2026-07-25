@@ -106,13 +106,15 @@ fn apply(rule: &Rule, tapes: &mut [Tape]) {
     }
 }
 
-/// The shared iterative loop. `record` optionally collects a step trace. Defensive on a malformed
-/// machine (missing state / out-of-range target / stuck state all halt).
+/// The shared iterative loop. `record` optionally collects a step trace; `counts` optionally
+/// accumulates a per-state step tally (indexed by state id, charging the state being *left*).
+/// Defensive on a malformed machine (missing state / out-of-range target / stuck state all halt).
 fn run(
     m: &Machine,
     init: &[Vec<Symbol>],
     caps: Caps,
     mut record: Option<&mut Vec<Step>>,
+    mut counts: Option<&mut Vec<u64>>,
 ) -> (Vec<Tape>, StateId, Status) {
     // `m.tapes` is an unbounded `usize` from the machine (not yet validated here); the initial live
     // cell count is >= the tape count (each tape starts with >= 1 cell), so the cells cap already
@@ -148,6 +150,15 @@ fn run(
             rec.push(Step { state: cur, tapes: tapes.iter().map(Tape::snapshot).collect() });
         }
         apply(rule, &mut tapes);
+        if let Some(c) = counts.as_deref_mut()
+            && let Some(slot) = c.get_mut(cur as usize)
+        {
+            // `cur` indexed `m.states` successfully above and `simulate_counts` sizes `counts` from
+            // that same machine, so this is in bounds on every real call. `get_mut` rather than `[]`
+            // makes the "never panics" contract line above structurally true instead of true by
+            // argument — a caller passing a short `counts` loses tallies rather than panicking.
+            *slot = slot.saturating_add(1);
+        }
         cur = rule.next;
         steps += 1;
     }
@@ -155,16 +166,27 @@ fn run(
 
 /// Simulate to a halt or a cap, without retaining the step trace.
 pub fn simulate(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<Tape>, Status) {
-    let (tapes, _final, status) = run(m, init, caps, None);
+    let (tapes, _final, status) = run(m, init, caps, None, None);
     (tapes, status)
 }
 
 /// Simulate, recording every step (before it is applied) for the scrubbable trace / view models.
 pub fn simulate_trace(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> Trace {
     let mut steps = Vec::new();
-    let (tapes, final_state, status) = run(m, init, caps, Some(&mut steps));
+    let (tapes, final_state, status) = run(m, init, caps, Some(&mut steps), None);
     let final_tapes = tapes.iter().map(Tape::snapshot).collect();
     Trace { steps, final_state, final_tapes, status }
+}
+
+/// Simulate `m`, accumulating how many steps were taken *in* each state, indexed by state id.
+///
+/// The counting analogue of `simulate_trace`, and the reason it exists: a trace records tapes per
+/// step, so counting a 178k-step program through it would allocate 178k tape snapshots. This
+/// allocates one `u64` per state, once.
+pub fn simulate_counts(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<u64>, Status) {
+    let mut counts = vec![0u64; m.states.len()];
+    let (_tapes, _final, status) = run(m, init, caps, None, Some(&mut counts));
+    (counts, status)
 }
 
 #[cfg(test)]
@@ -183,6 +205,41 @@ mod tests {
                     rules: vec![
                         Rule { read: vec![Some('1')], write: vec![None], moves: vec![Move::R], next: 0 },
                         Rule { read: vec![None], write: vec![Some('1')], moves: vec![Move::S], next: 1 },
+                    ],
+                },
+                State { name: "halt".into(), accept: true, rules: vec![] },
+            ],
+        }
+    }
+
+    /// A 1-tape machine that spends a *different, nonzero* number of steps in each of two non-accept
+    /// states, so per-state counts can distinguish `c[state_being_left]` from `c[0]`.
+    ///
+    /// Phase A sweeps right over the `'1'`s (staying in state 0), then a wildcard rule hands off to
+    /// state 1 without moving; phase B sweeps right over the `'2'`s, then a wildcard rule hands off
+    /// to the accept state. Both hand-off rules are themselves steps, charged to the state they
+    /// leave. On `['1','1','1','2','2','2','2','2']` that is 3+1 = 4 steps leaving state 0 and
+    /// 5+1 = 6 steps leaving state 1 -- distinct and nonzero, which is what makes the count vector
+    /// pin down the indexing.
+    fn two_phase() -> Machine {
+        Machine {
+            tapes: 1,
+            start: 0,
+            states: vec![
+                State {
+                    name: "phase_a".into(),
+                    accept: false,
+                    rules: vec![
+                        Rule { read: vec![Some('1')], write: vec![None], moves: vec![Move::R], next: 0 },
+                        Rule { read: vec![None], write: vec![None], moves: vec![Move::S], next: 1 },
+                    ],
+                },
+                State {
+                    name: "phase_b".into(),
+                    accept: false,
+                    rules: vec![
+                        Rule { read: vec![Some('2')], write: vec![None], moves: vec![Move::R], next: 1 },
+                        Rule { read: vec![None], write: vec![None], moves: vec![Move::S], next: 2 },
                     ],
                 },
                 State { name: "halt".into(), accept: true, rules: vec![] },
@@ -258,6 +315,63 @@ mod tests {
         let (tapes, status) = simulate(&m, &[], DEFAULT_CAPS);
         assert_eq!(status, Status::HitCap);
         assert!(tapes.is_empty(), "must not have allocated any tapes");
+    }
+
+    #[test]
+    fn per_state_counts_sum_to_the_total_step_count() {
+        // Cross-check counting against tracing on the SAME machine: the trace's step list is the
+        // independent ground truth for how many steps ran, and where.
+        let m = increment();
+        let trace = simulate_trace(&m, &[vec!['1', '1', '1']], DEFAULT_CAPS);
+        let (counts, status) = simulate_counts(&m, &[vec!['1', '1', '1']], DEFAULT_CAPS);
+        assert_eq!(counts.len(), m.states.len(), "counts must be indexed by state id");
+        assert_eq!(counts.iter().sum::<u64>(), trace.steps.len() as u64, "counts must account for every step");
+        assert_eq!(status, trace.status, "counting must not change the outcome");
+        // Per-state agreement, not just the total: a counter that dumped every step into one bucket
+        // would pass a sum-only check.
+        for (state, &n) in counts.iter().enumerate() {
+            let from_trace = trace.steps.iter().filter(|s| s.state == state as StateId).count() as u64;
+            assert_eq!(n, from_trace, "state {state}: counted {n}, trace shows {from_trace}");
+        }
+    }
+
+    #[test]
+    fn counts_are_charged_to_the_state_actually_left_not_all_to_state_zero() {
+        // The two fixtures above cannot catch a counter that ignores the current state: `increment()`
+        // happens to leave state 0 on all four of its steps, and `spin()` has a single state. So both
+        // would still pass if the increment were hardcoded to `c[0] += 1`, and the state-indexing
+        // could regress silently -- which matters because these counts get folded through the source
+        // map into a per-construct histogram, where "all cost in state 0's bucket" looks plausible
+        // rather than obviously broken.
+        //
+        // `two_phase()` fixes that by spending a DISTINCT, NONZERO number of steps in two different
+        // non-accept states. Hand-derived on `['1','1','1','2','2','2','2','2']`:
+        //   state 0 (phase_a): 3 rightward moves over the '1's + 1 hand-off to phase_b   = 4
+        //   state 1 (phase_b): 5 rightward moves over the '2's + 1 hand-off to halt      = 6
+        //   state 2 (halt):    accept, never left                                        = 0
+        // Distinct (4 != 6) so a swapped/collapsed index shows up; nonzero so neither is vacuous.
+        let m = two_phase();
+        let init = [vec!['1', '1', '1', '2', '2', '2', '2', '2']];
+        let (counts, status) = simulate_counts(&m, &init, DEFAULT_CAPS);
+        assert_eq!(status, Status::Halted);
+        assert_eq!(counts, vec![4, 6, 0], "each step must be charged to the state it leaves");
+        // Corroborate the hand-derivation against the trace, the same independent ground truth the
+        // cross-check test uses.
+        let trace = simulate_trace(&m, &init, DEFAULT_CAPS);
+        assert_eq!(counts.iter().sum::<u64>(), trace.steps.len() as u64);
+        for (state, &n) in counts.iter().enumerate() {
+            let from_trace = trace.steps.iter().filter(|s| s.state == state as StateId).count() as u64;
+            assert_eq!(n, from_trace, "state {state}: counted {n}, trace shows {from_trace}");
+        }
+    }
+
+    #[test]
+    fn counting_a_capped_run_still_accounts_for_every_step_taken() {
+        let m = spin();
+        let caps = Caps { steps: 1000, ..DEFAULT_CAPS };
+        let (counts, status) = simulate_counts(&m, &[], caps);
+        assert_eq!(status, Status::HitCap);
+        assert_eq!(counts.iter().sum::<u64>(), 1000, "a capped run must still count exactly the steps it took");
     }
 
     #[test]

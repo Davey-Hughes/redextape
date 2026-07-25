@@ -45,6 +45,12 @@ struct Ctx {
     next_local: u32,
     next_label: u32,
     depth: u32,
+    /// Parallel to `code`: `origins[i]` is the `Core` node whose lowering emitted `code[i]`.
+    origins: Vec<NodeId>,
+    /// The node currently being lowered. Instructions with no direct source analogue — jumps, frame
+    /// setup, a function's prologue — bill their ENCLOSING construct, which is what a reader wants:
+    /// the cost of an `if` should include the branch it required.
+    current: NodeId,
 }
 
 impl Ctx {
@@ -57,11 +63,14 @@ impl Ctx {
             next_local: 0,
             next_label: 0,
             depth: 0,
+            origins: Vec::new(),
+            current: 0,
         }
     }
 
     fn emit(&mut self, i: Instr) {
         self.code.push(i);
+        self.origins.push(self.current);
     }
 
     fn fresh_local(&mut self) -> Reg {
@@ -115,12 +124,26 @@ impl Ctx {
     }
 }
 
-/// Lower a whole program: compute its value into `Rr`, then `Halt`.
-pub fn lower_asm(core: &Core) -> Result<Program, LowerError> {
+/// Lower `core` to register-asm, returning the program AND its source map: `origins[i]` is the
+/// `Core` node whose lowering emitted `code[i]`.
+///
+/// The map is returned rather than stored on `Program` deliberately. `Program` derives `PartialEq`
+/// and is compared in the asm goldens; a side-table field would change equality and break them for a
+/// reason that has nothing to do with what the program computes.
+pub fn lower_asm_mapped(core: &Core) -> Result<(Program, Vec<NodeId>), LowerError> {
     let mut ctx = Ctx::new();
     lower_into(&mut ctx, core, Reg::Rr)?;
+    // `lower_into` restores `current` to whatever it was on entry once it returns, so without this
+    // the final `Halt` (emitted outside any `lower_into` call) would bill a stale node.
+    ctx.current = core.id();
     ctx.emit(Instr::Halt);
-    Ok(Program { code: ctx.code, labels: ctx.labels })
+    Ok((Program { code: ctx.code, labels: ctx.labels }, ctx.origins))
+}
+
+/// Lower `core` to register-asm. Exactly `lower_asm_mapped` with the source map discarded — there is
+/// ONE lowering implementation, so the mapped and unmapped paths cannot drift.
+pub fn lower_asm(core: &Core) -> Result<Program, LowerError> {
+    lower_asm_mapped(core).map(|(p, _)| p)
 }
 
 /// Emit code that computes `core` into register `dst`.
@@ -130,7 +153,10 @@ fn lower_into(ctx: &mut Ctx, core: &Core, dst: Reg) -> Result<(), LowerError> {
         ctx.depth -= 1;
         return Err(LowerError::TooDeep { node: core.id() });
     }
+    let saved = ctx.current;
+    ctx.current = core.id();
     let r = lower_inner(ctx, core, dst);
+    ctx.current = saved;
     ctx.depth -= 1;
     r
 }
@@ -403,6 +429,100 @@ mod tests {
     use crate::parser::parse;
     use crate::tm::asm::{AsmRun, DEFAULT_CAPS, decode_asm, run_asm};
     use crate::value::Value;
+
+    /// Every owned `Core` id, reachable from `core` by an ITERATIVE walk (mirrors `Core`'s own
+    /// hand-written iterative `Drop`): a big list literal desugars to a spine tens of thousands of
+    /// nodes deep, and a recursive walk here would overflow the native stack just like an unguarded
+    /// recursive `Drop` would.
+    fn all_node_ids(core: &Core) -> std::collections::BTreeSet<NodeId> {
+        let mut out = std::collections::BTreeSet::new();
+        let mut stack = vec![core];
+        while let Some(n) = stack.pop() {
+            out.insert(n.id());
+            push_children(n, &mut stack);
+        }
+        out
+    }
+
+    /// Push every child of `core` onto `stack`. Mirrors `core::take_core_children`'s match arms
+    /// exactly (grouping and all) so a new `Core` variant cannot be silently missed here: that
+    /// function is the authority on which children each variant has, since it must already enumerate
+    /// all of them for `Core`'s iterative `Drop` to be correct.
+    fn push_children<'a>(core: &'a Core, stack: &mut Vec<&'a Core>) {
+        match core {
+            Core::BinOp(_, _, a, b) => {
+                stack.push(a);
+                stack.push(b);
+            }
+            Core::Seq(_, a, b) | Core::While(_, a, b) => {
+                stack.push(a);
+                stack.push(b);
+            }
+            Core::If(_, a, b, c) => {
+                stack.push(a);
+                stack.push(b);
+                stack.push(c);
+            }
+            Core::Lambda(_, _, b) | Core::Assign(_, _, b) => {
+                stack.push(b);
+            }
+            Core::Apply(_, f, args) => {
+                stack.push(f);
+                stack.extend(args.iter());
+            }
+            Core::Let { value, body, .. } | Core::LetRec { value, body, .. } => {
+                stack.push(value);
+                stack.push(body);
+            }
+            // Truly childless leaves.
+            Core::Nat(..) | Core::Bool(..) | Core::Unit(..) | Core::Var(..) => {}
+        }
+    }
+
+    #[test]
+    fn every_instruction_has_an_origin_from_the_program_it_lowered() {
+        let core = desugar(&parse("fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(3)").0.unwrap());
+        let (prog, origins) = lower_asm_mapped(&core).expect("lowers");
+        assert_eq!(origins.len(), prog.code.len(), "origins must be parallel to code");
+        // Every origin must be a real node id in the program being lowered.
+        let ids = all_node_ids(&core);
+        for (i, id) in origins.iter().enumerate() {
+            assert!(ids.contains(id), "instruction {i} ({:?}) has origin {id}, not a node in the Core", prog.code[i]);
+        }
+    }
+
+    /// The program's terminating `Halt` must bill the top-level node, not a stale one.
+    ///
+    /// `Halt` is the one instruction `lower_asm_mapped` emits itself, AFTER `lower_into` has already
+    /// restored `current` to its pre-call value (0) — so it needs the explicit `ctx.current =
+    /// core.id()` that precedes it. Without that line the `Halt` silently bills node id 0, which is a
+    /// perfectly real node (the first leaf `desugar` mints) and therefore slips past
+    /// `every_instruction_has_an_origin_from_the_program_it_lowered`'s membership check. This test
+    /// pins the attribution itself, so deleting that line fails a test instead of quietly
+    /// mis-attributing the whole program's terminator.
+    #[test]
+    fn the_final_halt_bills_the_top_level_node() {
+        let core = desugar(&parse("1 + 2 * 3").0.unwrap());
+        // Guards against the test going vacuous: it can only distinguish "billed the root" from
+        // "billed the leftover 0" while the root's id is not itself 0.
+        assert_ne!(core.id(), 0, "root id must differ from Ctx::new's initial `current`");
+        let (prog, origins) = lower_asm_mapped(&core).expect("lowers");
+        assert!(matches!(prog.code.last(), Some(Instr::Halt)), "the program ends in Halt: {:?}", prog.code.last());
+        assert_eq!(
+            *origins.last().expect("a non-empty program"),
+            core.id(),
+            "the final Halt must bill the top-level node, not whatever `current` was left holding"
+        );
+    }
+
+    #[test]
+    fn arithmetic_attributes_to_its_own_binop_node() {
+        // `2 * 3` lowers to two `Li`s and a `Bin`; the `Bin` must bill the BinOp node, not a literal.
+        let core = desugar(&parse("2 * 3").0.unwrap());
+        let (prog, origins) = lower_asm_mapped(&core).expect("lowers");
+        let bin = prog.code.iter().position(|i| matches!(i, Instr::Bin(..))).expect("a Bin instruction");
+        assert_eq!(origins[bin], core.id(), "the multiply must bill the BinOp node");
+    }
 
     /// source -> desugar -> lower_asm -> run_asm -> decode_asm, using the reference result as the
     /// type witness. Returns the decoded value (equals the reference iff asm computed the right one).

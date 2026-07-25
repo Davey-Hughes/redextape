@@ -5,6 +5,7 @@
 //! delivering the intermediate oracle `reference == asm-interpreter`.
 
 pub mod asm;
+pub mod attribute;
 pub mod build;
 pub mod decode;
 pub mod defunc;
@@ -18,12 +19,13 @@ pub mod syntax;
 pub use asm::{
     AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, Instr, Program, Reg, decode_asm, decode_asm_ty, print_asm, run_asm,
 };
+pub use attribute::{Attribution, StepBucket, attribute, attribute_steps};
 pub use build::{AT, Builder, FIELD_WIDTH, HEAP, MARK, REG, RuleSpec, SEP, STACK, Slot, TAPES, WORK};
 pub use decode::decode_tape;
-pub use defunc::defunc;
+pub use defunc::{defunc, defunc_mapped};
 pub use encoding::{Encoding, Unary};
-pub use lower_asm::{LowerError, lower_asm};
-pub use lower_tm::lower_tm;
+pub use lower_asm::{LowerError, lower_asm, lower_asm_mapped};
+pub use lower_tm::{lower_tm, lower_tm_mapped};
 pub use machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
 pub use sim::{
     Caps as TmCaps, DEFAULT_CAPS as TM_DEFAULT_CAPS, Status as TmStatus, Step, Tape, Trace, simulate, simulate_trace,

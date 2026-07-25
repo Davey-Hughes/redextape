@@ -59,11 +59,80 @@ fn is_builtin_fn(name: &str) -> bool {
     BUILTIN_FNS.contains(&name)
 }
 
+/// The node generator this pass mints synthetic ids from: a `core::NodeGen` that also RECORDS every
+/// id it hands out. Everything `defunc` builds takes its id either from the input node it rewrites
+/// (carried through, keeping the user's construct identifiable downstream) or from here — so
+/// `minted` is exactly the set of output nodes with no source analogue, which is what
+/// `defunc_mapped` returns.
+///
+/// Wrapping `NodeGen` rather than teaching `core::NodeGen` to record keeps the bookkeeping where the
+/// need is: `desugar`'s generator (the other user) mints ids for a tree whose nodes ARE the source,
+/// so a `minted` set there would be pure overhead, and `core`'s public API does not grow a field
+/// only one pass reads.
+struct SynthGen {
+    inner: NodeGen,
+    /// Every id this generator minted — i.e. every node in the output with no source analogue.
+    /// Returned by `defunc_mapped` so the survey can bucket closure scaffolding separately from the
+    /// constructs the user actually wrote.
+    minted: BTreeSet<NodeId>,
+}
+
+impl SynthGen {
+    /// A generator whose first `fresh()` returns `next` — seed it past the input's max id so a
+    /// synthetic node can never collide with (and be mistaken for) a source one.
+    fn seeded(next: NodeId) -> Self {
+        SynthGen { inner: NodeGen::seeded(next), minted: BTreeSet::new() }
+    }
+
+    fn fresh(&mut self) -> NodeId {
+        let id = self.inner.fresh();
+        self.minted.insert(id);
+        id
+    }
+}
+
 /// A peeled top-level `fn name(params) { body }` (a `LetRec` whose value is a `Lambda`).
 struct Func<'a> {
+    /// The peeled `LetRec`'s and `Lambda`'s own ids. A KEPT (name-called) function is re-emitted as
+    /// exactly this `fn`, so it is re-emitted with these ids rather than fresh ones — `lower_asm`
+    /// bills a function's prologue (one `Mov` per parameter) and its `Ret` to the `LetRec` node, and
+    /// those run on EVERY call, so minting here would report a user function's whole per-call frame
+    /// cost as defunctionalization scaffolding. A VALUE-used function is dropped (inlined into a
+    /// dispatcher arm), so its two ids simply do not appear in the output.
+    letrec_id: NodeId,
+    lambda_id: NodeId,
     name: String,
     params: Vec<String>,
     body: &'a Core,
+}
+
+/// A function to emit as a `LetRec { name, Lambda(params, body) }` in the output.
+///
+/// WHY NO INPUT ID CAN BE CARRIED BY TWO OUTPUT NODES (the invariant the step survey rests on —
+/// attributing a step to an id only means something if that id names ONE node, and this pass INLINES
+/// bodies, so duplication is a live hazard rather than a theoretical one). Nothing structurally
+/// forbids it; it is emergent, from three separate properties, and a future change to ANY of them
+/// reintroduces the hazard:
+///   1. `peel` PARTITIONS the input — every node lands in exactly one of the prelude `let` VALUES, the
+///      `fn` BODIES, or main, so each reaches `Rewriter::rewrite` at most once. (The peeled binder
+///      nodes themselves are in none of the three: they are not rewritten at all, but re-emitted from
+///      the ids recorded in `Func`/`LetBinding`, once each.)
+///   2. `dispatcher` consumes each arm with `arms.remove(name)`, so an inlined body is emitted once.
+///   3. A function both called-by-name AND used-as-a-value is `Unsupported` (see the classification
+///      in `defunc_mapped` step 3). THIS is the load-bearing one: supporting that case means emitting
+///      the same body twice — once as a kept `fn`, once as a dispatcher arm — and every id inside it
+///      would then label two nodes, silently doubling the cost billed to the user's arithmetic.
+///
+/// Whoever relaxes (3) must re-id one of the two copies. `no_output_node_id_is_duplicated` fails
+/// loudly if they do not.
+struct Emitted {
+    name: String,
+    params: Vec<String>,
+    body: Core,
+    /// The source `(LetRec, Lambda)` ids when this function IS a user `fn` carried through (a kept
+    /// function, see `Func`); `None` for a generated `$applyN` dispatcher, which has no source
+    /// analogue at all and takes fresh ids.
+    src: Option<(NodeId, NodeId)>,
 }
 
 /// A peeled top-level `let name = value` value-binding sitting in the prelude chain (interleaved with
@@ -97,16 +166,25 @@ struct AnonClosure {
     body: Core,
 }
 
-/// Rewrite higher-order `core` into first-order Core, or `Unsupported` for a construct this pass does
-/// not handle.
-pub fn defunc(core: &Core) -> Result<Core, LowerError> {
+/// Rewrite higher-order `core` into first-order Core (or `Unsupported` for a construct this pass does
+/// not handle), returning the rewritten tree AND the set of ids that have no source analogue —
+/// closure-dispatch scaffolding (`$applyN` dispatchers and their tag tests, the `cons(tag, env)`
+/// closure representation, the `$box*` cells). Nodes carried through from the input keep their ids, so
+/// the step survey can distinguish what the user wrote from what defunctionalization added.
+///
+/// The invariant the survey needs is one-directional and holds exactly: every id in the output is
+/// either an input id or in the returned set. The set is a slight SUPERSET in one benign direction —
+/// the unique-name counter for anonymous lambdas (`$lam{k}`) draws from the same generator, so a
+/// handful of returned ids label no node at all. A bucket that collects zero steps costs nothing;
+/// the reverse (an output node in neither set) is what would silently misattribute cost.
+pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError> {
     // 0. Total-by-construction: measure `core`'s nesting depth iteratively (no native recursion) and
     // reject as `TooDeep` BEFORE any recursive pass runs. See `MAX_DEFUNC_DEPTH`'s doc comment.
     if let Some(node) = too_deep_node(core) {
         return Err(LowerError::TooDeep { node });
     }
 
-    let mut g = NodeGen::seeded(max_id(core).saturating_add(1));
+    let mut g = SynthGen::seeded(max_id(core).saturating_add(1));
 
     // 1. Peel the outer prelude: leading `let` value-bindings and `LetRec`-with-`Lambda` (`fn`) defs,
     // in whatever order they interleave. The first non-such node is the main tail expression.
@@ -235,12 +313,19 @@ pub fn defunc(core: &Core) -> Result<Core, LowerError> {
         seen_lets.insert(l.name.clone());
     }
 
-    // 5b. Kept functions keep their binding; rewrite their bodies.
-    let mut emitted: Vec<(String, Vec<String>, Core)> = Vec::new();
+    // 5b. Kept functions keep their binding — and their identity: re-emitted with the source `fn`'s
+    // own `LetRec`/`Lambda` ids (see `Func`), since this IS that function, only with its body
+    // rewritten.
+    let mut emitted: Vec<Emitted> = Vec::new();
     for f in &kept {
         let locals: BTreeSet<String> = f.params.iter().cloned().collect();
         let body = rw.rewrite(f.body, &locals)?;
-        emitted.push((f.name.clone(), f.params.clone(), body));
+        emitted.push(Emitted {
+            name: f.name.clone(),
+            params: f.params.clone(),
+            body,
+            src: Some((f.letrec_id, f.lambda_id)),
+        });
     }
 
     // 5c. Value functions are dropped; rewrite each body into a dispatcher arm. A named value fn never
@@ -272,16 +357,18 @@ pub fn defunc(core: &Core) -> Result<Core, LowerError> {
         let empty = Vec::new();
         let group = by_arity.get(&arity).unwrap_or(&empty);
         let (params, body) = dispatcher(&mut g, arity, group, &tags, &mut arms)?;
-        emitted.push((dispatcher_name(arity), params, body));
+        // Pure scaffolding: a dispatcher exists only because closures do — no source `fn` corresponds
+        // to it, so its `LetRec`/`Lambda` are minted (`src: None`).
+        emitted.push(Emitted { name: dispatcher_name(arity), params, body, src: None });
     }
 
     // 8. Emit in dependency order (callees outer of callers); a non-self cycle is `Unsupported`.
     let order = topo_order(&emitted, main)?;
 
     // 9. Assemble: the function `LetRec`s wrap the prelude `let`s, which wrap the rewritten main.
-    let mut by_name: BTreeMap<String, (Vec<String>, Core)> = BTreeMap::new();
-    for (name, params, body) in emitted {
-        by_name.insert(name, (params, body));
+    let mut by_name: BTreeMap<String, Emitted> = BTreeMap::new();
+    for e in emitted {
+        by_name.insert(e.name.clone(), e);
     }
     let mut acc = main_rw;
     // Prelude lets AROUND main: first let outermost of the let-group (so a later let's value can see
@@ -314,16 +401,29 @@ pub fn defunc(core: &Core) -> Result<Core, LowerError> {
         // Defensive: `order` is a permutation of `emitted`'s names (topo_order over exactly them), so
         // every name is present. Degrade an internal-invariant violation to `Unsupported` rather than
         // `expect`/panic — `defunc`/`run_tm` must stay total on ANY input.
-        let Some((params, body)) = by_name.remove(name) else {
+        let Some(Emitted { params, body, src, .. }) = by_name.remove(name) else {
             return Err(LowerError::Unsupported {
                 node: main.id(),
                 what: format!("ordered name `{name}` was emitted"),
             });
         };
-        let lam = Core::Lambda(g.fresh(), params, Box::new(body));
-        acc = Core::LetRec { id: g.fresh(), name: name.clone(), value: Box::new(lam), body: Box::new(acc) };
+        // A carried-through user `fn` keeps its `LetRec`/`Lambda` ids; a generated dispatcher mints
+        // both. Neither can collide: the source ids belong to a peeled node that appears nowhere else
+        // in the output, and `g` is seeded past every input id.
+        let (letrec_id, lambda_id) = match src {
+            Some(ids) => ids,
+            None => (g.fresh(), g.fresh()),
+        };
+        let lam = Core::Lambda(lambda_id, params, Box::new(body));
+        acc = Core::LetRec { id: letrec_id, name: name.clone(), value: Box::new(lam), body: Box::new(acc) };
     }
-    Ok(acc)
+    Ok((acc, g.minted))
+}
+
+/// Defunctionalize `core`. Exactly `defunc_mapped` with the synthetic-id set discarded — ONE
+/// implementation, so the two cannot drift.
+pub fn defunc(core: &Core) -> Result<Core, LowerError> {
+    defunc_mapped(core).map(|(c, _)| c)
 }
 
 /// Peel the outermost prelude chain of `let name = value` value-bindings and
@@ -337,11 +437,17 @@ fn peel(core: &Core) -> Result<(Vec<LetBinding<'_>>, Vec<Func<'_>>, &Core), Lowe
     let mut cur = core;
     loop {
         match cur {
-            Core::LetRec { name, value, body, .. } => {
-                let Core::Lambda(_, params, lam_body) = value.as_ref() else {
+            Core::LetRec { id, name, value, body } => {
+                let Core::Lambda(lam_id, params, lam_body) = value.as_ref() else {
                     return Err(unsupported(cur, "letrec value is not a function".to_string()));
                 };
-                funcs.push(Func { name: name.clone(), params: params.clone(), body: lam_body });
+                funcs.push(Func {
+                    letrec_id: *id,
+                    lambda_id: *lam_id,
+                    name: name.clone(),
+                    params: params.clone(),
+                    body: lam_body,
+                });
                 cur = body;
             }
             Core::Let { id, name, mutable, value, body } => {
@@ -415,7 +521,7 @@ fn analyze(
 /// name set, and accumulates the set of arities at which a value is applied (so exactly those
 /// dispatchers are generated) plus the anonymous value-lambdas it tags on the fly.
 struct Rewriter<'a> {
-    g: &'a mut NodeGen,
+    g: &'a mut SynthGen,
     tags: &'a BTreeMap<String, u64>,
     kept: &'a BTreeSet<String>,
     mutable_names: &'a BTreeSet<String>,
@@ -454,10 +560,11 @@ impl Rewriter<'_> {
             Core::Assign(id, name, v) => {
                 let rv = self.rewrite(v, locals)?;
                 // Plan 3b-2: a write to a boxed mutable is `$box_set($boxh(n), v)`, which (like
-                // `Assign`) evaluates to unit — semantics preserved.
+                // `Assign`) evaluates to unit — semantics preserved. The `$box_set` call IS this
+                // assignment, rewritten, so it carries the `Assign`'s own id.
                 if let Some(h) = self.box_handle.get(name).cloned() {
                     let hv = var(self.g, &h);
-                    return Ok(box_set2(self.g, hv, rv));
+                    return Ok(box_set2(self.g, *id, hv, rv));
                 }
                 Ok(Core::Assign(*id, name.clone(), Box::new(rv)))
             }
@@ -502,10 +609,11 @@ impl Rewriter<'_> {
     fn rewrite_value_name(&mut self, id: NodeId, name: &str, locals: &BTreeSet<String>) -> Result<Core, LowerError> {
         // Plan 3b-2: a read of a boxed mutable is `$box_get($boxh(n))`. Intercepted BEFORE the
         // `locals` check (a boxed mutable is a local, but its value lives in the box) so every
-        // read site — direct `Var`, or an `Apply` callee routed here — resolves through the cell.
+        // read site — direct `Var`, or an `Apply` callee routed here — resolves through the cell. The
+        // `$box_get` call IS this variable read, rewritten, so it carries the `Var`'s own id.
         if let Some(h) = self.box_handle.get(name).cloned() {
             let hv = var(self.g, &h);
-            return Ok(box_get1(self.g, hv));
+            return Ok(box_get1(self.g, id, hv));
         }
         if locals.contains(name) || name == "nil" {
             return Ok(Core::Var(id, name.to_string())); // a local value / the empty list
@@ -575,11 +683,21 @@ impl Rewriter<'_> {
             *slot += 1;
             t
         };
-        // GUARANTEED-UNIQUE, independent of push order: `self.anon.len()` was computed BEFORE the
-        // recursive body rewrite and the `self.anon.push`, so a value-lambda whose body contains
-        // ANOTHER value-lambda (currying, nested callbacks) minted the SAME `$lam0` for both — a
-        // duplicate key that corrupted `tags`/`by_arity`/`arms` and panicked the dispatcher's
-        // `arms.remove`. A fresh monotonic id from the shared `NodeGen` can never collide.
+        // GUARANTEED-UNIQUE, independent of push order. The invariant this name needs is exactly: a
+        // MONOTONIC counter, read BEFORE the recursive body rewrite. The historical bug was the FIRST
+        // half — the name came from `self.anon.len()`, which DID satisfy "read before the recursion"
+        // but is not a monotonic ticket dispenser at read time: `len()` only advances on the
+        // `self.anon.push` below, which happens AFTER the recursive rewrite. So a value-lambda whose
+        // body contains ANOTHER value-lambda (currying, nested callbacks) had both read `0` and mint
+        // the SAME `$lam0` — a duplicate key that corrupted `tags`/`by_arity`/`arms` and panicked the
+        // dispatcher's `arms.remove`.
+        //
+        // `self.g` satisfies that invariant, but nothing here NEEDS it to be the node generator: a
+        // dedicated monotonic counter would be equally collision-proof. Borrowing `g` is a deliberate
+        // convenience, and it costs one thing worth knowing — the id is consumed as a NAME, never
+        // labelling a node, so `defunc_mapped`'s returned set is a slight superset of the ids that
+        // actually appear in the output (see its doc comment). Harmless: a declared id that labels no
+        // node collects no steps.
         let name = format!("$lam{}", self.g.fresh());
 
         // The arm body is closed over exactly params + captures (bound by the dispatcher).
@@ -655,7 +773,7 @@ impl Rewriter<'_> {
 /// env (`let c1 = head($env); let c2 = head(tail($env)); …`, `$env = tail($clos)`) then its params
 /// (`let p1 = $a1; …`) around the (rewritten) body.
 fn dispatcher(
-    g: &mut NodeGen,
+    g: &mut SynthGen,
     arity: usize,
     group: &[String],
     tags: &BTreeMap<String, u64>,
@@ -680,6 +798,15 @@ fn dispatcher(
         };
         let mut arm = body;
         // Bind the function's real parameters to the dispatcher's `$a_i` (innermost, closest to body).
+        //
+        // These param bindings are SCAFFOLDING (fresh ids), and that is a deliberate asymmetry worth
+        // stating: for a KEPT function the equivalent parameter binding bills to the user's `LetRec`
+        // (see `Func`), whereas here the same semantic act bills to the dispatcher. The dropped
+        // `Lambda`'s id IS available and unused — it could have been reused here — so this is a
+        // declined option, not a forced one. Declined because these bindings exist ONLY because
+        // arguments now arrive through a dispatcher's positional `$a_i` slots: that is a
+        // defunctionalization artifact, and billing it to closure dispatch is the honest measurement
+        // the survey is for, not a distortion of it.
         for (i, p) in params.iter().enumerate().rev() {
             let a = var(g, &format!("$a{}", i + 1));
             arm = Core::Let { id: g.fresh(), name: p.clone(), mutable: false, value: Box::new(a), body: Box::new(arm) };
@@ -731,21 +858,21 @@ fn dispatcher_name(arity: usize) -> String {
 
 /// A DFS post-order of the emitted functions with edges caller -> callee, so a callee is emitted
 /// outer of (before) every caller. Self-recursion is fine (ignored); any other cycle is `Unsupported`.
-fn topo_order(emitted: &[(String, Vec<String>, Core)], main: &Core) -> Result<Vec<String>, LowerError> {
-    let names: BTreeSet<String> = emitted.iter().map(|(n, ..)| n.clone()).collect();
+fn topo_order(emitted: &[Emitted], main: &Core) -> Result<Vec<String>, LowerError> {
+    let names: BTreeSet<String> = emitted.iter().map(|e| e.name.clone()).collect();
     let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for (name, _, body) in emitted {
+    for e in emitted {
         let mut callees = BTreeSet::new();
-        collect_calls(body, &names, &mut callees, 0)?;
-        callees.remove(name); // self-recursion is allowed (LetRec binds the name before its body)
-        edges.insert(name.clone(), callees);
+        collect_calls(&e.body, &names, &mut callees, 0)?;
+        callees.remove(&e.name); // self-recursion is allowed (LetRec binds the name before its body)
+        edges.insert(e.name.clone(), callees);
     }
 
     let mut order = Vec::new();
     let mut done: BTreeSet<String> = BTreeSet::new();
     let mut on_stack: BTreeSet<String> = BTreeSet::new();
-    for (name, ..) in emitted {
-        visit(name, &edges, &mut done, &mut on_stack, &mut order, main, 0)?;
+    for e in emitted {
+        visit(&e.name, &edges, &mut done, &mut on_stack, &mut order, main, 0)?;
     }
     Ok(order)
 }
@@ -950,29 +1077,34 @@ fn param_names(core: &Core) -> BTreeSet<String> {
 
 // --- small Core builders --------------------------------------------------------------------------
 
-fn var(g: &mut NodeGen, name: &str) -> Core {
+// Every builder here mints a FRESH id for the node it makes: each exists only to represent a closure
+// (`cons(tag, env)`), to take one apart inside a dispatcher, or to hold a boxed cell — none of them
+// corresponds to a construct in the source. The two exceptions are `box_get1`/`box_set2`, whose outer
+// `Apply` REPLACES a source `Var`/`Assign` and therefore takes that node's id (`at`).
+
+fn var(g: &mut SynthGen, name: &str) -> Core {
     Core::Var(g.fresh(), name.to_string())
 }
 
-fn nat(g: &mut NodeGen, n: u64) -> Core {
+fn nat(g: &mut SynthGen, n: u64) -> Core {
     Core::Nat(g.fresh(), n)
 }
 
-fn apply(g: &mut NodeGen, callee: Core, args: Vec<Core>) -> Core {
+fn apply(g: &mut SynthGen, callee: Core, args: Vec<Core>) -> Core {
     Core::Apply(g.fresh(), Box::new(callee), args)
 }
 
-fn cons(g: &mut NodeGen, head: Core, tail: Core) -> Core {
+fn cons(g: &mut SynthGen, head: Core, tail: Core) -> Core {
     let c = var(g, "cons");
     apply(g, c, vec![head, tail])
 }
 
-fn head1(g: &mut NodeGen, list: Core) -> Core {
+fn head1(g: &mut SynthGen, list: Core) -> Core {
     let h = var(g, "head");
     apply(g, h, vec![list])
 }
 
-fn tail1(g: &mut NodeGen, list: Core) -> Core {
+fn tail1(g: &mut SynthGen, list: Core) -> Core {
     let t = var(g, "tail");
     apply(g, t, vec![list])
 }
@@ -981,24 +1113,29 @@ fn tail1(g: &mut NodeGen, list: Core) -> Core {
 // `$box_set(h, v)` writes it (evaluating to unit). `$box*` are `BUILTIN_FNS`, so these applications
 // stay static direct calls — the reference resolves them to the `Builtin::Box*` builtins and
 // `lower_asm` to the `Box`/`BoxGet`/`BoxSet` instructions.
-fn box1(g: &mut NodeGen, init: Core) -> Core {
+//
+// `box1` is the only one of the three with no source analogue: the cell allocation is new (the `let`
+// that holds it keeps its own id), so its `Apply` is minted. `box_get1`/`box_set2` each REPLACE a
+// source node — a `Var` read, an `Assign` write — so their outer `Apply` bills to `at`, that node's
+// id: a read/write through a box is still the read/write the user wrote, and the survey should say so.
+fn box1(g: &mut SynthGen, init: Core) -> Core {
     let f = var(g, "$box");
     apply(g, f, vec![init])
 }
 
-fn box_get1(g: &mut NodeGen, h: Core) -> Core {
+fn box_get1(g: &mut SynthGen, at: NodeId, h: Core) -> Core {
     let f = var(g, "$box_get");
-    apply(g, f, vec![h])
+    Core::Apply(at, Box::new(f), vec![h])
 }
 
-fn box_set2(g: &mut NodeGen, h: Core, v: Core) -> Core {
+fn box_set2(g: &mut SynthGen, at: NodeId, h: Core, v: Core) -> Core {
     let f = var(g, "$box_set");
-    apply(g, f, vec![h, v])
+    Core::Apply(at, Box::new(f), vec![h, v])
 }
 
 /// `cons(c1, cons(c2, … nil))` of the captured names as plain `Var`s (each in scope at the creation
 /// site). Empty captures → `nil` (a closed closure's env), matching the pre-Task-4 `cons(tag, nil)`.
-fn build_env(g: &mut NodeGen, captures: &[String]) -> Core {
+fn build_env(g: &mut SynthGen, captures: &[String]) -> Core {
     let mut env = var(g, "nil");
     for c in captures.iter().rev() {
         let cv = var(g, c);
@@ -1077,6 +1214,39 @@ mod tests {
     use super::*;
     use crate::desugar::desugar;
     use crate::parser::parse;
+
+    /// Every owned `Core` id, reachable from `core` by an ITERATIVE walk (reusing this module's own
+    /// `push_children`, the same child enumeration `too_deep_node`/`max_id` walk with): a big list
+    /// literal desugars to a spine tens of thousands of nodes deep, and a recursive walk here would
+    /// overflow the native stack just like an unguarded recursive `Drop` would.
+    fn all_node_ids(core: &Core) -> BTreeSet<NodeId> {
+        let mut out = BTreeSet::new();
+        let mut stack = vec![core];
+        while let Some(n) = stack.pop() {
+            out.insert(n.id());
+            push_children(n, &mut stack);
+        }
+        out
+    }
+
+    /// A node in `core` satisfying `pred`, or `None`. Iterative for the same reason as
+    /// `all_node_ids`; the worklist order is not source order, so "first" only pins a unique answer
+    /// when the program contains exactly one match — which is how every caller below uses it.
+    fn find_first<'a>(core: &'a Core, pred: &dyn Fn(&Core) -> bool) -> Option<&'a Core> {
+        let mut stack = vec![core];
+        while let Some(n) = stack.pop() {
+            if pred(n) {
+                return Some(n);
+            }
+            push_children(n, &mut stack);
+        }
+        None
+    }
+
+    /// The id of an `Add` `BinOp` node in `core`, or `None`.
+    fn find_add_binop_id(core: &Core) -> Option<NodeId> {
+        find_first(core, &|n| matches!(n, Core::BinOp(_, BinOp::Add, ..))).map(|n| n.id())
+    }
 
     /// Reference-equivalence: `defunc` preserves meaning. Parse+desugar `src`, run the reference on the
     /// ORIGINAL and on `defunc(original)`, and require the same value. Also require `defunc`'s output to
@@ -1421,5 +1591,182 @@ mod tests {
         assert_eq!(reference, crate::value::Value::Nat(6));
         let d = defunc(&core).expect("inner-let shadow of a boxed mutable must still box and lower");
         assert_eq!(crate::interp::eval(&d).unwrap(), reference); // reference(P) == reference(defunc(P))
+    }
+
+    /// THE EXHAUSTIVENESS INVARIANT: every id in `defunc`'s output is either an id that existed in the
+    /// input (a construct carried through) or one `defunc` declared it minted (closure-dispatch
+    /// scaffolding). Nothing in between — otherwise the step survey would bill TM cost to node ids that
+    /// do not exist in the user's program.
+    #[test]
+    fn defunc_reports_exactly_the_ids_it_minted() {
+        let core = desugar(
+            &parse(
+                "fn map(xs,f){ if is_empty(xs){nil}else{cons(f(head(xs)),map(tail(xs),f))} } fn add1(x){x+1} map([1,2],add1)",
+            )
+            .0
+            .unwrap(),
+        );
+        let before = all_node_ids(&core);
+        let (out, synthetic) = defunc_mapped(&core).expect("defuncs");
+        let after = all_node_ids(&out);
+
+        // Every id in the output is either one that existed before, or one declared synthetic.
+        for id in &after {
+            assert!(
+                before.contains(id) || synthetic.contains(id),
+                "id {id} is neither original nor declared synthetic"
+            );
+        }
+        // The declared set must not claim ids that were already there.
+        for id in &synthetic {
+            assert!(!before.contains(id), "id {id} declared synthetic but existed in the input");
+        }
+        // A higher-order program genuinely needs scaffolding, so the set must be non-empty — otherwise
+        // this test would pass vacuously against a `defunc` that minted nothing.
+        //
+        // NOTE the direction this test does NOT constrain: it is satisfied by a `defunc` that
+        // preserves NOTHING (mint every node and all three assertions still hold), and by one that
+        // recycles a DROPPED input id for a scaffolding node. Preservation is pinned positively, per
+        // construct, by `defunc_pins_which_constructs_keep_their_identity` below.
+        assert!(!synthetic.is_empty(), "defunc of a higher-order program minted no ids");
+    }
+
+    /// THE CLASSIFICATION ITSELF, pinned per construct. `defunc_reports_exactly_the_ids_it_minted`
+    /// checks only that the two buckets TOGETHER cover the output; it cannot tell whether a given
+    /// node landed in the right one, so on its own it admits a pass that mints everything. These
+    /// assertions name the three judgement calls the classification rests on, so flipping any of them
+    /// fails the build instead of silently re-billing the two largest cost buckets of a higher-order
+    /// program.
+    #[test]
+    fn defunc_pins_which_constructs_keep_their_identity() {
+        let core = desugar(
+            &parse(
+                "fn map(xs,f){ if is_empty(xs){nil}else{cons(f(head(xs)),map(tail(xs),f))} } fn add1(x){x+1} map([1,2],add1)",
+            )
+            .0
+            .unwrap(),
+        );
+        let letrec = |name: &'static str| {
+            find_first(&core, &move |n| matches!(n, Core::LetRec { name: m, .. } if m.as_str() == name))
+                .unwrap_or_else(|| panic!("the source defines `{name}`"))
+        };
+        let map_letrec_id = letrec("map").id();
+        let add1 = letrec("add1");
+        let add1_letrec_id = add1.id();
+        let Core::LetRec { value, .. } = add1 else { panic!("a `fn` desugars to a LetRec") };
+        let add1_lambda_id = value.id();
+        // The user's higher-order call site. `f` is applied exactly once (its other occurrence,
+        // `map(tail(xs), f)`, is an argument, not a callee), so this pins a unique node.
+        let call_f_id = find_first(
+            &core,
+            &|n| matches!(n, Core::Apply(_, c, _) if matches!(c.as_ref(), Core::Var(_, v) if v == "f")),
+        )
+        .expect("`map` applies its `f` parameter")
+        .id();
+
+        let (out, synthetic) = defunc_mapped(&core).expect("defuncs");
+        let after = all_node_ids(&out);
+
+        // KEPT function: this IS the user's `fn map`, only with its body rewritten. `lower_asm` bills
+        // a function's per-call prologue (a `Mov` per parameter) and its `Ret` to the `LetRec`, and
+        // those run on EVERY call — minting here would report a recursive user function's entire
+        // frame cost as defunctionalization scaffolding.
+        assert!(
+            after.contains(&map_letrec_id),
+            "kept fn `map` lost its LetRec identity: its whole per-call frame cost would bill to scaffolding"
+        );
+        // CALL SITE: the user wrote a call at `f(head(xs))`. It now routes through `$apply1`, but the
+        // call is still theirs — mint it and every call site the user wrote reports zero cost, with
+        // 100% of a `map`-heavy program landing in scaffolding.
+        assert!(
+            after.contains(&call_f_id),
+            "the user's higher-order call site `f(head(xs))` lost its identity: calls the user wrote would report zero cost"
+        );
+        // VALUE-used function: `add1` is DISSOLVED into a dispatcher arm, so its own `fn` nodes must
+        // not reappear.
+        //
+        // SCOPE, stated so nobody over-trusts this: these two assertions pin `add1`'s `LetRec` and
+        // `Lambda` ids SPECIFICALLY. They do NOT close the general hazard of a scaffolding node
+        // recycling some OTHER dropped input id — the value-mention `Var(add1)` that becomes
+        // `cons(tag, nil)`, or an unapplied lambda's body. Making the `cons(tag, nil)` below carry the
+        // dropped `Var(add1)` id instead of minting one still passes this whole module. Closing that
+        // in general means asserting over the ENTIRE scaffolding set, a much larger test than the id
+        // classification needs; this is a deliberate bound, not an oversight.
+        assert!(
+            !after.contains(&add1_letrec_id),
+            "`add1` is used as a value and dropped, so its LetRec id must not appear in the output"
+        );
+        assert!(
+            !after.contains(&add1_lambda_id),
+            "`add1` is used as a value and dropped, so its Lambda id must not appear in the output"
+        );
+        // SCAFFOLDING, positively declared rather than merely absent from the input: the dispatcher's
+        // tag test. `is_empty` is an `Apply`, so this `Eq` is the only one in the program.
+        let tag_test_id = find_first(&out, &|n| matches!(n, Core::BinOp(_, BinOp::Eq, ..)))
+            .expect("`$apply1` tests the closure tag")
+            .id();
+        assert!(
+            synthetic.contains(&tag_test_id),
+            "the `$apply1` tag test is closure-dispatch scaffolding and must be DECLARED synthetic"
+        );
+    }
+
+    #[test]
+    fn defunc_preserves_the_id_of_a_body_it_carried_through() {
+        // `add1`'s `x + 1` survives defunctionalization as the dispatcher's callee body. Its BinOp node
+        // must keep its original id, or the survey would bill user arithmetic to scaffolding.
+        let core = desugar(
+            &parse(
+                "fn map(xs,f){ if is_empty(xs){nil}else{cons(f(head(xs)),map(tail(xs),f))} } fn add1(x){x+1} map([1,2],add1)",
+            )
+            .0
+            .unwrap(),
+        );
+        let add_id = find_add_binop_id(&core).expect("the source has an Add BinOp");
+        let (out, _) = defunc_mapped(&core).expect("defuncs");
+        assert!(all_node_ids(&out).contains(&add_id), "the user's `x + 1` lost its identity through defunc");
+    }
+
+    /// No output node id is DUPLICATED. Attributing a TM step to a node id is only meaningful if an
+    /// id names one node: a duplicate would silently merge (or double-bill) two constructs' cost —
+    /// the same misattribution the mapped pass exists to prevent, one level down. `defunc` INLINES
+    /// bodies (a value-used function's body becomes a dispatcher arm), so duplication is a live
+    /// hazard here, not a theoretical one: the day the currently-`Unsupported` "both called by name
+    /// and used as a value" case is supported, that body is emitted TWICE and this test fails rather
+    /// than quietly doubling the arithmetic inside it.
+    #[test]
+    fn no_output_node_id_is_duplicated() {
+        fn count_nodes(core: &Core) -> usize {
+            let mut n = 0;
+            let mut stack = vec![core];
+            while let Some(x) = stack.pop() {
+                n += 1;
+                push_children(x, &mut stack);
+            }
+            n
+        }
+        for src in [
+            // A named function value (`add1`) dispatched through `$apply1`, plus a kept recursive `map`.
+            "fn map(xs,f){ if is_empty(xs){nil}else{cons(f(head(xs)),map(tail(xs),f))} } fn add1(x){x+1} map([1,2],add1)",
+            // Two value fns sharing one dispatcher (two arms, two tags).
+            "fn ap(f, x) { f(x) } fn add1(x) { x + 1 } fn dbl(x) { x * 2 } ap(add1, 5) + ap(dbl, 5)",
+            // An anonymous lambda capturing an immutable by value.
+            "let n = 5; fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } [1, 2, 3].map(|x| x + n)",
+            // A boxed mutable capture: `$box`/`$box_get`/`$box_set` rewrites over a `let mut`/`Assign`.
+            "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)",
+            // Nested value-lambdas (currying): two anon closures, one inside the other's body.
+            "fn ap(f, x) { f(x) } let add = |y| |z| y + z; ap(ap(add, 4), 5)",
+            // Two arities, so two dispatchers.
+            "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
+             fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }\n\
+             fn add(a, b) { a + b }\n fn add1(x) { x + 1 }\n fold([3, 1, 2].map(add1), 0, add)",
+        ] {
+            let core = desugar(&parse(src).0.unwrap());
+            // The premise: desugar itself hands out one id per node, so a duplicate in the output is
+            // `defunc`'s doing and not inherited.
+            assert_eq!(count_nodes(&core), all_node_ids(&core).len(), "INPUT has duplicate ids: {src}");
+            let out = defunc(&core).expect("defuncs");
+            assert_eq!(count_nodes(&out), all_node_ids(&out).len(), "OUTPUT has duplicate ids: {src}");
+        }
     }
 }

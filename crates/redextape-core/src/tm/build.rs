@@ -93,6 +93,13 @@ impl Builder {
         id
     }
 
+    /// Number of states allocated so far. States are only ever appended (`state`/`accept` both push),
+    /// never inserted or reordered, so a snapshot of this before and after a span of building exactly
+    /// brackets the states that span created — the range `before..after` names them precisely.
+    pub fn state_count(&self) -> usize {
+        self.states.len()
+    }
+
     /// Append a rule (built via `RuleSpec`) to state `s`, targeting `next`.
     pub fn add_rule(&mut self, s: StateId, spec: RuleSpec, next: StateId) {
         self.states[s as usize].rules.push(spec.into_rule(next));

@@ -26,6 +26,17 @@ pub(crate) const MAX_SLOTS: u32 = 100_000;
 /// bounded). `MAX_SLOTS` (the O(n_slots) bank/init-tape bound) stays as-is for no-call programs.
 pub(crate) const MAX_FRAME_LOC: u32 = 1_000;
 
+/// True when `lower_tm_mapped` will REFUSE to lay `prog` out over the `Loc` bank and return the
+/// degenerate halt-immediately machine instead: a program that contains a `Call` (so the O(n_loc^2)
+/// frame gadgets would be built) with an absurd local count.
+///
+/// The single definition of that condition, so a caller obliged to mirror the refusal — `attribute`,
+/// which must not report a machine that never ran as a complete zero-cost execution — cannot drift
+/// from the guard it mirrors.
+pub(crate) fn frame_bank_unrepresentable(prog: &Program, sm: &SlotMap) -> bool {
+    sm.n_loc() > MAX_FRAME_LOC && prog.code.iter().any(|i| matches!(i, Instr::Call(_)))
+}
+
 /// Maps the asm register file onto REG-tape fields. Layout: slot 0 = `Rr` (the result), then the
 /// `Loc` bank, then the `Arg` bank. Distinct registers -> distinct slots, so `lower_asm`'s
 /// "`ra`/`rb` fresh, `!= dst`" invariant carries to the `rd != ra, rb` slot precondition for free.
@@ -91,8 +102,19 @@ fn is_arith(op: BinOp) -> bool {
     matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul)
 }
 
-/// Lower `prog` into a `TAPES`-tape `Machine`. Total and panic-free on any `Program`.
-pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
+/// Lower `prog` to a Turing machine, returning the machine AND its state map: `state_origins[s]` is
+/// the `prog.code` index whose gadgets built state `s`, or `None` for machine scaffolding that
+/// belongs to no single instruction (the shared halt state, the call-site return-tag dispatch
+/// chain, the `Ret` handler's frame-restore gadget).
+///
+/// An instruction's own entry state (`pc{i}`) bills that instruction, not scaffolding: it is the
+/// state the machine occupies when the instruction begins, so its cost is the instruction's. The
+/// `None` bucket is reserved for states that genuinely belong to no single instruction.
+///
+/// Returned rather than stored on `Machine` deliberately: `Machine` derives `PartialEq` and the TM
+/// text round-trip test asserts `parse_tm(print_tm(m)) == m`, which a side-table field would break
+/// for a reason that has nothing to do with what the machine computes.
+pub fn lower_tm_mapped(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usize>>) {
     let sm = SlotMap::of(prog);
     let mut b = Builder::new();
     let n = prog.code.len();
@@ -103,7 +125,8 @@ pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
     // would build a multi-million-state machine and an oversized init tape. Refuse to lay it out:
     // return a degenerate machine that halts immediately. Total, panic-free, no huge allocation.
     if sm.n_slots() > MAX_SLOTS {
-        return b.finish(halt);
+        let state_origins = vec![None; b.state_count()];
+        return (b.finish(halt), state_origins);
     }
     // One entry state per instruction index. `pc[i]` means "about to execute instruction i".
     let pc: Vec<StateId> = (0..n).map(|i| b.state(format!("pc{i}"))).collect();
@@ -130,8 +153,9 @@ pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
     // They're only ever built when the program actually contains a `Call` (see `has_ret`/`ret_entry`
     // below and the `Call` arm in the per-instruction loop). Refuse an absurd local count in that case
     // *before* building any of them, so a call-containing program can't OOM the lowering.
-    if !call_sites.is_empty() && n_loc > MAX_FRAME_LOC {
-        return b.finish(halt);
+    if frame_bank_unrepresentable(prog, &sm) {
+        let state_origins = vec![None; b.state_count()];
+        return (b.finish(halt), state_origins);
     }
 
     let has_ret = prog.code.iter().any(|i| matches!(i, Instr::Ret));
@@ -161,7 +185,29 @@ pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
         re
     };
 
+    // Everything built above this point (the halt state, the `pc` entry states, and any
+    // `Ret`-handler scaffolding) starts out billed to no single instruction; the `pc` entries are
+    // then re-billed to their own instruction just below.
+    let mut state_origins: Vec<Option<usize>> = vec![None; b.state_count()];
+    // An instruction's ENTRY state is part of that instruction's cost — it is the state the machine
+    // occupies when the instruction begins, and a reader asking "what does this multiply cost?"
+    // expects it counted there. The `pc` batch is allocated above, before the per-instruction loop,
+    // so the loop's before/after span arithmetic alone would bill every entry state to scaffolding:
+    // a systematic one-directional bias that understates EVERY construct's cost and correspondingly
+    // inflates the scaffolding bucket — corrupting exactly the "cost of what the user wrote" vs
+    // "cost the machinery added" split this map exists to measure. Bill them explicitly instead.
+    // `get_mut` rather than indexing keeps this total: a `pc` id is always in range by construction,
+    // but an out-of-range one must not panic a library path.
+    for (i, &entry) in pc.iter().enumerate() {
+        if let Some(origin) = state_origins.get_mut(entry as usize) {
+            *origin = Some(i);
+        }
+    }
+
     for (i, instr) in prog.code.iter().enumerate() {
+        // States are appended as gadgets are emitted, so the states created while lowering
+        // instruction `i` are exactly those appended during this iteration.
+        let before = b.state_count();
         let fall = succ(i + 1);
         match instr {
             Instr::Li(rd, v) => enc.write_literal(&mut b, pc[i], fall, *v, sm.slot(*rd)),
@@ -202,9 +248,20 @@ pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
             Instr::BoxGet(rd, rb) => enc.box_get_op(&mut b, pc[i], fall, sm.slot(*rb), sm.slot(*rd)),
             Instr::BoxSet(rb, rv) => enc.box_set_op(&mut b, pc[i], fall, sm.slot(*rb), sm.slot(*rv)),
         }
+        let after = b.state_count();
+        for _ in before..after {
+            state_origins.push(Some(i));
+        }
     }
 
-    b.finish(pc.first().copied().unwrap_or(halt))
+    (b.finish(pc.first().copied().unwrap_or(halt)), state_origins)
+}
+
+/// Lower `prog` into a `TAPES`-tape `Machine`. Total and panic-free on any `Program`. Exactly
+/// `lower_tm_mapped` with the state map discarded — there is ONE lowering implementation, so the
+/// mapped and unmapped paths cannot drift.
+pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
+    lower_tm_mapped(prog, enc).0
 }
 
 #[cfg(test)]
@@ -572,6 +629,57 @@ mod tests {
             TmRun::Ran { tapes } => assert_eq!(decode_tape(&tapes, &expected, &Unary), Some(expected)),
             other => panic!("box program did not run on TM: {other:?}"),
         }
+    }
+
+    #[test]
+    fn every_state_maps_to_the_instruction_that_built_it_or_to_scaffolding() {
+        let core = desugar(&parse("fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(3)").0.unwrap());
+        let prog = lower_asm(&core).expect("lowers");
+        let (m, state_origins) = lower_tm_mapped(&prog, &Unary);
+        assert_eq!(state_origins.len(), m.states.len(), "state origins must be parallel to states");
+        for (s, origin) in state_origins.iter().enumerate() {
+            if let Some(idx) = origin {
+                assert!(*idx < prog.code.len(), "state {s} maps to instruction {idx}, out of range");
+            }
+        }
+        // Non-vacuity: a real program must attribute the bulk of its states to instructions, not to
+        // scaffolding. Without this the test would pass against an all-`None` map.
+        let attributed = state_origins.iter().filter(|o| o.is_some()).count();
+        assert!(
+            attributed * 2 > m.states.len(),
+            "most states should belong to an instruction, got {attributed}/{}",
+            m.states.len()
+        );
+    }
+
+    /// Every instruction's ENTRY state (`pc{i}` — the state the machine occupies when instruction
+    /// `i` begins) must bill instruction `i`, never scaffolding.
+    ///
+    /// Pinned separately from the non-vacuity check above, which it does NOT subsume: that check
+    /// sits at ~79% and would still pass with every entry state regressed to `None` (it would only
+    /// dip to ~77%). That regression is the dangerous kind — a systematic, one-directional bias
+    /// that understates EVERY construct's cost and correspondingly inflates the scaffolding bucket,
+    /// silently corrupting the very "cost the user wrote" vs "cost the machinery added" split this
+    /// map exists to inform, while still looking entirely plausible in a report. So it gets an
+    /// assertion that bites on it specifically rather than one that merely tolerates it.
+    #[test]
+    fn each_instructions_entry_state_bills_that_instruction() {
+        let core = desugar(&parse("fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(3)").0.unwrap());
+        let prog = lower_asm(&core).expect("lowers");
+        let (m, state_origins) = lower_tm_mapped(&prog, &Unary);
+        for i in 0..prog.code.len() {
+            let name = format!("pc{i}");
+            let entries: Vec<usize> =
+                m.states.iter().enumerate().filter(|(_, s)| s.name == name).map(|(s, _)| s).collect();
+            assert_eq!(entries.len(), 1, "expected exactly one entry state named `{name}`, found {entries:?}");
+            assert_eq!(
+                state_origins[entries[0]],
+                Some(i),
+                "instruction {i}'s entry state `{name}` must bill instruction {i}, not scaffolding"
+            );
+        }
+        // The machine begins by executing instruction 0, so its start state bills instruction 0.
+        assert_eq!(state_origins[m.start as usize], Some(0), "the start state must bill instruction 0");
     }
 
     #[test]

@@ -109,7 +109,19 @@ jobs:
           wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           /tmp/llvm.sh 22
+          # `llvm.sh` does not install Polly, but LLVM 22 is BUILT with it — so `llvm-config
+          # --libnames`, which llvm-sys's build script reads, lists Polly and llvm-sys emits
+          # `cargo:rustc-link-lib=static=Polly`. Without the separate dev package the link fails with
+          # "could not find native static library `Polly`". This does not reproduce on macOS, where
+          # Homebrew's keg and its own llvm-config agree.
+          apt-get install -y --no-install-recommends libpolly-22-dev
           "$LLVM_SYS_221_PREFIX/bin/llvm-config" --version   # fail loudly on a version mismatch
+          # Prove the libraries llvm-config advertises are actually present, rather than discovering
+          # it during a link several minutes later.
+          for lib in $("$LLVM_SYS_221_PREFIX/bin/llvm-config" --libnames); do
+            find "$LLVM_SYS_221_PREFIX/lib" /usr/lib -name "$lib" -print -quit | grep -q . \
+              || { echo "llvm-config advertises $lib but it is not installed"; exit 1; }
+          done
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
