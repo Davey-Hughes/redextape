@@ -981,6 +981,18 @@ fn classify_applies(core: &Core) -> BTreeMap<NodeId, ApplyClass> {
                 stack.push((value, inner));
                 stack.push((body, rec));
             }
+            // Same idea, N-ary: every group name is in scope (and therefore self/mutually-recursive)
+            // in EVERY binding's value; the body sees the group names but is an ordinary call site.
+            Core::LetRecGroup(_, bindings, body) => {
+                let mut inner = rec.clone();
+                for (name, _) in bindings {
+                    inner.push(name);
+                }
+                for (_, value) in bindings {
+                    stack.push((value, inner.clone()));
+                }
+                stack.push((body, rec));
+            }
             Core::BinOp(_, _, a, b) | Core::Seq(_, a, b) | Core::While(_, a, b) => {
                 stack.push((a, rec.clone()));
                 stack.push((b, rec));
@@ -1097,6 +1109,12 @@ fn find_node(core: &Core, target: NodeId) -> Option<&Core> {
                 stack.push(value);
                 stack.push(body);
             }
+            Core::LetRecGroup(_, bindings, body) => {
+                for (_, value) in bindings {
+                    stack.push(value);
+                }
+                stack.push(body);
+            }
             Core::Nat(..) | Core::Bool(..) | Core::Unit(..) | Core::Var(..) => {}
         }
     }
@@ -1125,6 +1143,10 @@ fn describe_node(node: &Core, classes: &BTreeMap<NodeId, ApplyClass>) -> String 
         }
         Core::Let { name, mutable, .. } => format!("Let({name}{})", if *mutable { ", mut" } else { "" }),
         Core::LetRec { name, .. } => format!("LetRec({name})"),
+        Core::LetRecGroup(_, bindings, _) => {
+            let names: Vec<&str> = bindings.iter().map(|(n, _)| n.as_str()).collect();
+            format!("LetRecGroup({})", names.join(", "))
+        }
         Core::Seq(..) => "Seq".to_string(),
         Core::Assign(_, name, _) => format!("Assign({name})"),
         Core::While(..) => "While".to_string(),
@@ -1155,6 +1177,7 @@ fn canonical_kind(node: &Core, classes: &BTreeMap<NodeId, ApplyClass>) -> &'stat
         Core::Apply(id, ..) => classes.get(id).copied().unwrap_or(ApplyClass::Indirect).label(),
         Core::Let { .. } => "Let",
         Core::LetRec { .. } => "LetRec",
+        Core::LetRecGroup(..) => "LetRecGroup",
         Core::Seq(..) => "Seq",
         Core::Assign(..) => "Assign",
         Core::While(..) => "While",

@@ -89,6 +89,14 @@ const CASES: &[&str] = &[
     "fn map(xs,f){ if is_empty(xs){nil}else{cons(f(head(xs)),map(tail(xs),f))} } fn add1(x){x+1} [5,6].map(add1)",
     "head(tail([1, 2, 3]))",
     "100 * 100",
+    // A mutually recursive group (`Core::LetRecGroup`): the first program shape in this repo that
+    // produces a genuine SCC AMONG SUBROUTINES. Everything above is either self-recursive (`sum`) or
+    // a DAG (defunc'd `map` + `$apply1`), and an SCC is exactly what LLVM's bottom-up inliner treats
+    // specially -- in the backend where Phase 2 already found IPO-related defects. Three members, so
+    // the answer 1+2+4+1 = 8 pins the rotation of the cycle rather than merely its members.
+    "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
+     fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
+     fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
 ];
 
 #[test]

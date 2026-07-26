@@ -122,8 +122,9 @@ fn assert_native_matches_reference(src: &str) {
 
 /// The first-order demo suite (a subset of `redextape-core`'s `three_way_oracle.rs`
 /// `FIRST_ORDER_DEMOS`) — arithmetic, monus, comparison, if, let/let-mut/assign/while, calls &
-/// recursion, list construction & access, and higher-order programs (`defunc`) — every value stays
-/// « FIELD_WIDTH (64) so the TM leg can participate too.
+/// recursion, list construction & access, higher-order programs (`defunc`), and mutually recursive /
+/// forward-referencing `fn`s (`Core::LetRecGroup`) — every value stays « FIELD_WIDTH (64) so the TM
+/// leg can participate too.
 const FIRST_ORDER_DEMOS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",
@@ -155,6 +156,31 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "let n = 5; fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } [1, 2, 3].map(|x| x + n)",
     // Higher-order currying: a value-lambda whose body is ANOTHER value-lambda.
     "fn ap(f, x) { f(x) } let add = |y| |z| y + z; ap(ap(add, 4), 5)",
+    // MUTUAL RECURSION (`Core::LetRecGroup`) — the same three programs `redextape-core`'s
+    // `three_way_oracle.rs` adds, carried here so the design spec's `reference == λ == TM == native`
+    // claim is ASSERTED on this class rather than assumed from the three-way leg. Each member is
+    // observably different at every level, so a permuted group computes a wrong value, not a crash.
+    "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
+     fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(4)",
+    // The ODD argument is not a duplicate: its answer comes out of the OTHER member's base case, so a
+    // backend that collapsed the pair onto `is_even` (which still answers `true` at every even
+    // argument) is caught here and not by the even case.
+    "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
+     fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(5)",
+    // A forward reference with no cycle: `a` is a one-member component still emitted INSIDE `b`.
+    "fn a(n){ b(n) + 1 } fn b(n){ n * 2 } a(3)",
+    // Three members, not two: 1+2+4+1 = 8 identifies the exact rotation of the cycle.
+    "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
+     fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
+     fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
+    // A group reaching the backends THROUGH `defunc` (`id` is used as a value), and a forward
+    // reference doing the same — the paths every case above skips, since they lower via `lower_asm`
+    // directly. See the matching comment in `three_way_oracle.rs`.
+    "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
+     fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(4, id)",
+    "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
+     fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(3, id)",
+    "fn ap(h,x){ h(x) } fn f(n){ ap(g, n) } fn g(n){ n + 1 } f(3)",
 ];
 
 /// Programs that only TM/native can run three-way with the reference — the λ backend v1 REJECTS them

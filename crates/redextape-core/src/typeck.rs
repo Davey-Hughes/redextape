@@ -6,7 +6,7 @@ use crate::diagnostic::Diagnostic;
 use crate::prelude::type_env;
 use crate::span::Span;
 use crate::ty::{Scheme, Ty};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub fn typecheck(program: &Program) -> Vec<Diagnostic> {
     let mut inf = Infer::new();
@@ -230,8 +230,23 @@ impl Infer {
     fn infer_block_inner(&mut self, env: &TyEnv, block: &Block) -> Ty {
         let mut env = clone_env(env);
         let mark = env.mark();
-        for stmt in &block.stmts {
-            self.infer_stmt(&mut env, stmt);
+        let mut i = 0;
+        while i < block.stmts.len() {
+            if matches!(&block.stmts[i], Stmt::Fn { .. }) {
+                // The maximal run of consecutive `Stmt::Fn`: pre-bind every name in the run
+                // monomorphically before checking any body, so a `fn` may forward-reference (or
+                // mutually recurse with) any other `fn` in the same run. A non-`fn` statement — a
+                // `let`, an `Assign`, a `while`, a bare `Expr` — ends the run; a `fn` after that
+                // point starts a fresh one and cannot see the earlier run's names.
+                let start = i;
+                while i < block.stmts.len() && matches!(&block.stmts[i], Stmt::Fn { .. }) {
+                    i += 1;
+                }
+                self.infer_fn_run(&mut env, &block.stmts[start..i]);
+            } else {
+                self.infer_stmt(&mut env, &block.stmts[i]);
+                i += 1;
+            }
         }
         let ty = match &block.tail {
             Some(e) => self.infer_expr(&env, e),
@@ -239,6 +254,78 @@ impl Infer {
         };
         env.truncate(mark);
         ty
+    }
+
+    /// Typecheck a maximal run of consecutive `Stmt::Fn` as a single mutually-recursive group:
+    /// every name in the run is bound monomorphically (its own `param_tys`/`ret`/`fun`) before any
+    /// body is checked, then each body is checked in turn against that shared, fully-bound
+    /// environment. This is what lets `fn a(n){ b(n) }` (or a genuine cycle) see a name defined
+    /// later in the same run — the ordering gate that used to reject both forward references and
+    /// mutual recursion.
+    ///
+    /// Everything else matches the original per-`fn` discipline: `rec_mark`/`body_mark`,
+    /// `unify(&ret, &body_ty, *span)`, and re-binding each name with a generalized scheme once all
+    /// bodies are checked. `fns` is non-empty and every element is `Stmt::Fn` (the caller's run).
+    ///
+    /// Two members of one run may NOT share a name — that is an error, reported here. This is a
+    /// DELIBERATE LANGUAGE CHANGE: before mutual recursion, `fn a … fn a …` was legal and the last
+    /// definition simply won, because each `fn` was bound in turn. Pre-binding the whole run makes
+    /// that shape genuinely ambiguous rather than merely redundant: last-wins requires the second `a`
+    /// to be the INNERMOST binding, while a sibling that calls `a` requires `a` to be OUTSIDE it, and
+    /// with `fn b(z){ a(z) } fn a(x){ x } fn a(y){ true }` no ordering satisfies both — the program
+    /// typechecks as `Bool` (last-wins) but evaluates through the first `a` to a `Nat`. There is no
+    /// winner to pick, so the honest move is to reject, as Rust does ("the name `a` is defined
+    /// multiple times"). Two runs separated by a non-`fn` statement are unaffected: those are
+    /// ordinary shadowing, not a duplicate, and stay legal.
+    fn infer_fn_run(&mut self, env: &mut TyEnv, fns: &[Stmt]) {
+        let rec_mark = env.mark();
+        // Pass 1: create every function's type and bind its name monomorphically, all before any
+        // body is checked (monomorphic mutual recursion).
+        let mut sigs: Vec<(Vec<Ty>, Ty, Ty)> = Vec::with_capacity(fns.len());
+        let mut defined: HashSet<&str> = HashSet::with_capacity(fns.len());
+        for stmt in fns {
+            let Stmt::Fn { name, params, span, .. } = stmt else {
+                continue;
+            };
+            if !defined.insert(name.as_str()) {
+                // Report and carry on binding it: recovery keeps the rest of the block checkable, and
+                // `sigs` must stay index-aligned with `fns` for pass 2.
+                self.error(
+                    *span,
+                    format!("the name `{name}` is defined multiple times in the same group of functions"),
+                );
+            }
+            let param_tys: Vec<Ty> = params.iter().map(|_| self.fresh()).collect();
+            let ret = self.fresh();
+            let fun = Ty::Fun(param_tys.clone(), Box::new(ret.clone()));
+            env.insert(name.clone(), Scheme::mono(fun.clone()), false);
+            sigs.push((param_tys, ret, fun));
+        }
+        // Pass 2: check each body in turn. Parameters are assignable locals within the function
+        // body (e.g. `count_down` reassigns its own `n`), even though they aren't declared with
+        // `let mut`.
+        for (stmt, (param_tys, ret, _)) in fns.iter().zip(&sigs) {
+            let Stmt::Fn { params, body, span, .. } = stmt else {
+                continue;
+            };
+            let body_mark = env.mark();
+            for (p, pt) in params.iter().zip(param_tys) {
+                env.insert(p.clone(), Scheme::mono(pt.clone()), true);
+            }
+            let body_ty = self.infer_block(env, body);
+            self.unify(ret, &body_ty, *span);
+            env.truncate(body_mark);
+        }
+        // Re-bind every name in the run with a generalized scheme for the rest of the block, once
+        // all of the run's monomorphic bindings (and the last body's params) are out of the way.
+        env.truncate(rec_mark);
+        for (stmt, (_, _, fun)) in fns.iter().zip(&sigs) {
+            let Stmt::Fn { name, .. } = stmt else {
+                continue;
+            };
+            let scheme = self.generalize(env, fun);
+            env.insert(name.clone(), scheme, false);
+        }
     }
 
     fn infer_stmt(&mut self, env: &mut TyEnv, stmt: &Stmt) {
@@ -250,27 +337,11 @@ impl Infer {
                 let scheme = if *mutable { Scheme::mono(self.resolve(&vt)) } else { self.generalize(env, &vt) };
                 env.insert(name.clone(), scheme, *mutable);
             }
-            Stmt::Fn { name, params, body, span } => {
-                let param_tys: Vec<Ty> = params.iter().map(|_| self.fresh()).collect();
-                let ret = self.fresh();
-                let fun = Ty::Fun(param_tys.clone(), Box::new(ret.clone()));
-                // Bind the function name monomorphically while checking its body (monomorphic recursion).
-                let rec_mark = env.mark();
-                env.insert(name.clone(), Scheme::mono(fun.clone()), false);
-                let body_mark = env.mark();
-                // Parameters are assignable locals within the function body (e.g. `count_down`
-                // reassigns its own `n`), even though they aren't declared with `let mut`.
-                for (p, pt) in params.iter().zip(&param_tys) {
-                    env.insert(p.clone(), Scheme::mono(pt.clone()), true);
-                }
-                let body_ty = self.infer_block(env, body);
-                self.unify(&ret, &body_ty, *span);
-                env.truncate(body_mark);
-                // Re-bind the name with a generalized scheme for the rest of the block.
-                env.truncate(rec_mark);
-                let scheme = self.generalize(env, &fun);
-                env.insert(name.clone(), scheme, false);
-            }
+            // A lone `fn` is the degenerate case of a run of one; `infer_block_inner` is the
+            // normal call site (it groups consecutive `Stmt::Fn`s before reaching here), but
+            // routing a singleton through the same function keeps this arm correct — rather than
+            // a second, driftable copy — if `infer_stmt` is ever called on a `Stmt::Fn` directly.
+            Stmt::Fn { .. } => self.infer_fn_run(env, std::slice::from_ref(stmt)),
             Stmt::Assign { target, value, span } => match env.lookup(target) {
                 None => self.error(*span, format!("unbound variable `{target}`")),
                 Some(b) => {
@@ -557,6 +628,64 @@ mod tests {
     fn closure_params_are_assignable_like_fn_params() {
         // A closure may reassign its own parameter, consistent with named `fn`.
         assert_ok("let f = |x| { x = x + 1; x }; f(1)");
+    }
+
+    #[test]
+    fn mutually_recursive_fns_typecheck() {
+        let src = "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
+                   fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(10)";
+        assert!(crate::analyze(src).diagnostics.is_empty(), "{:?}", crate::analyze(src).diagnostics);
+    }
+
+    #[test]
+    fn a_forward_reference_without_a_cycle_typechecks() {
+        // `a` calls `b`, defined after it, and `b` calls nothing — no cycle, but the same ordering gate.
+        let src = "fn a(n){ b(n) + 1 } fn b(n){ n * 2 } a(3)";
+        assert!(crate::analyze(src).diagnostics.is_empty(), "{:?}", crate::analyze(src).diagnostics);
+    }
+
+    #[test]
+    fn two_fns_in_one_run_may_not_share_a_name() {
+        // A DELIBERATE LANGUAGE CHANGE: `fn a … fn a …` used to be legal (last one won). Pre-binding
+        // the whole run makes it ambiguous rather than redundant, so it is now rejected — see
+        // `infer_fn_run`'s doc comment.
+        //
+        // The unsound shape this closes: this program typechecks as `Bool` (last-wins picks the
+        // second `a`) but, since `b` needs `a` bound OUTSIDE it, evaluates through the FIRST `a` to
+        // `Nat(3)` — a well-typed program producing a value of the wrong type. No ordering can
+        // satisfy both constraints, which is why the answer is rejection and not a better ordering.
+        assert_err("fn b(z){ a(z) } fn a(x){ x } fn a(y){ true } a(3)", "the name `a` is defined multiple times");
+        // The silent value change the same map caused: `b(3)` was 3 (the first `a`), became 4 (the
+        // second). Both readings are defensible, which is the point — neither is now on offer.
+        assert_err("fn a(x){ x } fn b(y){ a(y) } fn a(z){ z + 1 } b(3)", "the name `a` is defined multiple times");
+        // Three definitions: reported once per redefinition, and the run still typechecks onward.
+        assert_err("fn a(x){a(x)} fn a(x){a(x)} fn a(x){x} a(1)", "the name `a` is defined multiple times");
+        assert_eq!(
+            diags("fn a(x){a(x)} fn a(x){a(x)} fn a(x){x} a(1)")
+                .iter()
+                .filter(|d| d.message.contains("defined multiple times"))
+                .count(),
+            2,
+            "one diagnostic per REDEFINITION, not per definition"
+        );
+    }
+
+    #[test]
+    fn the_same_name_in_two_different_runs_is_still_legal() {
+        // Only a duplicate WITHIN one adjacent run is rejected. A non-`fn` statement ends the run, so
+        // the second `fn a` is ordinary shadowing — exactly as before this change — and must not be
+        // caught by the duplicate check.
+        assert_ok("fn a(x){ x } let sep = 0; fn a(y){ y + 1 } a(3)");
+        assert_eq!(crate::run("fn a(x){ x } let sep = 0; fn a(y){ y + 1 } a(3)").unwrap(), crate::value::Value::Nat(4));
+        // Same name at a different nesting level is likewise untouched.
+        assert_ok("fn a(x){ x } fn outer(y){ fn a(z){ z + 1 } a(y) } outer(3)");
+    }
+
+    #[test]
+    fn a_fn_separated_by_a_let_still_cannot_forward_reference() {
+        // The documented bound: grouping stops at a non-`fn` statement.
+        let src = "fn a(n){ b(n) } let k = 1; fn b(n){ n } a(3)";
+        assert!(!crate::analyze(src).diagnostics.is_empty(), "expected an unbound-name diagnostic");
     }
 
     #[test]

@@ -155,12 +155,15 @@ produce. The oracle validates every combination.
   demo corpus + proptest, making this project unusually SAFE to optimize.
   **Optimization lives at three tiers, and the earlier a pass sits, the more backends it helps:**
   - **Tier A — Core → Core (helps λ *and* TM *and* native).** Constant folding, DCE, CSE, inlining,
-    copy/const propagation, algebraic identities. Backend-agnostic — optimize once on Core and a smaller
-    Core yields a shorter λ term (fewer β-steps), a smaller/faster TM (fewer states + steps), *and* faster
-    native. Highest leverage; `defunc` already proves the Core→Core pass shape.
+    copy/const propagation, algebraic identities, **closure specialization**. Backend-agnostic — optimize
+    once on Core and a smaller Core yields a shorter λ term (fewer β-steps), a smaller/faster TM (fewer
+    states + steps), *and* faster native. Highest leverage; `defunc` already proves the Core→Core pass shape.
+    *Which* of these to build, and in what order, is no longer a guess — see **the ranked pass set** below.
   - **Tier B — asm → asm (helps TM + native, not λ — λ lowers Core→λ directly, bypassing asm).**
     Register allocation / slot minimization (shrinks the REG bank + tape length most), peephole,
-    dead-store elimination, jump threading, strength reduction on the `Instr` stream.
+    dead-store elimination, jump threading, strength reduction on the `Instr` stream. **The survey's
+    #2 target — `Ret`'s frame-restore — lands here, not in Tier A**, which is the one place the measured
+    ranking cuts across the tier order.
   - **Tier C — native codegen (native only): DONE** (merged 2026-07-24, `e7ca13b..451cbb4`; spec
     `docs/superpowers/specs/2026-07-24-tier-c-opt-measurement-design.md`, plan
     `.../plans/2026-07-24-tier-c-opt-measurement.md`). GVN, LICM, loop unrolling, vectorization, native
@@ -178,12 +181,57 @@ produce. The oracle validates every combination.
     for ~2.6× the compile time; and `Os`/`Oz` are byte-identical to `speed` on Cranelift, so six levels yield
     two distinct outputs there. **Tiers A and B now have a validated `-O3` reference point to measure
     against — and the TM's step-count goldens, not native wall-clock, are where their value will show.**
+  **The ranked pass set — measured, not guessed.** The Core source map + step survey slice (merged
+  2026-07-25, `07b5ee6`; spec `docs/superpowers/specs/2026-07-24-core-source-map-and-step-survey-design.md`)
+  built the instrument that picks these passes, and **the evidence overturned the recommendation this
+  roadmap previously implied**. Re-derive any number below with
+  `cargo run --release --example step_survey -p redextape-core` — the survey is the source of truth and
+  prints its own caveats; the ranking is transcribed here so choosing a pass does not require running it.
+  Corpus: 32 oracle programs, 3,261,660 TM steps, shares step-weighted.
+  1. **Closure specialization / known-callee devirtualization — 27.5%** (897,035 steps: `$applyN` dispatch
+     13.9% + `ClosureScaffold`'s dispatch half 13.6%). *Tier A.* **The enabling pass — you cannot inline
+     through `$apply1`**, so it must come first for the inliner to have anything to work on. Every closure at
+     every call site in this corpus is statically known, so the opportunity is 100% present, not
+     hypothetical. Measured ceilings: 86.7% on an isolated shape, 50.5% on `map` specialized to its known
+     callback — both with the specialized function still *called*, so neither bundles the inliner.
+     **Prerequisite:** `defunc` currently *rejects* functions both called by name and used as a value, which
+     is the entire "direct call to a value-used function" case — so
+     `docs/superpowers/specs/2026-07-25-defunc-both-called-and-value-used-design.md` comes first.
+  2. **`Ret`'s frame-restore / live-`Loc`-bank reduction — 24.8%** (810,151 steps). The **largest single
+     bucket in the survey — larger than any user construct kind** — and measured to grow **exactly
+     quadratically** in locals live across a call (constant 2nd differences; 42× the ABI cost at K=8 versus
+     K=0 for the *same one call*). *Tier B (asm→asm), not Tier A.* It is the one candidate with **no
+     pass-ceiling probe**, because a hand-optimized form would have to be a different ABI rather than a
+     different program; the scaling measurement is the evidence offered in place of a ceiling.
+  3. **Inlining — 8.2%** (18.1% counting self-recursive calls, which it can only unroll). *Tier A.*
+     Legitimate and it compounds with (1) — it also retires the `MachineScaffold` at the sites it removes —
+     but its honest probe ceiling is **62.5–86.2%, not the 91.0%** the identity-callee shape reports, and its
+     share is 0.30× devirtualization's.
+  4. **Arithmetic passes (folding, algebraic identities, const-prop) — 6.1% step-weighted**, which looks
+     negligible only under step-weighting *of this corpus*: program-averaged they are 17.4%, and on the 25
+     first-order programs **26.6%, beating merged-`Apply`'s 22.0%**. Their Part B ceilings are the survey's
+     highest (88.5–98.7%). *Tier A.*
+  - **Adjacent, and excluded from (1) by the same bucketing rule** (*bucket by what a pass could do about
+    it*): defunc's mutable-capture **boxing totals 2.4%** (79,784 steps). Devirtualization removes none of
+    it; a different mutable-capture strategy removes all of it.
+  - **The trap this survey exists to defuse.** A single merged `Apply` bucket (38.5%) names inlining the
+    standout. It is not: that bucket is four populations with opposite optimizer implications, its largest
+    slice (13.9% dispatch) is untouchable by an inliner, and another 4.9% is `cons`/`head`/`tail`/`is_empty`
+    — **one asm instruction each, no frame, no `Call`, no `Ret`** — with nothing there to inline at all.
+  - **The bound on all of the above, which must travel with the numbers.** This corpus is an oracle suite
+    built for **backend feature coverage, not workload representativeness**. Seven higher-order demos carry
+    **83.6% of the steps**; drop them and the headline inverts. The survey says where steps go *in these
+    programs*. Choosing a pass on it means betting an intended workload resembles one of these populations —
+    and that bet, not the table, is the decision.
   Two properties make this project special: the **oracle is the optimizer's test harness** (every pass must
   keep `reference == λ == TM (== native)` — a miscompiling pass is refuted instantly by whichever leg
   breaks), and the **TM makes savings measurable** (the step-count goldens quantify exactly what a pass
   saved: "DCE cut `sum(5)` from 178k steps to N"; λ shows β-step deltas; native shows wall-clock — three
   lenses on one optimization). **When:** its own plan(s), after the backends are complete, oracle green so a
-  regression is unambiguous; sequence Tier A → Tier B → (Tier C with the native backend). **Risk:**
+  regression is unambiguous. The tier order (Tier A → Tier B → Tier C, the last now done) still says which
+  tier *reaches* the most backends, but the **ranked pass set above says which pass to build**, and the two
+  disagree once: the #2 target is Tier B. Concretely: `defunc` BOTH → devirtualization → frame-restore ABI →
+  inlining. **Risk:**
   miscompilation — mitigated by the oracle; apply YAGNI hard (add a pass only if it helps demos fit under
   caps or reads more clearly).
 

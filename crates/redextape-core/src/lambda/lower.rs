@@ -11,6 +11,8 @@ use crate::lambda::term::{LambdaTerm, abs, app, shift, var};
 const STORE: &str = "$store";
 /// Scope sentinel for a `while`'s recursive `loop` binder.
 const LOOP: &str = "$loop";
+/// Scope sentinel for the tuple binder of a mutually recursive group's single fixpoint.
+const GROUP: &str = "$group";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LowerError {
@@ -170,7 +172,102 @@ fn lower_expr(core: &Core, scope: &mut Vec<String>, ctx: Option<&StoreCtx>) -> R
         Core::Let { mutable: true, .. } | Core::Assign(..) | Core::While(..) | Core::Seq(..) => {
             lower_region(core, scope)
         }
+        Core::LetRecGroup(id, bindings, body) => lower_group(*id, bindings, body, scope, ctx),
     }
+}
+
+/// Lower a mutually recursive binding group as ONE fixpoint over an n-tuple, then project each
+/// member out of it:
+///
+/// ```text
+/// G   = fix (\g. (\f1 … fn. TUPLE(v1, …, vn)) (proj_1 g) … (proj_n g))
+/// out = (\f1 … fn. body) (proj_1 G) … (proj_n G)
+/// ```
+///
+/// The tuple is the existing Scott list encoding (`cons`/`nil`), so `proj_j` is `head` after `j`
+/// `tail`s — no new combinator and no new encoding primitive. Applying `\f1 … fn. …` to the
+/// projections is exactly "replace every `fj` inside a value by `proj_j g`", done with binders
+/// instead of a substitution walk, so it reuses ordinary scope resolution.
+///
+/// Scope: all n names are pushed before ANY value (or the body) is lowered — the n-ary analogue of
+/// `LetRec`'s single `scope.push(name)` — so every member sees every other member and itself. The
+/// `GROUP` sentinel is pushed first because the `\g` binder sits outside all n name binders: it
+/// keeps the de Bruijn index of every enclosing-scope reference inside a value counting it.
+///
+/// Cost note: call-by-name `fix` re-expands the whole tuple at EVERY projection rather than sharing
+/// it, so a group costs meaningfully more reduction steps than an equivalent self-recursive `fn`.
+/// That is a step-cap limit, not a correctness one.
+fn lower_group(
+    id: NodeId,
+    bindings: &[(String, Core)],
+    body: &Core,
+    scope: &mut Vec<String>,
+    ctx: Option<&StoreCtx>,
+) -> Result<LambdaTerm, LowerError> {
+    // A member name that also names one of the enclosing region's mutable variables would be read
+    // back through the store, not through this group's binder: the `Var` arm checks `ctx` FIRST, so
+    // every reference to the member — in a sibling's value or in the body — would silently project a
+    // slot instead of resolving the function. Reject cleanly rather than miscompile, exactly as the
+    // immutable-`let` arm of `lower_region_body` does for the same collision.
+    if let Some(ctx) = ctx
+        && let Some((name, _)) = bindings.iter().find(|(name, _)| ctx.index_of(name).is_some())
+    {
+        return Err(LowerError::Unsupported {
+            node: id,
+            what: format!("group member `{name}` shadowing a mutable variable (v1 limitation)"),
+        });
+    }
+
+    let n = bindings.len();
+    let base = scope.len();
+
+    // --- G = fix (\g. (\f1 … fn. TUPLE) (proj_1 g) … (proj_n g)) ---
+    scope.push(GROUP.to_string());
+    for (name, _) in bindings {
+        scope.push(name.clone());
+    }
+    let lowered: Result<Vec<LambdaTerm>, LowerError> =
+        bindings.iter().map(|(_, value)| lower_expr(value, scope, ctx)).collect();
+    scope.truncate(base);
+    let values = lowered?;
+
+    // TUPLE(v1, …, vn) as a cons-list, then `\f1 … fn.` over it.
+    let mut fix_body = encode::nil();
+    for v in values.into_iter().rev() {
+        fix_body = app(app(encode::cons(), v), fix_body);
+    }
+    for (name, _) in bindings.iter().rev() {
+        fix_body = abs(name.clone(), fix_body);
+    }
+    // The arguments sit outside the n name binders but under `\g`, so `g` is `var(0)` here.
+    for j in 0..n {
+        fix_body = app(fix_body, projection(var(0), j));
+    }
+    let group = app(fix(), abs(GROUP, fix_body));
+
+    // --- out = (\f1 … fn. body) (proj_1 G) … (proj_n G) ---
+    for (name, _) in bindings {
+        scope.push(name.clone());
+    }
+    let lbody = lower_expr(body, scope, ctx);
+    scope.truncate(base);
+    let mut out = lbody?;
+    for (name, _) in bindings.iter().rev() {
+        out = abs(name.clone(), out);
+    }
+    for j in 0..n {
+        out = app(out, projection(group.clone(), j));
+    }
+    Ok(out)
+}
+
+/// `proj_j t` — the `j`-th (0-based) member of a cons-list tuple: `head (tail^j t)`. Iterative.
+fn projection(tuple: LambdaTerm, j: usize) -> LambdaTerm {
+    let mut t = tuple;
+    for _ in 0..j {
+        t = app(encode::tail(), t);
+    }
+    app(encode::head(), t)
 }
 
 fn lower_lambda(id: NodeId, params: &[String], body: &Core, scope: &mut Vec<String>) -> Result<LambdaTerm, LowerError> {
@@ -370,6 +467,12 @@ fn collect_region_vars(node: &Core) -> (Vec<String>, Vec<String>) {
                 walk(value, vars, letmut);
                 walk(body, vars, letmut);
             }
+            Core::LetRecGroup(_, bindings, body) => {
+                for (_, value) in bindings {
+                    walk(value, vars, letmut);
+                }
+                walk(body, vars, letmut);
+            }
             Core::Seq(_, a, b) | Core::While(_, a, b) | Core::BinOp(_, _, a, b) => {
                 walk(a, vars, letmut);
                 walk(b, vars, letmut);
@@ -418,6 +521,15 @@ fn assigns_captured(body: &Core, params: &[String]) -> bool {
                 local.push(name.clone());
                 let r = walk(value, local, params) || walk(body, local, params);
                 local.pop();
+                r
+            }
+            Core::LetRecGroup(_, bindings, body) => {
+                let n = local.len();
+                for (name, _) in bindings {
+                    local.push(name.clone());
+                }
+                let r = bindings.iter().any(|(_, v)| walk(v, local, params)) || walk(body, local, params);
+                local.truncate(n);
                 r
             }
             Core::Lambda(_, ps, b) => {
@@ -491,6 +603,60 @@ mod tests {
     fn recursion_via_fix() {
         let src = "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)";
         assert_eq!(run_lambda(src), Value::Nat(15));
+    }
+
+    #[test]
+    fn mutual_recursion_reduces_to_the_same_value_as_the_reference() {
+        // `is_even`/`is_odd` are observably DIFFERENT members: a SWAPPED projection (proj_2 for
+        // `is_even`, proj_1 for `is_odd`) computes `false` at an even argument, so a mis-indexed
+        // tuple fails rather than agreeing by symmetry.
+        //
+        // The ODD argument is NOT redundant, and this was measured, not assumed. Under the OTHER
+        // natural projection mutant — every member projected to `proj_1`, which is the sabotage the
+        // plan names — `is_odd` collapses onto `is_even`, and the pair degenerates into the single
+        // self-recursive `is_even(n) = if n == 0 { true } else { is_even(n - 1) }`. That still
+        // returns `true` at every EVEN argument, so `is_even(6)` alone PASSES under the mutant. Only
+        // an odd argument, whose answer must come out of the OTHER member's base case, falsifies it.
+        let defs = "fn is_even(n) { if n == 0 { true } else { is_odd(n - 1) } }\n\
+                    fn is_odd(n) { if n == 0 { false } else { is_even(n - 1) } }\n";
+        assert_eq!(run_lambda(&format!("{defs}is_even(6)")), Value::Bool(true));
+        assert_eq!(run_lambda(&format!("{defs}is_even(5)")), Value::Bool(false));
+    }
+
+    #[test]
+    fn a_three_member_cycle_projects_the_right_member() {
+        // Exercises `proj_2` (TWO `tail`s): each member returns a DIFFERENT constant at n == 0, so
+        // an off-by-one in the projection chain lands on the wrong constant.
+        // a(4) -> b(3) -> c(2) -> a(1) -> b(0) == 8.
+        let src = "fn a(n) { if n == 0 { 7 } else { b(n - 1) } }\n\
+                   fn b(n) { if n == 0 { 8 } else { c(n - 1) } }\n\
+                   fn c(n) { if n == 0 { 9 } else { a(n - 1) } }\n\
+                   a(4)";
+        assert_eq!(run_lambda(src), Value::Nat(8));
+    }
+
+    #[test]
+    fn a_group_member_reads_an_enclosing_binding() {
+        // The `\g` binder sits outside the group's n name binders, so a value's reference to an
+        // ENCLOSING binding has to count it. Without the `GROUP` scope sentinel this resolves one
+        // binder off and the program computes the wrong value (or fails to decode).
+        let src = "let k = 10;\n\
+                   fn f(n) { if n == 0 { k } else { g(n - 1) } }\n\
+                   fn g(n) { if n == 0 { 0 } else { f(n - 1) } }\n\
+                   f(2)";
+        assert_eq!(run_lambda(src), Value::Nat(10));
+    }
+
+    #[test]
+    fn a_group_member_shadowing_a_mutable_is_rejected() {
+        // Inside a store-passing region, a member name that also names a mutable would be read back
+        // out of the store instead of the group's binder. Without the guard this normalizes to a
+        // term that does not decode at all (the reference says 5), so reject it up front.
+        let src = "{ let mut f = 0; fn f(n) { g(n) } fn g(n) { if n == 0 { 5 } else { f(n - 1) } } f(1) }";
+        let (prog, _) = parse(src);
+        let core = desugar(&prog.unwrap());
+        let err = lower(&core).unwrap_err();
+        assert!(matches!(err, LowerError::Unsupported { .. }), "got {err:?}");
     }
 
     #[test]

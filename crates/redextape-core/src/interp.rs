@@ -134,6 +134,24 @@ impl Evaluator {
                 *slot.borrow_mut() = v;
                 self.eval(body, &env2)
             }
+            Core::LetRecGroup(_, bindings, body) => {
+                // Same shape as `LetRec`, N-ary: pre-bind EVERY name to a placeholder slot (so each
+                // value, and the body, can see every name), then evaluate the values in that fully
+                // extended env and patch each slot in turn.
+                let mut env2 = env.clone();
+                let mut slots = Vec::with_capacity(bindings.len());
+                for (name, _) in bindings {
+                    let slot = Rc::new(RefCell::new(Value::Unit));
+                    self.letrec_slots.push(slot.clone());
+                    slots.push(slot.clone());
+                    env2 = Some(Rc::new(Frame { name: name.clone(), slot, parent: env2 }));
+                }
+                for ((_, value), slot) in bindings.iter().zip(&slots) {
+                    let v = self.eval(value, &env2)?;
+                    *slot.borrow_mut() = v;
+                }
+                self.eval(body, &env2)
+            }
             Core::Seq(_, first, then) => {
                 self.eval(first, env)?;
                 self.eval(then, env)
@@ -447,5 +465,56 @@ mod tests {
         let get =
             Core::Apply(g.fresh(), Box::new(Core::Var(g.fresh(), "$box_get".into())), vec![Core::Nat(g.fresh(), 3)]);
         assert!(crate::interp::eval(&get).is_err());
+    }
+
+    // --- `Core::LetRecGroup` (mutually recursive binding groups) ---
+
+    use crate::core::NodeGen;
+
+    fn var_node(g: &mut NodeGen, name: &str) -> Core {
+        Core::Var(g.fresh(), name.to_string())
+    }
+
+    fn nat_node(g: &mut NodeGen, n: u64) -> Core {
+        Core::Nat(g.fresh(), n)
+    }
+
+    /// `name(arg)` — a single-argument call, built fresh each time.
+    fn call(g: &mut NodeGen, name: &str, arg: u64) -> Core {
+        Core::Apply(g.fresh(), Box::new(var_node(g, name)), vec![nat_node(g, arg)])
+    }
+
+    /// `\n. if n == 0 { true } else { is_odd(n - 1) }`
+    fn even_lambda(g: &mut NodeGen) -> Core {
+        let cond = Core::BinOp(g.fresh(), BinOp::Eq, Box::new(var_node(g, "n")), Box::new(nat_node(g, 0)));
+        let then_branch = Core::Bool(g.fresh(), true);
+        let n_minus_1 = Core::BinOp(g.fresh(), BinOp::Sub, Box::new(var_node(g, "n")), Box::new(nat_node(g, 1)));
+        let else_branch = Core::Apply(g.fresh(), Box::new(var_node(g, "is_odd")), vec![n_minus_1]);
+        let body = Core::If(g.fresh(), Box::new(cond), Box::new(then_branch), Box::new(else_branch));
+        Core::Lambda(g.fresh(), vec!["n".to_string()], Box::new(body))
+    }
+
+    /// `\n. if n == 0 { false } else { is_even(n - 1) }`
+    fn odd_lambda(g: &mut NodeGen) -> Core {
+        let cond = Core::BinOp(g.fresh(), BinOp::Eq, Box::new(var_node(g, "n")), Box::new(nat_node(g, 0)));
+        let then_branch = Core::Bool(g.fresh(), false);
+        let n_minus_1 = Core::BinOp(g.fresh(), BinOp::Sub, Box::new(var_node(g, "n")), Box::new(nat_node(g, 1)));
+        let else_branch = Core::Apply(g.fresh(), Box::new(var_node(g, "is_even")), vec![n_minus_1]);
+        let body = Core::If(g.fresh(), Box::new(cond), Box::new(then_branch), Box::new(else_branch));
+        Core::Lambda(g.fresh(), vec!["n".to_string()], Box::new(body))
+    }
+
+    #[test]
+    fn a_binding_group_lets_its_members_see_each_other() {
+        // letrec is_even = \n. if n == 0 { true } else { is_odd(n-1) }
+        //    and is_odd  = \n. if n == 0 { false } else { is_even(n-1) }
+        // in is_even(4)
+        let mut g = NodeGen::default();
+        let group = Core::LetRecGroup(
+            g.fresh(),
+            vec![("is_even".into(), even_lambda(&mut g)), ("is_odd".into(), odd_lambda(&mut g))],
+            Box::new(call(&mut g, "is_even", 4)),
+        );
+        assert_eq!(eval(&group).unwrap(), Value::Bool(true));
     }
 }

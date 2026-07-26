@@ -3,9 +3,11 @@
 //!
 //! A function or lambda *used as a value* (occurring anywhere other than as the immediate callee of
 //! an `Apply`) becomes a closure `cons(tag, env)` on the HEAP; an `Apply` of a value becomes a call
-//! to a generated per-arity `applyN` dispatcher that inlines the target bodies as its arms. Functions
-//! are emitted in dependency order (callees outer of callers) since neither the reference nor
-//! `lower_asm` supports mutual recursion.
+//! to a generated per-arity `applyN` dispatcher that inlines the target bodies as its arms. The
+//! output BINDERS are emitted in dependency order (callees outer of callers); a mutually recursive
+//! `LetRecGroup` is ONE binder, so calls among its own members need no ordering at all — the
+//! reference and `lower_asm` both bind every name in a group before evaluating any of its values. A
+//! cycle between two *distinct* binders remains `Unsupported`.
 //!
 //! Task 4 adds **immutable environment capture**: an anonymous `Lambda` used as a value (e.g. as an
 //! `Apply` argument) captures its free immutable variables **by value** — the closure env carries the
@@ -91,15 +93,30 @@ impl SynthGen {
     }
 }
 
-/// A peeled top-level `fn name(params) { body }` (a `LetRec` whose value is a `Lambda`).
+/// Which source binder a peeled function came from — and therefore which node re-emits it, and with
+/// which id. A KEPT (name-called) function is re-emitted as exactly the `fn` it was, so it carries
+/// the source id rather than a fresh one: `lower_asm` bills a function's prologue (one `Mov` per
+/// parameter) and its `Ret` to the binder node, and those run on EVERY call, so minting here would
+/// report a user function's whole per-call frame cost as defunctionalization scaffolding.
+#[derive(Clone, Copy, Debug)]
+enum Origin {
+    /// A standalone `fn`: the peeled `LetRec`'s own id, re-emitted as its own `LetRec`.
+    Solo(NodeId),
+    /// One member of a mutually recursive `LetRecGroup`: the GROUP node's own id. Every surviving
+    /// member of that group shares this id and they are re-emitted together, by the one binder that
+    /// carries it — so no output node id is duplicated (see `Emitted`) and the members stay
+    /// simultaneously bound, which is the whole point of the group.
+    Group(NodeId),
+}
+
+/// A peeled top-level `fn name(params) { body }` — a `LetRec` whose value is a `Lambda`, or one
+/// member of a `LetRecGroup` (whose values are all `Lambda`s).
 struct Func<'a> {
-    /// The peeled `LetRec`'s and `Lambda`'s own ids. A KEPT (name-called) function is re-emitted as
-    /// exactly this `fn`, so it is re-emitted with these ids rather than fresh ones — `lower_asm`
-    /// bills a function's prologue (one `Mov` per parameter) and its `Ret` to the `LetRec` node, and
-    /// those run on EVERY call, so minting here would report a user function's whole per-call frame
-    /// cost as defunctionalization scaffolding. A VALUE-used function is dropped (inlined into a
-    /// dispatcher arm), so its two ids simply do not appear in the output.
-    letrec_id: NodeId,
+    /// The binder this `fn` was peeled from, carrying its id (see `Origin`).
+    origin: Origin,
+    /// The peeled `Lambda`'s own id — a member's own, never the group's, so each member keeps its
+    /// identity in the source map. A VALUE-used function is dropped (inlined into a dispatcher arm),
+    /// so its ids simply do not appear in the output.
     lambda_id: NodeId,
     name: String,
     params: Vec<String>,
@@ -125,14 +142,55 @@ struct Func<'a> {
 ///
 /// Whoever relaxes (3) must re-id one of the two copies. `no_output_node_id_is_duplicated` fails
 /// loudly if they do not.
+///
+/// A binding group is the one case where several `Emitted`s share a source id (their `Origin::Group`
+/// id) — and it is not an exception to the invariant, because they are re-emitted by ONE
+/// `LetRecGroup` node carrying that id once. Their `Lambda` ids stay one per member.
 struct Emitted {
     name: String,
     params: Vec<String>,
     body: Core,
-    /// The source `(LetRec, Lambda)` ids when this function IS a user `fn` carried through (a kept
-    /// function, see `Func`); `None` for a generated `$applyN` dispatcher, which has no source
-    /// analogue at all and takes fresh ids.
-    src: Option<(NodeId, NodeId)>,
+    /// The source binder and this function's own `Lambda` id when it IS a user `fn` carried through
+    /// (a kept function, see `Func`); `None` for a generated `$applyN` dispatcher, which has no
+    /// source analogue at all and takes fresh ids.
+    src: Option<(Origin, NodeId)>,
+}
+
+impl Emitted {
+    /// The output binder that will bind this function (see `Unit`).
+    fn unit(&self) -> Unit {
+        match self.src {
+            Some((Origin::Group(id), _)) => Unit::Group(id),
+            _ => Unit::Solo(self.name.clone()),
+        }
+    }
+}
+
+/// One OUTPUT BINDER: a lone function's own `LetRec`, or the whole `LetRecGroup` a peeled group is
+/// re-emitted as (keyed by the source group node's id).
+///
+/// `topo_order` orders UNITS, not names, and that is not a workaround for its cycle rejection but the
+/// only shape that can be right: a group's members call one another, so ordering them individually
+/// would report a cycle for exactly the construct the group exists to express — and there is nothing
+/// to order between them anyway, since ONE binder binds them all simultaneously. Edges within a unit
+/// are dropped for the same reason self-edges always were: the binder binds every one of its names
+/// before any of its values is evaluated. Edges in and out of the group are kept, so a genuine cycle
+/// through a group (a dispatcher arm that calls a member while a member calls that dispatcher) is
+/// still rejected.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum Unit {
+    Solo(String),
+    Group(NodeId),
+}
+
+impl Unit {
+    /// How this unit is named in an `Unsupported` message.
+    fn label(&self) -> String {
+        match self {
+            Unit::Solo(name) => format!("`{name}`"),
+            Unit::Group(id) => format!("the binding group at node {id}"),
+        }
+    }
 }
 
 /// A peeled top-level `let name = value` value-binding sitting in the prelude chain (interleaved with
@@ -313,8 +371,8 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
         seen_lets.insert(l.name.clone());
     }
 
-    // 5b. Kept functions keep their binding — and their identity: re-emitted with the source `fn`'s
-    // own `LetRec`/`Lambda` ids (see `Func`), since this IS that function, only with its body
+    // 5b. Kept functions keep their binding — and their identity: re-emitted from the source `fn`'s
+    // own binder and `Lambda` ids (see `Func`), since this IS that function, only with its body
     // rewritten.
     let mut emitted: Vec<Emitted> = Vec::new();
     for f in &kept {
@@ -324,7 +382,7 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
             name: f.name.clone(),
             params: f.params.clone(),
             body,
-            src: Some((f.letrec_id, f.lambda_id)),
+            src: Some((f.origin, f.lambda_id)),
         });
     }
 
@@ -362,12 +420,16 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
         emitted.push(Emitted { name: dispatcher_name(arity), params, body, src: None });
     }
 
-    // 8. Emit in dependency order (callees outer of callers); a non-self cycle is `Unsupported`.
+    // 8. Emit in dependency order (callees outer of callers), one BINDER at a time — a lone function
+    // or a whole binding group (see `Unit`); a cycle between binders is `Unsupported`.
     let order = topo_order(&emitted, main)?;
 
-    // 9. Assemble: the function `LetRec`s wrap the prelude `let`s, which wrap the rewritten main.
+    // 9. Assemble: the function binders wrap the prelude `let`s, which wrap the rewritten main. Each
+    // unit's members in `emitted` order, which for a group is source order.
+    let mut members: BTreeMap<Unit, Vec<String>> = BTreeMap::new();
     let mut by_name: BTreeMap<String, Emitted> = BTreeMap::new();
     for e in emitted {
+        members.entry(e.unit()).or_default().push(e.name.clone());
         by_name.insert(e.name.clone(), e);
     }
     let mut acc = main_rw;
@@ -397,25 +459,68 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
         }
     }
     // Function chain OUTERMOST (outermost = `order[0]`).
-    for name in order.iter().rev() {
-        // Defensive: `order` is a permutation of `emitted`'s names (topo_order over exactly them), so
-        // every name is present. Degrade an internal-invariant violation to `Unsupported` rather than
-        // `expect`/panic — `defunc`/`run_tm` must stay total on ANY input.
-        let Some(Emitted { params, body, src, .. }) = by_name.remove(name) else {
+    for unit in order.iter().rev() {
+        // Defensive: `order` is a permutation of the units of `emitted` (`topo_order` over exactly
+        // them), so every unit has members. Degrade an internal-invariant violation to `Unsupported`
+        // rather than `expect`/panic — `defunc`/`run_tm` must stay total on ANY input.
+        let Some(names) = members.remove(unit) else {
             return Err(LowerError::Unsupported {
                 node: main.id(),
-                what: format!("ordered name `{name}` was emitted"),
+                what: format!("ordered unit {} was emitted", unit.label()),
             });
         };
-        // A carried-through user `fn` keeps its `LetRec`/`Lambda` ids; a generated dispatcher mints
-        // both. Neither can collide: the source ids belong to a peeled node that appears nowhere else
-        // in the output, and `g` is seeded past every input id.
-        let (letrec_id, lambda_id) = match src {
-            Some(ids) => ids,
-            None => (g.fresh(), g.fresh()),
+        // Each member as a `(name, Lambda)` binding, and the id for the binder around them: the source
+        // `LetRec`'s / `LetRecGroup`'s own, or a fresh one for a dispatcher (which has no source
+        // analogue). A carried-through user `fn` likewise keeps its own `Lambda` id. None can collide:
+        // the source ids belong to a peeled node that appears nowhere else in the output, and `g` is
+        // seeded past every input id. ONE node ends up carrying the binder id, however many members
+        // the unit has — a group's shared `Origin::Group` id is spent exactly once, here.
+        let mut binder_id: Option<NodeId> = match unit {
+            Unit::Group(id) => Some(*id),
+            // A lone unit whose one member carries no source origin is a generated dispatcher, which
+            // mints BOTH of its ids here. Mint the binder's now, BEFORE the member loop mints the
+            // lambda's, so a dispatcher's pair keeps the order it had before groups existed — this
+            // loop is the only place either is minted, and every higher-order program has one.
+            Unit::Solo(name) => match by_name.get(name) {
+                Some(e) if e.src.is_none() => Some(g.fresh()),
+                _ => None,
+            },
         };
-        let lam = Core::Lambda(lambda_id, params, Box::new(body));
-        acc = Core::LetRec { id: letrec_id, name: name.clone(), value: Box::new(lam), body: Box::new(acc) };
+        let mut bindings: Vec<(String, Core)> = Vec::with_capacity(names.len());
+        for name in &names {
+            let Some(Emitted { params, body, src, .. }) = by_name.remove(name) else {
+                return Err(LowerError::Unsupported {
+                    node: main.id(),
+                    what: format!("ordered name `{name}` was emitted"),
+                });
+            };
+            let lambda_id = match src {
+                Some((Origin::Solo(letrec_id), lam_id)) => {
+                    binder_id = Some(letrec_id);
+                    lam_id
+                }
+                Some((Origin::Group(_), lam_id)) => lam_id,
+                None => g.fresh(),
+            };
+            bindings.push((name.clone(), Core::Lambda(lambda_id, params, Box::new(body))));
+        }
+        let binder_id = match binder_id {
+            Some(id) => id,
+            None => g.fresh(),
+        };
+        acc = match bindings.len() {
+            // Cannot happen (a unit exists only because a member was emitted into it); folding it
+            // away keeps this total.
+            0 => acc,
+            // ONE member — a lone `fn`, or a group all but one of whose members were inlined into a
+            // dispatcher arm. Either way `LetRec` already binds its own name in its own value, and
+            // `LetRecGroup` is built only for a genuine group of two or more (see `Core::LetRecGroup`).
+            1 => match bindings.pop() {
+                Some((name, lam)) => Core::LetRec { id: binder_id, name, value: Box::new(lam), body: Box::new(acc) },
+                None => acc, // unreachable: the length was just checked
+            },
+            _ => Core::LetRecGroup(binder_id, bindings, Box::new(acc)),
+        };
     }
     Ok((acc, g.minted))
 }
@@ -426,10 +531,14 @@ pub fn defunc(core: &Core) -> Result<Core, LowerError> {
     defunc_mapped(core).map(|(c, _)| c)
 }
 
-/// Peel the outermost prelude chain of `let name = value` value-bindings and
-/// `LetRec { name, Lambda(params, body), .. }` (`fn`) definitions, in whatever order they interleave;
-/// the first non-such node is the main tail expression. A `LetRec` whose value is not a `Lambda` is
-/// `Unsupported`.
+/// Peel the outermost prelude chain of `let name = value` value-bindings,
+/// `LetRec { name, Lambda(params, body), .. }` (`fn`) definitions and `LetRecGroup` binding groups, in
+/// whatever order they interleave; the first non-such node is the main tail expression. A `LetRec` (or
+/// group member) whose value is not a `Lambda` is `Unsupported`.
+///
+/// A group contributes EVERY member as its own `Func` — they are ordinary top-level functions to the
+/// rest of the pass (classified, rewritten and possibly inlined one by one); all that distinguishes
+/// them is the `Origin::Group` that re-assembles the survivors under one binder at the end.
 #[allow(clippy::type_complexity)]
 fn peel(core: &Core) -> Result<(Vec<LetBinding<'_>>, Vec<Func<'_>>, &Core), LowerError> {
     let mut lets = Vec::new();
@@ -442,12 +551,30 @@ fn peel(core: &Core) -> Result<(Vec<LetBinding<'_>>, Vec<Func<'_>>, &Core), Lowe
                     return Err(unsupported(cur, "letrec value is not a function".to_string()));
                 };
                 funcs.push(Func {
-                    letrec_id: *id,
+                    origin: Origin::Solo(*id),
                     lambda_id: *lam_id,
                     name: name.clone(),
                     params: params.clone(),
                     body: lam_body,
                 });
+                cur = body;
+            }
+            Core::LetRecGroup(id, bindings, body) => {
+                for (name, value) in bindings {
+                    // Every value must be a `Lambda` (`desugar` builds a group only out of `fn`s, but
+                    // `Core` is public and this must stay total either way) — same rejection as the
+                    // `LetRec` arm above, named per member.
+                    let Core::Lambda(lam_id, params, lam_body) = value else {
+                        return Err(unsupported(value, format!("group binding `{name}` is not a function")));
+                    };
+                    funcs.push(Func {
+                        origin: Origin::Group(*id),
+                        lambda_id: *lam_id,
+                        name: name.clone(),
+                        params: params.clone(),
+                        body: lam_body,
+                    });
+                }
                 cur = body;
             }
             Core::Let { id, name, mutable, value, body } => {
@@ -496,6 +623,14 @@ fn analyze(
         Core::LetRec { name, value, body, .. } => {
             let inner = with(locals, name);
             analyze(value, funcs, &inner, value_used, name_called);
+            analyze(body, funcs, &inner, value_used, name_called);
+        }
+        Core::LetRecGroup(_, bindings, body) => {
+            let mut inner = locals.clone();
+            inner.extend(bindings.iter().map(|(name, _)| name.clone()));
+            for (_, value) in bindings {
+                analyze(value, funcs, &inner, value_used, name_called);
+            }
             analyze(body, funcs, &inner, value_used, name_called);
         }
         Core::Lambda(_, params, body) => {
@@ -601,7 +736,12 @@ impl Rewriter<'_> {
             // immutable locals by value.
             Core::Lambda(_, params, body) => self.rewrite_lambda_value(params, body, locals),
             // A nested/local function definition is a higher-order construct this pass does not handle.
+            // Only a NESTED binder reaches the rewriter: `peel` takes the whole top-level prelude
+            // chain, `LetRecGroup` included, and hands the rewriter only the bodies and main.
             Core::LetRec { .. } => Err(unsupported(node, "nested function definition".to_string())),
+            Core::LetRecGroup(..) => {
+                Err(unsupported(node, "nested mutually recursive function definition".to_string()))
+            }
         }
     }
 
@@ -856,55 +996,71 @@ fn dispatcher_name(arity: usize) -> String {
     format!("$apply{arity}")
 }
 
-/// A DFS post-order of the emitted functions with edges caller -> callee, so a callee is emitted
-/// outer of (before) every caller. Self-recursion is fine (ignored); any other cycle is `Unsupported`.
-fn topo_order(emitted: &[Emitted], main: &Core) -> Result<Vec<String>, LowerError> {
+/// A DFS post-order of the emitted BINDERS (`Unit`s: a lone function, or a whole binding group) with
+/// edges caller -> callee, so a callee is emitted outer of (before) every caller. A call WITHIN a unit
+/// — self-recursion, or one group member calling another — is ignored, since the binder binds every
+/// one of its names before any of its values is evaluated. Any other cycle is `Unsupported`.
+fn topo_order(emitted: &[Emitted], main: &Core) -> Result<Vec<Unit>, LowerError> {
     let names: BTreeSet<String> = emitted.iter().map(|e| e.name.clone()).collect();
-    let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let unit_of: BTreeMap<String, Unit> = emitted.iter().map(|e| (e.name.clone(), e.unit())).collect();
+    let mut edges: BTreeMap<Unit, BTreeSet<Unit>> = BTreeMap::new();
     for e in emitted {
         let mut callees = BTreeSet::new();
         collect_calls(&e.body, &names, &mut callees, 0)?;
-        callees.remove(&e.name); // self-recursion is allowed (LetRec binds the name before its body)
-        edges.insert(e.name.clone(), callees);
+        let from = e.unit();
+        // A unit's out-edges are the union of its members' — one group member's callee is a callee of
+        // the whole group, since they are emitted together.
+        let out = edges.entry(from.clone()).or_default();
+        for callee in &callees {
+            // A callee with no unit cannot happen (`callees` ⊆ `names`, and every name has one);
+            // skipping it rather than indexing keeps this total.
+            if let Some(u) = unit_of.get(callee)
+                && *u != from
+            {
+                out.insert(u.clone());
+            }
+        }
     }
 
     let mut order = Vec::new();
-    let mut done: BTreeSet<String> = BTreeSet::new();
-    let mut on_stack: BTreeSet<String> = BTreeSet::new();
+    let mut done: BTreeSet<Unit> = BTreeSet::new();
+    let mut on_stack: BTreeSet<Unit> = BTreeSet::new();
     for e in emitted {
-        visit(&e.name, &edges, &mut done, &mut on_stack, &mut order, main, 0)?;
+        visit(&e.unit(), &edges, &mut done, &mut on_stack, &mut order, main, 0)?;
     }
     Ok(order)
 }
 
 /// `depth` is the number of `visit` frames currently on the native stack (the call-graph DAG depth
-/// among emitted functions, i.e. #functions in the worst case) -- guarded defense-in-depth alongside
+/// among emitted binders, i.e. #binders in the worst case) -- guarded defense-in-depth alongside
 /// the up-front `too_deep_node` check on `core`'s own nesting (see `MAX_DEFUNC_DEPTH`).
 #[allow(clippy::too_many_arguments)]
 fn visit(
-    name: &str,
-    edges: &BTreeMap<String, BTreeSet<String>>,
-    done: &mut BTreeSet<String>,
-    on_stack: &mut BTreeSet<String>,
-    order: &mut Vec<String>,
+    unit: &Unit,
+    edges: &BTreeMap<Unit, BTreeSet<Unit>>,
+    done: &mut BTreeSet<Unit>,
+    on_stack: &mut BTreeSet<Unit>,
+    order: &mut Vec<Unit>,
     site: &Core,
     depth: u32,
 ) -> Result<(), LowerError> {
     if depth > MAX_DEFUNC_DEPTH {
         return Err(LowerError::TooDeep { node: site.id() });
     }
-    if done.contains(name) {
+    if done.contains(unit) {
         return Ok(());
     }
-    if !on_stack.insert(name.to_string()) {
-        return Err(unsupported(site, format!("cyclic higher-order call graph through `{name}`")));
+    if !on_stack.insert(unit.clone()) {
+        return Err(unsupported(site, format!("cyclic higher-order call graph through {}", unit.label())));
     }
-    for callee in &edges[name] {
+    // `.get` rather than `edges[unit]`: every unit does have an entry (they are built over exactly
+    // these units), but indexing PANICS if that ever stops holding, and this pass must stay total.
+    for callee in edges.get(unit).into_iter().flatten() {
         visit(callee, edges, done, on_stack, order, site, depth + 1)?;
     }
-    on_stack.remove(name);
-    done.insert(name.to_string());
-    order.push(name.to_string());
+    on_stack.remove(unit);
+    done.insert(unit.clone());
+    order.push(unit.clone());
     Ok(())
 }
 
@@ -945,6 +1101,12 @@ fn collect_calls(
         Core::Lambda(_, _, b) | Core::Assign(_, _, b) => collect_calls(b, targets, out, depth + 1)?,
         Core::Let { value, body, .. } | Core::LetRec { value, body, .. } => {
             collect_calls(value, targets, out, depth + 1)?;
+            collect_calls(body, targets, out, depth + 1)?;
+        }
+        Core::LetRecGroup(_, bindings, body) => {
+            for (_, value) in bindings {
+                collect_calls(value, targets, out, depth + 1)?;
+            }
             collect_calls(body, targets, out, depth + 1)?;
         }
         Core::Var(..) | Core::Nat(..) | Core::Bool(..) | Core::Unit(..) => {}
@@ -1003,6 +1165,17 @@ fn fv_into(node: &Core, out: &mut BTreeSet<String>) {
             fv_into(value, &mut inner);
             fv_into(body, &mut inner);
             inner.remove(name);
+            out.extend(inner);
+        }
+        Core::LetRecGroup(_, bindings, body) => {
+            let mut inner = BTreeSet::new();
+            for (_, value) in bindings {
+                fv_into(value, &mut inner);
+            }
+            fv_into(body, &mut inner);
+            for (name, _) in bindings {
+                inner.remove(name);
+            }
             out.extend(inner);
         }
         Core::Assign(_, name, value) => {
@@ -1203,6 +1376,12 @@ fn push_children<'a>(node: &'a Core, stack: &mut Vec<&'a Core>) {
         }
         Core::Let { value, body, .. } | Core::LetRec { value, body, .. } => {
             stack.push(value);
+            stack.push(body);
+        }
+        Core::LetRecGroup(_, bindings, body) => {
+            for (_, value) in bindings {
+                stack.push(value);
+            }
             stack.push(body);
         }
         Core::Var(..) | Core::Nat(..) | Core::Bool(..) | Core::Unit(..) => {}
@@ -1421,9 +1600,28 @@ mod tests {
             "cyclic higher-order call graph",
         );
 
+        // The half of the `Unit` rule that was deliberately NOT relaxed. `topo_order` drops edges
+        // *within* a binder (a group's members call each other freely, since `lower_asm` binds every
+        // name in the group before lowering any body) but KEEPS every edge in and out of one, so a
+        // cycle running THROUGH a group is still rejected: `b` is value-used, so its body becomes an
+        // `$apply1` arm that calls `a` by name, giving group{a,b} -> `ap` -> `$apply1` -> group{a,b}.
+        rejects(
+            "fn ap(f, x) { f(x) } fn a(n) { if n == 0 { 0 } else { ap(b, n - 1) } } \
+             fn b(n) { if n == 0 { 1 } else { a(n - 1) } } a(4)",
+            "cyclic higher-order call graph",
+        );
+
         // A nested/local function definition, reached (its enclosing fn must be called, or it's dead
         // code and silently dropped rather than rewritten — see the report for that false start).
         rejects("fn outer(x) { fn inner(y) { y + 1 } inner(x) } outer(5)", "nested function definition");
+
+        // A nested/local mutually recursive GROUP, same boundary one variant over: `peel` takes the
+        // top-level prelude chain (groups included), so only a group INSIDE a body reaches the
+        // rewriter, and a local definition is as unsupported for a group as for a lone `fn`.
+        rejects(
+            "fn outer(x) { fn a(n) { if n == 0 { 0 } else { b(n - 1) } } fn b(n) { a(n) + 1 } a(x) } outer(3)",
+            "nested mutually recursive function definition",
+        );
     }
 
     /// The dispatcher's fault arm (`head(nil)`), not `Unsupported`, is how a partial-application /
@@ -1727,6 +1925,94 @@ mod tests {
         assert!(all_node_ids(&out).contains(&add_id), "the user's `x + 1` lost its identity through defunc");
     }
 
+    /// A mutually recursive binding group survives defunctionalization: `ev`/`od` are BOTH mutually
+    /// recursive AND higher-order (they take a continuation `k` and apply it), so `lower_asm` alone
+    /// reports `Unsupported` and the real pipeline routes the program through `defunc` — exactly the
+    /// shape that reaches this pass.
+    ///
+    /// The two members contribute DIFFERENT arithmetic PER LEVEL (`+ 2` in `ev`, `+ 5` in `od`), not
+    /// just different base constants: with `ev(4, id) == 1 + 5 + 2 + 5 + 2 == 15`, binding either
+    /// body to the other's name gives 20, so a name<->body swap FAILS here instead of passing by
+    /// symmetry (a constant-only difference can cancel out). Verified by mutation, see the task-6
+    /// report.
+    #[test]
+    fn a_binding_group_survives_defunctionalization() {
+        let src = "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) + 2 } } \
+                   fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) + 5 } } \
+                   fn id(x){ x } ev(4, id)";
+        let core = crate::desugar::desugar(&crate::parser::parse(src).0.unwrap());
+        // The premise: this program really is beyond the first-order backend on its own.
+        assert!(
+            matches!(crate::tm::lower_asm(&core), Err(LowerError::Unsupported { .. })),
+            "the test program must be higher-order enough that `lower_asm` alone rejects it"
+        );
+        let out = defunc(&core).expect("a binding group must defunctionalize");
+        let prog = crate::tm::lower_asm(&out).expect("and then lower");
+        let expected = crate::run(src).unwrap();
+        assert_eq!(expected, crate::value::Value::Nat(15), "the members' per-level arithmetic must differ");
+        match crate::tm::run_asm(&prog, crate::tm::DEFAULT_CAPS) {
+            crate::tm::AsmRun::Ran(o) => assert_eq!(crate::tm::decode_asm(&o, &expected), Some(expected)),
+            other => panic!("did not run: {other:?}"),
+        }
+
+        // Structurally: the group comes out a GROUP — both members under ONE binder, in source
+        // order, and that binder carries the SOURCE group node's own id (the source map's claim that
+        // a construct the user wrote keeps its identity through the pass). A nested chain would bind
+        // whichever member came second too late for the first one's body.
+        let is_group = |c: &Core| matches!(c, Core::LetRecGroup(..));
+        let src_id = find_first(&core, &is_group).map(Core::id).expect("the source has a group");
+        match find_first(&out, &is_group) {
+            Some(Core::LetRecGroup(id, bindings, _)) => {
+                let names: Vec<&str> = bindings.iter().map(|(n, _)| n.as_str()).collect();
+                assert_eq!(names, ["ev", "od"], "both members, in source order, under one binder");
+                assert_eq!(*id, src_id, "the re-emitted group must keep the source group's id");
+            }
+            _ => panic!("defunc must re-emit the group as ONE LetRecGroup:\n{out:?}"),
+        }
+        // And each member keeps its OWN `Lambda` id (never the group's, never a fresh one).
+        let member_lambda_ids: Vec<NodeId> = match find_first(&core, &is_group) {
+            Some(Core::LetRecGroup(_, bindings, _)) => bindings.iter().map(|(_, v)| v.id()).collect(),
+            _ => Vec::new(),
+        };
+        let out_ids = all_node_ids(&out);
+        for id in member_lambda_ids {
+            assert!(out_ids.contains(&id), "member lambda {id} lost its identity through defunc");
+        }
+    }
+
+    /// THREE members, not two: a group is a `Vec` of bindings, and two is the one length where
+    /// "swap" and "reverse" and "rotate" are the same mistake. `p`/`q`/`r` each add a different
+    /// amount per level (`+ 2`, `+ 5`, `+ 11`) over different bases (1, 0, 7). Reference == defunc'd,
+    /// and the output lowers first-order.
+    ///
+    /// **`p(4, id)`, not `p(5, id)` — the ARGUMENT is what makes a permutation visible, not the
+    /// constants.** A rotation permutes *which* constant lands at *which* level; when the walk
+    /// consumes a whole number of laps, the multiset of constants summed — and the base body finally
+    /// reached — are both unchanged, so the answer is identical. Measured over all six pairings:
+    ///
+    /// | pairing | `p(4, id)` | `p(5, id)` |
+    /// |---|---:|---:|
+    /// | correct | **20** | **32** |
+    /// | rotate | 24 | **32** ← invisible |
+    /// | rotate the other way | 51 | 62 |
+    /// | swap first two | 32 | 44 |
+    /// | swap last two | 27 | 35 |
+    /// | swap outer two | 51 | 62 |
+    ///
+    /// At `p(5, id)` one of the two rotations returns **exactly the correct answer**, so this test
+    /// stayed green under the n-ary-only mispairing it exists to catch — only the rotation that
+    /// degenerates into a self-loop showed, which is the one Task 6 happened to try. At `p(4, id)`
+    /// every non-identity pairing differs.
+    #[test]
+    fn a_three_member_group_defuncs_and_agrees() {
+        defunc_preserves_and_lowers(
+            "fn p(n,k){ if n == 0 { k(1) } else { q(n - 1, k) + 2 } }\n\
+             fn q(n,k){ if n == 0 { k(0) } else { r(n - 1, k) + 5 } }\n\
+             fn r(n,k){ if n == 0 { k(7) } else { p(n - 1, k) + 11 } }\n\
+             fn id(x){ x }\n p(4, id)",
+        );
+    }
+
     /// No output node id is DUPLICATED. Attributing a TM step to a node id is only meaningful if an
     /// id names one node: a duplicate would silently merge (or double-bill) two constructs' cost —
     /// the same misattribution the mapped pass exists to prevent, one level down. `defunc` INLINES
@@ -1756,6 +2042,11 @@ mod tests {
             "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)",
             // Nested value-lambdas (currying): two anon closures, one inside the other's body.
             "fn ap(f, x) { f(x) } let add = |y| |z| y + z; ap(ap(add, 4), 5)",
+            // A mutually recursive binding group: its members SHARE one source id (`Origin::Group`),
+            // spent on exactly ONE `LetRecGroup` node in the output. The one case where a shared
+            // source id is by design is also the one where duplicating it would go unnoticed.
+            "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) + 2 } } \
+             fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) + 5 } } fn id(x){ x } ev(4, id)",
             // Two arities, so two dispatchers.
             "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
              fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }\n\

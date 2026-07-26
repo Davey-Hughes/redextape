@@ -220,4 +220,55 @@ mod drop_tests {
         assert!(program.is_some());
         drop(program); // exercises take_stmt_children's Fn/While/expr-statement arms
     }
+
+    /// `Core::LetRecGroup` (mutual-recursion slice, Task 2) is the highest-risk edit to
+    /// `take_core_children`: a binding group's children live in TWO places — every binding's VALUE
+    /// (an unboxed `Core` inside a `Vec`, not a `Box<Core>`) and the `body`. Missing either one means
+    /// the compiler's own field drop-glue (which runs after our custom `drop()` returns) recurses into
+    /// that un-unlinked child via a genuine Rust function call instead of our explicit worklist — and
+    /// if that child is another `LetRecGroup` down a long chain, each level adds one more native stack
+    /// frame until it overflows. Nothing produces this variant from source yet (Task 3 desugars into
+    /// it), so it is built directly here, the same way `interp.rs`'s own unit test does.
+    ///
+    /// Two chains, so each half of the invariant is independently falsifiable: chaining through
+    /// `body` (bindings shallow) would only catch a forgotten `body`; chaining through a binding's
+    /// VALUE (body shallow) would only catch a forgotten bindings-vec drain.
+    #[test]
+    fn dropping_deep_letrecgroup_chain_through_body_does_not_overflow() {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                use crate::core::{Core, NodeGen};
+                let mut g = NodeGen::default();
+                let mut acc = Core::Nat(g.fresh(), 0);
+                for _ in 0..40_000 {
+                    let bindings =
+                        vec![("f".to_string(), Core::Nat(g.fresh(), 0)), ("g".to_string(), Core::Nat(g.fresh(), 0))];
+                    acc = Core::LetRecGroup(g.fresh(), bindings, Box::new(acc)); // chain via body
+                }
+                drop(acc); // must tear down iteratively, not recurse 40,000 deep.
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn dropping_deep_letrecgroup_chain_through_a_binding_value_does_not_overflow() {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                use crate::core::{Core, NodeGen};
+                let mut g = NodeGen::default();
+                let mut acc = Core::Nat(g.fresh(), 0);
+                for _ in 0..40_000 {
+                    // chain via the binding's VALUE this time; the body is a shallow leaf.
+                    acc = Core::LetRecGroup(g.fresh(), vec![("f".to_string(), acc)], Box::new(Core::Nat(g.fresh(), 0)));
+                }
+                drop(acc);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 }

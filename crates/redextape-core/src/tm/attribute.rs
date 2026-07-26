@@ -299,6 +299,12 @@ mod tests {
                     stack.push(value);
                     stack.push(body);
                 }
+                Core::LetRecGroup(_, bindings, body) => {
+                    for (_, value) in bindings {
+                        stack.push(value);
+                    }
+                    stack.push(body);
+                }
                 Core::Nat(..) | Core::Bool(..) | Core::Unit(..) | Core::Var(..) => {}
             }
         }

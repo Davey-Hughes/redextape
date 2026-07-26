@@ -161,34 +161,63 @@ fn lower_into(ctx: &mut Ctx, core: &Core, dst: Reg) -> Result<(), LowerError> {
     r
 }
 
-/// Emit `params`-arity function `body` as an inline subroutine (jumped over during linear flow).
-/// Returns the entry label. The function is registered in `ctx` under `name` before its body is
-/// lowered, so it may recurse.
-fn lower_function(ctx: &mut Ctx, name: &str, params: &[String], body: &Core) -> Result<String, LowerError> {
-    let label = ctx.fresh_label(&format!("{name}."));
+/// One member of a binding group as `lower_function_group` wants it: `(name, params, body)`.
+type FnDef<'a> = (&'a str, &'a [String], &'a Core);
+
+/// Emit every function in `group` as an inline subroutine, all jumped over during linear flow:
+/// `jmp skip; f1: <body1> ret; … fn: <bodyn> ret; skip:`.
+///
+/// **EVERY member's `(label, arity)` is registered in `ctx` before ANY body is lowered.** That
+/// ordering *is* mutual recursion: allocating a label and binding it immediately before lowering
+/// that one body — what this function did when it only ever took one function — is exactly why a
+/// member could not call a sibling. It is pinned by
+/// `a_binding_group_lowers_and_runs_on_the_asm_interpreter`, which cannot lower at all if a name is
+/// bound late.
+///
+/// `lower_function` is the n == 1 case and calls straight through, so the single-`LetRec` path and
+/// the group path are ONE implementation and cannot drift. For n == 1 the emitted code and the label
+/// numbering (`{name}.` then `skip`) are byte-identical to what a single `fn` produced before, which
+/// is what keeps the captured step-count goldens still.
+fn lower_function_group(ctx: &mut Ctx, group: &[FnDef<'_>]) -> Result<(), LowerError> {
+    let labels: Vec<String> = group.iter().map(|(name, ..)| ctx.fresh_label(&format!("{name}."))).collect();
     let skip = ctx.fresh_label("skip");
-    ctx.bind_fn(name, label.clone(), params.len());
-    ctx.emit(Instr::Jmp(skip.clone()));
-    ctx.place(&label);
-    // Hide the caller's value scopes for the body (not merely push a new one): the body runs in a
-    // fresh activation whose locals renumber from 0, so a caller-scope variable would silently alias
-    // one of this function's own locals. Hiding them makes any capture resolve to `None`, so the
-    // `Var` arm rejects it as unbound -> `Unsupported` — a capturing closure is genuinely
-    // higher-order (deferred to defunctionalization, Plan 3b), and a clean error beats a wrong value.
-    // `fn_scopes` stays visible so recursion and calls to other functions still resolve.
-    let saved_scopes = std::mem::replace(&mut ctx.scopes, vec![Vec::new()]);
-    let saved_next = ctx.next_local;
-    ctx.next_local = 0; // each activation has its own local space
-    for (i, p) in params.iter().enumerate() {
-        let slot = ctx.bind(p);
-        ctx.emit(Instr::Mov(slot, Reg::Arg(i as u32)));
+    for ((name, params, _), label) in group.iter().zip(&labels) {
+        ctx.bind_fn(name, label.clone(), params.len());
     }
-    lower_into(ctx, body, Reg::Rr)?;
-    ctx.emit(Instr::Ret);
-    ctx.next_local = saved_next;
-    ctx.scopes = saved_scopes;
+    ctx.emit(Instr::Jmp(skip.clone()));
+    // Iterative over the members (never one recursive call per member): a group's size is a source
+    // property, and `MAX_LOWER_DEPTH` bounds the nesting of each body, not how many siblings it has.
+    for ((_, params, body), label) in group.iter().zip(&labels) {
+        ctx.place(label);
+        // Hide the caller's value scopes for the body (not merely push a new one): the body runs in a
+        // fresh activation whose locals renumber from 0, so a caller-scope variable would silently
+        // alias one of this function's own locals. Hiding them makes any capture resolve to `None`,
+        // so the `Var` arm rejects it as unbound -> `Unsupported` — a capturing closure is genuinely
+        // higher-order (deferred to defunctionalization, Plan 3b), and a clean error beats a wrong
+        // value. `fn_scopes` stays visible so recursion and calls to other functions still resolve —
+        // including, now, to the other members of this same group.
+        let saved_scopes = std::mem::replace(&mut ctx.scopes, vec![Vec::new()]);
+        let saved_next = ctx.next_local;
+        ctx.next_local = 0; // each activation has its own local space
+        for (i, p) in params.iter().enumerate() {
+            let slot = ctx.bind(p);
+            ctx.emit(Instr::Mov(slot, Reg::Arg(i as u32)));
+        }
+        lower_into(ctx, body, Reg::Rr)?;
+        ctx.emit(Instr::Ret);
+        ctx.next_local = saved_next;
+        ctx.scopes = saved_scopes;
+    }
     ctx.place(&skip);
-    Ok(label)
+    Ok(())
+}
+
+/// Emit `params`-arity function `body` as an inline subroutine (jumped over during linear flow). The
+/// function is registered in `ctx` under `name` before its body is lowered, so it may recurse.
+/// Exactly the one-member case of `lower_function_group` — there is ONE emitter, so the single and
+/// group paths cannot drift.
+fn lower_function(ctx: &mut Ctx, name: &str, params: &[String], body: &Core) -> Result<(), LowerError> {
+    lower_function_group(ctx, &[(name, params, body)])
 }
 
 /// `Ok(())` iff `fname` is used in `body` only as the callee of an `Apply` (never as a bare value).
@@ -212,6 +241,9 @@ fn reject_fn_value(body: &Core, fname: &str) -> Result<(), LowerError> {
             Core::Lambda(_, _, b) | Core::Assign(_, _, b) => walk(b, fname),
             Core::Let { value, body, .. } | Core::LetRec { value, body, .. } => {
                 walk(value, fname).or_else(|| walk(body, fname))
+            }
+            Core::LetRecGroup(_, bindings, body) => {
+                bindings.iter().find_map(|(_, v)| walk(v, fname)).or_else(|| walk(body, fname))
             }
             Core::Nat(..) | Core::Bool(..) | Core::Unit(..) => None,
         }
@@ -377,6 +409,40 @@ fn lower_inner(ctx: &mut Ctx, core: &Core, dst: Reg) -> Result<(), LowerError> {
             ctx.fn_scopes.pop();
             r
         }
+        // A mutually recursive binding group: the n-ary `LetRec`, and the same lowering — except
+        // every member is registered before any body is lowered, which is what lets the members call
+        // one another. Each is a plain named subroutine afterwards; the cycle costs nothing extra at
+        // run time (no closure, no dispatch), it is purely a question of when names are bound.
+        Core::LetRecGroup(_, bindings, body) => {
+            // Validate EVERY value is a function before lowering anything: a non-function member has
+            // no entry label to call, and half-emitting a group before discovering that would leave
+            // dead subroutines in the program. Unreachable from source (`desugar` builds a group only
+            // out of `fn`s), but `Core` is public and this must stay total either way.
+            let mut group: Vec<FnDef<'_>> = Vec::with_capacity(bindings.len());
+            for (name, value) in bindings {
+                let Core::Lambda(_, params, fn_body) = value else {
+                    return Err(LowerError::Unsupported {
+                        node: value.id(),
+                        what: format!("group binding `{name}` is not a function"),
+                    });
+                };
+                group.push((name.as_str(), params.as_slice(), fn_body));
+            }
+            // EVERY member's name must be call-only in the body, not just the first: a member reached
+            // as a bare value is a function-as-a-value use this first-order backend cannot represent.
+            for (name, _) in bindings {
+                reject_fn_value(body, name)?;
+            }
+            // ONE `fn_scopes` frame for the whole group — the names are simultaneous, not nested.
+            // Shaped exactly like the `LetRec` arm above, down to lowering the body from THIS frame
+            // rather than from a combinator's closure: a chain of nested groups recurses once per
+            // level here, and `MAX_LOWER_DEPTH`'s stack margin is calibrated against this frame.
+            ctx.fn_scopes.push(Vec::new());
+            lower_function_group(ctx, &group)?;
+            let r = lower_into(ctx, body, dst);
+            ctx.fn_scopes.pop();
+            r
+        }
         Core::Lambda(id, ..) => {
             // A bare lambda in value position is a function-as-a-value use (a call-only Let binding
             // is handled by the Let arm above).
@@ -472,6 +538,12 @@ mod tests {
             }
             Core::Let { value, body, .. } | Core::LetRec { value, body, .. } => {
                 stack.push(value);
+                stack.push(body);
+            }
+            Core::LetRecGroup(_, bindings, body) => {
+                for (_, value) in bindings {
+                    stack.push(value);
+                }
                 stack.push(body);
             }
             // Truly childless leaves.
@@ -619,6 +691,114 @@ mod tests {
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         let core = desugar(&prog.unwrap());
         assert!(matches!(lower_asm(&core), Err(LowerError::Unsupported { .. })));
+    }
+
+    /// The headline: a mutually recursive `fn` pair lowers and computes the reference's answer.
+    ///
+    /// NEITHER body can be lowered until the OTHER name is already bound — which is exactly the
+    /// ordering `lower_function_group` exists to establish. Registering names one-at-a-time, as the
+    /// single-`LetRec` path used to, leaves `is_odd` unknown while `is_even`'s body is lowered, and
+    /// the call falls through to `lower_builtin_apply` -> `Unsupported`.
+    #[test]
+    fn a_binding_group_lowers_and_runs_on_the_asm_interpreter() {
+        let src = "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
+                   fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(4)";
+        assert_eq!(run(src), Value::Bool(true));
+        // An odd argument, so the answer comes out of the OTHER member's base case.
+        let odd = "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
+                   fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(5)";
+        assert_eq!(run(odd), Value::Bool(false));
+    }
+
+    /// A call inside a group must reach the member it NAMES. Binding a name to a SIBLING's entry
+    /// label — a mis-zip of names against labels, which the ordering fix newly makes possible — still
+    /// lowers and still terminates, so it is a silent wrong VALUE rather than an error, and only a
+    /// program whose two members do different arithmetic can see it.
+    ///
+    /// Each level contributes its own member's constant, so the answer is a sum over the ALTERNATION:
+    /// 1 + 10 + 1 + 0 = 12. Under a swap every call lands in `odd_step`'s body instead (the swap
+    /// composes: entering the wrong body, its call to the other name lands wrong again), giving
+    /// 10 + 10 + 10 + 0 = 30. A pair that differed only in its base case would NOT catch this — it was
+    /// tried, and the swapped program still returned the right number.
+    #[test]
+    fn each_call_in_a_group_reaches_the_member_it_names() {
+        let src = "fn even_step(n){ if n == 0 { 0 } else { 1 + odd_step(n - 1) } } \
+                   fn odd_step(n){ if n == 0 { 0 } else { 10 + even_step(n - 1) } } even_step(3)";
+        assert_eq!(run(src), Value::Nat(12));
+    }
+
+    /// THREE members, not two — an n-ary bug that happens to work at n = 2 is exactly the shape of
+    /// defect this codebase keeps finding, and every guard above this one uses a PAIR. `lower_asm`'s
+    /// group loop indexes nothing by size, but "it is size-agnostic" is an argument, not evidence.
+    ///
+    /// Each member contributes its OWN constant at its own level (1 / 2 / 4), so the answer is a
+    /// positional sum over the cycle: `s0(4) = 1 + 2 + 4 + 1 + 0 = 8`. A ROTATION (each name bound to
+    /// the NEXT member's label) walks the bodies `s1, s0, s2, s1` instead, giving `2 + 1 + 4 + 2 = 9`,
+    /// and either transposition gives a different number again. A trio differing only in its base case
+    /// would return the same 0 either way, which is the vacuity Task 5 already caught once.
+    ///
+    /// **The ARGUMENT is what makes a rotation visible, not the constants** — a rotation permutes which
+    /// constant lands at which level, so it is observable only when the walk does not consume a whole
+    /// number of laps: measured, `s0(n)` differs from the correct answer exactly at `n ≡ 1 (mod 3)`
+    /// (`n = 0, 2, 3, 5, 6` all give the rotated and correct sums alike). `4` is chosen for that, and
+    /// `s1(4) == 9` enters the same cycle one phase along.
+    #[test]
+    fn a_three_member_group_lowers_and_each_member_keeps_its_own_body() {
+        let src = "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
+                   fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
+                   fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)";
+        assert_eq!(run(src), Value::Nat(8));
+        // Entering at a DIFFERENT member walks the same cycle from a different phase, so a lowering
+        // that collapsed the group to one body (or bound every name to one label) cannot satisfy
+        // both: `s1(4) = 2 + 4 + 1 + 2 + 0 = 9`.
+        let from_s1 = "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
+                       fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
+                       fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s1(4)";
+        assert_eq!(run(from_s1), Value::Nat(9));
+    }
+
+    /// `reject_fn_value` must run for EVERY member, not just the first: any member used as a bare
+    /// value in the body is a function-as-a-value use this backend cannot represent.
+    ///
+    /// The message is asserted, not merely `Unsupported`: without the per-member check the bare
+    /// `is_odd` still fails, but as the generic `unbound` fallback from the `Var` arm — so a
+    /// `matches!(.., Unsupported { .. })` assertion here would pass with the guard deleted.
+    #[test]
+    fn a_group_member_used_as_a_value_in_the_body_is_rejected_by_name() {
+        let src = "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
+                   fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } \
+                   let g = is_odd; is_even(4)";
+        let (prog, ds) = parse(src);
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let core = desugar(&prog.unwrap());
+        match lower_asm(&core) {
+            Err(LowerError::Unsupported { what, .. }) => {
+                assert_eq!(what, "`is_odd` used as a value", "the group's own check must be what fires");
+            }
+            other => panic!("expected the group member's value use to be rejected, got {other:?}"),
+        }
+    }
+
+    /// Every binding's value must be a `Lambda` before anything is lowered, and the error must name
+    /// the offending binding. Unreachable from source (`desugar` only ever builds a group out of
+    /// `fn`s), so the group is built by hand.
+    #[test]
+    fn a_group_binding_that_is_not_a_function_names_itself() {
+        use crate::core::NodeGen;
+        let mut g = NodeGen::default();
+        let lam = Core::Lambda(g.fresh(), vec!["x".into()], Box::new(Core::Var(g.fresh(), "x".into())));
+        let group = Core::LetRecGroup(
+            g.fresh(),
+            vec![("f".to_string(), lam), ("g".to_string(), Core::Nat(g.fresh(), 1))],
+            Box::new(Core::Nat(g.fresh(), 0)),
+        );
+        match lower_asm(&group) {
+            // The message names the OFFENDING binding (`g`), not the group and not the first member.
+            Err(LowerError::Unsupported { what, .. }) => {
+                assert_eq!(what, "group binding `g` is not a function");
+            }
+            other => panic!("expected a non-function binding to be rejected, got {other:?}"),
+        }
     }
 
     #[test]

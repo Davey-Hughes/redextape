@@ -71,8 +71,9 @@ fn assert_tm_only(src: &str) {
 }
 
 /// The full first-order demo suite — arithmetic, monus, comparison, if, let/let-mut/assign/while/seq,
-/// calls & recursion, list construction & access, and (Plan 3b-1) higher-order programs that `run_tm`
-/// now defunctionalizes before lowering (a function passed as a value, `map`/`fold`). Every value
+/// calls & recursion, list construction & access, (Plan 3b-1) higher-order programs that `run_tm`
+/// now defunctionalizes before lowering (a function passed as a value, `map`/`fold`), and
+/// MUTUALLY RECURSIVE / FORWARD-REFERENCING `fn`s (`Core::LetRecGroup`). Every value
 /// stays « FIELD_WIDTH (64) and every program runs to a value on ALL THREE backends. (The Plan-2
 /// latent traps that λ v1 REJECTS live in LAMBDA_LIMITATION_DEMOS below — they are not three-way.)
 const FIRST_ORDER_DEMOS: &[&str] = &[
@@ -114,6 +115,42 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     // (`|y| |z| y + z`). Both nested closures now get guaranteed-unique anon names, so `defunc` no
     // longer panics on the duplicate key and this defuncs three-way to 9.
     "fn ap(f, x) { f(x) } let add = |y| |z| y + z; ap(ap(add, 4), 5)",
+    // MUTUAL RECURSION (Core::LetRecGroup): a program class that previously reached NO backend —
+    // `typeck` rejected the forward reference, and `lower_asm` bound a name only before its own body.
+    // Each member is observably DIFFERENT at every level (not merely in its base case), so a backend
+    // that permuted the group's members would compute a plausible WRONG value rather than agree.
+    // Measured cost (well inside both caps): λ 367 of 5,000,000 steps, TM 99,699 of 5,000,000.
+    "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
+     fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(4)",
+    // The ODD argument is not a duplicate: its answer comes out of the OTHER member's base case. A
+    // backend that COLLAPSED the pair (both names resolving to `is_even`) still answers `true` at
+    // every even argument, so the even case alone would agree with the reference under that mutant —
+    // measured, not assumed; see `lambda/lower.rs`'s own group test. λ 502 steps, TM 120,899.
+    "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
+     fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(5)",
+    // A FORWARD REFERENCE with no cycle: `a` is a one-member component that must still be emitted
+    // INSIDE `b`, so this pins dependency order rather than grouping. λ 25 steps, TM 16,143.
+    "fn a(n){ b(n) + 1 } fn b(n){ n * 2 } a(3)",
+    // THREE members, not two — an n-ary bug that happens to work at n = 2 is the shape of defect this
+    // codebase keeps finding. Each member contributes its own constant at its own level (1/2/4), so
+    // the answer 1+2+4+1 = 8 identifies the exact rotation of the cycle; any rotation of the three
+    // bodies gives a different number. λ 411 steps, TM 145,819.
+    "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
+     fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
+     fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
+    // A group that reaches the backends THROUGH `defunc`. Every case above lowers via `lower_asm`
+    // directly, so `defunc`'s group handling — peeling a `LetRecGroup` and re-emitting it as one
+    // ordered unit, the whole of Task 6 — was asserted only by unit tests stopping at the reference
+    // and `run_asm`, never through λ, the TM, or native. `id` is used as a VALUE, which is what routes
+    // the program through `defunc`; `ev`/`od` stay a genuine cycle inside it. The answer comes out of
+    // whichever member's base case the parity reaches, so a collapsed or rotated group is caught.
+    "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
+     fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(4, id)",
+    "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
+     fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(3, id)",
+    // A FORWARD reference through `defunc` (no cycle): `f` names `g` before `g` is defined, and `g`
+    // is value-used, so the dependency ordering and the dispatcher interact.
+    "fn ap(h,x){ h(x) } fn f(n){ ap(g, n) } fn g(n){ n + 1 } f(3)",
 ];
 
 /// Runtime-faulting programs: the reference faults, both other backends diverge — all "no value".

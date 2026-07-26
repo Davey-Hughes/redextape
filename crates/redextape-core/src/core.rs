@@ -48,6 +48,12 @@ pub enum Core {
         value: Box<Core>,
         body: Box<Core>,
     },
+    /// Mutually recursive bindings: `letrec f1 = v1 and … and fn = vn in body`. Every value is a
+    /// `Lambda`, and every name is in scope in every value AND in the body.
+    ///
+    /// Constructed only for a genuine group (n >= 2) — a single recursive binding stays `LetRec`, so
+    /// existing programs lower identically and the step-count goldens do not move.
+    LetRecGroup(NodeId, Vec<(String, Core)>, Box<Core>),
     /// Evaluate `first` for effect (discard its value), then evaluate `then` for the result.
     Seq(NodeId, Box<Core>, Box<Core>),
     /// `name = value` — evaluates to the internal unit value.
@@ -71,6 +77,7 @@ impl Core {
             | Core::Assign(id, ..)
             | Core::While(id, ..) => *id,
             Core::Let { id, .. } | Core::LetRec { id, .. } => *id,
+            Core::LetRecGroup(id, ..) => *id,
         }
     }
 }
@@ -118,6 +125,16 @@ fn take_core_children(n: &mut Core, stack: &mut Vec<Core>) {
         }
         Core::Let { value, body, .. } | Core::LetRec { value, body, .. } => {
             stack.push(*std::mem::replace(value, Box::new(Core::Nat(0, 0))));
+            stack.push(*std::mem::replace(body, Box::new(Core::Nat(0, 0))));
+        }
+        Core::LetRecGroup(_, bindings, body) => {
+            // Every binding's value is an unboxed `Core` in the vec (not a `Box<Core>`), so draining
+            // the vec moves each one directly onto the worklist — no placeholder needed for them (the
+            // vec itself becomes empty, which is already childless). The body is still `Box<Core>`, so
+            // it gets the usual placeholder swap.
+            for (_, value) in std::mem::take(bindings) {
+                stack.push(value);
+            }
             stack.push(*std::mem::replace(body, Box::new(Core::Nat(0, 0))));
         }
         // Truly childless leaves.
