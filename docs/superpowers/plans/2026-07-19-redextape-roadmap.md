@@ -187,42 +187,57 @@ produce. The oracle validates every combination.
   roadmap previously implied**. Re-derive any number below with
   `cargo run --release --example step_survey -p redextape-core` — the survey is the source of truth and
   prints its own caveats; the ranking is transcribed here so choosing a pass does not require running it.
-  Corpus: 32 oracle programs, 3,261,660 TM steps, shares step-weighted.
-  1. **Closure specialization / known-callee devirtualization — 27.5%** (897,035 steps: `$applyN` dispatch
-     13.9% + `ClosureScaffold`'s dispatch half 13.6%). *Tier A.* **The enabling pass — you cannot inline
+  **Caveat on that source of truth:** the survey's corpus (`step_survey.rs`'s own `FIRST_ORDER_DEMOS` /
+  `LAMBDA_LIMITATION_DEMOS`) is a HAND-MAINTAINED copy of `tests/three_way_oracle.rs`'s arrays of the same
+  names — an example is a separate binary crate and cannot `use` an integration test's module, so the
+  strings are duplicated by hand — and it can silently drift out of sync with the oracle it claims to
+  mirror. That is exactly what happened before this refresh: the copy sat 12 demos stale (28 vs 40) across
+  two prior slices.
+  Corpus: 44 oracle programs, 6,654,774 TM steps, shares step-weighted.
+  1. **Closure specialization / known-callee devirtualization — 25.6%** (1,705,468 steps: `$applyN` dispatch
+     12.6% + `ClosureScaffold`'s dispatch half 13.0%). *Tier A.* **The enabling pass — you cannot inline
      through `$apply1`**, so it must come first for the inliner to have anything to work on. Every closure at
      every call site in this corpus is statically known, so the opportunity is 100% present, not
      hypothetical. Measured ceilings: 86.7% on an isolated shape, 50.5% on `map` specialized to its known
      callback — both with the specialized function still *called*, so neither bundles the inliner.
-     **Prerequisite:** `defunc` currently *rejects* functions both called by name and used as a value, which
-     is the entire "direct call to a value-used function" case — so
-     `docs/superpowers/specs/2026-07-25-defunc-both-called-and-value-used-design.md` comes first.
-  2. **`Ret`'s frame-restore / live-`Loc`-bank reduction — 24.8%** (810,151 steps). The **largest single
-     bucket in the survey — larger than any user construct kind** — and measured to grow **exactly
-     quadratically** in locals live across a call (constant 2nd differences; 42× the ABI cost at K=8 versus
-     K=0 for the *same one call*). *Tier B (asm→asm), not Tier A.* It is the one candidate with **no
-     pass-ceiling probe**, because a hand-optimized form would have to be a different ABI rather than a
-     different program; the scaling measurement is the evidence offered in place of a ceiling.
-  3. **Inlining — 8.2%** (18.1% counting self-recursive calls, which it can only unroll). *Tier A.*
+     **This resync moved more than magnitudes — the raw ranking flipped.** Pre-resync this pass was both
+     the recommended #1 *and* the survey's single largest bucket (27.5% > `Ret`'s 24.8%). Post-resync it
+     stays #1 by recommendation but is **no longer the largest by raw step-share**: `Ret`'s frame-restore
+     below now measures 27.6%, ahead of this pass's 25.6%. It keeps build-order #1 for the *structural*
+     reason above — nothing can be inlined through `$apply1` until this runs — not because it is the
+     biggest bucket; that argument no longer holds and this roadmap no longer makes it.
+     **Prerequisite (DONE):** `defunc` used to *reject* functions both called by name and used as a
+     value — the entire "direct call to a value-used function" case. Shipped 2026-07-25; see
+     `docs/superpowers/plans/2026-07-25-defunc-both-called-and-value-used.md`. One exception remains:
+     a BOTH function whose body dispatches at its OWN arity still closes a cycle through its
+     dispatcher, which a dispatcher/callee `LetRecGroup` would lift.
+  2. **`Ret`'s frame-restore / live-`Loc`-bank reduction — 27.6%** (1,839,145 steps). The **largest single
+     bucket in the survey — larger than any user construct kind, and, post-resync, larger than
+     devirtualization's target above too** — and measured to grow **exactly quadratically** in locals live
+     across a call (constant 2nd differences; 42× the ABI cost at K=8 versus K=0 for the *same one call*).
+     *Tier B (asm→asm), not Tier A.* It is the one candidate with **no pass-ceiling probe**, because a
+     hand-optimized form would have to be a different ABI rather than a different program; the scaling
+     measurement is the evidence offered in place of a ceiling.
+  3. **Inlining — 9.3%** (20.7% counting self-recursive calls, which it can only unroll). *Tier A.*
      Legitimate and it compounds with (1) — it also retires the `MachineScaffold` at the sites it removes —
      but its honest probe ceiling is **62.5–86.2%, not the 91.0%** the identity-callee shape reports, and its
-     share is 0.30× devirtualization's.
-  4. **Arithmetic passes (folding, algebraic identities, const-prop) — 6.1% step-weighted**, which looks
-     negligible only under step-weighting *of this corpus*: program-averaged they are 17.4%, and on the 25
-     first-order programs **26.6%, beating merged-`Apply`'s 22.0%**. Their Part B ceilings are the survey's
+     share is 0.36× devirtualization's.
+  4. **Arithmetic passes (folding, algebraic identities, const-prop) — 7.0% step-weighted**, which looks
+     negligible only under step-weighting *of this corpus*: program-averaged they are 16.1%, and on the 29
+     first-order programs **25.5%, beating merged-`Apply`'s 25.0%**. Their Part B ceilings are the survey's
      highest (88.5–98.7%). *Tier A.*
   - **Adjacent, and excluded from (1) by the same bucketing rule** (*bucket by what a pass could do about
-    it*): defunc's mutable-capture **boxing totals 2.4%** (79,784 steps). Devirtualization removes none of
+    it*): defunc's mutable-capture **boxing totals 1.2%** (79,784 steps). Devirtualization removes none of
     it; a different mutable-capture strategy removes all of it.
-  - **The trap this survey exists to defuse.** A single merged `Apply` bucket (38.5%) names inlining the
+  - **The trap this survey exists to defuse.** A single merged `Apply` bucket (37.3%) names inlining the
     standout. It is not: that bucket is four populations with opposite optimizer implications, its largest
-    slice (13.9% dispatch) is untouchable by an inliner, and another 4.9% is `cons`/`head`/`tail`/`is_empty`
+    slice (12.6% dispatch) is untouchable by an inliner, and another 3.3% is `cons`/`head`/`tail`/`is_empty`
     — **one asm instruction each, no frame, no `Call`, no `Ret`** — with nothing there to inline at all.
   - **The bound on all of the above, which must travel with the numbers.** This corpus is an oracle suite
-    built for **backend feature coverage, not workload representativeness**. Seven higher-order demos carry
-    **83.6% of the steps**; drop them and the headline inverts. The survey says where steps go *in these
-    programs*. Choosing a pass on it means betting an intended workload resembles one of these populations —
-    and that bet, not the table, is the decision.
+    built for **backend feature coverage, not workload representativeness**. Fifteen higher-order demos
+    carry **86.2% of the steps**; drop them and the headline inverts. The survey says where steps go *in
+    these programs*. Choosing a pass on it means betting an intended workload resembles one of these
+    populations — and that bet, not the table, is the decision.
   Two properties make this project special: the **oracle is the optimizer's test harness** (every pass must
   keep `reference == λ == TM (== native)` — a miscompiling pass is refuted instantly by whichever leg
   breaks), and the **TM makes savings measurable** (the step-count goldens quantify exactly what a pass
@@ -230,8 +245,9 @@ produce. The oracle validates every combination.
   lenses on one optimization). **When:** its own plan(s), after the backends are complete, oracle green so a
   regression is unambiguous. The tier order (Tier A → Tier B → Tier C, the last now done) still says which
   tier *reaches* the most backends, but the **ranked pass set above says which pass to build**, and the two
-  disagree once: the #2 target is Tier B. Concretely: `defunc` BOTH → devirtualization → frame-restore ABI →
-  inlining. **Risk:**
+  disagree once: the #2 target is Tier B — and, since this resync, is also the single largest bucket by raw
+  step-share, ahead of the #1 pass. Build order still follows the dependency, not the share: `defunc` BOTH →
+  devirtualization → frame-restore ABI → inlining. **Risk:**
   miscompilation — mitigated by the oracle; apply YAGNI hard (add a pass only if it helps demos fit under
   caps or reads more clearly).
 

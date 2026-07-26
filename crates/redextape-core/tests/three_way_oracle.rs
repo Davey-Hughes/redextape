@@ -151,6 +151,35 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     // A FORWARD reference through `defunc` (no cycle): `f` names `g` before `g` is defined, and `g`
     // is value-used, so the dependency ordering and the dispatcher interact.
     "fn ap(h,x){ h(x) } fn f(n){ ap(g, n) } fn g(n){ n + 1 } f(3)",
+    // A fn both CALLED BY NAME and USED AS A VALUE. Previously `Unsupported` on TM and native while
+    // the reference and λ accepted it — an oracle asymmetry this class now closes.
+    // Non-commutative at arity 2, so a forwarder with swapped arguments cannot pass: 5 + 7 = 12.
+    "fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)",
+    // RECURSIVE and value-used — the case the restriction actually blocked, and the reason the class
+    // is large: `analyze` counts a self-call as `name_called`, so every recursive fn used as a value
+    // was BOTH. 10 + 3 = 13.
+    "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } fn ap(g, x) { g(x) } ap(sum, 4) + sum(2)",
+    // `map` itself passed as a value while ALSO being called by name. Its body dispatches at arity 1
+    // and it is value-used at arity 2, so the two dispatchers are distinct. `map` calls itself by
+    // name, so the plain call graph has a cycle through `map` -- the interesting claim is about the
+    // DISPATCHER graph instead: `$apply2 -> map -> $apply1 -> add1` has no cycle through dispatchers.
+    // 2 + 6 = 8.
+    "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
+     fn add1(x) { x + 1 }\n\
+     fn ap2(g, a, b) { g(a, b) }\n\
+     head(map([1, 2], add1)) + head(ap2(map, [5, 6], add1))",
+    // A forwarding arm (BOTH: `b`, called by name AND used as a value) SHARING one dispatcher with a
+    // normal arm (value-only: `v`), at BOTH possible tag positions. Every BOTH demo above has its
+    // forwarder as the SOLE arm of its `$applyN`, so a per-arm parameter-binding defect -- the
+    // forwarder must bind NO params so `$a_i` reaches the call directly, while a normal arm must bind
+    // its own -- would compile and pass unnoticed. Tags are assigned in declaration order per arity:
+    // in the first program below `v` is tag 0 (normal arm) and `b` is tag 1 (forwarder); in the
+    // second, the two `fn`s are declared in the opposite order, so `b` is tag 0 (forwarder) and `v`
+    // is tag 1 (normal arm) -- confirmed by dumping the lowered asm, not assumed. `v` (x*10) and `b`
+    // (x+1) are value-distinguishable, so a tag mix-up or a mis-bound param changes the answer rather
+    // than staying silent: 10 + 2 + 6 = 18.
+    "fn v(x) { x * 10 } fn b(x) { x + 1 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
+    "fn b(x) { x + 1 } fn v(x) { x * 10 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
 ];
 
 /// Runtime-faulting programs: the reference faults, both other backends diverge — all "no value".

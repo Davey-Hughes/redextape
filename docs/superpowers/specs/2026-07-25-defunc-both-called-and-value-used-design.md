@@ -6,8 +6,9 @@
 
 ## Why this slice exists
 
-`defunc` currently **rejects** any function that is both called by name and used as a value
-(`defunc.rs:270-281`):
+`defunc` **rejected** any function that is both called by name and used as a value — the `(true, true)`
+arm of `defunc_mapped`'s step-3 partition (this text describes the state at `4275bd5`, before the slice
+landed; the string below no longer exists in the file):
 
 ```rust
 (true, true) => return Err(unsupported(f.body,
@@ -16,7 +17,7 @@
 
 The comment beside it says "BOTH is deferred to a later task." This is that task.
 
-**The rejected class is much larger than it looks.** `analyze` (`defunc.rs:478-481`) marks *any* direct
+**The rejected class is much larger than it looks.** `analyze`'s `Core::Apply` arm marks *any* direct
 `Apply` of a function name as `name_called`, with **no exclusion for a function calling itself**. So a
 recursive function's own self-call sets `name_called`; if that same function is ever used as a value, it
 is `(true, true)` and rejected. In practice that means **every recursive function used as a value** —
@@ -102,18 +103,26 @@ revisit duplication with a number behind it.
 bucket as `ClosureScaffold`. That is correct under the rule the survey established — *bucket by what a
 pass could do about it* — since devirtualization is exactly what would remove this frame.
 
-## 3. The capture question — verify, do not assume
-
-A top-level `fn` **can** capture: `let n = 5; fn f(x){ x + n } map(xs, f)` closes over `n`, and mutable
-captures are boxed to `$boxh{k}`.
+## 3. The capture question — verified: a top-level `fn` cannot capture
 
 A forwarding arm calls `f` and lets `f` resolve its captures **lexically**, ignoring the closure's env.
-That is correct **only if** the dispatcher is emitted in a scope where those bindings are visible.
+That is correct only if `f` has no captures to resolve. **It cannot have any.** Guard 2 — the
+`function \`{}\` references an outer let binding` check in `defunc_mapped`'s step 2 — rejects any peeled
+`fn` whose body's free variables intersect the prelude `let` names, and it runs **before** the step-3
+partition, so `let n = 5; fn f(x){ x + n } …` is `Unsupported` whether `f` is value-used, name-called,
+or both.
 
-**The implementation must verify that**, not assume it. If the dispatcher is not in scope of the prelude
-bindings, the arm must bind the captures from the closure env before forwarding, exactly as a
-non-forwarding arm does today. Either outcome is acceptable; silently relying on an unverified scoping
-property is not.
+This design's original text claimed the opposite and asked the implementation to verify it. Verified
+twice, independently: on `4275bd5` while scoping this slice, and again during implementation, both
+returning `Unsupported { what: "function `f` references an outer let binding" }` — the second run on
+the BOTH variant `let n = 5; fn f(x) { x + n } fn ap(g, x) { g(x) } f(1) + ap(f, 1)`. So the arm binds
+**no** captures, and the "bind from env if not" branch must not be written.
+
+Both the value-only and the BOTH variant are pinned by the `rejects(…, "references an outer let
+binding")` lines in `defunc.rs`'s `unsupported_boundary` test, so relaxing guard 2 without revisiting
+the forwarder fails loudly. (Anchors here are deliberately test and message names rather than line
+numbers: an earlier draft of this section cited `defunc.rs:1585`, which was already wrong when written
+and drifted twice more during this slice.)
 
 ## 4. What must be proven
 

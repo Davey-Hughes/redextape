@@ -21,10 +21,14 @@
 //! value is exactly by-reference capture of the shared cell, matching the reference. A mutable NO
 //! lambda captures is left byte-for-byte unchanged (purely-imperative loop counters never box).
 //!
-//! Still `Unsupported` (never a silent miscompile): a builtin used as a bare value, a function both
-//! called-by-name and used-as-a-value, a nested/local function definition, a cyclic higher-order call
-//! graph, and (conservatively, to preserve the lets-around-main emission scoping) a top-level named
-//! function whose body references an outer `let` binding.
+//! Still `Unsupported` (never a silent miscompile): a builtin used as a bare value, a nested/local
+//! function definition, a cyclic higher-order call graph, and (conservatively, to preserve the
+//! lets-around-main emission scoping) a top-level named function whose body references an outer `let`
+//! binding. A function both called-by-name and used-as-a-value IS accepted (see `Emitted`'s doc
+//! comment for how it is emitted without duplicating any id) — UNLESS its own body applies a value at
+//! its own arity, e.g. `fn ap(g,y){g(y)} fn f(x){ if x==0 {0} else { ap(f,x-1)+2 } } f(3)`: that closes
+//! a cycle `$applyN -> f -> $applyN` through `f`'s own dispatcher arm, and the pre-existing cyclic
+//! higher-order call graph rule above rejects it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -135,13 +139,16 @@ struct Func<'a> {
 ///      nodes themselves are in none of the three: they are not rewritten at all, but re-emitted from
 ///      the ids recorded in `Func`/`LetBinding`, once each.)
 ///   2. `dispatcher` consumes each arm with `arms.remove(name)`, so an inlined body is emitted once.
-///   3. A function both called-by-name AND used-as-a-value is `Unsupported` (see the classification
-///      in `defunc_mapped` step 3). THIS is the load-bearing one: supporting that case means emitting
-///      the same body twice — once as a kept `fn`, once as a dispatcher arm — and every id inside it
-///      would then label two nodes, silently doubling the cost billed to the user's arithmetic.
+///   3. Step 5c's forwarding arm for a function both called-by-name AND used-as-a-value HOLDS ONE
+///      `Apply` node (`f($a1..$aN)`), never a copy of the body: the function itself is emitted ONCE,
+///      as a kept `fn` (step 5b), and the dispatcher arm just calls it. This was previously guaranteed
+///      instead by rejecting the case outright; forwarding is what replaced that rejection without
+///      weakening the invariant. Duplicating the body — the obvious alternative, which buys one fewer
+///      frame on the dispatched path — would put every id inside it on two nodes, silently doubling
+///      the cost billed to the user's arithmetic, so a future change that prefers duplication MUST
+///      re-id one of the copies.
 ///
-/// Whoever relaxes (3) must re-id one of the two copies. `no_output_node_id_is_duplicated` fails
-/// loudly if they do not.
+/// `no_output_node_id_is_duplicated` fails loudly if any of the three stops holding.
 ///
 /// A binding group is the one case where several `Emitted`s share a source id (their `Origin::Group`
 /// id) — and it is not an exception to the invariant, because they are re-emitted by ONE
@@ -321,8 +328,10 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
         analyze(l.value, &func_names, &BTreeSet::new(), &mut value_used, &mut name_called);
     }
 
-    // KEPT = called by name only (stays a named subroutine). VALUE = used as a value only (dropped,
-    // inlined into a dispatcher arm). BOTH is deferred to a later task; neither is dead (dropped).
+    // KEPT = called by name (stays a named subroutine). VALUE = used as a value (tagged, reachable
+    // through a dispatcher). BOTH is both at once: a named subroutine that ALSO has a dispatcher arm,
+    // and the arm FORWARDS to the subroutine rather than duplicating its body (see step 5c and
+    // `Emitted`'s doc comment). Neither is dead (dropped).
     let mut kept: Vec<&Func> = Vec::new();
     let mut value_funcs: Vec<&Func> = Vec::new();
     for f in &funcs {
@@ -330,7 +339,8 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
         let nc = name_called.contains(&f.name);
         match (vu, nc) {
             (true, true) => {
-                return Err(unsupported(f.body, format!("`{}` is both called by name and used as a value", f.name)));
+                kept.push(f);
+                value_funcs.push(f);
             }
             (true, false) => value_funcs.push(f),
             (false, true) => kept.push(f),
@@ -386,10 +396,25 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
         });
     }
 
-    // 5c. Value functions are dropped; rewrite each body into a dispatcher arm. A named value fn never
-    // captures (guard 2 rejected any that references a let), so its arm carries no captures.
+    // 5c. Value functions: rewrite each body into a dispatcher arm. A named value fn never captures
+    // (guard 2 rejected any that references a let), so its arm carries no captures.
+    //
+    // A BOTH function is the exception: it is ALSO `kept`, so its body is already emitted once as a
+    // named subroutine (5b). Its arm FORWARDS to that subroutine — `f($a1, .., $aN)`, with NO param
+    // bindings (an empty `ArmData.params` makes `dispatcher` emit none, so `$a_i` reaches the call
+    // directly). Forwarding rather than duplicating is what keeps every input id labelling exactly ONE
+    // output node; see `Emitted`'s doc comment. It costs one extra frame on the DISPATCHED path only —
+    // the by-name path stays a direct call — and no existing program regresses, because programs in
+    // this class were rejected outright before.
     let mut arms: BTreeMap<String, ArmData> = BTreeMap::new();
     for f in &value_funcs {
+        if kept_names.contains(&f.name) {
+            let callee = var(rw.g, &f.name);
+            let args = (1..=f.params.len()).map(|i| var(rw.g, &format!("$a{i}"))).collect();
+            let body = apply(rw.g, callee, args);
+            arms.insert(f.name.clone(), ArmData { params: Vec::new(), captures: Vec::new(), body });
+            continue;
+        }
         let locals: BTreeSet<String> = f.params.iter().cloned().collect();
         let body = rw.rewrite(f.body, &locals)?;
         arms.insert(f.name.clone(), ArmData { params: f.params.clone(), captures: Vec::new(), body });
@@ -766,8 +791,10 @@ impl Rewriter<'_> {
             return Ok(cons(self.g, t, n));
         }
         if self.kept.contains(name) {
-            // A kept (name-called) function should never reach a value position (that would make it
-            // value-used); guard against it rather than silently produce a bad closure.
+            // A kept function in a value position. A BOTH function never reaches here — it is also
+            // tagged, and the `tags` check above fires first, yielding `cons(tag, nil)`. So this is a
+            // kept-ONLY function, which by definition is not value-used; reaching it means the
+            // classification and the rewrite disagree. Guard rather than build a tagless closure.
             return Err(LowerError::Unsupported { node: id, what: format!("`{name}` used as a value") });
         }
         if is_builtin_fn(name) {
@@ -1427,6 +1454,23 @@ mod tests {
         find_first(core, &|n| matches!(n, Core::BinOp(_, BinOp::Add, ..))).map(|n| n.id())
     }
 
+    /// Every `Apply` in `core` whose callee is `Var(callee)`, by the same iterative walk the rest of
+    /// this module uses (a big list literal desugars to a spine deep enough to overflow a recursive one).
+    fn count_calls_to(core: &Core, callee: &str) -> usize {
+        let mut n = 0;
+        let mut stack = vec![core];
+        while let Some(node) = stack.pop() {
+            if let Core::Apply(_, f, _) = node
+                && let Core::Var(_, name) = f.as_ref()
+                && name == callee
+            {
+                n += 1;
+            }
+            push_children(node, &mut stack);
+        }
+        n
+    }
+
     /// Reference-equivalence: `defunc` preserves meaning. Parse+desugar `src`, run the reference on the
     /// ORIGINAL and on `defunc(original)`, and require the same value. Also require `defunc`'s output to
     /// lower first-order (lower_asm accepts it) — the whole point.
@@ -1551,6 +1595,37 @@ mod tests {
         defunc_preserves_and_lowers("let mut m = 0; fn ap(f) { f(1) } ap(|x| x + m)");
     }
 
+    /// A `fn` both CALLED BY NAME and USED AS A VALUE. Non-commutative at arity 2 (`sub`, not `add`):
+    /// a forwarder that swapped `$a1`/`$a2` computes a plausible wrong answer, so a commutative
+    /// fixture would pass while the pass was broken. 5 + 7 = 12; swapped, 5 + 0 = 5.
+    #[test]
+    fn both_called_by_name_and_used_as_a_value() {
+        defunc_preserves_and_lowers("fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)");
+    }
+
+    /// A BOTH function's by-name call must stay a DIRECT call, not go through the dispatcher.
+    /// `rewrite_apply` tests `is_static` before its dispatch branch, which is what makes this hold —
+    /// and if a refactor ever swaps that order every answer stays correct and only gets slower, which
+    /// no oracle leg can see. Hence a structural assertion.
+    ///
+    /// In this program the ONLY value-application is `g(a, b)` inside `ap2`, so exactly one `$apply2`
+    /// call site may exist. Routing `sub(9, 4)` through dispatch would make it two.
+    #[test]
+    fn a_both_functions_by_name_call_stays_direct() {
+        let src = "fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)";
+        let (prog, ds) = parse(src);
+        assert!(ds.is_empty(), "{ds:?}");
+        let core = desugar(&prog.unwrap());
+        let d = defunc(&core).expect("defunc succeeds");
+        assert_eq!(
+            count_calls_to(&d, &dispatcher_name(2)),
+            1,
+            "exactly one $apply2 site (`g(a, b)` in `ap2`); the by-name `sub(9, 4)` must not dispatch"
+        );
+        // Two direct calls to `sub`: the user's `sub(9, 4)` and the dispatcher arm's forwarder.
+        assert_eq!(count_calls_to(&d, "sub"), 2, "the by-name call plus the forwarding arm");
+    }
+
     /// Pins the REAL `Unsupported` rejection boundary: every one of these was run individually to
     /// confirm it actually returns `Err(LowerError::Unsupported { .. })` (not `Ok`, not a downstream
     /// panic) before being added here — see the task-5 report for the full discovery log. `needle` also
@@ -1577,8 +1652,24 @@ mod tests {
         rejects("fn ap(f, x) { f(x) } ap(tail, cons(1, nil))", "builtin `tail`");
         rejects("fn ap(f, x) { f(x) } ap(is_empty, nil)", "builtin `is_empty`");
 
-        // A fn both called-by-name AND used-as-a-value (`f` here): Task 1's "BOTH" rejection.
-        rejects("fn f(x) { x + 1 } fn ap(g, x) { g(x) } f(1) + ap(f, 2)", "both called by name and used as a value");
+        // The BOTH class's ONE remaining exception. A BOTH function's arm forwards to it, giving
+        // `$applyN` an edge to `f`; if `f`'s body applies a value at the SAME arity N, that closes
+        // `$applyN -> t -> $applyN`. This is the PRE-EXISTING cycle rule (see the two cases below),
+        // not a new restriction — and dispatching at a DIFFERENT arity is fine, which is why the
+        // `map`-passed-as-a-value demo works. Lifting it means emitting the dispatcher and the BOTH
+        // function as one `LetRecGroup`, which is a change to `topo_order`'s unit model.
+        rejects(
+            "fn inc(x) { x + 1 } fn t(g) { g(3) } fn ap(h, y) { h(y) } t(inc) + ap(t, inc)",
+            "cyclic higher-order call graph",
+        );
+
+        // WHY THE FORWARDING ARM NEVER BINDS CAPTURES. A dispatcher arm that forwards lets the callee
+        // resolve its own free names LEXICALLY, ignoring the closure env — which is correct only if a
+        // top-level `fn` cannot capture. It cannot: guard 2 rejects any peeled `fn` whose body reads a
+        // prelude `let`, and it runs BEFORE the step-3 partition, so the BOTH variant is rejected for
+        // the same reason the value-only variant at the top of this test is. If guard 2 is ever
+        // relaxed, this line fails and the forwarder must start binding captures from the env.
+        rejects("let n = 5; fn f(x) { x + n } fn ap(g, x) { g(x) } f(1) + ap(f, 1)", "references an outer let binding");
 
         // A named value-fn referencing an outer `let` (Task 4's restriction): `f` is used only as a
         // value (passed to `ap`), and its body reads the outer `n`.
@@ -2017,9 +2108,11 @@ mod tests {
     /// id names one node: a duplicate would silently merge (or double-bill) two constructs' cost —
     /// the same misattribution the mapped pass exists to prevent, one level down. `defunc` INLINES
     /// bodies (a value-used function's body becomes a dispatcher arm), so duplication is a live
-    /// hazard here, not a theoretical one: the day the currently-`Unsupported` "both called by name
-    /// and used as a value" case is supported, that body is emitted TWICE and this test fails rather
-    /// than quietly doubling the arithmetic inside it.
+    /// hazard here, not a theoretical one. The corpus below includes a function both called-by-name
+    /// and used-as-a-value (`sub`/`ap2`); it passes because that function's dispatcher arm FORWARDS to
+    /// the kept subroutine (`sub($a1, $a2)`) rather than inlining a second copy of its body. If a
+    /// future change ever switched that arm back to duplicating the body, THIS is the test that would
+    /// fail — with a duplicate id, not by silently doubling the arithmetic inside it.
     #[test]
     fn no_output_node_id_is_duplicated() {
         fn count_nodes(core: &Core) -> usize {
@@ -2051,6 +2144,11 @@ mod tests {
             "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
              fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }\n\
              fn add(a, b) { a + b }\n fn add1(x) { x + 1 }\n fold([3, 1, 2].map(add1), 0, add)",
+            // The BOTH case: `sub` is called by name (`sub(9, 4)`) AND used as a value (`ap2(sub, ..)`),
+            // so it is kept AND has a dispatcher arm. This is what makes item 3 of `Emitted`'s invariant
+            // (see its doc comment) actually guarded — without this entry, nothing in this corpus
+            // exercises the forwarding arm's id behaviour at all.
+            "fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)",
         ] {
             let core = desugar(&parse(src).0.unwrap());
             // The premise: desugar itself hands out one id per node, so a duplicate in the output is

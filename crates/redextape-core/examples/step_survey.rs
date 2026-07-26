@@ -38,9 +38,13 @@ use redextape_core::tm::{LowerError, defunc, lower_asm};
 // Part A's corpus — copied verbatim, see the module doc comment above for why and from where.
 // ================================================================================================
 
-/// Verbatim copy of `tests/three_way_oracle.rs::FIRST_ORDER_DEMOS`: the full first-order-and-defunc'd
-/// demo suite, every one of them known (by that file's own passing test) to run `reference == λ == TM`
-/// to a value under `TM_DEFAULT_CAPS`.
+/// Verbatim copy of `tests/three_way_oracle.rs::FIRST_ORDER_DEMOS`: the full first-order demo suite —
+/// arithmetic, monus, comparison, if, let/let-mut/assign/while/seq, calls & recursion, list construction
+/// & access, higher-order programs that `run_tm` defunctionalizes before lowering (a function passed as
+/// a value, `map`/`fold`), MUTUALLY RECURSIVE / FORWARD-REFERENCING `fn`s (`Core::LetRecGroup`), and fns
+/// both CALLED BY NAME and USED AS A VALUE (forwarding through a shared `$applyN` dispatcher). Every
+/// one of them known (by that file's own passing test) to run `reference == λ == TM` to a value under
+/// `TM_DEFAULT_CAPS`.
 const FIRST_ORDER_DEMOS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",
@@ -65,8 +69,10 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "head(tail(cons(1, cons(2, nil))))",
     "head([1, 2, 3])",
     "tail([1, 2, 3])",
+    // Higher-order (Plan 3b-1): a function received as a value, defunctionalized before lowering.
     "fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)",
     "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2].map(add1)",
+    // Higher-order with immutable capture (Plan 3b-1 Task 4): `|x| x + n` captures `n` by value.
     "let n = 5; fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } [1, 2, 3].map(|x| x + n)",
     "\
         fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
@@ -74,7 +80,75 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
         fn add(a, b) { a + b }\n\
         fn add1(x) { x + 1 }\n\
         fold([3, 1, 2].map(add1), 0, add)",
+    // Higher-order currying (Plan 3b-1): a value-lambda whose body is ANOTHER value-lambda
+    // (`|y| |z| y + z`). Both nested closures now get guaranteed-unique anon names, so `defunc` no
+    // longer panics on the duplicate key and this defuncs three-way to 9.
     "fn ap(f, x) { f(x) } let add = |y| |z| y + z; ap(ap(add, 4), 5)",
+    // MUTUAL RECURSION (Core::LetRecGroup): a program class that previously reached NO backend —
+    // `typeck` rejected the forward reference, and `lower_asm` bound a name only before its own body.
+    // Each member is observably DIFFERENT at every level (not merely in its base case), so a backend
+    // that permuted the group's members would compute a plausible WRONG value rather than agree.
+    // Measured cost (well inside both caps): λ 367 of 5,000,000 steps, TM 99,699 of 5,000,000.
+    "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
+     fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(4)",
+    // The ODD argument is not a duplicate: its answer comes out of the OTHER member's base case. A
+    // backend that COLLAPSED the pair (both names resolving to `is_even`) still answers `true` at
+    // every even argument, so the even case alone would agree with the reference under that mutant —
+    // measured, not assumed; see `lambda/lower.rs`'s own group test. λ 502 steps, TM 120,899.
+    "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
+     fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(5)",
+    // A FORWARD REFERENCE with no cycle: `a` is a one-member component that must still be emitted
+    // INSIDE `b`, so this pins dependency order rather than grouping. λ 25 steps, TM 16,143.
+    "fn a(n){ b(n) + 1 } fn b(n){ n * 2 } a(3)",
+    // THREE members, not two — an n-ary bug that happens to work at n = 2 is the shape of defect this
+    // codebase keeps finding. Each member contributes its own constant at its own level (1/2/4), so
+    // the answer 1+2+4+1 = 8 identifies the exact rotation of the cycle; any rotation of the three
+    // bodies gives a different number. λ 411 steps, TM 145,819.
+    "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
+     fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
+     fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
+    // A group that reaches the backends THROUGH `defunc`. Every case above lowers via `lower_asm`
+    // directly, so `defunc`'s group handling — peeling a `LetRecGroup` and re-emitting it as one
+    // ordered unit, the whole of Task 6 — was asserted only by unit tests stopping at the reference
+    // and `run_asm`, never through λ, the TM, or native. `id` is used as a VALUE, which is what routes
+    // the program through `defunc`; `ev`/`od` stay a genuine cycle inside it. The answer comes out of
+    // whichever member's base case the parity reaches, so a collapsed or rotated group is caught.
+    "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
+     fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(4, id)",
+    "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
+     fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(3, id)",
+    // A FORWARD reference through `defunc` (no cycle): `f` names `g` before `g` is defined, and `g`
+    // is value-used, so the dependency ordering and the dispatcher interact.
+    "fn ap(h,x){ h(x) } fn f(n){ ap(g, n) } fn g(n){ n + 1 } f(3)",
+    // A fn both CALLED BY NAME and USED AS A VALUE. Previously `Unsupported` on TM and native while
+    // the reference and λ accepted it — an oracle asymmetry this class now closes.
+    // Non-commutative at arity 2, so a forwarder with swapped arguments cannot pass: 5 + 7 = 12.
+    "fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)",
+    // RECURSIVE and value-used — the case the restriction actually blocked, and the reason the class
+    // is large: `analyze` counts a self-call as `name_called`, so every recursive fn used as a value
+    // was BOTH. 10 + 3 = 13.
+    "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } fn ap(g, x) { g(x) } ap(sum, 4) + sum(2)",
+    // `map` itself passed as a value while ALSO being called by name. Its body dispatches at arity 1
+    // and it is value-used at arity 2, so the two dispatchers are distinct. `map` calls itself by
+    // name, so the plain call graph has a cycle through `map` -- the interesting claim is about the
+    // DISPATCHER graph instead: `$apply2 -> map -> $apply1 -> add1` has no cycle through dispatchers.
+    // 2 + 6 = 8.
+    "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
+     fn add1(x) { x + 1 }\n\
+     fn ap2(g, a, b) { g(a, b) }\n\
+     head(map([1, 2], add1)) + head(ap2(map, [5, 6], add1))",
+    // A forwarding arm (BOTH: `b`, called by name AND used as a value) SHARING one dispatcher with a
+    // normal arm (value-only: `v`), at BOTH possible tag positions. Every BOTH demo above has its
+    // forwarder as the SOLE arm of its `$applyN`, so a per-arm parameter-binding defect -- the
+    // forwarder must bind NO params so `$a_i` reaches the call directly, while a normal arm must bind
+    // its own -- would compile and pass unnoticed. Tags are assigned in declaration order per arity:
+    // in the first program below `v` is tag 0 (normal arm) and `b` is tag 1 (forwarder); in the
+    // second, the two `fn`s are declared in the opposite order, so `b` is tag 0 (forwarder) and `v`
+    // is tag 1 (normal arm) -- confirmed by dumping the lowered asm, not assumed. `v` (x*10) and `b`
+    // (x+1) are value-distinguishable, so a tag mix-up or a mis-bound param changes the answer rather
+    // than staying silent: 10 + 2 + 6 = 18.
+    "fn v(x) { x * 10 } fn b(x) { x + 1 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
+    "fn b(x) { x + 1 } fn v(x) { x * 10 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
 ];
 
 /// Verbatim copy of `tests/three_way_oracle.rs::LAMBDA_LIMITATION_DEMOS`: Plan-2 latent traps the λ

@@ -587,4 +587,88 @@ mod tests {
             "shifting the origin map produced an identical histogram — attribution is ignoring the map"
         );
     }
+
+    /// A BOTH function's dispatcher arm is a FORWARDER, and its frame is defunctionalization
+    /// scaffolding: it exists only because the dispatched path routes arguments through `$a_i` slots,
+    /// and known-callee devirtualization is precisely the pass that removes it. So its steps must land
+    /// in `ClosureScaffold` — while the function's own body still bills to the user's constructs.
+    ///
+    /// WHY THIS ASSERTS BY IDENTITY, not by summing each kind of bucket: the summed form (`closure =
+    /// sum of every ClosureScaffold bucket`, `user = sum of every Node bucket`, each asserted `> 0`)
+    /// was measured UNABLE TO FAIL under the exact mutation this test exists to catch — making 5c's
+    /// forwarding arm reuse the source function's own `lambda_id` instead of minting fresh ids from
+    /// `SynthGen`. Under that mutation the forwarding call's 13,082 steps relocate WHOLESALE from
+    /// `ClosureScaffold(25)` to `Node(16)` — the wrong-bucket bug this whole file exists to catch —
+    /// yet `closure` (24,052) and `user` (81,733) both stay positive, so both `assert!(... > 0)`s keep
+    /// passing. The mutant was caught only incidentally, by `defunc::no_output_node_id_is_duplicated`
+    /// in a different file, and for a different symptom (a duplicate output id, not a relocated cost).
+    /// So this test locates the forwarding `Apply` structurally, confirms `defunc` itself declares it
+    /// synthetic, and then asserts the histogram bills THAT SPECIFIC id to `ClosureScaffold` — a claim
+    /// the relocation actually breaks.
+    #[test]
+    fn a_both_functions_forwarding_arm_bills_to_closure_scaffold() {
+        const SRC: &str = "fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)";
+        let core = desugar(&parse(SRC).0.expect("parses"));
+
+        // The user's own `a - b`, read off the ORIGINAL core before `defunc` runs. `sub` is KEPT (it
+        // is also called by name), so its body is re-emitted with its source ids intact — this
+        // specific id, not just "some Node bucket", must survive into the attributed histogram.
+        let src_nodes = all_nodes(&core);
+        let sub_minus =
+            only(&src_nodes, "the `a - b` subtraction", |n| matches!(n, Core::BinOp(_, crate::core::BinOp::Sub, ..)));
+
+        let (rewritten, synthetic) = defunc_mapped(&core).expect("defuncs");
+
+        // Locate the forwarding arm STRUCTURALLY rather than by a hardcoded id (a hardcoded id is a
+        // brittle golden that breaks on any unrelated id-numbering change): it is the unique `Apply`
+        // whose callee is `Var(_, "sub")` and whose arguments are ALL dispatcher slots (`$a1`, `$a2`,
+        // ...). The user's own call site `sub(9, 4)` has `Nat` arguments, so this is unambiguous.
+        fn is_dispatch_slot(name: &str) -> bool {
+            name.strip_prefix("$a").is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+        }
+        let out_nodes = all_nodes(&rewritten);
+        let forward = only(&out_nodes, "forwarding call to `sub`", |n| {
+            matches!(n, Core::Apply(_, f, args)
+                if matches!(f.as_ref(), Core::Var(_, name) if name == "sub")
+                    && !args.is_empty()
+                    && args.iter().all(|a| matches!(a, Core::Var(_, name) if is_dispatch_slot(name))))
+        });
+
+        // THE HEADLINE ASSERTION: the forwarder's own id must bill `ClosureScaffold`, specifically —
+        // not merely "some ClosureScaffold bucket is nonzero" (the summed form above's replacement).
+        // This is checked BEFORE the synthetic-membership sanity check below on purpose: under the
+        // mutation this test exists to catch, the relocated cost fails this assertion (`None` where a
+        // positive count belongs) — the synthetic check would ALSO fail for the same underlying
+        // reason, and ordering this one first keeps the failure pinned to the claim actually under
+        // test, not a downstream symptom of it.
+        let a = attribute(SRC).expect("attributes");
+        assert!(!a.capped, "the fixture must run to completion");
+        assert_eq!(a.histogram.values().sum::<u64>(), a.total, "every step lands in exactly one bucket");
+
+        let forward_steps = a.histogram.get(&StepBucket::ClosureScaffold(forward.id())).copied();
+        assert!(
+            matches!(forward_steps, Some(n) if n > 0),
+            "the forwarding arm (id {}) must bill `ClosureScaffold` under its OWN id; got {:?} instead \
+             — this is exactly what a relocated (wrong-bucket) cost looks like",
+            forward.id(),
+            forward_steps
+        );
+
+        // This is what makes it scaffolding rather than a user node: confirm `defunc` itself declared
+        // the forwarder's id synthetic (not merely that some bucket lookup happened to succeed).
+        assert!(
+            synthetic.contains(&forward.id()),
+            "the forwarding Apply (id {}) must be declared synthetic by `defunc` — it is scaffolding, \
+             not a node the user wrote",
+            forward.id()
+        );
+
+        let sub_steps = a.histogram.get(&StepBucket::Node(sub_minus.id())).copied().unwrap_or(0);
+        assert!(
+            sub_steps > 0,
+            "the `a - b` subtraction (id {}) must still bill a `Node` bucket: the forwarder does not \
+             swallow the body it forwards to",
+            sub_minus.id()
+        );
+    }
 }
