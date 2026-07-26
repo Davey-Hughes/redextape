@@ -209,8 +209,11 @@ produce. The oracle validates every combination.
      **Prerequisite (DONE):** `defunc` used to *reject* functions both called by name and used as a
      value — the entire "direct call to a value-used function" case. Shipped 2026-07-25; see
      `docs/superpowers/plans/2026-07-25-defunc-both-called-and-value-used.md`. One exception remains:
-     a BOTH function whose body dispatches at its OWN arity still closes a cycle through its
-     dispatcher, which a dispatcher/callee `LetRecGroup` would lift.
+     a cycle in the emitted binder graph (kept `fn`s and `$applyN` dispatchers) that returns to a BOTH
+     function's own dispatcher is still `Unsupported` — reachable directly, through other kept `fn`s, or
+     (the non-obvious path) through dispatchers of OTHER arities, e.g. `$apply1 -> f -> $apply2 -> h ->
+     $apply1` when `f` and `h` are each BOTH at a different arity (see `defunc.rs`'s module doc for the
+     worked counterexample). A dispatcher/callee `LetRecGroup` would lift it.
   2. **`Ret`'s frame-restore / live-`Loc`-bank reduction — 27.6%** (1,839,145 steps). The **largest single
      bucket in the survey — larger than any user construct kind, and, post-resync, larger than
      devirtualization's target above too** — and measured to grow **exactly quadratically** in locals live

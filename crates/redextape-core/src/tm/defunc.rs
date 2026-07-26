@@ -25,10 +25,33 @@
 //! function definition, a cyclic higher-order call graph, and (conservatively, to preserve the
 //! lets-around-main emission scoping) a top-level named function whose body references an outer `let`
 //! binding. A function both called-by-name and used-as-a-value IS accepted (see `Emitted`'s doc
-//! comment for how it is emitted without duplicating any id) — UNLESS its own body applies a value at
-//! its own arity, e.g. `fn ap(g,y){g(y)} fn f(x){ if x==0 {0} else { ap(f,x-1)+2 } } f(3)`: that closes
-//! a cycle `$applyN -> f -> $applyN` through `f`'s own dispatcher arm, and the pre-existing cyclic
-//! higher-order call graph rule above rejects it.
+//! comment for how it is emitted without duplicating any id) — UNLESS the emitted BINDER graph (kept
+//! `fn`s and `$applyN` dispatchers, with an edge for every call and every dispatcher arm) has a CYCLE
+//! that returns to that function's OWN dispatcher, however it gets there. That is the rule in full; it
+//! is NOT "its body applies a value at its own arity, or calls another kept `fn` whose body does" — a
+//! two-disjunct phrasing this module used to state, and which looks exhaustive but is not, because the
+//! cycle can also leave through one dispatcher and re-enter through ANOTHER, of a different arity,
+//! reachable through other kept `fn`s along the way. Direct (own arity, own body): `fn inc(x) { x + 1 }
+//! fn t(g) { g(3) } fn ap(h, y) { h(y) } t(inc) + ap(t, inc)` — `t` is BOTH (`t(inc)` calls it by name,
+//! `ap(t, inc)` uses it as a value), and `t`'s own body `g(3)` applies `g` (on the dispatched path, `t`
+//! itself) at `t`'s own arity, closing `$apply1 -> t -> $apply1` through `t`'s own forwarding arm. Own
+//! arity, via another kept `fn`: `fn ap(g, y) { g(y) } fn f(x) { x + 1 } fn q(z) { ap(f, z) } q(1) +
+//! ap(q, 2)` is *also* rejected even though `q`'s own body never applies a value directly — it calls
+//! `ap` by name, and `ap`'s body applies ITS OWN parameter at arity 1, closing `$apply1 -> q -> ap ->
+//! $apply1` one hop further out. Neither of those shapes, and still correctly rejected: the
+//! non-obvious case, measured — `fn add(a, b) { a + b } fn inc(x) { x + 1 } fn f(g) { g(1, 2) } fn
+//! h(p, q) { p(q) } fn ap1(k, x) { k(x) } fn ap2(k, a, b) { k(a, b) } f(add) + h(inc, 5) + ap1(f,
+//! add) + ap2(h, inc, 5)`. `f` is BOTH at arity 1 (`f(add)`, `ap1(f, add)`), but its body `g(1, 2)`
+//! applies a value at arity **2**, not 1, and it calls no kept `fn` by name at all (only its own
+//! parameter `g`). Reference and λ agree at 18. Yet `f`'s body still reaches `$apply2` (arity 2), one
+//! of whose arms is `h` (also BOTH, value-used at arity 2 via `ap2`); `h`'s body `p(q)` applies at arity 1,
+//! reaching `$apply1` — the same dispatcher `t` closes through above, and the one `f` is itself an arm
+//! of. The cycle `$apply1 -> f -> $apply2 -> h -> $apply1` closes on `f`'s own dispatcher without
+//! either hop looking like "applies at its own arity" or "calls another kept `fn`" — it leaves through
+//! one dispatcher and comes back through a different one. `topo_order`'s cycle check catches it
+//! regardless, because it walks the actual graph rather than testing for these two named shapes; only
+//! the doc's claim to be exhaustive was wrong. TM/asm/native: `Unsupported { "cyclic higher-order call
+//! graph through `f`" }`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -780,19 +803,29 @@ impl Rewriter<'_> {
             let hv = var(self.g, &h);
             return Ok(box_get1(self.g, id, hv));
         }
-        if locals.contains(name) || name == "nil" {
-            return Ok(Core::Var(id, name.to_string())); // a local value / the empty list
+        if locals.contains(name) {
+            return Ok(Core::Var(id, name.to_string())); // a local value
         }
+        // The `tags` check MUST run before the literal-`nil` fallback below: `nil` is just an
+        // ordinary identifier in this language (not a keyword — see `prelude.rs`'s module doc), so a
+        // user `fn nil` used as a value SHADOWS the empty list exactly the way the reference
+        // interpreter's frame lookup shadows it (a `LetRecGroup` frame nearer than the prelude
+        // frame). Checking `name == "nil"` first would resolve every value-use of a user `fn nil` to
+        // the empty list instead of its closure — the bug this reorder closes (measured: TM `HitCap`
+        // where reference and λ both agree on a value).
         if let Some(&tag) = self.tags.get(name) {
-            // A closed named function-value: `cons(tag, nil)` (a named value fn never captures — guard 2
-            // rejects one that would).
+            // A closed named function-value: `cons(tag, $nil)` (a named value fn never captures — guard
+            // 2 rejects one that would).
             let t = nat(self.g, tag);
-            let n = var(self.g, "nil");
+            let n = nil_scaffold(self.g);
             return Ok(cons(self.g, t, n));
+        }
+        if name == "nil" {
+            return Ok(Core::Var(id, name.to_string())); // the empty list
         }
         if self.kept.contains(name) {
             // A kept function in a value position. A BOTH function never reaches here — it is also
-            // tagged, and the `tags` check above fires first, yielding `cons(tag, nil)`. So this is a
+            // tagged, and the `tags` check above fires first, yielding `cons(tag, $nil)`. So this is a
             // kept-ONLY function, which by definition is not value-used; reaching it means the
             // classification and the rewrite disagree. Guard rather than build a tagless closure.
             return Err(LowerError::Unsupported { node: id, what: format!("`{name}` used as a value") });
@@ -880,7 +913,7 @@ impl Rewriter<'_> {
             body: arm_body,
         });
 
-        // Build the closure at the creation site: `cons(tag, cons(c1, cons(c2, … nil)))`. Each captured
+        // Build the closure at the creation site: `cons(tag, cons(c1, cons(c2, … $nil)))`. Each captured
         // value is just `Var(c_i)` (a local in scope here).
         let env = build_env(self.g, &captures);
         let t = nat(self.g, tag);
@@ -946,9 +979,9 @@ fn dispatcher(
     tags: &BTreeMap<String, u64>,
     arms: &mut BTreeMap<String, ArmData>,
 ) -> Result<(Vec<String>, Core), LowerError> {
-    // The default is unreachable for well-typed programs; `head(nil)` faults on every backend, so a
+    // The default is unreachable for well-typed programs; `$head($nil)` faults on every backend, so a
     // bad tag never silently returns a value.
-    let n = var(g, "nil");
+    let n = nil_scaffold(g);
     let mut chain = head1(g, n);
 
     // Fold the arms into an `if tag == k { arm } else …` chain (tag 0 outermost).
@@ -1295,18 +1328,40 @@ fn apply(g: &mut SynthGen, callee: Core, args: Vec<Core>) -> Core {
 }
 
 fn cons(g: &mut SynthGen, head: Core, tail: Core) -> Core {
-    let c = var(g, "cons");
+    // `$cons`, not `cons`: this builds the closure representation itself, so a user `fn cons` must
+    // never be able to capture it. `$` is rejected by the lexer in an identifier, so no user
+    // binding can ever collide with this name — the same holds for its three siblings, `$head`/
+    // `$tail`/`$nil` (see `prelude.rs`'s `runtime_env` doc comment, which enumerates all four, and
+    // `lower_asm.rs`).
+    let c = var(g, "$cons");
     apply(g, c, vec![head, tail])
 }
 
 fn head1(g: &mut SynthGen, list: Core) -> Core {
-    let h = var(g, "head");
+    // `$head`, not `head`: this is the dispatcher's tag test (and its default-arm/nil sentinel), so
+    // a user `fn head` must never be able to capture it. Uncapturable for the same reason as `$cons`
+    // above.
+    let h = var(g, "$head");
     apply(g, h, vec![list])
 }
 
 fn tail1(g: &mut SynthGen, list: Core) -> Core {
-    let t = var(g, "tail");
+    // `$tail`, not `tail`: this unpacks a closure's env when a dispatcher arm binds captures, so a
+    // user `fn tail` must never be able to capture it. Uncapturable for the same reason as `$cons`
+    // above.
+    let t = var(g, "$tail");
     apply(g, t, vec![list])
+}
+
+/// The uncapturable empty-list scaffolding term. Every call site builds SCAFFOLDING with it — the
+/// closed-function-value closure's env (`rewrite_value_name`'s `tags` arm), the dispatcher's
+/// default/fault arm (an out-of-range tag `$head`s this and faults), and the env-list terminator
+/// (`build_env`) — never a stand-in for a genuine user reference to the empty list, which
+/// `rewrite_value_name` handles separately (its own `name == "nil"` arm, resolving the bare name).
+fn nil_scaffold(g: &mut SynthGen) -> Core {
+    // `$nil`, not `nil`: a user `fn nil` (or any other binding named `nil`) must never be able to
+    // capture this. Uncapturable for the same reason as `$cons`/`$head`/`$tail` above.
+    var(g, "$nil")
 }
 
 // Plan 3b-2 box builders: `$box(init)` allocates a fresh cell, `$box_get(h)` reads it, and
@@ -1333,10 +1388,10 @@ fn box_set2(g: &mut SynthGen, at: NodeId, h: Core, v: Core) -> Core {
     Core::Apply(at, Box::new(f), vec![h, v])
 }
 
-/// `cons(c1, cons(c2, … nil))` of the captured names as plain `Var`s (each in scope at the creation
-/// site). Empty captures → `nil` (a closed closure's env), matching the pre-Task-4 `cons(tag, nil)`.
+/// `cons(c1, cons(c2, … $nil))` of the captured names as plain `Var`s (each in scope at the creation
+/// site). Empty captures → `$nil` (a closed closure's env), matching the pre-Task-4 `cons(tag, $nil)`.
 fn build_env(g: &mut SynthGen, captures: &[String]) -> Core {
-    let mut env = var(g, "nil");
+    let mut env = nil_scaffold(g);
     for c in captures.iter().rev() {
         let cv = var(g, c);
         env = cons(g, cv, env);
@@ -1715,7 +1770,7 @@ mod tests {
         );
     }
 
-    /// The dispatcher's fault arm (`head(nil)`), not `Unsupported`, is how a partial-application /
+    /// The dispatcher's fault arm (`$head($nil)`), not `Unsupported`, is how a partial-application /
     /// arity-mismatched closure call is handled (Task 1's review): `defunc` has no static arity check on
     /// a value-application, so a mismatched call simply lands on a per-arity dispatcher with no matching
     /// arm and falls through to the faulting `else`. Both the reference (dynamic arity check on
@@ -1977,7 +2032,7 @@ mod tests {
         // SCOPE, stated so nobody over-trusts this: these two assertions pin `add1`'s `LetRec` and
         // `Lambda` ids SPECIFICALLY. They do NOT close the general hazard of a scaffolding node
         // recycling some OTHER dropped input id — the value-mention `Var(add1)` that becomes
-        // `cons(tag, nil)`, or an unapplied lambda's body. Making the `cons(tag, nil)` below carry the
+        // `cons(tag, $nil)`, or an unapplied lambda's body. Making the `cons(tag, $nil)` below carry the
         // dropped `Var(add1)` id instead of minting one still passes this whole module. Closing that
         // in general means asserting over the ENTIRE scaffolding set, a much larger test than the id
         // classification needs; this is a deliberate bound, not an oversight.
@@ -2156,6 +2211,132 @@ mod tests {
             assert_eq!(count_nodes(&core), all_node_ids(&core).len(), "INPUT has duplicate ids: {src}");
             let out = defunc(&core).expect("defuncs");
             assert_eq!(count_nodes(&out), all_node_ids(&out).len(), "OUTPUT has duplicate ids: {src}");
+        }
+    }
+
+    /// A user `fn` named after a list builtin must not capture `defunc`'s own scaffolding. Before the
+    /// `$`-alias fix this MISCOMPILED SILENTLY: `lower_asm` resolves a bound function before the
+    /// builtin table, so the dispatcher's synthesized `head($clos)` tag test resolved to the user's
+    /// `head`. Measured at 3246742: reference 5, λ 5, TM 3.
+    #[test]
+    fn a_user_fn_named_like_a_builtin_does_not_capture_scaffolding() {
+        for src in [
+            "fn head(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } head(1) + ap(add1, 2)",
+            "fn head(x) { x + 1 } fn ap(g, x) { g(x) } head(1) + ap(head, 2)",
+            "fn cons(a, b) { a + b } fn ap2(g, a, b) { g(a, b) } cons(1, 2) + ap2(cons, 3, 4)",
+            // NOT `"fn tail(x) { x + 1 } fn ap(g, x) { g(x) } tail(1) + ap(tail, 2)"`: that program is
+            // VACUOUS for the same reason `defunc_synthesizes_no_unaliased_builtin_call` was — `tail`
+            // there is a NAMED value-fn, which never captures, so `tail1()` (the helper that only fires
+            // to unpack a dispatched closure's non-empty env) is never invoked and a reverted
+            // `$tail`->`tail` regression would pass unnoticed. This entry adds a capturing value-lambda
+            // (`|y| y + n`) at the SAME arity alongside the shadowing `fn tail`, so its dispatcher arm
+            // actually calls `tail1()` while a real top-level `tail` binder exists to collide with.
+            "let n = 7; fn tail(x) { x + 1 } fn ap(g, y) { g(y) } tail(3) + ap(tail, 2) + ap(|y| y + n, 5)",
+        ] {
+            defunc_preserves_and_lowers(src);
+        }
+    }
+
+    /// Decides (by test, not by reasoning) whether `$cons`/`$head`/`$tail` belong in `BUILTIN_FNS`.
+    /// `is_builtin_fn` is consulted at exactly two call sites, both while re-`rewrite`ing the INPUT
+    /// `core` (`rewrite_apply`'s `is_static` and `rewrite_value_name`'s builtin-as-value rejection) —
+    /// never on defunc's own synthesized output, which the `cons`/`head1`/`tail1` helpers build
+    /// directly, bypassing `rewrite`/`rewrite_apply` entirely. Since `$` is rejected by the lexer, no
+    /// real user program can ever contain a `$`-prefixed `Var`, so this path is unreachable from
+    /// source. The only way to even exercise it is a hand-built `Core` (the `$`-name idiom from
+    /// `lower_asm.rs`'s `dollar_aliases_match_their_bare_builtins`) — so build the one input shape at
+    /// EACH call site where membership would matter, and confirm `defunc` rejects it safely (a
+    /// `LowerError::Unsupported` naming it a "free variable"/"unbound", never a panic and never a
+    /// silent accept) with `$cons`/`$head`/`$tail` absent from `BUILTIN_FNS`. That is the demonstration
+    /// that leaving them out changes nothing reachable, so they are NOT added.
+    #[test]
+    fn dollar_aliases_are_not_needed_in_builtin_fns() {
+        // Site 1 (`rewrite_value_name`): `$head` as a bare VALUE argument to a kept function.
+        // `fn ap(f) { f(1) } ap($head)`, hand-built since `$` cannot appear in a source string.
+        let mut g = NodeGen::default();
+        let f_body =
+            Core::Apply(g.fresh(), Box::new(Core::Var(g.fresh(), "f".to_string())), vec![Core::Nat(g.fresh(), 1)]);
+        let ap_value = Core::Lambda(g.fresh(), vec!["f".to_string()], Box::new(f_body));
+        let main = Core::Apply(
+            g.fresh(),
+            Box::new(Core::Var(g.fresh(), "ap".to_string())),
+            vec![Core::Var(g.fresh(), "$head".to_string())],
+        );
+        let core =
+            Core::LetRec { id: g.fresh(), name: "ap".to_string(), value: Box::new(ap_value), body: Box::new(main) };
+        match defunc(&core) {
+            Err(LowerError::Unsupported { what, .. }) => {
+                assert!(
+                    what.contains("free variable") && what.contains("$head"),
+                    "expected a `free variable` rejection naming `$head`, got: {what}"
+                );
+            }
+            other => panic!("expected Unsupported, got: {other:?}"),
+        }
+
+        // Site 2 (`rewrite_apply`'s `is_static`): `$head` applied directly as a callee.
+        // `$head(1)` at the top level, hand-built for the same reason.
+        let mut g2 = NodeGen::default();
+        let core2 = Core::Apply(
+            g2.fresh(),
+            Box::new(Core::Var(g2.fresh(), "$head".to_string())),
+            vec![Core::Nat(g2.fresh(), 1)],
+        );
+        match defunc(&core2) {
+            Err(LowerError::Unsupported { what, .. }) => {
+                assert!(
+                    what.contains("unbound") && what.contains("$head"),
+                    "expected an `unbound` rejection naming `$head`, got: {what}"
+                );
+            }
+            other => panic!("expected Unsupported, got: {other:?}"),
+        }
+    }
+
+    /// `is_empty` deliberately has NO `$` alias: `defunc` never synthesizes it, and an unused alias is
+    /// a name that later drifts out of sync with the thing it aliases. If a future change starts
+    /// synthesizing `is_empty`, this fails and points at the decision instead of silently
+    /// reintroducing the capture bug this slice fixed.
+    #[test]
+    fn defunc_synthesizes_no_unaliased_builtin_call() {
+        for src in [
+            "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
+             fn add1(x) { x + 1 }\n\
+             [3, 1, 2].map(add1)",
+            // `tail1()` (the helper that emits a bare/aliased call to `tail`) only fires when a
+            // DISPATCHED closure has a non-empty env to unpack (see `dispatcher`'s capture-unpacking
+            // loop) — a NAMED value-fn like `add1` above never captures, so the demo above alone never
+            // reaches it, and a mutation of `tail1` to emit any other name stays invisible. A capturing
+            // value-lambda dispatched through `$apply1` (`|y| y + n`, closing over `n`) forces the arm
+            // to actually bind from `$env`, so this entry is what makes the check below cover all
+            // three helpers (`cons1`/`head1`/`tail1`) rather than just two of them.
+            "let n = 7; fn ap(g, x) { g(x) } ap(|y| y + n, 5)",
+        ] {
+            let (prog, ds) = parse(src);
+            assert!(ds.is_empty(), "{ds:?}");
+            let core = desugar(&prog.unwrap());
+            let (d, synthetic) = defunc_mapped(&core).expect("defunc succeeds");
+            // Every `Apply` of a bare list-builtin name in the output must come from a node the USER
+            // wrote (not in `synthetic`). A synthesized one would be capturable.
+            let mut stack = vec![&d];
+            while let Some(node) = stack.pop() {
+                if let Core::Apply(id, callee, _) = node
+                    && let Core::Var(_, name) = callee.as_ref()
+                    && matches!(name.as_str(), "cons" | "head" | "tail" | "is_empty")
+                {
+                    assert!(!synthetic.contains(id), "synthesized call to bare `{name}` at {id} is capturable");
+                }
+                // `nil` is a VALUE, not a call — the same hazard shows up as a bare `Var`, not an
+                // `Apply` callee, so it gets its own check rather than being silently uncovered by the
+                // one above (this is the check that would have caught the `$nil` gap this test's
+                // sibling demos in `three_way_oracle.rs` were added to close).
+                if let Core::Var(id, name) = node
+                    && name == "nil"
+                {
+                    assert!(!synthetic.contains(id), "synthesized bare `nil` at {id} is capturable");
+                }
+                push_children(node, &mut stack);
+            }
         }
     }
 }

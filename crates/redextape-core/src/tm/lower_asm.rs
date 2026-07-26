@@ -259,8 +259,9 @@ fn reject_fn_value(body: &Core, fname: &str) -> Result<(), LowerError> {
 fn lower_builtin_apply(ctx: &mut Ctx, id: NodeId, name: &str, args: &[Core], dst: Reg) -> Result<(), LowerError> {
     // Any of these being shadowed by a local binding is a function-as-a-value use we do not support.
     let expected_arity = match name {
-        "cons" => 2,
+        "cons" | "$cons" => 2,
         "head" | "tail" | "is_empty" => 1,
+        "$head" | "$tail" => 1,
         "$box" | "$box_get" => 1,
         "$box_set" => 2,
         _ => return Err(LowerError::Unsupported { node: id, what: format!("call of unknown function `{name}`") }),
@@ -276,9 +277,9 @@ fn lower_builtin_apply(ctx: &mut Ctx, id: NodeId, name: &str, args: &[Core], dst
         regs.push(r);
     }
     match name {
-        "cons" => ctx.emit(Instr::Cons(dst, regs[0], regs[1])),
-        "head" => ctx.emit(Instr::Head(dst, regs[0])),
-        "tail" => ctx.emit(Instr::Tail(dst, regs[0])),
+        "cons" | "$cons" => ctx.emit(Instr::Cons(dst, regs[0], regs[1])),
+        "head" | "$head" => ctx.emit(Instr::Head(dst, regs[0])),
+        "tail" | "$tail" => ctx.emit(Instr::Tail(dst, regs[0])),
         "is_empty" => ctx.emit(Instr::IsEmpty(dst, regs[0])),
         "$box" => ctx.emit(Instr::Box(dst, regs[0])),
         "$box_get" => ctx.emit(Instr::BoxGet(dst, regs[0])),
@@ -302,6 +303,15 @@ fn lower_inner(ctx: &mut Ctx, core: &Core, dst: Reg) -> Result<(), LowerError> {
             Ok(())
         }
         Core::Var(id, name) => {
+            // `$nil` is `defunc`'s uncapturable scaffolding alias for the empty list (see its module
+            // doc and `prelude::runtime_env`'s doc comment): resolve it UNCONDITIONALLY. Unlike bare
+            // `nil` below, `$nil` never yields to a local binding — `$` is rejected by the lexer in a
+            // user identifier, so no local can ever be named `$nil`, and there is no "yield" case to
+            // guard against.
+            if name == "$nil" {
+                ctx.emit(Instr::Nil(dst));
+                return Ok(());
+            }
             if name == "nil" && ctx.resolve(name).is_none() {
                 ctx.emit(Instr::Nil(dst));
                 return Ok(());
@@ -829,5 +839,103 @@ mod tests {
             AsmRun::Ran(out) => assert_eq!(out.result, 6),
             other => panic!("asm did not run: {other:?}"),
         }
+    }
+
+    /// `$cons`/`$head`/`$tail`/`$nil` are aliases for the bare builtins/value, existing so `defunc`'s
+    /// synthesized scaffolding cannot be captured by a user `fn`/value of the same name (`$` is
+    /// unforgeable in user source). An alias that behaved even slightly differently would be worse
+    /// than the bug it fixes, so pin equivalence on both a value and a fault.
+    ///
+    /// `$` is rejected by the lexer in an identifier, so (unlike most tests in this module) there is
+    /// no source string to `parse` for the dollar side — each program is built by hand, exactly like
+    /// `box_builtins_lower_and_run_on_the_asm_interpreter` above. The reference interpreter doesn't
+    /// know the dollar names either (they exist only in `defunc`'s output, never typechecked or
+    /// evaluated on their own), so the BARE program's reference value stands in as `decode_asm`'s type
+    /// witness for both sides of each pair.
+    #[test]
+    fn dollar_aliases_match_their_bare_builtins() {
+        use crate::core::NodeGen;
+
+        fn lower_and_run(core: &Core, witness: &Value) -> Value {
+            let program = lower_asm(core).expect("lowering failed");
+            match run_asm(&program, DEFAULT_CAPS) {
+                AsmRun::Ran(o) => decode_asm(&o, witness).expect("decode failed"),
+                other => panic!("asm did not run: {other:?}"),
+            }
+        }
+        // The fault side of the equivalence: `AsmRun::Fault` carries the message directly, no
+        // `witness`/`decode_asm` needed (there is no value to decode).
+        fn lower_and_fault(core: &Core) -> String {
+            let program = lower_asm(core).expect("lowering failed");
+            match run_asm(&program, DEFAULT_CAPS) {
+                AsmRun::Fault(msg) => msg,
+                other => panic!("expected a fault, got: {other:?}"),
+            }
+        }
+        let mut g = NodeGen::default();
+        let ap = |g: &mut NodeGen, n: &str, a: Vec<Core>| {
+            Core::Apply(g.fresh(), Box::new(Core::Var(g.fresh(), n.into())), a)
+        };
+
+        // `cons(7, nil)` vs `$cons(7, nil)`.
+        let bare_args = vec![Core::Nat(g.fresh(), 7), Core::Var(g.fresh(), "nil".into())];
+        let bare_cons = ap(&mut g, "cons", bare_args);
+        let witness = crate::interp::eval(&bare_cons).expect("reference eval failed");
+        let want = lower_and_run(&bare_cons, &witness);
+        let dollar_args = vec![Core::Nat(g.fresh(), 7), Core::Var(g.fresh(), "nil".into())];
+        let dollar_cons = ap(&mut g, "$cons", dollar_args);
+        let got = lower_and_run(&dollar_cons, &witness);
+        assert_eq!(got, want, "`$cons(7, nil)` must behave exactly as `cons(7, nil)`");
+
+        // `head(cons(7, nil))` vs `$head(cons(7, nil))`.
+        let inner_args = vec![Core::Nat(g.fresh(), 7), Core::Var(g.fresh(), "nil".into())];
+        let inner = ap(&mut g, "cons", inner_args);
+        let bare_head = ap(&mut g, "head", vec![inner]);
+        let witness = crate::interp::eval(&bare_head).expect("reference eval failed");
+        let want = lower_and_run(&bare_head, &witness);
+        let inner_args2 = vec![Core::Nat(g.fresh(), 7), Core::Var(g.fresh(), "nil".into())];
+        let inner2 = ap(&mut g, "cons", inner_args2);
+        let dollar_head = ap(&mut g, "$head", vec![inner2]);
+        let got = lower_and_run(&dollar_head, &witness);
+        assert_eq!(got, want, "`$head(cons(7, nil))` must behave exactly as `head(cons(7, nil))`");
+
+        // `tail(cons(7, nil))` vs `$tail(cons(7, nil))`.
+        let inner_args3 = vec![Core::Nat(g.fresh(), 7), Core::Var(g.fresh(), "nil".into())];
+        let inner3 = ap(&mut g, "cons", inner_args3);
+        let bare_tail = ap(&mut g, "tail", vec![inner3]);
+        let witness = crate::interp::eval(&bare_tail).expect("reference eval failed");
+        let want = lower_and_run(&bare_tail, &witness);
+        let inner_args4 = vec![Core::Nat(g.fresh(), 7), Core::Var(g.fresh(), "nil".into())];
+        let inner4 = ap(&mut g, "cons", inner_args4);
+        let dollar_tail = ap(&mut g, "$tail", vec![inner4]);
+        let got = lower_and_run(&dollar_tail, &witness);
+        assert_eq!(got, want, "`$tail(cons(7, nil))` must behave exactly as `tail(cons(7, nil))`");
+
+        // The FAULT side of the equivalence, not just the value side: `head(nil)` vs `$head(nil)`.
+        let nil1 = Core::Var(g.fresh(), "nil".into());
+        let bare_head_nil = ap(&mut g, "head", vec![nil1]);
+        let want = lower_and_fault(&bare_head_nil);
+        let nil2 = Core::Var(g.fresh(), "nil".into());
+        let dollar_head_nil = ap(&mut g, "$head", vec![nil2]);
+        let got = lower_and_fault(&dollar_head_nil);
+        assert_eq!(got, want, "`$head(nil)` must fault exactly as `head(nil)`");
+
+        // `tail(nil)` vs `$tail(nil)`.
+        let nil3 = Core::Var(g.fresh(), "nil".into());
+        let bare_tail_nil = ap(&mut g, "tail", vec![nil3]);
+        let want = lower_and_fault(&bare_tail_nil);
+        let nil4 = Core::Var(g.fresh(), "nil".into());
+        let dollar_tail_nil = ap(&mut g, "$tail", vec![nil4]);
+        let got = lower_and_fault(&dollar_tail_nil);
+        assert_eq!(got, want, "`$tail(nil)` must fault exactly as `tail(nil)`");
+
+        // Bare `nil` vs bare `$nil`. Unlike the other three, `nil` is a VALUE, not a function — so
+        // there is no wrapping `Apply` to build; the whole program is just the one `Var`.
+        let bare_nil = Core::Var(g.fresh(), "nil".into());
+        let witness = crate::interp::eval(&bare_nil).expect("reference eval failed");
+        let want = lower_and_run(&bare_nil, &witness);
+        let dollar_nil = Core::Var(g.fresh(), "$nil".into());
+        let got = lower_and_run(&dollar_nil, &witness);
+        assert_eq!(got, want, "`$nil` must behave exactly as `nil`");
     }
 }

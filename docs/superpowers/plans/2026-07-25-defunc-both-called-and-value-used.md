@@ -22,15 +22,15 @@
 
 A throwaway spike applied the two edits and ran the probes below. It has been reverted; these are its results, and **two of them correct the design spec**.
 
-**1. The spec's §3 capture question is already answered: a top-level `fn` cannot capture at all.** The spec says "A top-level `fn` **can** capture: `let n = 5; fn f(x){ x + n } map(xs, f)` closes over `n`", and asks the implementation to verify the dispatcher's scope. It does not need to. **Guard 2** (`defunc.rs:302-310`) rejects *any* peeled `fn` whose body's free variables intersect the prelude `let` names, and it runs at step 2 — before the step-3 partition. Measured: that exact program returns `Unsupported { what: "function `f` references an outer let binding" }`, and `defunc.rs:1585` already pins it. So **the forwarder never needs to bind captures from the env**, and §3's "bind from env if not" branch is dead code that must not be written. Task 4 pins this so it breaks loudly if guard 2 is ever relaxed.
+**1. The spec's §3 capture question is already answered: a top-level `fn` cannot capture at all.** The spec says "A top-level `fn` **can** capture: `let n = 5; fn f(x){ x + n } map(xs, f)` closes over `n`", and asks the implementation to verify the dispatcher's scope. It does not need to. **Guard 2** (the `function \`{}\` references an outer let binding` check in `defunc_mapped`'s step 2) rejects *any* peeled `fn` whose body's free variables intersect the prelude `let` names, and it runs at step 2 — before the step-3 partition. Measured: that exact program returns `Unsupported { what: "function `f` references an outer let binding" }`, and the `rejects(…, "references an outer let binding")` lines in `unsupported_boundary` already pin it. So **the forwarder never needs to bind captures from the env**, and §3's "bind from env if not" branch is dead code that must not be written. Task 4 pins this so it breaks loudly if guard 2 is ever relaxed.
 
-**2. A new boundary the spec does not mention: a BOTH function whose body dispatches at its OWN arity is still `Unsupported`.** The forwarder gives `$applyN` an out-edge to the BOTH function. If that function's body applies a value at the *same* arity `N`, `topo_order` sees `$applyN → f → $applyN` and rejects with the **pre-existing** `cyclic higher-order call graph` rule (`defunc.rs:1053-1055`, already exercised by `defunc.rs:1597` and `1608`). This slice does not introduce that rule and does not lift it. Minimal witness:
+**2. A new boundary the spec does not mention: a cycle in the emitted BINDER graph (kept `fn`s and `$applyN` dispatchers) that returns to a BOTH function's own dispatcher is still `Unsupported`, however it gets there.** The forwarder gives `$applyN` an out-edge to the BOTH function. `topo_order` sees any resulting cycle back through `$applyN` and rejects with the **pre-existing** `cyclic higher-order call graph` rule (`visit`'s on-stack cycle check in `topo_order`, already exercised by `unsupported_boundary`'s other cyclic-call-graph cases). This slice does not introduce that rule and does not lift it. Minimal witness — the cycle closes DIRECTLY, through the function's own body applying a value at its own arity:
 
 ```
 fn inc(x) { x + 1 } fn t(g) { g(3) } fn ap(h, y) { h(y) } t(inc) + ap(t, inc)
 ```
 
-Dispatch at a *different* arity is fine, which is why the `map` case works. Measured with the spike applied:
+Dispatch at a *different* arity is fine, which is why the `map` case works — **but "different arity" is not sufficient for safety on its own**: a later review (closing this branch) found that the cycle can also leave through one dispatcher and re-enter through ANOTHER, of a different arity, reachable through other kept `fn`s along the way — e.g. `fn add(a, b) { a + b } fn inc(x) { x + 1 } fn f(g) { g(1, 2) } fn h(p, q) { p(q) } fn ap1(k, x) { k(x) } fn ap2(k, a, b) { k(a, b) } f(add) + h(inc, 5) + ap1(f, add) + ap2(h, inc, 5)` (reference/λ = 18; TM/asm/native `Unsupported { "cyclic higher-order call graph through \`f\`" }`): `f` is BOTH at arity 1, its body `g(1, 2)` applies at arity **2** not 1, and it calls no kept `fn` by name at all — yet `f`'s body still reaches `$apply2`, one of whose arms is `h` (also BOTH, at arity 2), and `h`'s body `p(q)` applies at arity 1, reaching `$apply1` — the same dispatcher `f` is itself an arm of. `$apply1 -> f -> $apply2 -> h -> $apply1` closes on `f`'s own dispatcher without matching the direct shape above (a function applying a value at ITS OWN arity) OR a kept `fn` calling another kept `fn` by name — it closes through a THIRD path, a dispatcher of one arity handing off to a dispatcher of another. `topo_order`'s cycle check already catches this correctly (it walks the real graph, not two named shapes), so nothing needed fixing except this document's claim to be exhaustive. Measured with the spike applied:
 
 | program | before | after |
 |---|---|---|
@@ -39,9 +39,9 @@ Dispatch at a *different* arity is fine, which is why the `map` case works. Meas
 | `map` value-used at arity 2, dispatching at arity 1 | BOTH rejected | **Ok, 8, meaning preserved** |
 | `fn t(g){g(3)}` value-used at arity 1, dispatching at arity 1 | BOTH rejected | `cyclic higher-order call graph through \`t\`` |
 
-**Scope consequence, stated plainly:** the spec's motivating line "passing `map` or `fold` itself to another function" **does work** (different arity), but the general claim "every recursive function used as a value" has this one exception. Lifting it would mean emitting the dispatcher and the BOTH function as one `LetRecGroup` — a genuinely larger change to `topo_order`'s unit model, and explicitly **not** in this slice.
+**Scope consequence, stated plainly:** the spec's motivating line "passing `map` or `fold` itself to another function" **does work** (different arity), but the general claim "every recursive function used as a value" has this one exception (any cycle back to a BOTH function's own dispatcher, not just the two shapes above). Lifting it would mean emitting the dispatcher and the BOTH function as one `LetRecGroup` — a genuinely larger change to `topo_order`'s unit model, and explicitly **not** in this slice.
 
-**3. Exactly one existing test breaks:** `tm::defunc::tests::unsupported_boundary` (the `rejects(..., "both called by name and used as a value")` line, `defunc.rs:1580-1581`). Everything else passes — **325 passed, 1 failed** — including `no_output_node_id_is_duplicated`, which is the evidence that forwarding does not duplicate ids.
+**3. Exactly one existing test breaks:** `tm::defunc::tests::unsupported_boundary` (the `rejects(..., "both called by name and used as a value")` line). Everything else passes — **325 passed, 1 failed** — including `no_output_node_id_is_duplicated`, which is the evidence that forwarding does not duplicate ids.
 
 **4. `rewrite_apply` and `rewrite_value_name` need no change.** `rewrite_apply` (`defunc.rs:870-883`) tests `is_static = kept.contains(name) || is_builtin_fn(name)` **before** the `is_local || is_value_fn` dispatch branch, so a BOTH function's by-name calls — including its own recursive self-call — take the direct path. `rewrite_value_name` (`defunc.rs:761-772`) tests `tags` **before** `kept`, so a BOTH function in a value position yields `cons(tag, nil)`. Both orderings are load-bearing; Task 2 pins the first one.
 
@@ -53,7 +53,7 @@ Dispatch at a *different* arity is fine, which is why the `map` case works. Meas
 - Modify: `crates/redextape-core/src/tm/defunc.rs:324-338` (step 3's comment + the `(true, true)` arm)
 - Modify: `crates/redextape-core/src/tm/defunc.rs:389-396` (step 5c, the arm builder)
 - Modify: `crates/redextape-core/src/tm/defunc.rs:126-144` (the `Emitted` doc comment's invariant argument)
-- Modify: `crates/redextape-core/src/tm/defunc.rs:1580-1581` (remove the now-obsolete `rejects` line)
+- Modify: `crates/redextape-core/src/tm/defunc.rs` (`unsupported_boundary`: remove the now-obsolete `rejects(..., "both called by name and used as a value")` line)
 - Test: `crates/redextape-core/src/tm/defunc.rs` (the `mod tests` at the bottom)
 
 **Interfaces:**
@@ -399,7 +399,7 @@ Expected: PASS.
 
 - [ ] **Step 3: Sabotage-verify the capture pin**
 
-Temporarily neuter guard 2 (`defunc.rs:302-310`) by making its rejection unreachable:
+Temporarily neuter guard 2 (the `function \`{}\` references an outer let binding` check, in `defunc_mapped`'s step 2) by making its rejection unreachable:
 
 ```rust
         if false && fv.intersection(&let_names).next().is_some() {
@@ -431,16 +431,18 @@ The spec asks the implementation to verify whether the dispatcher is in scope of
 ## 3. The capture question — verified: a top-level `fn` cannot capture
 
 A forwarding arm calls `f` and lets `f` resolve its captures **lexically**, ignoring the closure's env.
-That is correct only if `f` has no captures to resolve. **It cannot have any.** Guard 2
-(`defunc.rs:302-310`) rejects any peeled `fn` whose body's free variables intersect the prelude `let`
-names, and it runs at step 2 — before the step-3 partition — so `let n = 5; fn f(x){ x + n } …` is
-`Unsupported` whether `f` is value-used, name-called, or both.
+That is correct only if `f` has no captures to resolve. **It cannot have any.** Guard 2 (the
+`function \`{}\` references an outer let binding` check, in `defunc_mapped`'s step 2) rejects any
+peeled `fn` whose body's free variables intersect the prelude `let` names, and it runs at step 2 —
+before the step-3 partition — so `let n = 5; fn f(x){ x + n } …` is `Unsupported` whether `f` is
+value-used, name-called, or both.
 
 This design's original text claimed the opposite and asked the implementation to verify it. Measured
 on `4275bd5`: that program returns `Unsupported { what: "function `f` references an outer let
-binding" }`, and `defunc.rs:1585` already pinned it. So the arm binds **no** captures, and the
-"bind from env if not" branch must not be written. `unsupported_boundary` pins the BOTH variant, so
-relaxing guard 2 without revisiting the forwarder fails loudly.
+binding" }`, and the `rejects(…, "references an outer let binding")` lines in `unsupported_boundary`
+already pinned it. So the arm binds **no** captures, and the "bind from env if not" branch must not be
+written. `unsupported_boundary` pins the BOTH variant, so relaxing guard 2 without revisiting the
+forwarder fails loudly.
 ```
 
 - [ ] **Step 6: Commit**
@@ -567,8 +569,11 @@ The ranked-pass-set entry for devirtualization ends with a `**Prerequisite:**` s
      **Prerequisite (DONE):** `defunc` used to *reject* functions both called by name and used as a
      value — the entire "direct call to a value-used function" case. Shipped 2026-07-25; see
      `docs/superpowers/plans/2026-07-25-defunc-both-called-and-value-used.md`. One exception remains:
-     a BOTH function whose body dispatches at its OWN arity still closes a cycle through its
-     dispatcher, which a dispatcher/callee `LetRecGroup` would lift.
+     a cycle in the emitted binder graph (kept `fn`s and `$applyN` dispatchers) that returns to a BOTH
+     function's own dispatcher is still `Unsupported` — reachable directly, through other kept `fn`s, or
+     (the non-obvious path) through dispatchers of OTHER arities, e.g. `$apply1 -> f -> $apply2 -> h ->
+     $apply1` when `f` and `h` are each BOTH at a different arity (see `defunc.rs`'s module doc for the
+     worked counterexample). A dispatcher/callee `LetRecGroup` would lift it.
 ```
 
 - [ ] **Step 5: Verify the whole gate one last time**

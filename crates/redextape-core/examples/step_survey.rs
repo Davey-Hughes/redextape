@@ -13,6 +13,11 @@
 //! on purpose: `three_way_oracle.rs`'s `FAULT_DEMOS` and `tm_oracle.rs`'s unbounded-loop cap test —
 //! both are DESIGNED to hit a cap/diverge (a "no value" outcome has no completed steps to attribute),
 //! which is outside this survey's scope (every program here must complete under `DEFAULT_CAPS`).
+//! This copy (and `redextape-native/tests/native_oracle.rs`'s) drifted from `FIRST_ORDER_DEMOS` twice
+//! across two slices despite the "verbatim" claim above, so hand-checking is no longer enough:
+//! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_three_copies` now asserts all three
+//! copies are textually identical, so a future drift fails a test instead of silently stale-ing this
+//! report's corpus count.
 //!
 //! THE SURVEY'S OWN BIGGEST LIMITATION, stated up front because it bounds every number below: that
 //! corpus is an ORACLE suite, built to exercise BACKEND FEATURES (arithmetic, lists, recursion,
@@ -149,6 +154,54 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     // than staying silent: 10 + 2 + 6 = 18.
     "fn v(x) { x * 10 } fn b(x) { x + 1 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
     "fn b(x) { x + 1 } fn v(x) { x * 10 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
+    // A user `fn` shadowing a list builtin. `defunc` synthesizes `$head($clos)` for its dispatcher
+    // tag test, and `lower_asm` resolves a bound function BEFORE the builtin table — so with the
+    // bare name this silently miscompiled (measured at 3246742: reference 5, λ 5, TM 3). The `$`
+    // form is unforgeable in user source, so scaffolding is uncapturable. 2 + 3 = 5.
+    "fn head(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } head(1) + ap(add1, 2)",
+    // The same shadowing where the shadowing function is ALSO the value being dispatched. 2 + 3 = 5.
+    "fn head(x) { x + 1 } fn ap(g, x) { g(x) } head(1) + ap(head, 2)",
+    // A user `fn tail` shadowing the builtin — but unlike the `head` pair above, a `tail`-shaped
+    // twin of THAT demo (`fn tail(x){x+1} fn ap(g,x){g(x)} tail(1)+ap(tail,2)`) is VACUOUS: `$head`
+    // is called unconditionally by every dispatcher (the tag test), but `$tail` is only called by
+    // `tail1()` to unpack a dispatcher arm's CAPTURED env, and that program's closures capture
+    // nothing, so `tail1()` is never invoked and the demo could not detect a reverted `$tail`->`tail`
+    // regression (found when this class was surveyed for Task 2). Here `tail` is BOTH called by name
+    // (`tail(3)`) and used as a value (`ap(tail, 2)`), so it is KEPT — a real top-level `tail` binder
+    // exists for scaffolding to collide with — and the sibling value-lambda `|y| y + n` at the SAME
+    // arity captures `n`, forcing its dispatcher arm to call `tail1()` to unpack `$env`. Confirmed
+    // non-vacuous by sabotage (reverting `tail1`'s emitted name to the bare `"tail"`): the TM diverges
+    // (`HitCap`) while reference and λ still agree. 4 + 3 + 12 = 19.
+    "let n = 7; fn tail(x) { x + 1 } fn ap(g, y) { g(y) } tail(3) + ap(tail, 2) + ap(|y| y + n, 5)",
+    // `nil` is the FOURTH synthesized scaffolding name (the closed-function-value closure's env, the
+    // dispatcher's fault sentinel, the env-list terminator), and `rewrite_value_name`'s bare-`"nil"`
+    // check used to short-circuit BEFORE its `tags` check — so a user `fn nil`, itself USED AS A
+    // VALUE, compiled to the empty list instead of `cons(tag, $nil)`, and the dispatcher's
+    // `$head($clos)` tag test then faulted on it. `nil` is not a keyword in this language (see
+    // `prelude.rs`'s module doc), so a user `fn nil` SHADOWS the empty list exactly as the reference
+    // interpreter's frame lookup does — confirmed against the reference, which evaluates this to 5.
+    // Confirmed non-vacuous by sabotage (restoring the old check order): TM `HitCap`, matching the
+    // reference/λ "no value" outcome being wrongly a value fault instead of true agreement — see
+    // `defunc.rs`'s `rewrite_value_name` for the measured failure this reorder closes.
+    "fn nil(x) { x + 5 } fn ap(g, x) { g(x) } ap(nil, 0)",
+    // A user `fn nil` called by name ONLY (never itself used as a value) sharing a program with an
+    // unrelated CLOSED function-value (`add1`, passed to `ap`). Before the `$nil` alias, `add1`'s
+    // closed closure was built as `cons(tag, nil)` — a bare `nil` that `lower_asm`'s
+    // `reject_fn_value` then flagged as a value-use of the user's KEPT `fn nil`, rejecting the whole
+    // program on every lowering backend even though `nil` itself is never value-used anywhere.
+    // Confirmed non-vacuous by sabotage (reverting `$nil` at that one synthesis site): all three
+    // lowering backends `Unsupported { "\`nil\` used as a value" }`, while reference and λ still
+    // agree at 5. 2 + 3 = 5.
+    "fn nil(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } nil(1) + ap(add1, 2)",
+    // A user `fn cons` shadowing the list builtin — the `cons`-shaped twin of the `head`/`tail` pair
+    // above, closing the one member a review found missing (reverting the `cons` helper to its bare
+    // name left both oracle suites green). `defunc` builds every closure as `$cons(tag, env)`, so a
+    // bare `cons` here would let this user function capture the closure representation itself —
+    // `add1`'s closed closure would become `(tag + env)` (the user's `cons` computes `a + b`, not a
+    // pair), and the dispatcher's `$head($clos)` tag test then reads that number as a list. Confirmed
+    // non-vacuous by sabotage (reverting the `cons` helper's `"$cons"` to the bare `"cons"`):
+    // reference/λ still agree at 10, while the TM diverges (`HitCap`). 3 + 7 = 10.
+    "fn cons(a, b) { a + b } fn ap2(g, a, b) { g(a, b) } cons(1, 2) + ap2(cons, 3, 4)",
 ];
 
 /// Verbatim copy of `tests/three_way_oracle.rs::LAMBDA_LIMITATION_DEMOS`: Plan-2 latent traps the λ
