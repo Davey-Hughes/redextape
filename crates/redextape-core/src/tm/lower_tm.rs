@@ -114,19 +114,23 @@ fn is_arith(op: BinOp) -> bool {
 /// Returned rather than stored on `Machine` deliberately: `Machine` derives `PartialEq` and the TM
 /// text round-trip test asserts `parse_tm(print_tm(m)) == m`, which a side-table field would break
 /// for a reason that has nothing to do with what the machine computes.
-pub fn lower_tm_mapped(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usize>>) {
+fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usize>>, StateId) {
     let sm = SlotMap::of(prog);
     let mut b = Builder::new();
     let n = prog.code.len();
     // The single halt (accept) state: `halt`, an out-of-range/unimplemented instruction, and falling
     // off the end all route here.
     let halt = b.accept("halt");
+    // The single overflow-guard state, allocated EAGERLY next to `halt` so the origin map bills it to
+    // `None` (scaffolding) rather than to whichever instruction's gadget happened to request it first.
+    // Every guard rule targets this one state; see `Builder::overflow`.
+    let overflow = b.overflow();
     // An absurd register index (a hand-built or fuzzed Program; real `lower_asm` output stays tiny)
     // would build a multi-million-state machine and an oversized init tape. Refuse to lay it out:
     // return a degenerate machine that halts immediately. Total, panic-free, no huge allocation.
     if sm.n_slots() > MAX_SLOTS {
         let state_origins = vec![None; b.state_count()];
-        return (b.finish(halt), state_origins);
+        return (b.finish(halt), state_origins, overflow);
     }
     // One entry state per instruction index. `pc[i]` means "about to execute instruction i".
     let pc: Vec<StateId> = (0..n).map(|i| b.state(format!("pc{i}"))).collect();
@@ -155,7 +159,7 @@ pub fn lower_tm_mapped(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Opti
     // *before* building any of them, so a call-containing program can't OOM the lowering.
     if frame_bank_unrepresentable(prog, &sm) {
         let state_origins = vec![None; b.state_count()];
-        return (b.finish(halt), state_origins);
+        return (b.finish(halt), state_origins, overflow);
     }
 
     let has_ret = prog.code.iter().any(|i| matches!(i, Instr::Ret));
@@ -254,14 +258,38 @@ pub fn lower_tm_mapped(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Opti
         }
     }
 
-    (b.finish(pc.first().copied().unwrap_or(halt)), state_origins)
+    (b.finish(pc.first().copied().unwrap_or(halt)), state_origins, overflow)
+}
+
+/// Lower `prog` to a Turing machine, returning the machine AND its state map (see `lower_tm_all`).
+pub fn lower_tm_mapped(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usize>>) {
+    let (m, origins, _) = lower_tm_all(prog, enc);
+    (m, origins)
+}
+
+/// Lower `prog`, returning the machine AND its overflow-guard state. Halting in that state means a
+/// value did not fit the encoding's field width — retry at a wider one (`run_tm` does exactly that).
+///
+/// Returned as an artifact rather than stored on `Machine` for the same reason as the origin map:
+/// `Machine` derives `PartialEq` and the TM text round-trip asserts `parse_tm(print_tm(m)) == m`, which
+/// a side-table field would break for a reason unrelated to what the machine computes.
+pub fn lower_tm_guarded(prog: &Program, enc: &dyn Encoding) -> (Machine, StateId) {
+    let (m, _, overflow) = lower_tm_all(prog, enc);
+    (m, overflow)
+}
+
+/// The number of REG-bank fields `prog` needs — the argument `Encoding::init_reg` expects. Public
+/// because a caller laying out a bank by hand (an invariant test, a report, a visualizer) needs it and
+/// `SlotMap` is crate-internal.
+pub fn n_slots_of(prog: &Program) -> u32 {
+    SlotMap::of(prog).n_slots()
 }
 
 /// Lower `prog` into a `TAPES`-tape `Machine`. Total and panic-free on any `Program`. Exactly
 /// `lower_tm_mapped` with the state map discarded — there is ONE lowering implementation, so the
 /// mapped and unmapped paths cannot drift.
 pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
-    lower_tm_mapped(prog, enc).0
+    lower_tm_all(prog, enc).0
 }
 
 #[cfg(test)]
@@ -277,9 +305,135 @@ mod tests {
     use crate::tm::lower_asm::lower_asm;
     use crate::tm::sim::{Caps, DEFAULT_CAPS as CAPS, Status, simulate, simulate_trace};
 
+    /// `lower_tm_guarded` hands the overflow state back as an ARTIFACT (like `lower_tm_mapped`'s origin
+    /// map), and it is billed to no instruction — it is scaffolding, allocated alongside `halt`.
+    #[test]
+    fn lower_tm_guarded_returns_the_overflow_state_as_scaffolding() {
+        let (prog, ds) = parse("1 + 2 * 3");
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let core = desugar(&prog.unwrap());
+        let program = lower_asm(&core).expect("lowers");
+
+        let (m, overflow) = lower_tm_guarded(&program, &Unary::default());
+        assert!(m.states[overflow as usize].rules.is_empty());
+        assert!(!m.states[overflow as usize].accept);
+
+        let (_, origins) = lower_tm_mapped(&program, &Unary::default());
+        assert_eq!(origins[overflow as usize], None, "the guard belongs to no single instruction");
+
+        // The unguarded entry point is the same machine.
+        assert_eq!(lower_tm(&program, &Unary::default()), m);
+    }
+
+    /// Run `src` on a bank `width` cells wide and report whether it halted in the overflow guard.
+    fn halts_in_overflow(src: &str, width: usize) -> bool {
+        use crate::tm::sim::simulate_final;
+        let (prog, ds) = parse(src);
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let core = desugar(&prog.unwrap());
+        let program = lower_asm(&core).expect("lowers");
+        let enc = Unary::at(width);
+        let (m, overflow) = lower_tm_guarded(&program, &enc);
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(n_slots_of(&program));
+        let (_, final_state, status) = simulate_final(&m, &init, CAPS);
+        status == Status::Halted && final_state == overflow
+    }
+
+    /// A COMPUTED value that does not fit is caught by `append_work_to_field`'s guard — the universal
+    /// REG store, reached by `mov`, `arith`, `compare`, `pop_frame_restore`, `cons`, `head`/`tail`,
+    /// `is_empty` and the box ops alike. Both operands here fit a 4-cell field; only the result does not.
+    ///
+    /// Both overflow shapes are pinned, because one rule is claimed to cover both and they arrive at the
+    /// guard differently. `v > width` reaches the trailing `#` with WORK still holding marks; `v ==
+    /// width` reaches it with WORK exactly exhausted — the documented `rewind_home` miscount, and the
+    /// case a guard that also read WORK would silently miss.
+    #[test]
+    fn a_computed_value_that_does_not_fit_is_reported() {
+        assert!(halts_in_overflow("3 + 3", 4), "6 > 4: overflow with WORK still holding marks");
+        assert!(halts_in_overflow("2 + 2", 4), "4 == 4: no padding blank left, WORK exactly exhausted");
+        // Sufficient width: no overflow.
+        assert!(!halts_in_overflow("3 + 3", 8));
+        assert!(!halts_in_overflow("2 + 2", 8));
+    }
+
+    /// The two cases from the design spec that NO correctness-based test can catch. At width 4 both
+    /// corrupt the REG bank and still decode to the RIGHT answer: `3 - 5` destroys the last field's
+    /// trailing `#` and still returns 0; `0 + 5` merges two 4-cell fields into one 9-cell run and still
+    /// returns 5. The oversized value in both is the LITERAL 5, so this is the static guard's case, not
+    /// the computed-store one. The assertion is on the OUTCOME precisely because the value and even the
+    /// decode succeed.
+    #[test]
+    fn silent_literal_corruption_is_now_reported() {
+        assert!(halts_in_overflow("3 - 5", 4), "the literal 5 does not fit a 4-cell field");
+        assert!(halts_in_overflow("0 + 5", 4), "the literal 5 does not fit a 4-cell field");
+        assert!(!halts_in_overflow("3 - 5", 8));
+        assert!(!halts_in_overflow("0 + 5", 8));
+    }
+
+    /// A literal too large for the field is known at BUILD time — `n` is a compile-time constant — so
+    /// the guard is static: the instruction routes straight to the overflow state and emits no write
+    /// chain at all. `41` is stored directly, so widths 4 through 32 must all report overflow.
+    #[test]
+    fn an_oversized_literal_is_rejected_statically() {
+        for w in [4usize, 8, 16, 32] {
+            assert!(halts_in_overflow("let x = 41; x", w), "41 must not fit a {w}-cell field");
+        }
+        assert!(!halts_in_overflow("let x = 41; x", 64));
+    }
+
+    /// The static check uses the same STRICT bound as the runtime one: a literal exactly equal to the
+    /// width does not fit either.
+    #[test]
+    fn a_literal_exactly_equal_to_the_width_is_rejected() {
+        assert!(halts_in_overflow("let x = 8; x", 8));
+        assert!(!halts_in_overflow("let x = 7; x", 8));
+    }
+
+    /// The guard fires on a value that reaches the REG bank through a path OTHER than arithmetic, so
+    /// the claim "every REG store funnels through `append_work_to_field`" is tested rather than argued.
+    /// `mov` (a `let` binding read back) and `cons` (a heap pointer written into a field) are the two
+    /// most distinct such paths.
+    #[test]
+    fn the_guard_covers_non_arithmetic_reg_stores() {
+        assert!(halts_in_overflow("let x = 3 + 3; x", 4), "mov of an oversized value");
+        assert!(!halts_in_overflow("let x = 3 + 3; x", 8));
+    }
+
+    /// As `halts_in_overflow`, but for a higher-order program that must be defunctionalized first.
+    fn halts_in_overflow_defunc(src: &str, width: usize) -> bool {
+        use crate::tm::sim::simulate_final;
+        let (prog, ds) = parse(src);
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let core = desugar(&prog.unwrap());
+        let defunced = crate::tm::defunc::defunc(&core).expect("defuncs");
+        let program = lower_asm(&defunced).expect("lowers");
+        let enc = Unary::at(width);
+        let (m, overflow) = lower_tm_guarded(&program, &enc);
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(n_slots_of(&program));
+        let (_, final_state, status) = simulate_final(&m, &init, CAPS);
+        status == Status::Halted && final_state == overflow
+    }
+
+    /// A mutable-capture program at too narrow a width IS reported — but by the REG guard, not the BOX
+    /// one. Every value entering a box is copied out of a register field first (`box_op` and
+    /// `box_set_op` both take their value from a `Slot`), so it has already passed the REG guard at the
+    /// same width: **a BOX overflow is unreachable through any lowered program.** The BOX guards are
+    /// therefore defensive, against a hand-built machine or a future gadget that writes a box field
+    /// from somewhere other than a register, and they are tested where they can actually fire — at the
+    /// gadget level, in `encoding.rs`. This test pins the reachable half, and the comment records why
+    /// it is not evidence about the BOX guard.
+    #[test]
+    fn a_boxing_program_at_too_narrow_a_width_is_reported() {
+        let src = "let mut c = 0; fn ap(f, x) { f(x) } ap(|x| { c = c + x; c }, 5) + c";
+        assert!(halts_in_overflow_defunc(src, 4), "5 does not fit a 4-cell field");
+        assert!(!halts_in_overflow_defunc(src, 16));
+    }
+
     /// Lower `prog`, run it, and decode field 0 (the `Rr` result) as a unary Nat.
     fn run_nat(prog: &Program) -> Option<u64> {
-        let enc = Unary;
+        let enc = Unary::default();
         let m = lower_tm(prog, &enc);
         assert!(m.validate().is_empty(), "invalid machine: {:?}", m.validate());
         let sm = SlotMap::of(prog);
@@ -384,7 +538,7 @@ mod tests {
         // A hand-built Program with a huge register index must not panic or abort during lowering;
         // it routes to a degenerate halt machine (real `lower_asm` never emits such indices).
         let prog = Program { code: vec![Instr::Li(Reg::Loc(u32::MAX), 1), Instr::Halt], labels: vec![] };
-        let m = lower_tm(&prog, &Unary);
+        let m = lower_tm(&prog, &Unary::default());
         assert!(m.validate().is_empty(), "degenerate machine must be valid: {:?}", m.validate());
         // And it simulates to a halt (does not hang / panic).
         let (_tapes, status) = simulate(&m, &vec![Vec::new(); TAPES], CAPS);
@@ -448,7 +602,7 @@ mod tests {
         // A no-Call/no-Ret program with a large local count must NOT build the O(n_loc^2) Ret handler.
         // (Before the fix this built a ~O(2000^2) machine and could OOM.)
         let prog = Program { code: vec![Instr::Li(Reg::Loc(2_000), 1), Instr::Halt], labels: vec![] };
-        let m = lower_tm(&prog, &Unary);
+        let m = lower_tm(&prog, &Unary::default());
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         // One Li gadget seeking slot 2000 is O(2000); a quadratic Ret handler would be ~O(2000^2)=4M.
         assert!(m.states.len() < 50_000, "no-Call program must not build frame gadgets; got {}", m.states.len());
@@ -503,11 +657,11 @@ mod tests {
         // what lets the three-way oracle (Part 2b-2-iv-a) treat all three "no value" outcomes alike.
         // A small cap keeps the test fast (the spin has no fixed point; sim runs it to the step cap).
         fn hits_cap(prog: &Program) -> bool {
-            let m = lower_tm(prog, &Unary);
+            let m = lower_tm(prog, &Unary::default());
             assert!(m.validate().is_empty(), "{:?}", m.validate());
             let sm = SlotMap::of(prog);
             let mut init = vec![Vec::new(); TAPES];
-            init[REG] = Unary.init_reg(sm.n_slots());
+            init[REG] = Unary::default().init_reg(sm.n_slots());
             matches!(simulate(&m, &init, Caps { steps: 10_000, cells: 10_000 }).1, Status::HitCap)
         }
         // head(nil) / tail(nil): pointer 0.
@@ -539,7 +693,7 @@ mod tests {
             ],
             labels: vec![("f".to_string(), 3)],
         };
-        let m = lower_tm(&prog, &Unary);
+        let m = lower_tm(&prog, &Unary::default());
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         assert!(m.states.len() < 10_000, "must not build an O(n_loc^2) machine; got {}", m.states.len());
     }
@@ -554,10 +708,10 @@ mod tests {
             assert!(ds.is_empty(), "parse errors: {ds:?}");
             let core = desugar(&prog.unwrap());
             let program = lower_asm(&core).expect("lowers");
-            let m = lower_tm(&program, &Unary);
+            let m = lower_tm(&program, &Unary::default());
             let sm = SlotMap::of(&program);
             let mut init = vec![Vec::new(); TAPES];
-            init[REG] = Unary.init_reg(sm.n_slots());
+            init[REG] = Unary::default().init_reg(sm.n_slots());
             let trace = simulate_trace(&m, &init, CAPS);
             assert_eq!(trace.status, crate::tm::sim::Status::Halted, "demo must halt: {src}");
             trace.steps.len()
@@ -582,10 +736,10 @@ mod tests {
             let core = desugar(&prog.unwrap());
             let defunced = crate::tm::defunc::defunc(&core).expect("defunc succeeds");
             let program = lower_asm(&defunced).expect("defunc'd core lowers first-order");
-            let m = lower_tm(&program, &Unary);
+            let m = lower_tm(&program, &Unary::default());
             let sm = SlotMap::of(&program);
             let mut init = vec![Vec::new(); TAPES];
-            init[REG] = Unary.init_reg(sm.n_slots());
+            init[REG] = Unary::default().init_reg(sm.n_slots());
             let trace = simulate_trace(&m, &init, CAPS);
             assert_eq!(trace.status, crate::tm::sim::Status::Halted, "demo must halt: {src}");
             trace.steps.len()
@@ -625,8 +779,8 @@ mod tests {
             Core::Let { id: g.fresh(), name: "h".into(), mutable: false, value: Box::new(boxed), body: Box::new(body) };
         let expected = crate::interp::eval(&prog).unwrap();
         assert_eq!(expected, crate::value::Value::Nat(6));
-        match run_tm(&prog, &Unary, TM_DEFAULT_CAPS) {
-            TmRun::Ran { tapes } => assert_eq!(decode_tape(&tapes, &expected, &Unary), Some(expected)),
+        match run_tm(&prog, &Unary::default(), TM_DEFAULT_CAPS) {
+            TmRun::Ran { tapes } => assert_eq!(decode_tape(&tapes, &expected, &Unary::default()), Some(expected)),
             other => panic!("box program did not run on TM: {other:?}"),
         }
     }
@@ -635,7 +789,7 @@ mod tests {
     fn every_state_maps_to_the_instruction_that_built_it_or_to_scaffolding() {
         let core = desugar(&parse("fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(3)").0.unwrap());
         let prog = lower_asm(&core).expect("lowers");
-        let (m, state_origins) = lower_tm_mapped(&prog, &Unary);
+        let (m, state_origins) = lower_tm_mapped(&prog, &Unary::default());
         assert_eq!(state_origins.len(), m.states.len(), "state origins must be parallel to states");
         for (s, origin) in state_origins.iter().enumerate() {
             if let Some(idx) = origin {
@@ -666,7 +820,7 @@ mod tests {
     fn each_instructions_entry_state_bills_that_instruction() {
         let core = desugar(&parse("fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(3)").0.unwrap());
         let prog = lower_asm(&core).expect("lowers");
-        let (m, state_origins) = lower_tm_mapped(&prog, &Unary);
+        let (m, state_origins) = lower_tm_mapped(&prog, &Unary::default());
         for i in 0..prog.code.len() {
             let name = format!("pc{i}");
             let entries: Vec<usize> =
@@ -690,6 +844,6 @@ mod tests {
         let mut g = NodeGen::default();
         let get =
             Core::Apply(g.fresh(), Box::new(Core::Var(g.fresh(), "$box_get".into())), vec![Core::Nat(g.fresh(), 0)]);
-        assert!(matches!(run_tm(&get, &Unary, TmCaps { steps: 50_000, cells: 50_000 }), TmRun::HitCap));
+        assert!(matches!(run_tm(&get, &Unary::default(), TmCaps { steps: 50_000, cells: 50_000 }), TmRun::HitCap));
     }
 }

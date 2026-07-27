@@ -216,11 +216,26 @@ fn parse_core(src: &str) -> Result<Core, LowerError> {
 ///
 /// Mirrors `run_tm`'s lowering sequence exactly — including its `defunc` retry — so the attribution
 /// describes the same machine `run_tm` would actually run, not a differently-lowered one. Likewise
-/// the encoding and caps: every `run_tm` call site in the workspace passes `&Unary` (the only
+/// the encoding and caps: every `run_tm` call site in the workspace passes `&Unary::default()` (the only
 /// `Encoding` impl) and `DEFAULT_CAPS`.
 pub fn attribute(src: &str) -> Result<Attribution, LowerError> {
+    attribute_at(src, &Unary::default())
+}
+
+/// `attribute` at an explicit encoding rather than the default 64-cell one.
+///
+/// Exists because every share `attribute` reports is measured at ONE field width, and step cost is
+/// affine in that width (`steps = a + b·W`) with the `b·W` term at 91–97% of the total at width 64. A
+/// bucket's SHARE is therefore only width-independent if every bucket happens to have the same `b/a`
+/// ratio, which nothing guarantees. Re-attributing at the width `run_tm` actually fits is how that gets
+/// checked rather than assumed — see `examples/width_ranking.rs`.
+///
+/// A program whose values do not fit `enc` halts in the overflow guard, which is a real halt, so the
+/// histogram it produces describes a run that computed nothing. Callers must pass a width the program
+/// fits (`run_tm_fitted` reports one).
+pub fn attribute_at(src: &str, enc: &dyn Encoding) -> Result<Attribution, LowerError> {
     let core = parse_core(src)?;
-    Ok(match lower_mapped(&core, &Unary)? {
+    Ok(match lower_mapped(&core, enc)? {
         Some(m) => attribute_mapped(&m),
         None => Attribution::unrepresentable(),
     })
@@ -232,7 +247,7 @@ pub fn attribute(src: &str) -> Result<Attribution, LowerError> {
 #[cfg(test)]
 fn attribute_with_shifted_origins(src: &str) -> Result<Attribution, LowerError> {
     let core = parse_core(src)?;
-    Ok(match lower_mapped(&core, &Unary)? {
+    Ok(match lower_mapped(&core, &Unary::default())? {
         Some(mut m) => {
             m.origins.rotate_left(1);
             attribute_mapped(&m)
@@ -450,6 +465,14 @@ mod tests {
     ///
     /// Both bucket ids are read off the SOURCE Core (before `defunc`), which is the property under
     /// test: they must be findable there at all.
+    ///
+    /// The WRITE bucket and the total were re-blessed (+106 steps, 4,954 -> 5,060) when
+    /// `box_overwrite_field` became a COUNTED `width`-long chain instead of a content-driven loop. That
+    /// is a deliberate algorithmic change, not a guard: a box write now always traverses the full
+    /// window, so at the pinned width 64 these numbers grew. The overflow guards themselves add rules
+    /// and no steps, which is what the untouched `tm_step_count_goldens` continue to check. At the
+    /// fitted widths `run_tm` actually uses for a boxing program (8, not 64) the counted chain costs
+    /// about what the content-driven loop did, so the regression is confined to pinned-64 measurement.
     #[test]
     fn a_boxed_read_and_write_bill_the_source_nodes_they_replace() {
         const SRC: &str = "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)";
@@ -468,12 +491,12 @@ mod tests {
         );
         assert_eq!(
             a.histogram.get(&StepBucket::Node(write.id())).copied(),
-            Some(4_954),
+            Some(5_060),
             "the boxed WRITE to `n` must bill the `Assign(n)` the user wrote (node #{}); absent means \
              `defunc`'s `box_set2` minted a fresh id and the cost vanished into ClosureScaffold",
             write.id()
         );
-        assert_eq!(a.total, 136_589);
+        assert_eq!(a.total, 136_695);
         assert!(!a.capped);
     }
 
@@ -522,7 +545,7 @@ mod tests {
     fn the_maps_cover_the_machine_they_describe() {
         for src in CASES {
             let core = parse_core(src).expect("parses");
-            let m = lower_mapped(&core, &Unary).expect("lowers").expect("representable");
+            let m = lower_mapped(&core, &Unary::default()).expect("lowers").expect("representable");
             assert_eq!(
                 m.state_origins.len(),
                 m.machine.states.len(),
@@ -552,12 +575,12 @@ mod tests {
     fn the_attributed_machine_computes_the_program() {
         for src in CASES {
             let core = parse_core(src).expect("parses");
-            let m = lower_mapped(&core, &Unary).expect("lowers").expect("representable");
+            let m = lower_mapped(&core, &Unary::default()).expect("lowers").expect("representable");
             let expected = crate::run(src).expect("reference runs");
             let (tapes, status) = sim::simulate(&m.machine, &m.init, sim::DEFAULT_CAPS);
             assert_eq!(status, Status::Halted, "{src}: the attributed run did not halt");
             assert_eq!(
-                crate::tm::decode::decode_tape(&tapes, &expected, &Unary),
+                crate::tm::decode::decode_tape(&tapes, &expected, &Unary::default()),
                 Some(expected.clone()),
                 "{src}: the attributed machine did not compute the program's value"
             );

@@ -20,16 +20,22 @@ pub const SEP: Symbol = '#';
 /// The HEAP cons-cell delimiter: each cell is `@ <head marks> # <tail marks>`.
 pub const AT: Symbol = '@';
 
-/// Fixed width (cells) of every register field: a value `v` is `v` `MARK`s left-justified, then
-/// `FIELD_WIDTH - v` `BLANK`s. Fixed width means a write mutates the field IN PLACE (blank the window,
-/// write the marks) and never has to shift the rest of the tape. The bound is STRICT: `v` must stay
-/// `< FIELD_WIDTH`, so at least one padding blank always remains. This is load-bearing, not cosmetic —
-/// `rewind_home` walks left and stops on the first `#` it meets; a field written EXACTLY full (zero
-/// padding) has no interior blank for the copy/write/erase loops to land on, so they instead stop on the
-/// field's trailing `#`, and `rewind_home` then crosses one delimiter too many and lands the REG head one
-/// field to the RIGHT of home (2b-2 sizes this per program / the value bound; 64 is ample for 2b-1's
-/// small test values).
-pub const FIELD_WIDTH: usize = 64;
+/// The narrowest field width `run_tm`'s auto-fit search starts at.
+pub const MIN_FIELD_WIDTH: usize = 4;
+
+/// The widest field width: the ceiling of `run_tm`'s auto-fit search, and the width of
+/// `Unary::default()`.
+///
+/// A register field is `width` cells: a value `v` is `v` `MARK`s left-justified, then `width - v`
+/// `BLANK`s. Fixed width means a write mutates the field IN PLACE (blank the window, write the marks)
+/// and never has to shift the rest of the tape. The bound is STRICT: `v` must stay `< width`, so at
+/// least one padding blank always remains. This is load-bearing, not cosmetic — `rewind_home` walks left
+/// and stops on the first `#` it meets; a field written EXACTLY full (zero padding) has no interior blank
+/// for the copy/write/erase loops to land on, so they instead stop on the field's trailing `#`, and
+/// `rewind_home` then crosses one delimiter too many and lands the REG head one field to the RIGHT of
+/// home. The overflow guard (see `Builder::overflow`) turns that from a silent miscompile into a halt,
+/// and a program whose values exceed this ceiling is reported as `TmRun::Overflow`.
+pub const MAX_FIELD_WIDTH: usize = 64;
 
 /// A register-bank field index.
 pub type Slot = u32;
@@ -71,11 +77,36 @@ impl RuleSpec {
 #[derive(Default)]
 pub struct Builder {
     states: Vec<State>,
+    overflow: Option<StateId>,
 }
 
 impl Builder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The ONE shared overflow-guard state, allocated on first request. Rule-less and non-accept, so
+    /// reaching it halts the machine immediately and `simulate_final` can name it as the reason.
+    ///
+    /// Every gadget that writes a value into a fixed-width field (the REG bank, the BOX tape) routes its
+    /// "this value does not fit" case here, rather than allocating a fault state of its own as the
+    /// nil/dangling DEREF faults do. Those spin to a cap on purpose (matching λ's Ω and the reference's
+    /// `Runtime`); an overflow is a different thing — the program is fine, the tape is too narrow — and
+    /// the caller retries at a wider one, so it must be told apart from divergence.
+    pub fn overflow(&mut self) -> StateId {
+        match self.overflow {
+            Some(s) => s,
+            None => {
+                let s = self.state("overflow");
+                self.overflow = Some(s);
+                s
+            }
+        }
+    }
+
+    /// The overflow state if one has been allocated, without allocating one.
+    pub fn overflow_state(&self) -> Option<StateId> {
+        self.overflow
     }
 
     /// Allocate a fresh non-accept state; returns its id. Names should be identifiers (no reserved
@@ -115,6 +146,24 @@ impl Builder {
 mod tests {
     use super::*;
     use crate::tm::sim::{DEFAULT_CAPS as TM_DEFAULT_CAPS, Status, simulate};
+
+    /// The overflow state is ONE shared, rule-less, non-accept state: repeated requests return the same
+    /// id, and reaching it halts the machine (no rule matches, and it is not an accept state).
+    #[test]
+    fn overflow_state_is_shared_ruleless_and_non_accept() {
+        let mut b = Builder::new();
+        assert_eq!(b.overflow_state(), None, "not allocated until asked for");
+        let first = b.overflow();
+        let second = b.overflow();
+        assert_eq!(first, second, "every gadget must share the one overflow state");
+        assert_eq!(b.overflow_state(), Some(first));
+
+        let start = b.state("start");
+        b.add_rule(start, RuleSpec::new(), first);
+        let m = b.finish(start);
+        assert!(!m.states[first as usize].accept, "overflow must NOT be an accept state");
+        assert!(m.states[first as usize].rules.is_empty(), "overflow must be rule-less so it halts");
+    }
 
     #[test]
     fn rulespec_defaults_untouched_tapes() {

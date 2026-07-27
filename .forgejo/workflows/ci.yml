@@ -39,6 +39,44 @@ jobs:
           if [ -f Cargo.toml ]; then echo "has_rust=true" >> "$GITHUB_OUTPUT"; else echo "has_rust=false" >> "$GITHUB_OUTPUT"; fi
           if [ -f web/package.json ]; then echo "has_web=true" >> "$GITHUB_OUTPUT"; else echo "has_web=false" >> "$GITHUB_OUTPUT"; fi
 
+  # LINEAR HISTORY on main. The local `merge.ff = only` that `scripts/setup-dev.sh` sets is a
+  # convenience — it cannot bind anyone, and it does not survive a fresh clone. This is the gate: a
+  # merge commit reaching main fails CI however it got there.
+  #
+  # Checks only the commits this push/PR actually adds, so it never re-litigates history that is
+  # already on main.
+  linear-history:
+    runs-on: docker
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - name: Reject merge commits
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -eu
+          # A PR compares against its base; a push compares against what the branch was before it.
+          # A first push (or a null base) has no meaningful range, so fall back to the last commit.
+          range=""
+          if [ -n "${BASE:-}" ]; then
+            range="$BASE..HEAD"
+          elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..HEAD"
+          else
+            range="HEAD~1..HEAD"
+          fi
+          echo "checking $range"
+          merges=$(git log --merges --format='%h %s' "$range" || true)
+          if [ -n "$merges" ]; then
+            echo "error: merge commit(s) on main — rebase instead:" >&2
+            echo "$merges" >&2
+            exit 1
+          fi
+          echo "no merge commits in $range"
+
   rust:
     needs: detect
     if: needs.detect.outputs.has_rust == 'true'
@@ -70,6 +108,36 @@ jobs:
         run: ./scripts/check-all.sh --no-llvm
       - name: Test + coverage
         run: cargo llvm-cov --workspace --all-targets --fail-under-lines 80   # tune the gate as the code grows
+
+  # The SLOW test tier: exhaustive sweeps marked `#[ignore = "slow tier: ..."]`, which `cargo test`
+  # skips by default. In its own job for the same reason as `rust-llvm` — a multi-minute sweep must
+  # never delay the fast signal — and NOT continue-on-error, because a job permitted to fail is not
+  # coverage.
+  #
+  # This job is why the tier is worth having at all: `#[ignore]` tests rot when nothing runs them, and
+  # the whole point of the tier is that developers do not run it locally on every commit.
+  rust-slow:
+    needs: detect
+    if: needs.detect.outputs.has_rust == 'true'
+    runs-on: docker
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust (respects rust-toolchain.toml)
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+          . "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup show
+      - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-slow-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-slow-
+      - name: Slow tier (exhaustive sweeps)
+        run: ./scripts/check-slow.sh
 
   # The LLVM backend, in its own job so a cold or upstream-broken LLVM install never delays the fast
   # default-feature signal from `rust`. Deliberately NOT continue-on-error: a job permitted to fail
@@ -173,7 +241,7 @@ jobs:
 
   # Build + push the static-site image — only after rust + web pass, never on a PR.
   docker:
-    needs: [detect, rust, rust-llvm, web]
+    needs: [detect, rust, rust-llvm, rust-slow, web]
     if: >-
       !cancelled()
       && github.event_name != 'pull_request'
@@ -181,6 +249,7 @@ jobs:
       && needs.detect.outputs.has_web == 'true'
       && needs.rust.result == 'success'
       && needs.rust-llvm.result == 'success'
+      && needs.rust-slow.result == 'success'
       && needs.web.result == 'success'
     runs-on: docker                    # node:lts (runner default) + the host docker socket the runner mounts
     steps:

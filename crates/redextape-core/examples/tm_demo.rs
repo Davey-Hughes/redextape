@@ -103,14 +103,14 @@ fn main() {
     for line in print_asm(&prog).lines() {
         println!("       {line}");
     }
-    let machine = lower_tm(&prog, &Unary);
+    let machine = lower_tm(&prog, &Unary::default());
     println!("\n   → compiled to a {}-state, 4-tape Turing machine (REG / WORK / STACK / HEAP).", machine.states.len());
-    match run_tm(&core, &Unary, TM_DEFAULT_CAPS) {
+    match run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS) {
         TmRun::Ran { tapes } => {
             let (cells, head) = tapes[REG].snapshot();
             println!("   → simulated to a halt. Final REG tape (the fixed-width unary register bank):\n");
             println!("       {}", tape_excerpt(&cells, head, 88));
-            let value = decode_tape(&tapes, &Value::Nat(7), &Unary);
+            let value = decode_tape(&tapes, &Value::Nat(7), &Unary::default());
             println!(
                 "\n   → decodes to {}   (reference says {}, they agree ✓)",
                 fmt_opt(&value),
@@ -140,7 +140,7 @@ fn compile_tm(core: &Core) -> Option<Machine> {
         Err(LowerError::Unsupported { .. }) => lower_asm(&defunc(core).ok()?).ok()?,
         Err(_) => return None,
     };
-    Some(lower_tm(&prog, &Unary))
+    Some(lower_tm(&prog, &Unary::default()))
 }
 
 /// Run one program three ways and print a table row: reference value, λ β-step count, TM state count,
@@ -153,9 +153,8 @@ fn report(src: &str) {
     let lambda_ok = matches!(&lambda, LambdaRun::Reduced(nf) if decode(nf, &reference).as_ref() == Some(&reference));
     let beta_steps = lower(&core).map(|t| reduce_trace(&t, MAX_REDUCTION_STEPS).steps.len());
 
-    let tm = run_tm(&core, &Unary, TM_DEFAULT_CAPS);
-    let tm_ok =
-        matches!(&tm, TmRun::Ran { tapes } if decode_tape(tapes, &reference, &Unary).as_ref() == Some(&reference));
+    let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
+    let tm_ok = matches!(&tm, TmRun::Ran { tapes } if decode_tape(tapes, &reference, &Unary::default()).as_ref() == Some(&reference));
     let states = compile_tm(&core).map(|m| m.states.len());
 
     println!(
@@ -173,9 +172,8 @@ fn report_tm_only(src: &str) {
     let reference = run(src).expect("reference run failed");
     let core = core_of(src);
     let lambda_refuses = matches!(run_lambda(&core, MAX_REDUCTION_STEPS), LambdaRun::LowerError(_));
-    let tm = run_tm(&core, &Unary, TM_DEFAULT_CAPS);
-    let tm_ok =
-        matches!(&tm, TmRun::Ran { tapes } if decode_tape(tapes, &reference, &Unary).as_ref() == Some(&reference));
+    let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
+    let tm_ok = matches!(&tm, TmRun::Ran { tapes } if decode_tape(tapes, &reference, &Unary::default()).as_ref() == Some(&reference));
     println!(
         "   {:<64} {:>9}  {}",
         truncate(src, 64),

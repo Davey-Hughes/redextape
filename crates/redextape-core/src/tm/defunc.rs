@@ -1636,7 +1636,7 @@ mod tests {
             assert!(ds.is_empty(), "{src}: {ds:?}");
             let core = desugar(&prog.unwrap());
             assert!(
-                matches!(run_tm(&core, &Unary, TM_DEFAULT_CAPS), TmRun::Ran { .. } | TmRun::LowerError(_)),
+                matches!(run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::Ran { .. } | TmRun::LowerError(_)),
                 "run_tm must not panic on: {src}"
             );
         }
@@ -1837,9 +1837,9 @@ mod tests {
         let src = "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)";
         let core = desugar(&parse(src).0.unwrap());
         let reference = crate::interp::eval(&core).unwrap();
-        match run_tm(&core, &Unary, TM_DEFAULT_CAPS) {
+        match run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS) {
             TmRun::Ran { tapes } => assert_eq!(
-                decode_tape(&tapes, &reference, &Unary),
+                decode_tape(&tapes, &reference, &Unary::default()),
                 Some(reference.clone()),
                 "reference vs TM disagree on boxed mutable capture"
             ),

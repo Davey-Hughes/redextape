@@ -58,6 +58,20 @@ skip the LLVM configurations when no LLVM 22 toolchain is installed.
 The pre-commit hooks intentionally run only `cargo fmt` and `cargo clippy` — fast enough for every
 commit. Run `scripts/check-all.sh` before merging.
 
+`scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps marked
+`#[ignore = "slow tier: ..."]`, which `cargo test` skips by default and CI runs in its own job. The
+marker is deliberate — `cargo test` prints the ignored count, so a skipped sweep stays visible rather
+than looking like a passing one.
+
+## Conventions
+
+`main` is **linear** — no merge commits. Rebase a feature branch onto `main` before merging it.
+
+`scripts/setup-dev.sh` (run once per clone) sets `merge.ff = only` and `pull.ff = only` locally, so a
+non-fast-forward merge fails instead of quietly creating a merge commit, and installs the pre-commit
+hooks. That is convenience, not enforcement: `.git/config` is untracked and cannot bind anyone. The
+actual gate is CI's `linear-history` job, which rejects a merge commit on `main` however it arrived.
+
 Object-size baselines live in `crates/redextape-native/baselines/<target-triple>.txt` and gate the
 `size_baseline` test with a 10% band. Regenerate after an intentional codegen change:
 

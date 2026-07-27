@@ -5,7 +5,7 @@
 //! (build a tiny machine → run → decode).
 
 use crate::core::BinOp;
-use crate::tm::build::{AT, BOX, Builder, FIELD_WIDTH, HEAP, MARK, REG, RuleSpec, SEP, STACK, Slot, WORK};
+use crate::tm::build::{AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, REG, RuleSpec, SEP, STACK, Slot, WORK};
 use crate::tm::machine::{BLANK, Move, StateId, Symbol};
 
 /// The pluggable numeric encoding (the swappable seam). `Unary` is the v1 implementation; a `Binary`
@@ -28,7 +28,13 @@ pub trait Encoding {
     fn compare(&self, b: &mut Builder, entry: StateId, exit: StateId, op: BinOp, ra: Slot, rb: Slot, rd: Slot);
     /// Decode field `slot` of a materialized `reg` tape to its unary value (`None` if the field is absent).
     fn decode_nat(&self, reg_cells: &[Symbol], slot: Slot) -> Option<u64>;
-    /// The initial REG tape for a `slots`-field bank: `#` then (`FIELD_WIDTH` blanks + `#`)*`slots`.
+    /// The strict value bound this instance was built at — a stored value `v` must satisfy `v < width`.
+    /// `None` means the encoding is unbounded (a future `Binary`), which is how `run_tm`'s auto-fit
+    /// knows not to search at all.
+    fn field_width(&self) -> Option<usize>;
+    /// Re-instantiate this encoding at `width`. An unbounded encoding returns an equivalent of itself.
+    fn at_width(&self, width: usize) -> Box<dyn Encoding>;
+    /// The initial REG tape for a `slots`-field bank: `#` then (`width` blanks + `#`)*`slots`.
     /// Head begins at cell 0 (the leading `#` = home). Encoding-specific (a zero field's contents).
     fn init_reg(&self, slots: u32) -> Vec<Symbol>;
     /// `slot rd <- slot rs`. Flows `entry -> exit`; both heads home on entry and exit. Safe when
@@ -91,7 +97,26 @@ pub trait Encoding {
     fn box_set_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rb: Slot, rv: Slot);
 }
 
-pub struct Unary;
+/// The v1 unary encoding at a given field width. `Default` is `MAX_FIELD_WIDTH`; `run_tm` auto-fits a
+/// narrower one per program via `at_width`.
+#[derive(Clone, Copy, Debug)]
+pub struct Unary {
+    width: usize,
+}
+
+impl Default for Unary {
+    fn default() -> Self {
+        Unary { width: MAX_FIELD_WIDTH }
+    }
+}
+
+impl Unary {
+    /// A unary encoding whose register fields are `width` cells wide. Values `>= width` are not
+    /// representable and route to the overflow guard.
+    pub const fn at(width: usize) -> Unary {
+        Unary { width }
+    }
+}
 
 // ---- shared sub-primitives (free functions; each preserves the home convention) ----
 
@@ -119,8 +144,8 @@ fn seek_slot(b: &mut Builder, from: StateId, slot: Slot, label: &str) -> StateId
 /// the `(slot+1)`-th one, so we cross `slot` inner delimiters then rest on the leftmost. Content-blind
 /// to blank padding (only `#`s halt the walk), so a padded field cannot masquerade as the left end.
 /// PRECONDITION: the entry head must sit INSIDE field `slot` — on a mark or an interior padding blank —
-/// and never on the field's trailing `#`; this holds for every value `< FIELD_WIDTH` (see the
-/// `FIELD_WIDTH` doc), which is exactly why that bound is strict. `from` must have no conflicting rules;
+/// and never on the field's trailing `#`; this holds for every value `< width` (see the
+/// `MAX_FIELD_WIDTH` doc), which is exactly why that bound is strict. `from` must have no conflicting rules;
 /// returns the state now at home (head on the leading `#`).
 fn rewind_home(b: &mut Builder, from: StateId, slot: Slot, label: &str) -> StateId {
     // `from` is `scan_slot`. For k = slot..1 cross one `#` per field boundary into the field to the
@@ -203,7 +228,23 @@ fn append_work_to_field(b: &mut Builder, from: StateId, rd: Slot, label: &str) -
     // Write one REG mark per WORK mark, advancing both heads; stop at WORK's trailing blank.
     let wr = b.state(format!("{label}.wr"));
     b.add_rule(start, RuleSpec::new(), wr);
-    b.add_rule(wr, RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(REG, None, Some(MARK), Move::R), wr);
+    // OVERFLOW GUARD — must stay the FIRST rule on `wr`: rule lookup is first-match-wins and
+    // `validate()` has no overlap check, so a rule added ahead of this one silently disables it.
+    //
+    // The window was blanked just above and the head entered on the field's first cell, so the head can
+    // only read the field's TRAILING `#` by having walked off the end: the value does not fit. Reading
+    // `#` and IGNORING WORK covers both overflow shapes at once — `v > width` arrives here with WORK
+    // still holding marks, `v == width` with WORK exactly exhausted (the `rewind_home` miscount
+    // described on `MAX_FIELD_WIDTH`). A guard that also read WORK would miss exactly that second case.
+    let overflow = b.overflow();
+    b.add_rule(wr, RuleSpec::new().on(REG, Some(SEP), None, Move::S), overflow);
+    // The REG read is EXPLICIT (`BLANK`), not a wildcard, and that is load-bearing for the static
+    // delimiter check (`tm_static_delimiter_safety.rs`): a rule that writes a non-`#` symbol while
+    // reading a wildcard COULD clobber a delimiter, and proving otherwise needs head-position
+    // reasoning. Reading `BLANK` makes it impossible by construction. Sound because the window was
+    // blanked immediately above and the loop writes strictly left to right, so the cell under the
+    // head is always one of those blanks.
+    b.add_rule(wr, RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(REG, Some(BLANK), Some(MARK), Move::R), wr);
     let rin = b.state(format!("{label}.rin"));
     b.add_rule(wr, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S), rin); // WORK exhausted -> done
     let reg_home = rewind_home(b, rin, rd, &format!("{label}.r"));
@@ -639,27 +680,27 @@ pub(crate) fn parse_heap_cells(cells: &[Symbol]) -> Vec<(u64, u64)> {
 
 // ---- BOX tape sub-primitives (free functions; blank-padded fixed-width fields; rest at the ORIGIN) ----
 //
-// The BOX holds `# <field1> # <field2> # …`, each `<fieldi>` EXACTLY `FIELD_WIDTH` cells (the value's
+// The BOX holds `# <field1> # <field2> # …`, each `<fieldi>` EXACTLY `width` cells (the value's
 // marks left-justified, blank-padded), each preceded by a `#`. There is NO trailing `#` after the last
-// field — the blank "top" follows the last field's `FIELD_WIDTH` cells. A 1-based pointer `p` addresses
+// field — the blank "top" follows the last field's `width` cells. A 1-based pointer `p` addresses
 // field `p`. BETWEEN box gadgets the BOX head rests on the leading `#` (the ORIGIN); an empty box rests
 // at cell 0 over blanks (origin == top).
 //
 // Why NOT heap-style blank-boundary navigation: a box value may be 0 (a captured counter), so a field can
-// be `FIELD_WIDTH` blanks — interior padding blanks are then INDISTINGUISHABLE from the origin-left / top
+// be `width` blanks — interior padding blanks are then INDISTINGUISHABLE from the origin-left / top
 // blanks by a single read (a naive "walk to the first blank" stops on padding, not the boundary). So BOX
-// navigation is CONTENT-BLIND and FIXED-WIDTH: to cross one field the head moves EXACTLY `FIELD_WIDTH + 1`
+// navigation is CONTENT-BLIND and FIXED-WIDTH: to cross one field the head moves EXACTLY `width + 1`
 // cells (over the `#` and the window), landing on the boundary (`#` or the top blank), which IS then
 // distinguishable. Rightward walks detect the top by a blank landing; leftward returns are
 // COUNTER-BOUNDED by the pointer (cross exactly `p` fields), so no blank-run probing is ever needed.
 
-/// From the BOX head ON a `#` (a field's leading delimiter), move right EXACTLY `FIELD_WIDTH + 1` cells
-/// (off the `#`, over the field's `FIELD_WIDTH` window), landing on the boundary immediately after the
+/// From the BOX head ON a `#` (a field's leading delimiter), move right EXACTLY `width + 1` cells
+/// (off the `#`, over the field's `width` window), landing on the boundary immediately after the
 /// field — the next `#` or the top blank. Content-blind (wildcard reads), so a zero-valued (all-blank)
 /// field is crossed exactly like any other. Returns the boundary state (the caller branches on `#`/blank).
-fn box_skip_field_right(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn box_skip_field_right(b: &mut Builder, from: StateId, label: &str, width: usize) -> StateId {
     let mut cur = from;
-    for k in 0..=FIELD_WIDTH {
+    for k in 0..=width {
         let nxt = b.state(format!("{label}.sr{k}"));
         b.add_rule(cur, RuleSpec::new().on(BOX, None, None, Move::R), nxt);
         cur = nxt;
@@ -668,11 +709,11 @@ fn box_skip_field_right(b: &mut Builder, from: StateId, label: &str) -> StateId 
 }
 
 /// The leftward mirror of `box_skip_field_right`: from the BOX head ON a `#` (or on the top blank), move
-/// left EXACTLY `FIELD_WIDTH + 1` cells, landing on the previous field's leading `#` (or, from the top, on
+/// left EXACTLY `width + 1` cells, landing on the previous field's leading `#` (or, from the top, on
 /// the last field's leading `#`). Content-blind. Returns the landing state.
-fn box_skip_field_left(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn box_skip_field_left(b: &mut Builder, from: StateId, label: &str, width: usize) -> StateId {
     let mut cur = from;
-    for k in 0..=FIELD_WIDTH {
+    for k in 0..=width {
         let nxt = b.state(format!("{label}.sl{k}"));
         b.add_rule(cur, RuleSpec::new().on(BOX, None, None, Move::L), nxt);
         cur = nxt;
@@ -682,19 +723,38 @@ fn box_skip_field_left(b: &mut Builder, from: StateId, label: &str) -> StateId {
 
 /// Append a new field holding WORK's value at the BOX top. `from`: BOX head at the top (a BLANK — cell 0
 /// if the box is empty, else after the last field), WORK at home over the value's marks. Writes the
-/// leading `#`, then the `FIELD_WIDTH` window (one MARK per WORK mark, then blank-pad to `FIELD_WIDTH`),
+/// leading `#`, then the `width` window (one MARK per WORK mark, then blank-pad to `width`),
 /// leaving the head on the new top blank; then rewinds WORK home (marks INTACT). Mirrors
 /// `heap_open_cell_with_work` crossed with `write_literal`'s fixed-width padding.
-fn box_append_field(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn box_append_field(b: &mut Builder, from: StateId, label: &str, width: usize) -> StateId {
     // Write the field's leading `#` and step onto window cell 0.
     let mut cur = b.state(format!("{label}.w0"));
-    b.add_rule(from, RuleSpec::new().on(BOX, None, Some(SEP), Move::R), cur);
-    // Fixed-width window: FIELD_WIDTH cells. MARK arm copies a WORK mark (both heads R); once WORK is
+    b.add_rule(from, RuleSpec::new().on(BOX, Some(BLANK), Some(SEP), Move::R), cur);
+    // Fixed-width window: `width` cells. MARK arm copies a WORK mark (both heads R); once WORK is
     // exhausted the BLANK arm pads (BOX writes a blank, advances; WORK stays on its trailing blank).
-    for k in 0..FIELD_WIDTH {
+    let overflow = b.overflow();
+    for k in 0..width {
         let nxt = b.state(format!("{label}.w{}", k + 1));
-        b.add_rule(cur, RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(BOX, None, Some(MARK), Move::R), nxt);
-        b.add_rule(cur, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S).on(BOX, None, Some(BLANK), Move::R), nxt);
+        // OVERFLOW GUARD — FIRST rule, and only on the LAST window cell. Arriving here with WORK still
+        // on a MARK means `width - 1` marks are already written and at least one remains, i.e.
+        // `v >= width`: the field would be left with no padding blank, which is exactly what
+        // `box_read_field_to_work` relies on to find the field's end.
+        if k + 1 == width {
+            b.add_rule(cur, RuleSpec::new().on(WORK, Some(MARK), None, Move::S), overflow);
+        }
+        // Explicit `BLANK` reads rather than wildcards, so no rule here can write over a `#` — see
+        // `append_work_to_field`. Sound because this chain writes into fresh tape past the previous top,
+        // which is blank by construction.
+        b.add_rule(
+            cur,
+            RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(BOX, Some(BLANK), Some(MARK), Move::R),
+            nxt,
+        );
+        b.add_rule(
+            cur,
+            RuleSpec::new().on(WORK, Some(BLANK), None, Move::S).on(BOX, Some(BLANK), Some(BLANK), Move::R),
+            nxt,
+        );
         cur = nxt;
     }
     // `cur` is on the new top blank; WORK head rests on its trailing blank -> home, marks intact.
@@ -703,10 +763,10 @@ fn box_append_field(b: &mut Builder, from: StateId, label: &str) -> StateId {
 
 /// Count the BOX's fields into WORK and leave the head at the top. `from`: BOX at the origin (on the
 /// leading `#`, or cell 0 over blanks if empty), WORK home. Clears WORK; if empty the count is 0; else
-/// walks right field-by-field, writing one WORK mark per `#` (content-blind `FIELD_WIDTH + 1` skips
+/// walks right field-by-field, writing one WORK mark per `#` (content-blind `width + 1` skips
 /// between `#`s), stopping when a skip lands on the top blank. On exit WORK is home holding the field
 /// count and the BOX head is at the top. Structurally `heap_count_cells_to_work` over fixed-width fields.
-fn box_count_fields_to_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn box_count_fields_to_work(b: &mut Builder, from: StateId, label: &str, width: usize) -> StateId {
     let cleared = clear_work(b, from, &format!("{label}.cl")); // WORK empty+home; BOX at origin
     let done = b.state(format!("{label}.done"));
     let at_hash = b.state(format!("{label}.ah")); // BOX on a `#`, WORK at the accumulator's tail
@@ -716,7 +776,7 @@ fn box_count_fields_to_work(b: &mut Builder, from: StateId, label: &str) -> Stat
     // Count this `#` (write a WORK mark, advance WORK; BOX stays on the `#`), then skip the field right.
     let after = b.state(format!("{label}.am"));
     b.add_rule(at_hash, RuleSpec::new().on(WORK, None, Some(MARK), Move::R), after);
-    let boundary = box_skip_field_right(b, after, &format!("{label}.s"));
+    let boundary = box_skip_field_right(b, after, &format!("{label}.s"), width);
     b.add_rule(boundary, RuleSpec::new().on(BOX, Some(SEP), None, Move::S), at_hash); // another field
     let top = b.state(format!("{label}.top"));
     b.add_rule(boundary, RuleSpec::new().on(BOX, Some(BLANK), None, Move::S), top); // reached the top
@@ -732,7 +792,7 @@ fn box_count_fields_to_work(b: &mut Builder, from: StateId, label: &str) -> Stat
 /// `missing`: `p == 0`, an empty box, or a skip that runs off onto the top blank (`p` exceeds the field
 /// count) — the caller routes it to the rule-less `fault` spin. Content-blind skips, so a zero-valued
 /// field is sought exactly like any other.
-fn box_seek_field(b: &mut Builder, from: StateId, found: StateId, missing: StateId, label: &str) {
+fn box_seek_field(b: &mut Builder, from: StateId, found: StateId, missing: StateId, label: &str, width: usize) {
     let loop_head = b.state(format!("{label}.lp")); // BOX on a `#`, WORK home = remaining counter (>= 1)
     // Entry routing (disjoint reads, so order is immaterial): empty box, or p == 0, both -> missing.
     b.add_rule(from, RuleSpec::new().on(BOX, Some(BLANK), None, Move::S), missing); // empty box
@@ -744,7 +804,7 @@ fn box_seek_field(b: &mut Builder, from: StateId, found: StateId, missing: State
     b.add_rule(dec, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S).on(BOX, None, None, Move::R), found);
     let adv = b.state(format!("{label}.av"));
     b.add_rule(dec, RuleSpec::new().on(WORK, Some(MARK), None, Move::S), adv); // still positive -> advance
-    let boundary = box_skip_field_right(b, adv, &format!("{label}.s"));
+    let boundary = box_skip_field_right(b, adv, &format!("{label}.s"), width);
     b.add_rule(boundary, RuleSpec::new().on(BOX, Some(SEP), None, Move::S), loop_head); // next field -> loop
     b.add_rule(boundary, RuleSpec::new().on(BOX, Some(BLANK), None, Move::S), missing); // ran off the top
 }
@@ -767,21 +827,58 @@ fn box_read_field_to_work(b: &mut Builder, from: StateId, label: &str) -> StateI
 }
 
 /// Overwrite the field under the BOX head with WORK's marks, IN PLACE (the `#` delimiters never move).
-/// `from`: BOX on the field's first cell, WORK home over the new value's marks. Writes one MARK per WORK
-/// mark (both heads R), then blanks any leftover old marks (BOX `MARK -> BLANK`, R) up to the first blank;
-/// then walks left over the field's content to the leading `#` and steps right onto the first cell; then
-/// rewinds WORK home. Bounded by the field's own content (value `< FIELD_WIDTH` guarantees a padding
-/// blank), so it never needs a trailing delimiter and never spills into the next field.
-fn box_overwrite_field(b: &mut Builder, from: StateId, label: &str) -> StateId {
-    let wr = b.state(format!("{label}.wr"));
-    b.add_rule(from, RuleSpec::new(), wr);
-    b.add_rule(wr, RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(BOX, None, Some(MARK), Move::R), wr);
-    let blank = b.state(format!("{label}.bl"));
-    b.add_rule(wr, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S), blank); // WORK done -> blank the leftovers
-    b.add_rule(blank, RuleSpec::new().on(BOX, Some(MARK), Some(BLANK), Move::R), blank); // erase a leftover old mark
+/// `from`: BOX on the field's first cell, WORK home over the new value's marks. Rewrites the whole
+/// `width`-cell window — one MARK per WORK mark, then blanks for the rest, which erases any leftover old
+/// content — then walks left to the leading `#` and steps right onto the first cell; then rewinds WORK
+/// home (marks INTACT).
+///
+/// COUNTED, not content-driven, and that is load-bearing rather than stylistic. BOX fields have no
+/// trailing `#` after the LAST one — the top is a blank — so a content-driven write that overran the
+/// last field would have no delimiter to stop on or to guard against. The corruption would surface only
+/// much later, when the next `box_skip_field_right` landed mid-spill, read a `MARK` where it expects `#`
+/// or blank, and went stuck-silent. A `width`-long chain makes the guard uniform with `box_append_field`
+/// and matches the tape it writes to, whose navigation is content-blind and fixed-width everywhere else
+/// for the same underlying reason (a zero-valued field is all blanks, so blanks cannot delimit).
+fn box_overwrite_field(b: &mut Builder, from: StateId, label: &str, width: usize) -> StateId {
+    let overflow = b.overflow();
+    let mut cur = b.state(format!("{label}.w0"));
+    b.add_rule(from, RuleSpec::new(), cur);
+    for k in 0..width {
+        let nxt = b.state(format!("{label}.w{}", k + 1));
+        // OVERFLOW GUARD — FIRST rule, LAST window cell only; see `box_append_field`.
+        if k + 1 == width {
+            b.add_rule(cur, RuleSpec::new().on(WORK, Some(MARK), None, Move::S), overflow);
+        }
+        // Explicit BOX reads rather than wildcards, so no rule here can write over a `#` — see
+        // `append_work_to_field`. Unlike `box_append_field` this window holds OLD content, so each arm
+        // splits into a MARK case and a BLANK case; the pair is exhaustive over what a field can hold,
+        // which is exactly the property that makes the wildcard unnecessary.
+        b.add_rule(
+            cur,
+            RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(BOX, Some(MARK), Some(MARK), Move::R),
+            nxt,
+        );
+        b.add_rule(
+            cur,
+            RuleSpec::new().on(WORK, Some(MARK), None, Move::R).on(BOX, Some(BLANK), Some(MARK), Move::R),
+            nxt,
+        );
+        // WORK exhausted: blank the rest of the window, erasing whatever old content was there.
+        b.add_rule(
+            cur,
+            RuleSpec::new().on(WORK, Some(BLANK), None, Move::S).on(BOX, Some(MARK), Some(BLANK), Move::R),
+            nxt,
+        );
+        b.add_rule(
+            cur,
+            RuleSpec::new().on(WORK, Some(BLANK), None, Move::S).on(BOX, Some(BLANK), Some(BLANK), Move::R),
+            nxt,
+        );
+        cur = nxt;
+    }
+    // The head is one cell past the window. Walk left over the field's content to the leading `#`.
     let restore = b.state(format!("{label}.rs"));
-    b.add_rule(blank, RuleSpec::new().on(BOX, Some(BLANK), None, Move::S), restore); // first padding blank -> done
-    // Restore to the field's first cell: walk left over the content (marks and blanks) to the leading `#`.
+    b.add_rule(cur, RuleSpec::new().on(BOX, None, None, Move::L), restore);
     b.add_rule(restore, RuleSpec::new().on(BOX, Some(MARK), None, Move::L), restore);
     b.add_rule(restore, RuleSpec::new().on(BOX, Some(BLANK), None, Move::L), restore);
     let first = b.state(format!("{label}.fc"));
@@ -794,13 +891,13 @@ fn box_overwrite_field(b: &mut Builder, from: StateId, label: &str) -> StateId {
 /// counter and, while it stays positive, skips one field left per decrement — so exactly `p - 1` leftward
 /// field-skips land the head on the leading `#` (the origin). Counter-bounded, so it never has to detect
 /// the origin-left blank. On exit the BOX head is on the leading `#` and WORK is empty at home.
-fn box_return_to_origin(b: &mut Builder, from: StateId, label: &str) -> StateId {
+fn box_return_to_origin(b: &mut Builder, from: StateId, label: &str, width: usize) -> StateId {
     let dec = dec_work(b, from, &format!("{label}.dc")); // WORK <- counter - 1, WORK home
     let done = b.state(format!("{label}.done"));
     b.add_rule(dec, RuleSpec::new().on(WORK, Some(BLANK), None, Move::S), done); // drained -> on the origin `#`
     let more = b.state(format!("{label}.more"));
     b.add_rule(dec, RuleSpec::new().on(WORK, Some(MARK), None, Move::S), more); // still positive -> skip left
-    let prev = box_skip_field_left(b, more, &format!("{label}.s"));
+    let prev = box_skip_field_left(b, more, &format!("{label}.s"), width);
     b.add_rule(prev, RuleSpec::new(), from); // back-edge: loop with the BOX head on the previous `#`
     done
 }
@@ -817,6 +914,15 @@ fn inc_work(b: &mut Builder, from: StateId, label: &str) -> StateId {
 #[allow(clippy::too_many_arguments)] // `arith`/`compare` mirror the trait's three-address signature.
 impl Encoding for Unary {
     fn write_literal(&self, b: &mut Builder, entry: StateId, exit: StateId, n: u64, rd: Slot) {
+        // OVERFLOW GUARD, STATIC: `n` is a compile-time constant, so an unrepresentable literal needs
+        // no runtime check — route the instruction straight to the guard and emit no write chain at
+        // all. Same STRICT bound as the runtime guard: `n == width` fills the window exactly, leaving
+        // no padding blank for `rewind_home` to stop on (see `MAX_FIELD_WIDTH`).
+        if n >= self.width as u64 {
+            let overflow = b.overflow();
+            b.add_rule(entry, RuleSpec::new(), overflow);
+            return;
+        }
         // Fixed-width, no shift: seek rd's field; BLANK the whole window rightward to the trailing `#`;
         // step left back to the field's first cell; write `n` MARKs rightward; rewind REG home.
         let base = format!("wl{rd}s{entry}"); // `entry` uniquifies across calls (no state-name clashes)
@@ -833,7 +939,10 @@ impl Encoding for Unary {
         let mut cur = start;
         for i in 0..n {
             let nxt = b.state(format!("{base}.m{i}"));
-            b.add_rule(cur, RuleSpec::new().on(REG, None, Some(MARK), Move::R), nxt);
+            // Explicit `BLANK` read rather than a wildcard — see `append_work_to_field`. The window
+            // was blanked just above and `n < width` was checked statically, so every cell this
+            // chain writes is a blank inside the window.
+            b.add_rule(cur, RuleSpec::new().on(REG, Some(BLANK), Some(MARK), Move::R), nxt);
             cur = nxt;
         }
         let home = rewind_home(b, cur, rd, &format!("{base}.r"));
@@ -937,11 +1046,19 @@ impl Encoding for Unary {
         b.add_rule(after_wr, RuleSpec::new(), exit);
     }
 
+    fn field_width(&self) -> Option<usize> {
+        Some(self.width)
+    }
+
+    fn at_width(&self, width: usize) -> Box<dyn Encoding> {
+        Box::new(Unary::at(width))
+    }
+
     fn init_reg(&self, slots: u32) -> Vec<Symbol> {
-        // Fixed-width all-zero bank: `#` then (FIELD_WIDTH blanks + `#`) per field.
+        // Fixed-width all-zero bank: `#` then (width blanks + `#`) per field.
         let mut cells = vec![SEP];
         for _ in 0..slots {
-            cells.extend(std::iter::repeat_n(BLANK, FIELD_WIDTH));
+            cells.extend(std::iter::repeat_n(BLANK, self.width));
             cells.push(SEP);
         }
         cells
@@ -1085,19 +1202,19 @@ impl Encoding for Unary {
     fn box_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rv: Slot, rd: Slot) {
         let base = format!("box{entry}");
         // 1. Count the current fields (BOX -> top, WORK = N); 2. the new pointer is N + 1.
-        let counted = box_count_fields_to_work(b, entry, &format!("{base}.ct"));
+        let counted = box_count_fields_to_work(b, entry, &format!("{base}.ct"), self.width);
         let ptr = inc_work(b, counted, &format!("{base}.in")); // WORK = N + 1; BOX at top
         // 3. Write the pointer into `rd` (only touches REG/WORK; BOX stays at the top).
         let wrote = append_work_to_field(b, ptr, rd, &format!("{base}.wp")); // rd = N + 1
         // 4. Load `rv`'s value; 5. append the new field at the top.
         let clr = clear_work(b, wrote, &format!("{base}.c1"));
         let val = copy_field_to_work(b, clr, rv, &format!("{base}.cv")); // WORK = value; BOX at top
-        let appended = box_append_field(b, val, &format!("{base}.ap")); // BOX at the NEW top; WORK = value
+        let appended = box_append_field(b, val, &format!("{base}.ap"), self.width); // BOX at the NEW top; WORK = value
         // 6. Reload the pointer as the return counter; 7. walk the head back to the origin.
         let clr2 = clear_work(b, appended, &format!("{base}.c2"));
         let cnt = copy_field_to_work(b, clr2, rd, &format!("{base}.cc")); // WORK = N + 1; BOX at new top
-        let last_hash = box_skip_field_left(b, cnt, &format!("{base}.tl")); // new top -> last field's `#`
-        let origin = box_return_to_origin(b, last_hash, &format!("{base}.ro")); // -> origin, WORK drained
+        let last_hash = box_skip_field_left(b, cnt, &format!("{base}.tl"), self.width); // new top -> last field's `#`
+        let origin = box_return_to_origin(b, last_hash, &format!("{base}.ro"), self.width); // -> origin, WORK drained
         b.add_rule(origin, RuleSpec::new(), exit);
     }
 
@@ -1109,7 +1226,7 @@ impl Encoding for Unary {
         // λ's Ω-divergence and the reference's Runtime error — the three-way oracle treats them alike.
         b.add_rule(fault, RuleSpec::new(), fault);
         let found = b.state(format!("{base}.fd"));
-        box_seek_field(b, cw, found, fault, &format!("{base}.sk")); // found: BOX on the field's first cell
+        box_seek_field(b, cw, found, fault, &format!("{base}.sk"), self.width); // found: BOX on the field's first cell
         let read = box_read_field_to_work(b, found, &format!("{base}.rd")); // WORK = value; BOX on first cell
         let wrote = append_work_to_field(b, read, rd, &format!("{base}.wr")); // rd = value; BOX on first cell
         // Reload the pointer as the return counter, step onto the field's `#`, return to the origin.
@@ -1117,7 +1234,7 @@ impl Encoding for Unary {
         let cnt = copy_field_to_work(b, clr, rb, &format!("{base}.cc")); // WORK = p; BOX on first cell
         let on_hash = b.state(format!("{base}.oh"));
         b.add_rule(cnt, RuleSpec::new().on(BOX, None, None, Move::L), on_hash); // first cell -> field's `#`
-        let origin = box_return_to_origin(b, on_hash, &format!("{base}.ro"));
+        let origin = box_return_to_origin(b, on_hash, &format!("{base}.ro"), self.width);
         b.add_rule(origin, RuleSpec::new(), exit);
     }
 
@@ -1127,17 +1244,17 @@ impl Encoding for Unary {
         let fault = b.state(format!("{base}.fault"));
         b.add_rule(fault, RuleSpec::new(), fault); // nil/dangling -> spin -> HitCap (as box_get_op)
         let found = b.state(format!("{base}.fd"));
-        box_seek_field(b, cw, found, fault, &format!("{base}.sk")); // found: BOX on the field's first cell
+        box_seek_field(b, cw, found, fault, &format!("{base}.sk"), self.width); // found: BOX on the field's first cell
         // Reuse the counter slot: load `rv`'s NEW value, overwrite the field in place.
         let clr = clear_work(b, found, &format!("{base}.c1"));
         let val = copy_field_to_work(b, clr, rv, &format!("{base}.cv")); // WORK = new value; BOX on first cell
-        let over = box_overwrite_field(b, val, &format!("{base}.ov")); // in place; BOX back on first cell
+        let over = box_overwrite_field(b, val, &format!("{base}.ov"), self.width); // in place; BOX back on first cell
         // Reload the pointer as the return counter, step onto the field's `#`, return to the origin.
         let clr2 = clear_work(b, over, &format!("{base}.c2"));
         let cnt = copy_field_to_work(b, clr2, rb, &format!("{base}.cc")); // WORK = p; BOX on first cell
         let on_hash = b.state(format!("{base}.oh"));
         b.add_rule(cnt, RuleSpec::new().on(BOX, None, None, Move::L), on_hash); // first cell -> field's `#`
-        let origin = box_return_to_origin(b, on_hash, &format!("{base}.ro"));
+        let origin = box_return_to_origin(b, on_hash, &format!("{base}.ro"), self.width);
         b.add_rule(origin, RuleSpec::new(), exit);
     }
 }
@@ -1145,7 +1262,7 @@ impl Encoding for Unary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tm::build::{FIELD_WIDTH, TAPES};
+    use crate::tm::build::TAPES;
     use crate::tm::sim::{DEFAULT_CAPS as TM_DEFAULT_CAPS, Status, simulate};
 
     /// Build a machine over a `slots`-field register bank: `write_literal` each `(slot, value)`, run
@@ -1156,7 +1273,7 @@ mod tests {
         result: Slot,
         body: impl FnOnce(&mut Builder, StateId, StateId),
     ) -> Option<u64> {
-        let enc = Unary;
+        let enc = Unary::default();
         let mut b = Builder::new();
         // Chain: setup literals -> body -> halt. Build back-to-front so each `exit` is known.
         let halt = b.accept("halt");
@@ -1170,7 +1287,7 @@ mod tests {
             enc.write_literal(&mut b, w, entry, val, slot);
             entry = w;
         }
-        // The reg tape starts as an all-zero FIXED-WIDTH bank: `#` then (FIELD_WIDTH blanks + `#`)*slots.
+        // The reg tape starts as an all-zero FIXED-WIDTH bank: `#` then (MAX_FIELD_WIDTH blanks + `#`)*slots.
         let init_reg = enc.init_reg(slots);
         let m = b.finish(entry);
         assert!(m.validate().is_empty(), "invalid machine: {:?}", m.validate());
@@ -1184,9 +1301,9 @@ mod tests {
     #[test]
     fn write_literal_then_decode() {
         // The body under test writes the literal (no setup inits); decode reads it back.
-        assert_eq!(run_gadget(1, &[], 0, |b, e, x| Unary.write_literal(b, e, x, 5, 0)), Some(5));
-        assert_eq!(run_gadget(2, &[], 1, |b, e, x| Unary.write_literal(b, e, x, 3, 1)), Some(3));
-        assert_eq!(run_gadget(2, &[], 0, |b, e, x| Unary.write_literal(b, e, x, 0, 0)), Some(0));
+        assert_eq!(run_gadget(1, &[], 0, |b, e, x| Unary::default().write_literal(b, e, x, 5, 0)), Some(5));
+        assert_eq!(run_gadget(2, &[], 1, |b, e, x| Unary::default().write_literal(b, e, x, 3, 1)), Some(3));
+        assert_eq!(run_gadget(2, &[], 0, |b, e, x| Unary::default().write_literal(b, e, x, 0, 0)), Some(0));
     }
 
     #[test]
@@ -1194,12 +1311,12 @@ mod tests {
         // reg = `# 1 1 1 # 1 #` -> slot0=3, slot1=1.
         // Non-padded and padded fields both decode via the trait method.
         let cells = vec![SEP, MARK, MARK, MARK, SEP, MARK, SEP];
-        assert_eq!(Unary.decode_nat(&cells, 0), Some(3));
-        assert_eq!(Unary.decode_nat(&cells, 1), Some(1));
-        assert_eq!(Unary.decode_nat(&cells, 2), None); // no field after the trailing `#`
+        assert_eq!(Unary::default().decode_nat(&cells, 0), Some(3));
+        assert_eq!(Unary::default().decode_nat(&cells, 1), Some(1));
+        assert_eq!(Unary::default().decode_nat(&cells, 2), None); // no field after the trailing `#`
         // A fixed-width field `# 1 1 _ _ #` (value 2, padded) decodes to 2.
         let padded = vec![SEP, MARK, MARK, BLANK, BLANK, SEP];
-        assert_eq!(Unary.decode_nat(&padded, 0), Some(2));
+        assert_eq!(Unary::default().decode_nat(&padded, 0), Some(2));
     }
 
     #[test]
@@ -1218,7 +1335,7 @@ mod tests {
 
     fn arith(op: BinOp, a: u64, b: u64) -> Option<u64> {
         // 3-field bank: slot0=a, slot1=b, slot2=result.
-        run_gadget(3, &[(0, a), (1, b)], 2, move |bd, e, x| Unary.arith(bd, e, x, op, 0, 1, 2))
+        run_gadget(3, &[(0, a), (1, b)], 2, move |bd, e, x| Unary::default().arith(bd, e, x, op, 0, 1, 2))
     }
 
     #[test]
@@ -1246,7 +1363,7 @@ mod tests {
     fn cmp(op: BinOp, a: u64, b: u64) -> Option<u64> {
         // 3-field bank: slot0=a, slot1=b, slot2=result. `Eq`/`Ne` use rd (slot2) as scratch — valid
         // since rd ∉ {ra, rb} (a comparison's destination is a fresh temp), so no extra field is needed.
-        run_gadget(3, &[(0, a), (1, b)], 2, move |bd, e, x| Unary.compare(bd, e, x, op, 0, 1, 2))
+        run_gadget(3, &[(0, a), (1, b)], 2, move |bd, e, x| Unary::default().compare(bd, e, x, op, 0, 1, 2))
     }
 
     #[test]
@@ -1265,20 +1382,20 @@ mod tests {
 
     #[test]
     fn init_reg_lays_out_a_fixed_width_bank() {
-        // `#` then (FIELD_WIDTH blanks + `#`) per slot; every field decodes to 0.
-        let cells = Unary.init_reg(2);
-        assert_eq!(cells.len(), 1 + 2 * (FIELD_WIDTH + 1));
+        // `#` then (MAX_FIELD_WIDTH blanks + `#`) per slot; every field decodes to 0.
+        let cells = Unary::default().init_reg(2);
+        assert_eq!(cells.len(), 1 + 2 * (MAX_FIELD_WIDTH + 1));
         assert_eq!(cells[0], SEP);
-        assert_eq!(Unary.decode_nat(&cells, 0), Some(0));
-        assert_eq!(Unary.decode_nat(&cells, 1), Some(0));
-        assert_eq!(Unary.decode_nat(&cells, 2), None); // no field past the trailing `#`
+        assert_eq!(Unary::default().decode_nat(&cells, 0), Some(0));
+        assert_eq!(Unary::default().decode_nat(&cells, 1), Some(0));
+        assert_eq!(Unary::default().decode_nat(&cells, 2), None); // no field past the trailing `#`
     }
 
     #[test]
     fn mov_copies_a_field() {
         // slot0 <- v; mov slot1 <- slot0; decode slot1 == v (and slot0 is unchanged).
         fn body(b: &mut Builder, e: StateId, x: StateId) {
-            Unary.mov(b, e, x, 0, 1);
+            Unary::default().mov(b, e, x, 0, 1);
         }
         assert_eq!(run_gadget(2, &[(0, 5)], 1, body), Some(5));
         assert_eq!(run_gadget(2, &[(0, 0)], 1, body), Some(0));
@@ -1288,13 +1405,13 @@ mod tests {
 
     #[test]
     fn mov_into_self_is_identity() {
-        assert_eq!(run_gadget(1, &[(0, 4)], 0, |b, e, x| Unary.mov(b, e, x, 0, 0)), Some(4));
+        assert_eq!(run_gadget(1, &[(0, 4)], 0, |b, e, x| Unary::default().mov(b, e, x, 0, 0)), Some(4));
     }
 
     /// Build a 2-field machine: init slot0 <- `v`; `jz(slot0, zero_exit, nonzero_exit)`; the zero exit
     /// writes 7 into slot1, the nonzero exit writes 9. Decode slot1 to see which branch ran.
     fn run_jz(v: u64) -> Option<u64> {
-        let enc = Unary;
+        let enc = Unary::default();
         let mut b = Builder::new();
         let halt = b.accept("halt");
         let zero_exit = b.state("zexit");
@@ -1364,7 +1481,7 @@ mod tests {
     fn stack_push_then_pop_is_lifo() {
         // push 4 (literal), push 2 (literal); pop -> WORK==2, pop -> WORK==4; STACK empty.
         // Prove pops by writing the popped WORK value into a REG field and decoding it.
-        let enc = Unary;
+        let enc = Unary::default();
         let mut b = Builder::new();
         let halt = b.accept("halt");
         let p0 = b.state("p0");
@@ -1391,7 +1508,7 @@ mod tests {
     fn push_frame_saves_tag_then_locals_in_order() {
         // REG bank slots 0..3 = [Rr, Loc0=4, Loc1=2]; push_frame(n_loc=2, tag=1).
         // Expect STACK fields: [tag=1][Loc0=4][Loc1=2]  (tag at bottom, locals in slot order above it).
-        let enc = Unary;
+        let enc = Unary::default();
         let mut b = Builder::new();
         let halt = b.accept("halt");
         // Seed the Loc fields: slot1<-4, slot2<-2, then push_frame.
@@ -1419,7 +1536,7 @@ mod tests {
     #[test]
     fn pop_frame_restore_recovers_clobbered_locals() {
         // Save [Loc0=4, Loc1=2] under tag=0; CLOBBER the REG Loc fields; restore; they come back.
-        let enc = Unary;
+        let enc = Unary::default();
         let mut b = Builder::new();
         let halt = b.accept("halt");
         let s1 = b.state("s1");
@@ -1451,7 +1568,7 @@ mod tests {
     fn stack_is_empty_branches() {
         // Empty stack -> if_empty writes 7 to REG slot0; after a push, non-empty -> if_nonempty writes 9.
         fn check(pushes: u64) -> Option<u64> {
-            let enc = Unary;
+            let enc = Unary::default();
             let mut b = Builder::new();
             let halt = b.accept("halt");
             let e7 = b.state("e7");
@@ -1478,7 +1595,7 @@ mod tests {
     fn dispatch_tag_routes_on_the_tag_count() {
         // Push a bare tag c (no locals), then dispatch to one of 3 exits, each writing a distinct literal.
         fn dispatch(c: u64) -> Option<u64> {
-            let enc = Unary;
+            let enc = Unary::default();
             let mut b = Builder::new();
             let halt = b.accept("halt");
             let x0 = b.state("x0");
@@ -1546,7 +1663,7 @@ mod tests {
     fn heap_build_two_cells_and_count() {
         // Build cell1 = (3, 0), cell2 = (2, 1) by loading WORK via write-then-copy, then count == 2.
         // We stage WORK by writing a REG literal then copy_field_to_work (reusing merged primitives).
-        let enc = Unary;
+        let enc = Unary::default();
         let mut b = Builder::new();
         let halt = b.accept("halt");
         // reg slots: 0=3, 1=0, 2=2, 3=1 (heads/tails to store), slot 4 = where count lands.
@@ -1588,7 +1705,7 @@ mod tests {
     fn cons_builds_a_cell_and_writes_the_pointer() {
         // slots: 0=head, 1=tail-ptr, 2=result-ptr. cons(rd=2, rh=0, rt=1).
         fn run_cons(head: u64, tail: u64) -> (Vec<(u64, u64)>, Option<u64>) {
-            let enc = Unary;
+            let enc = Unary::default();
             let mut b = Builder::new();
             let halt = b.accept("halt");
             let s0 = b.state("s0");
@@ -1615,7 +1732,7 @@ mod tests {
     fn is_empty_op_maps_zero_to_true() {
         // slot0 <- v; is_empty_op(rd=1, rl=0); decode slot1. v==0 -> 1, v>0 -> 0.
         fn run_ie(v: u64) -> Option<u64> {
-            let enc = Unary;
+            let enc = Unary::default();
             let mut b = Builder::new();
             let halt = b.accept("halt");
             let s0 = b.state("s0");
@@ -1637,7 +1754,7 @@ mod tests {
     #[test]
     fn two_conses_get_sequential_pointers() {
         // cons(3, nil) -> ptr 1; then cons(2, ptr1) -> ptr 2. Heap = [(3,0), (2,1)].
-        let enc = Unary;
+        let enc = Unary::default();
         let mut b = Builder::new();
         let halt = b.accept("halt");
         // slot0=3, slot1=0(nil); cons -> slot2 (ptr1). slot3=2; cons(slot3, slot2) -> slot4 (ptr2).
@@ -1666,7 +1783,7 @@ mod tests {
     /// (or tail) into slot 6. `found` -> the field value; `missing` (dangling) -> the sentinel 9. Returns
     /// the decoded slot 6.
     fn run_seek_read(counter: u64, read_tail: bool) -> Option<u64> {
-        let enc = Unary;
+        let enc = Unary::default();
         let mut b = Builder::new();
         let halt = b.accept("halt");
         // slots: 0=7, 1=0(nil), 2=p1, 3=3, 4=p2, 5=counter, 6=result.
@@ -1695,7 +1812,7 @@ mod tests {
         };
         let wr = append_work_to_field(&mut b, read, 6, "wr");
         b.add_rule(wr, RuleSpec::new(), halt);
-        // missing -> sentinel 9 -> slot 6 -> halt (9 is distinct from every real head/tail here and < FIELD_WIDTH).
+        // missing -> sentinel 9 -> slot 6 -> halt (9 is distinct from every real head/tail here and < MAX_FIELD_WIDTH).
         enc.write_literal(&mut b, missing, halt, 9, 6);
         let mut init = vec![Vec::new(); TAPES];
         init[REG] = enc.init_reg(7);
@@ -1723,7 +1840,7 @@ mod tests {
         // Stage heap [(7,0),(3,1)] via cons (as in run_seek_read), then head_op/tail_op on a pointer slot.
         // slots: 0=7, 1=0(nil), 2=p1, 3=3, 4=p2(=2), 5=result.
         fn run_op(read_tail: bool, ptr_slot: Slot) -> Option<u64> {
-            let enc = Unary;
+            let enc = Unary::default();
             let mut b = Builder::new();
             let halt = b.accept("halt");
             let s0 = b.state("s0");
@@ -1761,15 +1878,21 @@ mod tests {
     #[test]
     fn mul_by_zero_is_zero() {
         // rd = ra * 0 == 0, and 0 * rb == 0 (the loop-counter drains immediately).
-        assert_eq!(run_gadget(3, &[(0, 7), (1, 0)], 2, |b, e, x| Unary.arith(b, e, x, BinOp::Mul, 0, 1, 2)), Some(0));
-        assert_eq!(run_gadget(3, &[(0, 0), (1, 7)], 2, |b, e, x| Unary.arith(b, e, x, BinOp::Mul, 0, 1, 2)), Some(0));
+        assert_eq!(
+            run_gadget(3, &[(0, 7), (1, 0)], 2, |b, e, x| Unary::default().arith(b, e, x, BinOp::Mul, 0, 1, 2)),
+            Some(0)
+        );
+        assert_eq!(
+            run_gadget(3, &[(0, 0), (1, 7)], 2, |b, e, x| Unary::default().arith(b, e, x, BinOp::Mul, 0, 1, 2)),
+            Some(0)
+        );
     }
 
     #[test]
     fn comparison_trichotomy_sweep() {
         // For a < b, a == b, a > b, every one of the six comparisons must give the right 0/1.
         fn cmp(op: BinOp, a: u64, bb: u64) -> Option<u64> {
-            run_gadget(3, &[(0, a), (1, bb)], 2, move |b, e, x| Unary.compare(b, e, x, op, 0, 1, 2))
+            run_gadget(3, &[(0, a), (1, bb)], 2, move |b, e, x| Unary::default().compare(b, e, x, op, 0, 1, 2))
         }
         for (a, bb, lt, le, gt, ge, eq, ne) in
             [(2u64, 5u64, 1, 1, 0, 0, 0, 1), (5, 5, 0, 1, 0, 1, 1, 0), (5, 2, 0, 0, 1, 1, 0, 1)]
@@ -1788,7 +1911,7 @@ mod tests {
         // Build heap [(7,0),(3,1),(9,0)] via cons: cons(7,nil)->p1; cons(3,p1)->p2; cons(9,nil)->p3.
         // tail(p2) reads cell 2's tail (=1, non-empty) and must STOP on cell 3's `@` then restore the top —
         // the "copy marks THEN hit AT" path (cell 2 is NOT the last cell). Expect 1.
-        let enc = Unary;
+        let enc = Unary::default();
         let mut b = Builder::new();
         let halt = b.accept("halt");
         // slots: 0=7,1=0(nil),2=p1,3=3,4=p2,5=9,6=p3,7=result.
@@ -1822,7 +1945,7 @@ mod tests {
         // Build [1,2] (p_outer -> (1, p_inner) -> (2,0)); tail(p_outer) -> p_inner; then cons(9, p_inner).
         // The deref must have restored the HEAP top, so the new cons appends a correct cell. Decode-check
         // via the pointer: the new cell's head is 9 and its tail is p_inner (=1). Expect the new ptr's head=9.
-        let enc = Unary;
+        let enc = Unary::default();
         let mut b = Builder::new();
         let halt = b.accept("halt");
         // slots: 0=2,1=0,2=p_inner,3=1,4=p_outer,5=t(=p_inner),6=9,7=p_new,8=head-of-p_new.
@@ -1862,7 +1985,7 @@ mod tests {
         inits: &[(u64, Slot)],
         body: impl FnOnce(&mut Builder, StateId, StateId),
     ) -> (Vec<Symbol>, Vec<Symbol>) {
-        let enc = Unary;
+        let enc = Unary::default();
         let mut b = Builder::new();
         let halt = b.accept("halt");
         let mut cur = b.state("s0");
@@ -1885,8 +2008,8 @@ mod tests {
     #[test]
     fn box_op_allocates_and_returns_pointer_one() {
         // box(7) into rd=1, with the value 7 pre-loaded in slot 0. Pointer must be 1.
-        let (_boxtape, reg) = run_box(2, &[(7, 0)], |b, e, x| Unary.box_op(b, e, x, 0, 1));
-        assert_eq!(Unary.decode_nat(&reg, 1), Some(1));
+        let (_boxtape, reg) = run_box(2, &[(7, 0)], |b, e, x| Unary::default().box_op(b, e, x, 0, 1));
+        assert_eq!(Unary::default().decode_nat(&reg, 1), Some(1));
     }
 
     #[test]
@@ -1894,14 +2017,14 @@ mod tests {
         // box(3) -> rd=1 ; box(4) -> rd=2 ; pointers 1 then 2
         let (_bt, reg) = run_box(3, &[(3, 0)], |b, e, x| {
             let mid = b.state("mid");
-            Unary.box_op(b, e, mid, 0, 1); // box(slot0=3) -> slot1
+            Unary::default().box_op(b, e, mid, 0, 1); // box(slot0=3) -> slot1
             // reload slot0 = 4, then box again -> slot2
             let after = b.state("after");
-            Unary.write_literal(b, mid, after, 4, 0);
-            Unary.box_op(b, after, x, 0, 2); // box(slot0=4) -> slot2
+            Unary::default().write_literal(b, mid, after, 4, 0);
+            Unary::default().box_op(b, after, x, 0, 2); // box(slot0=4) -> slot2
         });
-        assert_eq!(Unary.decode_nat(&reg, 1), Some(1));
-        assert_eq!(Unary.decode_nat(&reg, 2), Some(2));
+        assert_eq!(Unary::default().decode_nat(&reg, 1), Some(1));
+        assert_eq!(Unary::default().decode_nat(&reg, 2), Some(2));
     }
 
     #[test]
@@ -1909,10 +2032,10 @@ mod tests {
         // box(5) -> rd=1 ; box_get(rd=1) -> slot2 == 5
         let (_bt, reg) = run_box(3, &[(5, 0)], |b, e, x| {
             let mid = b.state("mid");
-            Unary.box_op(b, e, mid, 0, 1);
-            Unary.box_get_op(b, mid, x, 1, 2);
+            Unary::default().box_op(b, e, mid, 0, 1);
+            Unary::default().box_get_op(b, mid, x, 1, 2);
         });
-        assert_eq!(Unary.decode_nat(&reg, 2), Some(5));
+        assert_eq!(Unary::default().decode_nat(&reg, 2), Some(5));
     }
 
     #[test]
@@ -1920,12 +2043,12 @@ mod tests {
         // h = box(5) ; box_set(h, 9) ; box_get(h) == 9
         let (_bt, reg) = run_box(4, &[(5, 0), (9, 1)], |b, e, x| {
             let s1 = b.state("s1");
-            Unary.box_op(b, e, s1, 0, 2); // slot2 = box(slot0=5)
+            Unary::default().box_op(b, e, s1, 0, 2); // slot2 = box(slot0=5)
             let s2 = b.state("s2");
-            Unary.box_set_op(b, s1, s2, 2, 1); // *slot2 = slot1 (9)
-            Unary.box_get_op(b, s2, x, 2, 3); // slot3 = box_get(slot2) = 9
+            Unary::default().box_set_op(b, s1, s2, 2, 1); // *slot2 = slot1 (9)
+            Unary::default().box_get_op(b, s2, x, 2, 3); // slot3 = box_get(slot2) = 9
         });
-        assert_eq!(Unary.decode_nat(&reg, 3), Some(9));
+        assert_eq!(Unary::default().decode_nat(&reg, 3), Some(9));
     }
 
     #[test]
@@ -1933,31 +2056,31 @@ mod tests {
         // a = box(3) ; b = box(4) ; box_set(a, 7) ; box_get(b) == 4
         let (_bt, reg) = run_box(6, &[(3, 0), (4, 1), (7, 2)], |b, e, x| {
             let s1 = b.state("s1");
-            Unary.box_op(b, e, s1, 0, 3); // slot3 = box(3) -> ptr 1
+            Unary::default().box_op(b, e, s1, 0, 3); // slot3 = box(3) -> ptr 1
             let s2 = b.state("s2");
-            Unary.box_op(b, s1, s2, 1, 4); // slot4 = box(4) -> ptr 2
+            Unary::default().box_op(b, s1, s2, 1, 4); // slot4 = box(4) -> ptr 2
             let s3 = b.state("s3");
-            Unary.box_set_op(b, s2, s3, 3, 2); // *slot3 = 7
-            Unary.box_get_op(b, s3, x, 4, 5); // slot5 = box_get(slot4) = 4
+            Unary::default().box_set_op(b, s2, s3, 3, 2); // *slot3 = 7
+            Unary::default().box_get_op(b, s3, x, 4, 5); // slot5 = box_get(slot4) = 4
         });
-        assert_eq!(Unary.decode_nat(&reg, 5), Some(4));
+        assert_eq!(Unary::default().decode_nat(&reg, 5), Some(4));
     }
 
-    // The BOX tape is blank-padded, so a ZERO-valued field is FIELD_WIDTH blanks — indistinguishable
+    // The BOX tape is blank-padded, so a ZERO-valued field is `width` blanks — indistinguishable
     // from the origin-left / top blanks by a single read. These probe the content-blind fixed-width
     // navigation on exactly that case (never exercised by the six contract tests, whose values are all
-    // > 0). A box holds a value 0 <= v < FIELD_WIDTH (a captured counter can start at 0).
+    // > 0). A box holds a value 0 <= v < width (a captured counter can start at 0).
 
     #[test]
     fn box_of_zero_roundtrips() {
         // box(0) -> ptr 1 ; box_get(ptr) == 0. The whole field is blank; seek + read must not be fooled.
         let (_bt, reg) = run_box(3, &[(0, 0)], |b, e, x| {
             let mid = b.state("mid");
-            Unary.box_op(b, e, mid, 0, 1);
-            Unary.box_get_op(b, mid, x, 1, 2);
+            Unary::default().box_op(b, e, mid, 0, 1);
+            Unary::default().box_get_op(b, mid, x, 1, 2);
         });
-        assert_eq!(Unary.decode_nat(&reg, 1), Some(1), "an all-blank field still gets pointer 1");
-        assert_eq!(Unary.decode_nat(&reg, 2), Some(0), "box_get of a zero-valued box reads 0");
+        assert_eq!(Unary::default().decode_nat(&reg, 1), Some(1), "an all-blank field still gets pointer 1");
+        assert_eq!(Unary::default().decode_nat(&reg, 2), Some(0), "box_get of a zero-valued box reads 0");
     }
 
     #[test]
@@ -1965,17 +2088,17 @@ mod tests {
         // box(9) ; set 0 ; get == 0 ; set 4 ; get == 4. Shrinking (blank leftovers) then regrowing.
         let (_bt, reg) = run_box(6, &[(9, 0), (0, 1), (4, 2)], |b, e, x| {
             let s1 = b.state("s1");
-            Unary.box_op(b, e, s1, 0, 3); // slot3 = box(9) -> ptr 1
+            Unary::default().box_op(b, e, s1, 0, 3); // slot3 = box(9) -> ptr 1
             let s2 = b.state("s2");
-            Unary.box_set_op(b, s1, s2, 3, 1); // *ptr = 0
+            Unary::default().box_set_op(b, s1, s2, 3, 1); // *ptr = 0
             let s3 = b.state("s3");
-            Unary.box_get_op(b, s2, s3, 3, 4); // slot4 = 0
+            Unary::default().box_get_op(b, s2, s3, 3, 4); // slot4 = 0
             let s4 = b.state("s4");
-            Unary.box_set_op(b, s3, s4, 3, 2); // *ptr = 4
-            Unary.box_get_op(b, s4, x, 3, 5); // slot5 = 4
+            Unary::default().box_set_op(b, s3, s4, 3, 2); // *ptr = 4
+            Unary::default().box_get_op(b, s4, x, 3, 5); // slot5 = 4
         });
-        assert_eq!(Unary.decode_nat(&reg, 4), Some(0), "shrunk to 0");
-        assert_eq!(Unary.decode_nat(&reg, 5), Some(4), "regrew to 4");
+        assert_eq!(Unary::default().decode_nat(&reg, 4), Some(0), "shrunk to 0");
+        assert_eq!(Unary::default().decode_nat(&reg, 5), Some(4), "regrew to 4");
     }
 
     #[test]
@@ -1986,12 +2109,12 @@ mod tests {
         // or grow (no leftovers to erase).
         let (_bt, reg) = run_box(4, &[(9, 0), (4, 1)], |b, e, x| {
             let s1 = b.state("s1");
-            Unary.box_op(b, e, s1, 0, 2); // slot2 = box(slot0=9) -> ptr 1
+            Unary::default().box_op(b, e, s1, 0, 2); // slot2 = box(slot0=9) -> ptr 1
             let s2 = b.state("s2");
-            Unary.box_set_op(b, s1, s2, 2, 1); // *slot2 = slot1 (4)
-            Unary.box_get_op(b, s2, x, 2, 3); // slot3 = box_get(slot2) = 4
+            Unary::default().box_set_op(b, s1, s2, 2, 1); // *slot2 = slot1 (4)
+            Unary::default().box_get_op(b, s2, x, 2, 3); // slot3 = box_get(slot2) = 4
         });
-        assert_eq!(Unary.decode_nat(&reg, 3), Some(4), "shrunk 9 -> 4 in place (marks + leftovers)");
+        assert_eq!(Unary::default().decode_nat(&reg, 3), Some(4), "shrunk 9 -> 4 in place (marks + leftovers)");
     }
 
     #[test]
@@ -2000,12 +2123,192 @@ mod tests {
         // the second pointer must seek RIGHT across that all-blank field to land on field 2.
         let (_bt, reg) = run_box(5, &[(0, 0), (6, 1)], |b, e, x| {
             let s1 = b.state("s1");
-            Unary.box_op(b, e, s1, 0, 2); // slot2 = box(0) -> ptr 1
+            Unary::default().box_op(b, e, s1, 0, 2); // slot2 = box(0) -> ptr 1
             let s2 = b.state("s2");
-            Unary.box_op(b, s1, s2, 1, 3); // slot3 = box(6) -> ptr 2 (count skipped a zero field)
-            Unary.box_get_op(b, s2, x, 3, 4); // slot4 = box_get(ptr 2) = 6 (sought across a zero field)
+            Unary::default().box_op(b, s1, s2, 1, 3); // slot3 = box(6) -> ptr 2 (count skipped a zero field)
+            Unary::default().box_get_op(b, s2, x, 3, 4); // slot4 = box_get(ptr 2) = 6 (sought across a zero field)
         });
-        assert_eq!(Unary.decode_nat(&reg, 3), Some(2), "second pointer is 2 even past a zero field");
-        assert_eq!(Unary.decode_nat(&reg, 4), Some(6), "box_get sought across the zero field to field 2");
+        assert_eq!(Unary::default().decode_nat(&reg, 3), Some(2), "second pointer is 2 even past a zero field");
+        assert_eq!(Unary::default().decode_nat(&reg, 4), Some(6), "box_get sought across the zero field to field 2");
+    }
+
+    /// Build a machine that lays `marks` MARKs on WORK (head returned home), then runs `body`, and
+    /// report whether it halted in the overflow guard. WORK is written directly rather than copied out
+    /// of a register field, which is the ONLY way to hand a box gadget a value wider than the bank —
+    /// see `a_boxing_program_at_too_narrow_a_width_is_reported` in `lower_tm.rs` for why no lowered
+    /// program can do it.
+    fn work_gadget_overflows(width: usize, marks: usize, body: impl FnOnce(&mut Builder, StateId, StateId)) -> bool {
+        let enc = Unary::at(width);
+        let mut b = Builder::new();
+        let halt = b.accept("halt");
+        let start = b.state("start");
+        // Lay `marks` MARKs rightward on WORK, then walk back to home (its leftmost cell).
+        let mut cur = start;
+        for k in 0..marks {
+            let nxt = b.state(format!("m{k}"));
+            b.add_rule(cur, RuleSpec::new().on(WORK, None, Some(MARK), Move::R), nxt);
+            cur = nxt;
+        }
+        let homed = rewind_work(&mut b, cur, "seed");
+        let gadget = b.state("gadget");
+        b.add_rule(homed, RuleSpec::new(), gadget);
+        body(&mut b, gadget, halt);
+        let overflow = b.overflow_state().expect("the gadget under test must request the guard");
+        let m = b.finish(start);
+        assert!(m.validate().is_empty(), "{:?}", m.validate());
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(2);
+        let (_, final_state, status) = crate::tm::sim::simulate_final(&m, &init, TM_DEFAULT_CAPS);
+        status == Status::Halted && final_state == overflow
+    }
+
+    /// `box_append_field` must refuse a value that would fill its fixed-width window exactly or
+    /// overrun it. Exactly-full is the case that matters and the one a "did it overrun?" check would
+    /// miss: the field is left with no padding blank, which is precisely what `box_read_field_to_work`
+    /// relies on to find the field's end.
+    #[test]
+    fn box_append_field_guards_a_value_that_does_not_fit() {
+        assert!(work_gadget_overflows(4, 5, |b, e, x| {
+            let done = box_append_field(b, e, "ap", 4);
+            b.add_rule(done, RuleSpec::new(), x);
+        }));
+        assert!(work_gadget_overflows(4, 4, |b, e, x| {
+            let done = box_append_field(b, e, "ap", 4);
+            b.add_rule(done, RuleSpec::new(), x);
+        }));
+        assert!(!work_gadget_overflows(4, 3, |b, e, x| {
+            let done = box_append_field(b, e, "ap", 4);
+            b.add_rule(done, RuleSpec::new(), x);
+        }));
+    }
+
+    /// `box_overwrite_field` gets the same guard, but only because it is a COUNTED chain. Content-driven
+    /// it could not have one: BOX fields have no trailing `#` after the LAST one — the top is a blank —
+    /// so an overflow there had no delimiter to hit and would surface only later, when the next
+    /// `box_skip_field_right` landed mid-spill and went stuck-silent.
+    #[test]
+    fn box_overwrite_field_guards_a_value_that_does_not_fit() {
+        // Seed one field, then overwrite it. The seed is written by `box_append_field`, so keep it
+        // representable and make only the overwrite oversized.
+        let over = |marks: usize| {
+            work_gadget_overflows(4, marks, move |b, e, x| {
+                // Park the head on the field's first cell: write the leading `#`, then step right.
+                let on_first = b.state("mk");
+                b.add_rule(e, RuleSpec::new().on(BOX, None, Some(SEP), Move::R), on_first);
+                let done = box_overwrite_field(b, on_first, "ow", 4);
+                b.add_rule(done, RuleSpec::new(), x);
+            })
+        };
+        assert!(over(5), "v > width must be refused");
+        assert!(over(4), "v == width must be refused: no padding blank remains");
+        assert!(!over(3), "v < width fits");
+    }
+
+    /// Layer 2 of the guard's completeness argument (design spec §4): a guard only fires if it is
+    /// matched BEFORE the rules it shadows. Rule lookup is first-match-wins and `validate()` has no
+    /// overlap check — the hazard already documented at `append_field_to_work`.
+    ///
+    /// MEASURED, because the spec claimed more for this layer than it delivers: moving
+    /// `append_work_to_field`'s guard to the end of its state turns this test red, but it turns the
+    /// BEHAVIOURAL test (`a_computed_value_that_does_not_fit_is_reported`) red too, because the loop
+    /// rule that then shadows it matches on the very inputs the behavioural test uses. So this layer is
+    /// NOT catching a silent disable that behaviour would miss, at least for the guards as currently
+    /// written.
+    ///
+    /// What it does add is coverage that is STRUCTURAL rather than path-dependent: every call site of
+    /// `append_work_to_field` builds its own `wr` state, and a behavioural test only exercises the
+    /// states its particular program reaches. This checks every state in a built machine that routes to
+    /// the guard at all, and fails naming the offending state.
+    fn assert_guards_are_first(body: impl FnOnce(&mut Builder, StateId, StateId)) {
+        let mut b = Builder::new();
+        let entry = b.state("entry");
+        let exit = b.accept("exit");
+        body(&mut b, entry, exit);
+        let overflow = b.overflow_state().expect("the gadget under test must request the guard");
+        let m = b.finish(entry);
+        let guarded: Vec<_> =
+            m.states.iter().enumerate().filter(|(_, s)| s.rules.iter().any(|r| r.next == overflow)).collect();
+        assert!(!guarded.is_empty(), "no state routes to the guard — the gadget cannot be overflowing");
+        for (id, s) in guarded {
+            assert_eq!(
+                s.rules[0].next, overflow,
+                "state {id} (`{}`) routes to the guard, but not from its FIRST rule — a preceding rule \
+                 can shadow it and the guard silently stops firing",
+                s.name
+            );
+        }
+    }
+
+    #[test]
+    fn every_guard_rule_is_first_in_its_state() {
+        let enc = Unary::at(8);
+        // The REG store, reached through `mov`.
+        assert_guards_are_first(|b, e, x| enc.mov(b, e, x, 0, 1));
+        // The REG store reached through arithmetic, which is a different call site of the same gadget.
+        assert_guards_are_first(|b, e, x| enc.arith(b, e, x, BinOp::Add, 0, 1, 2));
+        // The BOX allocation and the BOX in-place write.
+        assert_guards_are_first(|b, e, x| enc.box_op(b, e, x, 0, 1));
+        assert_guards_are_first(|b, e, x| enc.box_set_op(b, e, x, 0, 1));
+    }
+
+    /// `write_literal`'s guard is STATIC — it emits a single unconditional rule to the guard and no
+    /// write chain at all — so "is it first?" is trivially true and the property worth pinning is
+    /// different: that the oversized case emits no write chain, rather than a chain plus a guard.
+    #[test]
+    fn an_oversized_literal_emits_a_bare_route_to_the_guard() {
+        let mut b = Builder::new();
+        let entry = b.state("entry");
+        let exit = b.accept("exit");
+        let before = b.state_count();
+        Unary::at(8).write_literal(&mut b, entry, exit, 8, 0);
+        let overflow = b.overflow_state().expect("must have requested the guard");
+        let m = b.finish(entry);
+        assert_eq!(m.states[entry as usize].rules.len(), 1, "one rule: straight to the guard");
+        assert_eq!(m.states[entry as usize].rules[0].next, overflow);
+        // Only the guard state itself was allocated; no seek/blank/write chain was emitted.
+        assert_eq!(m.states.len() - before, 1, "an unrepresentable literal must emit no write chain");
+    }
+
+    /// The field width is a property of the encoding INSTANCE, not a global constant: two `Unary`s at
+    /// different widths lay out different banks, and each one's own `decode_nat` reads its own layout.
+    #[test]
+    fn unary_width_is_per_instance() {
+        let narrow = Unary::at(8);
+        let wide = Unary::default();
+        assert_eq!(narrow.field_width(), Some(8));
+        assert_eq!(wide.field_width(), Some(MAX_FIELD_WIDTH));
+
+        // `#` then (width blanks + `#`) per slot.
+        assert_eq!(narrow.init_reg(2).len(), 1 + 2 * (8 + 1));
+        assert_eq!(wide.init_reg(2).len(), 1 + 2 * (MAX_FIELD_WIDTH + 1));
+
+        // `at_width` re-instantiates: the receiver is unchanged, the result carries the new width.
+        let refitted = wide.at_width(8);
+        assert_eq!(refitted.field_width(), Some(8));
+        assert_eq!(wide.field_width(), Some(MAX_FIELD_WIDTH), "at_width must not mutate the receiver");
+    }
+
+    /// A whole program runs correctly on a narrow bank, provided every stored value fits. `1 + 2 * 3`
+    /// stores at most 7, so width 8 is sufficient — and much cheaper than the default 64.
+    #[test]
+    fn a_program_runs_on_a_narrow_bank() {
+        use crate::desugar::desugar;
+        use crate::parser::parse;
+        use crate::tm::decode::decode_tape;
+        use crate::tm::lower_asm::lower_asm;
+        use crate::tm::lower_tm::{lower_tm, n_slots_of};
+        use crate::value::Value;
+
+        let (prog, ds) = parse("1 + 2 * 3");
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let core = desugar(&prog.unwrap());
+        let program = lower_asm(&core).expect("lowers");
+        let enc = Unary::at(8);
+        let m = lower_tm(&program, &enc);
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(n_slots_of(&program));
+        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+        assert_eq!(status, Status::Halted);
+        assert_eq!(decode_tape(&tapes, &Value::Nat(7), &enc), Some(Value::Nat(7)));
     }
 }

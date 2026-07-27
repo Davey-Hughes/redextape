@@ -80,7 +80,7 @@ fn assert_cross_backend_agree(src: &str) {
 
 /// The demo set: arithmetic, comparison, list construction/access, recursion, and a defunctionalized
 /// higher-order program (`map`) -- first-order and higher-order lowering paths both exercised, plus
-/// a value beyond the TM's `FIELD_WIDTH` (native has no such ceiling on either backend).
+/// a value beyond the TM's `MAX_FIELD_WIDTH` (native has no such ceiling on either backend).
 const CASES: &[&str] = &[
     "1 + 2 * 3",
     "10 > 3",

@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f19ee41625f72a69beda4317085c46ec7ef8048cf7e9888dc751df8963ecf1f8 # shrinks to src = "fn sum(k) { if k == 0 { 0 } else { k + sum(k - 1) } } sum(1)"

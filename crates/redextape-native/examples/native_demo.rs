@@ -3,8 +3,8 @@
 //! `reference`, `λ`, and the TM).
 //!
 //! The headline: unlike the TM backend (a genuine Turing machine whose registers are a unary tape
-//! fixed at `FIELD_WIDTH = 64` cells), native compiles to real 64-bit machine registers. It has no
-//! `FIELD_WIDTH` ceiling — a program whose result the TM literally cannot represent on its tape
+//! fixed at `MAX_FIELD_WIDTH = 64` cells), native compiles to real 64-bit machine registers. It has no
+//! `MAX_FIELD_WIDTH` ceiling — a program whose result the TM literally cannot represent on its tape
 //! (`100 * 100 = 10_000`, say) runs on native the same way it would on any compiled language.
 //!
 //!     cargo run --example native_demo -p redextape-native
@@ -54,7 +54,7 @@ fn main() {
 
     // 3. The native headline: real 64-bit registers, no unary-tape ceiling.
     println!("\n3. The native headline: values the TM's unary tape CANNOT represent\n");
-    println!("   The TM backend's registers are a fixed-width unary field (`FIELD_WIDTH = 64` cells);");
+    println!("   The TM backend's registers are a fixed-width unary field (`MAX_FIELD_WIDTH = 64` cells);");
     println!("   a result that exceeds 64 cannot even be decoded off the tape. Native compiles to real");
     println!("   64-bit machine registers, so it has no such ceiling.\n");
     println!("   {:<64} {:>10}  {}", "program", "result", "oracle");

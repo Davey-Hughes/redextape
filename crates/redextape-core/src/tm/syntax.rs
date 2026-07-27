@@ -413,7 +413,7 @@ state halt: accept
             let (prog, ds) = parse(src);
             assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
             let core = desugar(&prog.unwrap());
-            let m = lower_tm(&lower_asm(&core).expect("lowers"), &Unary);
+            let m = lower_tm(&lower_asm(&core).expect("lowers"), &Unary::default());
             assert!(m.validate().is_empty(), "compiled machine must be validate()-clean for {src}: {:?}", m.validate());
             assert_eq!(parse_tm(&print_tm(&m)), (Some(m.clone()), vec![]), "round-trip must equal m for {src}");
         }

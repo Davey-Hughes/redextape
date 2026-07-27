@@ -7,6 +7,10 @@
 #
 #   scripts/check-all.sh              # everything, including the LLVM configs
 #   scripts/check-all.sh --no-llvm    # skip LLVM (no toolchain installed)
+#
+# This gate runs the FAST test tier only. The slow tier (exhaustive sweeps, marked
+# `#[ignore = "slow tier: ..."]`) has its own script and its own CI job: scripts/check-slow.sh.
+# Kept separate deliberately — a merge gate that takes minutes stops being run before merges.
 set -euo pipefail
 
 run() { echo; echo "==> $*"; "$@"; }

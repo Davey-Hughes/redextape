@@ -10,7 +10,7 @@
 //! (`run_asm`) — both share `lower_asm`/`defunc`, so any disagreement is a real codegen bug, not a
 //! front-end or lowering difference.
 //!
-//! Native's DISTINCTIVE capability is having no `FIELD_WIDTH` (64) ceiling: it compiles to real 64-bit
+//! Native's DISTINCTIVE capability is having no `MAX_FIELD_WIDTH` (64) ceiling: it compiles to real 64-bit
 //! machine registers, unlike the TM's fixed-width unary tape. `native_runs_beyond_field_width` checks
 //! `native == reference` on values the TM literally cannot represent — the TM leg is intentionally
 //! absent there.
@@ -59,13 +59,13 @@ fn assert_four_way(src: &str) {
     let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
     let core = core_of(src);
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
-    let tm = run_tm(&core, &Unary, TM_DEFAULT_CAPS);
+    let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
     let native = run_native(&core, DEFAULT_CAPS);
     match (lambda, tm, native) {
         (LambdaRun::Reduced(nf), TmRun::Ran { tapes }, NativeRun::Ran(outcome)) => {
             assert_eq!(decode(&nf, &reference), Some(reference.clone()), "reference vs λ disagree for: {src}");
             assert_eq!(
-                decode_tape(&tapes, &reference, &Unary),
+                decode_tape(&tapes, &reference, &Unary::default()),
                 Some(reference.clone()),
                 "reference vs TM disagree for: {src}"
             );
@@ -104,7 +104,7 @@ fn assert_native_matches_asm(src: &str) {
 }
 
 /// native == reference only (no TM leg — the TM's fixed-width unary tape cannot represent these
-/// values). Native's distinctive capability: real 64-bit registers, no `FIELD_WIDTH` (64) ceiling.
+/// values). Native's distinctive capability: real 64-bit registers, no `MAX_FIELD_WIDTH` (64) ceiling.
 fn assert_native_matches_reference(src: &str) {
     let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
     let core = core_of(src);
@@ -123,7 +123,7 @@ fn assert_native_matches_reference(src: &str) {
 /// The first-order demo suite (a subset of `redextape-core`'s `three_way_oracle.rs`
 /// `FIRST_ORDER_DEMOS`) — arithmetic, monus, comparison, if, let/let-mut/assign/while, calls &
 /// recursion, list construction & access, higher-order programs (`defunc`), and mutually recursive /
-/// forward-referencing `fn`s (`Core::LetRecGroup`) — every value stays « FIELD_WIDTH (64) so the TM
+/// forward-referencing `fn`s (`Core::LetRecGroup`) — every value stays « MAX_FIELD_WIDTH (64) so the TM
 /// leg can participate too.
 const FIRST_ORDER_DEMOS: &[&str] = &[
     "1 + 2 * 3",
@@ -278,7 +278,7 @@ const LAMBDA_LIMITATION_DEMOS: &[&str] = &[
     "let mut c = 0; fn twice(g) { g(0); g(0); } let bump = |x| { c = c + 1; c }; twice(bump); c",
 ];
 
-/// Values that exceed `FIELD_WIDTH` (64) — the TM's unary tape cannot represent them. Native compiles
+/// Values that exceed `MAX_FIELD_WIDTH` (64) — the TM's unary tape cannot represent them. Native compiles
 /// to real 64-bit registers, so it has no such ceiling; this is native's distinctive leg.
 const BEYOND_FIELD_WIDTH_DEMOS: &[&str] = &[
     "100 * 100",
@@ -321,6 +321,22 @@ fn native_runs_beyond_field_width() {
     }
 }
 
+/// The TM's half of what `BEYOND_FIELD_WIDTH_DEMOS` claims — which until the overflow guard existed was
+/// only a comment, because the TM leg could not be run on these at all: it would have corrupted its
+/// register bank and handed back a WRONG answer rather than refusing. Now the ceiling is an outcome the
+/// caller can see, so "native has no such ceiling" is a contrast between two measured results instead of
+/// a measured result and an assertion in prose.
+#[test]
+fn the_tm_reports_its_ceiling_on_the_same_demos() {
+    for src in BEYOND_FIELD_WIDTH_DEMOS {
+        let core = core_of(src);
+        assert!(
+            matches!(run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::Overflow),
+            "the TM must REPORT that it cannot represent this, not miscompile it: {src}"
+        );
+    }
+}
+
 #[test]
 fn faults_diverge_on_native() {
     for src in FAULT_DEMOS {
@@ -335,7 +351,7 @@ fn faults_diverge_on_native() {
 
 /// A first-order expression generator whose value stays `< 8`-leaf-rooted arithmetic/comparison/if,
 /// reused (shape) from `redextape-core`'s `arb_tm_safe_expr` in `three_way_oracle.rs`. Unlike that
-/// generator native has NO `FIELD_WIDTH` bound, so leaves are widened to `0..1000` — native compiles
+/// generator native has NO `MAX_FIELD_WIDTH` bound, so leaves are widened to `0..1000` — native compiles
 /// to real 64-bit registers and never needs to stay under 64.
 fn arb_native_safe_expr() -> impl Strategy<Value = String> {
     let leaf = (0u64..1000).prop_map(|n| n.to_string());
@@ -353,7 +369,7 @@ fn arb_native_safe_expr() -> impl Strategy<Value = String> {
 proptest! {
     #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
 
-    /// Random wide-range (no `FIELD_WIDTH` bound) arithmetic/comparison/if programs: `native ==
+    /// Random wide-range (no `MAX_FIELD_WIDTH` bound) arithmetic/comparison/if programs: `native ==
     /// reference` AND `native == asm-interp`. The generator produces no loops/functions/faults, so a
     /// `HitCap`/`LowerError`/`Fault` would itself be a bug and trips the catch-all.
     #[test]

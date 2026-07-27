@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2bd96b722247143de508b5a88b81b920524fc1524ff6d27a9e80d917a09aad6f # shrinks to src = "(if 4 > 0 { 4 } else { 0 } + 13)"
+cc e30f7a910568419566d78de47316aefb071f805c7600b2c0ae3c814ff950e207 # shrinks to src = "let mut c = 3; fn ap(f, x) { f(x) } ap(|x| { c = c + x; c }, 2) + c"

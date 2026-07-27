@@ -19,9 +19,13 @@ fn assert_tm_agrees(src: &str) {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors: {ds:?}");
     let core = desugar(&prog.unwrap());
-    match (reference, run_tm(&core, &Unary, TM_DEFAULT_CAPS)) {
+    match (reference, run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS)) {
         (Ok(rv), TmRun::Ran { tapes }) => {
-            assert_eq!(decode_tape(&tapes, &rv, &Unary), Some(rv.clone()), "reference vs TM disagree for: {src}");
+            assert_eq!(
+                decode_tape(&tapes, &rv, &Unary::default()),
+                Some(rv.clone()),
+                "reference vs TM disagree for: {src}"
+            );
         }
         (Err(RunError::Runtime(_)), TmRun::HitCap) => {}
         (r, t) => panic!("oracle mismatch for {src}:\n  reference={r:?}\n  tm={t:?}"),
@@ -40,15 +44,15 @@ fn assert_asm_interp_matches_tm(src: &str) {
         AsmRun::Ran(o) => decode_asm(&o, &reference).expect("asm decode"),
         other => panic!("asm did not run for {src}: {other:?}"),
     };
-    let tm = match run_tm(&core, &Unary, TM_DEFAULT_CAPS) {
-        TmRun::Ran { tapes } => decode_tape(&tapes, &reference, &Unary).expect("tm decode"),
+    let tm = match run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS) {
+        TmRun::Ran { tapes } => decode_tape(&tapes, &reference, &Unary::default()).expect("tm decode"),
         other => panic!("tm did not run for {src}: {other:?}"),
     };
     assert_eq!(asm, tm, "asm-interp vs TM disagree for: {src}");
 }
 
 /// The control-flow demo subset: arithmetic, monus, comparisons, if, let/let mut, assign, while, seq.
-/// No `call`/`ret`, no list/heap ops (those are Parts 2b-2-ii/iii). Values stay well under FIELD_WIDTH.
+/// No `call`/`ret`, no list/heap ops (those are Parts 2b-2-ii/iii). Values stay well under MAX_FIELD_WIDTH.
 const CONTROL_FLOW_DEMOS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",
@@ -107,7 +111,7 @@ fn asm_interp_matches_tm_on_call_demos() {
 }
 
 /// The list-CONSTRUCTION demo subset: nil, cons, is_empty, and a list literal (desugars to a cons
-/// spine). NO head/tail (those dereference a pointer — Part 2b-2-iii-b). Values/lengths « FIELD_WIDTH.
+/// spine). NO head/tail (those dereference a pointer — Part 2b-2-iii-b). Values/lengths « MAX_FIELD_WIDTH.
 const LIST_BUILD_DEMOS: &[&str] = &["is_empty(nil)", "is_empty(cons(1, nil))", "[1, 2, 3]", "cons(1, cons(2, nil))"];
 
 #[test]
@@ -127,7 +131,7 @@ fn asm_interp_matches_tm_on_list_build_demos() {
 /// The list-ACCESS demo subset: head/tail deref on real (non-nil) lists — head -> a Nat, tail -> nil or
 /// a sub-list pointer, and a nested head(tail(...)). NO faulting access (head/tail of nil): the reference
 /// faults (RunError::Runtime) while the TM defensively halts, which is an oracle mismatch BY DESIGN;
-/// oracle-level fault-equivalence is Part 2b-2-iv. Values/lengths « FIELD_WIDTH.
+/// oracle-level fault-equivalence is Part 2b-2-iv. Values/lengths « MAX_FIELD_WIDTH.
 const LIST_ACCESS_DEMOS: &[&str] = &[
     "head(cons(7, nil))",
     "tail(cons(7, nil))",
@@ -156,9 +160,9 @@ fn asm_interp_matches_tm_on_list_access_demos() {
 fn tm_cap_matches_a_reference_nonterminating_program() {
     // An unbounded loop: the reference hits its step budget (Runtime error) and the TM hits its cap.
     // Both are the "same outcome" under cap-equivalence. The assertion holds because the 50_000-step
-    // cap fires long before the loop counter `n` grows anywhere near FIELD_WIDTH (64): at roughly
-    // 10-20x this cap, `n` would reach FIELD_WIDTH, the unary field would go exactly full,
-    // `rewind_home` would miscount (the documented FIELD_WIDTH failure mode), and the machine would
+    // cap fires long before the loop counter `n` grows anywhere near MAX_FIELD_WIDTH (64): at roughly
+    // 10-20x this cap, `n` would reach MAX_FIELD_WIDTH, the unary field would go exactly full,
+    // `rewind_home` would miscount (the documented MAX_FIELD_WIDTH failure mode), and the machine would
     // get stuck -> Halted, making `run_tm` return `Ran`, not `HitCap`. Do not raise this cap: a much
     // larger one would terminate via that corruption instead of via `HitCap`.
     use redextape_core::tm::TmCaps;
@@ -167,5 +171,5 @@ fn tm_cap_matches_a_reference_nonterminating_program() {
     assert!(ds.is_empty(), "parse errors: {ds:?}");
     let core = desugar(&prog.unwrap());
     let caps = TmCaps { steps: 50_000, cells: 50_000 };
-    assert!(matches!(run_tm(&core, &Unary, caps), TmRun::HitCap), "expected the TM to hit a cap");
+    assert!(matches!(run_tm(&core, &Unary::default(), caps), TmRun::HitCap), "expected the TM to hit a cap");
 }

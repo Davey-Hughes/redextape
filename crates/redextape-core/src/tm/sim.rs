@@ -106,6 +106,10 @@ fn apply(rule: &Rule, tapes: &mut [Tape]) {
     }
 }
 
+/// An observer called with the tapes after every applied step; returning `false` stops the run. See
+/// `simulate_watched`.
+pub type Watcher<'a> = &'a mut dyn FnMut(&[Tape]) -> bool;
+
 /// The shared iterative loop. `record` optionally collects a step trace; `counts` optionally
 /// accumulates a per-state step tally (indexed by state id, charging the state being *left*).
 /// Defensive on a malformed machine (missing state / out-of-range target / stuck state all halt).
@@ -115,6 +119,7 @@ fn run(
     caps: Caps,
     mut record: Option<&mut Vec<Step>>,
     mut counts: Option<&mut Vec<u64>>,
+    mut watch: Option<Watcher<'_>>,
 ) -> (Vec<Tape>, StateId, Status) {
     // `m.tapes` is an unbounded `usize` from the machine (not yet validated here); the initial live
     // cell count is >= the tape count (each tape starts with >= 1 cell), so the cells cap already
@@ -150,6 +155,14 @@ fn run(
             rec.push(Step { state: cur, tapes: tapes.iter().map(Tape::snapshot).collect() });
         }
         apply(rule, &mut tapes);
+        // The invariant hook (see `simulate_watched`): called on every applied step, and a `false`
+        // return stops the run here. Reported as `Halted` — the machine did not hit a cap, an observer
+        // chose to stop it — which keeps the hook from being mistaken for a resource outcome.
+        if let Some(w) = watch.as_deref_mut()
+            && !w(&tapes)
+        {
+            return (tapes, rule.next, Status::Halted);
+        }
         if let Some(c) = counts.as_deref_mut()
             && let Some(slot) = c.get_mut(cur as usize)
         {
@@ -166,14 +179,35 @@ fn run(
 
 /// Simulate to a halt or a cap, without retaining the step trace.
 pub fn simulate(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<Tape>, Status) {
-    let (tapes, _final, status) = run(m, init, caps, None, None);
+    let (tapes, _final, status) = run(m, init, caps, None, None, None);
     (tapes, status)
+}
+
+/// Simulate to a halt or a cap, reporting the final state alongside the tapes. The state is what tells
+/// a caller *why* a machine halted — in particular whether it halted in the overflow-guard state that
+/// `lower_tm_guarded` hands back. `simulate` is exactly this with the state discarded.
+pub fn simulate_final(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<Tape>, StateId, Status) {
+    run(m, init, caps, None, None, None)
+}
+
+/// Simulate, calling `watch` with the tapes after every applied step; a `false` return stops the run
+/// (reported as `Status::Halted`, since nothing hit a cap). The hook exists for invariant checking: it
+/// is how a test asserts a property of every intermediate configuration rather than only of the final
+/// one, which is what makes the overflow guard's completeness an observation rather than an argument
+/// from enumerating write sites.
+pub fn simulate_watched(
+    m: &Machine,
+    init: &[Vec<Symbol>],
+    caps: Caps,
+    watch: Watcher<'_>,
+) -> (Vec<Tape>, StateId, Status) {
+    run(m, init, caps, None, None, Some(watch))
 }
 
 /// Simulate, recording every step (before it is applied) for the scrubbable trace / view models.
 pub fn simulate_trace(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> Trace {
     let mut steps = Vec::new();
-    let (tapes, final_state, status) = run(m, init, caps, Some(&mut steps), None);
+    let (tapes, final_state, status) = run(m, init, caps, Some(&mut steps), None, None);
     let final_tapes = tapes.iter().map(Tape::snapshot).collect();
     Trace { steps, final_state, final_tapes, status }
 }
@@ -185,7 +219,7 @@ pub fn simulate_trace(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> Trace {
 /// allocates one `u64` per state, once.
 pub fn simulate_counts(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<u64>, Status) {
     let mut counts = vec![0u64; m.states.len()];
-    let (_tapes, _final, status) = run(m, init, caps, None, Some(&mut counts));
+    let (_tapes, _final, status) = run(m, init, caps, None, Some(&mut counts), None);
     (counts, status)
 }
 

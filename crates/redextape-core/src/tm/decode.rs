@@ -58,7 +58,7 @@ mod tests {
     use crate::tm::sim::{DEFAULT_CAPS as CAPS, simulate};
 
     fn run_to_tapes(prog: &Program) -> Vec<Tape> {
-        let enc = Unary;
+        let enc = Unary::default();
         let m = lower_tm(prog, &enc);
         let sm = SlotMap::of(prog);
         let mut init = vec![Vec::new(); TAPES];
@@ -79,7 +79,7 @@ mod tests {
             labels: vec![],
         };
         let tapes = run_to_tapes(&prog);
-        assert_eq!(decode_tape(&tapes, &Value::Nat(0), &Unary), Some(Value::Nat(5)));
+        assert_eq!(decode_tape(&tapes, &Value::Nat(0), &Unary::default()), Some(Value::Nat(5)));
     }
 
     #[test]
@@ -95,17 +95,17 @@ mod tests {
             labels: vec![],
         };
         let tapes = run_to_tapes(&prog);
-        assert_eq!(decode_tape(&tapes, &Value::Bool(false), &Unary), Some(Value::Bool(true)));
+        assert_eq!(decode_tape(&tapes, &Value::Bool(false), &Unary::default()), Some(Value::Bool(true)));
         // Same tape, a Nat witness: still decodes (to Nat(1)) — but as a DIFFERENT value, which is how
         // decode catches a machine that computed the wrong thing under a given type.
-        assert_eq!(decode_tape(&tapes, &Value::Nat(9), &Unary), Some(Value::Nat(1)));
+        assert_eq!(decode_tape(&tapes, &Value::Nat(9), &Unary::default()), Some(Value::Nat(1)));
     }
 
     #[test]
     fn non_first_class_shapes_decode_to_none() {
         let prog = Program { code: vec![Instr::Halt], labels: vec![] };
         let tapes = run_to_tapes(&prog);
-        assert_eq!(decode_tape(&tapes, &Value::Unit, &Unary), None);
+        assert_eq!(decode_tape(&tapes, &Value::Unit, &Unary::default()), None);
     }
 
     #[test]
@@ -123,15 +123,18 @@ mod tests {
             labels: vec![],
         };
         let tapes = run_to_tapes(&prog);
-        assert_eq!(decode_tape(&tapes, &Value::list_of_nats(&[1, 2]), &Unary), Some(Value::list_of_nats(&[1, 2])));
+        assert_eq!(
+            decode_tape(&tapes, &Value::list_of_nats(&[1, 2]), &Unary::default()),
+            Some(Value::list_of_nats(&[1, 2]))
+        );
     }
 
     #[test]
     fn decodes_nil_result() {
         let prog = Program { code: vec![Instr::Nil(Reg::Rr), Instr::Halt], labels: vec![] };
         let tapes = run_to_tapes(&prog);
-        assert_eq!(decode_tape(&tapes, &Value::Nil, &Unary), Some(Value::Nil));
+        assert_eq!(decode_tape(&tapes, &Value::Nil, &Unary::default()), Some(Value::Nil));
         // A Cons witness over a nil result decodes to None (pointer 0 is not a cons).
-        assert_eq!(decode_tape(&tapes, &Value::list_of_nats(&[1]), &Unary), None);
+        assert_eq!(decode_tape(&tapes, &Value::list_of_nats(&[1]), &Unary::default()), None);
     }
 }

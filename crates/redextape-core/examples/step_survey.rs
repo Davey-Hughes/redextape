@@ -35,9 +35,11 @@
 use std::collections::BTreeMap;
 
 use redextape_core::core::{BinOp, Core, NodeId};
+use redextape_core::desugar::desugar;
+use redextape_core::parser::parse;
 use redextape_core::run;
-use redextape_core::tm::attribute::{Attribution, StepBucket, attribute};
-use redextape_core::tm::{LowerError, defunc, lower_asm};
+use redextape_core::tm::attribute::{Attribution, StepBucket, attribute, attribute_at};
+use redextape_core::tm::{LowerError, TM_DEFAULT_CAPS, Unary, defunc, lower_asm, run_tm_fitted};
 
 // ================================================================================================
 // Part A's corpus — copied verbatim, see the module doc comment above for why and from where.
@@ -469,6 +471,9 @@ fn main() {
     println!("      `$apply1`), so their combined recovery exceeds either row and is not measured here.");
 
     print_conclusion(&all, &first_order_only, &ceilings);
+
+    print_width_reranking();
+    print_width_caveat();
 
     println!(
         "\n\nNo corpus program or probe hit the step cap: {}",
@@ -1338,6 +1343,186 @@ fn ceiling(ceilings: &BTreeMap<&str, f64>, label: &str) -> f64 {
 /// program here runs at least one step, checked by `print_program_attribution`'s own assertion).
 fn pct(part: u64, whole: u64) -> f64 {
     if whole == 0 { 0.0 } else { part as f64 / whole as f64 * 100.0 }
+}
+
+/// The four top-level shares, as percentages of the corpus total: (user, machine ABI, closure dispatch,
+/// closure boxing). The same rollup `Rollup::print` reports, reduced to the numbers the ranking rests on.
+#[derive(Clone, Copy, Debug)]
+struct Shares {
+    user: f64,
+    machine: f64,
+    dispatch: f64,
+    boxing: f64,
+    total: u64,
+}
+
+/// Running bucket totals, in the shape the Tier A comparison needs.
+#[derive(Clone, Copy, Debug, Default)]
+struct Tally {
+    user: u64,
+    machine: u64,
+    closure_dispatch: u64,
+    closure_box: u64,
+    /// `Apply` steps whose callee is an `$applyN` dispatcher. NOT the same as `closure_dispatch`: the
+    /// devirtualization target is the SUM of the two, which is the number the Tier A choice was made
+    /// on — the `ClosureScaffold` bucket alone is barely half of it.
+    apply_dispatch: u64,
+}
+
+impl Tally {
+    fn devirt_target(&self) -> u64 {
+        self.apply_dispatch + self.closure_dispatch
+    }
+    fn total(&self) -> u64 {
+        self.user + self.machine + self.closure_dispatch + self.closure_box
+    }
+}
+
+/// Roll one program's attribution into running bucket totals, by the same rules `Rollup::add` uses.
+fn accumulate(a: &Attribution, core: &Core, src: &str, out: &mut Tally) {
+    let classes = classify_applies(core);
+    for (bucket, &steps) in &a.histogram {
+        match bucket {
+            StepBucket::Node(id) => {
+                out.user += steps;
+                if canonical_kind(node_at(core, *id, src), &classes) == APPLY_DISPATCH {
+                    out.apply_dispatch += steps;
+                }
+            }
+            StepBucket::MachineScaffold => out.machine += steps,
+            StepBucket::ClosureScaffold(id) => {
+                if is_box_scaffold(node_at(core, *id, src)) {
+                    out.closure_box += steps;
+                } else {
+                    out.closure_dispatch += steps;
+                }
+            }
+        }
+    }
+}
+
+fn shares_of(t: Tally) -> Shares {
+    let total = t.total();
+    Shares {
+        user: pct(t.user, total),
+        machine: pct(t.machine, total),
+        dispatch: pct(t.devirt_target(), total),
+        boxing: pct(t.closure_box, total),
+        total,
+    }
+}
+
+/// THE RE-RANKING MEASUREMENT. Every share this survey reports is measured at the pinned field width
+/// 64. Step cost is affine in the width (`steps = a + b*W`) and the `b*W` term is 91–97% of the total
+/// at 64, so those shares are very nearly a ranking by `b` alone — by field-traversal cost. `run_tm`
+/// now fits a narrower width per program, where the fixed term is a third of the cost rather than a
+/// twentieth. A bucket's share is width-independent only if every bucket has the same `b/a` ratio,
+/// which nothing guarantees.
+///
+/// So: re-attribute the whole corpus at each program's OWN fitted width and compare. This answers
+/// whether the Tier A ordering survives sizing, rather than asserting a direction for it.
+fn print_width_reranking() {
+    println!("\n\n  ══ DOES THE RANKING SURVIVE PER-PROGRAM SIZING? ══\n");
+    for line in wrap(
+        "Every share above is measured at the pinned field width 64. Step cost is affine in the width \
+         and the width-driven term is 91% to 97% of the total there, so those shares are close to a \
+         ranking by field-traversal cost alone. `run_tm` now fits a narrower width per program. This \
+         re-attributes the identical corpus at each program's own fitted width and compares — the \
+         question is whether the ORDER of the buckets the Tier A passes target changes.",
+        96,
+    ) {
+        println!("  {line}");
+    }
+
+    let mut pinned = Tally::default();
+    let mut fitted = Tally::default();
+    let mut widths: BTreeMap<usize, usize> = BTreeMap::new();
+    for src in FIRST_ORDER_DEMOS.iter().chain(LAMBDA_LIMITATION_DEMOS.iter()) {
+        let (core, _) = core_for_display(src);
+        let program = desugar(&parse(src).0.expect("parses"));
+        let (_, w) = run_tm_fitted(&program, &Unary::default(), TM_DEFAULT_CAPS);
+        let w = w.expect("the unary encoding always reports a fitted width");
+        *widths.entry(w).or_insert(0) += 1;
+
+        let at64 = attribute_at(src, &Unary::default()).expect("attributes at 64");
+        let atw = attribute_at(src, &Unary::at(w)).expect("attributes at its fitted width");
+        assert!(!at64.capped && !atw.capped, "a corpus program must complete at both widths: {src}");
+        assert!(atw.total > 0, "a program attributed at its FITTED width must have run: {src}");
+        accumulate(&at64, &core, src, &mut pinned);
+        accumulate(&atw, &core, src, &mut fitted);
+    }
+
+    let p = shares_of(pinned);
+    let f = shares_of(fitted);
+    println!("\n  fitted widths chosen across the corpus: {widths:?} (width -> program count)");
+    println!("  corpus steps at pinned 64: {}   at fitted widths: {}", p.total, f.total);
+    println!(
+        "  the corpus as a whole runs {:.2}x fewer steps when each program is sized\n",
+        p.total as f64 / f.total as f64
+    );
+
+    println!("  {:<44} {:>12} {:>12} {:>10}", "bucket", "@64", "@fitted", "change");
+    for (label, a, b) in [
+        ("user constructs (all kinds, summed)", p.user, f.user),
+        ("frame-restore ABI target (MachineScaffold)", p.machine, f.machine),
+        ("devirtualization target ($applyN + dispatch)", p.dispatch, f.dispatch),
+        ("mutable-capture boxing (a different pass)", p.boxing, f.boxing),
+    ] {
+        println!("  {label:<44} {a:>11.1}% {b:>11.1}% {:>+9.1}pp", b - a);
+    }
+
+    // The ranking claim under test is the order of the two PASS TARGETS, which is NOT the same as the
+    // order of the raw scaffolding buckets: the devirtualization target is `$applyN`-callee Apply steps
+    // PLUS the ClosureScaffold dispatch bucket, and the ClosureScaffold half alone is barely half of
+    // it. Comparing the raw buckets would test a margin of ~14pp instead of the real ~1pp.
+    let order = |s: &Shares| if s.dispatch > s.machine { "devirt > ABI" } else { "ABI > devirt" };
+    println!(
+        "\n  margin between the two pass targets — at 64: {:.1}pp   at fitted: {:.1}pp",
+        (p.machine - p.dispatch).abs(),
+        (f.machine - f.dispatch).abs()
+    );
+    println!("  order — at 64: {}   at fitted: {}", order(&p), order(&f));
+    println!(
+        "  VERDICT: the ordering {}",
+        if order(&p) == order(&f) {
+            "is PRESERVED under per-program sizing."
+        } else {
+            "FLIPS under per-program sizing — the Tier A choice was made on width-64 evidence."
+        }
+    );
+}
+
+/// The narrow, MEASURED caveat that survives the re-ranking section above. An earlier draft of this
+/// survey asserted a mechanism here — that a traversal-eliminating pass (the frame-restore ABI) would
+/// lose most of its measured win as fields narrow while an instruction-eliminating one
+/// (devirtualization) kept its. That was reasoning, not measurement, and the measurement contradicts
+/// its direction: the ABI share ROSE. Both pass targets rose, because the buckets that shrink fastest
+/// under sizing are the user constructs, not the scaffolding.
+fn print_width_caveat() {
+    println!("\n\n  ── What the width result does and does not settle ──\n");
+    for line in wrap(
+        "SETTLED: the Tier A ordering does not depend on the field width. Re-attributing the whole \
+         corpus at each program's own fitted width moves every share by at most 2.5 percentage points \
+         and leaves the order of the two pass targets unchanged. The concern that these shares were an \
+         artifact of measuring at width 64 — where 91% to 97% of every step is padding traversal — is \
+         answered, and answered against the hypothesis that motivated it.",
+        96,
+    ) {
+        println!("  {line}");
+    }
+    println!();
+    for line in wrap(
+        "NOT SETTLED, and more important than the width question ever was: the two pass targets are \
+         within about one percentage point of each other, at either width. That is not a ranking. It \
+         is a tie inside the noise of a 50-program corpus whose largest single member is 17.7% of all \
+         steps, and it means the choice between devirtualization and the frame-restore ABI cannot be \
+         made on these aggregate shares at all — the tie-breakers are the ones Part B already names: \
+         devirtualization ENABLES inlining (nothing inlines through `$apply1`), while the ABI cost is \
+         superlinear in locals live across a call and has no pass-ceiling probe.",
+        96,
+    ) {
+        println!("  {line}");
+    }
 }
 
 /// A single-line, whitespace-collapsed, width-truncated view of a (possibly multi-line) demo string.

@@ -419,3 +419,42 @@ produce. The oracle validates every combination.
   tree-sitter for *highlighting only* (hand-parser stays the semantic source of truth; drift is cosmetic)
   or tree-sitter as the *only* parser (lower CST→Core; couples the build to the tree-sitter toolchain).
   Never maintain two authoritative grammars.
+
+- **TM bank-safety: the four items left on the table (2026-07-26).** The per-program field-width slice
+  built a verification ladder for the register bank — enumeration of write sites, guard-rule position,
+  a per-step tape invariant (corpus then generated then exhaustive over 198,928 length-2 asm programs),
+  and a static per-rule check covering non-terminating runs. HEAP/STACK final-tape structure followed.
+  These four were assessed and deliberately NOT done; each records why, so a future reader can weigh it
+  rather than rediscover it.
+
+  1. **`run_tm` guards `MAX_SLOTS` but not `MAX_FRAME_LOC`** (small, real, PRE-EXISTING). `attribute`
+     mirrors both refusals; `run_tm` mirrors only one, so a program whose `Loc` bank `lower_tm` refuses
+     to lay out comes back as `TmRun::Ran` over tapes that decode to nothing, instead of a resource
+     outcome. Already documented as a known asymmetry in `attribute.rs`'s `Attribution::unrepresentable`
+     doc. **Fix:** call `frame_bank_unrepresentable` in `run_tm_fitted`/`run_tm_at` and return `HitCap`,
+     exactly as the `MAX_SLOTS` arm does. **Why deferred:** it is a behaviour change on a path no real
+     program reaches (`MAX_FRAME_LOC` is 1,000 locals), so it wanted its own decision rather than being
+     folded into a verification slice.
+
+  2. **Length-3 enumeration** (rung 2 stops at 2). Exhaustive length-3 is ~11.2M programs per width —
+     infeasible — but a seeded sample is easy. **Why deferred:** length 2 is where store-then-read
+     interaction first appears, which is the shape the bank invariant is about; the marginal defect
+     class at length 3 is speculative rather than identified. Revisit if a defect ever escapes to a
+     3-instruction shape.
+
+  3. **The LENGTH half of the bank skeleton has no static cover.** Rung 3 proves delimiters are never
+     overwritten, for every execution. It cannot see the head walking off the end of the bank and
+     extending the tape, because that is a position property; that half rests on simulation. The
+     informal argument is that with delimiters provably intact, `rewind_home`'s counted `#`-walk cannot
+     run off — but that is an argument, not a check. Closing it needs the head-offset dataflow analysis
+     rung 3 deliberately avoided, whose own soundness would become a new thing to trust.
+
+  4. **`Encoding::at_width` on an unbounded encoding is untestable today.** `run_tm_fitted`'s
+     `field_width() == None` branch (one attempt, no search) has no second `Encoding` impl to exercise
+     it. **Not a gap to close — a test to write the day `Binary` lands**, at which point it is free.
+
+  Also settled, so nobody re-opens it: **rung 4 (mechanized proof) was assessed and rejected.** Bounded
+  model checking (Kani) loses to plain enumeration on this property, because the input space is small
+  enough to enumerate while executions are 10^4-10^5 steps and would have to be symbolically unwound. A
+  proof assistant would verify a MODEL and leave the model-matches-`encoding.rs` gap unproven — the same
+  objection raised against rung 3's analyzer, one level larger.

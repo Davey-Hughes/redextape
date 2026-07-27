@@ -3,13 +3,15 @@
 
 use redextape_core::core::BinOp;
 use redextape_core::tm::machine::{BLANK, Symbol};
-use redextape_core::tm::{Builder, Encoding, FIELD_WIDTH, REG, SEP, TAPES, TM_DEFAULT_CAPS, TmStatus, Unary, simulate};
+use redextape_core::tm::{
+    Builder, Encoding, MAX_FIELD_WIDTH, REG, SEP, TAPES, TM_DEFAULT_CAPS, TmStatus, Unary, simulate,
+};
 
-/// An all-zero fixed-width register bank of `fields` fields: `#` then `FIELD_WIDTH` blanks + `#`, repeated.
+/// An all-zero fixed-width register bank of `fields` fields: `#` then `MAX_FIELD_WIDTH` blanks + `#`, repeated.
 fn zero_bank(fields: usize) -> Vec<Symbol> {
     let mut bank = vec![SEP];
     for _ in 0..fields {
-        bank.extend(std::iter::repeat_n(BLANK, FIELD_WIDTH));
+        bank.extend(std::iter::repeat_n(BLANK, MAX_FIELD_WIDTH));
         bank.push(SEP);
     }
     bank
@@ -18,7 +20,7 @@ fn zero_bank(fields: usize) -> Vec<Symbol> {
 #[test]
 fn gadgets_compose_into_a_multi_step_computation() {
     // (3 + 2) * 2 == 10, in a 4-field bank: s0=3, s1=2, s2=(s0+s1), s3=(s2*s1).
-    let enc = Unary;
+    let enc = Unary::default();
     let mut b = Builder::new();
     let halt = b.accept("halt");
     // build back-to-front: mul(s2,s1)->s3 ; add(s0,s1)->s2 ; lit s1=2 ; lit s0=3
@@ -43,7 +45,7 @@ fn gadgets_compose_into_a_multi_step_computation() {
 #[test]
 fn gadgets_compose_with_a_trailing_comparison() {
     // (3 + 2) * 2 == 10, then compare s3 == 10 (a literal in s4) -> s5 holds the boolean `1`.
-    let enc = Unary;
+    let enc = Unary::default();
     let mut b = Builder::new();
     let halt = b.accept("halt");
     // build back-to-front: eq(s3,s4)->s5 ; lit s4=10 ; mul(s2,s1)->s3 ; add(s0,s1)->s2 ; lit s1=2 ; lit s0=3

@@ -25,11 +25,15 @@ fn assert_three_way(src: &str) {
     assert!(ds.is_empty(), "parse errors: {ds:?}");
     let core = desugar(&prog.unwrap());
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
-    let tm = run_tm(&core, &Unary, TM_DEFAULT_CAPS);
+    let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
     match (reference, lambda, tm) {
         (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }) => {
             assert_eq!(decode(&nf, &rv), Some(rv.clone()), "reference vs λ disagree for: {src}");
-            assert_eq!(decode_tape(&tapes, &rv, &Unary), Some(rv.clone()), "reference vs TM disagree for: {src}");
+            assert_eq!(
+                decode_tape(&tapes, &rv, &Unary::default()),
+                Some(rv.clone()),
+                "reference vs TM disagree for: {src}"
+            );
         }
         (r, l, t) => panic!("three-way oracle mismatch for {src}:\n  reference={r:?}\n  lambda={l:?}\n  tm={t:?}"),
     }
@@ -44,7 +48,7 @@ fn assert_three_way_diverges(src: &str) {
     assert!(ds.is_empty(), "parse errors: {ds:?}");
     let core = desugar(&prog.unwrap());
     let lambda = run_lambda(&core, 20_000);
-    let tm = run_tm(&core, &Unary, TmCaps { steps: 20_000, cells: 20_000 });
+    let tm = run_tm(&core, &Unary::default(), TmCaps { steps: 20_000, cells: 20_000 });
     match (reference, lambda, tm) {
         (Err(RunError::Runtime(_)), LambdaRun::HitCap, TmRun::HitCap) => {}
         (r, l, t) => panic!("expected all three to diverge on {src}:\n  reference={r:?}\n  lambda={l:?}\n  tm={t:?}"),
@@ -62,9 +66,13 @@ fn assert_tm_only(src: &str) {
         matches!(run_lambda(&core, MAX_REDUCTION_STEPS), LambdaRun::LowerError(_)),
         "λ should refuse the v1 latent trap: {src}"
     );
-    match (reference, run_tm(&core, &Unary, TM_DEFAULT_CAPS)) {
+    match (reference, run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS)) {
         (Ok(rv), TmRun::Ran { tapes }) => {
-            assert_eq!(decode_tape(&tapes, &rv, &Unary), Some(rv.clone()), "reference vs TM disagree for: {src}")
+            assert_eq!(
+                decode_tape(&tapes, &rv, &Unary::default()),
+                Some(rv.clone()),
+                "reference vs TM disagree for: {src}"
+            )
         }
         (r, t) => panic!("reference vs TM mismatch for {src}:\n  reference={r:?}\n  tm={t:?}"),
     }
@@ -74,7 +82,7 @@ fn assert_tm_only(src: &str) {
 /// calls & recursion, list construction & access, (Plan 3b-1) higher-order programs that `run_tm`
 /// now defunctionalizes before lowering (a function passed as a value, `map`/`fold`), and
 /// MUTUALLY RECURSIVE / FORWARD-REFERENCING `fn`s (`Core::LetRecGroup`). Every value
-/// stays « FIELD_WIDTH (64) and every program runs to a value on ALL THREE backends. (The Plan-2
+/// stays « MAX_FIELD_WIDTH (64) and every program runs to a value on ALL THREE backends. (The Plan-2
 /// latent traps that λ v1 REJECTS live in LAMBDA_LIMITATION_DEMOS below — they are not three-way.)
 const FIRST_ORDER_DEMOS: &[&str] = &[
     "1 + 2 * 3",
@@ -354,7 +362,7 @@ fn latent_traps_agree_reference_and_tm_while_lambda_refuses() {
     }
 }
 
-/// A first-order expression generator whose value — AND every intermediate — stays under FIELD_WIDTH
+/// A first-order expression generator whose value — AND every intermediate — stays under MAX_FIELD_WIDTH
 /// (64) (the `depth=3` recursion cap plus value-non-growing ops keep it there; measured max 27 over 2M
 /// samples), so the TM's fixed-width unary fields never overflow. Leaves are `< 8` and the node budget
 /// keeps the total leaf-sum small; it emits only value-non-growing ops: `+` (bounded by the leaf-sum),
@@ -391,11 +399,11 @@ proptest! {
         prop_assume!(ds.is_empty()); // skip anything that does not parse/type-check
         let core = desugar(&prog.unwrap());
         let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
-        let tm = run_tm(&core, &Unary, TM_DEFAULT_CAPS);
+        let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
         match (reference, lambda, tm) {
             (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }) => {
                 prop_assert_eq!(decode(&nf, &rv), Some(rv.clone()));
-                prop_assert_eq!(decode_tape(&tapes, &rv, &Unary), Some(rv));
+                prop_assert_eq!(decode_tape(&tapes, &rv, &Unary::default()), Some(rv));
             }
             (r, l, t) => prop_assert!(false, "three-way mismatch for {}:\n ref={:?}\n λ={:?}\n tm={:?}", src, r, l, t),
         }
@@ -409,7 +417,7 @@ proptest! {
 // oracle to the features that were previously covered by curated demos alone — the hardest, most
 // bug-prone code: mutable capture (boxing, Plan 3b-2), higher-order (defunc, Plan 3b-1), lists +
 // access, bounded recursion, and bounded imperative loops. Every operand is `< 8` and every
-// generated value AND intermediate is provably `< FIELD_WIDTH` (64) — the only arithmetic is a
+// generated value AND intermediate is provably `< MAX_FIELD_WIDTH` (64) — the only arithmetic is a
 // small number of bounded `+`s (worst case ~17) plus monus/comparison, so the TM's fixed-width unary
 // fields never overflow.
 // Each generator carries a non-vacuity meta-test proving it actually reaches its target oracle bucket.
@@ -423,11 +431,11 @@ fn three_way_value(src: &str) -> Result<(), TestCaseError> {
     prop_assume!(ds.is_empty()); // skip anything that doesn't parse/type-check
     let core = desugar(&prog.unwrap());
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
-    let tm = run_tm(&core, &Unary, TM_DEFAULT_CAPS);
+    let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
     match (reference, lambda, tm) {
         (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }) => {
             prop_assert_eq!(decode(&nf, &rv), Some(rv.clone()), "reference vs λ disagree: {}", src);
-            prop_assert_eq!(decode_tape(&tapes, &rv, &Unary), Some(rv), "reference vs TM disagree: {}", src);
+            prop_assert_eq!(decode_tape(&tapes, &rv, &Unary::default()), Some(rv), "reference vs TM disagree: {}", src);
             Ok(())
         }
         (r, l, t) => {
@@ -450,9 +458,9 @@ fn two_way_tm_only(src: &str) -> Result<(), TestCaseError> {
         "λ must refuse mut-in-closure: {}",
         src
     );
-    match (reference, run_tm(&core, &Unary, TM_DEFAULT_CAPS)) {
+    match (reference, run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS)) {
         (Ok(rv), TmRun::Ran { tapes }) => {
-            prop_assert_eq!(decode_tape(&tapes, &rv, &Unary), Some(rv), "reference vs TM disagree: {}", src);
+            prop_assert_eq!(decode_tape(&tapes, &rv, &Unary::default()), Some(rv), "reference vs TM disagree: {}", src);
             Ok(())
         }
         (r, t) => {
@@ -514,7 +522,10 @@ fn arb_mutable_capture_is_non_vacuous() {
             matches!(run_lambda(&core, MAX_REDUCTION_STEPS), LambdaRun::LowerError(_)),
             "must be λ-rejected: {src}"
         );
-        assert!(matches!(run_tm(&core, &Unary, TM_DEFAULT_CAPS), TmRun::Ran { .. }), "must run on TM (boxed): {src}");
+        assert!(
+            matches!(run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::Ran { .. }),
+            "must run on TM (boxed): {src}"
+        );
         assert!(run(src).is_ok(), "reference must run: {src}");
     }
 }
@@ -671,7 +682,7 @@ fn broadened_generators_are_non_vacuous() {
 // value and "agree." These tests assert MATHEMATICAL LAWS any correct implementation must satisfy — two
 // structurally-different programs that must compute the same value — checked on the reference AND the
 // TM. A law violation is a real bug REGARDLESS of backend agreement, so this is complementary to (not
-// subsumed by) the differential oracle above. All operands bounded so every value is `< FIELD_WIDTH`.
+// subsumed by) the differential oracle above. All operands bounded so every value is `< MAX_FIELD_WIDTH`.
 // ============================================================================================
 
 /// Run `src` on the TM and decode against its reference value; `None` if the reference faults, the
@@ -683,8 +694,8 @@ fn tm_val(src: &str) -> Option<Value> {
         return None;
     }
     let core = desugar(&prog.unwrap());
-    match run_tm(&core, &Unary, TM_DEFAULT_CAPS) {
-        TmRun::Ran { tapes } => decode_tape(&tapes, &expected, &Unary),
+    match run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS) {
+        TmRun::Ran { tapes } => decode_tape(&tapes, &expected, &Unary::default()),
         _ => None,
     }
 }
@@ -851,7 +862,7 @@ proptest! {
         prop_assume!(ds.is_empty());
         let core = desugar(&prog.unwrap());
         let lambda = run_lambda(&core, 20_000);
-        let tm = run_tm(&core, &Unary, TmCaps { steps: 20_000, cells: 20_000 });
+        let tm = run_tm(&core, &Unary::default(), TmCaps { steps: 20_000, cells: 20_000 });
         match (reference, lambda, tm) {
             (Err(RunError::Runtime(_)), LambdaRun::HitCap, TmRun::HitCap) => {}
             (r, l, t) => prop_assert!(false, "expected all three to diverge on {}:\n ref={:?}\n λ={:?}\n tm={:?}", src, r, l, t),
