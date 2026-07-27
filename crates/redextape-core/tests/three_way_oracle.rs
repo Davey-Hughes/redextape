@@ -1,24 +1,43 @@
-//! The three-way oracle (spec §12.1): for every first-order demo, the reference tree-walker's value,
-//! the decoded λ normal form, and the decoded TM final tape all agree. Runtime faults are the shared
-//! "no value" outcome (reference Runtime, λ HitCap, TM HitCap). Higher-order programs (map/fold, a
-//! function-valued argument) are three-way too as of Plan 3b-1: `run_tm` defunctionalizes -- rewrites
-//! higher-order Core into the first-order subset `lower_asm` already handles -- before lowering, so
-//! they run on the TM like everything else. The dual case is the λ-refuses side
-//! (`LAMBDA_LIMITATION_DEMOS`/`assert_tm_only`): Plan-2 latent traps that λ v1 REJECTS (`LowerError`)
-//! while the reference and the first-order TM both run them to a value. The per-category oracles
-//! (tm_oracle.rs's reference==TM / asm-interp==TM, lambda_oracle.rs's reference==λ) stay for
-//! localization; this file is the unified capstone.
+//! The backend oracle (spec §12.1) — FOUR-WAY as of Task 14: for every first-order demo, the reference
+//! tree-walker's value, the decoded λ normal form, and the decoded TM final tape — compiled and
+//! simulated under BOTH `Unary` and `Binary` — all agree: reference == λ == unary-TM == binary-TM. The
+//! two TM legs are DIFFERENT MACHINES compiled from the same Core (a different encoding lowers to a
+//! genuinely different bank layout and gadget set), not the same machine read two ways -- which is what
+//! makes this a real fourth leg rather than a restatement of the third. Runtime faults are the shared
+//! "no value" outcome (reference Runtime, λ HitCap, both TM legs HitCap). Higher-order programs
+//! (map/fold, a function-valued argument) are four-way too, as of Plan 3b-1 for the TM legs: `run_tm`
+//! defunctionalizes -- rewrites higher-order Core into the first-order subset `lower_asm` already
+//! handles -- before lowering, so they run on the TM like everything else, under either encoding. The
+//! dual case is the λ-refuses side (`LAMBDA_LIMITATION_DEMOS`/`assert_tm_only`): Plan-2 latent traps
+//! that λ v1 REJECTS (`LowerError`) while the reference and both first-order TM legs run them to a
+//! value. The per-category oracles (tm_oracle.rs's reference==TM / asm-interp==TM, lambda_oracle.rs's
+//! reference==λ) stay for localization; this file is the unified capstone.
+//!
+//! This file keeps the name `three_way_oracle.rs` even though the oracle it drives is now four-way:
+//! renaming it would break `first_order_demos_stay_synced_across_all_three_copies`'s path-based
+//! extraction of `FIRST_ORDER_DEMOS` (by `CARGO_MANIFEST_DIR`-relative path, not by module name) for no
+//! gain, so the filename/doc mismatch is a deliberate decision, not an oversight.
+//!
+//! DISCOVERY (Task 14): every binary leg below runs via `run_tm_fitted`, not `run_tm`, and decodes with
+//! `Binary::at(width)` at the WIDTH THE FIT ACTUALLY SETTLED ON, not `Binary::default()` (64 cells).
+//! `Binary::decode_nat`/`parse_heap_cells` are width-STRICT (they require the field to close exactly
+//! `self.width` cells later), unlike `Unary`'s content-driven decode, which scans to the next `#` and
+//! so happens to work at ANY width. Decoding a fitted-at-16 binary tape with a 64-wide `Binary` silently
+//! returns `None` for every single demo, not just `100 * 100` -- measured directly, not assumed.
 
 use proptest::prelude::*;
 use redextape_core::desugar::desugar;
 use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, run_lambda};
 use redextape_core::parser::parse;
-use redextape_core::tm::{TM_DEFAULT_CAPS, TmCaps, TmRun, Unary, decode_tape, run_tm};
+use redextape_core::tm::{Binary, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary, decode_tape, run_tm, run_tm_fitted};
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 
-/// reference == λ == TM, guided by the reference value's type. All three must run to a value that
-/// decodes equal.
+/// reference == λ == unary-TM == binary-TM, guided by the reference value's type. All four must run
+/// to a value that decodes equal.
+///
+/// The two TM legs are DIFFERENT MACHINES compiled from the same Core, not the same machine read two
+/// ways — which is what makes this a real fourth leg rather than a restatement of the third.
 fn assert_three_way(src: &str) {
     let reference = run(src);
     let (prog, ds) = parse(src);
@@ -26,22 +45,33 @@ fn assert_three_way(src: &str) {
     let core = desugar(&prog.unwrap());
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
     let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
-    match (reference, lambda, tm) {
-        (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }) => {
+    // `run_tm_fitted`, not `run_tm`: `Binary`'s decode is width-strict, so the tape must be read back
+    // at the SAME width the fit settled on (see this file's module doc, "DISCOVERY (Task 14)").
+    let (btm, bwidth) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
+    match (reference, lambda, tm, btm) {
+        (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }, TmRun::Ran { tapes: btapes }) => {
             assert_eq!(decode(&nf, &rv), Some(rv.clone()), "reference vs λ disagree for: {src}");
             assert_eq!(
                 decode_tape(&tapes, &rv, &Unary::default()),
                 Some(rv.clone()),
-                "reference vs TM disagree for: {src}"
+                "reference vs unary-TM disagree for: {src}"
+            );
+            let benc = Binary::at(bwidth.expect("Binary::field_width() is always Some"));
+            assert_eq!(
+                decode_tape(&btapes, &rv, &benc),
+                Some(rv.clone()),
+                "reference vs binary-TM disagree for: {src}"
             );
         }
-        (r, l, t) => panic!("three-way oracle mismatch for {src}:\n  reference={r:?}\n  lambda={l:?}\n  tm={t:?}"),
+        (r, l, t, b) => panic!(
+            "backend oracle mismatch for {src}:\n  reference={r:?}\n  lambda={l:?}\n  unary-tm={t:?}\n  binary-tm={b:?}"
+        ),
     }
 }
 
 /// A runtime-faulting program: the reference faults (Runtime), λ's head/tail of nil is Ω (no normal
-/// form), and the TM's deref fault state spins — all the same "no value" outcome. Small caps keep the
-/// two divergences fast.
+/// form), and both TM legs' deref fault state spins — all the same "no value" outcome. Small caps keep
+/// the divergences fast.
 fn assert_three_way_diverges(src: &str) {
     let reference = run(src);
     let (prog, ds) = parse(src);
@@ -49,14 +79,17 @@ fn assert_three_way_diverges(src: &str) {
     let core = desugar(&prog.unwrap());
     let lambda = run_lambda(&core, 20_000);
     let tm = run_tm(&core, &Unary::default(), TmCaps { steps: 20_000, cells: 20_000 });
-    match (reference, lambda, tm) {
-        (Err(RunError::Runtime(_)), LambdaRun::HitCap, TmRun::HitCap) => {}
-        (r, l, t) => panic!("expected all three to diverge on {src}:\n  reference={r:?}\n  lambda={l:?}\n  tm={t:?}"),
+    let btm = run_tm(&core, &Binary::default(), TmCaps { steps: 20_000, cells: 20_000 });
+    match (reference, lambda, tm, btm) {
+        (Err(RunError::Runtime(_)), LambdaRun::HitCap, TmRun::HitCap, TmRun::HitCap) => {}
+        (r, l, t, b) => panic!(
+            "expected reference/λ/both TM legs to diverge on {src}:\n  reference={r:?}\n  lambda={l:?}\n  unary-tm={t:?}\n  binary-tm={b:?}"
+        ),
     }
 }
 
 /// A program the λ backend refuses to lower in v1 (`LowerError`),
-/// while the reference and the first-order TM agree on the value.
+/// while the reference and both first-order TM legs agree on the value.
 fn assert_tm_only(src: &str) {
     let reference = run(src);
     let (prog, ds) = parse(src);
@@ -66,16 +99,75 @@ fn assert_tm_only(src: &str) {
         matches!(run_lambda(&core, MAX_REDUCTION_STEPS), LambdaRun::LowerError(_)),
         "λ should refuse the v1 latent trap: {src}"
     );
-    match (reference, run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS)) {
-        (Ok(rv), TmRun::Ran { tapes }) => {
+    let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
+    let (btm, bwidth) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
+    match (reference, tm, btm) {
+        (Ok(rv), TmRun::Ran { tapes }, TmRun::Ran { tapes: btapes }) => {
             assert_eq!(
                 decode_tape(&tapes, &rv, &Unary::default()),
                 Some(rv.clone()),
-                "reference vs TM disagree for: {src}"
-            )
+                "reference vs unary-TM disagree for: {src}"
+            );
+            let benc = Binary::at(bwidth.expect("Binary::field_width() is always Some"));
+            assert_eq!(
+                decode_tape(&btapes, &rv, &benc),
+                Some(rv.clone()),
+                "reference vs binary-TM disagree for: {src}"
+            );
         }
-        (r, t) => panic!("reference vs TM mismatch for {src}:\n  reference={r:?}\n  tm={t:?}"),
+        (r, t, b) => {
+            panic!("reference vs TM mismatch for {src}:\n  reference={r:?}\n  unary-tm={t:?}\n  binary-tm={b:?}")
+        }
     }
+}
+
+/// The capability the binary encoding exists for, stated as an executable claim: `100 * 100` is
+/// `TmRun::Overflow` under unary at EVERY width up to the 64-cell ceiling, and a value under binary.
+///
+/// The unary half is not incidental — it is the control. Without it this test would pass just as well
+/// if binary were secretly falling back to unary, or if the ceiling had been raised for both.
+///
+/// Uses `run_tm_fitted`, not `run_tm`, and decodes with `Binary::at(width)` at the width the fit
+/// settled on: `Binary::decode_nat` is width-strict (see this file's module doc, "DISCOVERY (Task
+/// 14)"), so decoding at a fixed `Binary::default()` (64 cells) would wrongly report `None` even
+/// though the machine computed 10,000 correctly.
+#[test]
+fn binary_computes_what_unary_cannot_represent() {
+    let (prog, ds) = parse("100 * 100");
+    assert!(ds.is_empty(), "parse errors: {ds:?}");
+    let core = desugar(&prog.unwrap());
+    assert!(
+        matches!(run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::Overflow),
+        "unary must still report Overflow — otherwise this test proves nothing about binary"
+    );
+    let (btm, bwidth) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
+    match btm {
+        TmRun::Ran { tapes } => {
+            let benc = Binary::at(bwidth.expect("Binary::field_width() is always Some"));
+            assert_eq!(decode_tape(&tapes, &Value::Nat(0), &benc), Some(Value::Nat(10_000)));
+        }
+        other => panic!("binary should compute 100 * 100: {other:?}"),
+    }
+}
+
+/// A tape produced by one encoding must NOT decode through the other. Before `parse_heap_cells` moved
+/// onto the trait, `decode_tape` took `enc` and ignored it for the heap half; this pins that the
+/// encoding is now load-bearing all the way through the decode.
+#[test]
+fn a_binary_tape_does_not_decode_as_unary() {
+    let (prog, ds) = parse("[1, 2, 3]");
+    assert!(ds.is_empty(), "parse errors: {ds:?}");
+    let core = desugar(&prog.unwrap());
+    let expected = Value::list_of_nats(&[1, 2, 3]);
+    let (btm, bwidth) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
+    let TmRun::Ran { tapes } = btm else { panic!("binary should run a list literal") };
+    let benc = Binary::at(bwidth.expect("Binary::field_width() is always Some"));
+    assert_eq!(decode_tape(&tapes, &expected, &benc), Some(expected.clone()));
+    assert_ne!(
+        decode_tape(&tapes, &expected, &Unary::default()),
+        Some(expected),
+        "a binary tape read as unary must not produce the right answer"
+    );
 }
 
 /// The full first-order demo suite — arithmetic, monus, comparison, if, let/let-mut/assign/while/seq,
@@ -432,14 +524,32 @@ fn three_way_value(src: &str) -> Result<(), TestCaseError> {
     let core = desugar(&prog.unwrap());
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
     let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
-    match (reference, lambda, tm) {
-        (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }) => {
+    // `Binary`'s decode is width-strict, so decode at the width `run_tm_fitted` actually settled on
+    // (see this file's module doc, "DISCOVERY (Task 14)"), not a fixed `Binary::default()`.
+    let (btm, bwidth) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
+    match (reference, lambda, tm, btm) {
+        (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }, TmRun::Ran { tapes: btapes }) => {
             prop_assert_eq!(decode(&nf, &rv), Some(rv.clone()), "reference vs λ disagree: {}", src);
-            prop_assert_eq!(decode_tape(&tapes, &rv, &Unary::default()), Some(rv), "reference vs TM disagree: {}", src);
+            prop_assert_eq!(
+                decode_tape(&tapes, &rv, &Unary::default()),
+                Some(rv.clone()),
+                "reference vs unary-TM disagree: {}",
+                src
+            );
+            let benc = Binary::at(bwidth.unwrap_or(64));
+            prop_assert_eq!(decode_tape(&btapes, &rv, &benc), Some(rv), "reference vs binary-TM disagree: {}", src);
             Ok(())
         }
-        (r, l, t) => {
-            prop_assert!(false, "three-way mismatch for {}:\n ref={:?}\n λ={:?}\n tm={:?}", src, r, l, t);
+        (r, l, t, b) => {
+            prop_assert!(
+                false,
+                "four-way mismatch for {}:\n ref={:?}\n λ={:?}\n unary-tm={:?}\n binary-tm={:?}",
+                src,
+                r,
+                l,
+                t,
+                b
+            );
             Ok(())
         }
     }
@@ -458,13 +568,29 @@ fn two_way_tm_only(src: &str) -> Result<(), TestCaseError> {
         "λ must refuse mut-in-closure: {}",
         src
     );
-    match (reference, run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS)) {
-        (Ok(rv), TmRun::Ran { tapes }) => {
-            prop_assert_eq!(decode_tape(&tapes, &rv, &Unary::default()), Some(rv), "reference vs TM disagree: {}", src);
+    let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
+    let (btm, bwidth) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
+    match (reference, tm, btm) {
+        (Ok(rv), TmRun::Ran { tapes }, TmRun::Ran { tapes: btapes }) => {
+            prop_assert_eq!(
+                decode_tape(&tapes, &rv, &Unary::default()),
+                Some(rv.clone()),
+                "reference vs unary-TM disagree: {}",
+                src
+            );
+            let benc = Binary::at(bwidth.unwrap_or(64));
+            prop_assert_eq!(decode_tape(&btapes, &rv, &benc), Some(rv), "reference vs binary-TM disagree: {}", src);
             Ok(())
         }
-        (r, t) => {
-            prop_assert!(false, "two-way (tm-only) mismatch for {}:\n ref={:?}\n tm={:?}", src, r, t);
+        (r, t, b) => {
+            prop_assert!(
+                false,
+                "two-way (tm-only) mismatch for {}:\n ref={:?}\n unary-tm={:?}\n binary-tm={:?}",
+                src,
+                r,
+                t,
+                b
+            );
             Ok(())
         }
     }

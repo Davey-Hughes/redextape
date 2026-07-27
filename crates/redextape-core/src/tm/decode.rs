@@ -8,7 +8,7 @@
 use std::rc::Rc;
 
 use crate::tm::build::{HEAP, REG};
-use crate::tm::encoding::{Encoding, parse_heap_cells};
+use crate::tm::encoding::Encoding;
 use crate::tm::sim::Tape;
 use crate::value::Value;
 
@@ -16,7 +16,7 @@ use crate::value::Value;
 /// The result word is REG slot 0 (`Rr`): a Nat/Bool value, or a list pointer into the HEAP.
 pub fn decode_tape(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) -> Option<Value> {
     let reg = tapes.get(REG)?.snapshot().0;
-    let heap = parse_heap_cells(&tapes.get(HEAP)?.snapshot().0);
+    let heap = enc.parse_heap_cells(&tapes.get(HEAP)?.snapshot().0);
     let word = enc.decode_nat(&reg, 0)?;
     decode_word(word, &heap, expected)
 }
@@ -52,7 +52,7 @@ mod tests {
     use super::*;
     use crate::core::BinOp;
     use crate::tm::asm::{Instr, Program, Reg};
-    use crate::tm::build::TAPES;
+    use crate::tm::build::{AT, MARK, SEP, TAPES};
     use crate::tm::encoding::Unary;
     use crate::tm::lower_tm::{SlotMap, lower_tm};
     use crate::tm::sim::{DEFAULT_CAPS as CAPS, simulate};
@@ -136,5 +136,43 @@ mod tests {
         assert_eq!(decode_tape(&tapes, &Value::Nil, &Unary::default()), Some(Value::Nil));
         // A Cons witness over a nil result decodes to None (pointer 0 is not a cons).
         assert_eq!(decode_tape(&tapes, &Value::list_of_nats(&[1]), &Unary::default()), None);
+    }
+
+    /// `parse_heap_cells` splits a single `@`-delimited cell into its `(head, tail)` mark-count pair,
+    /// and parses an empty heap to no cells at all. This calls `Unary::parse_heap_cells` directly, NOT
+    /// `decode_tape` — for a test that goes through `decode_tape`'s dispatch to the encoding, see
+    /// `decode_tape_reads_the_heap_through_the_encoding` below.
+    #[test]
+    fn parse_heap_cells_splits_head_and_tail() {
+        let enc = Unary::default();
+        // `@ 1 # 1 1` — one cons cell, head 1, tail 2 — as the unary encoding lays it out.
+        let heap: Vec<char> = "@1#11".chars().collect();
+        assert_eq!(enc.parse_heap_cells(&heap), vec![(1, 2)]);
+        // The empty heap has no cells, at any width.
+        assert_eq!(enc.parse_heap_cells(&[]), vec![]);
+    }
+
+    /// `decode_tape` must dispatch its HEAP read through `enc.parse_heap_cells`, not a hardcoded unary
+    /// parser. Unlike the test above, this one calls `decode_tape` itself: a HEAP tape and a REG tape
+    /// are built BY HAND (bypassing `lower_tm`/`simulate` entirely) and passed in with a `Value::Cons`
+    /// shape witness, so the assertion only holds if `decode_tape`'s Cons path actually reads the HEAP
+    /// through `enc` and follows the resulting pointer.
+    ///
+    /// LIMIT: `Unary` is the only `Encoding` impl in the tree, so this cannot distinguish "decoded via
+    /// `enc.parse_heap_cells`" from "decoded via a parser that happens to match `Unary`'s layout" — the
+    /// genuine cross-encoding proof needs a second encoding and is a later task's job (Task 14 of this
+    /// plan adds `a_binary_tape_does_not_decode_as_unary`, which decodes a binary-produced tape with
+    /// `Unary` and asserts it does NOT produce the right answer).
+    #[test]
+    fn decode_tape_reads_the_heap_through_the_encoding() {
+        let enc = Unary::default();
+        // REG: `# 1 #` -> slot 0 (Rr) = 1, a pointer to HEAP cell 1.
+        let reg = Tape::new(&[SEP, MARK, SEP]);
+        // HEAP: `@ 1 #` -> one cons cell at pointer 1: head 1, tail 0 (nil).
+        let heap = Tape::new(&[AT, MARK, SEP]);
+        let mut tapes = vec![Tape::new(&[]); TAPES];
+        tapes[REG] = reg;
+        tapes[HEAP] = heap;
+        assert_eq!(decode_tape(&tapes, &Value::list_of_nats(&[1]), &enc), Some(Value::list_of_nats(&[1])));
     }
 }

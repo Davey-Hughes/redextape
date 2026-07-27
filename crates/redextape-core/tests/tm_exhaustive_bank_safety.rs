@@ -117,7 +117,7 @@ fn check(program: &Program, width: usize, caps: TmCaps) -> Result<u64, String> {
         let mut watch = |tapes: &[Tape]| {
             steps += 1;
             let (cells, _) = tapes[REG].snapshot();
-            match reg_bank_is_well_formed(&cells, width, slots) {
+            match reg_bank_is_well_formed(&cells, &enc, slots) {
                 Ok(()) => true,
                 Err(why) => {
                     failure = Some(format!("step {steps}: {why}"));

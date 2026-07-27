@@ -20,6 +20,10 @@ pub const SEP: Symbol = '#';
 /// The HEAP cons-cell delimiter: each cell is `@ <head marks> # <tail marks>`.
 pub const AT: Symbol = '@';
 
+/// The binary zero digit. `MARK` (`'1'`) doubles as the one digit, so base 2 costs exactly one new
+/// symbol. The TM text form needs no change: `syntax::parse_sym` accepts any single char.
+pub const ZERO: Symbol = '0';
+
 /// The narrowest field width `run_tm`'s auto-fit search starts at.
 pub const MIN_FIELD_WIDTH: usize = 4;
 

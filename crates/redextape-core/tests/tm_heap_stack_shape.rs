@@ -64,7 +64,7 @@ fn check(src: &str) -> usize {
     assert_eq!(decode_tape(&tapes, &expected, &Unary::default()), Some(expected), "`{src}` decoded wrong");
 
     let heap = tapes[HEAP].snapshot().0;
-    if let Err(why) = heap_tape_is_well_formed(&heap) {
+    if let Err(why) = heap_tape_is_well_formed(&heap, &Unary::default()) {
         panic!("`{src}`: {why}");
     }
     let stack = tapes[STACK].snapshot().0;
@@ -109,19 +109,19 @@ fn deep_recursion_leaves_no_stack_residue() {
 fn the_heap_checker_accepts_real_heaps_and_rejects_damage() {
     // The shape `[1, 2, 3]` actually produces: cons(3,nil), cons(2,·), cons(1,·).
     let good: Vec<char> = "_@111#@11#1@1#11_".chars().collect();
-    assert_eq!(heap_tape_is_well_formed(&good), Ok(()));
+    assert_eq!(heap_tape_is_well_formed(&good, &Unary::default()), Ok(()));
     // A zero-valued head and tail is legitimate (`@#`).
-    assert_eq!(heap_tape_is_well_formed(&"_@#@11#1_".chars().collect::<Vec<_>>()), Ok(()));
+    assert_eq!(heap_tape_is_well_formed(&"_@#@11#1_".chars().collect::<Vec<_>>(), &Unary::default()), Ok(()));
     // An empty heap.
-    assert_eq!(heap_tape_is_well_formed(&[BLANK]), Ok(()));
-    assert_eq!(heap_tape_is_well_formed(&[]), Ok(()));
+    assert_eq!(heap_tape_is_well_formed(&[BLANK], &Unary::default()), Ok(()));
+    assert_eq!(heap_tape_is_well_formed(&[], &Unary::default()), Ok(()));
 
     // A cell whose head/tail separator is missing — the structure `decode_tape` walks would be lost.
-    assert!(heap_tape_is_well_formed(&"_@111@11#1_".chars().collect::<Vec<_>>()).is_err());
+    assert!(heap_tape_is_well_formed(&"_@111@11#1_".chars().collect::<Vec<_>>(), &Unary::default()).is_err());
     // Content after the heap's end.
-    assert!(heap_tape_is_well_formed(&"_@1#1__1_".chars().collect::<Vec<_>>()).is_err());
+    assert!(heap_tape_is_well_formed(&"_@1#1__1_".chars().collect::<Vec<_>>(), &Unary::default()).is_err());
     // A stray symbol where a cell should start.
-    assert!(heap_tape_is_well_formed(&"_@1#1_#_".chars().collect::<Vec<_>>()).is_err());
+    assert!(heap_tape_is_well_formed(&"_@1#1_#_".chars().collect::<Vec<_>>(), &Unary::default()).is_err());
     let _ = (MARK, SEP);
 }
 
@@ -170,7 +170,7 @@ proptest! {
             return Ok(()); // a cap or an overflow can stop mid-call; neither property applies then
         };
         prop_assert_eq!(decode_tape(&tapes, &expected, &Unary::default()), Some(expected), "decoded wrong: {}", src);
-        if let Err(why) = heap_tape_is_well_formed(&tapes[HEAP].snapshot().0) {
+        if let Err(why) = heap_tape_is_well_formed(&tapes[HEAP].snapshot().0, &Unary::default()) {
             prop_assert!(false, "`{}`: {}", src, why);
         }
         if let Err(why) = stack_is_empty(&tapes[STACK].snapshot().0) {

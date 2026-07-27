@@ -21,11 +21,11 @@ pub use asm::{
 };
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
-    AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, REG, RuleSpec, SEP, STACK, Slot, TAPES, WORK,
+    AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, REG, RuleSpec, SEP, STACK, Slot, TAPES, WORK, ZERO,
 };
 pub use decode::decode_tape;
 pub use defunc::{defunc, defunc_mapped};
-pub use encoding::{Encoding, Unary};
+pub use encoding::{Binary, Encoding, Unary};
 pub use lower_asm::{LowerError, lower_asm, lower_asm_mapped};
 pub use lower_tm::{lower_tm, lower_tm_guarded, lower_tm_mapped, n_slots_of};
 pub use machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
@@ -96,6 +96,7 @@ fn attempt(prog: &Program, enc: &dyn Encoding, n_slots: u32, caps: TmCaps) -> Tm
     let (machine, overflow) = lower_tm_guarded(prog, enc);
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots);
+    init[WORK] = enc.init_work();
     match simulate_final(&machine, &init, caps) {
         (_, s, TmStatus::Halted) if s == overflow => TmRun::Overflow,
         (tapes, _, TmStatus::Halted) => TmRun::Ran { tapes },
@@ -290,5 +291,14 @@ mod run_tm_tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    /// `attempt` initializes WORK from the encoding, and for unary that must be EMPTY — the same tape
+    /// unary gadgets have always started from. This pins the "no behaviour change" half of adding the
+    /// method: a non-empty unary WORK would shift every step count in the goldens.
+    #[test]
+    fn unary_starts_with_an_empty_work_tape() {
+        assert_eq!(Unary::default().init_work(), Vec::<Symbol>::new());
+        assert_eq!(Unary::at(4).init_work(), Vec::<Symbol>::new());
     }
 }

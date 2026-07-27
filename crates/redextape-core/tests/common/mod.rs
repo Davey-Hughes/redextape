@@ -15,10 +15,16 @@
 
 #![allow(dead_code)] // each test binary uses a different subset
 
-use redextape_core::tm::{AT, BLANK, MARK, Machine, SEP};
+use redextape_core::tm::{AT, BLANK, Encoding, MARK, Machine, SEP};
+
+/// The width every generic checker measures against. A bounded encoding reports its field width; an
+/// unbounded one has no fixed skeleton to check, so the checkers refuse rather than guess.
+fn width_of(enc: &dyn Encoding) -> usize {
+    enc.field_width().expect("bank-shape checkers require a bounded encoding")
+}
 
 /// The REG bank's SKELETON: exactly `1 + slots * (width + 1)` cells, with a `#` at cell 0 and at every
-/// `width + 1` cells thereafter, and only marks or blanks in between.
+/// `width + 1` cells thereafter, and only field content in between.
 ///
 /// Deliberately NOT "each field is marks-then-blanks". That is a BETWEEN-GADGET invariant, not a
 /// per-step one, and the suite found the difference the hard way: `append_work_to_field` and
@@ -29,7 +35,9 @@ use redextape_core::tm::{AT, BLANK, MARK, Machine, SEP};
 /// The skeleton is the right property anyway, because it is exactly what an overflow destroys: a value
 /// written past the end of its window overwrites the field's trailing `#` with a MARK, merging two
 /// fields and desynchronizing `rewind_home`'s `#`-counting walk.
-pub fn reg_bank_is_well_formed(cells: &[char], width: usize, slots: usize) -> Result<(), String> {
+pub fn reg_bank_is_well_formed(cells: &[char], enc: &dyn Encoding, slots: usize) -> Result<(), String> {
+    let width = width_of(enc);
+    let content = enc.field_symbols();
     let expected = 1 + slots * (width + 1);
     if cells.len() != expected {
         return Err(format!("bank is {} cells, expected {expected}", cells.len()));
@@ -42,25 +50,27 @@ pub fn reg_bank_is_well_formed(cells: &[char], width: usize, slots: usize) -> Re
         if cells[base + width] != SEP {
             return Err(format!("field {s} is not closed by `{SEP}`, got `{}`", cells[base + width]));
         }
-        if let Some(bad) = cells[base..base + width].iter().find(|&&c| c != MARK && c != BLANK) {
-            return Err(format!("field {s} holds `{bad}`, which is neither a mark nor a blank"));
+        if let Some(bad) = cells[base..base + width].iter().find(|c| !content.contains(c)) {
+            return Err(format!("field {s} holds `{bad}`, which is not field content for this encoding"));
         }
     }
     Ok(())
 }
 
 /// The BOX tape's skeleton: zero or more fields, each a `#` followed by exactly `width` cells holding
-/// only marks or blanks, then a blank "top" running to the end. Unlike REG there is NO trailing `#`
-/// after the last field, which is exactly why `box_overwrite_field` is a counted chain — a
-/// content-driven overrun of the last field would have no delimiter to stop at.
-pub fn box_tape_is_well_formed(cells: &[char], width: usize) -> Result<(), String> {
+/// only field content, then a blank "top" running to the end. Unlike REG there is NO trailing `#` after
+/// the last field, which is exactly why `box_overwrite_field` is a counted chain — a content-driven
+/// overrun of the last field would have no delimiter to stop at.
+pub fn box_tape_is_well_formed(cells: &[char], enc: &dyn Encoding) -> Result<(), String> {
+    let width = width_of(enc);
+    let content = enc.field_symbols();
     let mut i = 0usize;
     let mut field = 0usize;
     while i < cells.len() && cells[i] == SEP {
         let window = i + 1;
         let end = (window + width).min(cells.len());
-        if let Some(off) = cells[window..end].iter().position(|&c| c != MARK && c != BLANK) {
-            return Err(format!("box field {field} cell {off} is `{}`, not a mark or blank", cells[window + off]));
+        if let Some(off) = cells[window..end].iter().position(|c| !content.contains(c)) {
+            return Err(format!("box field {field} cell {off} is `{}`, not field content", cells[window + off]));
         }
         i = window + width;
         field += 1;
@@ -139,7 +149,12 @@ pub fn assert_delimiter_safe(m: &Machine, what: &str) {
 /// gadget a cell is half-written, so there is no per-step skeleton — unlike REG and BOX, whose
 /// delimiters are fixed for the whole run. For the same reason the static rung-3 check does not apply
 /// here either: a rule that writes a mark over a `@` is not automatically a defect on this tape.
-pub fn heap_tape_is_well_formed(cells: &[char]) -> Result<(), String> {
+pub fn heap_tape_is_well_formed(cells: &[char], enc: &dyn Encoding) -> Result<(), String> {
+    let content = enc.field_symbols();
+    // Under unary a word is a variable-length run of marks and a zero word is empty; under binary it
+    // is exactly `width` digits. "A run of field content" covers both, which is why this stayed one
+    // loop. It deliberately does NOT check word LENGTH — that would be a different property, and
+    // claiming it here without checking it is the failure mode this suite keeps finding.
     let mut i = 0usize;
     while i < cells.len() && cells[i] == BLANK {
         i += 1;
@@ -147,15 +162,15 @@ pub fn heap_tape_is_well_formed(cells: &[char]) -> Result<(), String> {
     let mut cell = 0usize;
     while i < cells.len() && cells[i] == AT {
         i += 1; // the `@`
-        while i < cells.len() && cells[i] == MARK {
-            i += 1; // head marks
+        while i < cells.len() && content.contains(&cells[i]) && cells[i] != BLANK {
+            i += 1; // head word
         }
         if i >= cells.len() || cells[i] != SEP {
             return Err(format!("cons cell {cell} has no `{SEP}` between head and tail (at index {i})"));
         }
         i += 1; // the `#`
-        while i < cells.len() && cells[i] == MARK {
-            i += 1; // tail marks
+        while i < cells.len() && content.contains(&cells[i]) && cells[i] != BLANK {
+            i += 1; // tail word
         }
         cell += 1;
     }

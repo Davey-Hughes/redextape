@@ -18,10 +18,11 @@ use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 
 mod common;
-use common::reg_bank_is_well_formed;
+use common::{box_tape_is_well_formed, heap_tape_is_well_formed, reg_bank_is_well_formed};
 use redextape_core::tm::{
-    Builder, Encoding, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Move, REG, RuleSpec, SEP, TAPES, TM_DEFAULT_CAPS, Tape,
-    TmCaps, TmRun, TmStatus, Unary, defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm_at, simulate_watched,
+    AT, BLANK, Builder, Encoding, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Move, REG, RuleSpec, SEP, TAPES,
+    TM_DEFAULT_CAPS, Tape, TmCaps, TmRun, TmStatus, Unary, defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm_at,
+    simulate_watched,
 };
 
 /// A representative spread of the survey corpus: arithmetic, monus, comparison, `if`, `let`/assign,
@@ -82,7 +83,7 @@ fn the_reg_bank_stays_well_formed_at_every_step_and_every_width() {
                 let mut watch = |tapes: &[Tape]| {
                     step += 1;
                     let (cells, _) = tapes[REG].snapshot();
-                    match reg_bank_is_well_formed(&cells, width, slots) {
+                    match reg_bank_is_well_formed(&cells, &enc, slots) {
                         Ok(()) => true,
                         Err(why) => {
                             failure = Some(format!("`{src}` at width {width}, step {step}: {why}"));
@@ -179,7 +180,7 @@ fn first_violation(src: &str, width: usize) -> Option<String> {
         let mut watch = |tapes: &[Tape]| {
             step += 1;
             let (cells, _) = tapes[REG].snapshot();
-            match reg_bank_is_well_formed(&cells, width, slots) {
+            match reg_bank_is_well_formed(&cells, &enc, slots) {
                 Ok(()) => true,
                 Err(why) => {
                     failure = Some(format!("`{src}` at width {width}, step {step}: {why}"));
@@ -285,7 +286,7 @@ fn the_invariant_catches_an_unguarded_write() {
     {
         let mut watch = |tapes: &[Tape]| {
             let (cells, _) = tapes[REG].snapshot();
-            match reg_bank_is_well_formed(&cells, width, 2) {
+            match reg_bank_is_well_formed(&cells, &enc, 2) {
                 Ok(()) => true,
                 Err(why) => {
                     caught = Some(why);
@@ -305,19 +306,99 @@ fn the_invariant_catches_an_unguarded_write() {
 fn a_well_formed_bank_passes_the_invariant() {
     let enc = Unary::at(8);
     let cells = enc.init_reg(3);
-    assert_eq!(reg_bank_is_well_formed(&cells, 8, 3), Ok(()), "a freshly initialized bank must be well-formed");
+    assert_eq!(reg_bank_is_well_formed(&cells, &enc, 3), Ok(()), "a freshly initialized bank must be well-formed");
     // A bank holding values passes, and so does one caught MID-REWRITE (blanks then marks) — the
     // skeleton is what is invariant, not the field content order.
     let mut held: Vec<char> = cells.clone();
     held[1] = MARK;
     held[2] = MARK;
-    assert_eq!(reg_bank_is_well_formed(&held, 8, 3), Ok(()), "a bank holding values is well-formed");
+    assert_eq!(reg_bank_is_well_formed(&held, &enc, 3), Ok(()), "a bank holding values is well-formed");
     let mut mid: Vec<char> = cells.clone();
     mid[3] = MARK;
     mid[4] = MARK;
-    assert_eq!(reg_bank_is_well_formed(&mid, 8, 3), Ok(()), "a mid-rewrite field must not be rejected");
+    assert_eq!(reg_bank_is_well_formed(&mid, &enc, 3), Ok(()), "a mid-rewrite field must not be rejected");
     // But a destroyed delimiter must be.
     let mut broken: Vec<char> = cells.clone();
     broken[9] = MARK;
-    assert!(reg_bank_is_well_formed(&broken, 8, 3).is_err(), "a clobbered delimiter must be rejected");
+    assert!(reg_bank_is_well_formed(&broken, &enc, 3).is_err(), "a clobbered delimiter must be rejected");
+}
+
+// ================================================================================================
+// Review finding: the sabotage that shipped with Task 2 (deleting an overflow guard) exercised the
+// LENGTH clause of `reg_bank_is_well_formed`, an unchanged clause. Task 2 rewrote only the CONTENT
+// clause (`!content.contains(c)`) to consult `Encoding::field_symbols()`. Nothing in the suite planted
+// an illegal symbol strictly INSIDE a field's interior, so nothing proved that clause actually rejects
+// anything. The three tests below close that gap directly.
+// ================================================================================================
+
+/// Pins the CONTENT clause of `reg_bank_is_well_formed` — the one clause Task 2 rewrote. Plants `AT`
+/// (never REG field content, under any encoding) at cell 4, strictly inside field 0's interior: not
+/// cell 0 (the bank's leading `#`), not cell 9 (field 0's closing `#`, since width 8 puts it at
+/// `1 + 8`), and not any other field's boundary. The total length (19 = `1 + 2*(8+1)`) and every `#`
+/// are all left exactly as `init_reg` produced them, so the length clause, the leading-`#` clause and
+/// the closing-`#` clause are all provably unable to be the source of a failure here — only the content
+/// clause can reject this bank.
+#[test]
+fn reg_bank_content_clause_rejects_a_non_content_symbol_inside_a_field() {
+    let enc = Unary::at(8);
+    let mut cells = enc.init_reg(2);
+    assert_eq!(cells.len(), 19, "field 0 must span cells[1..9], closed by `#` at cell 9");
+    cells[4] = AT; // strictly interior to field 0; not the leading `#`, not field 0's closing `#`
+    let err =
+        reg_bank_is_well_formed(&cells, &enc, 2).expect_err("a non-content symbol inside a field must be rejected");
+    assert!(err.contains("field 0"), "error must name the offending field index, got: {err}");
+}
+
+/// Pins the CONTENT clause of `box_tape_is_well_formed`, `reg_bank_is_well_formed`'s BOX-tape twin.
+/// Builds a single-field, 9-cell tape (cell 0 the field's leading `#`, cells 1..9 its content — there is
+/// no closing `#` on BOX, so a one-field tape simply ends there) and plants `AT` at cell 4, strictly
+/// inside that field's interior. The leading `#` is untouched, and the tape ends exactly where the
+/// field ends, so the "top must be blank" clause never even runs (its slice is empty) — only the
+/// content clause can reject this tape.
+#[test]
+fn box_tape_content_clause_rejects_a_non_content_symbol_inside_a_field() {
+    let enc = Unary::at(8);
+    let mut cells: Vec<char> = vec![SEP];
+    cells.extend(std::iter::repeat_n(BLANK, 8));
+    assert_eq!(cells.len(), 9, "one field, no closing `#`: a leading `#` plus 8 content cells");
+    cells[4] = AT; // strictly interior to the one field; not the leading `#`
+    let err =
+        box_tape_is_well_formed(&cells, &enc).expect_err("a non-content symbol inside a box field must be rejected");
+    assert!(err.contains("field 0"), "error must name the offending field index, got: {err}");
+}
+
+/// Pins the two BLANK-exclusion clauses in `heap_tape_is_well_formed`'s head-word and tail-word walks
+/// (`&& cells[i] != BLANK`). `Unary::field_symbols()` includes `BLANK`, but on HEAP a blank ends a
+/// word's run rather than being part of it — that's exactly why `common::mod.rs` adds the exclusion on
+/// top of the plain `content.contains` check in both walks. Drop either exclusion and the matching walk
+/// below treats a blank as ordinary word content, so it keeps going instead of stopping — swallowing
+/// the padding that should have ended it, and (in both tapes below) running clean off the end of the
+/// tape, at which point the final "must be blank to the end" check finds an empty slice and wrongly
+/// reports `Ok`.
+///
+/// Two hand-built 8-cell tapes exercise the two walks independently, so this one test goes red whichever
+/// exclusion is removed:
+///   * `head_gap` plants a blank INSIDE what would otherwise read as a head word (cell 2), with a real
+///     `#`/tail/padding laid out so a walk that does NOT stop at that blank sails straight through it and
+///     lands back on the genuine `#` at cell 4 — silently absorbing the gap and reporting `Ok`. The real
+///     (exclusion-respecting) walk stops at cell 2 and correctly reports a missing `#` between head and
+///     tail.
+///   * `tail_gap` is one complete, correctly-delimited cons cell, followed by three blanks and then a
+///     stray mark at the tape's very last cell. The real tail walk stops at the first blank (cell 4), so
+///     the stray mark at cell 7 is caught by the "must be blank to the end" clause. A walk that does not
+///     stop at a blank swallows the padding AND the stray mark and runs off the end of the tape, leaving
+///     nothing for that clause to check.
+#[test]
+fn heap_blank_exclusion_clauses_reject_a_word_walk_that_swallows_padding() {
+    let enc = Unary::at(8);
+
+    // Sensitive to the HEAD-word walk's `!= BLANK`.
+    let head_gap: Vec<char> = vec![AT, MARK, BLANK, MARK, SEP, MARK, BLANK, BLANK];
+    let err = heap_tape_is_well_formed(&head_gap, &enc).expect_err("a blank inside a head word must not be swallowed");
+    assert!(err.contains("between head and tail"), "expected a missing-`#` complaint, got: {err}");
+
+    // Sensitive to the TAIL-word walk's `!= BLANK`.
+    let tail_gap: Vec<char> = vec![AT, MARK, SEP, MARK, BLANK, BLANK, BLANK, MARK];
+    let err = heap_tape_is_well_formed(&tail_gap, &enc).expect_err("padding followed by a stray mark must be rejected");
+    assert!(err.contains("must be blank to the end"), "expected a trailing-garbage complaint, got: {err}");
 }

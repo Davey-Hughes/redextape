@@ -1,31 +1,40 @@
-//! Part of the three-way oracle (spec §12.1), control-flow slice: the reference tree-walker and the
+//! Part of the backend oracle (spec §12.1), control-flow slice: the reference tree-walker and the
 //! genuine multi-tape TM agree on straight-line + branching programs (no calls, no heap yet). Also
 //! carries the intermediate `asm-interp == TM` oracle (a disagreement localizes to asm->TM lowering)
 //! and cap-equivalence. Parts 2b-2-ii/iii/iv extend this to calls, lists, and the full
-//! `reference == lambda == TM`.
+//! `reference == lambda == TM`. As of Task 14 every demo below runs under BOTH `Unary` and `Binary`
+//! (`assert_tm_agrees`/`assert_asm_interp_matches_tm` take `enc: &dyn Encoding` and each test calls the
+//! body twice), so this file's two legs (reference==TM, asm-interp==TM) both cover the binary TM too.
+//!
+//! Both helpers use `run_tm_fitted`, not `run_tm`, and decode with `enc.at_width(width)` at the width
+//! the fit actually settled on -- `Binary`'s decode is width-strict (it requires the field to close
+//! exactly `self.width` cells later), unlike `Unary`'s content-driven decode, which scans to the next
+//! `#` and so happens to work at any width. Decoding at a fixed `enc` (its own, usually 64-cell, width)
+//! silently returns `None` for a `Binary` tape fitted narrower -- measured directly in
+//! `three_way_oracle.rs`'s module doc ("DISCOVERY (Task 14)"), where every single demo failed to
+//! decode this way, not just the headline `100 * 100` case.
 
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::tm::{
-    AsmRun, DEFAULT_CAPS as ASM_CAPS, TM_DEFAULT_CAPS, TmRun, Unary, decode_asm, decode_tape, lower_asm, run_asm,
-    run_tm,
+    AsmRun, Binary, DEFAULT_CAPS as ASM_CAPS, Encoding, TM_DEFAULT_CAPS, TmRun, Unary, decode_asm, decode_tape,
+    lower_asm, run_asm, run_tm, run_tm_fitted,
 };
 use redextape_core::{RunError, run};
 
 /// The reference result and the TM's decoded final tape must agree (guided by the reference value's
-/// type). A reference runtime fault/cap corresponds to a TM cap.
-fn assert_tm_agrees(src: &str) {
+/// type). A reference runtime fault/cap corresponds to a TM cap. `enc` selects which encoding drives
+/// this run (`Unary` or `Binary`), so this localizer covers both TM legs of the four-way oracle.
+fn assert_tm_agrees(src: &str, enc: &dyn Encoding) {
     let reference = run(src);
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors: {ds:?}");
     let core = desugar(&prog.unwrap());
-    match (reference, run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS)) {
+    let (outcome, width) = run_tm_fitted(&core, enc, TM_DEFAULT_CAPS);
+    match (reference, outcome) {
         (Ok(rv), TmRun::Ran { tapes }) => {
-            assert_eq!(
-                decode_tape(&tapes, &rv, &Unary::default()),
-                Some(rv.clone()),
-                "reference vs TM disagree for: {src}"
-            );
+            let fitted = enc.at_width(width.unwrap_or(64));
+            assert_eq!(decode_tape(&tapes, &rv, &*fitted), Some(rv.clone()), "reference vs TM disagree for: {src}");
         }
         (Err(RunError::Runtime(_)), TmRun::HitCap) => {}
         (r, t) => panic!("oracle mismatch for {src}:\n  reference={r:?}\n  tm={t:?}"),
@@ -33,8 +42,9 @@ fn assert_tm_agrees(src: &str) {
 }
 
 /// The intermediate oracle: the asm interpreter and the TM sim decode to the same value. Localizes a
-/// disagreement to asm->TM lowering (the reference==asm link is proven in `asm_oracle.rs`).
-fn assert_asm_interp_matches_tm(src: &str) {
+/// disagreement to asm->TM lowering (the reference==asm link is proven in `asm_oracle.rs`). `enc`
+/// selects which encoding drives the TM leg.
+fn assert_asm_interp_matches_tm(src: &str, enc: &dyn Encoding) {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors: {ds:?}");
     let core = desugar(&prog.unwrap());
@@ -44,8 +54,12 @@ fn assert_asm_interp_matches_tm(src: &str) {
         AsmRun::Ran(o) => decode_asm(&o, &reference).expect("asm decode"),
         other => panic!("asm did not run for {src}: {other:?}"),
     };
-    let tm = match run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS) {
-        TmRun::Ran { tapes } => decode_tape(&tapes, &reference, &Unary::default()).expect("tm decode"),
+    let (outcome, width) = run_tm_fitted(&core, enc, TM_DEFAULT_CAPS);
+    let tm = match outcome {
+        TmRun::Ran { tapes } => {
+            let fitted = enc.at_width(width.unwrap_or(64));
+            decode_tape(&tapes, &reference, &*fitted).expect("tm decode")
+        }
         other => panic!("tm did not run for {src}: {other:?}"),
     };
     assert_eq!(asm, tm, "asm-interp vs TM disagree for: {src}");
@@ -69,14 +83,16 @@ const CONTROL_FLOW_DEMOS: &[&str] = &[
 #[test]
 fn tm_agrees_with_reference_on_control_flow_demos() {
     for src in CONTROL_FLOW_DEMOS {
-        assert_tm_agrees(src);
+        assert_tm_agrees(src, &Unary::default());
+        assert_tm_agrees(src, &Binary::default());
     }
 }
 
 #[test]
 fn asm_interp_matches_tm_on_control_flow_demos() {
     for src in CONTROL_FLOW_DEMOS {
-        assert_asm_interp_matches_tm(src);
+        assert_asm_interp_matches_tm(src, &Unary::default());
+        assert_asm_interp_matches_tm(src, &Binary::default());
     }
 }
 
@@ -99,14 +115,16 @@ const CALL_DEMOS: &[&str] = &[
 #[test]
 fn tm_agrees_with_reference_on_call_demos() {
     for src in CALL_DEMOS {
-        assert_tm_agrees(src);
+        assert_tm_agrees(src, &Unary::default());
+        assert_tm_agrees(src, &Binary::default());
     }
 }
 
 #[test]
 fn asm_interp_matches_tm_on_call_demos() {
     for src in CALL_DEMOS {
-        assert_asm_interp_matches_tm(src);
+        assert_asm_interp_matches_tm(src, &Unary::default());
+        assert_asm_interp_matches_tm(src, &Binary::default());
     }
 }
 
@@ -117,14 +135,16 @@ const LIST_BUILD_DEMOS: &[&str] = &["is_empty(nil)", "is_empty(cons(1, nil))", "
 #[test]
 fn tm_agrees_with_reference_on_list_build_demos() {
     for src in LIST_BUILD_DEMOS {
-        assert_tm_agrees(src);
+        assert_tm_agrees(src, &Unary::default());
+        assert_tm_agrees(src, &Binary::default());
     }
 }
 
 #[test]
 fn asm_interp_matches_tm_on_list_build_demos() {
     for src in LIST_BUILD_DEMOS {
-        assert_asm_interp_matches_tm(src);
+        assert_asm_interp_matches_tm(src, &Unary::default());
+        assert_asm_interp_matches_tm(src, &Binary::default());
     }
 }
 
@@ -145,14 +165,16 @@ const LIST_ACCESS_DEMOS: &[&str] = &[
 #[test]
 fn tm_agrees_with_reference_on_list_access_demos() {
     for src in LIST_ACCESS_DEMOS {
-        assert_tm_agrees(src);
+        assert_tm_agrees(src, &Unary::default());
+        assert_tm_agrees(src, &Binary::default());
     }
 }
 
 #[test]
 fn asm_interp_matches_tm_on_list_access_demos() {
     for src in LIST_ACCESS_DEMOS {
-        assert_asm_interp_matches_tm(src);
+        assert_asm_interp_matches_tm(src, &Unary::default());
+        assert_asm_interp_matches_tm(src, &Binary::default());
     }
 }
 
@@ -165,6 +187,11 @@ fn tm_cap_matches_a_reference_nonterminating_program() {
     // `rewind_home` would miscount (the documented MAX_FIELD_WIDTH failure mode), and the machine would
     // get stuck -> Halted, making `run_tm` return `Ran`, not `HitCap`. Do not raise this cap: a much
     // larger one would terminate via that corruption instead of via `HitCap`.
+    //
+    // UNARY ONLY, deliberately: the failure mode this test pins is a strict-bound artifact of a
+    // content-driven (mark/blank) field, which `Binary`'s module doc states plainly has no analogue --
+    // every binary field is the same length and both digits are content, so there is no "padding blank
+    // must remain" invariant to corrupt. A binary leg here would not be testing the same thing.
     use redextape_core::tm::TmCaps;
     let src = "let mut n = 1; while n > 0 { n = n + 1; } n";
     let (prog, ds) = parse(src);
