@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use crate::tm::asm::decode_word_ty;
+use crate::tm::asm::{MAX_DECODE_NODES, decode_word_ty};
 use crate::tm::build::{HEAP, REG};
 use crate::tm::encoding::Encoding;
 use crate::tm::sim::Tape;
@@ -40,9 +40,14 @@ pub fn decode_tape(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) -> Opti
 /// a SHORTER list than the reference, so it cannot be expressed over this one — and the reverse needs a
 /// `Value -> Ty` function that is partial, since `Value::Nil` carries no recoverable element type.
 /// `asm.rs` keeps `decode_asm` and `decode_asm_ty` side by side for the same reason.
+///
+/// Seeds a fresh `MAX_DECODE_NODES` budget for this call, same as `decode_asm_ty` — `tapes` and `ty`
+/// both come from a `.tm` FILE here, so both the heap's acyclicity (the spine loop's job) and its
+/// decoded SIZE under nested types (the budget's job) are file-supplied and unchecked until now.
 pub fn decode_tape_ty(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Option<Value> {
     let (word, heap) = read_result(tapes, enc)?;
-    decode_word_ty(word, &heap, ty)
+    let mut budget = MAX_DECODE_NODES;
+    decode_word_ty(word, &heap, ty, &mut budget)
 }
 
 /// Type-directed decode of a word (Nat/Bool value or list pointer), guided by `expected`'s shape.

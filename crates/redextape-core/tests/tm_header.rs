@@ -52,9 +52,23 @@ fn the_headers_recipe_reproduces_its_literal_tapes() {
         for kind in [EncodingKind::Unary, EncodingKind::Binary] {
             let d = described(src, kind);
             let file = print_tm_with(&d.machine, &d.header);
-            let (_, h, ds) = parse_tm_full(&file);
+            let (pm, h, ds) = parse_tm_full(&file);
             assert!(ds.is_empty(), "{src} under {kind:?}: {ds:?}");
             let h = h.expect("a header");
+
+            // Optionality property 2, on the combination with the most moving parts — which is
+            // `cons(1, cons(2, nil))` under `Binary`: a 5-tape COMPILED machine (every compiled
+            // machine is 5-tape, since `build::TAPES` is fixed), a header with a NON-EMPTY WORK tape
+            // line (only `Binary` has one — `Unary::init_work()` is empty), `result List<Nat>`, at a
+            // fitted width. Property 2's own test uses a hand-built 2-state machine with one 6-cell
+            // unary tape — so without these two lines the spec's Testing §2 ("both encodings, at
+            // their fitted widths") is asserted nowhere.
+            //
+            // Naming the program matters: a review read this comment as describing `sum(5)` (which is
+            // `result Nat`) and reported it as a false claim. The claim was true of a different
+            // corpus entry; an unnamed "combination" invites exactly that misreading.
+            assert_eq!(pm.as_ref(), Some(&d.machine), "{src} under {kind:?}: machine must round-trip");
+            assert_eq!(h, d.header, "{src} under {kind:?}: header must round-trip");
 
             let enc = h.encoding();
             let init = h.init(d.machine.tapes);
@@ -94,6 +108,24 @@ fn a_tm_file_becomes_a_value_with_nothing_but_the_file() {
     assert_eq!(got, Some(Value::list_of_nats(&[1, 2])));
 }
 
+/// The binary twin of the test above — the only fixture whose header carries a `tape 1` (WORK) line, so
+/// this is the one that actually exercises a multi-tape-line file being read back with nothing but the
+/// file itself.
+#[test]
+fn a_binary_tm_file_becomes_a_value_with_nothing_but_the_file() {
+    let file = include_str!("fixtures/list_1_2_binary.tm");
+
+    let (m, h, ds) = parse_tm_full(file);
+    assert!(ds.is_empty(), "diagnostics: {ds:?}");
+    let (m, h) = (m.expect("a machine"), h.expect("a header"));
+
+    let (tapes, status) = simulate(&m, &h.init(m.tapes), TM_DEFAULT_CAPS);
+    assert_eq!(status, TmStatus::Halted);
+
+    let got = decode_tape_ty(&tapes, &h.result, &*h.encoding());
+    assert_eq!(got, Some(Value::list_of_nats(&[1, 2])));
+}
+
 /// The fixture is a real artifact of today's compiler, not a hand-tuned file that drifted from it.
 /// A codegen change updates the fixture deliberately, with this test as the prompt.
 #[test]
@@ -102,17 +134,21 @@ fn the_fixture_is_what_the_compiler_emits_today() {
     assert_eq!(
         print_tm_with(&d.machine, &d.header),
         include_str!("fixtures/list_1_2.tm"),
-        "regenerate with: cargo test -p redextape-core --test tm_header -- --ignored regenerate_fixture"
+        "regenerate with: cargo run --example regen_fixtures -p redextape-core"
     );
 }
 
-/// Writes the fixture. Ignored by default; run it deliberately after a codegen change.
+/// The binary twin of the check above. `Binary::init_work()` lays out a real `#`-delimited bank (unlike
+/// `Unary::init_work()`, which is empty), so this fixture is the only one carrying a `tape 1` line —
+/// the WORK-tape path had never round-tripped through an actual file before this one existed.
 #[test]
-#[ignore = "regenerates a checked-in fixture"]
-fn regenerate_fixture() {
-    let d = described("cons(1, cons(2, nil))", EncodingKind::Unary);
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/list_1_2.tm");
-    std::fs::write(path, print_tm_with(&d.machine, &d.header)).expect("write fixture");
+fn the_binary_fixture_is_what_the_compiler_emits_today() {
+    let d = described("cons(1, cons(2, nil))", EncodingKind::Binary);
+    assert_eq!(
+        print_tm_with(&d.machine, &d.header),
+        include_str!("fixtures/list_1_2_binary.tm"),
+        "regenerate with: cargo run --example regen_fixtures -p redextape-core"
+    );
 }
 
 /// SABOTAGE, each aimed at the check that can actually see it.
@@ -168,6 +204,45 @@ fn sabotaging_the_header_is_caught_by_the_end_to_end_decode() {
     bad_init[0][0] = '_';
     let (bad_tapes, _) = simulate(&m, &bad_init, TM_DEFAULT_CAPS);
     assert_ne!(decode_tape_ty(&bad_tapes, &h.result, &*h.encoding()), truth);
+}
+
+/// The `tm_emit` example's exact sequence, in-process (no shelling out): `emit` produces the text via
+/// `run_tm_described` + `print_tm_with`; `run` reads it back via `parse_tm_full`, builds `init` from
+/// the header, `simulate`s, and `decode_tape_ty`s. This is what CI protects — the example itself is
+/// only the demo.
+///
+/// Distinct from `a_described_run_computes_what_an_ordinary_run_computes` below: that test compares
+/// `d.run`'s tapes directly, never round-tripping through text. This one goes through the file format
+/// on purpose, so serialization is inside the loop being checked rather than beside it.
+#[test]
+fn emit_then_run_round_trip_matches_the_reference() {
+    for &src in CORPUS {
+        for kind in [EncodingKind::Unary, EncodingKind::Binary] {
+            let (core, ty) = core_and_ty(src);
+            let expected =
+                redextape_core::interp::eval(&core).unwrap_or_else(|e| panic!("reference failed for {src}: {e:?}"));
+
+            // `emit`: parse -> typecheck -> desugar already happened in `core_and_ty`; compile, run,
+            // and write the self-describing text.
+            let d = run_tm_described(&core, kind, ty, TM_DEFAULT_CAPS)
+                .unwrap_or_else(|r| panic!("{src} under {kind:?} did not run: {r:?}"));
+            let text = print_tm_with(&d.machine, &d.header);
+
+            // `run`: read the file (here, the in-memory text) -> parse -> build init from the header
+            // -> simulate -> decode.
+            let (m, h, ds) = parse_tm_full(&text);
+            assert!(ds.is_empty(), "{src} under {kind:?}: {ds:?}");
+            let m = m.unwrap_or_else(|| panic!("{src} under {kind:?}: file did not parse to a machine"));
+            let h = h.unwrap_or_else(|| panic!("{src} under {kind:?}: file has no header"));
+
+            let init = h.init(m.tapes);
+            let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+            assert_eq!(status, TmStatus::Halted, "{src} under {kind:?}: did not halt");
+
+            let got = decode_tape_ty(&tapes, &h.result, &*h.encoding());
+            assert_eq!(got, Some(expected), "{src} under {kind:?}");
+        }
+    }
 }
 
 /// A described run computes what the REFERENCE computes — not merely "something". The producer must

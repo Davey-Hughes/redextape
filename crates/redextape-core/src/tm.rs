@@ -22,7 +22,8 @@ pub use asm::{
 };
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
-    AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, REG, RuleSpec, SEP, STACK, Slot, TAPES, WORK, ZERO,
+    AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP, STACK, Slot, TAPES,
+    WORK, ZERO,
 };
 pub use decode::{decode_tape, decode_tape_ty};
 pub use defunc::{defunc, defunc_mapped};
@@ -122,8 +123,11 @@ pub fn run_tm(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> TmRun {
 /// Returns the machine and the initial tapes it built alongside the outcome. `run_tm_fitted` drops
 /// both; `run_tm_described` keeps them, and keeping them is the point — a header whose literal tapes
 /// were re-derived from its own `encoding`/`width`/`slots` fields could not disagree with them, so
-/// the consistency check over it would prove nothing. There is exactly ONE place that builds `init`,
-/// which is what makes the check a check.
+/// the consistency check over it would prove nothing. This is the ONE place that builds `init` on the
+/// `run_tm*` path, which is what makes the check a check. `tm/attribute.rs` builds a second `init` for
+/// its own purposes, setting only REG and never calling `init_work()` — harmless under `Unary`, where
+/// `init_work` returns empty regardless, but whether that omission is sound under `Binary` is a real
+/// open question, filed separately rather than answered here.
 fn attempt(prog: &Program, enc: &dyn Encoding, n_slots: u32, caps: TmCaps) -> (TmRun, Machine, Vec<Vec<Symbol>>) {
     let (machine, overflow) = lower_tm_guarded(prog, enc);
     let mut init = vec![Vec::new(); TAPES];

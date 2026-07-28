@@ -460,31 +460,102 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
     }
 }
 
+/// The most `Value` nodes a single type-directed decode may construct.
+///
+/// A TOTALITY guard on untrusted input, not a language limit — and a SEPARATE guarantee from the
+/// spine loop's bound. The loop bounds CYCLES: one step per heap cell, so a chain that never reaches
+/// nil returns `None` instead of recursing forever. It does not bound SIZE, because nested list types
+/// MULTIPLY — `List<List<Nat>>` over an n-cell heap is O(n²) nodes and `MAX_TY_DEPTH` nesting is
+/// O(n^d). Both factors come from the file. Neither guard implies the other.
+///
+/// DERIVED, not picked: a flat `List<Nat>` over an `L`-cell heap costs `2L + 1` nodes, and a run under
+/// `DEFAULT_CAPS` may legitimately build `DEFAULT_CAPS.heap` cells — so anything at or below
+/// `2 * DEFAULT_CAPS.heap + 1` is reachable by a correct program and must NOT be refused. The budget
+/// sits above that with room to spare, which is what keeps it a totality guard on untrusted input
+/// rather than a language limit. A constant below the runtime's own ceiling would reject programs
+/// that ran correctly, reporting them as "could not decode result".
+///
+/// THE RESIDUAL GAP, stated in numbers because no constant closes it and an adjective would hide it.
+///
+/// The derivation above covers a FLAT list exactly. It does not cover a nested one, and the reason is
+/// SHARING: `Instr::Tail` is a pointer read, not an allocation, so an ordinary function like
+///
+/// ```text
+/// fn tails(xs) = if is_empty(xs) { cons(nil, nil) } else { cons(xs, tails(tail(xs))) }
+/// ```
+///
+/// returns a `List<List<Nat>>` whose inner lists all SHARE the outer spine's cells — about `2m` heap
+/// cells for an `m`-element input, but `m² + m + 1` decode nodes, because this decoder walks each
+/// shared sub-list again for every pointer into it. **That is not a crafted heap; it is what `tails`
+/// produces.** Breakeven is `m ≈ 4,471` — three orders of magnitude below `DEFAULT_CAPS.heap`, and a
+/// perfectly ordinary input size. So a correct, fast, cap-respecting program CAN still be refused
+/// here, and calling this case adversarial (as an earlier revision of this comment did) was wrong.
+///
+/// Where the budget IS exactly as protective as intended is DEPTH, which is the hazard `MAX_TY_DEPTH`
+/// opens up. For the same maximally-shared shape, cost is `~n^d`, so breakeven `n ≈ 20_000_000^(1/d)`:
+///
+/// | `d` | 2 | 3 | 4 | 64 |
+/// |---|---|---|---|---|
+/// | breakeven `n` | ~4,471 | ~271 | ~67 | ~1.3 — i.e. **2 cells** already exceed it by ~9 orders |
+///
+/// Closing the `d = 2` gap properly needs a SHARING-AWARE decode — memoizing on `(pointer, type)` so
+/// an aliased sub-list is built once — not a bigger number. Filed in the spec's "What stays open".
+///
+/// `decode_asm`/`decode_word`, the Value-directed siblings, need no budget: they recurse on a finite
+/// reference `Value` already in memory, so its size is the bound.
+pub(crate) const MAX_DECODE_NODES: usize = 4 * DEFAULT_CAPS.heap as usize;
+
 /// Type-directed decode of a run's outcome to a `Value` (the AOT sibling of `decode_asm`, which is
 /// value-directed). Drives off the static `Ty` instead of a reference `Value`, so the standalone
-/// binary can decode without a reference run. Returns `None` on a representation mismatch or a
-/// non-value type (`Fun`/`Var`).
+/// binary can decode without a reference run. Returns `None` on a representation mismatch, a
+/// non-value type (`Fun`/`Var`), or an exhausted `MAX_DECODE_NODES` budget.
 pub fn decode_asm_ty(outcome: &AsmOutcome, ty: &Ty) -> Option<Value> {
-    decode_word_ty(outcome.result, &outcome.heap, ty)
+    let mut budget = MAX_DECODE_NODES;
+    decode_word_ty(outcome.result, &outcome.heap, ty, &mut budget)
 }
 
-/// Type-directed decode of one word. `pub(crate)` because `tm::decode` decodes the same
-/// `(word, heap)` pair off a set of TAPES and must not carry a second copy of this logic.
+/// Type-directed decode of one word. `pub(crate)` because `tm::decode::decode_tape_ty` decodes the
+/// same `(word, heap)` pair off a set of TAPES and must not carry a second copy of THIS decoder — a
+/// second budget/cycle-bound pair could silently disagree with this one. That claim is narrower than
+/// it sounds: the VALUE-directed sibling below, `decode_word`, IS duplicated — `tm::decode` has its
+/// own copy rather than calling this one — but safely, since both recurse structurally on a finite
+/// reference `Value` already in memory and need no budget at all (see `MAX_DECODE_NODES`'s doc above).
 ///
-/// Recursion here is on the TYPE (strictly smaller at each `List` element), never on the heap chain:
-/// the list SPINE is a loop, bounded by one step per heap cell. That bound is what makes a cyclic
-/// heap decode to `None` instead of overflowing the stack — a chain longer than the heap has cells
-/// must have revisited one. It matters because `tm::decode::decode_tape_ty` reads a heap that can
-/// come from a `.tm` FILE, where acyclicity is not something the compiler guaranteed.
-pub(crate) fn decode_word_ty(word: u64, heap: &[(u64, u64)], ty: &Ty) -> Option<Value> {
+/// Two SEPARATE totality guards, neither implying the other:
+///
+/// - Recursion here is on the TYPE (strictly smaller at each `List` element), never on the heap
+///   chain: the list SPINE is a loop, bounded by one step per heap cell. That bound is what makes a
+///   cyclic heap decode to `None` instead of overflowing the stack — a chain longer than the heap has
+///   cells must have revisited one. It bounds CYCLES, not SIZE: it says nothing about how much a
+///   single acyclic decode may construct.
+/// - `budget` bounds SIZE. It is decremented once per constructed `Value` node (every `Nat`/`Bool`/
+///   `Unit` leaf and every `Cons`), and decode fails once it would go negative. It matters because
+///   nested list types multiply: for `List<List<Nat>>`, each of up to n spine steps decodes an inner
+///   list that itself walks up to n cells, so an acyclic n-cell heap can still expand to O(n²) nodes
+///   — and `MAX_TY_DEPTH` nesting makes that O(n^d). The spine loop does not catch this: every step
+///   makes cycle-bounded progress while still constructing an unbounded amount of output.
+///
+/// Both matter because `tm::decode::decode_tape_ty` reads a heap AND a type that can come from a
+/// `.tm` FILE, where neither acyclicity nor a small size is something the compiler guaranteed.
+pub(crate) fn decode_word_ty(word: u64, heap: &[(u64, u64)], ty: &Ty, budget: &mut usize) -> Option<Value> {
     match ty {
-        Ty::Nat => Some(Value::Nat(word)),
-        Ty::Bool => match word {
-            0 => Some(Value::Bool(false)),
-            1 => Some(Value::Bool(true)),
-            _ => None,
-        },
-        Ty::Unit => Some(Value::Unit),
+        Ty::Nat => {
+            *budget = budget.checked_sub(1)?;
+            Some(Value::Nat(word))
+        }
+        Ty::Bool => {
+            let v = match word {
+                0 => Value::Bool(false),
+                1 => Value::Bool(true),
+                _ => return None,
+            };
+            *budget = budget.checked_sub(1)?;
+            Some(v)
+        }
+        Ty::Unit => {
+            *budget = budget.checked_sub(1)?;
+            Some(Value::Unit)
+        }
         Ty::List(elem) => {
             // Walk the spine forwards collecting heads, then rebuild back-to-front. At most one step
             // per cell; falling out of the loop means the chain never reached nil, i.e. it is cyclic.
@@ -492,14 +563,16 @@ pub(crate) fn decode_word_ty(word: u64, heap: &[(u64, u64)], ty: &Ty) -> Option<
             let mut w = word;
             for _ in 0..=heap.len() {
                 if w == 0 {
+                    *budget = budget.checked_sub(1)?; // the Nil node
                     let mut out = Value::Nil;
                     for h in heads.into_iter().rev() {
+                        *budget = budget.checked_sub(1)?; // each Cons node
                         out = Value::Cons(Rc::new(h), Rc::new(out));
                     }
                     return Some(out);
                 }
                 let &(h, t) = heap.get((w - 1) as usize)?;
-                heads.push(decode_word_ty(h, heap, elem)?);
+                heads.push(decode_word_ty(h, heap, elem, budget)?);
                 w = t;
             }
             None
@@ -966,5 +1039,81 @@ rec:
         }
         assert_eq!(cur, &Value::Nil, "the chain must terminate in nil");
         assert_eq!(heads, (1..=1000u64).rev().collect::<Vec<u64>>());
+    }
+
+    /// The spine loop bounds CYCLES — one step per heap cell. It does not bound SIZE. For
+    /// `List<List<Nat>>`, each of up to n spine steps decodes an inner list that walks up to n cells:
+    /// O(n^2) nodes, and `MAX_TY_DEPTH` nesting makes it O(n^d). BOTH factors are file-supplied, because
+    /// a machine of `state s: accept` returns its initial tapes unchanged. The two guards are separate
+    /// guarantees and neither implies the other.
+    #[test]
+    fn a_nested_type_over_a_large_heap_is_refused_rather_than_expanded() {
+        use crate::ty::Ty;
+        // Every cell points at the previous one, so each of the n spine steps decodes an inner list of
+        // length up to n. Costing it out: the outer spine takes n steps, each contributing 1 outer
+        // `Cons` plus an inner `List<Nat>` decode of length m (m running 0..=n-1), which costs 2m + 1
+        // nodes. Summing the inner costs over m = 0..=n-1 gives n^2 (sum of the first n odd numbers),
+        // plus n outer `Cons` nodes, plus 1 final outer `Nil`: n^2 + n + 1 total.
+        //
+        // n = 6000 gives 6000^2 + 6000 + 1 = 36,006,001 nodes — about 1.8x MAX_DECODE_NODES
+        // (4 * DEFAULT_CAPS.heap = 20,000,000), decisively over without being absurdly large.
+        let n = 6000u64;
+        let heap: Vec<(u64, u64)> = (1..=n).map(|i| (i - 1, i - 1)).collect();
+        let o = AsmOutcome { result: n, heap };
+        let nested = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
+        assert_eq!(decode_asm_ty(&o, &nested), None, "must exhaust the node budget, not expand");
+    }
+
+    /// The budget must not reject legitimate decodes. A flat list well under the cap still decodes, and
+    /// a modest nested one does too.
+    #[test]
+    fn the_node_budget_admits_legitimate_decodes() {
+        use crate::ty::Ty;
+        let heap: Vec<(u64, u64)> = (1..=1000u64).map(|i| (i, i - 1)).collect();
+        let o = AsmOutcome { result: 1000, heap };
+        assert!(decode_asm_ty(&o, &Ty::List(Box::new(Ty::Nat))).is_some(), "a 1000-element list must decode");
+        // A small nested case: 20 cells, List<List<Nat>> -> at most ~400 nodes.
+        let heap: Vec<(u64, u64)> = (1..=20u64).map(|i| (i - 1, i - 1)).collect();
+        let o = AsmOutcome { result: 20, heap };
+        let nested = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
+        assert!(decode_asm_ty(&o, &nested).is_some(), "a small nested list must still decode");
+    }
+
+    /// Pins the per-node accounting exactly, in both directions: a flat `List<Nat>` of `L` elements
+    /// costs `2L + 1` nodes (L `Cons` + L `Nat` leaves + 1 `Nil`), so it must decode iff
+    /// `2L + 1 <= MAX_DECODE_NODES`. `L` is chosen at that boundary — `(MAX_DECODE_NODES - 1) / 2` is
+    /// the largest `L` for which `2L + 1` still fits, so it must decode; `L + 1` pushes `2L + 1` one
+    /// past the budget, so it must not. Neither an over-count nor an under-count of what a node costs
+    /// (e.g. charging only for `Cons`, not for `Nat` leaves) could pass both assertions at once — unlike
+    /// the nested-heap test above, which a same-order miscount could still slip past.
+    ///
+    /// Ignored by default: `L` is ~10,000,000, so this allocates ~`MAX_DECODE_NODES` heap cells and
+    /// `Value`s, which is slow under a debug build. Run explicitly, or via the slow tier
+    /// (`scripts/check-slow.sh`).
+    #[test]
+    #[ignore = "slow tier: allocates ~MAX_DECODE_NODES values"]
+    fn the_node_budget_boundary_is_exact() {
+        use crate::ty::Ty;
+        let l_ok = (MAX_DECODE_NODES as u64 - 1) / 2;
+        let cost_ok = 2 * l_ok + 1;
+        let cost_over = 2 * (l_ok + 1) + 1;
+        assert!(cost_ok <= MAX_DECODE_NODES as u64, "sanity: l_ok must fit the budget");
+        assert!(cost_over > MAX_DECODE_NODES as u64, "sanity: l_ok must be the largest such L");
+
+        let heap: Vec<(u64, u64)> = (1..=l_ok).map(|i| (i, i - 1)).collect();
+        let o = AsmOutcome { result: l_ok, heap };
+        assert!(
+            decode_asm_ty(&o, &Ty::List(Box::new(Ty::Nat))).is_some(),
+            "a {l_ok}-element list costs {cost_ok} <= MAX_DECODE_NODES and must decode"
+        );
+
+        let l_over = l_ok + 1;
+        let heap: Vec<(u64, u64)> = (1..=l_over).map(|i| (i, i - 1)).collect();
+        let o = AsmOutcome { result: l_over, heap };
+        assert_eq!(
+            decode_asm_ty(&o, &Ty::List(Box::new(Ty::Nat))),
+            None,
+            "a {l_over}-element list costs one node over budget and must not decode"
+        );
     }
 }

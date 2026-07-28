@@ -6,8 +6,29 @@
 //! `Machine::validate()` — i.e. identifier-ish state names (no whitespace or reserved `; * : [ ]`)
 //! and data symbols outside the reserved set. `lower_tm` produces only such machines; a machine
 //! outside this representable subset is *rejected* by `validate` rather than silently corrupted.
+//!
+//! `print_tm`/`parse_tm` are the header-less pair above. `print_tm_with`/`parse_tm_full` are their
+//! header-carrying siblings: a file may additionally record a `TmHeader` (initial tapes, plus the
+//! `encoding`/`width`/`slots`/`result` recipe for interpreting the answer — see `tm::header`'s module
+//! doc for why that lives on the side rather than on `Machine`). The header is OPTIONAL; `parse_tm` is
+//! a thin wrapper that discards it, so a header-less file and a headered one both parse to the same
+//! machine.
+//!
+//! ## What a reader must assume beyond δ and q₀
+//!
+//! These are properties of the FORMAT, not of any one machine, and a foreign simulator that assumes
+//! otherwise diverges silently:
+//!
+//! - **Each tape's head starts at cell 0** of its literal contents (an omitted `tape` line means an
+//!   empty tape, whose head is at its single blank cell).
+//! - **Tapes are TWO-WAY infinite.** Moving left from cell 0 is legal and yields a blank; it does not
+//!   halt or error. A reader modelling a one-way tape computes a different function.
+//! - **A state with no rule matching the current symbols HALTS**, and halting is not failure — the
+//!   final tapes are the result. Only an `accept` state is distinguished, and only for readers that
+//!   care about acceptance rather than output.
 
 use crate::diagnostic::Severity;
+use crate::tm::build::MAX_TAPES;
 use crate::tm::header::{HeaderParts, TmHeader, print_header};
 use crate::tm::machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
 use crate::{Diagnostic, Span};
@@ -186,13 +207,23 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
         }
         if let Some(rest) = trimmed.strip_prefix("tapes ") {
             match rest.split(';').next().unwrap_or("").trim().parse::<usize>() {
-                Ok(n) if n >= 1 => tapes = Some(n),
-                _ => diags.push(err(span, "expected `tapes <positive integer>`")),
+                Ok(n) if (1..=MAX_TAPES).contains(&n) => tapes = Some(n),
+                _ => diags.push(err(span, format!("expected `tapes <1..={MAX_TAPES}>`"))),
             }
-        } else if let Some((key, rest)) =
-            trimmed.split_once(' ').filter(|(k, _)| matches!(*k, "encoding" | "width" | "slots" | "result" | "tape"))
+        } else if let Some((key, rest)) = trimmed
+            .split_once(' ')
+            .filter(|(k, _)| matches!(*k, "version" | "encoding" | "width" | "slots" | "result" | "tape"))
         {
             if let Some(Err(msg)) = header.directive(key, rest, span) {
+                diags.push(err(span, msg));
+            }
+        } else if trimmed == "version" {
+            // The one directive with no required argument shape to key off: every other directive's
+            // dispatch above needs a space to find its `key`/`rest` split, but a bare `version` line
+            // (no number at all) is exactly one of the malformed forms `directive` must still name as
+            // a version error rather than fall through to "unrecognized line" — see
+            // `an_unknown_version_is_an_error_not_a_warning`.
+            if let Some(Err(msg)) = header.directive("version", "", span) {
                 diags.push(err(span, msg));
             }
         } else if let Some(rest) = trimmed.strip_prefix("start ") {
@@ -360,6 +391,7 @@ state halt: accept
         let expected = "\
 tapes 1
 start scan
+version 1
 encoding unary
 width 4
 slots 1
@@ -382,9 +414,15 @@ state halt: accept
         let m = increment();
         let plain = print_tm(&m);
         let headered = print_tm_with(&m, &a_header());
+        // The margin here is ONE CHARACTER. The only machine-authored line that comes close to a stripped
+        // prefix is `tapes {n}`, which survives the `"tape "` prefix strip solely because index 4 is `s`
+        // and not a space. State/rule lines are safe by construction (`"state "` and two leading spaces).
+        // If either keyword ever loses its trailing space this test starts silently removing real content.
         let stripped: String = headered
             .lines()
-            .filter(|l| !["encoding ", "width ", "slots ", "result ", "tape "].iter().any(|p| l.starts_with(p)))
+            .filter(|l| {
+                !["version ", "encoding ", "width ", "slots ", "result ", "tape "].iter().any(|p| l.starts_with(p))
+            })
             .map(|l| format!("{l}\n"))
             .collect();
         assert_eq!(stripped, plain);
@@ -612,6 +650,9 @@ state s: accept
             ("encoding unary\nencoding binary\nwidth 4\nslots 1\nresult Nat", "duplicate"),
             ("encoding unary\nwidth 4\nwidth 8\nslots 1\nresult Nat", "duplicate"),
             ("encoding unary\nwidth 4\nslots 1\nresult Nat\ntape 0 #_#\ntape 0 #_#", "duplicate"),
+            // `version` gets the same duplicate rule as the other four. Two AGREEING lines are still
+            // an error: the rule is about the file stating a thing once, not about the values matching.
+            ("version 1\nversion 1\nencoding unary\nwidth 4\nslots 1\nresult Nat", "duplicate"),
         ];
         for (header, needle) in cases {
             let src = format!("tapes 1\nstart s\n{header}\n\nstate s: accept\n");
@@ -627,15 +668,18 @@ state s: accept
             // The out-of-range `tape` diagnostic is about ONE specific line, whose real span was in
             // scope when `directive` saw it. `start <= end <= len` is trivially true of `{0, 0}` too
             // (which is exactly how this went unnoticed before), so check the span is non-empty and
-            // actually covers the offending `tape` line. The other cases legitimately have no single
-            // offending line and keep the loose check above.
+            // actually covers the offending `tape` line — exactly, not by substring: `covered.contains
+            // ("tape")` would also pass for the `tapes 1` line above it, which is the same defect class
+            // this test exists to catch. The other cases legitimately have no single offending line and
+            // keep the loose check above.
             if *needle == "out of range" {
                 let d = ds.iter().find(|d| d.message.contains("out of range")).expect("out of range diagnostic");
                 assert!(d.span.start < d.span.end, "expected a non-empty span for:\n{header}\ngot {d:?}");
                 let covered = &src[d.span.start..d.span.end];
-                assert!(
-                    covered.contains("tape"),
-                    "span must cover the offending `tape` line for:\n{header}\ngot span {:?} -> {covered:?}",
+                assert_eq!(
+                    covered.trim(),
+                    "tape 9 #____#",
+                    "span must cover exactly the offending `tape` line for:\n{header}\ngot span {:?} -> {covered:?}",
                     d.span
                 );
             }
@@ -678,5 +722,95 @@ state s: accept
         ] {
             let _ = parse_tm_full(src); // must return, never panic
         }
+    }
+
+    /// A `.tm` file is untrusted. `tapes N` drives `TmHeader::init`'s allocation directly, and a machine
+    /// whose only state is `state s: accept` has no rules — so the rule-arity check never constrains it.
+    /// Without a cap, `tapes 10000000000` parses clean and the documented next step allocates 10^10 Vecs.
+    /// `sim.rs` guards this exact scenario by name; the header path reintroduced it one call earlier.
+    #[test]
+    fn an_absurd_tape_count_is_refused_rather_than_allocated() {
+        let src = "tapes 10000000000\nstart s\n\nstate s: accept\n";
+        let (m, ds) = parse_tm(src);
+        assert!(m.is_none(), "an absurd tape count must not yield a machine");
+        assert!(ds.iter().any(|d| d.message.contains("tapes")), "{ds:?}");
+        for d in &ds {
+            assert!(d.span.start <= d.span.end && d.span.end <= src.len());
+        }
+    }
+
+    /// BOTH DIRECTIONS. A cap tested only from above proves the rejection fires, never that it fires at
+    /// the right place — the value one below it must still be accepted.
+    #[test]
+    fn the_tape_cap_admits_the_value_just_below_it() {
+        let at_cap = format!("tapes {MAX_TAPES}\nstart s\n\nstate s: accept\n");
+        let (m, ds) = parse_tm(&at_cap);
+        assert!(m.is_some() && ds.is_empty(), "at the cap must parse: {ds:?}");
+        let over = format!("tapes {}\nstart s\n\nstate s: accept\n", MAX_TAPES + 1);
+        let (m, ds) = parse_tm(&over);
+        assert!(m.is_none(), "one over the cap must not parse");
+        // Naming the directive matters: `is_none()` alone would also be satisfied by an unrelated
+        // parse error, so it cannot tell "the cap fired" from "something else rejected this file".
+        // Its two sibling cap tests both check the message; this one did not.
+        assert!(ds.iter().any(|d| d.message.contains("tapes")), "must be refused BY THE CAP: {ds:?}");
+    }
+
+    /// `slots` and `width` feed `init_reg`, which allocates `slots * (width + 1)` cells — the recipe
+    /// evaluation the header exists for, and what the consistency check itself performs. MAX_SLOTS and
+    /// MAX_FIELD_WIDTH already bound this for in-memory programs; the file path bypassed them.
+    #[test]
+    fn absurd_slots_and_width_are_refused_at_their_existing_ceilings() {
+        let hdr = |s: &str, w: &str| {
+            format!("tapes 1\nstart s\nencoding unary\nwidth {w}\nslots {s}\nresult Nat\n\nstate s: accept\n")
+        };
+        // At each ceiling: accepted.
+        assert!(parse_tm_full(&hdr("100000", "64")).1.is_some(), "at both ceilings must parse");
+        // One over: refused, each naming its own directive.
+        let (_, h, ds) = parse_tm_full(&hdr("100001", "64"));
+        assert!(h.is_none() && ds.iter().any(|d| d.message.contains("slots")), "{ds:?}");
+        let (_, h, ds) = parse_tm_full(&hdr("100000", "65"));
+        assert!(h.is_none() && ds.iter().any(|d| d.message.contains("width")), "{ds:?}");
+    }
+
+    /// Absent means version 1, so every file written before this directive existed stays valid.
+    #[test]
+    fn an_absent_version_means_one() {
+        let src = "tapes 1\nstart s\nencoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n";
+        let (m, h, ds) = parse_tm_full(src);
+        assert!(m.is_some() && h.is_some(), "{ds:?}");
+        assert!(ds.is_empty(), "an absent version is not a diagnostic: {ds:?}");
+    }
+
+    /// An unknown version is a hard ERROR, not a warning. A future version could change what `width` or
+    /// `slots` MEAN, so decoding a v2 file under v1 rules would produce a confidently wrong value — the
+    /// exact failure the header exists to prevent.
+    #[test]
+    fn an_unknown_version_is_an_error_not_a_warning() {
+        for bad in ["version 2", "version 0", "version foo", "version"] {
+            let src =
+                format!("tapes 1\nstart s\n{bad}\nencoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n");
+            let (m, h, ds) = parse_tm_full(&src);
+            assert!(m.is_none() && h.is_none(), "{bad:?} must be refused");
+            assert!(ds.iter().any(|d| d.message.contains("version")), "{bad:?}: {ds:?}");
+        }
+    }
+
+    /// `version` is NOT a member of the four-directive header set, so the four optionality properties are
+    /// untouched — but a lone `version` must not be silently dropped, on the same reasoning as a stray
+    /// `tape` line: discarding it turns a typo into "this file has no header".
+    #[test]
+    fn a_lone_version_without_a_header_is_a_diagnostic() {
+        let src = "tapes 1\nstart s\nversion 1\n\nstate s: accept\n";
+        let (_, h, ds) = parse_tm_full(src);
+        assert!(h.is_none());
+        assert!(ds.iter().any(|d| d.message.contains("version")), "{ds:?}");
+    }
+
+    /// The printer always emits it, and it leads the block.
+    #[test]
+    fn print_tm_with_emits_version_first() {
+        let out = print_tm_with(&increment(), &a_header());
+        let block: Vec<&str> = out.lines().skip(2).take(1).collect();
+        assert_eq!(block, vec!["version 1"], "got:\n{out}");
     }
 }

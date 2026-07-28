@@ -66,7 +66,6 @@ pub fn parse_ty(s: &str) -> Option<Ty> {
     // Peel `List<` off the front and its matching `>` off the back together, so the two counts cannot
     // disagree: `List<Nat>>` peels to the base `Nat>`, which matches no base type and is rejected.
     while let Some(rest) = s.strip_prefix("List<") {
-        // `>` is ASCII, so `len() - 1` is a char boundary whenever `ends_with` holds.
         let rest = rest.strip_suffix('>')?;
         s = rest.trim();
         depth += 1;

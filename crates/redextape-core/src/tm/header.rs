@@ -21,11 +21,23 @@
 //! encoding's semantics, and a name cannot convey them.
 
 use crate::Span;
-use crate::tm::build::{BOX, HEAP, REG, STACK, WORK};
+use crate::tm::build::{BOX, HEAP, MAX_FIELD_WIDTH, REG, STACK, WORK};
 use crate::tm::encoding::{Binary, Encoding, Unary};
+use crate::tm::lower_tm::MAX_SLOTS;
 use crate::tm::machine::Symbol;
 use crate::ty::Ty;
 use crate::ty::parse_ty;
+
+/// The `.tm` header format version this build writes and accepts.
+///
+/// An ABSENT `version` directive means 1, so every file written before this directive existed stays
+/// valid. An unknown version is a hard parse ERROR rather than a warning: a future version could
+/// change what `width` or `slots` MEAN, and decoding a v2 file under v1 rules would produce a
+/// confidently wrong value — the exact failure the header exists to prevent.
+///
+/// NOT a member of the four-directive header set (`encoding`/`width`/`slots`/`result`), so the four
+/// optionality properties are unaffected and a header-less file is still header-less.
+pub const HEADER_VERSION: u32 = 1;
 
 /// Which `Encoding` a file names.
 ///
@@ -106,7 +118,11 @@ pub struct TmHeader {
 
 impl TmHeader {
     /// Build a header, normalizing `tapes` into the form the text output can represent exactly:
-    /// empty tapes dropped, indices ascending, duplicates collapsed to the first.
+    /// empty tapes dropped, indices ascending, and duplicate indices collapsed to one entry — but
+    /// NOT always "the first" of the input. Empties are dropped BEFORE the duplicate collapse runs,
+    /// so an empty entry never wins a duplicate index merely by coming first: `[(0, []), (0, ['#'])]`
+    /// keeps the SECOND entry, because the first is already gone by the time dedup sees the list.
+    /// Only among the entries that survive the empty drop does input order decide the winner.
     ///
     /// The normalization is not cosmetic. An omitted `tape` line MEANS "this tape starts empty"
     /// (which is how HEAP, STACK and BOX always start), so an explicitly-stored empty entry prints
@@ -138,8 +154,13 @@ impl TmHeader {
     }
 
     /// The initial tape vector to hand `simulate`, from the literal `tape` lines. `n_tapes` comes
-    /// from the file's `tapes N`. Total: entries outside `0..n_tapes` are dropped rather than
-    /// panicked on, so a header and a tape count that disagree still yield a runnable configuration.
+    /// from the file's `tapes N`. Entries outside `0..n_tapes` are dropped rather than panicked on, so
+    /// a header and a tape count that disagree still yield a runnable configuration.
+    ///
+    /// **Not total in `n_tapes` itself.** The allocation below is `n_tapes` `Vec`s, so this is bounded
+    /// only because the one caller that parses `n_tapes` from a file (`syntax::parse_tm_full`) caps it
+    /// at `MAX_TAPES` before it ever reaches here — see that cap's doc for why an unbounded `tapes N`
+    /// is a hazard. A caller that hands this an unvalidated `n_tapes` is outside that guarantee.
     pub fn init(&self, n_tapes: usize) -> Vec<Vec<Symbol>> {
         let mut init = vec![Vec::new(); n_tapes];
         for (i, cells) in &self.tapes {
@@ -157,9 +178,11 @@ use std::fmt::Write as _;
 /// Render `h`'s directives, one per line, ending in a newline. Emitted between `start` and the states
 /// by `syntax::print_tm_with`.
 ///
-/// The order — `encoding`, `width`, `slots`, `result`, then `tape` lines ascending — is FIXED, even
-/// though the parser accepts any order. A printer has to choose one, and a fixed choice is what makes
-/// re-printing a re-parse idempotent.
+/// The order — `version`, `encoding`, `width`, `slots`, `result`, then `tape` lines ascending — is
+/// FIXED, even though the parser accepts any order. A printer has to choose one, and a fixed choice is
+/// what makes re-printing a re-parse idempotent. `version` leads: it is not one of the four directives
+/// `TmHeader` carries (there is no field for it — see `HEADER_VERSION`'s doc), but a reader needs to
+/// know which rules govern the rest of the block before it makes sense of them.
 ///
 /// KNOWN LIMIT: a tape cell equal to `;` would open a comment and not round-trip. No `Encoding` in
 /// this tree writes one — the tape alphabet is `_ # 1 0 @` — and `Machine::validate()` already
@@ -167,6 +190,7 @@ use std::fmt::Write as _;
 /// the text form is specified for, the same as one whose state name contains a space.
 pub(crate) fn print_header(h: &TmHeader) -> String {
     let mut out = String::new();
+    let _ = writeln!(out, "version {HEADER_VERSION}");
     let _ = writeln!(out, "encoding {}", h.encoding.name());
     let _ = writeln!(out, "width {}", h.width);
     let _ = writeln!(out, "slots {}", h.slots);
@@ -199,6 +223,13 @@ pub(crate) struct HeaderParts {
     width: Option<usize>,
     slots: Option<u32>,
     result: Option<Ty>,
+    /// The parsed, VALIDATED version — `Some` only once a `version` directive has been seen naming
+    /// exactly `HEADER_VERSION`. Not surfaced on `TmHeader` (see `HEADER_VERSION`'s doc: version is a
+    /// property of the FORMAT, validated here and re-emitted as a constant, not a property of any one
+    /// machine's header). Its ONLY job is detecting a duplicate directive — `finish` never reads it,
+    /// consulting `saw_version` below instead, because a `version` line that FAILED to validate still
+    /// means the file was trying to carry a header.
+    version: Option<u32>,
     /// Each entry carries the `Span` of the `tape` line it came from, so a diagnostic about ONE
     /// specific entry (the out-of-range check in `finish`) can point at the line that caused it
     /// instead of the whole file. The span is parse-time-only: `finish` strips it before handing the
@@ -208,6 +239,13 @@ pub(crate) struct HeaderParts {
     /// FAILED to parse still means the file was trying to carry a header, and `finish` must not then
     /// report "no header".
     saw_tape: bool,
+    /// Whether any `version` line was seen, mirroring `saw_tape` exactly and for the same reason: a
+    /// `version` directive that failed to parse (or named an unknown version — caught earlier, in
+    /// `directive`, since that error must fire regardless of what else is in the file) still means the
+    /// file was trying to say something, and a LONE, valid `version` with none of the four directives
+    /// must not silently read as "no header" either — that would turn a typo into invisible data loss,
+    /// same as a stray `tape` line.
+    saw_version: bool,
 }
 
 impl HeaderParts {
@@ -222,6 +260,25 @@ impl HeaderParts {
     pub(crate) fn directive(&mut self, key: &str, rest: &str, span: Span) -> Option<Result<(), String>> {
         let val = rest.split(';').next().unwrap_or("").trim();
         match key {
+            // Unlike the four directives below, an unrecognized version is not "incomplete" — it is
+            // refused outright, here, at the earliest point it can be: a v2 file parsed under v1 rules
+            // would not fail to parse, it would parse to a CONFIDENTLY WRONG value, because a future
+            // version could redefine what `width` or `slots` mean. A duplicate is an error for the same
+            // reason as the other four: two disagreeing `version` lines have no defensible winner.
+            "version" => {
+                self.saw_version = true;
+                Some(match (self.version, val.parse::<u32>()) {
+                    (Some(_), _) => Err("duplicate `version` directive".into()),
+                    (None, Ok(v)) if v == HEADER_VERSION => {
+                        self.version = Some(v);
+                        Ok(())
+                    }
+                    (None, Ok(v)) => Err(format!(
+                        "unsupported header version `{v}` (this build reads version {HEADER_VERSION} only)"
+                    )),
+                    (None, Err(_)) => Err(format!("expected `version {HEADER_VERSION}`, found `{val}`")),
+                })
+            }
             "encoding" => Some(match (self.encoding, EncodingKind::parse(val)) {
                 (Some(_), _) => Err("duplicate `encoding` directive".into()),
                 (None, Some(k)) => {
@@ -230,21 +287,27 @@ impl HeaderParts {
                 }
                 (None, None) => Err(format!("unknown `encoding` name `{val}` (expected `unary` or `binary`)")),
             }),
+            // Capped at the same ceiling `lower_and_size` enforces for in-memory programs: `slots` and
+            // `width` feed `init_reg`, which allocates `slots * (width + 1)` cells. A TOTALITY guard on
+            // untrusted input, not a language limit.
             "width" => Some(match (self.width, val.parse::<usize>()) {
                 (Some(_), _) => Err("duplicate `width` directive".into()),
-                (None, Ok(n)) if n >= 1 => {
+                (None, Ok(n)) if (1..=MAX_FIELD_WIDTH).contains(&n) => {
                     self.width = Some(n);
                     Ok(())
                 }
-                (None, _) => Err(format!("expected `width <positive integer>`, found `{val}`")),
+                (None, _) => Err(format!("expected `width <1..={MAX_FIELD_WIDTH}>`, found `{val}`")),
             }),
+            // Capped at the same ceiling `lower_and_size` enforces for in-memory programs: `slots` and
+            // `width` feed `init_reg`, which allocates `slots * (width + 1)` cells. A TOTALITY guard on
+            // untrusted input, not a language limit.
             "slots" => Some(match (self.slots, val.parse::<u32>()) {
                 (Some(_), _) => Err("duplicate `slots` directive".into()),
-                (None, Ok(n)) => {
+                (None, Ok(n)) if n <= MAX_SLOTS => {
                     self.slots = Some(n);
                     Ok(())
                 }
-                (None, Err(_)) => Err(format!("expected `slots <integer>`, found `{val}`")),
+                (None, _) => Err(format!("expected `slots <0..={MAX_SLOTS}>`, found `{val}`")),
             }),
             "result" => Some(match (&self.result, parse_ty(val)) {
                 (Some(_), _) => Err("duplicate `result` directive".into()),
@@ -286,15 +349,19 @@ impl HeaderParts {
     /// isn't (there is no single line to blame for a directive that never appeared at all). The
     /// caller stamps `None` to a `Span { start: 0, end: 0 }` placeholder.
     ///
-    /// - **Zero of the four present** (and no `tape` line) -> `(None, [])`: the file has no header,
-    ///   which is not an error. This is optionality property 4, and it is what every file written
-    ///   before this slice looks like.
-    /// - **All four present** -> a validated header.
+    /// - **Zero of the four present** (and no `tape` or `version` line) -> `(None, [])`: the file has
+    ///   no header, which is not an error. This is optionality property 4, and it is what every file
+    ///   written before this slice looks like.
+    /// - **All four present** -> a validated header. (`version`, valid or absent, has already been
+    ///   settled in `directive` — an unrecognized version errors there, immediately, rather than
+    ///   waiting for `finish`.)
     /// - **One to three present** -> `(None, [(msg, None)])` naming the missing ones. Not a silent
     ///   `None`, because discarding a half-written header would turn a typo into "this file has no
     ///   header". Spanless: there is no single offending line for an ABSENT directive.
-    /// - **`tape` lines but none of the four** -> an error for the same reason: the tape data would
-    ///   otherwise vanish without a word. Also spanless, for the same reason.
+    /// - **`tape` and/or `version` lines but none of the four** -> an error for the same reason: that
+    ///   data would otherwise vanish without a word. Also spanless, for the same reason. `version` is
+    ///   folded in here rather than getting its own case because a LONE `version` has exactly the same
+    ///   shape as a lone `tape`: a directive with no header for it to belong to.
     pub(crate) fn finish(self, n_tapes: usize) -> (Option<TmHeader>, Vec<(String, Option<Span>)>) {
         let missing: Vec<&str> = [
             ("encoding", self.encoding.is_none()),
@@ -307,11 +374,13 @@ impl HeaderParts {
         .collect();
 
         if missing.len() == 4 {
-            return if self.saw_tape {
+            return if self.saw_tape || self.saw_version {
                 (
                     None,
                     vec![(
-                        "`tape` directives without a header (needs `encoding`, `width`, `slots`, `result`)".into(),
+                        "`tape`/`version` directives without a header (needs `encoding`, `width`, `slots`, \
+                         `result`)"
+                            .into(),
                         None,
                     )],
                 )
@@ -393,6 +462,14 @@ mod tests {
             vec![(HEAP, vec![]), (WORK, vec!['#']), (REG, vec!['#', '_'])],
         );
         assert_eq!(h.tapes(), &[(REG, vec!['#', '_']), (WORK, vec!['#'])]);
+
+        // The duplicate-index collapse `dedup_by_key` implements has been untested until now, though
+        // `TmHeader::new` is `pub` and documents the behaviour. Neither entry here is empty, so the
+        // empty-tape filter above does not interfere with either one — input order alone decides the
+        // winner, and (per the corrected doc on `new`) the first entry survives.
+        let h = TmHeader::new(EncodingKind::Unary, 8, 1, Ty::Nat, vec![(REG, vec!['#', 'a']), (REG, vec!['#', 'b'])]);
+        assert_eq!(h.tapes().len(), 1, "duplicate indices must collapse to one entry");
+        assert_eq!(h.tapes()[0], (REG, vec!['#', 'a']), "first survives when neither side is empty");
     }
 
     #[test]
@@ -433,6 +510,7 @@ mod tests {
             vec![(REG, vec!['#', '0', '0', '0', '0', '#']), (WORK, vec!['#', '0', '0', '0', '0', '#'])],
         );
         let expected = "\
+version 1
 encoding binary
 width 4
 slots 2

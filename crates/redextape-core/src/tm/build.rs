@@ -8,6 +8,17 @@ use crate::tm::machine::{Machine, Move, Rule, State, StateId, Symbol};
 
 /// Fixed multi-tape layout (arity shared by every gadget so they compose).
 pub const TAPES: usize = 5;
+
+/// The most tapes a PARSED machine may declare.
+///
+/// A TOTALITY guard on untrusted input, not a language limit. `tapes N` from a `.tm` file drives
+/// `TmHeader::init`'s allocation directly, and a rule-less accept state means the rule-arity check
+/// never constrains it — so without this, `tapes 10_000_000_000` parses clean and the documented next
+/// step allocates that many `Vec`s. `sim.rs` guards the same scenario one call later, by name.
+///
+/// This compiler emits `TAPES` (5). 64 leaves an order of magnitude for hand-written machines while
+/// bounding the allocation to something a test can survive.
+pub const MAX_TAPES: usize = 64;
 pub const REG: usize = 0;
 pub const WORK: usize = 1;
 pub const STACK: usize = 2;
