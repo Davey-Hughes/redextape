@@ -176,16 +176,20 @@ so it takes `&dyn Encoding` rather than a symbol slice.
 
 #### 3.3 `fn init_work(&self) -> Vec<Symbol>`
 
-`Binary` needs structured scratch. Unary's WORK is an unstructured run of contiguous marks whose end is
-found by scanning to a blank; binary's operands are fixed-width digit strings, and `mul` (Architecture §4)
-needs three of them live at once. So under `Binary`, WORK becomes a small fixed bank with the same shape as REG — `#` then
-(`w` digits + `#`) × 3:
+**CORRECTED (Task 17), verified three times during the branch:** `Binary` needs exactly **one** scratch
+field (`N_WORK_FIELDS = 1`, `binary::W_ACC`), not the three predicted below. The three-field estimate
+assumed `mul` would need a live multiplicand, a live (shrinking) multiplier, and an accumulator
+simultaneously — the standard shift-and-add shape. The implementation instead shifts the
+**accumulator** left each iteration and reads the multiplier bit directly off REG (`bit_is_one` at a
+static per-iteration offset, since the `w` iterations are unrolled at build time), so there is no
+multiplier register and no loop counter to keep alongside the accumulator. `eq`/`ne` need a second
+temporary too, but they park it in REG `rd` (a fresh destination, per the trait's precondition) exactly
+as `Unary::eq_to_work` already does, rather than in a second WORK field. So WORK under `Binary` is `#`
+then (`w` digits + `#`) × **1**:
 
 | field | role |
 |---|---|
-| `W0` | accumulator / primary operand / the `0`-`1` boolean the comparisons produce |
-| `W1` | secondary operand — the shifted multiplicand |
-| `W2` | the multiplier, shifted right, doubling as the loop's termination test |
+| `W_ACC` | accumulator / primary operand / the `0`-`1` boolean the comparisons produce — the ONLY WORK field |
 
 `Unary::init_work()` returns the empty vector, so today's behaviour is **bit-identical** — WORK starts
 empty exactly as it does now. `attempt()` (`tm.rs:96`) gains one line setting `init[WORK]` alongside
@@ -298,22 +302,65 @@ state, per encoding, the value range each width covers, and binary's widths shou
 5. A binary column in `examples/width_report.rs` and `examples/step_survey.rs`: steps and final tape
    length, unary vs binary, per program — with a golden.
 
-## What the measurement is expected to show, and why it is the point
+## What the measurement showed (Task 17), and which prediction it refuted
 
-The toggle is only worth having if it teaches something, and the interesting result is a *trade*, not a
-win. Two predictions, both to be confirmed or refuted by the artifact rather than asserted here:
+The toggle is only worth having if it teaches something, and the interesting result turned out to be a
+*trade*, not a clean win — but not the trade this section originally predicted. Two predictions were
+made before the artifact existed; the measurement below is `examples/width_report.rs`'s Section D and
+`examples/step_survey.rs`'s Part D, both auto-fit per program by `run_tm_fitted` (no width pinned by
+hand), reproduced independently during Task 17 and matching the numbers below exactly.
 
-- **Binary banks are shorter.** Auto-fit settles binary at a narrower cell count for the same program —
-  `1 + 2 * 3` needs 3 bits where unary needs 8 cells — and tape length is `1 + slots·(w+1)`.
-- **Binary step counts are probably *higher* on this corpus.** Every value in the demo suite is under 64,
-  which is precisely the regime where a `k`-cell unary add beats a `w`-cell ripple carry. The prior width
-  measurement found the padding-traversal term to be 71–97% of all steps at `w = 64`; binary removes the
-  padding but adds per-digit carry logic.
+- **Binary banks are shorter — HELD.** Auto-fit settles binary at a narrower cell count for the same
+  program: `let x = 40; x + 2` needs 8 cells where unary needs 64.
+- **Binary step counts are probably *higher* on this corpus — REFUTED.** The prediction reasoned that
+  since every demo value is under 64, and that is precisely the regime where a `k`-cell unary add beats a
+  `w`-cell ripple carry, binary would cost more time even while saving space. Measured, the OPPOSITE
+  holds in aggregate: over `width_report.rs`'s **18-program corpus** binary totals **0.45x** unary's
+  steps (270,369 → 122,972) — because the width each encoding auto-fits to is not the same width, and
+  narrowing the *bank* (not just the per-operation cost) is most of the win.
 
-If both hold, the honest headline is that **binary buys range and space, and costs time at small values** —
-which is a more useful thing to have measured than a speedup would have been, and is exactly the kind of
-counterintuitive result the step survey has produced before (it overturned this roadmap's own recommended
-pass ranking).
+| program | unary w / steps | binary w / steps | ratio |
+|---|---|---|---|
+| `let x = 40; x + 2` | 64 / 2,870 | 8 / 405 | 0.14x |
+| `if 2 > 1 { 10 } else { 20 }` | 16 / 638 | 4 / 215 | 0.34x |
+| `fn sum(n) {...} sum(5)` | 16 / 50,542 | 4 / 18,086 | 0.36x |
+| `3 - 5` | 8 / 253 | 4 / 140 | 0.55x |
+| `while` loop, n=4 | 8 / 13,824 | 4 / 7,990 | 0.58x |
+| `1 + 2 * 3` | 8 / 1,020 | 4 / 613 | 0.60x |
+| `map(add1)` over `[3,1,2]` | 8 / 55,927 | 4 / 34,972 | 0.63x |
+| `[1, 2, 3]` | 4 / 802 | 4 / 896 | **1.12x** |
+| `head(tail(cons(1,cons(2,nil))))` | 4 / 790 | 4 / 950 | **1.20x** |
+| **subtotal, these 9 rows** | **126,666** | **64,267** | **0.51x** |
+
+**These nine rows are a SELECTION, not the corpus.** They are the hand-check written before the
+artifact existed, and `width_report.rs` reproduced every one of them program for program. But the
+corpus is **18** programs and its total is **0.45x** (270,369 → 122,972). An earlier version of this
+section labelled the 9-row subtotal "the corpus total" and the roadmap repeated it as fact — the
+branch's own recurring defect (a number claiming more than it covers) surviving into the commit that
+was supposed to correct exactly that. Run `cargo run --release --example width_report` for the full
+table; it is the source of truth and these nine rows are a readable excerpt of it.
+
+**The rows where binary loses are the controlled comparison, and they are the honest answer to the
+refuted prediction.** There are **three** in the full corpus — `list-build` 1.12x, `list-head` 1.13x,
+`list-tail-head` 1.20x — of which the excerpt above shows two. Each fits at width 4 under BOTH
+encodings, so there is no bank-width advantage for binary there, and binary is 12–20% *slower*, which is the true per-operation cost of ripple-carry over
+mark-counting the original prediction was reasoning about. Everywhere else in the table binary wins, but
+for a different reason than either prediction named: it fits a narrower bank than unary needs for the
+same values, and the padding-traversal term this branch's predecessor slice measured at 71–97% of all
+steps at `w = 64` is exactly what a narrower bank avoids paying. So the honest headline is **binary buys
+range and (usually) time, by buying space first** — the space and time effects are not independent, and
+conflating them is what made the original per-operation prediction wrong at the aggregate level while
+still being correct at the per-operation level the controlled rows isolate. `step_survey.rs`'s Part D
+runs the same comparison over the full 50-program `FIRST_ORDER_DEMOS`/`LAMBDA_LIMITATION_DEMOS` corpus
+and finds the same shape: 0.39x in aggregate, with **12 of 50** programs (mostly small heap/list
+operations) fitting at width 4 under both encodings — of which **11 lose**, at 1.06x-1.20x, and one
+*wins*: `is_empty(nil)` at 0.84x, which is outside the range an earlier version of this sentence
+claimed for all twelve. A same-width (both pinned at 64) comparison — `lower_tm.rs`'s
+`tm_step_count_goldens_binary`/`tm_step_count_golden_higher_order_binary` — makes the per-operation cost
+starker still: at a shared width binary is 1.15x-1.72x slower on three of the four goldens, and 10.2x
+slower on the one golden built on `Mul` (`1 + 2 * 3`), because `Mul` is the one gadget with materially
+more states than its unary counterpart (Architecture §4) and that shows up in the step count once the
+bank is wide enough for it to matter.
 
 ## What stays open
 
@@ -327,7 +374,14 @@ pass ranking).
    invariant. Deferred, not rejected.
 3. **The LENGTH half of the bank skeleton** still has no static cover, for binary as for unary (roadmap
    item 3). Unchanged by this slice.
-4. **`Binary` as a fourth leg in `native_oracle.rs`.** Native's advertised distinctive capability is
-   "no `MAX_FIELD_WIDTH` (64) ceiling" (`native_oracle.rs:13`). Binary narrows that gap considerably — the
-   TM now reaches 2⁶⁴ — so those comments become inaccurate and the native suite's framing needs a pass.
-   Small, but it must not be forgotten: it is a claim in a doc comment that this slice makes false.
+4. **RESOLVED (Task 17).** Native's advertised distinctive capability was "no `MAX_FIELD_WIDTH` (64)
+   ceiling" (`native_oracle.rs:13`); Task 17 reworded the four stale sites (`native_oracle.rs`'s module
+   doc, `assert_native_matches_reference`'s doc, `BEYOND_FIELD_WIDTH_DEMOS`'s doc, and
+   `the_tm_reports_its_ceiling_on_the_same_demos`'s doc, plus `native_demo.rs`'s module doc and its
+   section 3) to say "the TM's unary tape" and note that `Binary` narrows the gap to values `>= 2^64` —
+   a domain this language cannot express anyway, since `Value::Nat(u64)` and the reference's
+   `saturating_add`/`_mul` already cap it there. `native_runs_beyond_field_width` was kept (not deleted):
+   it still tests a real difference, native vs. *unary*, just a narrower one than advertised. Actually
+   adding `Binary` as a participating fourth leg in the native oracle (parameterizing the whole suite
+   over both TM encodings) was NOT done — out of Task 17's scope, which was the doc correction, not a
+   new oracle dimension — and stays open if a future slice wants it.

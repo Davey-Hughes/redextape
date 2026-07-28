@@ -5,7 +5,7 @@ use crate::ast::{BinOp, Block, Expr, Program, Stmt};
 use crate::diagnostic::Diagnostic;
 use crate::prelude::type_env;
 use crate::span::Span;
-use crate::ty::{Scheme, Ty};
+use crate::ty::{Scheme, Ty, show};
 use std::collections::{HashMap, HashSet};
 
 pub fn typecheck(program: &Program) -> Vec<Diagnostic> {
@@ -499,20 +499,6 @@ fn subst_vars(ty: &Ty, mapping: &HashMap<u32, Ty>) -> Ty {
             Ty::Fun(ps.iter().map(|p| subst_vars(p, mapping)).collect(), Box::new(subst_vars(r, mapping)))
         }
         Ty::Nat | Ty::Bool | Ty::Unit => ty.clone(),
-    }
-}
-
-fn show(ty: &Ty) -> String {
-    match ty {
-        Ty::Nat => "Nat".into(),
-        Ty::Bool => "Bool".into(),
-        Ty::Unit => "Unit".into(),
-        Ty::List(t) => format!("List<{}>", show(t)),
-        Ty::Fun(ps, r) => {
-            let ps: Vec<String> = ps.iter().map(show).collect();
-            format!("({}) -> {}", ps.join(", "), show(r))
-        }
-        Ty::Var(v) => format!("t{v}"),
     }
 }
 

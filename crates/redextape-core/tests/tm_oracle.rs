@@ -7,12 +7,14 @@
 //! body twice), so this file's two legs (reference==TM, asm-interp==TM) both cover the binary TM too.
 //!
 //! Both helpers use `run_tm_fitted`, not `run_tm`, and decode with `enc.at_width(width)` at the width
-//! the fit actually settled on -- `Binary`'s decode is width-strict (it requires the field to close
-//! exactly `self.width` cells later), unlike `Unary`'s content-driven decode, which scans to the next
-//! `#` and so happens to work at any width. Decoding at a fixed `enc` (its own, usually 64-cell, width)
-//! silently returns `None` for a `Binary` tape fitted narrower -- measured directly in
-//! `three_way_oracle.rs`'s module doc ("DISCOVERY (Task 14)"), where every single demo failed to
-//! decode this way, not just the headline `100 * 100` case.
+//! the fit actually settled on. That was once REQUIRED: `Binary`'s decode used to be width-strict, and
+//! decoding a fitted-at-16 tape with a 64-cell `Binary` returned `None` for every demo here, not just
+//! the headline `100 * 100` case. Both decoders are structural now (`binary.rs`, "Reading a tape back"),
+//! so any instance would do.
+//!
+//! It stays anyway, and not out of inertia: the fitted width is the one an oracle disagreement would be
+//! reported at, and threading it keeps `at_width` on the executed path rather than leaving it to the
+//! width-equivalence suite alone.
 
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;

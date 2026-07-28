@@ -18,18 +18,23 @@
 //! extraction of `FIRST_ORDER_DEMOS` (by `CARGO_MANIFEST_DIR`-relative path, not by module name) for no
 //! gain, so the filename/doc mismatch is a deliberate decision, not an oversight.
 //!
-//! DISCOVERY (Task 14): every binary leg below runs via `run_tm_fitted`, not `run_tm`, and decodes with
-//! `Binary::at(width)` at the WIDTH THE FIT ACTUALLY SETTLED ON, not `Binary::default()` (64 cells).
-//! `Binary::decode_nat`/`parse_heap_cells` are width-STRICT (they require the field to close exactly
-//! `self.width` cells later), unlike `Unary`'s content-driven decode, which scans to the next `#` and
-//! so happens to work at ANY width. Decoding a fitted-at-16 binary tape with a 64-wide `Binary` silently
-//! returns `None` for every single demo, not just `100 * 100` -- measured directly, not assumed.
+//! DISCOVERY (Task 14), SINCE RESOLVED: every binary leg below runs via `run_tm_fitted`, not `run_tm`,
+//! and decodes with `Binary::at(width)` at the WIDTH THE FIT ACTUALLY SETTLED ON. That was once
+//! REQUIRED. `Binary::decode_nat`/`parse_heap_cells` were width-STRICT (they required a field to close
+//! exactly `self.width` cells later) where `Unary`'s content-driven decode scans to the next `#` and so
+//! works at any width, and decoding a fitted-at-16 binary tape with a 64-wide `Binary` silently returned
+//! `None` for every single demo, not just `100 * 100` -- measured directly, not assumed.
+//!
+//! Both decoders are structural now (see `binary.rs`, "Reading a tape back"), so `run_tm` paired with a
+//! default instance would work here too; `tm.rs`'s `a_default_encoding_decodes_a_tape_fitted_to_a_
+//! narrower_width` is what pins that. The fitted form stays below because the width is worth naming in
+//! a failure message and because it keeps `at_width` on this file's executed path.
 
 use proptest::prelude::*;
 use redextape_core::desugar::desugar;
 use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, run_lambda};
 use redextape_core::parser::parse;
-use redextape_core::tm::{Binary, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary, decode_tape, run_tm, run_tm_fitted};
+use redextape_core::tm::{Binary, Encoding, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary, decode_tape, run_tm, run_tm_fitted};
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 
@@ -45,8 +50,8 @@ fn assert_three_way(src: &str) {
     let core = desugar(&prog.unwrap());
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
     let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
-    // `run_tm_fitted`, not `run_tm`: `Binary`'s decode is width-strict, so the tape must be read back
-    // at the SAME width the fit settled on (see this file's module doc, "DISCOVERY (Task 14)").
+    // `run_tm_fitted`, not `run_tm`: reads the tape back at the width the fit settled on. Once forced
+    // by a width-strict decode, now kept so a failure names the width (see this file's module doc).
     let (btm, bwidth) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
     match (reference, lambda, tm, btm) {
         (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }, TmRun::Ran { tapes: btapes }) => {
@@ -128,9 +133,9 @@ fn assert_tm_only(src: &str) {
 /// if binary were secretly falling back to unary, or if the ceiling had been raised for both.
 ///
 /// Uses `run_tm_fitted`, not `run_tm`, and decodes with `Binary::at(width)` at the width the fit
-/// settled on: `Binary::decode_nat` is width-strict (see this file's module doc, "DISCOVERY (Task
-/// 14)"), so decoding at a fixed `Binary::default()` (64 cells) would wrongly report `None` even
-/// though the machine computed 10,000 correctly.
+/// settled on. Once required — `Binary::decode_nat` was width-strict, and a fixed `Binary::default()`
+/// (64 cells) would have reported `None` even though the machine computed 10,000 correctly — and now
+/// kept for the width itself, which is half of what this test claims (see the module doc).
 #[test]
 fn binary_computes_what_unary_cannot_represent() {
     let (prog, ds) = parse("100 * 100");
@@ -524,8 +529,8 @@ fn three_way_value(src: &str) -> Result<(), TestCaseError> {
     let core = desugar(&prog.unwrap());
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
     let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
-    // `Binary`'s decode is width-strict, so decode at the width `run_tm_fitted` actually settled on
-    // (see this file's module doc, "DISCOVERY (Task 14)"), not a fixed `Binary::default()`.
+    // Decodes at the width `run_tm_fitted` settled on. No longer required (both decoders are
+    // structural), but it names the width in a shrunk counterexample, which a bare `run_tm` would not.
     let (btm, bwidth) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
     match (reference, lambda, tm, btm) {
         (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }, TmRun::Ran { tapes: btapes }) => {
@@ -811,17 +816,23 @@ fn broadened_generators_are_non_vacuous() {
 // subsumed by) the differential oracle above. All operands bounded so every value is `< MAX_FIELD_WIDTH`.
 // ============================================================================================
 
-/// Run `src` on the TM and decode against its reference value; `None` if the reference faults, the
-/// program doesn't lower/halt, or decode fails.
-fn tm_val(src: &str) -> Option<Value> {
+/// Run `src` on the TM under ONE encoding and decode against its reference value; `None` if the
+/// reference faults, the program doesn't lower/halt, or decode fails.
+///
+/// `run_tm_fitted` rather than `run_tm`: once required, because `Binary`'s decode was width-strict and
+/// a tape fitted at 16 cells decoded to `None` under `Binary::default()` (see this file's module doc).
+/// Both decoders are structural now, so this is no longer load-bearing — but both legs still go through
+/// the same path rather than branching on encoding, which is why it reads the same for `Unary` too.
+fn tm_val_with(src: &str, enc: &dyn Encoding) -> Option<Value> {
     let expected = run(src).ok()?;
     let (prog, ds) = parse(src);
     if !ds.is_empty() {
         return None;
     }
     let core = desugar(&prog.unwrap());
-    match run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS) {
-        TmRun::Ran { tapes } => decode_tape(&tapes, &expected, &Unary::default()),
+    let (run_out, width) = run_tm_fitted(&core, enc, TM_DEFAULT_CAPS);
+    match run_out {
+        TmRun::Ran { tapes } => decode_tape(&tapes, &expected, &*enc.at_width(width?)),
         _ => None,
     }
 }
@@ -837,9 +848,16 @@ fn assert_equiv(lhs: &str, rhs: &str) -> Result<(), TestCaseError> {
     match (&rl, &rr) {
         (Ok(vl), Ok(vr)) => {
             prop_assert_eq!(vl, vr, "law violated on the reference:\n  {} = {:?}\n  {} = {:?}", lhs, vl, rhs, vr);
-            let (tl, tr) = (tm_val(lhs), tm_val(rhs));
-            prop_assert_eq!(tl.as_ref(), Some(vl), "TM violates the law (lhs): {}", lhs);
-            prop_assert_eq!(tr.as_ref(), Some(vr), "TM violates the law (rhs): {}", rhs);
+            // BOTH encodings. A law is a property of the pipeline, not of one representation, so a
+            // law that held under unary and broke under binary would be exactly the kind of defect
+            // this file exists to catch — and until now these ~14 law proptests ran unary only.
+            for (name, enc) in
+                [("unary", &Unary::default() as &dyn Encoding), ("binary", &Binary::default() as &dyn Encoding)]
+            {
+                let (tl, tr) = (tm_val_with(lhs, enc), tm_val_with(rhs, enc));
+                prop_assert_eq!(tl.as_ref(), Some(vl), "{}-TM violates the law (lhs): {}", name, lhs);
+                prop_assert_eq!(tr.as_ref(), Some(vr), "{}-TM violates the law (rhs): {}", name, rhs);
+            }
         }
         // A metamorphic law here is between two VALUE-producing programs; any fault (or a one-sided
         // fault) is a law violation or a generator bug, so fail rather than silently accept it.

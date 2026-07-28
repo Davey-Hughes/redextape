@@ -28,7 +28,7 @@ pub use unary::Unary;
 // the operands are intrinsic to the interface, so allow the arg count on the whole seam.
 #[allow(clippy::too_many_arguments)]
 pub trait Encoding {
-    /// `slot rd <- n` (clear the field, write `n` marks).
+    /// `slot rd <- n` (clear the field, write `n` in this encoding's representation).
     fn write_literal(&self, b: &mut Builder, entry: StateId, exit: StateId, n: u64, rd: Slot);
     /// `slot rd <- (ra `op` rb)` for an arithmetic `BinOp` (Add/Sub/Mul); comparisons go to `compare`.
     /// PRECONDITION: `rd` must be a fresh temporary, distinct from `ra` and `rb`, for every
@@ -41,7 +41,9 @@ pub trait Encoding {
     /// PRECONDITION: `rd` must be a fresh temporary, distinct from `ra` and `rb` (`Eq`/`Ne` park an
     /// intermediate boolean in `rd` while `ra`/`rb` are still being read).
     fn compare(&self, b: &mut Builder, entry: StateId, exit: StateId, op: BinOp, ra: Slot, rb: Slot, rd: Slot);
-    /// Decode field `slot` of a materialized `reg` tape to its unary value (`None` if the field is absent).
+    /// Decode field `slot` of a materialized `reg` tape to the number it holds — the reading is the
+    /// encoding's own (`Unary` counts marks, `Binary` folds digits). `None` if the field is absent or
+    /// malformed for this encoding.
     fn decode_nat(&self, reg_cells: &[Symbol], slot: Slot) -> Option<u64>;
     /// This instance's field width, in TAPE CELLS — not directly a value bound, since what a `width`-cell
     /// field can hold is encoding-specific: `v < width` for `Unary`, `v < 2^width` for `Binary`. Both
@@ -67,6 +69,21 @@ pub trait Encoding {
     /// from cell 0 — `Tape::snapshot`'s cell 0 is not necessarily the origin, so a marker-delimited scan
     /// is what makes parsing robust to blanks left of the origin.
     fn parse_heap_cells(&self, cells: &[Symbol]) -> Vec<(u64, u64)>;
+    /// The exact length, in tape cells, of a HEAP cons-cell WORD — or `None` when this encoding does not
+    /// fix one.
+    ///
+    /// A sibling of `field_symbols`, and it exists for the same reason: the bank-safety checkers verify
+    /// the heap's skeleton, and how long a word is happens to be a fact only the encoding knows.
+    ///
+    /// It is deliberately NOT `field_width`. A heap word is not a register field. `Unary` pads a REG
+    /// field out to `width` with blanks, but writes a heap word as a bare mark run whose length IS the
+    /// value — so unary fields are fixed-width while unary heap words are not, and answering
+    /// `field_width` here would make the checker reject every non-maximal unary value. `Binary` writes
+    /// both as exactly `width` digits, so for it the two coincide.
+    ///
+    /// Only ever applied to a FINAL (halted) tape. A mid-append word is legitimately shorter than this,
+    /// and no per-step invariant may use it.
+    fn heap_word_len(&self) -> Option<usize>;
     /// Re-instantiate this encoding at `width`. An unbounded encoding returns an equivalent of itself.
     fn at_width(&self, width: usize) -> Box<dyn Encoding>;
     /// The initial REG tape for a `slots`-field bank: `#` then (`width` blanks + `#`)*`slots`.
@@ -101,8 +118,10 @@ pub trait Encoding {
     /// with the tag now the top field, REG/WORK home. `n_loc = 0` is a no-op leaving the tag on top.
     fn pop_frame_restore(&self, b: &mut Builder, entry: StateId, exit: StateId, n_loc: u32);
     /// The second half of the `Ret`-side gadget: with the return-tag as the top STACK field (as left by
-    /// `pop_frame_restore`), read+erase the tag and route to `exits[c]` where `c` is the tag's mark
-    /// count. `from` `entry` (STACK head at the top — the blank right of the tag's `#`; REG/WORK home).
+    /// `pop_frame_restore`), read+erase the tag and route to `exits[c]` where `c` is the tag's VALUE as
+    /// this encoding reads it (`Unary` counts marks; `Binary` folds digits and fans out by a linear
+    /// chain of equality tests, since a depth-`width` decision trie would have `2^width` leaves).
+    /// `from` `entry` (STACK head at the top — the blank right of the tag's `#`; REG/WORK home).
     /// Erases the whole tag field so on the chosen exit the STACK head is at the NEW top (the caller's
     /// frame, or an empty stack), REG/WORK untouched (still home). Does NOT flow to a single `exit`: it
     /// is a finite-state fan-out to one of `exits`. If `c >= exits.len()` (cannot happen for a
@@ -120,8 +139,11 @@ pub trait Encoding {
     /// `rd <- head(field rl)`: read the pointer in `rl`, seek the cell, write its head-word into `rd`.
     /// Flows `entry -> exit` with all heads home/top on the value exit. A `nil` pointer (`rl == 0`) or a
     /// dangling pointer has no value and SPINS to a cap (HitCap), matching λ (Ω) and the reference
-    /// (Runtime); `rd` is not written. Like `cons`, the structural navigation (seek) is unary-always;
-    /// only the copied head-word follows the encoding. PRECONDITION: `rd` distinct from `rl` (`rd` is
+    /// (Runtime); `rd` is not written. BOTH the head-word and the structural navigation follow the
+    /// encoding: `Unary` walks the cell chain by counting marks, `Binary` skips whole fixed-width cells
+    /// with a counted chain driven by a binary counter. (This doc previously said the navigation was
+    /// "unary-always"; the binary impl makes that false, and a trait doc asserting an implementation
+    /// property its second implementation violates is worse than saying nothing.) PRECONDITION: `rd` distinct from `rl` (`rd` is
     /// written last, after `rl` is fully read — but keep them distinct; `lower_asm` emits fresh operands).
     fn head_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
     /// As `head_op`, but writes the tail-word into `rd`.

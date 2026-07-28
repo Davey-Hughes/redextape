@@ -35,10 +35,17 @@
 
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{BLANK, BOX, MARK, REG, SEP, Unary, defunc, lower_asm, lower_tm_guarded};
+use redextape_core::tm::{BLANK, BOX, Binary, Encoding, MARK, REG, SEP, Unary, defunc, lower_asm, lower_tm_guarded};
 
 mod common;
 use common::{assert_delimiter_safe, unsafe_rules};
+
+/// Both encodings this rung must cover. `Binary` has its own bank with its own write sites (REG, BOX
+/// and — under `Binary` specifically — WORK, since `Binary::init_work` is non-empty), so a corpus that
+/// only ever lowers to `Unary` verifies nothing about them.
+fn encodings_at(width: usize) -> Vec<(&'static str, Box<dyn Encoding>)> {
+    vec![("unary", Box::new(Unary::at(width))), ("binary", Box::new(Binary::at(width)))]
+}
 
 /// The corpus, spanning every gadget family. Kept in step with `tm_bank_invariant.rs`.
 const CORPUS: &[&str] = &[
@@ -74,8 +81,10 @@ fn no_machine_in_the_corpus_can_write_over_a_delimiter() {
             Err(_) => lower_asm(&defunc(&core).expect("defuncs")).expect("lowers after defunc"),
         };
         for width in [2usize, 4, 8, 64] {
-            let (m, _) = lower_tm_guarded(&program, &Unary::at(width));
-            assert_delimiter_safe(&m, &format!("`{src}` at width {width}"));
+            for (name, enc) in encodings_at(width) {
+                let (m, _) = lower_tm_guarded(&program, &*enc);
+                assert_delimiter_safe(&m, &*enc, &format!("`{src}` at width {width} ({name})"));
+            }
         }
     }
 }
@@ -91,8 +100,10 @@ fn the_property_holds_for_programs_that_never_terminate() {
         assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
         let core = desugar(&prog.unwrap());
         let program = lower_asm(&core).expect("lowers");
-        let (m, _) = lower_tm_guarded(&program, &Unary::at(4));
-        assert_delimiter_safe(&m, &format!("diverging `{src}`"));
+        for (name, enc) in encodings_at(4) {
+            let (m, _) = lower_tm_guarded(&program, &*enc);
+            assert_delimiter_safe(&m, &*enc, &format!("diverging `{src}` ({name})"));
+        }
     }
 }
 
@@ -148,4 +159,39 @@ fn the_checker_accepts_both_forms_of_safety() {
         1,
         "a guard constraining a second tape does not fire on every `#`, so it cannot shadow"
     );
+}
+
+/// `unsafe_rules`' clause (b) accepts ANY non-`#` read, not just symbols an encoding calls "field
+/// content" — see `tests/common/mod.rs` for why the field-content-restricted version was tried and
+/// rejected (it flagged `box_append_field_bin`'s legitimate `BLANK` read as unsafe). Pin that this did
+/// not go too far the other way: a rule that writes a digit under a WILDCARD read — no explicit read at
+/// all — must still be reported, checked against a REAL `Binary` digit (`ZERO`). Without this, a fix
+/// that accidentally made clause (b) accept `rule.read[tape].is_none()` too would pass every other test
+/// in this file (every real gadget, unary or binary, reads an explicit symbol) while silently no longer
+/// rejecting anything.
+#[test]
+fn the_checker_still_flags_a_wildcard_digit_write() {
+    use redextape_core::tm::{Builder, Move, RuleSpec, ZERO};
+    let mut b = Builder::new();
+    let s = b.state("danger");
+    let halt = b.accept("halt");
+    b.add_rule(s, RuleSpec::new().on(REG, None, Some(ZERO), Move::R), halt);
+    let m = b.finish(s);
+    let bad = unsafe_rules(&m, REG);
+    assert_eq!(bad.len(), 1, "a wildcard-read digit write must still be flagged: {bad:?}");
+}
+
+/// And a read of `Some(SEP)` itself — the direct, textbook clobber — must still be reported when
+/// unshadowed, under EITHER encoding's digit alphabet. This is the case clause (b) must never swallow:
+/// if it ever accepted `s == SEP` as "safe", the whole checker would be vacuous for the one read that
+/// actually sits on the delimiter.
+#[test]
+fn the_checker_still_flags_a_direct_sep_read_write() {
+    use redextape_core::tm::{Builder, Move, RuleSpec, ZERO};
+    let mut b = Builder::new();
+    let s = b.state("clobber");
+    let halt = b.accept("halt");
+    b.add_rule(s, RuleSpec::new().on(REG, Some(SEP), Some(ZERO), Move::R), halt);
+    let bad = unsafe_rules(&b.finish(s), REG);
+    assert_eq!(bad.len(), 1, "a rule that reads `#` and writes a digit must be flagged: {bad:?}");
 }

@@ -879,7 +879,18 @@ impl Encoding for Unary {
     }
 
     fn field_symbols(&self) -> &'static [Symbol] {
-        &[MARK, BLANK]
+        // The SAME constant the gadgets pass to `seek_slot`/`rewind_home`, not a second hand-written
+        // copy. `encoding.rs` documents `content` as "the encoding's `field_symbols()`"; returning a
+        // separate literal would make that false the moment either drifted — and drift is silent in
+        // both directions (an extra symbol makes the generic bank checkers report false corruption; a
+        // missing one stalls the skeleton walk mid-bank). `Binary` already returns its own `BITS`.
+        UNARY_CONTENT
+    }
+
+    fn heap_word_len(&self) -> Option<usize> {
+        // A unary heap word is a bare mark run whose length IS the value, so there is no fixed length
+        // to check — unlike a REG field, which this encoding pads out to `self.width` with blanks.
+        None
     }
 
     fn parse_heap_cells(&self, cells: &[Symbol]) -> Vec<(u64, u64)> {

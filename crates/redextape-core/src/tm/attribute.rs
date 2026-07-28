@@ -22,7 +22,7 @@ use crate::tm::build::{REG, TAPES};
 use crate::tm::defunc::defunc_mapped;
 use crate::tm::encoding::{Encoding, Unary};
 use crate::tm::lower_asm::{LowerError, lower_asm_mapped};
-use crate::tm::lower_tm::{MAX_SLOTS, SlotMap, frame_bank_unrepresentable, lower_tm_mapped};
+use crate::tm::lower_tm::{MAX_SLOTS, SlotMap, frame_bank_unrepresentable, lower_tm_mapped, mul_count_unrepresentable};
 use crate::tm::machine::{Machine, Symbol};
 use crate::tm::sim::{self, Status};
 
@@ -71,19 +71,19 @@ pub struct Attribution {
 
 impl Attribution {
     /// What to report for a program `lower_tm_mapped` refuses to lay out — `MAX_SLOTS` (an absurd
-    /// register file) or `MAX_FRAME_LOC` (an absurd `Loc` bank in a call-containing program). Either
-    /// way it hands back a degenerate machine that halts before doing anything, so nothing ran and
-    /// nothing is attributed — and `capped` says the histogram does not describe a complete execution.
+    /// register file), `MAX_FRAME_LOC` (an absurd `Loc` bank in a call-containing program), or
+    /// `MAX_MUL_INSTRS` (too many `Mul` instructions, each O(width²) states under `Binary`). Every one
+    /// hands back a degenerate machine that halts before doing anything, so nothing ran and nothing is
+    /// attributed — and `capped` says the histogram does not describe a complete execution.
     ///
     /// The alternative is what this used to do for the `MAX_FRAME_LOC` half: simulate the degenerate
     /// machine and report `{ histogram: {}, total: 0, capped: false }`, which a consumer reads as a
     /// program that RAN and cost NOTHING. That is the one wrong answer available here.
     ///
-    /// Note this is deliberately NOT what `run_tm` reports for the `MAX_FRAME_LOC` half: `run_tm`
-    /// guards only `MAX_SLOTS`, so it simulates the degenerate machine and reports `Ran` over tapes
-    /// that decode to nothing. Attribution mirrors `run_tm`'s LOWERING exactly (same machine, same
-    /// encoding, same caps) — but `capped` is documented as "does not describe a complete execution",
-    /// and a zero-step degenerate halt does not.
+    /// `run_tm` reports the SAME class of program as `TmRun::TooLarge` — a program refused before it
+    /// took a step, never `Ran` over tapes that decode to nothing. Attribution mirrors `run_tm`'s
+    /// LOWERING exactly (same machine, same encoding, same caps) — and `capped` is documented as "does
+    /// not describe a complete execution", which a zero-step degenerate halt indeed does not.
     fn unrepresentable() -> Attribution {
         Attribution { histogram: BTreeMap::new(), total: 0, capped: true }
     }
@@ -144,8 +144,8 @@ struct Mapped {
 /// refusals, and the seeded REG tape. Mirroring it is the point — an attribution of a differently
 /// lowered machine would describe a program nobody executes.
 ///
-/// `Ok(None)` is a program `lower_tm_mapped` refuses to lay out (`MAX_SLOTS` or `MAX_FRAME_LOC`):
-/// the machine halts before doing anything, so there is no run to attribute.
+/// `Ok(None)` is a program `lower_tm_mapped` refuses to lay out (`MAX_SLOTS`, `MAX_FRAME_LOC`, or
+/// `MAX_MUL_INSTRS`): the machine halts before doing anything, so there is no run to attribute.
 fn lower_mapped(core: &Core, enc: &dyn Encoding) -> Result<Option<Mapped>, LowerError> {
     // `lower_program`: try the program as first-order Core FIRST (a shape `defunc`'s top-level peel
     // does not recognize would otherwise be wrongly rejected), and retry through `defunc` only on
@@ -163,16 +163,17 @@ fn lower_mapped(core: &Core, enc: &dyn Encoding) -> Result<Option<Mapped>, Lower
     };
     let (machine, state_origins) = lower_tm_mapped(&prog, enc);
     let sm = SlotMap::of(&prog);
-    // BOTH of `lower_tm_mapped`'s layout refusals, not just the one `run_tm` mirrors. Each hands back
-    // a degenerate halt-immediately machine with an all-`None` state map, so simulating either would
-    // report a meaningless zero-step run — and a zero-step run passes the exhaustiveness invariant
-    // (0 == 0) while telling a consumer the program cost nothing.
+    // ALL THREE of `lower_tm_mapped`'s layout refusals, exactly the set `run_tm` now mirrors too (see
+    // `tm.rs`'s `run_tm_fitted`/`run_tm_at`). Each hands back a degenerate halt-immediately machine with
+    // an all-`None` state map, so simulating any of them would report a meaningless zero-step run — and
+    // a zero-step run passes the exhaustiveness invariant (0 == 0) while telling a consumer the program
+    // cost nothing.
     //
     // `MAX_SLOTS` is spelled out here because `run_tm` spells it out too (an absurd register index
-    // would also drive `init_reg` into a huge allocation just below). The `MAX_FRAME_LOC` half goes
-    // through `lower_tm`'s own predicate rather than being re-derived, so it cannot drift from the
-    // guard it mirrors.
-    if sm.n_slots() > MAX_SLOTS || frame_bank_unrepresentable(&prog, &sm) {
+    // would also drive `init_reg` into a huge allocation just below). The `MAX_FRAME_LOC` and
+    // `MAX_MUL_INSTRS` halves go through `lower_tm`'s own predicates rather than being re-derived, so
+    // this cannot drift from the guards it mirrors.
+    if sm.n_slots() > MAX_SLOTS || frame_bank_unrepresentable(&prog, &sm) || mul_count_unrepresentable(&prog) {
         return Ok(None);
     }
     let mut init = vec![Vec::new(); TAPES];
@@ -500,8 +501,8 @@ mod tests {
         assert!(!a.capped);
     }
 
-    /// `lower_tm_mapped` has TWO layout refusals, and both hand back a degenerate machine that halts
-    /// before doing anything. Mirroring only the `MAX_SLOTS` one made this program — which really
+    /// `lower_tm_mapped` has THREE layout refusals, and all three hand back a degenerate machine that
+    /// halts before doing anything. Mirroring only the `MAX_SLOTS` one made this program — which really
     /// does exceed `MAX_FRAME_LOC`, 3,315 states of which 0 were mapped — attribute as
     /// `{ histogram: {}, total: 0, capped: false }`: a program that never ran, reported as one that
     /// ran and cost nothing.
@@ -511,6 +512,20 @@ mod tests {
         const N: usize = 1_100;
         let params: String = (0..N).map(|i| format!("p{i}, ")).collect();
         let src = format!("fn g(y) {{ y }} fn f({params}n) {{ g(n) }} f({}3)", "1, ".repeat(N));
+
+        let a = attribute(&src).expect("attributes");
+        assert_eq!(a.total, 0, "the degenerate halt machine cannot take a step");
+        assert!(a.histogram.is_empty(), "nothing ran, so nothing is attributable: {:?}", a.histogram);
+        assert!(a.capped, "a program that never ran must not be reported as one that ran for free");
+    }
+
+    /// The THIRD layout refusal, `MAX_MUL_INSTRS`: a program with too many `Mul` instructions must also
+    /// attribute as "never ran", not as a zero-cost run. Same shape as the frame-bank case above, and
+    /// the same wrong answer would result if this refusal were left unmirrored here.
+    #[test]
+    fn a_program_with_too_many_muls_reports_that_nothing_ran() {
+        // > MAX_MUL_INSTRS (32) multiplications in one straight-line expression.
+        let src = vec!["2"; 34].join(" * "); // 33 `*` operators.
 
         let a = attribute(&src).expect("attributes");
         assert_eq!(a.total, 0, "the degenerate halt machine cannot take a step");

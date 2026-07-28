@@ -39,7 +39,10 @@ use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::run;
 use redextape_core::tm::attribute::{Attribution, StepBucket, attribute, attribute_at};
-use redextape_core::tm::{LowerError, TM_DEFAULT_CAPS, Unary, defunc, lower_asm, run_tm_fitted};
+use redextape_core::tm::{
+    Binary, Encoding, LowerError, MIN_FIELD_WIDTH, Program, REG, TAPES, TM_DEFAULT_CAPS, TmRun, TmStatus, Unary, WORK,
+    defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts, simulate_final,
+};
 
 // ================================================================================================
 // Part A's corpus — copied verbatim, see the module doc comment above for why and from where.
@@ -475,11 +478,169 @@ fn main() {
     print_width_reranking();
     print_width_caveat();
 
+    // ============================================================================================
+    // PART D — unary vs binary at the fitted width (Task 17: the measurement that makes the toggle
+    // worth having).
+    // ============================================================================================
+    println!("\n\n════════════════════════════════════════════════════════════════════");
+    println!(" PART D — unary vs binary, each at its OWN fitted width");
+    println!("════════════════════════════════════════════════════════════════════");
+    any_capped |= print_encoding_comparison();
+
     println!(
         "\n\nNo corpus program or probe hit the step cap: {}",
         if any_capped { "FALSE — see PARTIAL markers above" } else { "confirmed" }
     );
     assert!(!any_capped, "a corpus program or probe hit the step cap — the survey's own requirement failed");
+}
+
+/// One encoding's measurement for one program at its own fitted width: the width, total steps, and the
+/// final REG tape's cell length. `capped` distinguishes a genuine step-cap hit from every other
+/// non-`Ran` outcome (`Overflow`/`LowerError`), which is not expected on this corpus (both encodings
+/// are already known to reach `Ran` here via `tm_oracle.rs`/`three_way_oracle.rs`'s four-way oracle)
+/// but is reported rather than silently treated the same as a cap.
+struct Measured {
+    width: Option<usize>,
+    steps: Option<u64>,
+    reg_len: Option<usize>,
+    capped: bool,
+}
+
+/// Fit `family` to `src`, run once at the fitted width, and report width + steps + final REG length.
+/// Mirrors `width_report.rs`'s `measure`/`steps_at`/`ended_in_guard` — duplicated rather than shared
+/// because an example is a separate binary crate that cannot `use` another example's module (the same
+/// reason this file already hand-copies `FIRST_ORDER_DEMOS`, see the module doc above).
+fn measure(src: &str, family: &dyn Encoding) -> Measured {
+    let (prog, ds) = parse(src);
+    assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
+    let core = desugar(&prog.unwrap());
+    let (outcome, width) = run_tm_fitted(&core, family, TM_DEFAULT_CAPS);
+    match (outcome, width) {
+        (TmRun::Ran { tapes }, Some(w)) => {
+            let enc = family.at_width(w);
+            let reg_len = tapes[REG].snapshot().0.len();
+            let steps = steps_at(src, enc.as_ref());
+            Measured { width: Some(w), steps, reg_len: Some(reg_len), capped: false }
+        }
+        (TmRun::HitCap, _) => Measured { width: None, steps: None, reg_len: None, capped: true },
+        _ => Measured { width: None, steps: None, reg_len: None, capped: false },
+    }
+}
+
+/// Steps taken at a PINNED width (`enc`'s own). `None` means the run did not complete there (overflow
+/// or cap). Generic over `enc` so this serves both `Unary` and `Binary`: the `init[WORK]` line only
+/// matters for `Binary` (`Unary::init_work()` is the empty vector).
+fn steps_at(src: &str, enc: &dyn Encoding) -> Option<u64> {
+    let (prog, ds) = parse(src);
+    assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
+    let core = desugar(&prog.unwrap());
+    let program = match lower_asm(&core) {
+        Ok(p) => p,
+        Err(_) => lower_asm(&defunc(&core).ok()?).ok()?,
+    };
+    let (m, overflow) = lower_tm_guarded(&program, enc);
+    let mut init = vec![Vec::new(); TAPES];
+    init[REG] = enc.init_reg(n_slots_of(&program));
+    init[WORK] = enc.init_work();
+    let (counts, status) = simulate_counts(&m, &init, TM_DEFAULT_CAPS);
+    if status != TmStatus::Halted {
+        return None;
+    }
+    if counts.get(overflow as usize).is_some() && ended_in_guard(&program, enc) {
+        return None;
+    }
+    Some(counts.iter().sum())
+}
+
+/// Whether a pinned-width run halts in the overflow guard.
+fn ended_in_guard(program: &Program, enc: &dyn Encoding) -> bool {
+    let (m, overflow) = lower_tm_guarded(program, enc);
+    let mut init = vec![Vec::new(); TAPES];
+    init[REG] = enc.init_reg(n_slots_of(program));
+    init[WORK] = enc.init_work();
+    let (_, final_state, status) = simulate_final(&m, &init, TM_DEFAULT_CAPS);
+    status == TmStatus::Halted && final_state == overflow
+}
+
+/// The Task 17 deliverable: for every program in this file's own Part A corpus
+/// (`FIRST_ORDER_DEMOS` + `LAMBDA_LIMITATION_DEMOS`), fit BOTH encodings independently via
+/// `run_tm_fitted` and report width, total steps, and final REG tape length under each, plus the
+/// ratio. Returns whether anything hit a genuine step cap (as opposed to `Overflow`, which is not
+/// expected here — see `Measured`'s doc).
+fn print_encoding_comparison() -> bool {
+    println!("\nEvery earlier section in this survey attributes steps under a PINNED width (`Unary::default()`,");
+    println!("64 cells, or a program's unary-fitted width in the re-ranking section). This section fits BOTH");
+    println!("encodings INDEPENDENTLY per program via `run_tm_fitted` — the width, step count, and final REG");
+    println!("tape length each encoding actually settles on, not a shared pinned width imposed on both.\n");
+    println!(
+        "  {:<88} | {:>4} {:>9} {:>5} | {:>4} {:>9} {:>5} | {:>7}",
+        "program", "u-w", "u-steps", "u-reg", "b-w", "b-steps", "b-reg", "ratio"
+    );
+
+    let mut total_u = 0u64;
+    let mut total_b = 0u64;
+    let mut controlled: Vec<(String, f64)> = Vec::new();
+    let mut incomplete = 0usize;
+    let mut any_cap = false;
+    let all_demos: Vec<&str> = FIRST_ORDER_DEMOS.iter().chain(LAMBDA_LIMITATION_DEMOS.iter()).copied().collect();
+
+    for src in &all_demos {
+        let mu = measure(src, &Unary::default());
+        let mb = measure(src, &Binary::default());
+        any_cap |= mu.capped || mb.capped;
+        match (mu.width, mu.steps, mu.reg_len, mb.width, mb.steps, mb.reg_len) {
+            (Some(uw), Some(us), Some(ur), Some(bw), Some(bs), Some(br)) => {
+                let ratio = bs as f64 / us as f64;
+                total_u += us;
+                total_b += bs;
+                println!(
+                    "  {:<88} | {uw:>4} {us:>9} {ur:>5} | {bw:>4} {bs:>9} {br:>5} | {ratio:>6.2}x",
+                    truncate(src, 88)
+                );
+                // The CONTROLLED comparison: both settle at the narrowest possible width under BOTH
+                // encodings, so there is no bank-width advantage for binary and the ratio isolates the
+                // true per-operation cost of ripple-carry over mark-counting.
+                if uw == MIN_FIELD_WIDTH && bw == MIN_FIELD_WIDTH {
+                    controlled.push((truncate(src, 70), ratio));
+                }
+            }
+            _ => {
+                incomplete += 1;
+                println!(
+                    "  {:<88}   DID NOT COMPLETE under one or both encodings (unary capped={}, binary capped={})",
+                    truncate(src, 88),
+                    mu.capped,
+                    mb.capped
+                );
+            }
+        }
+    }
+
+    println!(
+        "\n  TOTAL steps over {} of {} programs (excludes {incomplete} that did not complete under both \
+         encodings): unary {total_u}  binary {total_b}  ratio {:.2}x",
+        all_demos.len() - incomplete,
+        all_demos.len(),
+        total_b as f64 / total_u.max(1) as f64
+    );
+    if !controlled.is_empty() {
+        println!(
+            "\n  CONTROLLED COMPARISON — {} programs fit at width {MIN_FIELD_WIDTH} under BOTH encodings (no",
+            controlled.len()
+        );
+        println!("  bank-width advantage for binary there; the ratio isolates the true per-operation cost):");
+        for (src, ratio) in &controlled {
+            let verdict = if *ratio > 1.0 { "binary LOSES" } else { "binary wins" };
+            println!("    {src:<70} {ratio:>6.2}x  {verdict}");
+        }
+        println!("  Everywhere else in the table binary wins by fitting a narrower bank than unary needs.");
+    }
+    println!(
+        "\n  Footer: {} programs (this file's own Part A corpus: FIRST_ORDER_DEMOS + LAMBDA_LIMITATION_DEMOS);",
+        all_demos.len()
+    );
+    println!("  `run_tm_fitted` chose every width shown above, independently per encoding, per program.");
+    any_cap
 }
 
 /// What the decomposed data supports, in pass order. Every number here is read back out — the shares

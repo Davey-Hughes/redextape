@@ -129,7 +129,12 @@ fn ripple_add(b: &mut Builder, from: StateId, rb: Slot, label: &str) -> StateId 
     let fin = b.state(format!("{label}.fin"));
     b.add_rule(c0, RuleSpec::new().on(REG, Some(SEP), None, Move::L).on(WORK, Some(SEP), None, Move::L), fin);
     let overflow = b.overflow();
-    b.add_rule(c1, RuleSpec::new().on(REG, Some(SEP), None, Move::S), overflow);
+    // Reads BOTH tapes' `SEP`, mirroring `c0` above and both of `ripple_sub`'s exits. Equal-width
+    // lockstep means the two heads always arrive together, so this is defence in depth, not a
+    // correctness fix — but if that invariant were ever broken, a desync would then surface as a STUCK
+    // HALT (which the gadget harness catches by name) rather than being mislabelled as an overflow,
+    // which `run_tm_fitted` would act on by retrying at a wider bank.
+    b.add_rule(c1, RuleSpec::new().on(REG, Some(SEP), None, Move::S).on(WORK, Some(SEP), None, Move::S), overflow);
     let h1 = rewind_home(b, fin, REG, BITS, rb, &format!("{label}.r1"));
     rewind_home(b, h1, WORK, BITS, W_ACC, &format!("{label}.r2"))
 }
@@ -460,20 +465,7 @@ fn branch_on_equals(
     b.add_rule(h, RuleSpec::new(), if_eq);
 }
 
-// ---- HEAP tape sub-primitives (free functions; each preserves the HEAP "top" invariant) ----
-//
-// The HEAP holds `@ <head digits> # <tail digits>` cons cells laid left-to-right, the head on the
-// BLANK immediately after the last cell (the "top"); an empty heap has the head at the origin over a
-// blank. Cells sit at 1-based addresses (nil = pointer 0). What changes from `Unary`'s HEAP is that a
-// cell is FIXED width — `heap_cell_len(width)` cells, always — rather than a variable-length mark run,
-// so moving from one cell to the next is a COUNTED skip rather than a content scan. Locating the FIRST
-// cell from the top is still a content scan (`heap_rewind_to_first_cell`): the NUMBER of cells is not
-// known at build time even though each cell's WIDTH is, so there is no fixed offset back to it.
-
-/// Cell size on the binary HEAP, in cells: `@` + width digits + `#` + width digits.
-fn heap_cell_len(width: usize) -> usize {
-    2 * width + 2
-}
+// ---- shared tape sub-primitives (tape-agnostic; used by both the HEAP and BOX walkers) ----
 
 /// Blindly advance `tape`'s head `n` cells in direction `mv`, writing nothing and reading with a
 /// wildcard — safe precisely because it never writes, so no "explicit non-`#` read" obligation applies.
@@ -493,6 +485,21 @@ fn skip_cells(b: &mut Builder, from: StateId, tape: usize, n: usize, mv: Move, l
         cur = nxt;
     }
     cur
+}
+
+// ---- HEAP tape sub-primitives (free functions; each preserves the HEAP "top" invariant) ----
+//
+// The HEAP holds `@ <head digits> # <tail digits>` cons cells laid left-to-right, the head on the
+// BLANK immediately after the last cell (the "top"); an empty heap has the head at the origin over a
+// blank. Cells sit at 1-based addresses (nil = pointer 0). What changes from `Unary`'s HEAP is that a
+// cell is FIXED width — `heap_cell_len(width)` cells, always — rather than a variable-length mark run,
+// so moving from one cell to the next is a COUNTED skip rather than a content scan. Locating the FIRST
+// cell from the top is still a content scan (`heap_rewind_to_first_cell`): the NUMBER of cells is not
+// known at build time even though each cell's WIDTH is, so there is no fixed offset back to it.
+
+/// Cell size on the binary HEAP, in cells: `@` + width digits + `#` + width digits.
+fn heap_cell_len(width: usize) -> usize {
+    2 * width + 2
 }
 
 /// `W_ACC += 1`. Walks LSB to MSB flipping 1s to 0s until the first 0, which becomes 1. A carry out
@@ -882,6 +889,52 @@ fn box_return_to_origin_bin(b: &mut Builder, from: StateId, width: usize, label:
     done
 }
 
+// ------------------------------------------------------------------------------------------------
+// Reading a tape back: STRUCTURAL, never width-driven
+// ------------------------------------------------------------------------------------------------
+//
+// The two decoders below find a word's extent from the tape's own DELIMITERS — `#` on REG and BOX,
+// `@`/`#` on HEAP — and never consult `self.width`. A `Binary` at any width therefore reads a tape
+// laid out at any other, which is what lets `decode_tape` work without being told the width the
+// machine was lowered at. `Unary`'s mark-counting decode always had that property; this is what
+// removes the asymmetry.
+//
+// What it gives up, deliberately: the decoder no longer double-checks each word's LENGTH. A word
+// truncated by a clobbered high digit used to read as `None`; it now reads as the smaller number the
+// remaining digits spell. That check is not lost, only moved — the REG bank's field width is checked
+// directly by `tests/common::reg_bank_is_well_formed` (the skeleton must be exactly
+// `1 + slots * (width + 1)` cells with a `#` at every boundary), and the HEAP's word length by
+// `heap_tape_is_well_formed`, which grew a length check in the same change for exactly this reason.
+
+/// Count the leading cells of `cells` that are binary field content, i.e. the extent of a word.
+///
+/// Ties the scan to `BITS` — the same constant `field_symbols()` returns and the gadgets pass to
+/// `seek_slot` — rather than re-listing the two digits, so a future alphabet change cannot leave the
+/// writers and the reader disagreeing about what a digit is.
+fn digit_run(cells: &[Symbol]) -> usize {
+    cells.iter().take_while(|c| BITS.contains(c)).count()
+}
+
+/// Read a digit run as an LSB-first binary word: the leftmost cell is 2^0.
+///
+/// `None` when the word is not a `u64`. Callers pass a slice that `digit_run` already bounded, so the
+/// non-digit arm is unreachable through them; it stays because this is the one place that turns cells
+/// into a number, and a silent 0 for a foreign symbol is the failure mode this file must not have.
+fn word(digits: &[Symbol]) -> Option<u64> {
+    let mut acc = 0u64;
+    for (k, &d) in digits.iter().enumerate() {
+        match d {
+            ZERO => {}
+            MARK if k < 64 => acc |= 1u64 << k,
+            // A set bit at 2^64 or above cannot be a `u64`. Unreachable while MAX_FIELD_WIDTH is 64;
+            // total rather than panicking on a shift overflow if that ever changes.
+            MARK => return None,
+            _ => return None,
+        }
+    }
+    Some(acc)
+}
+
 #[allow(clippy::too_many_arguments)] // `arith`/`compare` mirror the trait's three-address signature.
 impl Encoding for Binary {
     fn field_width(&self) -> Option<usize> {
@@ -905,31 +958,29 @@ impl Encoding for Binary {
     }
 
     fn decode_nat(&self, reg_cells: &[Symbol], slot: Slot) -> Option<u64> {
-        // Fixed-width bank `# f0 # f1 … #`; field `slot` is the `width` cells after the `slot`-th `#`
-        // (leading `#` = #0) and must be closed by another `#`, so a `slot` past the last field is
-        // `None`. Digits are LSB-first. A non-digit cell means the field is corrupt -> `None`, which
-        // is what makes a decode of a clobbered bank fail loudly instead of returning a plausible
-        // number.
+        // Bank `# f0 # f1 … #`; field `slot` is the digit run after the `slot`-th `#` (leading `#` =
+        // #0), and it must be CLOSED by another `#`. Structural — see the banner above — so `self.width`
+        // is never consulted and a bank laid out at any width reads correctly.
+        //
+        // The closing-`#` requirement is what keeps the decode loud. A run that stops on a foreign
+        // symbol, runs off the end of the tape, or belongs to a `slot` past the last field all leave a
+        // non-`#` (or nothing) where the delimiter must be, and all yield `None` rather than a
+        // plausible number.
+        //
+        // An EMPTY field (`##`, digit run of length 0) reads as `Some(0)`. No bank this encoding lays
+        // out contains one — `init_reg` writes `width >= MIN_FIELD_WIDTH` digits per field — so it is a
+        // degenerate input either way; `Some(0)` is chosen because `Unary::decode_nat` answers the same
+        // for the same shape, and the point of this method is that the two agree.
         let mut seps = 0u32;
         for (i, &c) in reg_cells.iter().enumerate() {
             if c == SEP {
                 if seps == slot {
                     let rest = reg_cells.get(i + 1..)?;
-                    if rest.len() < self.width || rest.get(self.width) != Some(&SEP) {
+                    let n = digit_run(rest);
+                    if rest.get(n) != Some(&SEP) {
                         return None;
                     }
-                    let mut acc = 0u64;
-                    for (k, &d) in rest[..self.width].iter().enumerate() {
-                        match d {
-                            ZERO => {}
-                            MARK if k < 64 => acc |= 1u64 << k,
-                            // A set bit at 2^64 or above cannot be a `u64`. Unreachable while
-                            // MAX_FIELD_WIDTH is 64; total rather than panicking if that changes.
-                            MARK => return None,
-                            _ => return None,
-                        }
-                    }
-                    return Some(acc);
+                    return word(&rest[..n]);
                 }
                 seps += 1;
             }
@@ -1236,31 +1287,32 @@ impl Encoding for Binary {
         b.add_rule(origin, RuleSpec::new(), exit);
     }
 
+    fn heap_word_len(&self) -> Option<usize> {
+        // `heap_open`/`heap_append` write exactly `width` digits per word, the same as a REG field —
+        // binary pads with leading-position ZEROs rather than with blanks, so a word's length carries no
+        // information about its value and is fixed.
+        Some(self.width)
+    }
+
     fn parse_heap_cells(&self, cells: &[Symbol]) -> Vec<(u64, u64)> {
-        // `@ <width digits> # <width digits>`, laid left to right from the first `@`. Scanning FOR the
+        // `@ <head digits> # <tail digits>`, laid left to right from the first `@`. Scanning FOR the
         // marker (not indexing from cell 0) is what the trait requires: `Tape::snapshot`'s cell 0 is not
-        // necessarily the origin. Total: a truncated or malformed tape yields the cells parsed so far.
+        // necessarily the origin. Structural — see the banner above — so `self.width` is never
+        // consulted and a heap laid out at any width reads correctly.
+        //
+        // Each word ends where it stops being digits: the head at the `#` between the two words, the
+        // tail at the next cell's `@` or at the blank past the heap's top. Total: a truncated or
+        // malformed tape yields the cells parsed so far, never a panic and never an invented cell.
         let mut out = Vec::new();
         let mut i = cells.iter().position(|&c| c == AT).unwrap_or(cells.len());
-        let word = |s: &[Symbol]| -> Option<u64> {
-            let mut acc = 0u64;
-            for (k, &d) in s.iter().enumerate() {
-                match d {
-                    ZERO => {}
-                    MARK if k < 64 => acc |= 1u64 << k,
-                    _ => return None,
-                }
-            }
-            Some(acc)
-        };
         while cells.get(i) == Some(&AT) {
             let h0 = i + 1;
-            let sep = h0 + self.width;
-            let t0 = sep + 1;
-            let end = t0 + self.width;
-            if cells.get(sep) != Some(&SEP) || end > cells.len() {
-                break;
+            let sep = h0 + digit_run(&cells[h0..]);
+            if cells.get(sep) != Some(&SEP) {
+                break; // no separator where the head word ended: this is not a cons cell
             }
+            let t0 = sep + 1;
+            let end = t0 + digit_run(&cells[t0..]);
             match (word(&cells[h0..sep]), word(&cells[t0..end])) {
                 (Some(h), Some(t)) => out.push((h, t)),
                 _ => break,

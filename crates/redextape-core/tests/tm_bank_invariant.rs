@@ -20,10 +20,16 @@ use redextape_core::parser::parse;
 mod common;
 use common::{box_tape_is_well_formed, heap_tape_is_well_formed, reg_bank_is_well_formed};
 use redextape_core::tm::{
-    AT, BLANK, Builder, Encoding, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Move, REG, RuleSpec, SEP, TAPES,
-    TM_DEFAULT_CAPS, Tape, TmCaps, TmRun, TmStatus, Unary, defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm_at,
-    simulate_watched,
+    AT, BLANK, Binary, Builder, Encoding, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Move, REG, RuleSpec, SEP, TAPES,
+    TM_DEFAULT_CAPS, Tape, TmCaps, TmRun, TmStatus, Unary, WORK, ZERO, defunc, lower_asm, lower_tm_guarded, n_slots_of,
+    run_tm_at, simulate_watched,
 };
+
+/// Both encodings this layer must cover, at a given width. `Binary` has its own bank with its own write
+/// sites, so a corpus that only ever lowers to `Unary` verifies nothing about it.
+fn encodings_at(width: usize) -> Vec<(&'static str, Box<dyn Encoding>)> {
+    vec![("unary", Box::new(Unary::at(width))), ("binary", Box::new(Binary::at(width)))]
+}
 
 /// A representative spread of the survey corpus: arithmetic, monus, comparison, `if`, `let`/assign,
 /// `while`, recursion, list construction and access, defunctionalized higher-order, mutual recursion,
@@ -72,32 +78,35 @@ fn the_reg_bank_stays_well_formed_at_every_step_and_every_width() {
         let slots = n_slots_of(&program) as usize;
 
         for width in widths() {
-            let enc = Unary::at(width);
-            let (m, _overflow) = lower_tm_guarded(&program, &enc);
-            let mut init = vec![Vec::new(); TAPES];
-            init[REG] = enc.init_reg(slots as u32);
+            for (name, enc) in encodings_at(width) {
+                let enc = enc.as_ref();
+                let (m, _overflow) = lower_tm_guarded(&program, enc);
+                let mut init = vec![Vec::new(); TAPES];
+                init[REG] = enc.init_reg(slots as u32);
+                init[WORK] = enc.init_work();
 
-            let mut step = 0usize;
-            let mut failure: Option<String> = None;
-            {
-                let mut watch = |tapes: &[Tape]| {
-                    step += 1;
-                    let (cells, _) = tapes[REG].snapshot();
-                    match reg_bank_is_well_formed(&cells, &enc, slots) {
-                        Ok(()) => true,
-                        Err(why) => {
-                            failure = Some(format!("`{src}` at width {width}, step {step}: {why}"));
-                            false
+                let mut step = 0usize;
+                let mut failure: Option<String> = None;
+                {
+                    let mut watch = |tapes: &[Tape]| {
+                        step += 1;
+                        let (cells, _) = tapes[REG].snapshot();
+                        match reg_bank_is_well_formed(&cells, enc, slots) {
+                            Ok(()) => true,
+                            Err(why) => {
+                                failure = Some(format!("`{src}` at width {width} ({name}), step {step}: {why}"));
+                                false
+                            }
                         }
-                    }
-                };
-                let (_, _, status) = simulate_watched(&m, &init, TM_DEFAULT_CAPS, &mut watch);
-                assert!(
-                    matches!(status, TmStatus::Halted | TmStatus::HitCap),
-                    "`{src}` at width {width} must reach a defined outcome"
-                );
+                    };
+                    let (_, _, status) = simulate_watched(&m, &init, TM_DEFAULT_CAPS, &mut watch);
+                    assert!(
+                        matches!(status, TmStatus::Halted | TmStatus::HitCap),
+                        "`{src}` at width {width} ({name}) must reach a defined outcome"
+                    );
+                }
+                assert!(failure.is_none(), "{}", failure.unwrap());
             }
-            assert!(failure.is_none(), "{}", failure.unwrap());
         }
     }
 }
@@ -157,9 +166,9 @@ fn arb_feature_program() -> impl Strategy<Value = String> {
     ]
 }
 
-/// Run `src` at `width` and return the first invariant violation, if any. `None` means every step of
-/// the run left both fixed-width banks well-formed.
-fn first_violation(src: &str, width: usize) -> Option<String> {
+/// Run `src` at `width` under `enc` (named `name` for the failure message) and return the first
+/// invariant violation, if any. `None` means every step of the run left the fixed-width bank well-formed.
+fn first_violation(src: &str, width: usize, name: &str, enc: &dyn Encoding) -> Option<String> {
     let (prog, ds) = parse(src);
     if !ds.is_empty() {
         return None; // not a program; the generators' shapes are valid, this is belt-and-braces
@@ -170,20 +179,20 @@ fn first_violation(src: &str, width: usize) -> Option<String> {
         Err(_) => defunc(&core).ok().and_then(|d| lower_asm(&d).ok())?,
     };
     let slots = n_slots_of(&program) as usize;
-    let enc = Unary::at(width);
-    let (m, _) = lower_tm_guarded(&program, &enc);
+    let (m, _) = lower_tm_guarded(&program, enc);
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(slots as u32);
+    init[WORK] = enc.init_work();
     let mut step = 0usize;
     let mut failure = None;
     {
         let mut watch = |tapes: &[Tape]| {
             step += 1;
             let (cells, _) = tapes[REG].snapshot();
-            match reg_bank_is_well_formed(&cells, &enc, slots) {
+            match reg_bank_is_well_formed(&cells, enc, slots) {
                 Ok(()) => true,
                 Err(why) => {
-                    failure = Some(format!("`{src}` at width {width}, step {step}: {why}"));
+                    failure = Some(format!("`{src}` at width {width} ({name}), step {step}: {why}"));
                     false
                 }
             }
@@ -199,12 +208,14 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 48, ..ProptestConfig::default() })]
 
     /// The bank invariant over generated arithmetic, at the narrow widths where an overflow is most
-    /// likely and the tape is cheapest to check every step.
+    /// likely and the tape is cheapest to check every step, over BOTH encodings.
     #[test]
     fn generated_expressions_never_corrupt_the_bank(src in arb_expr()) {
-        for width in NARROW_WIDTHS {
-            if let Some(why) = first_violation(&src, *width) {
-                prop_assert!(false, "{}", why);
+        for &width in NARROW_WIDTHS {
+            for (name, enc) in encodings_at(width) {
+                if let Some(why) = first_violation(&src, width, name, enc.as_ref()) {
+                    prop_assert!(false, "{}", why);
+                }
             }
         }
     }
@@ -213,9 +224,11 @@ proptest! {
     /// higher-order, and mutable-capture boxing — with values randomized so several widths are hit.
     #[test]
     fn generated_feature_programs_never_corrupt_the_bank(src in arb_feature_program()) {
-        for width in NARROW_WIDTHS {
-            if let Some(why) = first_violation(&src, *width) {
-                prop_assert!(false, "{}", why);
+        for &width in NARROW_WIDTHS {
+            for (name, enc) in encodings_at(width) {
+                if let Some(why) = first_violation(&src, width, name, enc.as_ref()) {
+                    prop_assert!(false, "{}", why);
+                }
             }
         }
     }
@@ -232,26 +245,28 @@ fn the_generated_programs_actually_run() {
 
     let mut runner = TestRunner::new(Config { cases: 100, ..Config::default() });
     for (label, strategy) in [("expr", arb_expr().boxed()), ("feature", arb_feature_program().boxed())] {
-        let (mut ran, mut overflowed) = (0usize, 0usize);
-        for _ in 0..100 {
-            let src = strategy.new_tree(&mut runner).expect("generates").current();
-            let (prog, ds) = parse(&src);
-            if !ds.is_empty() {
-                continue;
+        for (name, enc) in encodings_at(4) {
+            let (mut ran, mut overflowed) = (0usize, 0usize);
+            for _ in 0..100 {
+                let src = strategy.new_tree(&mut runner).expect("generates").current();
+                let (prog, ds) = parse(&src);
+                if !ds.is_empty() {
+                    continue;
+                }
+                let core = desugar(&prog.unwrap());
+                match run_tm_at(&core, enc.as_ref(), TM_DEFAULT_CAPS) {
+                    TmRun::Ran { .. } => ran += 1,
+                    TmRun::Overflow => overflowed += 1,
+                    _ => {}
+                }
             }
-            let core = desugar(&prog.unwrap());
-            match run_tm_at(&core, &Unary::at(4), TM_DEFAULT_CAPS) {
-                TmRun::Ran { .. } => ran += 1,
-                TmRun::Overflow => overflowed += 1,
-                _ => {}
-            }
+            assert!(ran + overflowed > 80, "{label} ({name}): too few generated programs reached the TM at all");
+            assert!(
+                overflowed > 0,
+                "{label} ({name}): no generated program overflowed at width 4, so the invariant was never checked \
+                 on a run that halts in the guard"
+            );
         }
-        assert!(ran + overflowed > 80, "{label}: too few generated programs reached the TM at all");
-        assert!(
-            overflowed > 0,
-            "{label}: no generated program overflowed at width 4, so the invariant was never checked \
-             on a run that halts in the guard"
-        );
     }
 }
 
@@ -364,6 +379,26 @@ fn box_tape_content_clause_rejects_a_non_content_symbol_inside_a_field() {
     cells[4] = AT; // strictly interior to the one field; not the leading `#`
     let err =
         box_tape_is_well_formed(&cells, &enc).expect_err("a non-content symbol inside a box field must be rejected");
+    assert!(err.contains("field 0"), "error must name the offending field index, got: {err}");
+}
+
+/// Pins the MID-APPEND concession `box_tape_is_well_formed` needed for `Binary` (see its doc in
+/// `tests/common/mod.rs`): `box_append_field_bin` writes a new field's leading `#` FIRST, then its
+/// digits left-to-right onto virgin tape, so for several steps the field genuinely holds "some real
+/// digits, then not-yet-reached `BLANK`" — a snapshot that is not a defect, unlike a foreign symbol or
+/// (checked below) content that RESUMES after a blank, which no gadget ever produces and must still be
+/// rejected. `Unary`'s alphabet already includes `BLANK`, so this concession was invisible before
+/// `Binary` (whose alphabet correctly excludes it) existed.
+#[test]
+fn box_tape_content_clause_tolerates_binary_mid_append_but_not_a_resumed_field() {
+    let enc = Binary::at(4);
+    // A field mid-append: 2 real digits written, 2 cells still virgin blank. Must be ACCEPTED.
+    let mid_append: Vec<char> = vec![SEP, ZERO, MARK, BLANK, BLANK];
+    assert_eq!(box_tape_is_well_formed(&mid_append, &enc), Ok(()), "a mid-append field must not be rejected");
+    // Content RESUMING after a blank — no gadget ever produces this, and it must still be rejected: the
+    // blank run has to be an unbroken SUFFIX of the window, not a gap in the middle.
+    let resumed: Vec<char> = vec![SEP, ZERO, BLANK, MARK, ZERO];
+    let err = box_tape_is_well_formed(&resumed, &enc).expect_err("content resuming after a blank must be rejected");
     assert!(err.contains("field 0"), "error must name the offending field index, got: {err}");
 }
 

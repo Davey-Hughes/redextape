@@ -468,7 +468,15 @@ pub fn decode_asm_ty(outcome: &AsmOutcome, ty: &Ty) -> Option<Value> {
     decode_word_ty(outcome.result, &outcome.heap, ty)
 }
 
-fn decode_word_ty(word: u64, heap: &[(u64, u64)], ty: &Ty) -> Option<Value> {
+/// Type-directed decode of one word. `pub(crate)` because `tm::decode` decodes the same
+/// `(word, heap)` pair off a set of TAPES and must not carry a second copy of this logic.
+///
+/// Recursion here is on the TYPE (strictly smaller at each `List` element), never on the heap chain:
+/// the list SPINE is a loop, bounded by one step per heap cell. That bound is what makes a cyclic
+/// heap decode to `None` instead of overflowing the stack — a chain longer than the heap has cells
+/// must have revisited one. It matters because `tm::decode::decode_tape_ty` reads a heap that can
+/// come from a `.tm` FILE, where acyclicity is not something the compiler guaranteed.
+pub(crate) fn decode_word_ty(word: u64, heap: &[(u64, u64)], ty: &Ty) -> Option<Value> {
     match ty {
         Ty::Nat => Some(Value::Nat(word)),
         Ty::Bool => match word {
@@ -478,14 +486,23 @@ fn decode_word_ty(word: u64, heap: &[(u64, u64)], ty: &Ty) -> Option<Value> {
         },
         Ty::Unit => Some(Value::Unit),
         Ty::List(elem) => {
-            // Follow the 1-based pointer chain: 0 = nil, else cell p-1 = (head, tail-ptr).
-            if word == 0 {
-                return Some(Value::Nil);
+            // Walk the spine forwards collecting heads, then rebuild back-to-front. At most one step
+            // per cell; falling out of the loop means the chain never reached nil, i.e. it is cyclic.
+            let mut heads = Vec::new();
+            let mut w = word;
+            for _ in 0..=heap.len() {
+                if w == 0 {
+                    let mut out = Value::Nil;
+                    for h in heads.into_iter().rev() {
+                        out = Value::Cons(Rc::new(h), Rc::new(out));
+                    }
+                    return Some(out);
+                }
+                let &(h, t) = heap.get((w - 1) as usize)?;
+                heads.push(decode_word_ty(h, heap, elem)?);
+                w = t;
             }
-            let &(h, t) = heap.get((word - 1) as usize)?;
-            let head = decode_word_ty(h, heap, elem)?;
-            let tail = decode_word_ty(t, heap, ty)?; // tail has the same list type
-            Some(Value::Cons(Rc::new(head), Rc::new(tail)))
+            None
         }
         Ty::Fun(..) | Ty::Var(_) => None,
     }
@@ -907,5 +924,47 @@ rec:
         };
         // cap of 1 box allocation: the second Box hits the cap
         assert!(matches!(run_asm(&prog, Caps { heap: 1, ..DEFAULT_CAPS }), AsmRun::HitCap));
+    }
+
+    /// A heap whose chain never reaches nil must decode to `None`, not overflow the stack.
+    ///
+    /// Unreachable from the compiler (a cons cell's tail points only at an EARLIER cell, so every
+    /// compiled chain is acyclic and terminates), but `tm::decode::decode_tape_ty` reads a heap that can
+    /// come from a hand-written `.tm` file's initial HEAP tape — i.e. from untrusted input. The
+    /// Value-directed `decode_asm` needs no such guard: it recurses on a finite reference `Value`.
+    #[test]
+    fn a_cyclic_heap_decodes_to_none_rather_than_overflowing() {
+        use crate::ty::Ty;
+        // Cell 1 = (7, 1): its tail points at itself.
+        let o = AsmOutcome { result: 1, heap: vec![(7, 1)] };
+        assert_eq!(decode_asm_ty(&o, &Ty::List(Box::new(Ty::Nat))), None);
+        // A two-cell cycle: 1 -> 2 -> 1.
+        let o2 = AsmOutcome { result: 1, heap: vec![(7, 2), (8, 1)] };
+        assert_eq!(decode_asm_ty(&o2, &Ty::List(Box::new(Ty::Nat))), None);
+    }
+
+    /// The hardening must not change any acyclic answer — including a chain long enough that the old
+    /// recursive shape was the only thing under test. This test now checks the HEADS, not just the length,
+    /// so a reversed rebuild (which would still produce a 1000-element nil-terminated list) fails it.
+    #[test]
+    fn a_long_acyclic_list_still_decodes() {
+        use crate::ty::Ty;
+        // cell i (1-based) = (i, i-1), so the chain 1000 -> 999 -> … -> 1 -> nil.
+        let heap: Vec<(u64, u64)> = (1..=1000u64).map(|i| (i, i - 1)).collect();
+        let o = AsmOutcome { result: 1000, heap };
+        let v = decode_asm_ty(&o, &Ty::List(Box::new(Ty::Nat))).expect("decodes");
+
+        // Collect the HEADS, not just the length: a reversed rebuild would still produce a
+        // 1000-element `Nil`-terminated list, so a length-only assertion cannot tell the two apart —
+        // and "the hardening must not change any acyclic answer" is a claim about the VALUES.
+        let mut heads = Vec::new();
+        let mut cur = &v;
+        while let Value::Cons(h, t) = cur {
+            let Value::Nat(n) = &**h else { panic!("expected a Nat head, got {h:?}") };
+            heads.push(*n);
+            cur = t;
+        }
+        assert_eq!(cur, &Value::Nil, "the chain must terminate in nil");
+        assert_eq!(heads, (1..=1000u64).rev().collect::<Vec<u64>>());
     }
 }

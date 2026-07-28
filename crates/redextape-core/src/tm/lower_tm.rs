@@ -37,6 +37,41 @@ pub(crate) fn frame_bank_unrepresentable(prog: &Program, sm: &SlotMap) -> bool {
     sm.n_loc() > MAX_FRAME_LOC && prog.code.iter().any(|i| matches!(i, Instr::Call(_)))
 }
 
+/// Upper bound on the number of `Mul` instructions a single program may contain.
+///
+/// `Add`/`Sub` cost O(width) states per instruction under either encoding, but `Binary::arith`'s `Mul`
+/// gadget is O(width²) — measured `1.5*width^2 + 26.5*width + 13` states for the gadget alone: 143
+/// states at width 4, 7,853 at the 64-cell ceiling (`MAX_FIELD_WIDTH`). A chain of `Mul`s therefore
+/// grows the machine far faster than a chain of any other instruction would, so it needs its own bound
+/// the way `MAX_FRAME_LOC` bounds the `Loc` bank's own O(n_loc^2) blowup.
+///
+/// This is checked UNCONDITIONALLY — not only when `enc` happens to be `Binary` — because `Unary`'s
+/// per-`Mul` cost (dominated by seeking to a growing slot index, not by width) grows with the same
+/// instruction count too, just more slowly: measured at width 64, a chain of 32 `Mul`s costs 616,999
+/// states / ~421 MB under `Binary` and only 12,411 states / ~10 MB under `Unary`; 128 `Mul`s cost
+/// 6,842,311 states / ~4.6 GB under `Binary` and 178,635 states / ~129 MB under `Unary`. `Unary` needs
+/// roughly an order of magnitude more `Mul`s to reach the same danger zone, but it is not immune, so a
+/// guard that fired only for `Binary` would leave that path open — see `mul_count_unrepresentable`.
+///
+/// 32 is far above any real program's `Mul` count (the corpus's demos and every property-test generator
+/// in this workspace never exceed 2 in one program), while keeping the worst case this permits
+/// (measured, at the 64-cell ceiling) to ~617k states / ~410 MB under `Binary` — well short of the
+/// multi-GB territory a longer chain reaches, and comfortably inside what a single test process can
+/// build without risking the abort this guard exists to prevent.
+pub(crate) const MAX_MUL_INSTRS: u32 = 32;
+
+/// True when `lower_tm_mapped` will REFUSE to build `prog`'s arithmetic gadgets and return the
+/// degenerate halt-immediately machine instead: more `Mul` instructions than `MAX_MUL_INSTRS` (see its
+/// doc for why the bound applies regardless of which `Encoding` ultimately runs the machine).
+///
+/// The single definition of that condition, mirrored for the same reason `frame_bank_unrepresentable`
+/// is: a caller obliged to mirror the refusal (`attribute`, `run_tm`) cannot drift from the guard it
+/// mirrors.
+pub(crate) fn mul_count_unrepresentable(prog: &Program) -> bool {
+    let n_mul = prog.code.iter().filter(|i| matches!(i, Instr::Bin(BinOp::Mul, ..))).count();
+    n_mul as u32 > MAX_MUL_INSTRS
+}
+
 /// Maps the asm register file onto REG-tape fields. Layout: slot 0 = `Rr` (the result), then the
 /// `Loc` bank, then the `Arg` bank. Distinct registers -> distinct slots, so `lower_asm`'s
 /// "`ra`/`rb` fresh, `!= dst`" invariant carries to the `rd != ra, rb` slot precondition for free.
@@ -129,6 +164,13 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
     // would build a multi-million-state machine and an oversized init tape. Refuse to lay it out:
     // return a degenerate machine that halts immediately. Total, panic-free, no huge allocation.
     if sm.n_slots() > MAX_SLOTS {
+        let state_origins = vec![None; b.state_count()];
+        return (b.finish(halt), state_origins, overflow);
+    }
+    // Too many `Mul` instructions would build an oversized machine under EITHER encoding (see
+    // `MAX_MUL_INSTRS`'s doc) — checked here, as early as `MAX_SLOTS`, since it depends on nothing built
+    // below and refusing before laying out `pc` is strictly cheaper than refusing after.
+    if mul_count_unrepresentable(prog) {
         let state_origins = vec![None; b.state_count()];
         return (b.finish(halt), state_origins, overflow);
     }
@@ -301,7 +343,8 @@ mod tests {
     use crate::tm::asm::{Instr, Program, Reg};
     use crate::tm::build::REG;
     use crate::tm::build::TAPES;
-    use crate::tm::encoding::Unary;
+    use crate::tm::build::WORK;
+    use crate::tm::encoding::{Binary, Unary};
     use crate::tm::lower_asm::lower_asm;
     use crate::tm::sim::{Caps, DEFAULT_CAPS as CAPS, Status, simulate, simulate_trace};
 
@@ -698,6 +741,44 @@ mod tests {
         assert!(m.states.len() < 10_000, "must not build an O(n_loc^2) machine; got {}", m.states.len());
     }
 
+    /// A chain of `n` `Mul`s: `Loc(0)=2; Loc(1)=2; Loc(2)=Loc(0)*Loc(1); Loc(3)=Loc(2)*Loc(1); ...` —
+    /// the exact shape `MAX_MUL_INSTRS`'s doc measured (there via the front end on `"2 * 2 * ... * 2"`,
+    /// here built directly so the test does not depend on the parser/desugarer's own instruction count).
+    fn mul_chain(n: u32) -> Program {
+        let mut code = vec![Instr::Li(Reg::Loc(0), 2), Instr::Li(Reg::Loc(1), 2)];
+        for i in 0..n {
+            code.push(Instr::Bin(BinOp::Mul, Reg::Loc(i + 2), Reg::Loc(i + 1), Reg::Loc(1)));
+        }
+        code.push(Instr::Halt);
+        Program { code, labels: vec![] }
+    }
+
+    #[test]
+    fn program_with_too_many_muls_routes_to_degenerate_halt() {
+        // One MORE than MAX_MUL_INSTRS must route to a degenerate halt under EITHER encoding — not
+        // build the O(width^2)-per-`Mul` machine (measured, at just one more `Mul` than the bound: on
+        // the order of hundreds of thousands of states / hundreds of MB under `Binary` — see
+        // `MAX_MUL_INSTRS`'s doc). The guard is unconditional on encoding, so both must degenerate.
+        let prog = mul_chain(MAX_MUL_INSTRS + 1);
+        for m in [lower_tm(&prog, &Unary::default()), lower_tm(&prog, &Binary::default())] {
+            assert!(m.validate().is_empty(), "{:?}", m.validate());
+            assert!(m.states.len() < 10_000, "must route to a degenerate halt; got {}", m.states.len());
+            let (_tapes, status) = simulate(&m, &vec![Vec::new(); TAPES], CAPS);
+            assert_eq!(status, Status::Halted);
+        }
+    }
+
+    #[test]
+    fn at_the_mul_bound_the_machine_still_builds() {
+        // Exactly MAX_MUL_INSTRS `Mul`s must still lower to a genuine (non-degenerate) machine: the
+        // guard's boundary must not clip a program sitting exactly at the bound.
+        let prog = mul_chain(MAX_MUL_INSTRS);
+        for m in [lower_tm(&prog, &Unary::default()), lower_tm(&prog, &Binary::default())] {
+            assert!(m.validate().is_empty(), "{:?}", m.validate());
+            assert!(m.states.len() > 100, "the boundary case must build a real machine, got {} states", m.states.len());
+        }
+    }
+
     #[test]
     fn tm_step_count_goldens() {
         // The exact number of TM steps a small program takes — a regression guard on gadget step cost and
@@ -751,6 +832,63 @@ mod tests {
                  fn add1(x) { x + 1 } [1, 2].map(add1)"
             ),
             239_971
+        );
+    }
+
+    #[test]
+    fn tm_step_count_goldens_binary() {
+        // The base-2 counterpart of `tm_step_count_goldens`, above: the SAME three programs at
+        // `Binary::default()` — also a 64-cell field, so this is a same-width, cross-encoding
+        // comparison rather than a same-program-narrower-bank one (see `width_report.rs`'s Section D /
+        // `step_survey.rs`'s Part D for the auto-fit comparison). `init[WORK]` matters here in a way it
+        // never did for the unary goldens above: `Binary::init_work()` is a real fixed-width scratch
+        // field, not the empty vector `Unary::init_work()` returns.
+        fn steps(src: &str) -> usize {
+            let (prog, ds) = parse(src);
+            assert!(ds.is_empty(), "parse errors: {ds:?}");
+            let core = desugar(&prog.unwrap());
+            let program = lower_asm(&core).expect("lowers");
+            let m = lower_tm(&program, &Binary::default());
+            let sm = SlotMap::of(&program);
+            let mut init = vec![Vec::new(); TAPES];
+            init[REG] = Binary::default().init_reg(sm.n_slots());
+            init[WORK] = Binary::default().init_work();
+            let trace = simulate_trace(&m, &init, CAPS);
+            assert_eq!(trace.status, crate::tm::sim::Status::Halted, "demo must halt: {src}");
+            trace.steps.len()
+        }
+        // CAPTURED the same way as the unary set above: run once, paste the real numbers, re-ran to
+        // confirm stable/deterministic. A gadget-cost re-bless moves these too, deliberately.
+        assert_eq!(steps("1 + 2 * 3"), 58393);
+        assert_eq!(steps("if 2 > 1 { 10 } else { 20 }"), 2495);
+        assert_eq!(steps("head(cons(7, nil))"), 3949);
+    }
+
+    #[test]
+    fn tm_step_count_golden_higher_order_binary() {
+        // The base-2 counterpart of `tm_step_count_golden_higher_order`, above: same demo, same defunc
+        // retry, `Binary::default()` in place of `Unary::default()`.
+        fn steps(src: &str) -> usize {
+            let (prog, ds) = parse(src);
+            assert!(ds.is_empty(), "parse errors: {ds:?}");
+            let core = desugar(&prog.unwrap());
+            let defunced = crate::tm::defunc::defunc(&core).expect("defunc succeeds");
+            let program = lower_asm(&defunced).expect("defunc'd core lowers first-order");
+            let m = lower_tm(&program, &Binary::default());
+            let sm = SlotMap::of(&program);
+            let mut init = vec![Vec::new(); TAPES];
+            init[REG] = Binary::default().init_reg(sm.n_slots());
+            init[WORK] = Binary::default().init_work();
+            let trace = simulate_trace(&m, &init, CAPS);
+            assert_eq!(trace.status, crate::tm::sim::Status::Halted, "demo must halt: {src}");
+            trace.steps.len()
+        }
+        assert_eq!(
+            steps(
+                "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } \
+                 fn add1(x) { x + 1 } [1, 2].map(add1)"
+            ),
+            298_214
         );
     }
 

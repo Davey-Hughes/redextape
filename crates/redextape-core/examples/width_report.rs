@@ -25,8 +25,8 @@ use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::run;
 use redextape_core::tm::{
-    Encoding, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, REG, TAPES, TM_DEFAULT_CAPS, TmRun, TmStatus, Unary, defunc, lower_asm,
-    lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts,
+    Binary, Encoding, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Program, REG, TAPES, TM_DEFAULT_CAPS, TmRun, TmStatus, Unary,
+    WORK, decode_tape, defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts, simulate_final,
 };
 use redextape_core::value::Value;
 
@@ -61,7 +61,11 @@ const CORPUS: &[(&str, &str)] = &[
 /// Steps taken at a PINNED width, and whether the run completed. `None` means the run did not reach a
 /// value there (it overflowed the bank or hit a cap), which is exactly what happens below the fitted
 /// width and is reported rather than silently averaged in.
-fn steps_at(src: &str, width: usize) -> Option<u64> {
+///
+/// Generic over `enc` (already at the width to measure) so this serves both `Unary` and `Binary` — the
+/// only reason it needs `init[WORK]` at all is `Binary`: `Unary::init_work()` is the empty vector, so
+/// this is a behaviour-preserving addition for every existing (unary) call site.
+fn steps_at(src: &str, enc: &dyn Encoding) -> Option<u64> {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
     let core = desugar(&prog.unwrap());
@@ -69,28 +73,28 @@ fn steps_at(src: &str, width: usize) -> Option<u64> {
         Ok(p) => p,
         Err(_) => lower_asm(&defunc(&core).ok()?).ok()?,
     };
-    let enc = Unary::at(width);
-    let (m, overflow) = lower_tm_guarded(&program, &enc);
+    let (m, overflow) = lower_tm_guarded(&program, enc);
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots_of(&program));
+    init[WORK] = enc.init_work();
     let (counts, status) = simulate_counts(&m, &init, TM_DEFAULT_CAPS);
     if status != TmStatus::Halted {
         return None;
     }
     // A run that ended in the guard did not compute anything; its step count is not comparable.
-    if counts.get(overflow as usize).is_some() && ended_in_guard(&program, width) {
+    if counts.get(overflow as usize).is_some() && ended_in_guard(&program, enc) {
         return None;
     }
     Some(counts.iter().sum())
 }
 
 /// Whether a pinned-width run halts in the overflow guard.
-fn ended_in_guard(program: &redextape_core::tm::Program, width: usize) -> bool {
-    let enc = Unary::at(width);
-    let (m, overflow) = lower_tm_guarded(program, &enc);
+fn ended_in_guard(program: &Program, enc: &dyn Encoding) -> bool {
+    let (m, overflow) = lower_tm_guarded(program, enc);
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots_of(program));
-    let (_, final_state, status) = redextape_core::tm::simulate_final(&m, &init, TM_DEFAULT_CAPS);
+    init[WORK] = enc.init_work();
+    let (_, final_state, status) = simulate_final(&m, &init, TM_DEFAULT_CAPS);
     status == TmStatus::Halted && final_state == overflow
 }
 
@@ -103,15 +107,25 @@ fn widths() -> Vec<usize> {
     w
 }
 
-/// The width `run_tm` settles on, and the value it produced.
-fn fitted(src: &str) -> (Option<usize>, String) {
+/// The width `run_tm` settles on, and the value it produced, under `family` (`Unary::default()` or
+/// `Binary::default()` — `run_tm_fitted` re-widens it as it searches).
+///
+/// Decodes at the FITTED width (`family.at_width(w)`), not at `family`'s own (usually 64-cell) width.
+/// This was once required for correctness: `Binary`'s decode was width-strict, so a tape fitted at, say,
+/// 4 cells decoded to `None` under a 64-cell `Binary`, while `Unary`'s scan-to-the-first-blank decode hid
+/// the asymmetry — this function used to decode every result with `Unary::default()` regardless of the
+/// fitted width and happened to work only because of it. Both decoders are structural now, so the
+/// `at_width` below is no longer load-bearing; it stays because a width report that decoded at a width
+/// it does not report would be a confusing thing to leave behind.
+fn fitted(src: &str, family: &dyn Encoding) -> (Option<usize>, String) {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
     let core = desugar(&prog.unwrap());
     let expected = run(src).ok();
-    let (outcome, width) = run_tm_fitted(&core, &Unary::default(), TM_DEFAULT_CAPS);
+    let (outcome, width) = run_tm_fitted(&core, family, TM_DEFAULT_CAPS);
+    let dec_enc = family.at_width(width.unwrap_or(MAX_FIELD_WIDTH));
     let shown = match (&outcome, &expected) {
-        (TmRun::Ran { tapes }, Some(v)) => match redextape_core::tm::decode_tape(tapes, v, &Unary::default()) {
+        (TmRun::Ran { tapes }, Some(v)) => match decode_tape(tapes, v, dec_enc.as_ref()) {
             Some(got) if got == *v => fmt_value(&got),
             other => format!("MISMATCH {other:?}"),
         },
@@ -129,13 +143,50 @@ fn fmt_value(v: &Value) -> String {
     }
 }
 
+/// One encoding's measurement for one program at its own fitted width: the width, total steps, the
+/// final REG tape's cell length, and the decoded value (for a sanity cross-check against the reference).
+struct Measured {
+    width: Option<usize>,
+    steps: Option<u64>,
+    reg_len: Option<usize>,
+    value: String,
+}
+
+/// Fit `family` to `src`, run once at the fitted width, and report width + steps + final REG length —
+/// the deliverable this task adds: a per-program, per-encoding comparison at the width each actually
+/// settles on, not at a shared pinned width.
+fn measure(src: &str, family: &dyn Encoding) -> Measured {
+    let (prog, ds) = parse(src);
+    assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
+    let core = desugar(&prog.unwrap());
+    let (outcome, width) = run_tm_fitted(&core, family, TM_DEFAULT_CAPS);
+    match (outcome, width) {
+        (TmRun::Ran { tapes }, Some(w)) => {
+            let enc = family.at_width(w);
+            let reg_len = tapes[REG].snapshot().0.len();
+            let steps = steps_at(src, enc.as_ref());
+            let expected = run(src).ok();
+            let value = match &expected {
+                Some(v) => match decode_tape(&tapes, v, enc.as_ref()) {
+                    Some(got) if got == *v => fmt_value(&got),
+                    other => format!("MISMATCH {other:?}"),
+                },
+                None => "no-reference".to_string(),
+            };
+            Measured { width: Some(w), steps, reg_len: Some(reg_len), value }
+        }
+        (TmRun::Overflow, _) => Measured { width: None, steps: None, reg_len: None, value: "overflow".to_string() },
+        (other, _) => Measured { width: None, steps: None, reg_len: None, value: format!("{other:?}") },
+    }
+}
+
 fn main() {
     println!("\n=== A. steps(W) = a + b*W, and the width-driven share at W = 64 ===\n");
     println!("   {:<16} {:>9} {:>11} {:>9}  affine?", "program", "slope b", "intercept a", "pad@64");
     let mut shares: Vec<f64> = Vec::new();
     for (name, src) in CORPUS {
         // Fit from the two widest points, then check every other completed width lies on that line.
-        let (Some(s32), Some(s64)) = (steps_at(src, 32), steps_at(src, 64)) else {
+        let (Some(s32), Some(s64)) = (steps_at(src, &Unary::at(32)), steps_at(src, &Unary::at(64))) else {
             println!("   {name:<16} {:>9} {:>11} {:>9}  (does not complete at 32/64)", "—", "—", "—");
             continue;
         };
@@ -143,7 +194,7 @@ fn main() {
         let a = s64 as f64 - b * 64.0;
         let affine = widths()
             .iter()
-            .filter_map(|&w| steps_at(src, w).map(|s| (w, s)))
+            .filter_map(|&w| steps_at(src, &Unary::at(w)).map(|s| (w, s)))
             .all(|(w, s)| ((a + b * w as f64) - s as f64).abs() < 0.5);
         let share = b * 64.0 / s64 as f64 * 100.0;
         shares.push(share);
@@ -173,12 +224,12 @@ fn main() {
     println!("   {:<16} {:>7} {:>12} {:>12} {:>9}  value", "program", "fitted", "steps@fitted", "steps@64", "speedup");
     let mut speedups: Vec<f64> = Vec::new();
     for (name, src) in CORPUS {
-        let (w, shown) = fitted(src);
+        let (w, shown) = fitted(src, &Unary::default());
         let Some(w) = w else {
             println!("   {name:<16} {:>7} {:>12} {:>12} {:>9}  {shown}", "—", "—", "—", "—");
             continue;
         };
-        match (steps_at(src, w), steps_at(src, MAX_FIELD_WIDTH)) {
+        match (steps_at(src, &Unary::at(w)), steps_at(src, &Unary::at(MAX_FIELD_WIDTH))) {
             (Some(sf), Some(s64)) => {
                 let ratio = s64 as f64 / sf as f64;
                 speedups.push(ratio);
@@ -205,15 +256,84 @@ fn main() {
     println!("   {:<16} {:>7} {:>14} {:>14} {:>9}", "program", "fitted", "search total", "final attempt", "overhead");
     let mut worst: f64 = 0.0;
     for (name, src) in CORPUS {
-        let (Some(w), _) = fitted(src) else { continue };
+        let (Some(w), _) = fitted(src, &Unary::default()) else { continue };
         // Every attempt auto-fit made, in order, is every width up to and including the fitted one.
         let total: u64 = widths().iter().take_while(|&&x| x <= w).filter_map(|&x| pinned_steps_any(src, x)).sum();
-        let Some(final_attempt) = steps_at(src, w) else { continue };
+        let Some(final_attempt) = steps_at(src, &Unary::at(w)) else { continue };
         let overhead = total as f64 / final_attempt as f64;
         worst = worst.max(overhead);
         println!("   {name:<16} {w:>7} {total:>14} {final_attempt:>14} {overhead:>8.2}x");
     }
     println!("\n   worst overhead across the corpus: {worst:.2}x the final attempt.");
+    println!();
+
+    // ============================================================================================
+    // D. unary vs binary at each encoding's OWN fitted width — the payoff of the toggle (Task 17).
+    // ============================================================================================
+    //
+    // Every earlier section is unary-only (it measures per-program width sizing WITHIN one encoding).
+    // This section is the new thing: the same corpus, run through BOTH encodings, each auto-fit by
+    // `run_tm_fitted` independently, so the comparison is "the width and step cost each encoding
+    // actually settles on", not the same pinned width imposed on both.
+    println!("\n=== D. unary vs binary, each at its OWN fitted width ===\n");
+    println!("   `ratio` is binary steps / unary steps: below 1.0 binary is FASTER. `reg` is the final REG");
+    println!("   tape's cell length (`1 + slots*(w+1)`). Both encodings are fit independently by");
+    println!("   `run_tm_fitted` — no width here is chosen or pinned by hand.\n");
+    println!(
+        "   {:<16} | {:>4} {:>10} {:>6} | {:>4} {:>10} {:>6} | {:>7}  value",
+        "program", "u-w", "u-steps", "u-reg", "b-w", "b-steps", "b-reg", "ratio"
+    );
+    let mut total_u = 0u64;
+    let mut total_b = 0u64;
+    let mut controlled: Vec<(&str, f64)> = Vec::new();
+    let mut incomplete = 0usize;
+    for (name, src) in CORPUS {
+        let mu = measure(src, &Unary::default());
+        let mb = measure(src, &Binary::default());
+        match (mu.width, mu.steps, mu.reg_len, mb.width, mb.steps, mb.reg_len) {
+            (Some(uw), Some(us), Some(ur), Some(bw), Some(bs), Some(br)) => {
+                let ratio = bs as f64 / us as f64;
+                total_u += us;
+                total_b += bs;
+                println!(
+                    "   {name:<16} | {uw:>4} {us:>10} {ur:>6} | {bw:>4} {bs:>10} {br:>6} | {ratio:>6.2}x  {}",
+                    mu.value
+                );
+                // The CONTROLLED comparison: both settle at the narrowest possible width under BOTH
+                // encodings, so there is no bank-width advantage for binary and the ratio isolates the
+                // per-operation cost of ripple-carry over mark-counting.
+                if uw == MIN_FIELD_WIDTH && bw == MIN_FIELD_WIDTH {
+                    controlled.push((name, ratio));
+                }
+            }
+            _ => {
+                incomplete += 1;
+                println!(
+                    "   {name:<16}   (did not complete under one or both encodings: unary {:?}, binary {:?})",
+                    mu.value, mb.value
+                );
+            }
+        }
+    }
+    println!(
+        "\n   TOTAL steps summed over the {} completed programs: unary {total_u}  binary {total_b}  ratio {:.2}x",
+        CORPUS.len() - incomplete,
+        total_b as f64 / total_u as f64
+    );
+    if !controlled.is_empty() {
+        println!("\n   CONTROLLED COMPARISON — programs that fit at width {MIN_FIELD_WIDTH} under BOTH encodings (no");
+        println!("   bank-width advantage for binary here; this isolates the true per-operation cost):");
+        for (name, ratio) in &controlled {
+            let verdict = if *ratio > 1.0 { "binary LOSES" } else { "binary wins" };
+            println!("     {name:<16} {ratio:>6.2}x  {verdict}");
+        }
+        println!("   Everywhere else in the table binary wins by fitting a NARROWER bank than unary needs.");
+    }
+    println!(
+        "\n   Footer: {} corpus programs (same CORPUS as sections A-C); `run_tm_fitted` chose every width",
+        CORPUS.len()
+    );
+    println!("   shown above independently per encoding — none was pinned by hand.");
     println!();
 }
 

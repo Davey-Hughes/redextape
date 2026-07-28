@@ -22,8 +22,8 @@ use redextape_core::tm::Encoding;
 mod common;
 use common::{reg_bank_is_well_formed, unsafe_rules};
 use redextape_core::tm::{
-    BOX, Instr, Program, REG, Reg, TAPES, Tape, TmCaps, TmStatus, Unary, lower_tm_guarded, n_slots_of, parse_tm,
-    print_tm, simulate_watched,
+    BOX, Binary, Instr, Program, REG, Reg, TAPES, Tape, TmCaps, TmStatus, Unary, WORK, lower_tm_guarded, n_slots_of,
+    parse_tm, print_tm, simulate_watched,
 };
 
 // ================================================================================================
@@ -40,28 +40,63 @@ const REGS: &[Reg] = &[Reg::Rr, Reg::Loc(0), Reg::Loc(1), Reg::Arg(0)];
 /// `Lt` stands for the comparison family, which all derive from the same `monus`/`is_zero` primitive.
 const BIN_OPS: &[BinOp] = &[BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::Lt];
 
-/// The widths swept. Small on purpose: a narrow bank makes overflow the COMMON case rather than a rare
-/// one, which is the regime the guard exists for. Width 2 is the narrowest that can hold any value
-/// (the bound is strict, so a 2-cell field holds only 0 and 1).
-const WIDTHS: &[usize] = &[2, 3, 4, 5];
+/// The widths swept for UNARY. Small on purpose: a narrow bank makes overflow the COMMON case rather
+/// than a rare one, which is the regime the guard exists for. Width 2 is the narrowest that can hold
+/// any value (unary's bound is strict, so a 2-cell field holds only 0 and 1).
+const UNARY_WIDTHS: &[usize] = &[2, 3, 4, 5];
 
-/// Literals enumerated for `Li`. Expressed relative to the width under test so the sweep always
-/// includes the boundary values — `w - 1` (the largest that fits), `w` (exactly full, the
-/// `rewind_home` miscount), and `w + 1` (a plain overrun) — which is where the strict bound lives.
-fn literals_for(width: usize) -> Vec<u64> {
-    let w = width as u64;
-    let mut v = vec![0, 1, w.saturating_sub(1), w, w + 1];
+/// The widths swept for BINARY, chosen for the same REGIME rather than the same NUMBERS. A binary
+/// `w`-cell field holds `2^w` values, so unary's 5 would hold {0..31} — far outside the
+/// overflow-is-common regime. Widths 1-3 hold {0..1}, {0..3} and {0..7}, which is the analogue.
+const BINARY_WIDTHS: &[usize] = &[1, 2, 3];
+
+/// The two encodings this sweep covers, paired with the widths chosen for THEIR regime. A single
+/// shared `WIDTHS` list would mean the same cell count for both, but "narrow enough that overflow is
+/// common" is a property of the value RANGE (`width` for unary, `2^width` for binary), not of the cell
+/// count — see `UNARY_WIDTHS`/`BINARY_WIDTHS`.
+fn sweep_targets() -> [(&'static str, &'static [usize]); 2] {
+    [("unary", UNARY_WIDTHS), ("binary", BINARY_WIDTHS)]
+}
+
+/// Build the named encoding at `width`. The one place that maps a sweep target's name to a concrete
+/// `Encoding`, so every other function can stay generic over `&dyn Encoding`.
+fn encoding_named(name: &str, width: usize) -> Box<dyn Encoding> {
+    match name {
+        "binary" => Box::new(Binary::at(width)),
+        "unary" => Box::new(Unary::at(width)),
+        other => panic!("unknown sweep target `{other}`"),
+    }
+}
+
+/// The number of distinct values a `width`-cell field can hold, per encoding: `width` for unary (the
+/// bound `v < width` is strict), `2^width` for binary (`v < 2^width` — see `Binary::fits`). Neither
+/// formula is on the `Encoding` trait (`field_width`'s own doc says the cell count is "not directly a
+/// value bound, since what a `width`-cell field can hold is encoding-specific"), so the sweep has to
+/// know each one itself, in exactly this one place.
+fn capacity(name: &str, width: usize) -> u64 {
+    match name {
+        "binary" => 1u64 << width,
+        _ => width as u64,
+    }
+}
+
+/// Literals enumerated for `Li`, relative to `capacity` (the number of representable values) rather
+/// than the raw cell count — so the boundary values mean the same thing under every encoding:
+/// `capacity - 1` (the largest that fits), `capacity` (exactly one over — the `rewind_home` miscount
+/// for unary, the plain overflow-guard trip for binary), and `capacity + 1` (a further overrun).
+fn literals_for(capacity: u64) -> Vec<u64> {
+    let mut v = vec![0, 1, capacity.saturating_sub(1), capacity, capacity + 1];
     v.sort_unstable();
     v.dedup();
     v
 }
 
-/// Every instruction in the alphabet, at a given width. `Jz`/`Jmp`/`Call` target the single label at
-/// index 0, which is enough to close a loop.
-fn alphabet(width: usize) -> Vec<Instr> {
+/// Every instruction in the alphabet, at a given `(encoding name, width)`. `Jz`/`Jmp`/`Call` target the
+/// single label at index 0, which is enough to close a loop.
+fn alphabet(name: &str, width: usize) -> Vec<Instr> {
     let mut out = Vec::new();
     for &d in REGS {
-        for &n in &literals_for(width) {
+        for &n in &literals_for(capacity(name, width)) {
             out.push(Instr::Li(d, n));
         }
         out.push(Instr::Nil(d));
@@ -87,12 +122,11 @@ fn alphabet(width: usize) -> Vec<Instr> {
     out
 }
 
-/// What checking one `(program, width)` pair found. `Ok(steps)` means the run reached a defined
+/// What checking one `(program, encoding)` pair found. `Ok(steps)` means the run reached a defined
 /// outcome with the bank well-formed at every step.
-fn check(program: &Program, width: usize, caps: TmCaps) -> Result<u64, String> {
+fn check(program: &Program, enc: &dyn Encoding, caps: TmCaps) -> Result<u64, String> {
     let slots = n_slots_of(program) as usize;
-    let enc = Unary::at(width);
-    let (m, _) = lower_tm_guarded(program, &enc);
+    let (m, _) = lower_tm_guarded(program, enc);
     // Free from the same sweep: `lower_tm` claims these for ANY `Program` and never tests them
     // exhaustively.
     let issues = m.validate();
@@ -102,8 +136,14 @@ fn check(program: &Program, width: usize, caps: TmCaps) -> Result<u64, String> {
     // RUNG 3, applied to every enumerated machine. This is the half of the coverage simulation cannot
     // reach: roughly half of these programs are infinite loops that spend the whole step budget, so
     // the watcher below verifies only a prefix of them. The static check has no such limit — it proves
-    // no rule of this machine can EVER write over a delimiter, at any step count.
-    for tape in [REG, BOX] {
+    // no rule of this machine can EVER write over a delimiter, at any step count. WORK joins REG/BOX
+    // whenever the encoding declares it a fixed-width bank (`Binary`'s `init_work` is non-empty;
+    // `Unary`'s is not) — see `common::assert_delimiter_safe`, whose tape-selection logic this mirrors.
+    let mut tapes_to_check = vec![REG, BOX];
+    if !enc.init_work().is_empty() {
+        tapes_to_check.push(WORK);
+    }
+    for tape in tapes_to_check {
         let bad = unsafe_rules(&m, tape);
         if !bad.is_empty() {
             return Err(format!("static delimiter safety fails on tape {tape}: {}", bad.join("; ")));
@@ -111,13 +151,14 @@ fn check(program: &Program, width: usize, caps: TmCaps) -> Result<u64, String> {
     }
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(slots as u32);
+    init[WORK] = enc.init_work();
     let mut steps = 0u64;
     let mut failure = None;
     {
         let mut watch = |tapes: &[Tape]| {
             steps += 1;
             let (cells, _) = tapes[REG].snapshot();
-            match reg_bank_is_well_formed(&cells, &enc, slots) {
+            match reg_bank_is_well_formed(&cells, enc, slots) {
                 Ok(()) => true,
                 Err(why) => {
                     failure = Some(format!("step {steps}: {why}"));
@@ -150,18 +191,37 @@ fn describe(program: &Program) -> String {
 /// of long-running programs is genuinely deeper, not merely slower.
 const FAST_CAPS: TmCaps = TmCaps { steps: 2_000, cells: 2_000 };
 
-/// The exact number of `(length-1 program, width)` pairs the exhaustive sweeps must cover, derived
-/// from the alphabet rather than hardcoded. Asserting equality (not `>`) is deliberate: a later edit
-/// that shrinks the alphabet — dropping an instruction, deduping a literal away — would otherwise
+/// The exact number of `(length-1 program, encoding, width)` triples the exhaustive sweeps must cover,
+/// derived from the alphabet rather than hardcoded. Asserting equality (not `>`) is deliberate: a later
+/// edit that shrinks the alphabet — dropping an instruction, deduping a literal away — would otherwise
 /// reduce coverage silently while every sweep stayed green.
 fn expected_pair_count() -> usize {
-    WIDTHS.iter().map(|&w| alphabet(w).len()).sum()
+    sweep_targets().iter().map(|&(name, widths)| widths.iter().map(|&w| alphabet(name, w).len()).sum::<usize>()).sum()
 }
 
-/// All length-1 programs, over every width. Fast enough for the default tier, and it is the sweep that
-/// covers every INSTRUCTION at every boundary literal at least once.
-fn length_one_programs(width: usize) -> Vec<Program> {
-    alphabet(width).into_iter().map(|i| Program { code: vec![i], labels: vec![("L".to_string(), 0)] }).collect()
+/// All length-1 programs, over every width, for one named encoding. Fast enough for the default tier,
+/// and it is the sweep that covers every INSTRUCTION at every boundary literal at least once.
+fn length_one_programs(name: &str, width: usize) -> Vec<Program> {
+    alphabet(name, width).into_iter().map(|i| Program { code: vec![i], labels: vec![("L".to_string(), 0)] }).collect()
+}
+
+/// The sweep's widths are chosen for a REGIME — overflow being the common case, not a rare one — and
+/// the regime is a property of the VALUE RANGE, not of the cell count. A unary 5-cell field holds
+/// {0..4}; a binary one holds {0..31}. Copying unary's numbers to binary would quietly move the sweep
+/// out of the regime it was designed for while looking identical in the source.
+///
+/// This test does not check a machine. It checks that the constants still describe what their comment
+/// claims, which is the failure mode this suite keeps finding in itself.
+#[test]
+fn the_swept_widths_cover_the_overflow_regime_for_each_encoding() {
+    for &w in UNARY_WIDTHS {
+        assert!(w <= 5, "unary width {w} holds values < {w}, too wide for the overflow regime");
+    }
+    for &w in BINARY_WIDTHS {
+        let max = 1u64 << w;
+        assert!(max <= 32, "binary width {w} holds values < {max}, too wide for the overflow regime");
+    }
+    assert!(!BINARY_WIDTHS.is_empty(), "the binary sweep must not be silently empty");
 }
 
 // ================================================================================================
@@ -174,21 +234,28 @@ fn length_one_programs(width: usize) -> Vec<Program> {
 #[ignore = "slow tier: measures enumeration cost to size the exhaustive sweep; run via scripts/check-slow.sh"]
 fn measure_enumeration_cost() {
     let caps = TmCaps { steps: 20_000, cells: 20_000 };
-    println!("\n  width | alphabet | length-1 programs | checked | total steps");
-    for &width in WIDTHS {
-        let alpha = alphabet(width).len();
-        let programs = length_one_programs(width);
-        let mut total_steps = 0u64;
-        for p in &programs {
-            match check(p, width, caps) {
-                Ok(s) => total_steps += s,
-                Err(why) => panic!("length-1 program `{}` at width {width}: {why}", describe(p)),
+    println!("\n  encoding | width | alphabet | length-1 programs | checked | total steps");
+    for (name, widths) in sweep_targets() {
+        for &width in widths {
+            let alpha = alphabet(name, width).len();
+            let programs = length_one_programs(name, width);
+            let mut total_steps = 0u64;
+            for p in &programs {
+                let enc = encoding_named(name, width);
+                match check(p, enc.as_ref(), caps) {
+                    Ok(s) => total_steps += s,
+                    Err(why) => panic!("length-1 program `{}` at width {width} ({name}): {why}", describe(p)),
+                }
             }
+            println!(
+                "  {name:>8} | {width:>5} | {alpha:>8} | {:>17} | {:>7} | {total_steps:>11}",
+                programs.len(),
+                programs.len()
+            );
         }
-        println!("  {width:>5} | {alpha:>8} | {:>17} | {:>7} | {total_steps:>11}", programs.len(), programs.len());
     }
-    let alpha = alphabet(4).len();
-    println!("\n  alphabet size at width 4: {alpha}");
+    let alpha = alphabet("unary", 4).len();
+    println!("\n  alphabet size at width 4 (unary): {alpha}");
     println!("  length-2 enumeration would be {} programs per width", alpha * alpha);
     println!("  length-3 enumeration would be {} programs per width", (alpha as u64).pow(3));
     assert!(alpha > 100, "the alphabet must be large enough for the sweep to mean something: {alpha}");
@@ -208,39 +275,51 @@ fn measure_enumeration_cost() {
 /// Reports the outcome mix rather than only pass/fail, because a sweep where every program instantly
 /// halted would be green while covering nothing.
 #[test]
-#[ignore = "slow tier: exhaustive over ~200k (program, width) pairs, ~2 min; run via scripts/check-slow.sh"]
+#[ignore = "slow tier: exhaustive over ~200k (program, encoding, width) triples, ~2 min; run via scripts/check-slow.sh"]
 fn every_two_instruction_program_keeps_the_bank_well_formed() {
     let caps = TmCaps { steps: 20_000, cells: 20_000 };
     let mut total = 0usize;
     let mut capped = 0usize;
     let mut total_steps = 0u64;
-    for &width in WIDTHS {
-        let alpha = alphabet(width);
-        let mut per_width = 0usize;
-        for first in &alpha {
-            for second in &alpha {
-                let p = Program { code: vec![first.clone(), second.clone()], labels: vec![("L".to_string(), 0)] };
-                match check(&p, width, caps) {
-                    Ok(steps) => {
-                        total_steps += steps;
-                        // A run that used the whole budget did not finish; count it so the report
-                        // cannot present a sweep of timeouts as a sweep of completed executions.
-                        if steps >= caps.steps {
-                            capped += 1;
+    for (name, widths) in sweep_targets() {
+        for &width in widths {
+            let alpha = alphabet(name, width);
+            let enc = encoding_named(name, width);
+            let mut per_width = 0usize;
+            for first in &alpha {
+                for second in &alpha {
+                    let p = Program { code: vec![first.clone(), second.clone()], labels: vec![("L".to_string(), 0)] };
+                    match check(&p, enc.as_ref(), caps) {
+                        Ok(steps) => {
+                            total_steps += steps;
+                            // A run that used the whole budget did not finish; count it so the report
+                            // cannot present a sweep of timeouts as a sweep of completed executions.
+                            if steps >= caps.steps {
+                                capped += 1;
+                            }
                         }
+                        Err(why) => panic!("width {width} ({name}), program `{}`: {why}", describe(&p)),
                     }
-                    Err(why) => panic!("width {width}, program `{}`: {why}", describe(&p)),
+                    per_width += 1;
                 }
-                per_width += 1;
             }
+            println!("  {name} width {width}: {per_width} programs checked");
+            total += per_width;
         }
-        println!("  width {width}: {per_width} programs checked");
-        total += per_width;
     }
-    let expected: usize = WIDTHS.iter().map(|&w| alphabet(w).len().pow(2)).sum();
-    assert_eq!(total, expected, "the sweep covered fewer pairs than the alphabet defines");
+    let expected: usize = sweep_targets()
+        .iter()
+        .map(|&(name, widths)| widths.iter().map(|&w| alphabet(name, w).len().pow(2)).sum::<usize>())
+        .sum();
+    assert_eq!(
+        total,
+        expected,
+        "the sweep covered fewer pairs than the alphabet defines (summed over: {:?}) — coverage shrank \
+         silently; the per-encoding `{{name}} width {{width}}` lines above say which one",
+        sweep_targets().iter().map(|&(n, w)| (n, w.len())).collect::<Vec<_>>()
+    );
     println!(
-        "\n  EXHAUSTIVE over {total} (length-2 program, width) pairs, {total_steps} steps total.\n  \
+        "\n  EXHAUSTIVE over {total} (length-2 program, encoding, width) triples, {total_steps} steps total.\n  \
          {capped} of them ({:.1}%) used the whole step budget rather than halting — they are infinite \
          loops through the single label. SIMULATION therefore verifies only a prefix of those, which is \
          precisely why every machine here also gets the STATIC delimiter check (rung 3): that half is \
@@ -261,20 +340,29 @@ fn every_two_instruction_program_keeps_the_bank_well_formed() {
 fn every_single_instruction_program_keeps_the_bank_well_formed() {
     let caps = FAST_CAPS;
     let mut checked = 0usize;
-    for &width in WIDTHS {
-        for p in length_one_programs(width) {
-            if let Err(why) = check(&p, width, caps) {
-                panic!("width {width}, program `{}`: {why}", describe(&p));
+    for (name, widths) in sweep_targets() {
+        let mut n_programs = 0usize;
+        for &width in widths {
+            let enc = encoding_named(name, width);
+            for p in length_one_programs(name, width) {
+                if let Err(why) = check(&p, enc.as_ref(), caps) {
+                    panic!("width {width} ({name}), program `{}`: {why}", describe(&p));
+                }
+                checked += 1;
+                n_programs += 1;
             }
-            checked += 1;
         }
+        // Per-encoding count, so a silently halved sweep (e.g. an empty `BINARY_WIDTHS`) is visible in
+        // the test output rather than hiding behind a single combined total.
+        println!("swept {n_programs} programs x {} widths for {name}", widths.len());
     }
     assert_eq!(
         checked,
         expected_pair_count(),
-        "the sweep covered fewer pairs than the alphabet defines — coverage shrank silently"
+        "the sweep covered fewer pairs than the alphabet defines — coverage shrank silently; the \
+         per-encoding `swept N programs x W widths for <name>` lines above say which one"
     );
-    println!("exhaustive over {checked} (length-1 program, width) pairs");
+    println!("exhaustive over {checked} (length-1 program, encoding, width) triples");
 }
 
 /// The fast tier's length-2 subset: every `(Li, anything)` pair. Cheap, and it covers the one class of
@@ -293,29 +381,37 @@ fn every_single_instruction_program_keeps_the_bank_well_formed() {
 fn every_seeded_two_instruction_program_keeps_the_bank_well_formed() {
     let caps = FAST_CAPS;
     let mut checked = 0usize;
-    for &width in WIDTHS {
-        let alpha = alphabet(width);
-        let seeds: Vec<&Instr> = alpha.iter().filter(|i| matches!(i, Instr::Li(..))).collect();
-        assert!(!seeds.is_empty(), "the alphabet must contain `Li` seeds at width {width}");
-        for seed in &seeds {
-            for second in &alpha {
-                let p = Program { code: vec![(*seed).clone(), second.clone()], labels: vec![("L".to_string(), 0)] };
-                if let Err(why) = check(&p, width, caps) {
-                    panic!("width {width}, program `{}`: {why}", describe(&p));
+    for (name, widths) in sweep_targets() {
+        for &width in widths {
+            let alpha = alphabet(name, width);
+            let enc = encoding_named(name, width);
+            let seeds: Vec<&Instr> = alpha.iter().filter(|i| matches!(i, Instr::Li(..))).collect();
+            assert!(!seeds.is_empty(), "the alphabet must contain `Li` seeds at width {width} ({name})");
+            for seed in &seeds {
+                for second in &alpha {
+                    let p = Program { code: vec![(*seed).clone(), second.clone()], labels: vec![("L".to_string(), 0)] };
+                    if let Err(why) = check(&p, enc.as_ref(), caps) {
+                        panic!("width {width} ({name}), program `{}`: {why}", describe(&p));
+                    }
+                    checked += 1;
                 }
-                checked += 1;
             }
         }
     }
-    let expected: usize = WIDTHS
+    let expected: usize = sweep_targets()
         .iter()
-        .map(|&w| {
-            let a = alphabet(w);
-            a.iter().filter(|i| matches!(i, Instr::Li(..))).count() * a.len()
+        .map(|&(name, widths)| {
+            widths
+                .iter()
+                .map(|&w| {
+                    let a = alphabet(name, w);
+                    a.iter().filter(|i| matches!(i, Instr::Li(..))).count() * a.len()
+                })
+                .sum::<usize>()
         })
         .sum();
     assert_eq!(checked, expected, "the seeded sweep covered fewer pairs than the alphabet defines");
-    println!("exhaustive over {checked} (Li-seeded length-2 program, width) pairs");
+    println!("exhaustive over {checked} (Li-seeded length-2 program, encoding, width) triples");
 }
 
 /// The TM text form round-trips every machine the length-1 sweep builds. `parse_tm(print_tm(m)) == m`
@@ -324,13 +420,25 @@ fn every_seeded_two_instruction_program_keeps_the_bank_well_formed() {
 #[test]
 fn every_single_instruction_machine_round_trips_through_the_text_form() {
     let mut checked = 0usize;
-    for &width in WIDTHS {
-        for p in length_one_programs(width) {
-            let (m, _) = lower_tm_guarded(&p, &Unary::at(width));
-            let (parsed, errors) = parse_tm(&print_tm(&m));
-            assert!(errors.is_empty(), "width {width}, `{}`: text form has errors: {errors:?}", describe(&p));
-            assert_eq!(parsed.as_ref(), Some(&m), "width {width}, `{}`: does not round-trip", describe(&p));
-            checked += 1;
+    for (name, widths) in sweep_targets() {
+        for &width in widths {
+            let enc = encoding_named(name, width);
+            for p in length_one_programs(name, width) {
+                let (m, _) = lower_tm_guarded(&p, enc.as_ref());
+                let (parsed, errors) = parse_tm(&print_tm(&m));
+                assert!(
+                    errors.is_empty(),
+                    "width {width} ({name}), `{}`: text form has errors: {errors:?}",
+                    describe(&p)
+                );
+                assert_eq!(
+                    parsed.as_ref(),
+                    Some(&m),
+                    "width {width} ({name}), `{}`: does not round-trip",
+                    describe(&p)
+                );
+                checked += 1;
+            }
         }
     }
     assert_eq!(checked, expected_pair_count(), "fewer machines round-tripped than the alphabet defines");

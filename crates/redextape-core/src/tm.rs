@@ -10,6 +10,7 @@ pub mod build;
 pub mod decode;
 pub mod defunc;
 pub mod encoding;
+pub mod header;
 pub mod lower_asm;
 pub mod lower_tm;
 pub mod machine;
@@ -23,9 +24,10 @@ pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_
 pub use build::{
     AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, REG, RuleSpec, SEP, STACK, Slot, TAPES, WORK, ZERO,
 };
-pub use decode::decode_tape;
+pub use decode::{decode_tape, decode_tape_ty};
 pub use defunc::{defunc, defunc_mapped};
 pub use encoding::{Binary, Encoding, Unary};
+pub use header::{EncodingKind, TmHeader};
 pub use lower_asm::{LowerError, lower_asm, lower_asm_mapped};
 pub use lower_tm::{lower_tm, lower_tm_guarded, lower_tm_mapped, n_slots_of};
 pub use machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
@@ -33,9 +35,10 @@ pub use sim::{
     Caps as TmCaps, DEFAULT_CAPS as TM_DEFAULT_CAPS, Status as TmStatus, Step, Tape, Trace, Watcher, simulate,
     simulate_counts, simulate_final, simulate_trace, simulate_watched,
 };
-pub use syntax::{parse_tm, print_tm};
+pub use syntax::{parse_tm, parse_tm_full, print_tm, print_tm_with};
 
 use crate::core::Core;
+use crate::ty::Ty;
 // `Encoding`, `lower_asm`, `LowerError`, `lower_tm`, `simulate`, `Tape`, `TmCaps`, `TmStatus`, `REG`,
 // and `TAPES` are all already in scope via this module's existing `pub use` re-exports.
 
@@ -44,6 +47,12 @@ use crate::core::Core;
 #[derive(Clone, Debug)]
 pub enum TmRun {
     /// Simulated to a halt. Decode the final tapes against an expected value's shape (`decode_tape`).
+    ///
+    /// Any instance of the encoding decodes these tapes — the width the machine was lowered at does not
+    /// have to reach the decoder. Both encodings read STRUCTURALLY, from one delimiter to the next, so a
+    /// tape auto-fitted to 4 cells decodes correctly under a 64-cell instance. (`Unary` always did;
+    /// `Binary` was width-strict until the structural-decode change, which is why callers used to have
+    /// to thread `run_tm_fitted`'s reported width into a matching `Binary::at(..)`.)
     Ran { tapes: Vec<Tape> },
     /// The simulation hit a step / tape-cells cap.
     HitCap,
@@ -51,6 +60,19 @@ pub enum TmRun {
     /// program is not representable on this tape. Distinct from `HitCap`: nothing diverged, the tape is
     /// simply too narrow, which is a property of the encoding rather than of the program's semantics.
     Overflow,
+    /// `lower_tm` REFUSED to build a machine for this program at all — an absurd register file
+    /// (`lower_tm::MAX_SLOTS`), an absurd `Loc` bank in a call-containing program
+    /// (`lower_tm::MAX_FRAME_LOC`), or too many `Mul` instructions (`lower_tm::MAX_MUL_INSTRS`, each
+    /// O(width²) states under `Binary`). Any of the three would make `lower_tm` build (or `init_reg`
+    /// allocate) an oversized machine were lowering to proceed, so lowering never proceeds: the program
+    /// never ran a single step.
+    ///
+    /// Distinct from `HitCap`, which reports a run that started and then hit a resource cap mid-flight
+    /// — a program refused here never started. Distinct from `Overflow` too: `run_tm_fitted`'s retry
+    /// loop widens the bank and tries again on `Overflow`, which would be actively wrong for this case
+    /// (the same too-large program would simply be re-lowered, and re-refused, at every width up to the
+    /// ceiling). `TooLarge` is reported once, at the first width tried, with no retry.
+    TooLarge,
     /// The program could not be lowered to asm (e.g. a higher-order use).
     LowerError(LowerError),
 }
@@ -87,21 +109,55 @@ fn lower_program(core: &Core) -> Result<Program, LowerError> {
 /// Lower (`lower_asm`, defunctionalizing first if needed -> `lower_tm`) then simulate. The convenience
 /// entry point for the oracle and later plans; `enc` selects the numeric encoding (the v1 `Unary`).
 /// Panic-free and bounded by `caps`.
+///
+/// Discards the width auto-fit settled on, which is fine for decoding — see `TmRun::Ran` — since both
+/// encodings decode structurally. Use `run_tm_fitted` when the width itself is the interesting output
+/// (a size report, a step-count comparison across widths).
 pub fn run_tm(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> TmRun {
     run_tm_fitted(core, enc, caps).0
 }
 
 /// One attempt at `enc`'s own width: lower, lay out the bank, simulate, and classify the halt.
-fn attempt(prog: &Program, enc: &dyn Encoding, n_slots: u32, caps: TmCaps) -> TmRun {
+///
+/// Returns the machine and the initial tapes it built alongside the outcome. `run_tm_fitted` drops
+/// both; `run_tm_described` keeps them, and keeping them is the point — a header whose literal tapes
+/// were re-derived from its own `encoding`/`width`/`slots` fields could not disagree with them, so
+/// the consistency check over it would prove nothing. There is exactly ONE place that builds `init`,
+/// which is what makes the check a check.
+fn attempt(prog: &Program, enc: &dyn Encoding, n_slots: u32, caps: TmCaps) -> (TmRun, Machine, Vec<Vec<Symbol>>) {
     let (machine, overflow) = lower_tm_guarded(prog, enc);
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots);
     init[WORK] = enc.init_work();
-    match simulate_final(&machine, &init, caps) {
+    let run = match simulate_final(&machine, &init, caps) {
         (_, s, TmStatus::Halted) if s == overflow => TmRun::Overflow,
         (tapes, _, TmStatus::Halted) => TmRun::Ran { tapes },
         (_, _, TmStatus::HitCap) => TmRun::HitCap,
+    };
+    (run, machine, init)
+}
+
+/// Lower `core`, then check ALL THREE of `lower_tm`'s layout refusals — `MAX_SLOTS` (an absurd register
+/// file, which would also drive `init_reg` into a huge or aborting allocation just below),
+/// `frame_bank_unrepresentable` (an absurd `Loc` bank in a call-containing program), and
+/// `mul_count_unrepresentable` (too many `Mul` instructions, each O(width²) states under `Binary`).
+///
+/// The single place `run_tm_fitted`/`run_tm_at` decide "is this program representable at all", so the
+/// two cannot drift from each other or from the guards they mirror — the same reason
+/// `frame_bank_unrepresentable` itself is a shared predicate rather than re-derived at each call site.
+/// A refused program is reported as `TmRun::TooLarge`: it never took a step, so it must not come back
+/// as `Ran` over tapes that decode to nothing (`MAX_SLOTS`'s and `MAX_FRAME_LOC`'s old behaviour) or as
+/// `HitCap` (which claims a run started and then hit a resource cap mid-flight).
+fn lower_and_size(core: &Core) -> Result<(Program, lower_tm::SlotMap), TmRun> {
+    let prog = lower_program(core).map_err(TmRun::LowerError)?;
+    let sm = lower_tm::SlotMap::of(&prog);
+    if sm.n_slots() > crate::tm::lower_tm::MAX_SLOTS
+        || lower_tm::frame_bank_unrepresentable(&prog, &sm)
+        || lower_tm::mul_count_unrepresentable(&prog)
+    {
+        return Err(TmRun::TooLarge);
     }
+    Ok((prog, sm))
 }
 
 /// Lower, then run at the narrowest field width that fits, reporting that width alongside the outcome.
@@ -111,35 +167,74 @@ fn attempt(prog: &Program, enc: &dyn Encoding, n_slots: u32, caps: TmCaps) -> Tm
 /// overflowing yields `TmRun::Overflow`. An encoding reporting `field_width() == None` is unbounded, so
 /// there is exactly one attempt and the reported width is `None`.
 ///
-/// Only the GUARD triggers a retry, never `HitCap` — a nil/dangling dereference spins to a cap at every
-/// width, so retrying on caps would burn the full step budget five times over and still report the same
-/// thing. That distinction is the reason the guard is a state id rather than a spin (see
-/// `Builder::overflow`).
+/// Only the GUARD triggers a retry, never `HitCap` (nor `TooLarge`) — a nil/dangling dereference spins
+/// to a cap at every width, so retrying on caps would burn the full step budget five times over and
+/// still report the same thing; a program `lower_and_size` refuses is refused independently of width,
+/// so retrying it would just re-refuse it at every width up to the ceiling for no benefit. That
+/// distinction is the reason the guard is a state id rather than a spin (see `Builder::overflow`).
 ///
 /// The retries are cheap BECAUSE of the guard: a too-narrow attempt runs the correct prefix of the
 /// program and then halts at its first overflowing store, so it costs less than the successful attempt
 /// that follows it. Without the guard an under-sized run corrupts the bank and frequently runs away to
 /// the full step cap instead, which is what made the pre-guard behaviour expensive as well as wrong.
 pub fn run_tm_fitted(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> (TmRun, Option<usize>) {
-    let prog = match lower_program(core) {
+    let (prog, sm) = match lower_and_size(core) {
         Ok(p) => p,
-        Err(e) => return (TmRun::LowerError(e), None),
+        Err(e) => return (e, None),
     };
-    let n_slots = lower_tm::n_slots_of(&prog);
-    // Mirrors `lower_tm`'s own guard: an absurd register index would drive `init_reg` into a huge or
-    // aborting allocation. An unrepresentable program is a resource-cap outcome, not a panic.
-    if n_slots > crate::tm::lower_tm::MAX_SLOTS {
-        return (TmRun::HitCap, None);
-    }
+    let n_slots = sm.n_slots();
     if enc.field_width().is_none() {
-        return (attempt(&prog, enc, n_slots, caps), None);
+        return (attempt(&prog, enc, n_slots, caps).0, None);
     }
     let mut width = MIN_FIELD_WIDTH;
     loop {
         let fitted = enc.at_width(width);
-        match attempt(&prog, &*fitted, n_slots, caps) {
+        match attempt(&prog, &*fitted, n_slots, caps).0 {
             TmRun::Overflow if width < MAX_FIELD_WIDTH => width = (width * 2).min(MAX_FIELD_WIDTH),
             other => return (other, Some(width)),
+        }
+    }
+}
+
+/// A run together with everything needed to write it down: the machine, and the header describing the
+/// very configuration it was run from.
+#[derive(Clone, Debug)]
+pub struct DescribedRun {
+    /// What happened.
+    pub run: TmRun,
+    /// The machine that ran. `print_tm_with(&machine, &header)` is a complete, self-describing file.
+    pub machine: Machine,
+    /// The recipe AND the literal initial tapes, captured from the configuration `simulate` was
+    /// handed — not re-derived from the recipe, which is what makes the consistency check a check.
+    pub header: TmHeader,
+}
+
+/// Lower, auto-fit the width, run — and return the machine and header that together form a complete
+/// `.tm` file for that run.
+///
+/// `result` is the program's top-level type (`typeck::result_type`), which the caller supplies
+/// because this function takes `Core` and typing happens on the AST.
+///
+/// `Err` for a program that never ran (`LowerError` / `TooLarge`): there is no configuration to
+/// describe, so there is no honest header to return.
+///
+/// Mirrors `run_tm_fitted`'s search — `MIN_FIELD_WIDTH`, doubling, retrying only on the overflow
+/// guard — but has no unbounded-encoding branch: `EncodingKind` names only bounded encodings, since
+/// an unbounded one has no name to write in a file.
+pub fn run_tm_described(core: &Core, kind: EncodingKind, result: Ty, caps: TmCaps) -> Result<DescribedRun, TmRun> {
+    let (prog, sm) = lower_and_size(core)?;
+    let n_slots = sm.n_slots();
+    let mut width = MIN_FIELD_WIDTH;
+    loop {
+        let fitted = kind.at(width);
+        let (run, machine, init) = attempt(&prog, &*fitted, n_slots, caps);
+        match run {
+            TmRun::Overflow if width < MAX_FIELD_WIDTH => width = (width * 2).min(MAX_FIELD_WIDTH),
+            run => {
+                let tapes = init.into_iter().enumerate().collect();
+                let header = TmHeader::new(kind, width, n_slots, result, tapes);
+                return Ok(DescribedRun { run, machine, header });
+            }
         }
     }
 }
@@ -148,15 +243,11 @@ pub fn run_tm_fitted(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> (TmRun, O
 /// attribution survey use, so their numbers stay comparable across slices even as auto-fit changes what
 /// a program costs end to end.
 pub fn run_tm_at(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> TmRun {
-    let prog = match lower_program(core) {
+    let (prog, sm) = match lower_and_size(core) {
         Ok(p) => p,
-        Err(e) => return TmRun::LowerError(e),
+        Err(e) => return e,
     };
-    let n_slots = lower_tm::n_slots_of(&prog);
-    if n_slots > crate::tm::lower_tm::MAX_SLOTS {
-        return TmRun::HitCap;
-    }
-    attempt(&prog, enc, n_slots, caps)
+    attempt(&prog, enc, sm.n_slots(), caps).0
 }
 
 #[cfg(test)]
@@ -192,11 +283,105 @@ mod run_tm_tests {
         assert_eq!(fitted("[1, 2, 3]"), (Value::list_of_nats(&[1, 2, 3]), Some(4)));
     }
 
+    /// A tape decodes to the same value under an encoding instance of ANY width, for both encodings.
+    ///
+    /// This is the property `Binary` used to lack. Its decode required a field to close exactly at the
+    /// instance's own `width`, so a tape auto-fitted to 4 or 8 cells decoded to `None` under
+    /// `Binary::default()` (64) and every caller had to thread the fitted width from `run_tm_fitted`
+    /// into a matching `Binary::at(..)`. Both decoders are structural now — they read one delimiter to
+    /// the next — so the width the machine was lowered at no longer has to reach the decoder at all.
+    ///
+    /// Three things keep this from passing vacuously:
+    ///
+    ///   * The programs fit BELOW 64, asserted rather than assumed. At 64 a strict decoder and a
+    ///     structural one agree, so a corpus that all fitted at the ceiling would prove nothing.
+    ///   * Reader widths run in BOTH directions from the fitted one, including widths NARROWER than the
+    ///     tape was laid out at. That is not decoration, and it is sabotage-verified: adding a ONE-SIDED
+    ///     width dependence to `Binary::decode_nat` (`if n > self.width { return None }`) is accepted by
+    ///     the default reader (64) AND by the fitted reader (8), and is caught ONLY by `read at 4`.
+    ///   * The corpus reaches the HEAP (`[20, 25, 30]`, `head(tail(..))`) and the STACK (`sum`), so
+    ///     `parse_heap_cells` and its pointer chain are covered too, not just `decode_nat` on slot 0.
+    ///
+    /// THE VALUES ARE LOAD-BEARING and were nearly wrong. An earlier corpus (`1 + 2 * 3`, `[1, 2, 3]`,
+    /// `sum(4)`) fitted BINARY at 4 for every program — `MIN_FIELD_WIDTH`, the narrowest width there is
+    /// — so `MIN_FIELD_WIDTH` in the reader list was never actually narrower than the tape, and the
+    /// narrower direction went unexercised for the very encoding this test exists for. Measured, not
+    /// assumed. Values in [16, 31] are what put unary at 32 and binary at 8 simultaneously, and the
+    /// `MIN_FIELD_WIDTH < width` assertion below is what stops a future edit from losing that again.
+    #[test]
+    fn a_tape_decodes_the_same_at_every_reader_width() {
+        for src in [
+            "20 + 5",
+            "[20, 25, 30]",
+            "head(tail([20, 25, 30]))",
+            "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(6)",
+        ] {
+            let core = core_of(src);
+            let expected = crate::run(src).expect("reference run failed");
+            for enc in [&Unary::default() as &dyn Encoding, &Binary::default()] {
+                let (run, width) = run_tm_fitted(&core, enc, TM_DEFAULT_CAPS);
+                let TmRun::Ran { tapes } = run else { panic!("`{src}` did not run: {run:?}") };
+                let width = width.expect("a bounded encoding reports a fitted width");
+                // Both bounds are non-vacuity guards, in opposite directions: at the ceiling a strict
+                // decoder and a structural one agree, and at the floor no reader below is available.
+                assert!(width < MAX_FIELD_WIDTH, "`{src}` fitted to {width}: at the ceiling this proves nothing");
+                assert!(MIN_FIELD_WIDTH < width, "`{src}` fitted to {width}: no reader is narrower than the tape");
+                // The DEFAULT instance (64 cells), NOT `enc.at_width(width)`.
+                assert_eq!(
+                    decode_tape(&tapes, &expected, enc),
+                    Some(expected.clone()),
+                    "`{src}`: default reader, tape written at {width}"
+                );
+                // Then widths above AND below the one the tape was actually laid out at.
+                for reader in [MIN_FIELD_WIDTH, width, width * 2, MAX_FIELD_WIDTH] {
+                    let at = enc.at_width(reader);
+                    assert_eq!(
+                        decode_tape(&tapes, &expected, at.as_ref()),
+                        Some(expected.clone()),
+                        "`{src}`: written at {width}, read at {reader}"
+                    );
+                }
+            }
+        }
+    }
+
     /// A value the tape cannot represent at ANY width up to the ceiling is now REPORTED. Before the
     /// guard this silently miscompiled: the bank was corrupted and a wrong answer came back.
     #[test]
     fn a_value_beyond_the_ceiling_reports_overflow() {
         assert!(matches!(run_tm(&core_of("100 * 100"), &Unary::default(), TM_DEFAULT_CAPS), TmRun::Overflow));
+    }
+
+    /// Fix 1: a program with more `Mul`s than `lower_tm::MAX_MUL_INSTRS` must be reported as
+    /// `TooLarge` through `run_tm`/`run_tm_at`/`run_tm_fitted` alike — never `Ran` (the machine
+    /// `lower_tm` refuses to build cannot have simulated to a value) and never retried as `Overflow`
+    /// (which would just re-refuse the same program at every width up to the ceiling).
+    #[test]
+    fn too_many_muls_is_reported_as_too_large_not_ran_or_overflow() {
+        let src = vec!["2"; crate::tm::lower_tm::MAX_MUL_INSTRS as usize + 2].join(" * ");
+        let core = core_of(&src);
+        assert!(matches!(run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::TooLarge));
+        assert!(matches!(run_tm(&core, &Binary::default(), TM_DEFAULT_CAPS), TmRun::TooLarge));
+        assert!(matches!(run_tm_at(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::TooLarge));
+        let (fitted, width) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
+        assert!(matches!(fitted, TmRun::TooLarge), "got {fitted:?}");
+        assert_eq!(width, None, "a refused program was never fitted to any width");
+    }
+
+    /// Fix 2 (roadmap "TM bank-safety" item 1): `run_tm` used to guard only `MAX_SLOTS`, so a
+    /// call-containing program whose `Loc` bank `lower_tm` refuses to lay out (`MAX_FRAME_LOC`) came
+    /// back as `Ran` over tapes that decode to nothing, instead of a resource outcome. It must now
+    /// mirror `frame_bank_unrepresentable` and report `TooLarge`, exactly as `attribute` already does
+    /// (see `attribute.rs`'s `a_program_too_wide_for_the_frame_bank_reports_that_nothing_ran`).
+    #[test]
+    fn a_frame_bank_too_wide_to_lay_out_is_too_large_not_ran() {
+        const N: usize = 1_100; // > MAX_FRAME_LOC (1,000) locals in a function that contains a call.
+        let params: String = (0..N).map(|i| format!("p{i}, ")).collect();
+        let src = format!("fn g(y) {{ y }} fn f({params}n) {{ g(n) }} f({}3)", "1, ".repeat(N));
+        let core = core_of(&src);
+        assert!(matches!(run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::TooLarge));
+        assert!(matches!(run_tm_at(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::TooLarge));
+        assert!(matches!(run_tm_fitted(&core, &Unary::default(), TM_DEFAULT_CAPS).0, TmRun::TooLarge));
     }
 
     /// `run_tm_at` does NOT search: it runs once at the encoding's own width, which is what the step
@@ -284,7 +469,7 @@ mod run_tm_tests {
                 assert!(ds.is_empty(), "parse errors: {ds:?}");
                 let core = desugar(&prog.unwrap());
                 match run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS) {
-                    TmRun::LowerError(_) | TmRun::HitCap | TmRun::Overflow => {}
+                    TmRun::LowerError(_) | TmRun::HitCap | TmRun::Overflow | TmRun::TooLarge => {}
                     TmRun::Ran { .. } => panic!("expected LowerError or HitCap for a 40k-deep list literal"),
                 }
             })

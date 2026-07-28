@@ -17,7 +17,9 @@ pub const BOX: usize = 4;
 /// Tape data symbols. `BLANK` (`_`) comes from `machine`. `SEP` (`#`) delimits register fields.
 pub const MARK: Symbol = '1';
 pub const SEP: Symbol = '#';
-/// The HEAP cons-cell delimiter: each cell is `@ <head marks> # <tail marks>`.
+/// The HEAP cons-cell delimiter: each cell is `@ <head word> # <tail word>`, where a WORD is written
+/// in the encoding's own representation — a variable-length mark run under `Unary`, exactly `width`
+/// digits under `Binary` (which is what makes a binary cell fixed-size and seekable by counting).
 pub const AT: Symbol = '@';
 
 /// The binary zero digit. `MARK` (`'1'`) doubles as the one digit, so base 2 costs exactly one new
@@ -27,18 +29,22 @@ pub const ZERO: Symbol = '0';
 /// The narrowest field width `run_tm`'s auto-fit search starts at.
 pub const MIN_FIELD_WIDTH: usize = 4;
 
-/// The widest field width: the ceiling of `run_tm`'s auto-fit search, and the width of
-/// `Unary::default()`.
+/// The widest field width: the ceiling of `run_tm`'s auto-fit search, and the default width of BOTH
+/// encodings (`Unary::default()`, `Binary::default()`).
 ///
-/// A register field is `width` cells: a value `v` is `v` `MARK`s left-justified, then `width - v`
-/// `BLANK`s. Fixed width means a write mutates the field IN PLACE (blank the window, write the marks)
-/// and never has to shift the rest of the tape. The bound is STRICT: `v` must stay `< width`, so at
-/// least one padding blank always remains. This is load-bearing, not cosmetic — `rewind_home` walks left
-/// and stops on the first `#` it meets; a field written EXACTLY full (zero padding) has no interior blank
-/// for the copy/write/erase loops to land on, so they instead stop on the field's trailing `#`, and
-/// `rewind_home` then crosses one delimiter too many and lands the REG head one field to the RIGHT of
-/// home. The overflow guard (see `Builder::overflow`) turns that from a silent miscompile into a halt,
-/// and a program whose values exceed this ceiling is reported as `TmRun::Overflow`.
+/// A register field is `width` CELLS. What a field of that many cells can HOLD is the encoding's own
+/// business and differs sharply between the two: `Unary` stores `v` as `v` marks left-justified with
+/// blank padding, so `v < width`; `Binary` stores exactly `width` LSB-first digits with no padding, so
+/// `v < 2^width` and a 64-cell field is a full `u64`. Fixed width is what both share, and it is why a
+/// write mutates the field IN PLACE and never has to shift the rest of the tape.
+///
+/// **The strict `v < width` bound is UNARY's, not this constant's** — see `encoding::unary`, which owns
+/// the argument for why the padding blank is load-bearing there (`rewind_home` stops on the first `#`,
+/// so a field written exactly full desynchronizes its delimiter-counting walk). `encoding::binary` has
+/// no analogous requirement: both digits are content and every field is the same length.
+///
+/// A value that fits at no width up to this ceiling is reported as `TmRun::Overflow` by the shared
+/// overflow guard (see `Builder::overflow`), for either encoding.
 pub const MAX_FIELD_WIDTH: usize = 64;
 
 /// A register-bank field index.

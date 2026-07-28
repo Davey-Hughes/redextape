@@ -135,6 +135,157 @@ front-end hub and the register-asm (`Instr`) IR is the imperative-backend hub** 
 whichever hub maximizes reach, and visualizers are pure *consumers* of the traces the backends already
 produce. The oracle validates every combination.
 
+- **Binary-encoding follow-ups left on the table (2026-07-27).** The final whole-branch review found no
+  defect that changes an answer, no totality hole, and no ladder rung whose assertions fail to bite on
+  binary shapes. These are what it filed instead of blocking; each records why, so a future reader can
+  weigh rather than rediscover.
+
+  1. **DONE (15ed8dd). `Binary::arith`'s `Mul` has no lowering-size guard, and reaches an allocation abort from a ~1 KB
+     source.** `Mul` is O(width²) STATES per instruction (`1.5w² + 26.5w + 13` for the gadget alone:
+     143 at width 4, 7,853 at 64). Measured on `2 * 2 * … * 2` at width 64: 128 muls → 6.8M states,
+     19.6M rules, **4.57 GB** peak RSS, where unary needs ~8 KB of source to reach comparable size.
+     Unary is already quadratic in program length, so this is a ~35× worsening of an existing class
+     rather than a new one — but "no input may crash any process" is the cardinal rule, and
+     `lower_tm.rs` already establishes both the policy and the mechanism for exactly this
+     (`MAX_SLOTS`/`MAX_FRAME_LOC` refuse BEFORE building, returning a degenerate halt machine).
+     **Shipped:** `mul_count_unrepresentable` + `MAX_MUL_INSTRS` (32, cheap predicate: too many `Mul`
+     instructions, checked unconditionally on encoding since unary reaches the same danger zone more
+     slowly rather than never), refused before `lower_tm_all` builds anything, mirrored by `attribute`.
+     A new `TmRun::TooLarge` reports it (and `MAX_SLOTS`'s existing refusal moved to it too, for
+     consistency) rather than `HitCap`/`Overflow` — measured exactly two exhaustive `match` sites in the
+     whole workspace that needed a new arm for the variant, both updated. Done together with item 1 of
+     the "TM bank-safety" filing below (the same `run_tm`-mirrors-`lower_tm` story, in the same
+     functions).
+
+  2. **DONE (2026-07-27). `Binary`'s decode was width-strict; `Unary`'s is not — and the asymmetry
+     was removable.** `decode_nat`/`parse_heap_cells` required a field to close exactly at `width`, so a
+     tape fitted at 16 cells decoded to `None` under `Binary::default()` (64). Both now read from one
+     delimiter to the next and never consult `self.width`, so any instance decodes any tape; shared
+     `digit_run` (tied to `BITS`) and `word` (LSB-first, `None` past 2^64) replace the two inline loops.
+     Structural is not permissive — a field must still be CLOSED by a `#`, so a run stopped by a foreign
+     symbol, a run off the end of the tape, and a slot past the last field all still yield `None`.
+
+     **The cost landed where the plan did not predict.** Giving up the width-length check was known and
+     accepted; what was not written down is that this check was the RECORDED COMPENSATION for item 6's
+     `heap_tape_is_well_formed` gap, so removing it would have left binary heap word length unverified
+     anywhere. And the hole is invisible to every value assertion: digits are LSB-first, so a word
+     truncated from its HIGH end when those digits are zero spells the SAME number (`@0#00` and `@00#00`
+     both parse to `[(0, 0)]` at width 2). New `Encoding::heap_word_len` (`None` for unary, whose heap
+     words are value-length mark runs; `Some(width)` for binary) moved the check into the checker in the
+     same slice. REG needed no such move — `reg_bank_is_well_formed` already pins the skeleton at
+     `1 + slots * (width + 1)` cells.
+
+     Callers were NOT churned. `run_tm_fitted` + `at_width` is now redundant rather than required, and
+     every site kept it with its doc corrected to say why it stays (the width names a failure, and it
+     keeps `at_width` on the executed path). Removing it would delete coverage, not add clarity.
+
+     **One more instance of the recurring pattern, caught by measuring instead of assuming.** The
+     end-to-end test's first corpus (`1 + 2 * 3`, `[1, 2, 3]`, `head(tail([4,5,6]))`, `sum(4)`) fitted
+     BINARY at 4 for every program — `MIN_FIELD_WIDTH`, the narrowest width there is — so the "read at a
+     NARROWER width than the tape was written at" case never happened for the one encoding the test
+     exists for; unary hid it by fitting at 8/16/32. Values in [16, 31] put unary at 32 and binary at 8
+     simultaneously. Now asserted from both ends (`MIN_FIELD_WIDTH < width < MAX_FIELD_WIDTH`), and
+     sabotage-verified that the narrow reader earns its place: a ONE-SIDED width dependence
+     (`if n > self.width { return None }`) is accepted by the default reader AND the fitted reader, and
+     caught only by `read at 4`.
+
+  3. **DONE (8f49a06). `ripple_add`'s `c1 -> overflow` exit checked only REG's `SEP`** while `c0 -> fin` checks both
+     tapes, and `ripple_sub`'s two exits both check both. Safe today by equal-width lockstep (and rule
+     ordering cannot misfire — the four digit rules precede it and require an explicit digit on both
+     tapes), but the asymmetry is unexplained in the file, and a future desync would be mislabelled
+     "overflow" rather than surfacing as a stuck halt. One line.
+
+  4. **DONE (8f49a06). `skip_cells` sat under the "HEAP tape sub-primitives" banner** though in
+     `binary.rs`, with eleven call sites (3 HEAP, 8 BOX). Pure relocation into a shared-primitives
+     region; work that greps by section banner could miss it.
+
+  5. **DONE (8f49a06), and it was bigger than filed. `three_way_oracle.rs`'s `tm_val` was unary-only** — and it drove not one test but the
+     ~14 metamorphic law proptests (arithmetic, list, mutation, closure, if, map_head, monus,
+     distributivity) via `assert_equiv`, while its sibling `three_way_value` in the same file had been
+     made four-way. Two value-oracle paths, one updated and one not: precisely the drift shape this
+     branch kept finding. Now `tm_val_with(src, enc)`, checked under both encodings with the encoding
+     named in every failure message, and verified to actually run by decoding the binary tape at
+     `width + 4` and watching `arithmetic_laws` fail on `binary-TM violates the law (lhs): 0 + 0`.
+
+  6. **Two checker limits. One FIXED (2026-07-27), one still documented-not-fixed.**
+     `heap_tape_is_well_formed`'s missing word-LENGTH check is now **CLOSED** — item 2's structural
+     decode deleted the compensation that made the gap tolerable, so the check moved into the checker
+     via `Encoding::heap_word_len`. See item 2.
+
+     Still open: `assert_delimiter_safe` infers "WORK is a fixed-width bank" from
+     `!enc.init_work().is_empty()` — a proxy for a property the trait does not state, so a third encoding
+     with a structured-yet-initially-empty WORK would be silently unchecked. It carries a `KNOWN LIMIT`
+     block in `tests/common/mod.rs`, so a reader of the checker finds it rather than a reader of this
+     roadmap. Deferred because inventing the trait predicate now means guessing what it should mean; the
+     third encoding that would settle it does not exist yet.
+
+- **Self-describing TM text form (optional header) — DONE (2026-07-28).** Spec:
+  `docs/superpowers/specs/2026-07-27-tm-self-describing-header-design.md`; plan:
+  `docs/superpowers/plans/2026-07-27-tm-self-describing-header.md`. A `.tm` file now records **both
+  halves of a Turing machine**: δ and q₀ as before, plus the initial configuration — the literal initial
+  tapes, so any simulator can run it, and the `encoding`/`width`/`slots`/`result` recipe needed to
+  interpret the answer. `tests/tm_header.rs` turns a checked-in 463-line fixture into a `Value` with no
+  `Core`, no `lower_tm` and no reference run; that test is the one that could not have been written if
+  any part of the header were insufficient.
+
+  **What it guarantees:** a foreign tool can RUN a `.tm` file. **What it cannot:** that tool cannot
+  INTERPRET the result. Decoding needs the encoding's semantics, and a name cannot convey them. The
+  asymmetry is inherent — running is universal, interpreting is not — so the header closes the gap it
+  can close and names the gap it cannot.
+
+  **Optionality is free and is pinned by four properties** (`tm/syntax.rs`), because a header adds no
+  capability to the machine — it removes an INPUT requirement. Property 4 (a header-less file yields
+  `None`, *not* a diagnostic) is the one that would regress silently, since a parser taught to
+  recognize directives is a parser that can start requiring them. `Machine` gained no field, per the
+  rule `lower_tm.rs` states twice; `tm/header.rs` does not even import `Machine`, so that rule holds at
+  the import level rather than by convention. `print_tm`'s output is byte-identical to before the
+  branch, pinned by the pre-existing listing golden.
+
+  **The historical framing that motivated this slice was already stale when it started, and the
+  correction is worth keeping.** The binary branch's width-STRICT decode — a tape fitted at 16 cells
+  decoding to `None` under a 64-cell `Binary` — was cited as the concrete symptom. Structural decode
+  removed that symptom before this slice began, but not the underlying gap: a file still recorded no
+  initial tapes, no slot count and no result type. One consequence propagated all the way into the
+  test design: **`width` is invisible to the end-to-end decode**, because `Binary::decode_nat` and
+  `parse_heap_cells` each state outright that `self.width` is never consulted. It is visible only to
+  the consistency check, where `init_reg` writes `width` cells per field. A sabotage aimed at the
+  end-to-end test would have proved nothing.
+
+  **Two findings the slice produced beyond its own scope.**
+
+  1. *A totality hole, latent until this slice made it reachable.* `asm.rs`'s `decode_word_ty` recursed
+     on the heap chain under a type that never shrinks for `List`, so a **cyclic heap overflowed the
+     stack**. Unreachable while every heap came from the compiler — a cons cell's tail points only at an
+     earlier cell, so compiled chains are acyclic — and reachable the moment a heap can come from a
+     FILE. The spine is now a loop bounded by one step per cell, so a cycle decodes to `None`.
+
+  2. *Seven instances of "the guard proves less than its name claims" — and **six originated in the
+     PLAN**, not in the implementations.* Each was caught by a review instructed to hand-trace the
+     claim rather than accept it:
+
+     | where | claimed | actually asserted |
+     |---|---|---|
+     | long-list decode test | "must not change any acyclic answer" | length + nil terminator only; a reversed rebuild passed |
+     | `print_tm` prefix-strip test | header lines removed | safe only by a one-character margin (`"tapes 1"` vs the `"tape "` prefix), undocumented |
+     | malformed-header test | its own name says "spanned diagnostics" | `start <= end <= len`, which `{0,0}` satisfies |
+     | range-check ordering | the check lives in `finish` *because* directives are order-independent | never tested with the lines reversed |
+     | described-run test | "computes what an ordinary run computes" | `is_some()` |
+     | tape-flip sabotage | flipping a literal tape cell reddens the end-to-end test | a DATA cell cannot — `lower_into` writes `Rr` unconditionally and the decoder reads only REG slot 0, so `Rr`'s data cells are structurally write-before-read |
+     | WORK consistency equation | one of two load-bearing equations | vacuous under `Unary` (`init_work()` is empty, and empty tapes are dropped) |
+
+     **The two most instructive were found by RUNNING the check, not reading it.** The tape-flip
+     sabotage was discovered when an implementer ran it, watched it fail to fire, and root-caused it
+     rather than adjusting the assertion until it passed. And the `{0,0}` span bug was living inside a
+     test with the word "spanned" in its name. This is the same lesson the optimizer-tier and
+     source-map branches recorded; what is new is *where* it was caught — six times in plan text,
+     before it became a green test nobody would question again.
+
+  **Deliberately not done, with reasons.** No format-version directive — it costs nothing now and a
+  migration later, but it is speculative until a second version exists. No CLI or file-emitting entry
+  point: `run_tm_described` + `print_tm_with` produce the text, and whether a binary should write it to
+  disk is a separate question. **One new registration point:** a third encoding must be added to
+  `EncodingKind` and its `parse`, which is inherent to a format that names its variants.
+
 - **Single-tape TM — backend/theory track, highest thematic payoff.** Build it as a *transformation*
   on the finished `Machine`, NOT a separate compile target: multi-tape → single-tape via the textbook
   `2k`-track interleaving simulation (per tape: a content track + a head-marker track on one tape over a
@@ -146,6 +297,64 @@ produce. The oracle validates every combination.
   multi-tape oracle context is warm. **Risk:** quadratic slowdown → generous caps + a product-alphabet
   decode (keep the alphabet a tuple, not a blown-up power set). This *supersedes* the passive "single-tape
   TM view" listed under v2 above — the reduction is the interesting artifact; the view falls out of it.
+
+- **Machine-model reductions — a PIPELINE, of which single-tape is stage 1 (raised 2026-07-27, not yet
+  planned).** The project varies two things today: the COMPILATION TARGET (reference / λ / TM / native)
+  and the REPRESENTATION INSIDE a machine (unary / binary `Encoding`). It has never varied **the machine
+  model itself**, and that is the axis where each step is a named theorem. The architectural principle
+  is already stated for single-tape above and generalizes to all of these: a `Machine -> Machine`
+  function plus a decode-unwrapper, touching NOTHING in Core, asm or `encoding`.
+
+  **Tier 1 — three reductions that COMPOSE, and whose composition is the punchline.**
+
+  | stage | theorem | cost |
+  |---|---|---|
+  | k tapes → 1 tape | multi-tape ≡ single-tape (2k-track interleaving) | quadratic |
+  | arbitrary alphabet → `{0,1}` | alphabet reduction; each symbol becomes a k-bit block | ×k length, ×O(k) steps |
+  | two-way tape → one-way | fold the tape at the origin onto two tracks | ~×2 |
+
+  Apply all three and the result is the most austere machine in the textbook — **one tape, one head, two
+  symbols, infinite in one direction only** — running a mini-language program, with each stage
+  independently validated as its own oracle leg. The tape-folding stage is genuinely available: `sim.rs`'s
+  `Tape` is a zipper with both ends growable, i.e. two-way infinite today.
+
+  **Why this project in particular.** "Polynomial slowdown" is normally a hand-wave; here step counts are
+  exact integers, so each reduction's real cost becomes a measured table on actual programs. That is the
+  same move the binary-encoding slice just made, where a *predicted* slowdown turned out to be a 0.51×
+  speedup once bank width was allowed to vary — the prediction was right about the mechanism and wrong
+  about which effect dominates, and only measurement showed it.
+
+  **Tier 2 — different machine MODELS (more striking, much more expensive; each needs its own simulator
+  and decode, so these are not `Machine -> Machine`).**
+  - *Universal TM.* Encode the machine as a tape string and run it on ONE fixed machine — the deepest
+    theorem available. Direct synergy with the self-describing header slice above: a `.tm` file that
+    carries its own initial configuration and result type is most of what a UTM needs as input.
+  - *Two-counter (Minsky) machine.* Two integers plus increment/decrement/zero-test is Turing-complete;
+    "your program, reduced to two numbers" is arresting. **Honest caveat:** the standard 2-stack →
+    2-counter route uses Gödel encoding (`2^a · 3^b`), so the counters explode astronomically — realistically
+    demonstrable only on trivial programs, with step counts to match.
+
+  **Tier 3 — property-preserving variants.** A *reversible* TM (Bennett) — every step undoable, costing a
+  history tape — connects computation to thermodynamics and the Landauer limit, which no other track here
+  touches. An *oblivious* TM (head motion independent of input) is mainly a stepping stone to circuit
+  constructions.
+
+  **Two architectural notes, both worth settling BEFORE the first reduction ships.** (1) *Orthogonality.*
+  `Encoding` varies representation WITHIN a machine; a reduction varies THE MACHINE. They must compose
+  freely — binary × single-tape × 2-symbol should be a legal combination — which means the oracle's legs
+  become a PRODUCT of the axes, not a sum. Decide early whether CI runs every combination or only a
+  diagonal, because the cost is combinatorial and the exhaustive sweep is already the slow tier's
+  dominant term. (2) *The header slice becomes load-bearing rather than a nicety.* With a family of
+  machine shapes in play, "which shape is this and how do I read its tape back" stops being optional;
+  a reduced machine whose initial configuration and result type travel with it is what makes a pipeline
+  inspectable at each stage.
+
+  **RECOMMENDATION: alphabet reduction to `{0,1}` is the best one to do after single-tape.** It is a pure
+  `Machine -> Machine` function, it is the natural companion to the binary `Encoding` work just finished —
+  and the contrast between the TWO SENSES OF "BINARY" (how a NUMBER is represented in a field, versus how
+  a SYMBOL is represented in cells) is itself worth documenting, since conflating them is the obvious
+  misreading — and composing the two reductions reaches the canonical machine, which is a satisfying
+  place for this project to arrive.
 
 - **Optimizing compiler — IR track, oracle-guarded.** Optimization passes over the IR. Motivation:
   (a) practical — TM step counts explode (unary arithmetic, STACK recursion, quadratic single-tape), and
@@ -335,6 +544,51 @@ produce. The oracle validates every combination.
   walk of the asm. (v1's actual surprises: `lower_asm`'s inline fn layout forced a reachability partition, and
   deep fat-frame recursion forced a frame-size-aware depth cap — both resolved.)
 
+- **Deforestation / supercompilation — optimizer track, Tier A, DECIDED 2026-07-27.** The
+  zero-cost-abstraction question, asked directly: Rust fuses a chain of iterator adapters into one
+  imperative loop, and the analogue here would fuse `map(f) ∘ map(g)` into `map(f∘g)` without building
+  the intermediate list. **Rust's mechanism does not transfer.** Its adapters are monomorphized structs
+  whose `next()` inlines, after which LLVM fuses the loop; here the builtins are only `nil`/`cons`/
+  `head`/`tail`/`is_empty`, and `map`/`fold` are ORDINARY USER-DEFINED RECURSION over a cons list. So
+  what is wanted is deforestation, not adapter fusion.
+
+  **Route chosen: general deforestation, up to supercompilation. The two cheaper routes are rejected,
+  and why is the point of recording this.** (a) *Pattern-rewriting the known shapes* — fires only on
+  shapes someone anticipated, i.e. the optimizer that optimizes the benchmark; the exhaustive sweep and
+  proptest generators exist precisely to catch that class, and an optimizer designed to need them is the
+  wrong shape. (b) *Making `map`/`filter` builtins carrying fusion laws* — cheap and effective, and it
+  **weakens the demonstration**: the interesting fact about this language is that `map` is DEFINABLE in
+  it, not primitive to it, and a fusion law on a builtin proves nothing about the language.
+
+  **Why this project suits supercompilation unusually well.** The hard parts in a real language —
+  effects, exceptions, laziness, mutable aliasing — are largely absent; the one mutable construct
+  (capture via BOX) is bounded and explicit. `defunc` already proves the Core→Core pass shape. And the
+  payoff is measurable in the exact currency deforestation targets: an eliminated intermediate list is
+  literally fewer `@` cons cells on the final HEAP tape and fewer HEAP walks, so "the intermediate
+  structure is gone" is an OBSERVATION on the tape, not an inference from a benchmark. The oracle
+  becomes `supercompiled == unoptimized == reference == λ == unary-TM == binary-TM`.
+
+  **The two hard parts, both of which are totality problems in this project's terms.** (1) *Termination
+  of the driving loop* — supercompilation drives the program symbolically and must decide when to fold a
+  repeated configuration; without a whistle (a well-quasi-order such as homeomorphic embedding) forcing
+  generalization, the COMPILER diverges. Totality is the cardinal rule, so the whistle is the same class
+  of guard as `MAX_LOWER_DEPTH`/`MAX_DEFUNC_DEPTH`, not polish. (2) *Residual code blowup* — output can
+  be exponentially larger, and on a TM that is directly visible as state count. `Mul`'s O(width²) states
+  already shows state count is a real budget, so a size cap and an honest measurement of the trade are
+  part of the slice, not a follow-up.
+
+  **This REORGANIZES the ranked pass set above rather than adding to it.** Inlining, constant folding
+  and closure specialization are all special cases of driving, so committing to supercompilation
+  partly subsumes them. The measured #1 (closure devirtualization, 25.6%) stays first regardless — it
+  is cheap, it is a special case worth having standalone, and nothing can be driven through `$apply1`
+  until it runs. Ordering is therefore: devirtualize, then supercompile the first-order residue.
+
+  **Success criteria, falsifiable:** intermediate cons cells eliminated (count `@` cells on the final
+  HEAP tape, before vs after), step ratio per program, state count as the size cost, and the oracle
+  green at every level. **Placement:** after the binary encoding branch and the self-describing header
+  slice. Opt-in, default off, in the same discipline as `Unary::default()` remaining the default
+  through the entire encoding branch — the DIFF is the artifact, not the optimized machine.
+
 - **Alternative front-ends — frontend track, purely additive; the angle is *paradigm diversity*.** A new
   surface language compiling to the *same* Core needs only lexer → parser → typecheck → desugar-to-Core;
   everything downstream (`defunc`, λ, asm, TM, native, the entire oracle) is REUSED UNCHANGED — it operates on
@@ -420,6 +674,67 @@ produce. The oracle validates every combination.
   or tree-sitter as the *only* parser (lower CST→Core; couples the build to the tree-sitter toolchain).
   Never maintain two authoritative grammars.
 
+- **TM value encoding — the swappable `Encoding` seam, realized. Encoding track, items 1-3: DONE.**
+  `tm/encoding.rs`'s `Encoding` trait was declared a "swappable seam" back in Part 2b-1 and had exactly
+  one implementation (`Unary`) through all of Plan 3. Three slices closed the track out:
+  1. **Per-program field-width sizing + the overflow guard — DONE** (merged 2026-07-26, `3613837..5cfd3b1`;
+     spec `docs/superpowers/specs/2026-07-26-per-program-field-width-design.md`). `run_tm` now auto-fits
+     the narrowest field width a program's values actually need (4 → 8 → 16 → 32 → 64, doubling) instead of
+     always paying for a pinned 64-cell bank — measured **3.59× fewer steps** on the oracle corpus — and a
+     value that overflows every width up to 64 now reports `TmRun::Overflow` instead of silently corrupting
+     the bank (the pre-guard failure mode: a too-narrow run wrote past its field boundary and still returned
+     an answer, sometimes the right one by coincidence — the dangerous case).
+  2. **The bank-safety ladder — DONE** (same slice). A six-layer verification ladder for the register bank
+     (write-site enumeration, guard-rule position, a per-step corpus/generated/EXHAUSTIVE — 198,928
+     programs — tape invariant, a static per-rule non-termination check, HEAP/STACK final-tape structure),
+     built to be reused rather than re-derived by whatever encoding came next.
+  3. **`Binary`, a second `impl Encoding` — DONE** (branch `tm-binary-encoding`, 2026-07-27 onward from
+     `8f076e0`; spec `docs/superpowers/specs/2026-07-26-tm-binary-encoding-design.md`, corrected in place —
+     not left to drift — by this branch's own final slice). A base-2 encoding — a `w`-cell field is `w`
+     LSB-first bits, holding `0..2^w` — proven against the SAME four-way oracle
+     (`reference == λ == unary-TM == binary-TM`) and the SAME bank-safety ladder from item 2, generalized
+     over both encodings by three new trait methods (`parse_heap_cells`, `field_symbols`, `init_work`).
+     **Two predictions were made before the measurement existed; it went 1-for-2:**
+     - *Binary banks are narrower — HELD.* Auto-fit settles binary at a smaller cell count for the same
+       program (`let x = 40; x + 2` needs 8 cells where unary needs 64).
+     - *Binary step counts are probably higher on this corpus — REFUTED IN AGGREGATE, HELD AT A FIXED
+       WIDTH.* The reasoning (every demo value is under 64, precisely where a `k`-cell unary add beats a
+       `w`-cell ripple carry) is correct when the width is held equal: same-width goldens
+       (`tm_step_count_goldens_binary`/`_golden_higher_order_binary`, both pinned at 64 cells) show binary
+       1.15-1.72× slower on three of four goldens and 10.2× slower on the one built on `Mul`. But
+       `run_tm_fitted` fits each encoding to ITS OWN narrowest width, not a shared one, and the space
+       saving dominates: over `width_report.rs`'s 18-program corpus binary totals **0.45×** unary's steps
+       (270,369 → 122,972); over the full 50-program first-order oracle corpus (`step_survey.rs`'s Part D),
+       **0.39×**. (This line first said 0.45× was 0.51×. That figure is the subtotal of a NINE-row hand
+       check — which the artifact did reproduce exactly, program for program — mislabelled as the corpus
+       total. Caught by the final whole-branch review, which re-ran the cited artifact.)
+       The programs that DO lose are the controlled case: both encodings fit at width 4, so there is no
+       bank-width advantage to hide the per-operation cost, and binary is 5-20% slower there — the number
+       the refuted prediction was actually describing, isolated from the width effect it was conflated with.
+     - **`Mul` costs materially more STATES than its unary counterpart**: `1.5w² + 26.5w + 13` (143 states
+       at width 4, 821 at 16, 7,853 at 64) — the one gadget where shift-and-add is not a wash against
+       unary's per-value chain.
+     - **The design spec's own §3.3 WORK-tape estimate was wrong**: it predicted three scratch fields (for
+       `mul`'s accumulator/multiplicand/multiplier). The shipped design needs **one** (`N_WORK_FIELDS = 1`)
+       — `mul` shifts the ACCUMULATOR instead of the multiplicand (no multiplier register, no loop counter;
+       the `w` iterations unroll at build time), and `eq`/`ne` park their intermediate in REG `rd` exactly
+       as `Unary::eq_to_work` already does. Verified three times during the branch.
+     - **Corrected two doc-comment claims this same branch had made false**, in `redextape-native`'s
+       `native_oracle.rs`/`native_demo.rs`: "no `MAX_FIELD_WIDTH` ceiling, unlike the TM's fixed-width
+       tape" was true of UNARY alone even before `Binary` existed — the phrase just never had to say so
+       while unary was the only encoding. `Binary` at 64 cells covers the entire `u64` range, matching
+       native's registers and the reference's own `Value::Nat(u64)` + saturating arithmetic — so the
+       honest remaining gap (values `>= 2^64`) is not one this language can even express. The test
+       (`native_runs_beyond_field_width`) was kept, not deleted: it still tests a real difference (native
+       vs. unary), just a narrower one than advertised.
+  **Honest bound, stated because every item above earns one:** all of it is measured on the oracle demo
+  corpus (`FIRST_ORDER_DEMOS`/`LAMBDA_LIMITATION_DEMOS`), built for backend feature coverage, not workload
+  representativeness — the step survey's own recurring caveat applies here too. **What stays open:**
+  arbitrary-precision (variable-length) fields (every widening write would have to shift the bank,
+  invalidating the fixed-window in-place-write invariant every gadget rests on — a large separate slice,
+  deferred not rejected) and `Binary` as a fourth PARTICIPATING leg in the native oracle (its doc claims
+  were corrected; the suite itself was not reparameterized to actually run both encodings).
+
 - **TM bank-safety: the four items left on the table (2026-07-26).** The per-program field-width slice
   built a verification ladder for the register bank — enumeration of write sites, guard-rule position,
   a per-step tape invariant (corpus then generated then exhaustive over 198,928 length-2 asm programs),
@@ -427,14 +742,15 @@ produce. The oracle validates every combination.
   These four were assessed and deliberately NOT done; each records why, so a future reader can weigh it
   rather than rediscover it.
 
-  1. **`run_tm` guards `MAX_SLOTS` but not `MAX_FRAME_LOC`** (small, real, PRE-EXISTING). `attribute`
+  1. **DONE (15ed8dd). `run_tm` guards `MAX_SLOTS` but not `MAX_FRAME_LOC`** (small, real, PRE-EXISTING). `attribute`
      mirrors both refusals; `run_tm` mirrors only one, so a program whose `Loc` bank `lower_tm` refuses
      to lay out comes back as `TmRun::Ran` over tapes that decode to nothing, instead of a resource
      outcome. Already documented as a known asymmetry in `attribute.rs`'s `Attribution::unrepresentable`
-     doc. **Fix:** call `frame_bank_unrepresentable` in `run_tm_fitted`/`run_tm_at` and return `HitCap`,
-     exactly as the `MAX_SLOTS` arm does. **Why deferred:** it is a behaviour change on a path no real
-     program reaches (`MAX_FRAME_LOC` is 1,000 locals), so it wanted its own decision rather than being
-     folded into a verification slice.
+     doc. **Shipped:** `run_tm_fitted`/`run_tm_at` now share one `lower_and_size` helper that calls
+     `frame_bank_unrepresentable` (and the new `mul_count_unrepresentable`, see the binary-encoding
+     follow-up item 1 above — done together, same fix in the same functions) and reports a new
+     `TmRun::TooLarge`, not `HitCap`: a refused program never took a step, so `HitCap` ("hit a
+     step/cell cap") would itself be a claim of more than is true.
 
   2. **Length-3 enumeration** (rung 2 stops at 2). Exhaustive length-3 is ~11.2M programs per width —
      infeasible — but a seeded sample is easy. **Why deferred:** length 2 is where store-then-read
@@ -449,9 +765,12 @@ produce. The oracle validates every combination.
      run off — but that is an argument, not a check. Closing it needs the head-offset dataflow analysis
      rung 3 deliberately avoided, whose own soundness would become a new thing to trust.
 
-  4. **`Encoding::at_width` on an unbounded encoding is untestable today.** `run_tm_fitted`'s
-     `field_width() == None` branch (one attempt, no search) has no second `Encoding` impl to exercise
-     it. **Not a gap to close — a test to write the day `Binary` lands**, at which point it is free.
+  4. **`Encoding::at_width` on an unbounded encoding — CLOSED (2026-07-27).** This item predicted the
+     branch would become testable free "the day `Binary` lands". **That prediction was wrong, and the
+     binary slice recorded why:** `Binary` is bounded (a `w`-cell field holds `v < 2^w`), so it does
+     not exercise `field_width() == None` either. What covers the branch is a test-only `Unbounded`
+     mock in `tests/tm_encoding.rs` that delegates every gadget to `Unary` and differs only in what it
+     reports. Cheap, but not free, and not a side effect of anything.
 
   Also settled, so nobody re-opens it: **rung 4 (mechanized proof) was assessed and rejected.** Bounded
   model checking (Kani) loses to plain enumeration on this property, because the input space is small

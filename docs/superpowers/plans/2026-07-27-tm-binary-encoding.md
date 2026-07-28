@@ -1989,7 +1989,7 @@ The one cost: the w iterations are unrolled at build time, so Mul is O(width)
 STATES where every other gadget is O(1). Tens of states at the widths auto-fit
 selects; ~7,855 at 64, and the growth is QUADRATIC in the width, not linear. Recorded, not optimized.
 
-Exhaustive over all 256 pairs at width 4 (137 of which overflow, so the guard
+Exhaustive over all 256 pairs at width 4 (180 of which overflow, so the guard
 path gets more coverage than the value path), plus 100*100 and 200*200 at 16."
 ```
 

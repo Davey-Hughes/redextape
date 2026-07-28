@@ -2,10 +2,16 @@
 //! machine code via Cranelift, run it, and decode the result — the fourth oracle leg (alongside
 //! `reference`, `λ`, and the TM).
 //!
-//! The headline: unlike the TM backend (a genuine Turing machine whose registers are a unary tape
-//! fixed at `MAX_FIELD_WIDTH = 64` cells), native compiles to real 64-bit machine registers. It has no
-//! `MAX_FIELD_WIDTH` ceiling — a program whose result the TM literally cannot represent on its tape
-//! (`100 * 100 = 10_000`, say) runs on native the same way it would on any compiled language.
+//! The headline: unlike the TM backend's UNARY tape (a genuine Turing machine whose registers are a
+//! unary field fixed at `MAX_FIELD_WIDTH = 64` cells, so `v < 64`), native compiles to real 64-bit
+//! machine registers. It has no `MAX_FIELD_WIDTH` ceiling — a program whose result the unary TM
+//! literally cannot represent on its tape (`100 * 100 = 10_000`, say) runs on native the same way it
+//! would on any compiled language.
+//!
+//! CORRECTION (Task 17, `tm-binary-encoding`): the TM backend also has a `Binary` encoding now, where a
+//! `w`-cell field holds `0..2^w` — at the 64-cell ceiling, the entire `u64` range. `100 * 100 = 10_000`
+//! is representable there too; it no longer distinguishes native from "the TM backend", only from
+//! unary. The real remaining gap is values `>= 2^64`, which section 3 below demonstrates instead.
 //!
 //!     cargo run --example native_demo -p redextape-native
 //!
@@ -53,10 +59,18 @@ fn main() {
     );
 
     // 3. The native headline: real 64-bit registers, no unary-tape ceiling.
-    println!("\n3. The native headline: values the TM's unary tape CANNOT represent\n");
-    println!("   The TM backend's registers are a fixed-width unary field (`MAX_FIELD_WIDTH = 64` cells);");
-    println!("   a result that exceeds 64 cannot even be decoded off the tape. Native compiles to real");
-    println!("   64-bit machine registers, so it has no such ceiling.\n");
+    println!("\n3. The native headline: values the TM's UNARY tape CANNOT represent\n");
+    println!("   The TM backend's unary encoding stores a value as that many MARKS in a fixed-width field");
+    println!("   (`MAX_FIELD_WIDTH = 64` cells), so a result that exceeds 64 cannot even be decoded off the");
+    println!("   tape. Native compiles to real 64-bit machine registers, so it has no such ceiling.\n");
+    println!("   CORRECTION (Task 17): the TM backend also has a `Binary` encoding now — a `w`-cell binary");
+    println!("   field holds `0..2^w`, so at the 64-cell ceiling it covers the entire `u64` range, exactly");
+    println!("   like native's registers. Every value below is representable in `Binary`, so this contrast");
+    println!("   is \"native vs. unary\", not \"native vs. the TM backend\" — see `Binary::at`/`run_tm_fitted`");
+    println!("   in `redextape_core::tm`. The genuinely remaining gap is values `>= 2^64`: this language's");
+    println!("   own `Value::Nat(u64)` saturates there too (`interp.rs`'s `saturating_add`/`_mul`), so no");
+    println!("   program in this demo can express one — the boundary this file can actually show is unary");
+    println!("   vs. everything else, not native vs. the TM backend as a whole.\n");
     println!("   {:<64} {:>10}  {}", "program", "result", "oracle");
     println!("   {}", "─".repeat(94));
     for src in ["100 * 100", "999 + 1", "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(100)"] {

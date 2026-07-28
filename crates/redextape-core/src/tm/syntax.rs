@@ -8,6 +8,7 @@
 //! outside this representable subset is *rejected* by `validate` rather than silently corrupted.
 
 use crate::diagnostic::Severity;
+use crate::tm::header::{HeaderParts, TmHeader, print_header};
 use crate::tm::machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
 use crate::{Diagnostic, Span};
 use std::fmt::Write as _;
@@ -40,11 +41,27 @@ fn state_name(m: &Machine, id: u32) -> String {
     m.states.get(id as usize).map_or_else(|| format!("<state {id}>"), |s| s.name.clone())
 }
 
-/// Render `m` as the readable TM text form.
+/// Render `m` as the readable TM text form, with NO header. Byte-identical to what this function has
+/// always emitted — a machine printed without a header must stay exactly as readable, and as
+/// parseable, as it was before headers existed.
 pub fn print_tm(m: &Machine) -> String {
+    print_tm_inner(m, "")
+}
+
+/// Render `m` with `h`'s directives between `start` and the states. The result is a complete,
+/// self-describing `.tm` file: a reader can build the initial configuration and simulate it with no
+/// knowledge of this project, and decode the answer given the encoding implementations.
+pub fn print_tm_with(m: &Machine, h: &TmHeader) -> String {
+    print_tm_inner(m, &print_header(h))
+}
+
+/// The one printer. `header` is either empty or a block of directives ending in a newline; it is the
+/// ONLY difference between the two entry points above, which is what keeps them from drifting.
+fn print_tm_inner(m: &Machine, header: &str) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "tapes {}", m.tapes);
     let _ = writeln!(out, "start {}", state_name(m, m.start));
+    out.push_str(header);
     let _ = writeln!(out);
     for s in &m.states {
         if s.accept {
@@ -133,12 +150,28 @@ fn parse_rule_line(line: &str, span: Span) -> Result<RawRule, Diagnostic> {
     Ok(RawRule { read, write, moves, goto: goto.to_string(), span })
 }
 
-/// Parse the TM text form. Iterative (flat grammar, no recursion). Never panics.
+/// Parse the TM text form, dropping any header. Unchanged in signature and behaviour: a file with a
+/// header still reads as the machine it describes (optionality property 3).
+///
+/// A thin wrapper over `parse_tm_full` rather than a second parser (spec D2). This is not an
+/// aesthetic preference: `parse_tm` MUST be taught to skip header directives regardless, or it hits
+/// its unknown-line error path and rejects any file carrying one. Given that it must change, having
+/// it delegate removes the failure mode where two parsers drift.
 pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
+    let (m, _, ds) = parse_tm_full(src);
+    (m, ds)
+}
+
+/// Parse the TM text form, returning the header too. Iterative (flat grammar, no recursion). Never
+/// panics.
+///
+/// A `None` header means the file carried none, which is NOT an error — see `HeaderParts::finish`.
+pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagnostic>) {
     let mut diags: Vec<Diagnostic> = Vec::new();
     let mut tapes: Option<usize> = None;
     let mut start_name: Option<(String, Span)> = None;
     let mut states: Vec<RawState> = Vec::new();
+    let mut header = HeaderParts::default();
 
     let mut offset = 0usize;
     for raw_line in src.split_inclusive('\n') {
@@ -155,6 +188,12 @@ pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
             match rest.split(';').next().unwrap_or("").trim().parse::<usize>() {
                 Ok(n) if n >= 1 => tapes = Some(n),
                 _ => diags.push(err(span, "expected `tapes <positive integer>`")),
+            }
+        } else if let Some((key, rest)) =
+            trimmed.split_once(' ').filter(|(k, _)| matches!(*k, "encoding" | "width" | "slots" | "result" | "tape"))
+        {
+            if let Some(Err(msg)) = header.directive(key, rest, span) {
+                diags.push(err(span, msg));
             }
         } else if let Some(rest) = trimmed.strip_prefix("start ") {
             start_name = Some((rest.split(';').next().unwrap_or("").trim().to_string(), span));
@@ -201,8 +240,13 @@ pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
 
     let Some(tapes) = tapes else {
         diags.push(err(Span { start: 0, end: 0 }, "missing `tapes <n>`"));
-        return (None, diags);
+        return (None, None, diags);
     };
+
+    let (parsed_header, header_errs) = header.finish(tapes);
+    for (msg, sp) in header_errs {
+        diags.push(err(sp.unwrap_or(Span { start: 0, end: 0 }), msg));
+    }
 
     // Resolve names -> ids (definition order). Owned keys, so it does not borrow `states` and the
     // final builder can consume `states` freely. (Duplicate names were diagnosed above; if any exist
@@ -234,7 +278,7 @@ pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
     };
 
     if diags.iter().any(|d| d.severity == Severity::Error) {
-        return (None, diags);
+        return (None, None, diags);
     }
 
     let machine = Machine {
@@ -258,7 +302,7 @@ pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
             })
             .collect(),
     };
-    (Some(machine), diags)
+    (Some(machine), parsed_header, diags)
 }
 
 #[cfg(test)]
@@ -300,6 +344,50 @@ state scan:
 state halt: accept
 ";
         assert_eq!(print_tm(&increment()), expected);
+    }
+
+    use crate::tm::header::{EncodingKind, TmHeader};
+    use crate::ty::Ty;
+
+    fn a_header() -> TmHeader {
+        TmHeader::new(EncodingKind::Unary, 4, 1, Ty::Nat, vec![(0, vec!['#', '_', '_', '_', '_', '#'])])
+    }
+
+    /// `print_tm_with` is `print_tm` plus a header block, in that exact position: after `start`, before
+    /// the blank line that precedes the states.
+    #[test]
+    fn print_tm_with_inserts_the_header_after_start() {
+        let expected = "\
+tapes 1
+start scan
+encoding unary
+width 4
+slots 1
+result Nat
+tape 0 #____#  ; reg
+
+state scan:
+  [1] -> write [*], move [R], goto scan
+  [*] -> write [1], move [S], goto halt
+state halt: accept
+";
+        assert_eq!(print_tm_with(&increment(), &a_header()), expected);
+    }
+
+    /// GLOBAL CONSTRAINT: `print_tm`'s output is byte-identical to before this slice. The check is that
+    /// removing the header from `print_tm_with`'s output recovers it exactly — if the two printers had
+    /// been allowed to drift, this is what catches it.
+    #[test]
+    fn print_tm_output_is_unchanged_by_the_header_split() {
+        let m = increment();
+        let plain = print_tm(&m);
+        let headered = print_tm_with(&m, &a_header());
+        let stripped: String = headered
+            .lines()
+            .filter(|l| !["encoding ", "width ", "slots ", "result ", "tape "].iter().any(|p| l.starts_with(p)))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        assert_eq!(stripped, plain);
     }
 
     use crate::Severity;
@@ -416,6 +504,179 @@ state halt: accept
             let m = lower_tm(&lower_asm(&core).expect("lowers"), &Unary::default());
             assert!(m.validate().is_empty(), "compiled machine must be validate()-clean for {src}: {:?}", m.validate());
             assert_eq!(parse_tm(&print_tm(&m)), (Some(m.clone()), vec![]), "round-trip must equal m for {src}");
+        }
+    }
+
+    /// PROPERTY 1: today's round-trip, untouched.
+    #[test]
+    fn property_1_plain_round_trip_is_untouched() {
+        let m = increment();
+        assert_eq!(parse_tm(&print_tm(&m)), (Some(m), vec![]));
+    }
+
+    /// PROPERTY 2: the new round-trip. A header printed is a header parsed back, equal.
+    #[test]
+    fn property_2_headered_round_trip_returns_both_halves() {
+        let (m, h) = (increment(), a_header());
+        let (pm, ph, ds) = parse_tm_full(&print_tm_with(&m, &h));
+        assert!(ds.is_empty(), "diagnostics: {ds:?}");
+        assert_eq!(pm, Some(m));
+        assert_eq!(ph, Some(h));
+    }
+
+    /// PROPERTY 3: a headered file still reads as a plain machine. `parse_tm` must SKIP the directives,
+    /// not reject them — without this it hits its unknown-line error path on any file carrying a header.
+    #[test]
+    fn property_3_a_headered_file_still_parses_as_a_plain_machine() {
+        let m = increment();
+        assert_eq!(parse_tm(&print_tm_with(&m, &a_header())), (Some(m), vec![]));
+    }
+
+    /// PROPERTY 4: a header-less file yields NO HEADER, NOT AN ERROR.
+    ///
+    /// This is the property most likely to regress silently, because a parser taught to recognize
+    /// directives is a parser that can start requiring them. Every file written before this slice looks
+    /// like this one.
+    #[test]
+    fn property_4_a_headerless_file_yields_none_not_a_diagnostic() {
+        let m = increment();
+        let (pm, ph, ds) = parse_tm_full(&print_tm(&m));
+        assert_eq!(pm, Some(m));
+        assert_eq!(ph, None);
+        assert!(ds.is_empty(), "a missing header is not an error, got: {ds:?}");
+    }
+
+    /// `tapes N` and `tape I …` are told apart by the MANDATORY SPACE in each keyword, not by dispatch
+    /// order: `"tape 0 …".strip_prefix("tapes ")` fails at position 4 (`s` vs ` `) and the reverse fails
+    /// too. This test is what fails if either prefix ever loses its space.
+    #[test]
+    fn tapes_and_tape_are_distinguished_by_the_mandatory_space() {
+        let src = "\
+tapes 1
+start s
+encoding unary
+width 4
+slots 1
+result Nat
+tape 0 #____#
+
+state s: accept
+";
+        let (m, h, ds) = parse_tm_full(src);
+        assert!(ds.is_empty(), "diagnostics: {ds:?}");
+        assert_eq!(m.expect("a machine").tapes, 1, "`tapes 1` must set the tape COUNT");
+        assert_eq!(h.expect("a header").tapes(), &[(0, vec!['#', '_', '_', '_', '_', '#'])]);
+    }
+
+    /// A PARTIAL header is a diagnostic naming what is missing — not a `None`. Silently discarding a
+    /// half-written header would turn a typo into "this file has no header".
+    #[test]
+    fn a_partial_header_names_the_missing_directives() {
+        let src = "tapes 1\nstart s\nencoding unary\nwidth 4\n\nstate s: accept\n";
+        let (m, h, ds) = parse_tm_full(src);
+        assert!(m.is_none(), "an error gate must suppress the machine too");
+        assert!(h.is_none());
+        let joined = ds.iter().map(|d| d.message.clone()).collect::<Vec<_>>().join(" | ");
+        assert!(joined.contains("slots") && joined.contains("result"), "must name both: {joined}");
+        assert!(!joined.contains("encoding") && !joined.contains("width"), "must not name present ones: {joined}");
+    }
+
+    /// `tape` lines with none of the four header directives would otherwise be SILENTLY DROPPED — the
+    /// same data loss the partial-header rule exists to prevent.
+    #[test]
+    fn tape_lines_without_a_header_are_a_diagnostic_not_silent_data_loss() {
+        let src = "tapes 1\nstart s\ntape 0 #____#\n\nstate s: accept\n";
+        let (_, h, ds) = parse_tm_full(src);
+        assert!(h.is_none());
+        assert!(ds.iter().any(|d| d.message.contains("tape")), "{ds:?}");
+    }
+
+    #[test]
+    fn malformed_header_directives_are_spanned_diagnostics_never_panics() {
+        // Each case is a COMPLETE header with exactly one thing wrong. Building them by APPENDING a bad
+        // line to a valid header would test something else entirely: every bad line would be a second
+        // directive of its own key, so all of them would hit the duplicate arm and none would reach the
+        // validation under test.
+        let cases: &[(&str, &str)] = &[
+            ("encoding ternary\nwidth 4\nslots 1\nresult Nat", "ternary"),
+            ("encoding unary\nwidth 0\nslots 1\nresult Nat", "width"),
+            ("encoding unary\nwidth -1\nslots 1\nresult Nat", "width"),
+            ("encoding unary\nwidth nine\nslots 1\nresult Nat", "width"),
+            ("encoding unary\nwidth 4\nslots nine\nresult Nat", "slots"),
+            // D5: a well-formed type that is not a first-class tape value.
+            ("encoding unary\nwidth 4\nslots 1\nresult (Nat) -> Bool", "result"),
+            ("encoding unary\nwidth 4\nslots 1\nresult Wobble", "result"),
+            // Index >= the file's `tapes 1`. Checked after the loop, since directives are order-independent.
+            ("encoding unary\nwidth 4\nslots 1\nresult Nat\ntape 9 #____#", "out of range"),
+            ("encoding unary\nwidth 4\nslots 1\nresult Nat\ntape x #____#", "tape"),
+            ("encoding unary\nencoding binary\nwidth 4\nslots 1\nresult Nat", "duplicate"),
+            ("encoding unary\nwidth 4\nwidth 8\nslots 1\nresult Nat", "duplicate"),
+            ("encoding unary\nwidth 4\nslots 1\nresult Nat\ntape 0 #_#\ntape 0 #_#", "duplicate"),
+        ];
+        for (header, needle) in cases {
+            let src = format!("tapes 1\nstart s\n{header}\n\nstate s: accept\n");
+            let (m, h, ds) = parse_tm_full(&src);
+            assert!(
+                ds.iter().any(|d| d.message.contains(needle)),
+                "expected a diagnostic mentioning {needle:?} for:\n{header}\ngot {ds:?}"
+            );
+            assert!(m.is_none() && h.is_none(), "an error gate must suppress both halves for:\n{header}");
+            for d in &ds {
+                assert!(d.span.start <= d.span.end && d.span.end <= src.len(), "bad span for:\n{header}");
+            }
+            // The out-of-range `tape` diagnostic is about ONE specific line, whose real span was in
+            // scope when `directive` saw it. `start <= end <= len` is trivially true of `{0, 0}` too
+            // (which is exactly how this went unnoticed before), so check the span is non-empty and
+            // actually covers the offending `tape` line. The other cases legitimately have no single
+            // offending line and keep the loose check above.
+            if *needle == "out of range" {
+                let d = ds.iter().find(|d| d.message.contains("out of range")).expect("out of range diagnostic");
+                assert!(d.span.start < d.span.end, "expected a non-empty span for:\n{header}\ngot {d:?}");
+                let covered = &src[d.span.start..d.span.end];
+                assert!(
+                    covered.contains("tape"),
+                    "span must cover the offending `tape` line for:\n{header}\ngot span {:?} -> {covered:?}",
+                    d.span
+                );
+            }
+        }
+    }
+
+    /// The range check lives in `finish`, not in `directive`, precisely because directives are
+    /// order-independent — a `tape` line may precede the `tapes N` that makes it out of range. Every
+    /// other test writes `tapes` first, so without this one the scenario the design cites as its own
+    /// reason is asserted nowhere.
+    #[test]
+    fn an_out_of_range_tape_is_caught_even_when_it_precedes_the_tapes_line() {
+        let src = "tape 9 #____#\ntapes 1\nstart s\nencoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n";
+        let (m, h, ds) = parse_tm_full(src);
+        assert!(m.is_none() && h.is_none());
+        assert!(ds.iter().any(|d| d.message.contains("out of range")), "{ds:?}");
+    }
+
+    #[test]
+    fn header_directives_are_order_independent() {
+        let a = "tapes 1\nstart s\nencoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n";
+        let b = "tapes 1\nresult Nat\nslots 1\nstart s\nwidth 4\nencoding unary\n\nstate s: accept\n";
+        let (_, ha, _) = parse_tm_full(a);
+        let (_, hb, _) = parse_tm_full(b);
+        assert_eq!(ha, hb);
+        assert!(ha.is_some());
+    }
+
+    #[test]
+    fn headered_garbage_never_panics() {
+        for src in [
+            "encoding\n",
+            "width\n",
+            "slots\n",
+            "result\n",
+            "tape\n",
+            "tape 0\n",
+            "encoding unary\n",
+            "tapes 1\nstart s\nresult List<\n\nstate s: accept\n",
+        ] {
+            let _ = parse_tm_full(src); // must return, never panic
         }
     }
 }

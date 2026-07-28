@@ -717,3 +717,98 @@ fn a_nil_box_get_spins_to_a_cap() {
     });
     assert_eq!(result, None, "a nil box_get must spin to a cap (HitCap), not halt anywhere");
 }
+
+// ================================================================================================
+// STRUCTURAL DECODE
+//
+// `decode_nat` and `parse_heap_cells` read from one delimiter to the next and never consult
+// `self.width`, so an instance at ANY width reads a tape laid out at any other. That is what makes
+// `decode_tape` work without being told the width the machine was lowered at — the property `Unary`
+// always had and `Binary` did not.
+//
+// The tests below therefore assert the SAME answer across a spread of widths on ONE fixed tape. A
+// width-strict decoder passes only at the tape's own width, so any single-width assertion here would
+// be unfalsifiable for the property being claimed.
+// ================================================================================================
+
+/// LSB-first digits: the leftmost cell is 2^0.
+fn cells(s: &str) -> Vec<char> {
+    s.chars().collect()
+}
+
+/// Every width tried against a fixed tape, including widths above and below the one it was written at.
+const READER_WIDTHS: [usize; 5] = [1, 2, 3, 8, 64];
+
+#[test]
+fn decode_nat_reads_a_bank_laid_out_at_any_other_width() {
+    // A REG bank written at width 3: field 0 = `101` = 5, field 1 = `010` = 2.
+    let bank = cells("#101#010#");
+    for w in READER_WIDTHS {
+        let enc = Binary::at(w);
+        assert_eq!(enc.decode_nat(&bank, 0), Some(5), "reader width {w}");
+        assert_eq!(enc.decode_nat(&bank, 1), Some(2), "reader width {w}");
+        assert_eq!(enc.decode_nat(&bank, 2), None, "reader width {w}: no field past the trailing `#`");
+    }
+}
+
+/// Structural does NOT mean permissive. A field that is not a digit run closed by a `#` is still
+/// rejected, at every reader width — the property that makes a decode of a clobbered bank fail loudly
+/// instead of returning a plausible number.
+#[test]
+fn decode_nat_still_rejects_a_malformed_field() {
+    for w in READER_WIDTHS {
+        let enc = Binary::at(w);
+        // A foreign symbol inside the field: the digit run stops early and the next cell is not `#`.
+        assert_eq!(enc.decode_nat(&cells("#1@1#"), 0), None, "reader width {w}: foreign symbol");
+        // Unterminated: digits run off the end of the tape with no closing `#`.
+        assert_eq!(enc.decode_nat(&cells("#101"), 0), None, "reader width {w}: no closing `#`");
+        // A blank inside the field. `BLANK` is unary padding, never binary field content.
+        assert_eq!(enc.decode_nat(&cells("#1_1#"), 0), None, "reader width {w}: blank in field");
+    }
+}
+
+/// A field wider than 64 digits is structurally legal but only representable when its high digits are
+/// all zero, so the two cases must part company. Unreachable while `MAX_FIELD_WIDTH` is 64; this pins
+/// that the decoder stays total rather than panicking on a shift overflow if that ever changes.
+#[test]
+fn decode_nat_rejects_a_set_bit_beyond_u64_but_tolerates_high_zeros() {
+    let mut wide = vec![SEP];
+    wide.extend(std::iter::repeat_n(ZERO, 63));
+    wide.push(MARK); // bit 63 — the highest a `u64` holds
+    wide.push(SEP);
+    assert_eq!(Binary::at(64).decode_nat(&wide, 0), Some(1u64 << 63));
+
+    let mut over = wide.clone();
+    over.pop(); // drop the closing `#`
+    over.push(ZERO); // bit 64 — clear, so still representable
+    over.push(SEP);
+    assert_eq!(Binary::at(64).decode_nat(&over, 0), Some(1u64 << 63), "a clear bit past 2^63 changes nothing");
+
+    let mut set = over.clone();
+    set[65] = MARK; // bit 64 SET — not a `u64`
+    assert_eq!(Binary::at(64).decode_nat(&set, 0), None, "a set bit at 2^64 is not representable");
+}
+
+#[test]
+fn parse_heap_cells_reads_a_heap_laid_out_at_any_other_width() {
+    // Two cons cells written at width 2: `(head 2, tail 0)` then `(head 3, tail 1)`.
+    let heap = cells("_@01#00@11#10_");
+    for w in READER_WIDTHS {
+        assert_eq!(Binary::at(w).parse_heap_cells(&heap), vec![(2, 0), (3, 1)], "reader width {w}");
+    }
+}
+
+/// The heap parser is TOTAL on a malformed tape — it yields the cells parsed so far rather than
+/// panicking or inventing one — and that must not change with structural word reads.
+#[test]
+fn parse_heap_cells_stops_at_the_first_malformed_cell() {
+    for w in READER_WIDTHS {
+        let enc = Binary::at(w);
+        // Second cell has no `#` between head and tail.
+        assert_eq!(enc.parse_heap_cells(&cells("_@01#00@0110_")), vec![(2, 0)], "reader width {w}");
+        // Truncated mid-cell: the head word runs off the end with no separator.
+        assert_eq!(enc.parse_heap_cells(&cells("_@01#00@01")), vec![(2, 0)], "reader width {w}");
+        // Nothing at all.
+        assert_eq!(enc.parse_heap_cells(&cells("____")), vec![], "reader width {w}");
+    }
+}

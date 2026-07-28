@@ -11,9 +11,19 @@
 //! front-end or lowering difference.
 //!
 //! Native's DISTINCTIVE capability is having no `MAX_FIELD_WIDTH` (64) ceiling: it compiles to real 64-bit
-//! machine registers, unlike the TM's fixed-width unary tape. `native_runs_beyond_field_width` checks
-//! `native == reference` on values the TM literally cannot represent — the TM leg is intentionally
+//! machine registers, unlike the TM's fixed-width UNARY tape. `native_runs_beyond_field_width` checks
+//! `native == reference` on values the unary TM literally cannot represent — the TM leg is intentionally
 //! absent there.
+//!
+//! CORRECTION (Task 17, `tm-binary-encoding`): this was true of unary alone even before that branch —
+//! the phrase just didn't say so, because unary was the only encoding. The TM backend also has a
+//! `Binary` encoding now, and a `w`-cell binary field holds `0..2^w`, so at the 64-cell ceiling it
+//! covers the entire `u64` range — every demo below (`BEYOND_FIELD_WIDTH_DEMOS`, all « 2⁶⁴) is
+//! representable there and would NOT overflow. The gap this file measures is real but narrower than
+//! advertised: it is "unary vs. native", not "the TM backend vs. native". The true remaining gap —
+//! values `>= 2^64`, where even `Binary` overflows and native still has none — is not exercised here
+//! (nothing in this suite goes there); see `the_tm_reports_its_ceiling_on_the_same_demos` below for the
+//! narrower, honest claim this file can actually make.
 //!
 //! CAPS NOTE (Task 4/5 review): native's step accounting is coarse (it only ticks loop back-edges and
 //! calls, enough to guarantee termination, not to match `run_asm`'s per-instruction step count). Every
@@ -103,8 +113,10 @@ fn assert_native_matches_asm(src: &str) {
     }
 }
 
-/// native == reference only (no TM leg — the TM's fixed-width unary tape cannot represent these
-/// values). Native's distinctive capability: real 64-bit registers, no `MAX_FIELD_WIDTH` (64) ceiling.
+/// native == reference only (no TM leg — the TM's fixed-width UNARY tape cannot represent these
+/// values; the TM's `Binary` encoding could represent every value used below, since none reaches
+/// 2⁶⁴ — see the module doc's Task 17 correction). Native's distinctive capability: real 64-bit
+/// registers, no `MAX_FIELD_WIDTH` (64) ceiling at ANY encoding.
 fn assert_native_matches_reference(src: &str) {
     let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
     let core = core_of(src);
@@ -278,8 +290,11 @@ const LAMBDA_LIMITATION_DEMOS: &[&str] = &[
     "let mut c = 0; fn twice(g) { g(0); g(0); } let bump = |x| { c = c + 1; c }; twice(bump); c",
 ];
 
-/// Values that exceed `MAX_FIELD_WIDTH` (64) — the TM's unary tape cannot represent them. Native compiles
-/// to real 64-bit registers, so it has no such ceiling; this is native's distinctive leg.
+/// Values that exceed `MAX_FIELD_WIDTH` (64) UNARY cells — the unary tape cannot represent them (every
+/// value here is « 2⁶⁴, so the TM's `Binary` encoding represents all of them fine; this demo set is a
+/// unary-vs-native contrast, not a TM-backend-vs-native one — Task 17's correction to this file). Native
+/// compiles to real 64-bit registers, so it has no such ceiling at any encoding; this is native's
+/// distinctive leg.
 const BEYOND_FIELD_WIDTH_DEMOS: &[&str] = &[
     "100 * 100",
     "let n = 500; n + n",
@@ -314,6 +329,11 @@ fn native_matches_asm_interp_on_lambda_limitation_demos() {
     }
 }
 
+/// NOT deleted by Task 17 (`tm-binary-encoding`), even though the encoding it contrasts against
+/// (`Unary`) is no longer the TM backend's only option: this still tests a REAL difference, just a
+/// smaller one than the doc comments used to claim. See `the_tm_reports_its_ceiling_on_the_same_demos`
+/// immediately below for the (now unary-scoped) contrast, and the module doc for the honest gap that
+/// remains — values `>= 2^64`, which nothing in this file exercises on the TM side either way.
 #[test]
 fn native_runs_beyond_field_width() {
     for src in BEYOND_FIELD_WIDTH_DEMOS {
@@ -326,6 +346,14 @@ fn native_runs_beyond_field_width() {
 /// register bank and handed back a WRONG answer rather than refusing. Now the ceiling is an outcome the
 /// caller can see, so "native has no such ceiling" is a contrast between two measured results instead of
 /// a measured result and an assertion in prose.
+///
+/// SCOPED TO UNARY (Task 17 correction): this pins `Unary::default()` specifically, not "the TM
+/// backend". Every value in `BEYOND_FIELD_WIDTH_DEMOS` is « 2⁶⁴, so re-running this loop with
+/// `Binary::default()` in place of `Unary::default()` would NOT overflow — the binary TM would agree
+/// with native and the reference on all four. That is exactly the trade the encoding toggle bought:
+/// this test still demonstrates a real, measured gap, but it is "native vs. unary", and the gap
+/// narrower than "native vs. the TM backend" would suggest — see `crates/redextape-core/src/tm.rs`'s
+/// `TmRun::Overflow` doc and `docs/superpowers/specs/2026-07-26-tm-binary-encoding-design.md`.
 #[test]
 fn the_tm_reports_its_ceiling_on_the_same_demos() {
     for src in BEYOND_FIELD_WIDTH_DEMOS {

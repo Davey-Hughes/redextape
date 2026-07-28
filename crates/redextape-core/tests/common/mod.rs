@@ -15,7 +15,7 @@
 
 #![allow(dead_code)] // each test binary uses a different subset
 
-use redextape_core::tm::{AT, BLANK, Encoding, MARK, Machine, SEP};
+use redextape_core::tm::{AT, BLANK, BOX, Encoding, Machine, REG, SEP, WORK};
 
 /// The width every generic checker measures against. A bounded encoding reports its field width; an
 /// unbounded one has no fixed skeleton to check, so the checkers refuse rather than guess.
@@ -61,6 +61,33 @@ pub fn reg_bank_is_well_formed(cells: &[char], enc: &dyn Encoding, slots: usize)
 /// only field content, then a blank "top" running to the end. Unlike REG there is NO trailing `#` after
 /// the last field, which is exactly why `box_overwrite_field` is a counted chain — a content-driven
 /// overrun of the last field would have no delimiter to stop at.
+///
+/// A field's `width`-cell window is accepted as either FULLY WRITTEN (every cell is `content`) or
+/// MID-APPEND: some PREFIX of `content`, then `BLANK` for the rest of the window. The second shape is
+/// not a defect — it is what `box_append_field`/`box_append_field_bin` produce while writing a brand
+/// new field, one cell per simulator step, onto virgin tape: the leading `#` is written FIRST (it sits
+/// left of every content cell, and a tape head can only sweep one direction per pass), so for the
+/// several steps it takes to write the rest of the field, the tape genuinely holds "some real content,
+/// then not-yet-reached blank" — checked per-step, that is what is true at that step, not a corruption.
+///
+/// The predicate tolerates this shape in ANY window, not only the last field, and that is sound — but
+/// for a reason outside the predicate itself, so it is worth naming: `box_overwrite_field`/
+/// `box_overwrite_field_bin` never read a `BLANK` old value, so an already-written field can never
+/// re-enter the mid-append shape. The check is gadget-behaviour-dependent here, not intrinsically
+/// last-field-only, and a future gadget that overwrote a field blank-first would slip past it.
+///
+/// This was invisible under `Unary` only because `BLANK` is already part of `Unary::field_symbols()`
+/// (a unary field IS "marks then blank padding", complete or not, so a partial append already looks like
+/// ordinary field content and needed no special case). `Binary::field_symbols()` correctly excludes
+/// `BLANK` — a binary field has no padding, every cell is a real digit once written — which is what
+/// surfaces the mid-append shape as a THIRD case here rather than a subset of the first.
+///
+/// An EARLIER field can never be in the mid-append shape: every `box_*` gadget that writes an EXISTING
+/// field (`box_overwrite_field`/`box_overwrite_field_bin`) reads and writes real content only, never a
+/// virgin blank — only the CURRENTLY-GROWING (rightmost) field ever has one. Tolerating the shape
+/// per-window rather than only for "the last field" is still sound: it requires the blank run to be an
+/// unbroken SUFFIX of the window, so a foreign symbol, or real content resuming after a blank (which no
+/// gadget ever produces, mid-append or otherwise), is still rejected.
 pub fn box_tape_is_well_formed(cells: &[char], enc: &dyn Encoding) -> Result<(), String> {
     let width = width_of(enc);
     let content = enc.field_symbols();
@@ -69,8 +96,12 @@ pub fn box_tape_is_well_formed(cells: &[char], enc: &dyn Encoding) -> Result<(),
     while i < cells.len() && cells[i] == SEP {
         let window = i + 1;
         let end = (window + width).min(cells.len());
-        if let Some(off) = cells[window..end].iter().position(|c| !content.contains(c)) {
-            return Err(format!("box field {field} cell {off} is `{}`, not field content", cells[window + off]));
+        let win = &cells[window..end];
+        if let Some(off) = win.iter().position(|c| !content.contains(c)) {
+            let mid_append = win[off] == BLANK && win[off..].iter().all(|&c| c == BLANK);
+            if !mid_append {
+                return Err(format!("box field {field} cell {off} is `{}`, not field content", cells[window + off]));
+            }
         }
         i = window + width;
         field += 1;
@@ -92,10 +123,28 @@ pub fn box_tape_is_well_formed(cells: &[char], enc: &dyn Encoding) -> Result<(),
 /// A rule is SAFE on `tape` if either:
 ///   (a) it does not write `tape`, or writes `SEP` itself (the write lands under the head, so a
 ///       delimiter write cannot destroy a delimiter), or
-///   (b) it reads an explicit non-`SEP` symbol there, so it provably never fires with the head on a
-///       delimiter, or
+///   (b) it reads an explicit NON-`SEP` symbol there — ANY such symbol, not only ones the encoding
+///       declares as field content — so it provably never fires with the head on a delimiter, or
 ///   (c) an EARLIER rule in the same state reads `Some(SEP)` there AND constrains no other tape, so by
 ///       first-match-wins it always shadows this one whenever the head is on a delimiter.
+///
+/// Clause (b) was originally `matches!(rule.read[tape], Some(MARK) | Some(BLANK))`, hardcoding the
+/// UNARY alphabet: under `Binary` a digit-write rule that reads `Some(ZERO)` failed that clause and was
+/// reported as unsafe, a FALSE POSITIVE on correct code (`write_literal`/`copy_field` enumerate both
+/// `ZERO` and `MARK` explicitly — see `binary.rs`). The obvious repair — restrict clause (b) to
+/// `enc.field_symbols()` instead of a hardcoded pair — turns out to be ANOTHER hardcoded alphabet one
+/// level up, and it is caught by the very first binary machine run through it:
+/// `box_append_field_bin` legitimately reads `Some(BLANK)` when appending a fresh BOX field onto virgin
+/// tape (a BOX field's WIDTH is declared field content, but the growing TOP beyond the last field is
+/// not — `BLANK` is deliberately excluded from `Binary::field_symbols()` because a binary field is never
+/// blank-padded). Restricting to `field_symbols()` would reject that real, correct rule.
+///
+/// The actual invariant clause (b) needs has nothing to do with what an encoding calls "field content":
+/// `SEP`, `BLANK`, `MARK`, `ZERO` and `AT` are five DISTINCT, globally-fixed symbols (see
+/// `tm/build.rs`/`tm/machine.rs`), so a rule whose read is `Some(s)` for ANY `s != SEP` can only ever
+/// fire with the tape cell literally holding `s` — which is provably not `#`. That holds regardless of
+/// which encoding declared `s` as legal field content, so clause (b) does not need to consult the
+/// encoding at all: it needs `SEP`, which every tape shares.
 ///
 /// (c) is what the overflow guard provides for the content-driven loops, and it is why the guard must
 /// be the FIRST rule in its state. A guard that also constrained another tape would not fire on every
@@ -108,7 +157,7 @@ pub fn unsafe_rules(m: &Machine, tape: usize) -> Vec<String> {
             if written == SEP {
                 continue; // (a)
             }
-            if matches!(rule.read[tape], Some(MARK) | Some(BLANK)) {
+            if matches!(rule.read[tape], Some(s) if s != SEP) {
                 continue; // (b)
             }
             let shadowed = state.rules[..ri]
@@ -126,10 +175,26 @@ pub fn unsafe_rules(m: &Machine, tape: usize) -> Vec<String> {
     out
 }
 
-/// Assert delimiter safety on both fixed-width tapes. HEAP and STACK are excluded because they are
-/// variable-width and delimited by content, so they have no fixed skeleton to destroy.
-pub fn assert_delimiter_safe(m: &Machine, what: &str) {
-    for (tape, name) in [(redextape_core::tm::REG, "REG"), (redextape_core::tm::BOX, "BOX")] {
+/// Assert delimiter safety on every FIXED-WIDTH tape. REG and BOX always; WORK only when the encoding
+/// declares it structured by returning a non-empty `init_work` — under `Unary`, WORK is built up
+/// on-the-fly and has no fixed skeleton to check; under `Binary` it is a `#`-delimited fixed-width bank
+/// (`Binary::init_work` returns a one-field bank) whose delimiters are exactly as destructible as REG's
+/// or BOX's. HEAP and STACK are excluded because they are variable-width and delimited by content, so
+/// they have no fixed skeleton to destroy.
+///
+/// KNOWN LIMIT: `!init_work().is_empty()` is a PROXY for "this encoding gives WORK a fixed-width
+/// skeleton", and the trait states no such property. It happens to be exact for both encodings in the
+/// tree — `Unary` builds its scratch from an empty tape, `Binary` lays out a one-field bank — but a
+/// third encoding whose WORK is structured yet STARTS empty would be silently skipped here, with no
+/// test failing to say so. Closing it properly means an explicit trait predicate; that is deliberately
+/// deferred until a third implementation exists, because inventing the predicate now would mean
+/// guessing what it should mean. Recorded so the next implementor finds it rather than rediscovers it.
+pub fn assert_delimiter_safe(m: &Machine, enc: &dyn Encoding, what: &str) {
+    let mut tapes = vec![(REG, "REG"), (BOX, "BOX")];
+    if !enc.init_work().is_empty() {
+        tapes.push((WORK, "WORK"));
+    }
+    for (tape, name) in tapes {
         let bad = unsafe_rules(m, tape);
         assert!(
             bad.is_empty(),
@@ -151,10 +216,26 @@ pub fn assert_delimiter_safe(m: &Machine, what: &str) {
 /// here either: a rule that writes a mark over a `@` is not automatically a defect on this tape.
 pub fn heap_tape_is_well_formed(cells: &[char], enc: &dyn Encoding) -> Result<(), String> {
     let content = enc.field_symbols();
-    // Under unary a word is a variable-length run of marks and a zero word is empty; under binary it
-    // is exactly `width` digits. "A run of field content" covers both, which is why this stayed one
-    // loop. It deliberately does NOT check word LENGTH — that would be a different property, and
-    // claiming it here without checking it is the failure mode this suite keeps finding.
+    // A word is "a run of field content", which covers both encodings and is why this stayed one loop.
+    // Its LENGTH is checked only where the encoding fixes one (`Encoding::heap_word_len`): `None` under
+    // `Unary`, whose words are bare mark runs whose length IS the value, and `Some(width)` under
+    // `Binary`, whose words are always `width` digits.
+    //
+    // THAT ASYMMETRY IS THE POINT, and it used to be a recorded gap here. This rung checked no length
+    // at all, which was the whole property for unary but covered strictly less of binary's heap
+    // structure than binary admits. What compensated was `Binary::parse_heap_cells` being width-strict
+    // — and making it STRUCTURAL removed that compensation, so the check moved here in the same change.
+    // Without it, a binary word truncated by a clobbered high digit would now decode to the smaller
+    // number its remaining digits spell, and nothing anywhere would notice.
+    let word_len = enc.heap_word_len();
+    let check_len = |cell: usize, what: &str, len: usize| -> Result<(), String> {
+        match word_len {
+            Some(w) if len != w => {
+                Err(format!("cons cell {cell}'s {what} word is {len} cell(s), not the encoding's {w}"))
+            }
+            _ => Ok(()),
+        }
+    };
     let mut i = 0usize;
     while i < cells.len() && cells[i] == BLANK {
         i += 1;
@@ -162,16 +243,22 @@ pub fn heap_tape_is_well_formed(cells: &[char], enc: &dyn Encoding) -> Result<()
     let mut cell = 0usize;
     while i < cells.len() && cells[i] == AT {
         i += 1; // the `@`
+        let head = i;
         while i < cells.len() && content.contains(&cells[i]) && cells[i] != BLANK {
             i += 1; // head word
         }
+        // Separator BEFORE length: a cell with no `#` at all is a broken skeleton, and saying so is more
+        // useful than complaining that the run leading up to the breakage was the wrong length.
         if i >= cells.len() || cells[i] != SEP {
             return Err(format!("cons cell {cell} has no `{SEP}` between head and tail (at index {i})"));
         }
+        check_len(cell, "head", i - head)?;
         i += 1; // the `#`
+        let tail = i;
         while i < cells.len() && content.contains(&cells[i]) && cells[i] != BLANK {
             i += 1; // tail word
         }
+        check_len(cell, "tail", i - tail)?;
         cell += 1;
     }
     if let Some(off) = cells[i.min(cells.len())..].iter().position(|&c| c != BLANK) {
