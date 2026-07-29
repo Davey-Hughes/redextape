@@ -9,7 +9,7 @@ pub mod reduce;
 pub mod syntax;
 pub mod term;
 
-pub use decode::decode;
+pub use decode::{decode, decode_lambda_ty};
 pub use lower::{LowerError, lower};
 pub use reduce::{MAX_REDUCTION_STEPS, Status, Step, Trace, reduce_to_normal_form, reduce_trace};
 pub use syntax::{parse_lambda, print_lambda};
@@ -17,11 +17,15 @@ pub use term::{Dir, LambdaTerm, Path};
 
 use crate::core::Core;
 
-/// The outcome of lowering + reducing a program through the lambda backend. Decoding to a `Value`
-/// is a separate, type-directed step (see `decode`), because bare normal forms are ambiguous.
+/// The outcome of lowering + reducing a program through the lambda backend. Decoding to a `Value` is a
+/// separate, type-directed step, because bare normal forms are ambiguous — and there are two sibling
+/// decoders for it: `decode` is guided by an expected `Value` (what the oracle holds after a reference
+/// run) and `decode_lambda_ty` by a `Ty` alone (all a reader of printed text has). They disagree on two
+/// cases on purpose; see `decode.rs`.
 #[derive(Clone, Debug)]
 pub enum LambdaRun {
-    /// Reduced to a normal form. Decode it against an expected value's shape (`decode`).
+    /// Reduced to a normal form. Decode it with `decode` (against an expected value's shape) or with
+    /// `decode_lambda_ty` (against a type).
     Reduced(LambdaTerm),
     /// Reduction hit the step cap.
     HitCap,

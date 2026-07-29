@@ -65,50 +65,129 @@ fn widths() -> Vec<usize> {
     w
 }
 
-#[test]
-fn the_reg_bank_stays_well_formed_at_every_step_and_every_width() {
-    for src in CORPUS {
-        let (prog, ds) = parse(src);
-        assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
-        let core = desugar(&prog.unwrap());
-        let program = match lower_asm(&core) {
-            Ok(p) => p,
-            Err(_) => lower_asm(&defunc(&core).expect("defuncs")).expect("lowers after defunc"),
-        };
-        let slots = n_slots_of(&program) as usize;
+/// One (program, width, encoding) unit of the corpus invariant: lower, simulate, and check the REG
+/// bank after EVERY step. Extracted verbatim from the single test this file used to have, so the split
+/// below changes only how the units are SCHEDULED, never what any one of them asserts.
+fn check_reg_bank_unit(src: &str, width: usize, name: &str, enc: &dyn Encoding) {
+    let (prog, ds) = parse(src);
+    assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
+    let core = desugar(&prog.unwrap());
+    let program = match lower_asm(&core) {
+        Ok(p) => p,
+        Err(_) => lower_asm(&defunc(&core).expect("defuncs")).expect("lowers after defunc"),
+    };
+    let slots = n_slots_of(&program) as usize;
 
-        for width in widths() {
-            for (name, enc) in encodings_at(width) {
-                let enc = enc.as_ref();
-                let (m, _overflow) = lower_tm_guarded(&program, enc);
-                let mut init = vec![Vec::new(); TAPES];
-                init[REG] = enc.init_reg(slots as u32);
-                init[WORK] = enc.init_work();
+    let (m, _overflow) = lower_tm_guarded(&program, enc);
+    let mut init = vec![Vec::new(); TAPES];
+    init[REG] = enc.init_reg(slots as u32);
+    init[WORK] = enc.init_work();
 
-                let mut step = 0usize;
-                let mut failure: Option<String> = None;
-                {
-                    let mut watch = |tapes: &[Tape]| {
-                        step += 1;
-                        let (cells, _) = tapes[REG].snapshot();
-                        match reg_bank_is_well_formed(&cells, enc, slots) {
-                            Ok(()) => true,
-                            Err(why) => {
-                                failure = Some(format!("`{src}` at width {width} ({name}), step {step}: {why}"));
-                                false
-                            }
-                        }
-                    };
-                    let (_, _, status) = simulate_watched(&m, &init, TM_DEFAULT_CAPS, &mut watch);
-                    assert!(
-                        matches!(status, TmStatus::Halted | TmStatus::HitCap),
-                        "`{src}` at width {width} ({name}) must reach a defined outcome"
-                    );
+    let mut step = 0usize;
+    let mut failure: Option<String> = None;
+    {
+        let mut watch = |tapes: &[Tape]| {
+            step += 1;
+            let (cells, _) = tapes[REG].snapshot();
+            match reg_bank_is_well_formed(&cells, enc, slots) {
+                Ok(()) => true,
+                Err(why) => {
+                    failure = Some(format!("`{src}` at width {width} ({name}), step {step}: {why}"));
+                    false
                 }
-                assert!(failure.is_none(), "{}", failure.unwrap());
             }
+        };
+        let (_, _, status) = simulate_watched(&m, &init, TM_DEFAULT_CAPS, &mut watch);
+        assert!(
+            matches!(status, TmStatus::Halted | TmStatus::HitCap),
+            "`{src}` at width {width} ({name}) must reach a defined outcome"
+        );
+    }
+    assert!(failure.is_none(), "{}", failure.unwrap());
+}
+
+/// Runs the whole corpus for one (width, encoding) pair. Selects the encoding by name from
+/// `encodings_at(width)` — the same function the coverage guard below reads from — rather than
+/// constructing it separately, so there is exactly one place that decides which encodings exist at a
+/// width.
+fn check_corpus_at(width: usize, encoding_name: &str) {
+    let (name, enc) = encodings_at(width)
+        .into_iter()
+        .find(|(n, _)| *n == encoding_name)
+        .unwrap_or_else(|| panic!("no encoding named `{encoding_name}` at width {width}"));
+    for src in CORPUS {
+        check_reg_bank_unit(src, width, name, enc.as_ref());
+    }
+}
+
+/// Emits one `#[test]` per `(width, encoding)` unit — each running the whole corpus at that width under
+/// that encoding — and records what it emitted into `EMITTED`, so the coverage guard below can compare
+/// against the real cross product instead of a second hard-coded copy of it.
+///
+/// The axis is `(width, encoding)`, not per-width or per-program: cost is quadratic in width (width 64
+/// alone was 73% of the original 131s single test), so a per-width split leaves one ~94s long pole and
+/// looks like a fix without being one; per-(width, encoding) is the fewest tests that clears the real
+/// ceiling in this file (`generated_feature_programs_never_corrupt_the_bank`, ~51s, untouched by this
+/// task), and every generated name says what it covers.
+macro_rules! reg_bank_tests {
+    ($( $test:ident => ($w:expr, $enc:expr) ),* $(,)?) => {
+        $(
+            #[test]
+            fn $test() {
+                check_corpus_at($w, $enc);
+            }
+        )*
+
+        /// Every `(width, encoding)` unit the macro above actually emitted a test for. The coverage
+        /// guard below compares this against the real cross product.
+        const EMITTED: &[(usize, &str)] = &[ $( ($w, $enc) ),* ];
+    };
+}
+
+reg_bank_tests! {
+    the_reg_bank_stays_well_formed_at_width_4_unary => (4, "unary"),
+    the_reg_bank_stays_well_formed_at_width_4_binary => (4, "binary"),
+    the_reg_bank_stays_well_formed_at_width_8_unary => (8, "unary"),
+    the_reg_bank_stays_well_formed_at_width_8_binary => (8, "binary"),
+    the_reg_bank_stays_well_formed_at_width_16_unary => (16, "unary"),
+    the_reg_bank_stays_well_formed_at_width_16_binary => (16, "binary"),
+    the_reg_bank_stays_well_formed_at_width_32_unary => (32, "unary"),
+    the_reg_bank_stays_well_formed_at_width_32_binary => (32, "binary"),
+    the_reg_bank_stays_well_formed_at_width_64_unary => (64, "unary"),
+    the_reg_bank_stays_well_formed_at_width_64_binary => (64, "binary"),
+}
+
+/// The hazard this guards against: the 10 tests above hard-code the `(width, encoding)` cross product,
+/// but `widths()` is COMPUTED at runtime from `MIN_FIELD_WIDTH`/`MAX_FIELD_WIDTH`, and the encoding
+/// names come from `encodings_at`. If `MAX_FIELD_WIDTH` ever doubles, `widths()` grows a width the macro
+/// invocation above does not have an entry for, and that width is checked by NOTHING — the file gets
+/// FASTER and WEAKER, and every remaining test still passes. The same failure mode follows from adding
+/// an encoding to `encodings_at`, or from someone deleting one of the generated tests above.
+///
+/// So: derive the expected cross product from `widths()` x `encodings_at` at runtime, and compare it
+/// against `EMITTED` — never hard-code the expected answer a second time, or this guard just restates
+/// the thing it is checking.
+///
+/// What this does NOT catch: whether any one generated test's BODY is correct. It only proves every
+/// `(width, encoding)` cell is covered by SOME test; `check_reg_bank_unit` and `check_corpus_at` carry
+/// the actual assertions, extracted unchanged from the single test this file used to have.
+#[test]
+fn the_split_covers_the_whole_cross_product() {
+    let mut expected: Vec<(usize, &str)> = Vec::new();
+    for width in widths() {
+        for (name, _) in encodings_at(width) {
+            expected.push((width, name));
         }
     }
+    let mut emitted: Vec<(usize, &str)> = EMITTED.to_vec();
+    expected.sort();
+    emitted.sort();
+    assert_eq!(
+        emitted, expected,
+        "the (width, encoding) tests the `reg_bank_tests!` macro emits do not match the real cross \
+         product of widths() x encodings_at(width); a width or encoding was added/removed, or a \
+         generated test was deleted, without updating the macro invocation"
+    );
 }
 
 // ================================================================================================

@@ -191,15 +191,17 @@ fn sabotaging_the_header_is_caught_by_the_end_to_end_decode() {
     assert_ne!(decode_tape_ty(&tapes, &redextape_core::ty::Ty::Nat, &*h.encoding()), truth);
     // Wrong initial tapes: corrupt the leading delimiter of REG's OWN result field (slot 0, `Rr`).
     //
-    // A DELIMITER, deliberately, not a data cell. Measured, not assumed: every register
-    // `lower_asm`/`lower_tm` ever compiles -- `Rr` included -- is write-before-read (a well-typed
-    // program never reads a variable it has not just assigned, and lowering realizes that as an
-    // unconditional, absolute write before any read; even `nil` compiles to an explicit `nil rr`
-    // rather than relying on `rr` starting blank). Consequently no DATA cell of the literal REG or
-    // WORK bank survives to influence the final decoded value -- flipping any single one, for every
-    // program in `CORPUS` under both encodings, decodes identically to the untouched run. A delimiter
-    // is different: the scanning gadgets that locate field boundaries read it before any register is
-    // (re)written, so corrupting one is genuinely visible.
+    // A DELIMITER, deliberately, not a data cell. The DESIGN INTENT is that every register
+    // `lower_asm`/`lower_tm` compiles -- `Rr` included -- is write-before-read (a well-typed program
+    // never reads a variable it has not just assigned, and lowering is meant to realize that as an
+    // unconditional, absolute write before any read; even `nil` compiles to an explicit `nil rr` rather
+    // than relying on `rr` starting blank), so no DATA cell of the literal REG or WORK bank should
+    // survive to influence the final decoded value. That is a claim about the whole compiler, which
+    // nothing here proves; what was actually checked, as corroboration rather than proof, is narrower --
+    // for the 4 programs in `CORPUS`, under both encodings, flipping any single DATA cell decodes
+    // identically to the untouched run. A delimiter is different: the scanning gadgets that locate
+    // field boundaries read it before any register is (re)written, so corrupting one is genuinely
+    // visible.
     let mut bad_init = h.init(m.tapes);
     bad_init[0][0] = '_';
     let (bad_tapes, _) = simulate(&m, &bad_init, TM_DEFAULT_CAPS);
@@ -263,4 +265,53 @@ fn a_described_run_computes_what_an_ordinary_run_computes() {
             assert_eq!(got, Some(expected), "{src} under {kind:?}");
         }
     }
+}
+
+/// `run_tm_described` returns `Ok` for a run that never reached a value.
+///
+/// THE TRAP THIS PINS, found by a whole-branch review and reproduced live: its `Err` arm carries only
+/// `LowerError`/`TooLarge`, so `Overflow` and `HitCap` come back as `Ok` with a `machine` and `header`
+/// that print as a complete, self-describing `.tm` file. Nothing about that file says the run failed.
+/// And the overflow guard is a rule-less non-accept state — which HALTS — so a reader's
+/// `status != Halted` check passes too, and it decodes whatever the guard left on the tapes.
+///
+/// `tm_emit emit '50 + 50'` did exactly that: wrote a file, exit 0, no diagnostic, which `tm_emit run`
+/// then read back as **64**. Any consumer of `run_tm_described` must inspect `.run`; this test is what
+/// tells the next one that `Ok` is not the same as "produced a value".
+#[test]
+fn a_described_run_can_be_ok_without_having_produced_a_value() {
+    // 100 exceeds `Unary`'s strict `v < width` bound at every width up to `MAX_FIELD_WIDTH` (64).
+    let (core, ty) = core_and_ty("50 + 50");
+    let d = run_tm_described(&core, EncodingKind::Unary, ty, TM_DEFAULT_CAPS)
+        .expect("lowering succeeds — the failure is at RUN time, which is the whole point");
+    assert!(matches!(d.run, TmRun::Overflow), "expected Overflow inside an Ok DescribedRun, got {:?}", d.run);
+}
+
+/// The same program under `Binary` succeeds — so the refusal above is the ENCODING's limit, not the
+/// program's, and the two encodings genuinely disagree on a program a person would plausibly type.
+/// That disagreement is why `emit`'s diagnostic points at `--encoding binary` as an actionable fix.
+#[test]
+fn the_program_unary_refuses_succeeds_under_binary() {
+    let (core, ty) = core_and_ty("50 + 50");
+    let expected = redextape_core::interp::eval(&core).expect("reference runs");
+    let d = run_tm_described(&core, EncodingKind::Binary, ty, TM_DEFAULT_CAPS).expect("runs");
+    let TmRun::Ran { tapes } = &d.run else { panic!("expected Ran under Binary, got {:?}", d.run) };
+    assert_eq!(decode_tape_ty(tapes, &d.header.result, &*d.header.encoding()), Some(expected));
+}
+
+/// The OTHER way an `Ok` `DescribedRun` can carry no value: the machine never halted.
+///
+/// `head(nil)` dereferences a nil pointer, which the TM resolves by SPINNING to a cap (matching λ's Ω
+/// and the reference's `RuntimeError`), so `run_tm_described` returns `Ok` with `TmRun::HitCap`. Like
+/// the `Overflow` case above, the `machine` and `header` alongside it still print as a complete,
+/// self-describing file that a reader would happily simulate and decode.
+///
+/// This arm had no coverage until a whole-branch review named it. It is cheap to hold, and it is the
+/// second of exactly two ways `Ok` can mean "did not produce a value".
+#[test]
+fn a_described_run_can_be_ok_because_it_never_halted() {
+    let (core, ty) = core_and_ty("head(nil)");
+    let d = run_tm_described(&core, EncodingKind::Unary, ty, TM_DEFAULT_CAPS)
+        .expect("lowering succeeds — the failure is at RUN time");
+    assert!(matches!(d.run, TmRun::HitCap), "expected HitCap inside an Ok DescribedRun, got {:?}", d.run);
 }

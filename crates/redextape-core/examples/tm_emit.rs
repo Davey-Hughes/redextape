@@ -18,7 +18,8 @@ use redextape_core::Diagnostic;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::tm::{
-    EncodingKind, TM_DEFAULT_CAPS, TmStatus, decode_tape_ty, parse_tm_full, print_tm_with, run_tm_described, simulate,
+    EncodingKind, TM_DEFAULT_CAPS, TmRun, TmStatus, decode_tape_ty, parse_tm_full, print_tm_with, run_tm_described,
+    simulate,
 };
 use redextape_core::ty::show as show_ty;
 use redextape_core::typeck::result_type;
@@ -47,6 +48,30 @@ fn usage() -> String {
 
 fn format_diagnostics(ds: &[Diagnostic]) -> String {
     ds.iter().map(|d| format!("  {}..{}: {}", d.span.start, d.span.end, d.message)).collect::<Vec<_>>().join("\n")
+}
+
+/// Prose for every `TmRun` outcome that is not `Ran` -- used both for `run_tm_described`'s `Err` (which
+/// only ever carries `LowerError`/`TooLarge`, since those are refused before a single step) and for a
+/// `described.run` that came back `Ok` without reaching a value (`Overflow`/`HitCap`, since the width
+/// auto-fit loop gives up at the ceiling and returns whatever it last got).
+fn describe_non_value_run(run: &TmRun, encoding: EncodingKind) -> String {
+    match run {
+        TmRun::Ran { .. } => "ran to a value".to_string(),
+        TmRun::Overflow => format!(
+            "no value fit `{encoding:?}`'s field width at any width up to the ceiling. This is a property of \
+             the encoding, not of the program -- `--encoding binary` represents far larger values in the same \
+             field width and may succeed where `{encoding:?}` does not."
+        ),
+        // No leading "it" — every caller already prefixes "`<prog>` did not run to a value: ", and the
+        // two read together as one sentence.
+        TmRun::HitCap => {
+            "the simulation did not halt; it hit the step/tape-cell cap before producing a result".to_string()
+        }
+        TmRun::TooLarge => "the program's register file, call-frame bank, or multiplication count is too large \
+             for the TM backend to represent"
+            .to_string(),
+        TmRun::LowerError(e) => format!("it could not be lowered to the TM backend: {e:?}"),
+    }
 }
 
 /// `emit`: parse -> typecheck -> desugar -> run to fit the width -> write the self-describing text.
@@ -95,7 +120,19 @@ fn emit(args: &[String]) -> Result<(), String> {
 
     let core = desugar(&prog);
     let described = run_tm_described(&core, encoding, ty, TM_DEFAULT_CAPS)
-        .map_err(|run| format!("`{src}` did not run to a value: {run:?}"))?;
+        .map_err(|run| format!("`{src}` did not run to a value: {}", describe_non_value_run(&run, encoding)))?;
+
+    // `run_tm_described`'s `Err` arm only carries `LowerError`/`TooLarge` — it can still come back `Ok`
+    // with a `described.run` that never reached a value (`Overflow`/`HitCap`), because the width
+    // auto-fit loop gives up at `MAX_FIELD_WIDTH` and returns whatever it last got. Left unchecked, that
+    // machine and header still print as a complete, self-describing `.tm` file, and `run` happily
+    // simulates and decodes it -- against whatever the overflow guard's rule-less non-accept state
+    // (itself a HALT) or the step/cell cap left on the tapes. That is how a program like `50 + 50`
+    // (whose largest intermediate, 100, exceeds `Unary`'s field width ceiling) silently emits a file
+    // that computes 64, not 100, with no diagnostic at all.
+    if !matches!(described.run, TmRun::Ran { .. }) {
+        return Err(format!("`{src}` did not run to a value: {}", describe_non_value_run(&described.run, encoding)));
+    }
 
     let text = print_tm_with(&described.machine, &described.header);
     match out {
@@ -112,6 +149,12 @@ fn emit(args: &[String]) -> Result<(), String> {
 /// `decode_tape_ty` -> print the value.
 fn run(args: &[String]) -> Result<(), String> {
     let path = args.first().ok_or_else(|| format!("`run` needs a path argument\n\n{}", usage()))?;
+    // Same guard as `emit`: reject flag-shaped arguments before they can be swallowed as the path.
+    // Without this, `tm_emit run --help` reports "could not read `--help`" -- technically true, and
+    // useless.
+    if path.starts_with('-') {
+        return Err(format!("unknown flag `{path}`\n\n{}", usage()));
+    }
     if let Some(extra) = args.get(1) {
         return Err(format!("unexpected argument `{extra}`\n\n{}", usage()));
     }

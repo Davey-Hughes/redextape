@@ -28,7 +28,7 @@ pub use build::{
 pub use decode::{decode_tape, decode_tape_ty};
 pub use defunc::{defunc, defunc_mapped};
 pub use encoding::{Binary, Encoding, Unary};
-pub use header::{EncodingKind, TmHeader};
+pub use header::{EncodingKind, HEADER_VERSION, TmHeader};
 pub use lower_asm::{LowerError, lower_asm, lower_asm_mapped};
 pub use lower_tm::{lower_tm, lower_tm_guarded, lower_tm_mapped, n_slots_of};
 pub use machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};

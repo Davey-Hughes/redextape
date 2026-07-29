@@ -31,6 +31,15 @@ esac
 # `--release` is not optional here: the sweeps simulate millions of TM steps, and a debug build makes
 # the tier take hours rather than minutes. Correctness is identical — the simulator has no
 # debug-only behaviour — so this trades nothing away.
+#
+# STILL `cargo test`, DELIBERATELY, while the fast tier moved to cargo-nextest. Two reasons, and
+# neither is inertia. First, `--nocapture` is load-bearing here: a sweep that prints progress is the
+# difference between a long job and a silent one, and nextest's `--no-capture` implies
+# `--test-threads 1`, so adopting it would serialise the very thing the switch was meant to
+# parallelise. Second, these sweeps were written and measured under a serial runner — the exhaustive
+# 198,928-program sweep in particular — and running them concurrently changes their peak memory
+# profile in a way nobody has measured. Converting this tier is a separate change that starts with
+# that measurement, not a footnote to the fast one.
 if [ "$mode" = ignored ]; then
   echo "==> slow tier only (use --all to include the fast tier)"
   run cargo test --release --workspace -- --ignored --nocapture

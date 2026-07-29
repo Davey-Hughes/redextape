@@ -55,6 +55,13 @@ each of the four configurations: the default (`cranelift`), `--no-default-featur
 llvm`, and `--no-default-features --features llvm`. CI runs this same script. Pass `--no-llvm` to
 skip the LLVM configurations when no LLVM 22 toolchain is installed.
 
+The test runner is [`cargo-nextest`](https://nexte.st), not `cargo test`: `cargo test` runs the test
+binaries one at a time and only shares threads within a binary, which on this suite left 12 cores
+running at 1.39x. Same tests, same pass set, 231.7s → 135.2s. `scripts/check-all.sh` fails loudly if
+nextest is missing rather than falling back, so the gate behaves the same everywhere;
+`scripts/setup-dev.sh` installs it. Because nextest does not run doctests, the script pairs every
+config with an explicit `cargo test --doc` at the same feature flags.
+
 The pre-commit hooks intentionally run only `cargo fmt` and `cargo clippy` — fast enough for every
 commit. Run `scripts/check-all.sh` before merging.
 

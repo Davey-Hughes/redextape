@@ -25,16 +25,17 @@ pub const STACK: usize = 2;
 pub const HEAP: usize = 3;
 pub const BOX: usize = 4;
 
-/// Tape data symbols. `BLANK` (`_`) comes from `machine`. `SEP` (`#`) delimits register fields.
+/// Tape data symbols. `BLANK` (`_`) comes from `machine`. `MARK` (`1`) is the unary mark, one per unit
+/// of a value's count. `SEP` (`#`) delimits register fields.
 pub const MARK: Symbol = '1';
 pub const SEP: Symbol = '#';
-/// The HEAP cons-cell delimiter: each cell is `@ <head word> # <tail word>`, where a WORD is written
-/// in the encoding's own representation — a variable-length mark run under `Unary`, exactly `width`
-/// digits under `Binary` (which is what makes a binary cell fixed-size and seekable by counting).
+/// The HEAP cons-cell delimiter (`@`): each cell is `@ <head word> # <tail word>`, where a WORD is
+/// written in the encoding's own representation — a variable-length mark run under `Unary`, exactly
+/// `width` digits under `Binary` (which is what makes a binary cell fixed-size and seekable by counting).
 pub const AT: Symbol = '@';
 
-/// The binary zero digit. `MARK` (`'1'`) doubles as the one digit, so base 2 costs exactly one new
-/// symbol. The TM text form needs no change: `syntax::parse_sym` accepts any single char.
+/// The binary zero digit (`0`). `MARK` (`'1'`) doubles as the one digit, so base 2 costs exactly one
+/// new symbol. The TM text form needs no change: `syntax::parse_sym` accepts any single char.
 pub const ZERO: Symbol = '0';
 
 /// The narrowest field width `run_tm`'s auto-fit search starts at.

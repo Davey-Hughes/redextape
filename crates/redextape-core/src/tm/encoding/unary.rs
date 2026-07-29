@@ -1,6 +1,15 @@
-//! The v1 unary `Encoding`: a value `v` is `v` `MARK`s, left-justified in a `width`-cell field and
-//! padded with `BLANK`s. The bound is STRICT (`v < width`) — see `MAX_FIELD_WIDTH` for why the
-//! padding blank is load-bearing rather than cosmetic.
+//! The v1 unary `Encoding`: a SCALAR (`Nat`/`Bool`/`Unit`) value `v` is `v` `MARK`s, left-justified in
+//! a `width`-cell field and padded with `BLANK`s. The bound is STRICT (`v < width`) — see
+//! `MAX_FIELD_WIDTH` for why the padding blank is load-bearing rather than cosmetic.
+//!
+//! A COMPOUND value (`List<T>`) does not fit one field, so it is not stored that way at all: a REG
+//! field holds a POINTER into the HEAP tape (`build::HEAP`, tape index 3) instead of the list itself —
+//! in particular, a list-typed program RESULT is such a pointer in REG field 0 (`Reg::Rr`; see
+//! `header::TmHeader::result`). Pointers are 1-based and `nil` is pointer 0 (no cell). The HEAP lays
+//! cons cells left-to-right in allocation order as `@ <head word> # <tail word>` (`build::AT`), so
+//! pointer `p` addresses the `p`-th cell from the origin (`Encoding::parse_heap_cells`); head/tail are
+//! themselves unary words — variable-length `MARK` runs, not fixed-width fields like a REG value. A
+//! `List<T>` is this pointer chain, followed until it reaches `nil`.
 
 use crate::core::BinOp;
 use crate::tm::build::{AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, REG, RuleSpec, SEP, STACK, Slot, WORK};

@@ -92,6 +92,29 @@ jobs:
           rustup component add llvm-tools-preview
           curl -fsSL https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.8.7/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz \
             | tar xzf - -C "$HOME/.cargo/bin"
+          # cargo-nextest is the runner scripts/check-all.sh requires (see its header for the
+          # measurement). Prebuilt binary, same pattern as cargo-llvm-cov above — building it from
+          # source would cost more than it saves.
+          #
+          # PINNED to an exact version and an exact release asset, and checksummed BEFORE it reaches
+          # PATH. This binary executes every test in CI with full repo access, so the documented
+          # one-liner — `curl https://get.nexte.st/latest/linux | tar zxf -` — is arbitrary
+          # unversioned code from a redirector, piped straight to disk. `get.nexte.st/<version>/linux`
+          # resolves to this very GitHub asset (same blob), so naming the asset directly costs nothing
+          # and is what makes the pin auditable.
+          #
+          # Upstream publishes no .sha256 alongside the asset, so this hash was taken from the pinned
+          # artifact itself: it cannot prove the artifact was honest on the day it was pinned, but it
+          # does prove nothing has changed since. Update BOTH values together when bumping.
+          NEXTEST_VERSION=0.9.140
+          NEXTEST_SHA256=4ee9aaa0d0171a985a5d0eb735b87355894c1c455972e9674fb9fdbd1387c9a3
+          curl -fsSL -o /tmp/nextest.tar.gz \
+            "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${NEXTEST_VERSION}/cargo-nextest-${NEXTEST_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          # Explicit failure rather than relying on the runner's shell being `bash -e`: a checksum
+          # check that cannot fail the step is not a checksum check.
+          echo "${NEXTEST_SHA256}  /tmp/nextest.tar.gz" | sha256sum -c - \
+            || { echo "cargo-nextest checksum mismatch — refusing to install" >&2; exit 1; }
+          tar xzf /tmp/nextest.tar.gz -C "$HOME/.cargo/bin"
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
@@ -106,8 +129,20 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Feature matrix (non-LLVM configs)
         run: ./scripts/check-all.sh --no-llvm
+      # `llvm-cov nextest`, not `llvm-cov --all-targets`, for the same reason the gate above switched
+      # runners. Measured on this tree before the swap: 373.7s -> 164.6s (2.27x).
+      #
+      # It is NOT bit-identical coverage and saying so would be the easy lie: lines went 95.55% ->
+      # 95.52%, i.e. 1397 -> 1407 uncovered of 31417. The 10 lines are the target set — `--all-targets`
+      # instruments example targets, nextest's default does not. Both sit 15 points above the gate, so
+      # the swap is safe; the delta is recorded rather than rounded away so that a future drop toward 80
+      # is not misread as this change's fault.
+      #
+      # Neither runner covers DOCTESTS: `--all-targets` excludes them and nextest cannot run them at
+      # all. That is unchanged by the swap, and `cargo llvm-cov --doctests` is nightly-only. The
+      # doctest in `ty::show` is EXECUTED by scripts/check-all.sh above, just not instrumented here.
       - name: Test + coverage
-        run: cargo llvm-cov --workspace --all-targets --fail-under-lines 80   # tune the gate as the code grows
+        run: cargo llvm-cov nextest --workspace --fail-under-lines 80   # tune the gate as the code grows
 
   # The SLOW test tier: exhaustive sweeps marked `#[ignore = "slow tier: ..."]`, which `cargo test`
   # skips by default. In its own job for the same reason as `rust-llvm` — a multi-minute sweep must

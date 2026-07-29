@@ -475,6 +475,14 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
 /// rather than a language limit. A constant below the runtime's own ceiling would reject programs
 /// that ran correctly, reporting them as "could not decode result".
 ///
+/// **That derivation is written for the ASM consumer; the other one is bounded by a DIFFERENT
+/// constant.** `tm::decode::decode_tape_ty` reads a heap off a TM tape, bounded by `sim::DEFAULT_CAPS`
+/// `.cells` (total tape cells), not by `asm::DEFAULT_CAPS.heap`. It works out with room to spare —
+/// a heap cons cell costs at least three cells (`@`, `#`, and one word cell), so 5,000,000 cells is
+/// under ~1.6M cells' worth of cons cells and well inside this budget. Stated because the two
+/// constants are numerically equal today and independently changeable: raising `sim`'s cell cap
+/// without revisiting this would silently break the property on the TM path.
+///
 /// THE RESIDUAL GAP, stated in numbers because no constant closes it and an adjective would hide it.
 ///
 /// The derivation above covers a FLAT list exactly. It does not cover a nested one, and the reason is

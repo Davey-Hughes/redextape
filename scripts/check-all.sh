@@ -27,6 +27,32 @@ case "${1:-}" in
 esac
 [ "$#" -le 1 ] || { echo "error: too many arguments" >&2; usage; }
 
+# THE RUNNER IS cargo-nextest, not `cargo test`. `cargo test` runs the 22 test binaries ONE AT A TIME
+# and shares threads only WITHIN a binary; nextest schedules every test from every binary in one
+# parallel pool. Measured on this suite (2026-07-28, 12 logical CPUs): 231.7s -> 135.2s wall, the same
+# 623 tests with the same pass set, parallelism 1.39x -> 2.51x. Nothing about any test changed.
+#
+# A hard failure, not a fallback to `cargo test`. A gate that silently runs a different runner
+# depending on what happens to be installed is a gate whose behaviour nobody can predict — and the
+# fallback would be the SLOW path, so the machine least likely to notice is the one that needed the
+# speed most.
+if ! cargo nextest --version >/dev/null 2>&1; then
+  echo "error: cargo-nextest not found (the test runner this gate uses)." >&2
+  echo "  install: cargo install cargo-nextest --locked   # or: brew install cargo-nextest" >&2
+  echo "  scripts/setup-dev.sh installs it too." >&2
+  exit 1
+fi
+
+# NEXTEST DOES NOT RUN DOCTESTS. `cargo test` ran them as a side effect, so swapping the runner would
+# silently drop them — the exact "gate covers less than its name claims" defect this project keeps
+# finding. Every config below therefore pairs nextest with an explicit `cargo test --doc` AT THE SAME
+# FEATURE FLAGS. Keep the pairing if a config is ever added.
+#
+# There are zero doctests in the tree today, which is precisely why this is easy to get wrong: the
+# paired run costs seconds and asserts nothing right now, and its whole value is the day someone adds
+# a `///` example.
+test_cfg() { run cargo nextest run "$@"; run cargo test "$@" --doc; }
+
 # Every config gets clippy AND tests; a config that is built but never tested is a blind spot. The
 # default (`cranelift`) config is covered by the --workspace pair.
 #
@@ -34,10 +60,10 @@ esac
 # `--features "cranelift llvm"`; the genuinely LLVM-only config is --no-default-features --features llvm.
 run cargo fmt --all --check
 run cargo clippy --workspace --all-targets -- -D warnings
-run cargo test --workspace
+test_cfg --workspace
 run cargo build -p redextape-native --no-default-features
 run cargo clippy -p redextape-native --no-default-features --all-targets -- -D warnings
-run cargo test -p redextape-native --no-default-features
+test_cfg -p redextape-native --no-default-features
 
 if [ "$no_llvm" -eq 1 ]; then
   echo; echo "==> skipping the LLVM configs (--no-llvm)"; exit 0
@@ -57,8 +83,8 @@ fi
 echo "==> using LLVM at $LLVM_SYS_221_PREFIX"
 
 run cargo clippy -p redextape-native --features llvm --all-targets -- -D warnings
-run cargo test -p redextape-native --features llvm
+test_cfg -p redextape-native --features llvm
 run cargo clippy -p redextape-native --no-default-features --features llvm --all-targets -- -D warnings
-run cargo test -p redextape-native --no-default-features --features llvm
+test_cfg -p redextape-native --no-default-features --features llvm
 
 echo; echo "all configs green"

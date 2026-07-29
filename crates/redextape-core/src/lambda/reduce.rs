@@ -1,5 +1,39 @@
 //! Normal-order (leftmost-outermost) β-reduction over de Bruijn terms, tracking the redex path per
 //! step. A step cap bounds non-terminating reduction (returns a partial trace + `HitCap`).
+//!
+//! NORMAL ORDER IS REQUIRED, NOT A CHOICE THIS IMPLEMENTATION MADE. Any reducer for the terms this
+//! backend emits — ours, or an independent one reading `print_lambda` output — must reduce
+//! leftmost-outermost. An applicative-order (call-by-value) reducer does not merely take a different
+//! route to the same answer: it fails to terminate on ordinary programs, for three independent reasons,
+//! each of which is sufficient on its own.
+//!
+//! 1. **Conditionals are unthunked.** `lower.rs` lowers `Core::If` to `app(app(cond, then), else)`,
+//!    handing a Scott boolean both branches as bare arguments. Call-by-value evaluates both before the
+//!    selection can discard one, so `fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } }` recurses
+//!    unconditionally and its base case can never stop it. `if_only_reduces_the_taken_branch` below
+//!    pins the property this depends on for THIS reducer.
+//! 2. **The fixpoint combinator is the call-by-name Y**, `\f. (\x. f (x x)) (\x. f (x x))` (`lower.rs`'s
+//!    `fix`). Call-by-value must reduce the argument `x x` before applying, and that regenerates the
+//!    same redex forever. Call-by-value needs the Z combinator instead; the two are not interchangeable,
+//!    and nothing in an emitted term marks which one it was built for.
+//! 3. **`head`/`tail` pass Ω unconditionally.** `encode.rs` defines `head = \l. l DIVERGE (\h.\t. h)`
+//!    with `DIVERGE = (\x. x x) (\x. x x)`. Normal order never selects that argument for a non-empty
+//!    list; call-by-value evaluates it before applying `l` at all, so even `head(cons(7, nil))`
+//!    diverges.
+//!
+//! WHY THIS NEEDS SAYING, given that it looks like it follows from theory. β-reduction is confluent
+//! (Church–Rosser), so any two reduction sequences that DO reach normal forms reach the same one. An
+//! implementer who knows that can correctly conclude the order does not change the answer — and then
+//! incorrectly conclude the order does not matter. Confluence is about UNIQUENESS. REACHABILITY is the
+//! separate standardization/normalization result, and that is the one saying normal order reaches a
+//! normal form whenever one exists. So correct prior knowledge points the wrong way exactly where these
+//! docs were silent, and the symptom — hitting the step cap — reads as "the cap is too low" rather than
+//! "the strategy is wrong".
+//!
+//! The three mechanisms are listed rather than summarized because they are what a later optimization
+//! pass would have to retire before relaxing the requirement: thunking the `if` branches retires (1),
+//! thunking `head`/`tail`'s nil branch retires (3), and switching to Z retires (2). Until all three are
+//! retired, none of them may be assumed.
 
 use crate::lambda::term::{Dir, LambdaTerm, Path, beta};
 

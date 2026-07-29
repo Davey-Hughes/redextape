@@ -224,7 +224,7 @@ produce. The oracle validates every combination.
   `docs/superpowers/plans/2026-07-27-tm-self-describing-header.md`. A `.tm` file now records **both
   halves of a Turing machine**: δ and q₀ as before, plus the initial configuration — the literal initial
   tapes, so any simulator can run it, and the `encoding`/`width`/`slots`/`result` recipe needed to
-  interpret the answer. `tests/tm_header.rs` turns a checked-in 463-line fixture into a `Value` with no
+  interpret the answer. `tests/tm_header.rs` turns a checked-in 464-line fixture into a `Value` with no
   `Core`, no `lower_tm` and no reference run; that test is the one that could not have been written if
   any part of the header were insufficient.
 
@@ -259,7 +259,7 @@ produce. The oracle validates every combination.
      earlier cell, so compiled chains are acyclic — and reachable the moment a heap can come from a
      FILE. The spine is now a loop bounded by one step per cell, so a cycle decodes to `None`.
 
-  2. *Seven instances of "the guard proves less than its name claims" — and **six originated in the
+  2. *Thirteen instances of "the guard proves less than its name claims" across both slices — and **the majority originated in the
      PLAN**, not in the implementations.* Each was caught by a review instructed to hand-trace the
      claim rather than accept it:
 
@@ -280,11 +280,186 @@ produce. The oracle validates every combination.
      source-map branches recorded; what is new is *where* it was caught — six times in plan text,
      before it became a green test nobody would question again.
 
-  **Deliberately not done, with reasons.** No format-version directive — it costs nothing now and a
-  migration later, but it is speculative until a second version exists. No CLI or file-emitting entry
-  point: `run_tm_described` + `print_tm_with` produce the text, and whether a binary should write it to
-  disk is a separate question. **One new registration point:** a third encoding must be added to
-  `EncodingKind` and its `parse`, which is inherent to a format that names its variants.
+  **One new registration point:** a third encoding must be added to `EncodingKind` and its `parse`,
+  which is inherent to a format that names its variants.
+
+  **Slice 2 — hardening, versioning and tooling (2026-07-28).** Spec:
+  `docs/superpowers/specs/2026-07-28-tm-header-hardening-and-tooling-design.md`. Slice 1's own
+  whole-branch review returned *Not ready*, and the shape of its three findings is the lesson: the
+  branch's stated threat model — "a `.tm` file is untrusted" — was honoured in two places and abandoned
+  in two others. It had closed a cyclic-heap stack overflow in code unreachable in-tree, while three
+  file-supplied integers (`tapes`/`slots`/`width`) fed eager allocations with no cap, and the
+  type-directed decoder's cost was exponential in a file-controlled type depth. **A hardening argument
+  that applies to one input and not its three siblings is not a hardening argument.**
+
+  Fixed: `MAX_TAPES` plus the existing `MAX_SLOTS`/`MAX_FIELD_WIDTH` now gate the parser (both
+  directions tested — the value AT each cap still parses); `MAX_DECODE_NODES` bounds the decode's
+  total SIZE, a guarantee separate from the spine loop's cycle bound; and optionality property 2 is
+  pinned on compiled 5-tape machines under both encodings rather than one hand-built toy.
+
+  **Two things slice 1 recorded as deliberately not done, which slice 2 then did.** A format `version`
+  directive (always emitted, absent means 1, unknown is a hard error — because a future version could
+  change what `width` or `slots` MEAN, and a warning would let a v2 file decode to a confidently wrong
+  value). And a file-emitting entry point: `examples/tm_emit.rs`, `emit` and `run`, which makes the
+  headline claim executable outside the test harness. Both entries above are struck rather than
+  deleted, so the reasoning that judged them speculative stays visible next to what changed it.
+
+  **`tests/tm_foreign_reader.rs`** is the slice's most unusual artifact: an independent simulator and
+  unary decoder written from the doc comments rather than the implementation, which found three
+  documentation gaps. Its own header records the residual honestly — the compound (heap) decode was
+  brief-derived, not doc-derived, so that half remains asserted rather than demonstrated.
+
+  **Still open after slice 2**, in rough order of how likely they are to bite:
+
+  1. **`decode_word_ty` is not sharing-aware.** `Instr::Tail` is a pointer READ, not an allocation, so
+     an ordinary `tails`-style function returns a `List<List<Nat>>` whose inner lists share the outer
+     spine — `~2m` heap cells but `m² + m + 1` decode nodes, because the decoder re-walks each shared
+     sub-list once per pointer into it. Breakeven `m ≈ 4,471`, three orders of magnitude below the heap
+     cap, so **a correct, fast, cap-respecting program can still be refused** (a refusal, never a wrong
+     answer — which is why it does not block). No constant closes it: raising the budget to cover
+     `d = 2` reopens `d = 3`. The fix is memoizing on `(pointer, type)`. **This applies to
+     `decode_asm_ty` on the AOT path too** — a second consumer that will not read this branch's specs.
+  2. ~~`attribute.rs` builds an `init` setting only REG.~~ **FIXED (2026-07-28) — and it was a LIVE bug,
+     not the latent one this entry predicted.** `lower_mapped`'s doc claimed it mirrored `run_tm`'s
+     lowering "step for step" while seeding only REG. Under `Binary`, `init_work()` lays out a real
+     bank, so the machine walked off a bank that was not there, hit a rule-less state, and HALTED —
+     and a rule-less halt is indistinguishable from a real one, so `capped` stayed false and callers
+     were told they had a COMPLETE execution. `sum(5)` attributed to **329** steps against a real
+     **223,886**; `1 + 2 * 3` to 1,436 against 58,393. The corrected figure is 10.2x the unary 5,724,
+     exactly the ratio the binary-encoding branch independently recorded for that Mul-heavy program —
+     the strongest available evidence the number is now right rather than merely different. Every
+     step-attribution figure ever produced under `Binary` was wrong; the `Unary` ones are unaffected.
+  3. `run_tm_fitted` and `run_tm_described` each carry their own `MIN_FIELD_WIDTH`/doubling/`Overflow`
+     retry loop. They agree today and nothing pins that they keep agreeing.
+  4. ~~Header directives are accepted anywhere in the file.~~ **FIXED (2026-07-28).** The grammar always
+     said they must precede the first `state`; the parser accepted them anywhere. Enforced now
+     precisely because nothing this project emits was affected — the printer always writes the block in
+     position — so the set of files a stricter parser would break was still empty. That set only grows.
+
+- **λ typed decode + foreign reader — DONE (2026-07-28).** Spec:
+  `docs/superpowers/specs/2026-07-28-lambda-foreign-reader-and-typed-decode-design.md`; plan:
+  `docs/superpowers/plans/2026-07-28-lambda-foreign-reader-and-typed-decode.md`. The λ backend had the
+  two gaps the TM header branch had just closed on its side: a printed normal form could not be
+  INTERPRETED without a reference run, and every test of "any reducer can read this" used OUR reducer.
+  Both are closed, and **λ needed no header to close them** — `print_tm` serialized half a machine, but a
+  λ term IS its whole configuration, so importing the TM's answer would have been cargo-culting a
+  solution to a problem this backend does not have.
+
+  **Shipped.** `lambda::decode_lambda_ty` as a SIBLING of `decode`, with both deliberate disagreements
+  pinned (nil under a `Cons` witness; `Unit`) so re-expressing either over the other cannot quietly
+  loosen the oracle's list-length check. Its list spine is walked ITERATIVELY, and the spec's A2 answer is
+  narrower than this branch first wrote it. `decode_cons` destructures `nf` before it consults `expected`
+  and descends only where BOTH are cons-shaped, so `decode`'s depth is `min(expected's spine length, nf's
+  own cons nesting)`; the term is the binding half, because every producer caps term depth
+  (`MAX_TERM_DEPTH` = 3,000, `MAX_PARSE_DEPTH` = 256 — about 750 frames at four term nodes per Scott
+  cell). Safe on a normal stack, so `decode` was left recursive. What it is NOT is "bounded by a `Value`
+  the caller already holds and so needs no guard of its own" — a caller-held spine is millions of cells,
+  the very premise the branch's own next commit acted on in `value.rs` (below). `decode_lambda_ty` is
+  iterative because it is new code that could drop the data-proportional axis for free, not because
+  `decode` enjoys a guard it lacks; **removing the axis beats bounding it**, and it survives
+  directly-built terms past every producer cap as a result.
+  No node budget, either: `decode_tape_ty` needs one because the TM heap is a graph that can cycle and
+  alias, whereas a λ normal form is a finite tree already in memory. And `tests/lambda_foreign_reader.rs`
+  — its own term type, parser, normal-order reducer and Church/Scott decoder, written from doc comments
+  only, consuming the printed LOWERED term so the reducer is genuinely exercised (3-626 β-steps per row,
+  asserted `> 0`, so no row can pass by decoding something already in normal form). All 13 corpus rows
+  agreed with the reference **on first run, with no adjustment to the reducer**.
+
+  **THE FINDING, and it was live.** `print_lambda`'s output did not reparse in `parse_lambda` for any
+  program with mutable state: `lower.rs` binds store-passing state as `$store`, and the lexer accepted
+  only `_` and ASCII alphanumerics. `parse_print_round_trips` had proptested exactly that property since
+  Plan 2 and could never have caught it, because its generator emitted exactly **two binder hints**.
+  *The guard proved less than its name claimed, and the gap was in the generator, not the property.* The
+  generator now draws from a hint pool including `$store`, and the fix was sabotage-checked: reverting
+  the lexer change must make the proptest fail with a `$store` counterexample. Also written down, because
+  the foreign reader needed it and could not find it: the identifier grammar, and the naming rule that
+  makes printed output unambiguous — `fresh` checks the full ancestor chain, so no binder shares a name
+  with any binder ENCLOSING it and the parser's rightmost-in-scope match is **exact, not a convention**.
+  The spec expected the α-renaming rule to be the missing piece; it was sound and merely unwritten, and
+  the cruder defect above was the real one.
+
+  **A pre-existing defect the branch surfaced by accident, in code neither section named.** `value.rs`'s
+  `Drop` is hand-written and iterative, and its own doc gives the reason: a list built at runtime is a
+  `Value::Cons` spine whose length is bounded only by the step budget, so millions of cells. `PartialEq`
+  and `Debug` walked that same spine RECURSIVELY — so the premise that made `Drop` necessary made both
+  of them overflow at exactly the lengths `Drop` was written to survive. Both are iterative now. The
+  follow-up commit is worth its own line: the first `Debug` fix was O(n²) (rebuilding a string per cell)
+  in a function whose own doc cites "millions of cells" — it satisfied the LETTER of the finding (no
+  recursion, no overflow) while leaving the same premise unmet along a different axis.
+
+  **The recurring pathology showed up twice on this branch, and the second instance is the sharper one.**
+  (a) `decode.rs` shipped doc blocks asserting a `value.rs` property that **the branch's own next commit
+  falsified**; corrected in `fix(value,lambda): correct stale docs and make Debug O(n) over the spine`,
+  cited by SUBJECT rather than by hash on purpose — a hash written inside the branch it names cannot
+  survive that branch's own rebase, and this entry originally carried one that had already gone dangling.
+  (b) The foreign reader's finding 10 claimed `MAX_PARSE_DEPTH` had
+  "no doc comment at all". It has one, and that doc answers the exact question the finding posed. The
+  cause is the instructive part: the doc extraction used `grep '^//!'`, which **by construction cannot
+  match a `///`** — absence of evidence recorded as evidence of absence, inside the one artifact whose
+  entire value is its accuracy. The correction is recorded IN the findings list along with its mechanism
+  rather than silently applied, because a findings list that quietly drops a false entry teaches the next
+  reader nothing.
+
+  **Honest bound — what the foreign reader does NOT establish**, stated because the file's title suggests
+  more. Its `shift`/`subst`/`beta` share the originals' names, signatures, TAPL (§6.2) formulation and
+  one verbatim doc line — all permitted, since signatures and doc comments were on the reading list, but
+  the consequence is that **the substitution layer is not an independent cross-check**: a shared
+  TAPL-level misreading would be invisible here, both implementations agreeing and both wrong the same
+  way. The genuinely independent component is REDEX SELECTION — which side of `App` reduces first,
+  whether reduction descends under `Abs` — and that is precisely where the one correctness finding came
+  from. Four of the eleven findings are additionally marked UNEXERCISED: the corpus cannot falsify them,
+  so they are guesses the file does not license anyone to rely on.
+
+  **What stays open**, in rough order of how likely each is to bite:
+
+  1. ~~Nothing documents that the format REQUIRES normal order.~~ **DONE (2026-07-28).** It was a
+     correctness gap, not a doc gap: an applicative-order reader does not merely differ from ours, it is
+     **non-terminating**, for three independent reasons each sufficient alone. `Core::If` lowers to
+     `app(app(cond, then), else)` with both branches unthunked, so call-by-value evaluates the branch not
+     taken and `sum(5)`'s base case can never stop the recursion; `fix` is the call-by-name Y, whose
+     `x x` argument regenerates the same redex forever under call-by-value (Z is the call-by-value
+     combinator, and nothing in an emitted term says which was intended); and `head`/`tail` pass Ω as
+     their `nil` branch on EVERY call, so even `head(cons(7, nil))` hangs. A faithful independent
+     implementer, reading everything we published, could build something that hangs. Now stated
+     normatively in **`reduce.rs`'s module doc** — all three mechanisms, not one, because they are what a
+     later optimization pass would have to retire before relaxing the requirement — with a cross-reference
+     from **`encode.rs`'s module doc**, where `diverge()` is defined. Written down alongside it: why this
+     misleads a COMPETENT reader. β-reduction is confluent, so any two sequences that reach normal forms
+     reach the same one — correct about UNIQUENESS, and silent about REACHABILITY, which is the separate
+     standardization result. The docs were quiet exactly where correct prior knowledge points the wrong
+     way, and the symptom (a step-cap timeout) misdiagnoses as "cap too low".
+  2. **No reader-facing file records that the encodings collide.** `true` and `nil` are both
+     `Abs(Abs(Var 1))`; `false` and `church 0` are both `Abs(Abs(Var 0))` — so a result type is needed in
+     PRINCIPLE, not as a convenience. The fact is documented, in `lambda/decode.rs`'s module doc, but
+     that file is correctly off-limits to a foreign reader (it describes the very strategy such a reader
+     must rederive), and neither `syntax.rs` nor `encode.rs` carries it. An independent implementer
+     rediscovers it by hitting it. One doc line in `encode.rs`.
+  3. **DONE (2026-07-28). `term.rs`'s `shift` WRAPPED on a negative result** — `(i64::from(*k) + d) as u32`
+     silently produced a huge index instead of failing. Reachable only on an open term, which the compiler
+     never produces, so it was latent rather than live; but the undocumented case had silent corruption
+     behind it in production code, not merely an unstated convention. **Shipped:** an UNCONDITIONAL
+     `assert!`, not a `debug_assert!`, on the strength of a measurement — five release runs put the
+     guarded version's range around the unguarded one (0.2078–0.2191s vs 0.2123–0.2151s for 2,000 shifts
+     over a 400-deep term), i.e. the cost is below run-to-run noise, so the weaker guard bought nothing.
+     A miscompile is worse than a crash, and `debug_assert!` would have left release builds wrapping.
+
+     Two things worth keeping from doing it. The deferral had reasoned "nothing can exercise it" — true of
+     compiled output, but `shift` is `pub`, so `shift(-1, 0, &var(0))` reaches it directly, and
+     `shift_panics_instead_of_wrapping_to_a_dangling_index` is that call. **Sabotage-checked:** deleting
+     the `assert!` makes that test the only thing in the tree that notices. And the invariant keeping this
+     unreachable is not local to either function — it holds because `subst`'s `j + 1` and `shift`'s
+     `cutoff + 1` step in lockstep under `Abs`. Two functions agreeing by construction is what a refactor
+     breaks silently, which is the actual argument for a permanent check.
+  4. **DONE (2026-07-28). Two minors in the freshening work itself.** `fresh`'s fallback to `"v"` on an
+     empty hint is now stated in the naming-rule doc, and the `hint{k}` notation is spelled out as
+     digit-appending with an example (`x` collides → `x0`, `x1`, …) rather than left to be read as literal
+     braces.
+  5. **§C's residual.** Resolved as "nothing" — the λ text form carries no result type, because every
+     consumer already holds one and none receives text without the program it came from. Open item 2
+     above is the sharpened version of the same fact and does not change the answer: the collision proves
+     a type must EXIST, not that it must travel IN the text. A `.lam` file handed to another tool would
+     flip it, and wants `run_lambda` returning the type before it wants a `; result:` line — see the
+     spec's §C, which records the grep the criterion turned on.
 
 - **Single-tape TM — backend/theory track, highest thematic payoff.** Build it as a *transformation*
   on the finished `Machine`, NOT a separate compile target: multi-tape → single-tape via the textbook
@@ -777,3 +952,83 @@ produce. The oracle validates every combination.
   enough to enumerate while executions are 10^4-10^5 steps and would have to be symbolically unwound. A
   proof assistant would verify a MODEL and leave the model-matches-`encoding.rs` gap unproven — the same
   objection raised against rung 3's analyzer, one level larger.
+
+  **What the dumb checker COSTS, measured 2026-07-28 — so the refusals above are priced, not just
+  principled.** Decomposing one bank-invariant unit (debug, the profile the fast tier uses) into
+  simulate-only / +watcher-call / +materialize-the-tape / +scan, over four workloads:
+
+  | | simulation | watcher call | materialize | **invariant scan** |
+  |---|---|---|---|---|
+  | share of runtime | ~1% | ~0% | 18-20% | **~80%** |
+
+  So `reg_bank_is_well_formed` rescanning the whole bank after every step IS the test. The machine it is
+  checking is 1%. A TM step writes at most one cell per tape, so an INCREMENTAL check would be O(1)
+  where this is O(cells), and it is inductively sound (verify the initial state, then each delta) — it is
+  the only large lever left in this file.
+
+  **Still rejected, for the reason rungs 3 and 4 were:** an incremental checker is cleverer, and its
+  correctness becomes a new thing to trust, against a checker whose whole value is being "the same dumb
+  tape check, looking at the same actual tape". The difference now is that the bill is known: **this
+  project pays ~80% of the file's runtime for a checker too stupid to be wrong.** Reopen it only with
+  that number in hand.
+
+  **And a negative result worth not repeating.** `Tape::snapshot` allocates a fresh `Vec` per watcher
+  call, which looked like the obvious free win inside that 18-20%. It is not: reworking it to refill a
+  reused buffer was implemented and measured at **no effect** (49.2/55.5s vs 49.7/54.1s on the heaviest
+  unit, ranges fully overlapping), because in a debug build the cost of materializing is the COPY, not
+  the malloc — and the copy cannot go without giving the checkers an indexable view instead of a slice,
+  since they index randomly. Reverted rather than shipped. The 18-20% is real but is not reachable by
+  removing the allocation alone.
+
+- **Fast-tier wall clock: 231.7s → 60.4s (3.8x), no assertion weakened (2026-07-28).** Plan:
+  `plans/2026-07-28-test-suite-parallelism.md`, which carries the measured distribution. Two changes.
+
+  **1. `cargo-nextest` is now the runner** (`scripts/check-all.sh`, CI). `cargo test` runs the 22 test
+  binaries ONE AT A TIME and shares threads only WITHIN a binary, which left a 12-core machine at 1.39x;
+  nextest pools every test from every binary. 231.7s → 135.2s, 623 tests, same pass set, nothing about
+  any test changed. CI's coverage step moved to `llvm-cov nextest` too: 373.7s → 164.6s. **Coverage is
+  not bit-identical and the CI comment says so rather than rounding it away** — 95.55% → 95.52% lines,
+  the 10-line delta being example targets `--all-targets` instruments and nextest's default does not.
+  The gate HARD-FAILS without nextest rather than falling back, so it behaves the same everywhere.
+
+  **nextest does not run doctests and never will** (rustdoc is a separate pipeline), so every config
+  pairs it with an explicit `cargo test --doc` at the same feature flags. That pairing had no teeth —
+  the tree had zero doctests, so it executed nothing and asserted nothing, and a config added later with
+  a bare `cargo nextest run` would have dropped doctests silently. `ty::show` now carries one real
+  doctest so each config prints `1 passed` and a dropped pairing shows as a zero. **Do not delete it as
+  redundant.** `scripts/check-slow.sh` deliberately stays on `cargo test`: nextest's `--no-capture`
+  implies `--test-threads 1`, so converting it would serialise the thing the switch is for.
+
+  **2. The corpus bank invariant was split so the runner can schedule it.** It was ONE `#[test]` running
+  19 programs x 5 widths x 2 encodings — 131s on one core, 95%+ of what remained. Now one test per
+  `(width, encoding)`. 135.2s → 60.4s; the file 131.0s → 49.8s.
+
+  **The measurement chose the axis, and it was not the obvious one.** Cost is QUADRATIC in field width
+  (4:0.48s 8:2.20s 16:7.23s 32:24.34s 64:94.26s), so width 64 alone is 73% and a per-width split leaves a
+  94.3s long pole while looking like a fix. It also corrected the plan's own threshold: that had been set
+  from the next tier OUTSIDE this file (~18-20s), but the real ceiling is inside it — the 51.2s generated
+  proptest, which Task 3 may deliberately leave alone. A finer `(program, width, encoding)` axis gives a
+  13s pole and saves nothing while that stands, so it was rejected in favour of 10 tests whose names say
+  what they cover.
+
+  **The guard is the deliverable, not the speedup.** The 10 tests hard-code the cross product, but
+  `widths()` is COMPUTED from `MIN_FIELD_WIDTH`/`MAX_FIELD_WIDTH`. If `MAX_FIELD_WIDTH` doubles the new
+  width is covered by NOTHING — the file gets faster AND weaker and every remaining test still passes.
+  So the macro records what it emitted and `the_split_covers_the_whole_cross_product` compares that
+  against `widths() x encodings_at` derived AT RUNTIME (never a second hard-coded list, or the guard just
+  restates what it checks). Sabotage-verified in both directions — deleting a generated test and shrinking
+  the width ladder each make it fail, naming the missing cell.
+
+  **REJECTED with the measurement, because it is the obvious next idea.** `[profile.test] opt-level = 2`
+  takes the suite to ~15s, a further ~9x and the largest single lever available. A probe showed a
+  recursive 5,000-cell spine walk SURVIVES a 256 KiB stack once optimised (LLVM turns the tail call into
+  a loop), so the small-stack guards in `lambda/decode.rs` and `value.rs` would pass against exactly the
+  recursive implementations they exist to reject. It is not free speed; the price is paid in silence.
+
+  **Honest bound and what stays open.** All timings are one machine, warm, debug except where stated. The
+  floor is now the two ~50s bank-invariant tests, and ~80% of that is the invariant scan itself — see
+  the bank-safety section above, where that cost is decomposed and the incremental-checker option is
+  priced and declined. Task 3 (splitting the generated proptest by `prop_oneof!` alternative) is still
+  open and is deliberately framed as a DECISION: it preserves the case count but changes the
+  distribution and the seeds and can orphan a recorded regression, and on its own it moves the floor by
+  only ~5s. Splitting width 64 further BY PROGRAM only becomes worthwhile once that proptest is split.

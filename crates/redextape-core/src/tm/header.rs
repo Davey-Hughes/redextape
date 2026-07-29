@@ -109,7 +109,13 @@ pub struct TmHeader {
     pub width: usize,
     /// REG bank field count.
     pub slots: u32,
-    /// The type the final tape decodes to. Only `Nat`/`Bool`/`Unit`/`List<T>` are admissible.
+    /// The type of the program's RESULT VALUE — NOT "the final tape" (tape `TAPES - 1`, the BOX bank,
+    /// is typically unused). The value is read from REG field 0 (`Reg::Rr`) and, for a `List<T>`,
+    /// followed as a pointer into the HEAP tape (see `build::AT` for the cons-cell layout — it covers
+    /// BOTH encodings, which matters here because a header may say `encoding binary`, whose head/tail
+    /// words are fixed-width digit strings rather than the variable-length mark runs `encoding::unary`
+    /// describes; `decode::decode_tape_ty` is the reader). Only `Nat`/`Bool`/`Unit`/`List<T>` are
+    /// admissible.
     pub result: Ty,
     /// Literal initial contents by tape INDEX, ascending, with EMPTY TAPES OMITTED. Private because
     /// `new` maintains that normal form and the round-trip depends on it — see `new`.
@@ -129,6 +135,17 @@ impl TmHeader {
     /// nothing and parses back to no entry — and `parse_tm_full(print_tm_with(m, h))` would return a
     /// header unequal to `h`, breaking optionality property 2 over a difference that carries no
     /// information. Normalizing at construction makes the round-trip exact instead of approximate.
+    ///
+    /// **PRECONDITION for the round-trip, unenforced here.** This constructor accepts any `width` and
+    /// `slots`, but `parse_tm_full` caps them at `MAX_FIELD_WIDTH` and `MAX_SLOTS` (totality guards on
+    /// untrusted input). So a header built with `width: 0`, `width > MAX_FIELD_WIDTH` or
+    /// `slots > MAX_SLOTS` will PRINT and then fail to parse back — optionality property 2 holds for
+    /// headers within those caps, not for every value this constructor admits. `run_tm_described`, the
+    /// only producer in the tree, cannot exceed them: its width comes from the auto-fit search, which
+    /// clamps at `MAX_FIELD_WIDTH`, and its slot count from `lower_and_size`, which refuses above
+    /// `MAX_SLOTS` before a machine is ever built. The caps are not re-checked here because doing so
+    /// would make a pure normalizer fallible for a case its only caller cannot reach — but a hand-built
+    /// header is outside the guarantee, and that is stated here rather than discovered at parse time.
     pub fn new(
         encoding: EncodingKind,
         width: usize,
@@ -254,9 +271,12 @@ impl HeaderParts {
     /// (the caller keeps looking), `Some(Ok(()))` if it was consumed, `Some(Err(msg))` if it was a
     /// header directive that did not parse.
     ///
-    /// A DUPLICATE directive is an error rather than last-wins: two disagreeing `width` lines have no
-    /// defensible winner, and picking one silently would decode the tape against a recipe the file
-    /// does not unambiguously state.
+    /// A DUPLICATE directive is an error rather than last-wins. The rule is that the file STATES A
+    /// THING ONCE — not that the values disagree: two *agreeing* `width 4` lines are refused too.
+    /// Disagreeing ones are the motivating case (there is no defensible winner, and picking one
+    /// silently would decode the tape against a recipe the file does not unambiguously state), but
+    /// admitting agreeing duplicates would mean comparing values to decide whether a file is
+    /// well-formed, which is a strictly worse rule to state and to test.
     pub(crate) fn directive(&mut self, key: &str, rest: &str, span: Span) -> Option<Result<(), String>> {
         let val = rest.split(';').next().unwrap_or("").trim();
         match key {
@@ -264,7 +284,8 @@ impl HeaderParts {
             // refused outright, here, at the earliest point it can be: a v2 file parsed under v1 rules
             // would not fail to parse, it would parse to a CONFIDENTLY WRONG value, because a future
             // version could redefine what `width` or `slots` mean. A duplicate is an error for the same
-            // reason as the other four: two disagreeing `version` lines have no defensible winner.
+            // reason as the other four, and on the same rule: the file states a thing once, so two
+            // AGREEING `version 1` lines are refused as well.
             "version" => {
                 self.saw_version = true;
                 Some(match (self.version, val.parse::<u32>()) {
@@ -287,9 +308,13 @@ impl HeaderParts {
                 }
                 (None, None) => Err(format!("unknown `encoding` name `{val}` (expected `unary` or `binary`)")),
             }),
-            // Capped at the same ceiling `lower_and_size` enforces for in-memory programs: `slots` and
-            // `width` feed `init_reg`, which allocates `slots * (width + 1)` cells. A TOTALITY guard on
-            // untrusted input, not a language limit.
+            // Capped at the auto-fit search's OWN ceiling: `run_tm_fitted` doubles from
+            // `MIN_FIELD_WIDTH` and clamps at `MAX_FIELD_WIDTH`, so a file naming a wider field
+            // describes a bank this build could not have produced and whose recipe it cannot evaluate.
+            // (NOT, despite the sibling arm below, a ceiling `lower_and_size` enforces — that function
+            // checks `MAX_SLOTS`, `frame_bank_unrepresentable` and `mul_count_unrepresentable`, and
+            // nothing about field width.) With `slots`, this bounds `init_reg`'s
+            // `slots * (width + 1)` allocation. A TOTALITY guard on untrusted input, not a language limit.
             "width" => Some(match (self.width, val.parse::<usize>()) {
                 (Some(_), _) => Err("duplicate `width` directive".into()),
                 (None, Ok(n)) if (1..=MAX_FIELD_WIDTH).contains(&n) => {
@@ -298,9 +323,10 @@ impl HeaderParts {
                 }
                 (None, _) => Err(format!("expected `width <1..={MAX_FIELD_WIDTH}>`, found `{val}`")),
             }),
-            // Capped at the same ceiling `lower_and_size` enforces for in-memory programs: `slots` and
-            // `width` feed `init_reg`, which allocates `slots * (width + 1)` cells. A TOTALITY guard on
-            // untrusted input, not a language limit.
+            // Capped at the same ceiling `lower_and_size` enforces for in-memory programs, so the file
+            // path and the in-memory path cannot disagree about one named limit. With `width`, this
+            // bounds `init_reg`'s `slots * (width + 1)` allocation. A TOTALITY guard on untrusted
+            // input, not a language limit.
             "slots" => Some(match (self.slots, val.parse::<u32>()) {
                 (Some(_), _) => Err("duplicate `slots` directive".into()),
                 (None, Ok(n)) if n <= MAX_SLOTS => {

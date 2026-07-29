@@ -39,6 +39,20 @@ pub const MAX_TY_DEPTH: usize = 64;
 /// `result` directive needs the same rendering and a second printer would be a second thing to keep
 /// in agreement. `parse_ty` is its partial inverse — partial because `Fun`/`Var` print but do not
 /// parse back (see `parse_ty`).
+///
+/// ```
+/// use redextape_core::ty::{Ty, show};
+/// assert_eq!(show(&Ty::List(Box::new(Ty::Nat))), "List<Nat>");
+/// ```
+///
+/// That example is also this tree's ONLY doctest, and it is load-bearing beyond documenting `show`.
+/// The test runner is `cargo-nextest`, which does not run doctests at all — so `scripts/check-all.sh`
+/// pairs every config with an explicit `cargo test --doc`. With no doctest anywhere, that paired run
+/// would execute nothing and assert nothing, and a config added later with a bare `cargo nextest run`
+/// would drop doctests with no failure to show for it. One real doctest makes the wiring OBSERVABLE:
+/// the gate prints `1 passed` per config, so a dropped pairing shows up as a zero. Same reasoning as
+/// the slow tier's `#[ignore]` marker, which was chosen over an env-var guard because `cargo test`
+/// prints the ignored count.
 pub fn show(ty: &Ty) -> String {
     match ty {
         Ty::Nat => "Nat".into(),

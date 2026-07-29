@@ -18,7 +18,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::{Core, NodeId};
-use crate::tm::build::{REG, TAPES};
+use crate::tm::build::{REG, TAPES, WORK};
 use crate::tm::defunc::defunc_mapped;
 use crate::tm::encoding::{Encoding, Unary};
 use crate::tm::lower_asm::{LowerError, lower_asm_mapped};
@@ -177,9 +177,18 @@ fn lower_mapped(core: &Core, enc: &dyn Encoding) -> Result<Option<Mapped>, Lower
         return Ok(None);
     }
     let mut init = vec![Vec::new(); TAPES];
-    // `REG < TAPES` by construction; `get_mut` rather than indexing keeps this library path total.
+    // BOTH banks, exactly as `tm.rs`'s `attempt` seeds them. Seeding only REG is not a harmless
+    // omission: `Unary::init_work()` is empty so nothing shows, but `Binary::init_work()` lays out a
+    // real `#`-delimited bank, and a binary machine run against an EMPTY WORK tape walks off the end
+    // of a bank that is not there, lands in a rule-less state, and HALTS. That halt is indistinguishable
+    // from a real one — `capped` stays false — so attribution reported `sum(5)` under `Binary` as a
+    // COMPLETE 329-step execution when the real run is three orders of magnitude longer.
+    // `REG`/`WORK < TAPES` by construction; `get_mut` rather than indexing keeps this library path total.
     if let Some(reg) = init.get_mut(REG) {
         *reg = enc.init_reg(sm.n_slots());
+    }
+    if let Some(work) = init.get_mut(WORK) {
+        *work = enc.init_work();
     }
     Ok(Some(Mapped { machine, state_origins, origins, synthetic, init }))
 }
@@ -271,6 +280,45 @@ mod tests {
     /// `ClosureScaffold` bucket — which is precisely the split (what the user wrote vs what
     /// defunctionalization added) the step survey consumes. It is the two-element `map` demo the TM
     /// goldens already pin, kept to two elements so it stays cheap.
+    /// Attribution must describe THE MACHINE `run_tm` RUNS — under every encoding, not just the one
+    /// whose scratch bank happens to be empty.
+    ///
+    /// `lower_mapped` seeds `init` itself, and its doc says it mirrors `run_tm`'s lowering "step for
+    /// step". It seeded only REG. Under `Unary` that is invisible, because `init_work()` returns
+    /// nothing; under `Binary` it lays out a real `#`-delimited bank, so the machine walked off a bank
+    /// that was not there, hit a rule-less state, and HALTED — reporting `capped: false`, i.e. a
+    /// COMPLETE execution. `sum(5)` attributed to 329 steps against a real 223,886.
+    ///
+    /// This asserts the property rather than the numbers: whatever `simulate_counts` reports for the
+    /// machine built the way `tm.rs`'s `attempt` builds it is what attribution must total. A future
+    /// tape gaining an initial layout breaks this test rather than silently shrinking a histogram.
+    #[test]
+    fn attribution_totals_the_steps_the_real_machine_takes_under_both_encodings() {
+        use crate::tm::encoding::{Binary, Unary};
+        use crate::tm::lower_tm::{SlotMap, lower_tm};
+        for src in ["1 + 2 * 3", "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)"] {
+            for (name, enc) in
+                [("Unary", Box::new(Unary::default()) as Box<dyn Encoding>), ("Binary", Box::new(Binary::default()))]
+            {
+                let core = parse_core(src).expect("parses");
+                let prog = crate::tm::lower_asm::lower_asm(&core).expect("lowers first-order");
+                let sm = SlotMap::of(&prog);
+                let machine = lower_tm(&prog, &*enc);
+                // Exactly as `tm.rs`'s `attempt` seeds it — both banks.
+                let mut init = vec![Vec::new(); TAPES];
+                init[REG] = enc.init_reg(sm.n_slots());
+                init[WORK] = enc.init_work();
+                let (counts, status) = sim::simulate_counts(&machine, &init, sim::DEFAULT_CAPS);
+                assert_eq!(status, sim::Status::Halted, "{src} under {name} must halt");
+                let real: u64 = counts.iter().sum();
+
+                let a = attribute_at(src, &*enc).expect("attributes");
+                assert!(!a.capped, "{src} under {name}: attribution must report a complete run");
+                assert_eq!(a.total, real, "{src} under {name}: attribution must total the real steps");
+            }
+        }
+    }
+
     const CASES: [&str; 5] = [
         "2 * 3",
         "1 + 2 * 3",

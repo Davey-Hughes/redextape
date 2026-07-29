@@ -3,9 +3,18 @@
 //! `_` is the blank symbol, `*` is the read-wildcard / write-unchanged marker, and `;` starts a
 //! comment (whole-line or trailing). The round-trip guarantee
 //! `parse_tm(print_tm(m)) == (Some(m), [])` holds for every `Machine` that passes
-//! `Machine::validate()` — i.e. identifier-ish state names (no whitespace or reserved `; * : [ ]`)
-//! and data symbols outside the reserved set. `lower_tm` produces only such machines; a machine
-//! outside this representable subset is *rejected* by `validate` rather than silently corrupted.
+//! `Machine::validate()` **and declares `tapes <= MAX_TAPES`** — i.e. identifier-ish state names (no
+//! whitespace or reserved `; * : [ ]`), data symbols outside the reserved set, and a tape count the
+//! parser will accept back. `lower_tm` produces only such machines; a machine outside this
+//! representable subset is *rejected* by `validate` rather than silently corrupted.
+//!
+//! **The tape-count clause is a real caveat, not a formality, and `validate()` does not enforce it.**
+//! `validate()` places no bound on `tapes`, and an accept-only machine has no rules, so the
+//! rule-arity check is vacuous for it — making `Machine { tapes: 100, states: [accept], .. }`
+//! validate()-clean. `print_tm` writes `tapes 100` faithfully and `parse_tm` then refuses it, because
+//! `MAX_TAPES` is a totality guard on untrusted input (see `build::MAX_TAPES`). The asymmetry is
+//! deliberate — the guard protects a reader from a hostile file — but it means "representable" is a
+//! slightly narrower set than "validate()-clean", and this is where that is written down.
 //!
 //! `print_tm`/`parse_tm` are the header-less pair above. `print_tm_with`/`parse_tm_full` are their
 //! header-carrying siblings: a file may additionally record a `TmHeader` (initial tapes, plus the
@@ -171,6 +180,21 @@ fn parse_rule_line(line: &str, span: Span) -> Result<RawRule, Diagnostic> {
     Ok(RawRule { read, write, moves, goto: goto.to_string(), span })
 }
 
+/// Reject a header directive that appears AFTER the first `state`.
+///
+/// The grammar has always said directives "must precede the first `state`", and the parser has always
+/// accepted them anywhere — a divergence that only gets more expensive with age, because every file
+/// written in the meantime that violates the stated grammar is one a later, stricter parser breaks.
+/// The printer emits them in position unconditionally, so no file this project produces is affected;
+/// enforcing now costs nothing and closes the gap while that is still true.
+fn header_position(key: &str, states: &[RawState]) -> Result<(), String> {
+    if states.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("`{key}` must precede the first `state` (header directives come before the states)"))
+    }
+}
+
 /// Parse the TM text form, dropping any header. Unchanged in signature and behaviour: a file with a
 /// header still reads as the machine it describes (optionality property 3).
 ///
@@ -214,7 +238,9 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
             .split_once(' ')
             .filter(|(k, _)| matches!(*k, "version" | "encoding" | "width" | "slots" | "result" | "tape"))
         {
-            if let Some(Err(msg)) = header.directive(key, rest, span) {
+            if let Err(msg) = header_position(key, &states) {
+                diags.push(err(span, msg));
+            } else if let Some(Err(msg)) = header.directive(key, rest, span) {
                 diags.push(err(span, msg));
             }
         } else if trimmed == "version" {
@@ -223,7 +249,9 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
             // (no number at all) is exactly one of the malformed forms `directive` must still name as
             // a version error rather than fall through to "unrecognized line" — see
             // `an_unknown_version_is_an_error_not_a_warning`.
-            if let Some(Err(msg)) = header.directive("version", "", span) {
+            if let Err(msg) = header_position("version", &states) {
+                diags.push(err(span, msg));
+            } else if let Some(Err(msg)) = header.directive("version", "", span) {
                 diags.push(err(span, msg));
             }
         } else if let Some(rest) = trimmed.strip_prefix("start ") {
@@ -543,6 +571,32 @@ state halt: accept
             assert!(m.validate().is_empty(), "compiled machine must be validate()-clean for {src}: {:?}", m.validate());
             assert_eq!(parse_tm(&print_tm(&m)), (Some(m.clone()), vec![]), "round-trip must equal m for {src}");
         }
+    }
+
+    /// A header directive AFTER the first `state` is refused, as the grammar has always said.
+    ///
+    /// The parser used to accept them anywhere, so this file parsed clean. Nothing this project emits
+    /// is affected — `print_header` writes the block between `start` and the states unconditionally —
+    /// which is exactly why enforcing was cheap NOW and would not have been later: every file written
+    /// against the looser parser is one a stricter parser breaks.
+    #[test]
+    fn a_header_directive_after_the_first_state_is_refused() {
+        for bad in ["encoding unary", "width 4", "slots 1", "result Nat", "tape 0 #_#", "version 1"] {
+            let src = format!("tapes 1\nstart s\n\nstate s: accept\n{bad}\n");
+            let (m, h, ds) = parse_tm_full(&src);
+            assert!(m.is_none() && h.is_none(), "{bad:?} after a state must be refused");
+            assert!(ds.iter().any(|d| d.message.contains("must precede the first `state`")), "{bad:?}: {ds:?}");
+        }
+    }
+
+    /// ...and the same directives BEFORE the first state still parse, so the guard is positional
+    /// rather than a blanket rejection.
+    #[test]
+    fn the_same_directives_before_the_first_state_still_parse() {
+        let src = "tapes 1\nstart s\nversion 1\nencoding unary\nwidth 4\nslots 1\nresult Nat\ntape 0 #_#\n\nstate s: accept\n";
+        let (m, h, ds) = parse_tm_full(src);
+        assert!(ds.is_empty(), "{ds:?}");
+        assert!(m.is_some() && h.is_some());
     }
 
     /// PROPERTY 1: today's round-trip, untouched.

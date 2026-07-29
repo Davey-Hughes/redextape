@@ -1,6 +1,14 @@
 //! Church `Nat` and Scott `Bool`/`List` encodings as closed de Bruijn lambda-terms, plus the
 //! arithmetic, comparison, and list combinators the lowering uses. Behavioral correctness (these
 //! reduce to the right normal forms) is covered in `reduce.rs`'s tests.
+//!
+//! THESE COMBINATORS REQUIRE NORMAL-ORDER REDUCTION, and the sharpest reason is defined right here:
+//! `head`/`tail` pass a deliberately non-normalizing term (`diverge()`) as their `nil` branch on EVERY
+//! call, so an applicative-order reducer evaluates it even for a non-empty list and hangs on
+//! `head(cons(7, nil))` — a correct program. The Scott booleans below are the other half of a second
+//! reason: `lower.rs` hands them both `if` branches unthunked, so call-by-value evaluates the branch not
+//! taken. `reduce.rs`'s module doc states the requirement in full, with the third reason (the
+//! call-by-name fixpoint combinator) and why confluence does not excuse it.
 
 use crate::core::BinOp;
 use crate::lambda::term::{LambdaTerm, abs, app, var};
