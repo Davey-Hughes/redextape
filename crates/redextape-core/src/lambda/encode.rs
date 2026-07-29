@@ -9,6 +9,19 @@
 //! reason: `lower.rs` hands them both `if` branches unthunked, so call-by-value evaluates the branch not
 //! taken. `reduce.rs`'s module doc states the requirement in full, with the third reason (the
 //! call-by-name fixpoint combinator) and why confluence does not excuse it.
+//!
+//! THE ENCODINGS COLLIDE, so a normal form CANNOT be decoded without a result type supplied from
+//! outside. This is a property of the encodings, not a shortcoming of any particular decoder, and it
+//! holds for an independent implementation exactly as it holds for ours:
+//!
+//!   * `tru()` (`\t.\f. t`) and `nil()` (`\n.\c. n`) are the SAME de Bruijn term, `Abs(Abs(Var 1))`.
+//!   * `fls()` (`\t.\f. f`) and `church(0)` (`\f.\x. x`) are both `Abs(Abs(Var 0))`.
+//!
+//! The collision propagates through structure rather than staying at the leaves: a one-element Scott
+//! list holding either one is a single term, so `[0]` and `[false]` are indistinguishable, and so is
+//! every larger structure built over them. Nothing recoverable from a printed or reduced term says
+//! which was meant. A reader handed only a normal form is therefore not merely inconvenienced — it
+//! has strictly insufficient information, and must be told the result type by its caller.
 
 use crate::core::BinOp;
 use crate::lambda::term::{LambdaTerm, abs, app, var};

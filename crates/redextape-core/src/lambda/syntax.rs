@@ -20,6 +20,12 @@
 //! A FREE variable has no name to print and comes out as `?<index>`, which is not a valid identifier —
 //! deliberately, so an open term fails to reparse loudly rather than silently rebinding. Everything the
 //! backend produces is closed.
+//!
+//! THIS TEXT FORM CARRIES NO RESULT TYPE, and one is required to interpret what it denotes: the value
+//! encodings collide, so `\a.\b. b` is `false` and `church(0)` at once, and `\a.\b. a` is `true` and
+//! `nil` at once. Parsing and printing are unaffected — the terms round-trip exactly — but a reader
+//! that intends to DECODE a term to a value needs the type from its caller. See `encode.rs`'s module
+//! doc for the full statement.
 
 use crate::diagnostic::Diagnostic;
 use crate::lambda::term::{LambdaTerm, abs, app, var};

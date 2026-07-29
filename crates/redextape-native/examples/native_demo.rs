@@ -11,7 +11,8 @@
 //! CORRECTION (Task 17, `tm-binary-encoding`): the TM backend also has a `Binary` encoding now, where a
 //! `w`-cell field holds `0..2^w` — at the 64-cell ceiling, the entire `u64` range. `100 * 100 = 10_000`
 //! is representable there too; it no longer distinguishes native from "the TM backend", only from
-//! unary. The real remaining gap is values `>= 2^64`, which section 3 below demonstrates instead.
+//! unary. The real remaining gap is values `>= 2^64`; section 3 below EXPLAINS that gap rather than
+//! demonstrating it — no program in this demo reaches that far, as section 3's own printed output says.
 //!
 //!     cargo run --example native_demo -p redextape-native
 //!

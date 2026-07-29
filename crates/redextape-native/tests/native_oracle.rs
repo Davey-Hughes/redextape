@@ -1,29 +1,61 @@
 #![cfg(feature = "cranelift")]
-//! The four-way oracle (Task 6, native backend v1): for every first-order demo, the reference
-//! tree-walker's value, the decoded λ normal form, the decoded TM final tape, AND the decoded native
-//! (Cranelift JIT) result all agree — `reference == λ == TM == native`. This extends
-//! `redextape-core`'s three-way oracle (`tests/three_way_oracle.rs`) with native as a validated
-//! fourth leg.
+//! The native oracle: for every first-order demo, the reference tree-walker's value, the decoded λ
+//! normal form, the decoded TM final tape UNDER EVERY ENCODING, and the decoded native (Cranelift JIT)
+//! result all agree. This extends `redextape-core`'s three-way oracle (`tests/three_way_oracle.rs`)
+//! with native as a validated leg.
 //!
 //! Native's PRIMARY new cross-check is narrower and sharper than the four-way: `native == asm-interp`
 //! on the SAME lowered `Program` isolates codegen (`run_native`/Cranelift) from interpretation
 //! (`run_asm`) — both share `lower_asm`/`defunc`, so any disagreement is a real codegen bug, not a
 //! front-end or lowering difference.
 //!
-//! Native's DISTINCTIVE capability is having no `MAX_FIELD_WIDTH` (64) ceiling: it compiles to real 64-bit
-//! machine registers, unlike the TM's fixed-width UNARY tape. `native_runs_beyond_field_width` checks
-//! `native == reference` on values the unary TM literally cannot represent — the TM leg is intentionally
-//! absent there.
+//! ONE TEST PER ENCODING, not one test doing every encoding: `four_way_tests!` emits
+//! `four_way_oracle_on_the_first_order_suite_{unary,binary}`, so each emitted test is still genuinely
+//! FOUR-way (reference == λ == TM(one encoding) == native) and its name states its real arity. It is
+//! this FILE that covers five legs — reference, λ, TM-unary, TM-binary, native — not any single test.
+//! LEGS, not "backends": two of the five are the same TM backend at different encodings, the
+//! distinction this file polices elsewhere (`the_tm_reports_its_ceiling_on_the_same_demos`'s "SCOPED TO
+//! UNARY" note, `past_the_u64_ceiling_the_backends_diverge_by_design`'s "a claim about the TM BACKEND,
+//! not about one encoding").
 //!
-//! CORRECTION (Task 17, `tm-binary-encoding`): this was true of unary alone even before that branch —
-//! the phrase just didn't say so, because unary was the only encoding. The TM backend also has a
-//! `Binary` encoding now, and a `w`-cell binary field holds `0..2^w`, so at the 64-cell ceiling it
-//! covers the entire `u64` range — every demo below (`BEYOND_FIELD_WIDTH_DEMOS`, all « 2⁶⁴) is
-//! representable there and would NOT overflow. The gap this file measures is real but narrower than
-//! advertised: it is "unary vs. native", not "the TM backend vs. native". The true remaining gap —
-//! values `>= 2^64`, where even `Binary` overflows and native still has none — is not exercised here
-//! (nothing in this suite goes there); see `the_tm_reports_its_ceiling_on_the_same_demos` below for the
-//! narrower, honest claim this file can actually make.
+//! WHAT ACTUALLY FORCES A DEVELOPER HERE, stated precisely rather than implied end-to-end: adding a
+//! third `EncodingKind` breaks `tm_leg`'s match below (`:121-128`, no wildcard arm) at COMPILE TIME, and
+//! that is the real forcing function — the new arm is required to compile. `encodings()` (above) is the
+//! registration point once a developer is already in this file, but nothing forces them to touch it
+//! too. `every_encoding_has_a_four_way_test` derives its expectation from `encodings()` AT RUNTIME and
+//! compares it against `EMITTED`, so it catches drift BETWEEN THOSE TWO LISTS — a generated test
+//! deleted, or the macro invocation left behind `encodings()`. It does NOT catch a developer who adds
+//! the compile-forced match arm, compiles clean, and never adds the new kind to `encodings()` itself:
+//! that encoding is covered by nothing, and this guard still passes. Remembering to extend
+//! `encodings()` is the one link nothing enforces — see `every_encoding_has_a_four_way_test`'s own doc
+//! comment below for the same statement at its point of use.
+//!
+//! THE UNARY LEG RUNS AT THE FIXED `MAX_FIELD_WIDTH` (64) it has always run at, while binary goes
+//! through `run_tm_fitted`. The asymmetry is DELIBERATE CONVENTION, not a correctness requirement —
+//! see `tm_leg`'s doc comment below for the full statement and its citation.
+//!
+//! Two things `tm_leg`'s doc does not cover, both about why UNARY in particular stays fixed rather than
+//! also being fitted (considered and rejected, so a future editor does not "fix" it): fitting unary
+//! would silently move every demo from a 64-cell bank to an 8-16-cell one, a LATERAL coverage change
+//! (fitted exercises narrow banks and the overflow boundary; fixed-64 exercises wide banks — neither
+//! dominates) to checks that were already green. And the width axis itself is not this file's job:
+//! `tm_width_equivalence.rs` and `tm_bank_invariant.rs` already own it, running `widths() x
+//! encodings_at(width)` deliberately across the full range; this file checks native agreement at one
+//! width per encoding, the same split core's `three_way_oracle.rs` uses.
+//!
+//! NATIVE'S DISTINCTIVE CAPABILITY, stated at the width it actually holds. Native compiles to real
+//! 64-bit machine registers and has no `MAX_FIELD_WIDTH` ceiling. That is a contrast with UNARY, not
+//! with the TM backend: a `w`-cell binary field holds `0..2^w`, so at 64 cells `Binary` covers the
+//! entire `u64` range. Both halves are now MEASURED rather than asserted in prose —
+//! `the_tm_reports_its_ceiling_on_the_same_demos` pins unary reporting `Overflow` on
+//! `BEYOND_FIELD_WIDTH_DEMOS` (the control), and `binary_runs_the_demos_unary_cannot_represent` pins
+//! binary running the same four and agreeing with the reference (measured: all four fit at width 16).
+//!
+//! PAST 2^64 THE BACKENDS DIVERGE BY DESIGN, and that is pinned rather than left unexercised — see
+//! `past_the_u64_ceiling_the_backends_diverge_by_design` and `SATURATION_DEMOS`. It cannot be an
+//! agreement test: the reference and native SATURATE to `u64::MAX` (`tm/asm.rs`'s
+//! `saturating_add`/`saturating_mul`), while the TM halts in its rule-less overflow guard
+//! (`tm/lower_tm.rs`'s `Builder::overflow`) at every width up to the ceiling. Both are deliberate.
 //!
 //! CAPS NOTE (Task 4/5 review): native's step accounting is coarse (it only ticks loop back-edges and
 //! calls, enough to guarantee termination, not to match `run_asm`'s per-instruction step count). Every
@@ -36,9 +68,10 @@ use redextape_core::desugar::desugar;
 use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, run_lambda};
 use redextape_core::parser::parse;
 use redextape_core::tm::{
-    AsmRun, DEFAULT_CAPS, LowerError, Program, TM_DEFAULT_CAPS, TmRun, Unary, decode_asm, decode_tape, defunc,
-    lower_asm, run_asm, run_tm,
+    AsmRun, Binary, DEFAULT_CAPS, Encoding, EncodingKind, LowerError, MAX_FIELD_WIDTH, Program, TM_DEFAULT_CAPS, TmRun,
+    Unary, decode_asm, decode_tape, defunc, lower_asm, run_asm, run_tm, run_tm_fitted,
 };
+use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 use redextape_native::{NativeRun, run_native};
 
@@ -63,21 +96,79 @@ fn lower_program(core: &Core) -> Result<Program, LowerError> {
     lower_asm(&defunced)
 }
 
-/// reference == λ == TM == native, guided by the reference value's type. All four must run to a value
-/// that decodes equal.
-fn assert_four_way(src: &str) {
+/// Every encoding this file's TM leg covers. THE single place that decides — the coverage guard
+/// (`every_encoding_has_a_four_way_test`) derives its expectation from here rather than from a second
+/// hard-coded list, because a guard that restates the list it is checking checks nothing.
+fn encodings() -> Vec<(&'static str, EncodingKind)> {
+    vec![("unary", EncodingKind::Unary), ("binary", EncodingKind::Binary)]
+}
+
+/// The `EncodingKind` that `encodings()` gives this name. This function never sees a TEST's name — it
+/// receives the encoding string `four_way_tests!` passes as `$enc` — so it panics only when that string
+/// is not a key in `encodings()`. It does NOT catch a generated test's function name drifting from what
+/// it actually runs (e.g. the macro's `..._binary => "unary"` swapped): that would still find a real
+/// entry in `encodings()` and pass, with a test named for one encoding silently running the other.
+fn encoding_named(name: &str) -> EncodingKind {
+    encodings()
+        .into_iter()
+        .find(|(n, _)| *n == name)
+        .unwrap_or_else(|| panic!("no encoding named `{name}` in `encodings()`"))
+        .1
+}
+
+/// Run the TM leg for `kind`, returning the outcome AND the encoding its tape must be DECODED with.
+///
+/// The two encodings run differently, but the asymmetry is a DELIBERATE CONVENTION plus this branch's
+/// additive-only constraint, NOT a correctness requirement. Unary runs at the fixed `MAX_FIELD_WIDTH`
+/// (64) that `Unary::default()` gives — the width this file's TM leg has always used, kept unchanged so
+/// that adding binary alters no assertion that was already green.
+///
+/// Binary goes through `run_tm_fitted`, but NOT because decode needs the fit width: both decoders are
+/// structural now, so a default-width (64) `Binary` would decode a fitted-at-16 tape correctly too —
+/// `a_tape_decodes_the_same_at_every_reader_width` (`redextape-core/src/tm.rs`) pins exactly that. The
+/// fitted form is kept because the width it settles on is worth naming (it is the number
+/// `binary_runs_the_demos_unary_cannot_represent` reports — all four of its demos fit at 16), because it
+/// keeps `at_width` on this file's executed path, and because it matches the convention core's
+/// `three_way_oracle.rs` already uses, so the two files do not drift.
+///
+/// So: do not "fix" the unary arm into a fitted one believing decode demands it, and do not read the
+/// binary arm as load-bearing for correctness — it is convention, not requirement.
+fn tm_leg(core: &Core, kind: EncodingKind) -> (TmRun, Box<dyn Encoding>) {
+    match kind {
+        EncodingKind::Unary => (run_tm(core, &Unary::default(), TM_DEFAULT_CAPS), Box::new(Unary::default())),
+        EncodingKind::Binary => {
+            let (run, width) = run_tm_fitted(core, &Binary::default(), TM_DEFAULT_CAPS);
+            // `width` is `None` in two cases: an unbounded encoding (not `Binary` — its
+            // `field_width()` is always `Some`), or a lowering failure (`run_tm_fitted` returns
+            // early with `(e, None)` before ever picking a width). In the second case `run` is
+            // already the error `TmRun` (`LowerError`/`TooLarge`), not `Ran`, so the width chosen
+            // here is never read for decoding — fall back to `Binary::default()`'s own width
+            // (`MAX_FIELD_WIDTH`) instead of panicking, and let the error flow to the caller.
+            (run, EncodingKind::Binary.at(width.unwrap_or(MAX_FIELD_WIDTH)))
+        }
+    }
+}
+
+/// reference == λ == TM(`kind`) == native, guided by the reference value's type. All four must run to
+/// a value that decodes equal.
+///
+/// Still genuinely FOUR-way after the per-encoding split, and that is not an accident of naming: each
+/// emitted test runs ONE encoding, so its name states its real arity. It is the FILE that now covers
+/// five legs, not any single test — see the module doc's "LEGS, not backends" note.
+fn assert_four_way(src: &str, kind: EncodingKind) {
     let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
     let core = core_of(src);
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
-    let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
+    let (tm, tm_enc) = tm_leg(&core, kind);
     let native = run_native(&core, DEFAULT_CAPS);
     match (lambda, tm, native) {
         (LambdaRun::Reduced(nf), TmRun::Ran { tapes }, NativeRun::Ran(outcome)) => {
             assert_eq!(decode(&nf, &reference), Some(reference.clone()), "reference vs λ disagree for: {src}");
             assert_eq!(
-                decode_tape(&tapes, &reference, &Unary::default()),
+                decode_tape(&tapes, &reference, &*tm_enc),
                 Some(reference.clone()),
-                "reference vs TM disagree for: {src}"
+                "reference vs {}-TM disagree for: {src}",
+                kind.name()
             );
             assert_eq!(
                 decode_asm(&outcome, &reference),
@@ -85,11 +176,10 @@ fn assert_four_way(src: &str) {
                 "reference vs native disagree for: {src}"
             );
         }
-        (l, t, n) => {
-            panic!(
-                "four-way oracle mismatch for {src}:\n  reference={reference:?}\n  lambda={l:?}\n  tm={t:?}\n  native={n:?}"
-            )
-        }
+        (l, t, n) => panic!(
+            "four-way oracle mismatch for {src} ({}):\n  reference={reference:?}\n  lambda={l:?}\n  tm={t:?}\n  native={n:?}",
+            kind.name()
+        ),
     }
 }
 
@@ -114,9 +204,10 @@ fn assert_native_matches_asm(src: &str) {
 }
 
 /// native == reference only (no TM leg — the TM's fixed-width UNARY tape cannot represent these
-/// values; the TM's `Binary` encoding could represent every value used below, since none reaches
-/// 2⁶⁴ — see the module doc's Task 17 correction). Native's distinctive capability: real 64-bit
-/// registers, no `MAX_FIELD_WIDTH` (64) ceiling at ANY encoding.
+/// values; the TM's `Binary` encoding could represent every value used below, since none reaches 2⁶⁴ —
+/// see `binary_runs_the_demos_unary_cannot_represent` and `the_tm_reports_its_ceiling_on_the_same_demos`
+/// below). Native's distinctive capability: real 64-bit registers, no `MAX_FIELD_WIDTH` (64) ceiling at
+/// ANY encoding.
 fn assert_native_matches_reference(src: &str) {
     let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
     let core = core_of(src);
@@ -302,15 +393,76 @@ const BEYOND_FIELD_WIDTH_DEMOS: &[&str] = &[
     "[100, 200, 300]",
 ];
 
+/// Values at or past 2⁶⁴ — the gap `past_the_u64_ceiling_the_backends_diverge_by_design` below
+/// exercises; before that test existed, nothing did.
+///
+/// IT CANNOT BE AN AGREEMENT TEST, and this must not be "fixed" into one. The backends diverge here BY
+/// DESIGN: the reference and native SATURATE (`tm/asm.rs`'s `saturating_add`/`saturating_mul`), while
+/// the TM halts in its rule-less overflow guard (`tm/lower_tm.rs`'s `Builder::overflow`) and never
+/// saturates at any width up to the 64-cell ceiling. Both behaviours are deliberate; they are simply
+/// different, and nothing recorded that in an executable form before this test.
+///
+/// Measured 2026-07-29: each of these gives reference `Nat(u64::MAX)`, native `Nat(u64::MAX)`, binary
+/// TM `Overflow` (having widened to 64), unary TM `Overflow`. The 20-digit literal parses with zero
+/// diagnostics, so these need no special construction.
+const SATURATION_DEMOS: &[&str] =
+    &["18446744073709551615 + 1", "let n = 18446744073709551615; n + 1", "4294967295 * 4294967295 * 4294967295"];
+
 /// Runtime-faulting programs: the reference faults (`RunError::Runtime`) and native reports a
 /// `NativeRun::Fault` — the shared "no value, but not a crash and not a cap" outcome.
 const FAULT_DEMOS: &[&str] = &["head(nil)", "tail(nil)"];
 
+/// Emits one `#[test]` per encoding — each running the WHOLE first-order suite under that encoding —
+/// and records what it emitted into `EMITTED` so the coverage guard below can compare against
+/// `encodings()` instead of a second hard-coded copy of it.
+///
+/// The axis is per-encoding rather than per-demo because the runner (cargo-nextest) schedules every
+/// test from every binary in one parallel pool: two encoding tests run concurrently, so adding the
+/// binary leg costs roughly nothing in wall-clock, whereas one test doing both legs would have made
+/// this file's single long pole twice as long.
+macro_rules! four_way_tests {
+    ($( $test:ident => $enc:expr ),* $(,)?) => {
+        $(
+            #[test]
+            fn $test() {
+                let kind = encoding_named($enc);
+                for src in FIRST_ORDER_DEMOS {
+                    assert_four_way(src, kind);
+                }
+            }
+        )*
+
+        /// Every encoding name the macro above actually emitted a test for.
+        const EMITTED: &[&str] = &[ $( $enc ),* ];
+    };
+}
+
+four_way_tests! {
+    four_way_oracle_on_the_first_order_suite_unary => "unary",
+    four_way_oracle_on_the_first_order_suite_binary => "binary",
+}
+
+/// The hazard this guards: the macro invocation above hard-codes which encodings get a test, while
+/// `encodings()` is the list everything else reads. Add a third encoding to `encodings()` and, without
+/// this guard, that encoding is covered by NOTHING while every remaining test still passes — the file
+/// gets faster and weaker at the same time. Deleting a generated test has the identical signature.
+///
+/// So: derive the expectation from `encodings()` AT RUNTIME and compare against `EMITTED`. Never
+/// hard-code the expected answer a second time, or this guard just restates the thing it checks.
+///
+/// What this does NOT catch: whether any generated test's BODY is correct. It proves only that every
+/// encoding is covered by SOME test; `assert_four_way` carries the actual assertions.
 #[test]
-fn four_way_oracle_on_the_first_order_suite() {
-    for src in FIRST_ORDER_DEMOS {
-        assert_four_way(src);
-    }
+fn every_encoding_has_a_four_way_test() {
+    let mut expected: Vec<&str> = encodings().into_iter().map(|(name, _)| name).collect();
+    let mut emitted: Vec<&str> = EMITTED.to_vec();
+    expected.sort_unstable();
+    emitted.sort_unstable();
+    assert_eq!(
+        emitted, expected,
+        "the tests `four_way_tests!` emits do not match `encodings()`; an encoding was added or \
+         removed, or a generated test was deleted, without updating the macro invocation"
+    );
 }
 
 #[test]
@@ -332,8 +484,10 @@ fn native_matches_asm_interp_on_lambda_limitation_demos() {
 /// NOT deleted by Task 17 (`tm-binary-encoding`), even though the encoding it contrasts against
 /// (`Unary`) is no longer the TM backend's only option: this still tests a REAL difference, just a
 /// smaller one than the doc comments used to claim. See `the_tm_reports_its_ceiling_on_the_same_demos`
-/// immediately below for the (now unary-scoped) contrast, and the module doc for the honest gap that
-/// remains — values `>= 2^64`, which nothing in this file exercises on the TM side either way.
+/// immediately below for the (now unary-scoped) contrast, and the module doc's "PAST 2^64" paragraph for
+/// the honest remaining gap — values `>= 2^64`, where the backends diverge by design rather than agree;
+/// `past_the_u64_ceiling_the_backends_diverge_by_design` and `SATURATION_DEMOS` now exercise exactly
+/// that, on the TM side, in this file.
 #[test]
 fn native_runs_beyond_field_width() {
     for src in BEYOND_FIELD_WIDTH_DEMOS {
@@ -365,6 +519,62 @@ fn the_tm_reports_its_ceiling_on_the_same_demos() {
     }
 }
 
+/// The OTHER half of the Task-17 correction, as a measured result rather than a doc comment. Every
+/// value in `BEYOND_FIELD_WIDTH_DEMOS` is « 2⁶⁴, so `Binary` represents all of them: it runs all four
+/// and agrees with the reference (and so, transitively, with native — `native_runs_beyond_field_width`
+/// above pins native against the same reference values).
+///
+/// Measured 2026-07-29: all four fit at width 16, including the heap list `[100, 200, 300]`.
+///
+/// Together with `the_tm_reports_its_ceiling_on_the_same_demos` (which MUST be kept — it is the
+/// control), this establishes as two measured results what the module doc previously only asserted in
+/// prose: the gap this file exhibits is "native vs. UNARY", not "native vs. the TM backend".
+#[test]
+fn binary_runs_the_demos_unary_cannot_represent() {
+    for src in BEYOND_FIELD_WIDTH_DEMOS {
+        let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
+        let core = core_of(src);
+        let (tm, enc) = tm_leg(&core, EncodingKind::Binary);
+        match tm {
+            TmRun::Ran { tapes } => assert_eq!(
+                decode_tape(&tapes, &reference, &*enc),
+                Some(reference.clone()),
+                "binary-TM vs reference disagree for: {src}"
+            ),
+            other => panic!("binary must RUN what unary cannot represent, got {other:?} for: {src}"),
+        }
+    }
+}
+
+/// Native's ceiling-free claim at the ONE place it is genuinely load-bearing, and the TM's refusal
+/// beside it. See `SATURATION_DEMOS` for why agreement is impossible here by construction.
+///
+/// The TM half loops over `encodings()` rather than naming `Binary`: this is a claim about the TM
+/// BACKEND, not about one encoding, so a third encoding must satisfy it too the day it is added.
+#[test]
+fn past_the_u64_ceiling_the_backends_diverge_by_design() {
+    for src in SATURATION_DEMOS {
+        let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
+        assert_eq!(reference, Value::Nat(u64::MAX), "these demos exist in order to saturate: {src}");
+        let core = core_of(src);
+        match run_native(&core, DEFAULT_CAPS) {
+            NativeRun::Ran(outcome) => assert_eq!(
+                decode_asm(&outcome, &reference),
+                Some(reference.clone()),
+                "native must saturate exactly as the reference does: {src}"
+            ),
+            other => panic!("native must run `{src}`, got {other:?}"),
+        }
+        for (name, kind) in encodings() {
+            let (tm, _) = tm_leg(&core, kind);
+            assert!(
+                matches!(tm, TmRun::Overflow),
+                "the {name} TM must REFUSE this, not saturate and not miscompile: {src} gave {tm:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn faults_diverge_on_native() {
     for src in FAULT_DEMOS {
@@ -381,6 +591,12 @@ fn faults_diverge_on_native() {
 /// reused (shape) from `redextape-core`'s `arb_tm_safe_expr` in `three_way_oracle.rs`. Unlike that
 /// generator native has NO `MAX_FIELD_WIDTH` bound, so leaves are widened to `0..1000` — native compiles
 /// to real 64-bit registers and never needs to stay under 64.
+///
+/// `arb_tm_mixed_range_expr` (below) is this generator's STRUCTURAL TWIN — same `prop_recursive(3, 8,
+/// 3, ..)` parameters and operator set, a different leaf strategy — and nothing enforces that they stay
+/// in lockstep; a future edit here (operator set, recursion parameters) can silently desync the twin.
+/// Filed as open in the roadmap's "What stays open" for this branch, not fixed: deduplicating would mean
+/// editing this pre-existing generator, which that branch's additive-only constraint forbade.
 fn arb_native_safe_expr() -> impl Strategy<Value = String> {
     let leaf = (0u64..1000).prop_map(|n| n.to_string());
     leaf.prop_recursive(3, 8, 3, |inner| {
@@ -419,6 +635,105 @@ proptest! {
                 }
             }
             (r, n) => prop_assert!(false, "native mismatch for {}:\n  reference={:?}\n  native={:?}", src, r, n),
+        }
+    }
+}
+
+/// Structurally identical to `arb_native_safe_expr` (same `prop_recursive(3, 8, 3, ..)` depth/size/branch
+/// parameters, same operator set — `+`, `-`, `>`-if, `==`-if, and the three-argument `if c > 0` form) but
+/// with a MIXED leaf: `prop_oneof!` over a small range unary can represent (`0..8`, reused verbatim from
+/// `redextape-core`'s `arb_tm_safe_expr` in `three_way_oracle.rs` — that generator uses these exact
+/// recursion parameters and its doc comment records a measured max value of 27 over 2M samples, well
+/// under the 64-cell ceiling) and the existing wide `0..1000` range, weighted 4:1 toward the small range.
+///
+/// `arb_native_safe_expr` itself is UNTOUCHED (`native_agrees_with_reference_and_asm_on_random_programs`
+/// depends on its pure `0..1000` leaves); this is a separate generator for the TM-legs proptest only.
+///
+/// Do not read `0..8` as "sitting at 64 minus a little room" — it is nowhere near the ceiling. The
+/// headroom is the point: `+` on two leaves can exceed a bound either leaf alone satisfies, so the small
+/// range has to stay far enough below 64 that a handful of small leaves summed together (this
+/// generator's recursion can sum several) still lands under it. `0..8` is the same range
+/// `arb_tm_safe_expr` already proved safe under IDENTICAL recursion parameters, so reusing it verbatim
+/// carries that proof over rather than re-deriving a new bound.
+fn arb_tm_mixed_range_expr() -> impl Strategy<Value = String> {
+    let small = 0u64..8;
+    let wide = 0u64..1000;
+    let leaf = prop_oneof![4 => small, 1 => wide].prop_map(|n| n.to_string());
+    leaf.prop_recursive(3, 8, 3, |inner| {
+        prop_oneof![
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("({a} + {b})")),
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("({a} - {b})")),
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("if {a} > {b} {{ 1 }} else {{ 0 }}")),
+            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("if {a} == {b} {{ 1 }} else {{ 0 }}")),
+            (inner.clone(), inner.clone(), inner).prop_map(|(c, a, b)| format!("if {c} > 0 {{ {a} }} else {{ {b} }}")),
+        ]
+    })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+
+    /// The TM legs over `arb_tm_mixed_range_expr` — and they are ASYMMETRIC BY NECESSITY, which is
+    /// the whole reason this test has its own doc comment.
+    ///
+    /// THE NAME SAYS "AGREES" FOR BINARY AND "NEVER WRONG" FOR UNARY BECAUSE THOSE ARE DIFFERENT
+    /// CLAIMS, not a stylistic choice: binary is asserted to decode equal to the reference on every
+    /// case it runs, full agreement; unary is asserted only to never decode to a WRONG value when it
+    /// runs, and is allowed to refuse (`Overflow`) instead. No improvement to unary's fire rate collapses
+    /// that gap — "never wrong when it runs" stays strictly weaker than "agrees" no matter how often it
+    /// runs — so the name states the asymmetric claim directly rather than relying on a reader to find
+    /// it in the comment below.
+    ///
+    /// The generator mixes a small range unary can represent with the wide `0..1000` range a 64-cell
+    /// UNARY field cannot. So:
+    ///
+    ///   * BINARY is a FULL leg: it must run, and decode equal to the reference.
+    ///   * UNARY is asserted NEVER WRONG, which is strictly weaker: `Ran` must decode equal to the
+    ///     reference; `Overflow` is permitted and still expected on a real fraction of cases (any leaf
+    ///     drawn from the wide range, or an unlucky sum of small ones, can still overflow).
+    ///
+    /// DO NOT READ THE NAME AS SYMMETRIC. The unary half does not claim unary computes these programs.
+    /// It claims unary never SILENTLY computes them wrongly — a `Ran` that decodes to the wrong value
+    /// is caught, a refusal is not a failure. That is weaker than the binary leg and stronger than the
+    /// nothing that was here before, and it is stated rather than left for a reader to infer from the
+    /// code.
+    ///
+    /// MEASURED FIRE RATE (2026-07-29): with the old `arb_native_safe_expr` (pure `0..1000` leaves),
+    /// unary's `Ran` branch fired on ~0.6% of cases (11 of 1920, over 30 independent 64-case runs, and
+    /// silent on 21 of those 30 runs). Retargeted at `arb_tm_mixed_range_expr`, instrumented the same
+    /// way (a temporary `eprintln!` on every `Ran`) and run 30 independent times (64 cases each, 1920
+    /// cases total, no fixed seed): 1159 `Ran` hits (~60.4% of cases), firing on all 30 of the 30 runs
+    /// (every run saw between 29 and 45 hits; none saw zero). So: the unary half now exercises its
+    /// assertion on a clear majority of cases, on every run, rather than being live only in aggregate.
+    #[test]
+    fn binary_tm_agrees_while_unary_tm_is_never_wrong_on_random_programs(src in arb_tm_mixed_range_expr()) {
+        let reference = run(&src);
+        prop_assume!(reference.is_ok());
+        let rv = reference.unwrap();
+        let (prog, ds) = parse(&src);
+        prop_assume!(ds.is_empty());
+        let core = desugar(&prog.unwrap());
+
+        let (btm, benc) = tm_leg(&core, EncodingKind::Binary);
+        match btm {
+            TmRun::Ran { tapes } => prop_assert_eq!(
+                decode_tape(&tapes, &rv, &*benc),
+                Some(rv.clone()),
+                "binary-TM vs reference disagree: {}",
+                src
+            ),
+            other => prop_assert!(false, "binary must run {}: {:?}", src, other),
+        }
+
+        // The weaker half. A refusal is fine; a WRONG ANSWER is not.
+        let (utm, uenc) = tm_leg(&core, EncodingKind::Unary);
+        if let TmRun::Ran { tapes } = utm {
+            prop_assert_eq!(
+                decode_tape(&tapes, &rv, &*uenc),
+                Some(rv.clone()),
+                "unary-TM RAN and produced the WRONG answer: {}",
+                src
+            );
         }
     }
 }

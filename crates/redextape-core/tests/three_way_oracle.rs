@@ -26,9 +26,9 @@
 //! `None` for every single demo, not just `100 * 100` -- measured directly, not assumed.
 //!
 //! Both decoders are structural now (see `binary.rs`, "Reading a tape back"), so `run_tm` paired with a
-//! default instance would work here too; `tm.rs`'s `a_default_encoding_decodes_a_tape_fitted_to_a_
-//! narrower_width` is what pins that. The fitted form stays below because the width is worth naming in
-//! a failure message and because it keeps `at_width` on this file's executed path.
+//! default instance would work here too; `tm.rs`'s `a_tape_decodes_the_same_at_every_reader_width` is
+//! what pins that. The fitted form stays below because the width is worth naming in a failure message
+//! and because it keeps `at_width` on this file's executed path.
 
 use proptest::prelude::*;
 use redextape_core::desugar::desugar;

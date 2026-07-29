@@ -428,12 +428,22 @@ produce. The oracle validates every combination.
      reach the same one — correct about UNIQUENESS, and silent about REACHABILITY, which is the separate
      standardization result. The docs were quiet exactly where correct prior knowledge points the wrong
      way, and the symptom (a step-cap timeout) misdiagnoses as "cap too low".
-  2. **No reader-facing file records that the encodings collide.** `true` and `nil` are both
-     `Abs(Abs(Var 1))`; `false` and `church 0` are both `Abs(Abs(Var 0))` — so a result type is needed in
-     PRINCIPLE, not as a convenience. The fact is documented, in `lambda/decode.rs`'s module doc, but
-     that file is correctly off-limits to a foreign reader (it describes the very strategy such a reader
-     must rederive), and neither `syntax.rs` nor `encode.rs` carries it. An independent implementer
-     rediscovers it by hitting it. One doc line in `encode.rs`.
+  2. **DONE (2026-07-29). No reader-facing file records that the encodings collide.** `true` and `nil`
+     are both `Abs(Abs(Var 1))`; `false` and `church 0` are both `Abs(Abs(Var 0))` — so a result type is
+     needed in PRINCIPLE, not as a convenience. The fact was documented only in `lambda/decode.rs`'s
+     module doc, and that file is correctly off-limits to a foreign reader (it describes the very
+     strategy such a reader must rederive), so the fact was invisible to the one reader it mattered to.
+     **Shipped:** a paragraph in `encode.rs`'s module doc — the collision, both colliding pairs, and that
+     it propagates through structure (a one-element Scott list holding either collides too, so the
+     problem is not confined to the leaves) — plus a NEW paragraph added to `syntax.rs`'s module doc, the
+     file where a foreign reader actually meets the problem, stating for the first time in that file that
+     this text form carries no result type and pointing back to `encode.rs` for the full statement. (The
+     phrase itself did not already live in `syntax.rs`, or anywhere under `lambda/`, before this branch —
+     it previously appeared only in `tests/lambda_foreign_reader.rs` and a prior branch's planning docs;
+     this entry understated what shipped as much as it overstated it.) The one
+     non-obvious decision: the new paragraph deliberately does **not** cite `decode.rs`, even though
+     that is where the collision was first written down — pointing a foreign reader at the file they are
+     told not to open would reintroduce the exact gap this item exists to close.
   3. **DONE (2026-07-28). `term.rs`'s `shift` WRAPPED on a negative result** — `(i64::from(*k) + d) as u32`
      silently produced a huge index instead of failing. Reachable only on an open term, which the compiler
      never produces, so it was latent rather than live; but the undocumented case had silent corruption
@@ -902,13 +912,132 @@ produce. The oracle validates every combination.
        honest remaining gap (values `>= 2^64`) is not one this language can even express. The test
        (`native_runs_beyond_field_width`) was kept, not deleted: it still tests a real difference (native
        vs. unary), just a narrower one than advertised.
+
+       **ANNOTATION, not a rewrite (item 4 below contradicts this):** "not one this language can even
+       express" reads as "there is nothing to test at this boundary" — false. Item 4's `SATURATION_DEMOS`
+       are exactly such programs (`18446744073709551615 + 1`, a 20-digit literal that parses with no
+       diagnostics), and they are meaningful, exercised, and pin a real divergence: reference/native
+       SATURATE to `u64::MAX`, the TM halts in its rule-less overflow guard. What is true is narrower —
+       no `Value::Nat` ever HOLDS a number `>= 2^64` (saturation forbids it) — but a program can
+       absolutely reach for that boundary and get a well-defined, testable answer. Left as written per
+       this repo's annotate-don't-drift convention; see item 4 for the corrected, sharper statement.
+  4. **DONE (2026-07-29). `Binary` as a fourth PARTICIPATING leg in the native oracle** (branch
+     `binary-oracle-leg-and-collision-doc`). Item 3 above corrected the doc claims; the suite itself
+     still only ran unary. Five sites in `crates/redextape-native/tests/native_oracle.rs`: (1) the
+     four-way suite split into one `#[test]` per encoding via a `four_way_tests!` macro that also
+     records `EMITTED`; (2) `every_encoding_has_a_four_way_test`, a guard deriving its expectation from
+     `encodings()` at RUNTIME and comparing it against `EMITTED` — it catches drift BETWEEN THOSE TWO
+     LISTS (a generated test deleted, or a macro invocation left behind `encodings()`), not drift between
+     `encodings()` and the set of encodings that actually exists: `tm_leg`'s exhaustive match (no
+     wildcard arm) is the real compile-time forcing function that brings a developer adding a third
+     `EncodingKind` to this file at all, but nothing forces them to also extend `encodings()` once here,
+     so an encoding never registered there stays covered by nothing regardless of this guard; (3)
+     `binary_runs_the_demos_unary_cannot_represent`, turning a doc-comment claim into a measured result
+     while the unary `Overflow` control stays untouched; (4) a NEW proptest
+     (`binary_tm_agrees_while_unary_tm_is_never_wrong_on_random_programs`) over a NEW mixed-range
+     generator (`arb_tm_mixed_range_expr`) adds the TM legs — the pre-existing wide-range proptest
+     (`native_agrees_with_reference_and_asm_on_random_programs`) was deliberately left untouched, not
+     extended; (5) `past_the_u64_ceiling_the_backends_diverge_by_design`. Plus a doc-coherence pass. 7
+     tests → 12.
+
+     **The wall-clock result, which was the design bet.** Baseline 16.786s, of which ONE test
+     (`four_way_oracle_on_the_first_order_suite`) was 16.784s — the file's entire long pole. Splitting
+     per encoding lets `cargo-nextest` run the two legs CONCURRENTLY instead of sequentially in one test.
+     Four independent measurements of the split suite exist on this tree, agreeing on the shape but not
+     the decimals: the controller, right after the Task 2 split (9 tests) — `…_binary` 16.240s, `…_unary`
+     17.045s, total 17.045s; Task 7's own pasted verification run — `…_binary` 16.223s, `…_unary`
+     17.001s, total 17.002s; Task 8's full-gate run — `…_binary` 16.721s, `…_unary` 17.505s, total
+     17.505s; and the figure this entry originally stated as THE result — `…_binary` 16.165s, `…_unary`
+     16.938s, total 16.939s — cited to "see Verification below" even though that section pastes the
+     16.223s/17.001s run, and which happened to be the lowest of the four, quoted to a millisecond
+     (caught by review). Read honestly this is a RANGE across runs, not a single measurement: the suite
+     totals roughly **16.9-17.5s**, with the two encoding legs each landing around 16-17.5s and running
+     CONCURRENTLY, so the total tracks whichever leg is slower that run rather than their sum. What is
+     solid across all four runs: adding an entire second encoding cost a fraction of a second, never
+     close to doubling the file's long pole, because a second test doing the same work in parallel is
+     close to free — one test doing both legs would have doubled it instead.
+
+     **Finding the item did not anticipate: the ≥2⁶⁴ gap cannot be closed by an agreement test.** The
+     reference and native SATURATE to `u64::MAX` (`tm/asm.rs`'s `saturating_add`/`saturating_mul`); the
+     TM halts in its rule-less overflow guard (`tm/lower_tm.rs`'s `Builder::overflow`) and never
+     saturates. Both deliberate. So it is pinned as a DIVERGENCE (`past_the_u64_ceiling_the_backends_
+     diverge_by_design` + `SATURATION_DEMOS`), with the reason recorded in the test so nobody later
+     "fixes" it by making the TM saturate.
+
+     **The branch's own defect, and the lesson.** The plan and spec justified fitting binary
+     (`run_tm_fitted` rather than `Binary::default()`) by claiming its DECODE needs the fitted width.
+     **That was false.** Both decoders are structural; `a_tape_decodes_the_same_at_every_reader_width`
+     (`redextape-core/src/tm.rs:316`) pins that a default-width `Binary` decodes a fitted-at-16 tape.
+     Caught by sabotage: swapping the fitted encoding for `&Binary::default()` was expected to fail and
+     PASSED. Provenance: core's `three_way_oracle.rs` records this as *"That was once REQUIRED"* and
+     retracts it two sentences later; the plan author extracted the obsolete half and propagated it as
+     live justification because it READS like a correctness constraint. It reached five places across
+     spec and plan and into committed code (fixed: `fbc970f` in code, `1fec082` in the documents).
+     **Three independent defenses had to fire to catch it** — the sabotage that disproved it, a reviewer
+     that flagged the sabotage as exercising only one branch of the assertion (which is what prompted the
+     second sabotage that found the false claim), and a Task 6 implementer who read the plan's draft
+     module-doc text against an explicit "do not undo this correction" warning in the same dispatch and
+     refused to transcribe the draft. Any one alone and it ships. (Binary itself stays fitted anyway —
+     the width it settles on is worth naming, and it matches the convention core's `three_way_oracle.rs`
+     already uses — so the asymmetry with unary is deliberate convention plus this branch's
+     additive-only constraint, never a correctness requirement.)
+
+     **Why unary was not also fitted, to close the asymmetry the other way.** Considered and rejected.
+     Unary's demos are all small enough to fit at width 8-16, so moving unary from its fixed
+     `MAX_FIELD_WIDTH` (64) to `run_tm_fitted` would have silently moved every demo from a 64-cell bank
+     down to an 8-16-cell one — a LATERAL coverage change, not a strict improvement: fixed-64 exercises
+     wide banks, fitted exercises narrow banks and sits closer to the overflow boundary, and neither
+     dominates the other. Applying that change here means reshaping an already-green check's coverage
+     without being asked to, on a branch whose entire subject is checks that under-deliver on what they
+     claim — not a place to add a new instance of that failure mode. The width axis itself is also not
+     this file's job: `tm_width_equivalence.rs` and `tm_bank_invariant.rs` already own it, running
+     `widths() x encodings_at(width)` deliberately across the full range; `native_oracle.rs` checks native
+     agreement at one width per encoding, not a second width sweep. So unary stays fixed-64 by choice,
+     and that choice is separate from — and in addition to — the additive-only constraint above.
+
+     **A measurement that changed the work.** The proptest's unary half was initially asserted "never
+     wrong" over a generator drawing leaves `0..1000`, which unary cannot represent. Measured fire rate:
+     11/1920 cases (0.6%), silent on ~70% of runs. A new generator (`arb_tm_mixed_range_expr`,
+     `prop_oneof![4 => 0..8, 1 => 0..1000]`, otherwise structurally identical to the existing
+     `arb_native_safe_expr`) raised it to 60.4% (1159/1920), live on 30/30 runs; the sabotage went from
+     luck-dependent to reddening 5/5 independent runs. The test was also RENAMED to
+     `binary_tm_agrees_while_unary_tm_is_never_wrong_on_random_programs`, because raising the fire rate
+     does not change the semantic asymmetry — binary AGREES, unary is merely NEVER-CAUGHT-WRONG — so a
+     name using "agree" for both would keep overclaiming.
+
+     **Also fixed in passing** (commit `cbec82a`): core's `three_way_oracle.rs` cited its pinning test as
+     `a_default_encoding_decodes_a_tape_fitted_to_a_narrower_width`, which never existed under that name.
+     A doc citing a guard nobody can grep reads as an absent guard.
   **Honest bound, stated because every item above earns one:** all of it is measured on the oracle demo
-  corpus (`FIRST_ORDER_DEMOS`/`LAMBDA_LIMITATION_DEMOS`), built for backend feature coverage, not workload
-  representativeness — the step survey's own recurring caveat applies here too. **What stays open:**
-  arbitrary-precision (variable-length) fields (every widening write would have to shift the bank,
+  corpus (`FIRST_ORDER_DEMOS`/`LAMBDA_LIMITATION_DEMOS`/`BEYOND_FIELD_WIDTH_DEMOS`), built for backend
+  feature coverage, not workload representativeness — the step survey's own recurring caveat applies here
+  too. **What stays open:**
+  arbitrary-precision (variable-length) fields — every widening write would have to shift the bank,
   invalidating the fixed-window in-place-write invariant every gadget rests on — a large separate slice,
-  deferred not rejected) and `Binary` as a fourth PARTICIPATING leg in the native oracle (its doc claims
-  were corrected; the suite itself was not reparameterized to actually run both encodings).
+  deferred not rejected. Also open, filed honestly rather than done: `arb_native_safe_expr` and
+  `arb_tm_mixed_range_expr` are copy-paste duplicates differing only in the leaf strategy, and nothing
+  structurally enforces that they stay in lockstep — a future edit to one's operator set or recursion
+  parameters could silently desync them. Deduplicating would have required editing the pre-existing
+  generator, which this branch's additive-only constraint forbade.
+
+  Two more, filed after the whole-branch review rather than left in a review transcript:
+
+  1. **No structural link between `EncodingKind` and the six files that each keep a local encodings
+     list.** `native_oracle.rs`'s `every_encoding_has_a_four_way_test` catches drift between
+     `encodings()` and `EMITTED` — two lists inside one file — and its doc now says so precisely. What
+     nothing catches is a developer adding a third `EncodingKind`, satisfying the compile-forced
+     `tm_leg` match arm, and never extending `encodings()`: that encoding is covered by nothing and
+     every guard still passes. `native_oracle.rs` is the BEST-defended of the six (`tm_bank_invariant.rs`,
+     `tm_width_equivalence.rs`, `tm_heap_stack_shape.rs`, `tm_static_delimiter_safety.rs`,
+     `three_way_oracle.rs` construct `Box<dyn Encoding>` from concrete types and get no compile error at
+     all). Closing it properly means an `EncodingKind::ALL` in core plus an exhaustiveness round-trip
+     each list is checked against — one slice covering all six, not a per-file patch.
+  2. **The proptest's 60.4% unary fire rate is load-bearing evidence protected only by prose.** That
+     number is the whole justification that the unary half is not near-vacuous — the generator was
+     changed precisely because 0.6% meant it asserted nothing on ~70% of runs. Nothing fails if a future
+     weight or leaf-range edit walks it back; the doc comment would simply become false. A deterministic
+     fixed-seed sampling test asserting the `Ran` fraction exceeds a floor is cheap and would make the
+     claim self-defending.
 
 - **TM bank-safety: the four items left on the table (2026-07-26).** The per-program field-width slice
   built a verification ladder for the register bank — enumeration of write sites, guard-rule position,
