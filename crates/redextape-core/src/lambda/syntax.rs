@@ -1,6 +1,12 @@
-//! The human-readable, runnable lambda text form: `var`, `\x. e` (also `λ`), application by
-//! juxtaposition (left-assoc), parens. Parsing resolves names to de Bruijn indices; printing
-//! regenerates readable names from binder hints. Printer and parser round-trip (§7.2).
+//! The human-readable, runnable lambda text form: `var`, `λx. e`, application by juxtaposition
+//! (left-assoc), parens. Parsing resolves names to de Bruijn indices; printing regenerates readable
+//! names from binder hints. Printer and parser round-trip (§7.2).
+//!
+//! BINDER SPELLING IS ASYMMETRIC ON PURPOSE. The parser accepts `\` and `λ` interchangeably; the
+//! printer emits only `λ`. So `λ` is the canonical form — what a golden file, a demo, or a CLI dump
+//! shows — while `\` stays a permanent input alias, because it is what a keyboard types. This costs
+//! nothing to keep: `\` is one more arm on the same match, and the round-trip property is unaffected
+//! either way (printed output uses `λ`, which the parser reads back identically).
 //!
 //! IDENTIFIERS. An identifier starts with an ASCII letter, `_`, or `$`, and continues with those plus
 //! ASCII digits. `$` is there because the lowering names its store-passing binder `$store`
@@ -175,7 +181,8 @@ fn is_ident_continue(c: char) -> bool {
     c == '_' || c == '$' || c.is_ascii_alphanumeric()
 }
 
-/// Print a term with readable names, freshening on shadow collision, minimal parens.
+/// Print a term with readable names, freshening on shadow collision, minimal parens. Binders print as
+/// `λ`, never `\` — see the module doc on why input accepts both and output picks one.
 pub fn print_lambda(t: &LambdaTerm) -> String {
     let mut names: Vec<String> = Vec::new();
     print_term(t, &mut names)
@@ -192,7 +199,7 @@ fn print_term(t: &LambdaTerm, names: &mut Vec<String>) -> String {
             names.push(name.clone());
             let inner = print_term(body, names);
             names.pop();
-            format!("\\{name}. {inner}")
+            format!("λ{name}. {inner}")
         }
         LambdaTerm::App(f, a) => {
             let fs = print_app_fn(f, names);
@@ -252,6 +259,21 @@ mod tests {
     #[test]
     fn accepts_unicode_lambda() {
         assert_eq!(parse_ok("λx. x"), abs("x", var(0)));
+    }
+
+    /// The printer emits `λ` and the parser accepts both spellings. This is the ONLY test that pins
+    /// either half: every other printing test is a round-trip or idempotency property, and those hold
+    /// just as well if the printer emits `\` — so a silent revert to `\`, or a parser that quietly
+    /// dropped the ASCII alias, would leave the whole suite green without this.
+    #[test]
+    fn prints_lambda_but_accepts_both_binder_spellings() {
+        let printed = print_lambda(&abs("x", var(0)));
+        assert_eq!(printed, "λx. x");
+        assert!(!printed.contains('\\'), "the printer must not emit a backslash binder: {printed:?}");
+        // `\` stays a permanent input alias and denotes exactly the same term.
+        assert_eq!(parse_ok("\\x. x"), parse_ok("λx. x"));
+        // Mixed spellings in one term are fine — the two chars are interchangeable on input.
+        assert_eq!(parse_ok("\\a. λb. a b"), parse_ok("λa. λb. a b"));
     }
 
     #[test]

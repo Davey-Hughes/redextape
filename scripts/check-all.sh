@@ -72,13 +72,31 @@ fi
 # llvm-sys locates LLVM via a version-specific variable. Honor an existing setting; otherwise probe
 # the usual locations. If broadening the supported LLVM range later, derive the variable NAME from
 # the selected inkwell feature rather than hardcoding 221.
+#
+# `/usr` is in the list because that is where most Linux distributions put LLVM (Arch, Fedora, and
+# openSUSE all ship `/usr/bin/llvm-config`); without it this gate could not run its LLVM configs on
+# those systems at all, and reported "no LLVM 22 found" on a machine with LLVM 22 installed.
+#
+# THE VERSION CHECK IS THE POINT, not decoration. Three of the four entries are UNVERSIONED
+# (`/opt/homebrew/opt/llvm`, `/usr/local/opt/llvm`, `/usr`) — only `/usr/lib/llvm-22` names 22 in the
+# path. Accepting an unversioned prefix on the strength of `llvm-config` merely EXISTING is how a box
+# with, say, LLVM 18 at `/usr` gets handed to llvm-sys as if it were 22: the failure then surfaces as
+# an llvm-sys build error naming a version nobody asked for, far from the line that chose it. Probing
+# for the right LLVM and probing for any LLVM are different questions, and this asks the first.
+llvm_probe_paths="/opt/homebrew/opt/llvm /usr/lib/llvm-22 /usr/local/opt/llvm /usr"
+# An explicit LLVM_SYS_221_PREFIX is deliberately NOT version-checked: setting it is a statement of
+# intent, and a wrong one already fails loudly in llvm-sys. The guard below is for the GUESS.
 if [ -z "${LLVM_SYS_221_PREFIX:-}" ]; then
-  for p in /opt/homebrew/opt/llvm /usr/lib/llvm-22 /usr/local/opt/llvm; do
-    if [ -x "$p/bin/llvm-config" ]; then export LLVM_SYS_221_PREFIX="$p"; break; fi
+  for p in $llvm_probe_paths; do
+    [ -x "$p/bin/llvm-config" ] || continue
+    [ "$("$p/bin/llvm-config" --version 2>/dev/null | cut -d. -f1)" = 22 ] || continue
+    export LLVM_SYS_221_PREFIX="$p"; break
   done
 fi
 if [ -z "${LLVM_SYS_221_PREFIX:-}" ]; then
-  echo "error: no LLVM 22 found; set LLVM_SYS_221_PREFIX or pass --no-llvm" >&2; exit 1
+  echo "error: no LLVM 22 found; set LLVM_SYS_221_PREFIX or pass --no-llvm" >&2
+  echo "  probed (needs bin/llvm-config reporting major version 22): $llvm_probe_paths" >&2
+  exit 1
 fi
 echo "==> using LLVM at $LLVM_SYS_221_PREFIX"
 

@@ -243,7 +243,7 @@ jobs:
     if: needs.detect.outputs.has_web == 'true'
     runs-on: docker
     container:
-      image: node:24-bookworm          # node + git present; JS actions work
+      image: node:26-bookworm          # node + git present; JS actions work
     defaults:
       run:
         working-directory: web
@@ -257,7 +257,7 @@ jobs:
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup show
           rustup target add wasm32-unknown-unknown
-          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz \
+          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
             | tar xzf - --strip-components=1 -C /usr/local/bin --wildcards '*/wasm-pack'
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:

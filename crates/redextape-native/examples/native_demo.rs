@@ -23,7 +23,7 @@ use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::run;
 use redextape_core::tm::{DEFAULT_CAPS, decode_asm};
-use redextape_core::value::Value;
+use redextape_core::value::format_value;
 use redextape_native::{NativeRun, run_native};
 
 // The header rows pass column-aligned string literals as width args on purpose.
@@ -113,7 +113,7 @@ fn report(src: &str) {
         NativeRun::Ran(o) => {
             let decoded = decode_asm(o, &reference);
             let ok = decoded.as_ref() == Some(&reference);
-            (decoded.as_ref().map_or("<none>".to_string(), fmt_value), ok)
+            (decoded.as_ref().map_or("<none>".to_string(), format_value), ok)
         }
         other => (format!("{other:?}"), false),
     };
@@ -124,23 +124,4 @@ fn report(src: &str) {
 fn truncate(s: &str, width: usize) -> String {
     let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() > width { format!("{}…", flat.chars().take(width - 1).collect::<String>()) } else { flat }
-}
-
-/// Pretty-print a runtime value (lists flattened, no `Debug` noise).
-fn fmt_value(v: &Value) -> String {
-    match v {
-        Value::Nat(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Nil => "[]".to_string(),
-        Value::Cons(..) => {
-            let mut items = Vec::new();
-            let mut cur = v;
-            while let Value::Cons(h, t) = cur {
-                items.push(fmt_value(h));
-                cur = &**t;
-            }
-            format!("[{}]", items.join(", "))
-        }
-        other => format!("{other:?}"),
-    }
 }

@@ -7,7 +7,7 @@ use redextape_core::desugar::desugar;
 use redextape_core::lambda::{MAX_REDUCTION_STEPS, decode, lower, parse_lambda, print_lambda, reduce_trace};
 use redextape_core::parser::parse;
 use redextape_core::run;
-use redextape_core::value::Value;
+use redextape_core::value::format_value;
 
 // The header rows pass column-aligned string literals as `{:<56}` args on purpose.
 #[allow(clippy::print_literal)]
@@ -43,7 +43,7 @@ fn main() {
             "   {:<56} {:>7}  {:>8}  {}",
             shown,
             trace.steps.len(),
-            fmt_value(&reference),
+            format_value(&reference),
             if agree { "✓ agree" } else { "✗ DISAGREE" },
         );
     }
@@ -77,23 +77,4 @@ fn main() {
     println!("   re-parses identically: {}   (diagnostics: {})", reparsed.as_ref() == Some(&church_two), diags.len(),);
 
     println!("\nAll of the above is the data the future web UI (Plan 5) will render.\n");
-}
-
-/// Pretty-print a runtime value (lists flattened, no `Debug` noise).
-fn fmt_value(v: &Value) -> String {
-    match v {
-        Value::Nat(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Nil => "[]".to_string(),
-        Value::Cons(..) => {
-            let mut items = Vec::new();
-            let mut cur = v;
-            while let Value::Cons(h, t) = cur {
-                items.push(fmt_value(h));
-                cur = &**t;
-            }
-            format!("[{}]", items.join(", "))
-        }
-        other => format!("{other:?}"),
-    }
 }

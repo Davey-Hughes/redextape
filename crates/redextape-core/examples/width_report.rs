@@ -28,7 +28,7 @@ use redextape_core::tm::{
     Binary, Encoding, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Program, REG, TAPES, TM_DEFAULT_CAPS, TmRun, TmStatus, Unary,
     WORK, decode_tape, defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts, simulate_final,
 };
-use redextape_core::value::Value;
+use redextape_core::value::format_value;
 
 /// The corpus, kept in step with `tests/tm_bank_invariant.rs`.
 const CORPUS: &[(&str, &str)] = &[
@@ -126,21 +126,13 @@ fn fitted(src: &str, family: &dyn Encoding) -> (Option<usize>, String) {
     let dec_enc = family.at_width(width.unwrap_or(MAX_FIELD_WIDTH));
     let shown = match (&outcome, &expected) {
         (TmRun::Ran { tapes }, Some(v)) => match decode_tape(tapes, v, dec_enc.as_ref()) {
-            Some(got) if got == *v => fmt_value(&got),
+            Some(got) if got == *v => format_value(&got),
             other => format!("MISMATCH {other:?}"),
         },
         (TmRun::Overflow, _) => "overflow".to_string(),
         (other, _) => format!("{other:?}"),
     };
     (width, shown)
-}
-
-fn fmt_value(v: &Value) -> String {
-    match v {
-        Value::Nat(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        other => format!("{other:?}"),
-    }
 }
 
 /// One encoding's measurement for one program at its own fitted width: the width, total steps, the
@@ -168,7 +160,7 @@ fn measure(src: &str, family: &dyn Encoding) -> Measured {
             let expected = run(src).ok();
             let value = match &expected {
                 Some(v) => match decode_tape(&tapes, v, enc.as_ref()) {
-                    Some(got) if got == *v => fmt_value(&got),
+                    Some(got) if got == *v => format_value(&got),
                     other => format!("MISMATCH {other:?}"),
                 },
                 None => "no-reference".to_string(),

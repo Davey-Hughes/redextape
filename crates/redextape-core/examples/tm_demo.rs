@@ -19,7 +19,7 @@ use redextape_core::tm::{
     LowerError, Machine, REG, TM_DEFAULT_CAPS, TmRun, Unary, decode_tape, defunc, lower_asm, lower_tm, print_asm,
     run_tm,
 };
-use redextape_core::value::Value;
+use redextape_core::value::{Value, format_value};
 
 // The header rows pass column-aligned string literals as width args on purpose.
 #[allow(clippy::print_literal)]
@@ -114,7 +114,7 @@ fn main() {
             println!(
                 "\n   → decodes to {}   (reference says {}, they agree ✓)",
                 fmt_opt(&value),
-                fmt_value(&Value::Nat(7))
+                format_value(&Value::Nat(7))
             );
         }
         other => println!("   → unexpected: {other:?}"),
@@ -160,7 +160,7 @@ fn report(src: &str) {
     println!(
         "   {:<52} {:>9}  {:>7}  {:>10}  {}",
         truncate(src, 52),
-        fmt_value(&reference),
+        format_value(&reference),
         beta_steps.map_or("—".to_string(), |n| n.to_string()),
         states.map_or("—".to_string(), |n| n.to_string()),
         if lambda_ok && tm_ok { "✓ all agree" } else { "✗ DISAGREE" },
@@ -177,7 +177,7 @@ fn report_tm_only(src: &str) {
     println!(
         "   {:<64} {:>9}  {}",
         truncate(src, 64),
-        fmt_value(&reference),
+        format_value(&reference),
         if lambda_refuses && tm_ok { "✓ agree  (λ: refuses to lower)" } else { "✗ DISAGREE" },
     );
 }
@@ -200,24 +200,5 @@ fn truncate(s: &str, width: usize) -> String {
 }
 
 fn fmt_opt(v: &Option<Value>) -> String {
-    v.as_ref().map_or("<none>".to_string(), fmt_value)
-}
-
-/// Pretty-print a runtime value (lists flattened, no `Debug` noise).
-fn fmt_value(v: &Value) -> String {
-    match v {
-        Value::Nat(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Nil => "[]".to_string(),
-        Value::Cons(..) => {
-            let mut items = Vec::new();
-            let mut cur = v;
-            while let Value::Cons(h, t) = cur {
-                items.push(fmt_value(h));
-                cur = &**t;
-            }
-            format!("[{}]", items.join(", "))
-        }
-        other => format!("{other:?}"),
-    }
+    v.as_ref().map_or("<none>".to_string(), format_value)
 }

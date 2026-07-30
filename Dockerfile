@@ -15,7 +15,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
     && rustup target add wasm32-unknown-unknown \
-    && curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz \
+    && curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
        | tar xzf - --strip-components=1 -C /usr/local/bin --wildcards '*/wasm-pack'
 # Manifests + sources only; nothing is read at runtime.
 COPY Cargo.toml Cargo.lock ./
@@ -23,7 +23,7 @@ COPY crates/ ./crates/
 RUN wasm-pack build crates/redextape-wasm --release --target web --out-dir /app/pkg
 
 ########################  2. Web bundle (Vite) → /app/web/dist  ################################
-FROM node:24-slim AS web
+FROM node:26-slim AS web
 WORKDIR /app/web
 # Install deps against the lockfile first so this layer caches across source-only changes.
 COPY web/package.json web/package-lock.json ./

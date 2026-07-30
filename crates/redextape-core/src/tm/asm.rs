@@ -93,29 +93,38 @@ fn bin_mnemonic(op: BinOp) -> &'static str {
     }
 }
 
-fn instr_str(i: &Instr) -> String {
+/// One instruction split into its mnemonic and its operand text (empty when it takes none).
+/// The two are joined in ONE place — `instr_str` — so the mnemonic/operand separator is stated
+/// once rather than in every arm; a newly added instruction cannot get its own spacing wrong.
+fn instr_parts(i: &Instr) -> (&'static str, String) {
     match i {
-        Instr::Li(rd, n) => format!("li {}, #{n}", reg_str(*rd)),
-        Instr::Mov(rd, rs) => format!("mov {}, {}", reg_str(*rd), reg_str(*rs)),
+        Instr::Li(rd, n) => ("li", format!("{}, #{n}", reg_str(*rd))),
+        Instr::Mov(rd, rs) => ("mov", format!("{}, {}", reg_str(*rd), reg_str(*rs))),
         Instr::Bin(op, rd, ra, rb) => {
-            format!("{} {}, {}, {}", bin_mnemonic(*op), reg_str(*rd), reg_str(*ra), reg_str(*rb))
+            (bin_mnemonic(*op), format!("{}, {}, {}", reg_str(*rd), reg_str(*ra), reg_str(*rb)))
         }
-        Instr::Jz(r, l) => format!("jz {}, {l}", reg_str(*r)),
-        Instr::Jmp(l) => format!("jmp {l}"),
-        Instr::Call(l) => format!("call {l}"),
-        Instr::Ret => "ret".to_string(),
-        Instr::Halt => "halt".to_string(),
-        Instr::Nil(rd) => format!("nil {}", reg_str(*rd)),
-        Instr::Cons(rd, rh, rt) => {
-            format!("cons {}, {}, {}", reg_str(*rd), reg_str(*rh), reg_str(*rt))
-        }
-        Instr::Head(rd, rl) => format!("head {}, {}", reg_str(*rd), reg_str(*rl)),
-        Instr::Tail(rd, rl) => format!("tail {}, {}", reg_str(*rd), reg_str(*rl)),
-        Instr::IsEmpty(rd, rl) => format!("isempty {}, {}", reg_str(*rd), reg_str(*rl)),
-        Instr::Box(rd, rv) => format!("box {}, {}", reg_str(*rd), reg_str(*rv)),
-        Instr::BoxGet(rd, rb) => format!("box_get {}, {}", reg_str(*rd), reg_str(*rb)),
-        Instr::BoxSet(rb, rv) => format!("box_set {}, {}", reg_str(*rb), reg_str(*rv)),
+        Instr::Jz(r, l) => ("jz", format!("{}, {l}", reg_str(*r))),
+        Instr::Jmp(l) => ("jmp", l.clone()),
+        Instr::Call(l) => ("call", l.clone()),
+        Instr::Ret => ("ret", String::new()),
+        Instr::Halt => ("halt", String::new()),
+        Instr::Nil(rd) => ("nil", reg_str(*rd)),
+        Instr::Cons(rd, rh, rt) => ("cons", format!("{}, {}, {}", reg_str(*rd), reg_str(*rh), reg_str(*rt))),
+        Instr::Head(rd, rl) => ("head", format!("{}, {}", reg_str(*rd), reg_str(*rl))),
+        Instr::Tail(rd, rl) => ("tail", format!("{}, {}", reg_str(*rd), reg_str(*rl))),
+        Instr::IsEmpty(rd, rl) => ("isempty", format!("{}, {}", reg_str(*rd), reg_str(*rl))),
+        Instr::Box(rd, rv) => ("box", format!("{}, {}", reg_str(*rd), reg_str(*rv))),
+        Instr::BoxGet(rd, rb) => ("box_get", format!("{}, {}", reg_str(*rd), reg_str(*rb))),
+        Instr::BoxSet(rb, rv) => ("box_set", format!("{}, {}", reg_str(*rb), reg_str(*rv))),
     }
+}
+
+/// Mnemonic, then a TAB, then the operands — so operands line up in a column whatever the mnemonic's
+/// width, without the printer having to know the longest one. An operand-less instruction (`ret`,
+/// `halt`) prints bare: a trailing tab would be invisible trailing whitespace in the listing.
+fn instr_str(i: &Instr) -> String {
+    let (mnemonic, operands) = instr_parts(i);
+    if operands.is_empty() { mnemonic.to_string() } else { format!("{mnemonic}\t{operands}") }
 }
 
 /// Render a `Program` as the readable assembly listing (labels at column 0, instructions indented).
@@ -693,16 +702,20 @@ mod tests {
             ],
             labels: vec![("sum".to_string(), 3), ("rec".to_string(), 6)],
         };
-        let expected = "    li a0, #5
-    call sum
-    halt
-sum:
-    mov r0, a0
-    cmpeq r1, r0, r0
-    jz r1, rec
-rec:
-    ret
-";
+        // Written with explicit `\t` rather than a literal tab: the separator is the thing under test,
+        // and a literal tab here is indistinguishable from spaces on screen and liable to be
+        // "helpfully" re-indented by an editor.
+        let expected = concat!(
+            "    li\ta0, #5\n",
+            "    call\tsum\n",
+            "    halt\n",
+            "sum:\n",
+            "    mov\tr0, a0\n",
+            "    cmpeq\tr1, r0, r0\n",
+            "    jz\tr1, rec\n",
+            "rec:\n",
+            "    ret\n",
+        );
         assert_eq!(print_asm(&prog), expected);
     }
 
@@ -714,15 +727,16 @@ rec:
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         let core = desugar(&prog.unwrap());
         let asm = print_asm(&lower_asm(&core).expect("lowers"));
-        let expected = "    li r0, #1
-    mov r2, r0
-    mov r3, r0
-    add r1, r2, r3
-    mov r4, r1
-    li r5, #3
-    mul rr, r4, r5
-    halt
-";
+        let expected = concat!(
+            "    li\tr0, #1\n",
+            "    mov\tr2, r0\n",
+            "    mov\tr3, r0\n",
+            "    add\tr1, r2, r3\n",
+            "    mov\tr4, r1\n",
+            "    li\tr5, #3\n",
+            "    mul\trr, r4, r5\n",
+            "    halt\n",
+        );
         assert_eq!(asm, expected);
     }
 
