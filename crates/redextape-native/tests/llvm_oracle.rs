@@ -29,6 +29,7 @@ use redextape_core::tm::{DEFAULT_CAPS, decode_asm};
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 use redextape_native::{Codegen, NativeRun, OptLevel, run_native_with};
+use redextape_test_support::arb_expr_over;
 
 /// Every level `OptLevel` offers, the size-oriented ones (`Os`/`Oz`) included, swept rather than
 /// spot-checking `O3` and hoping.
@@ -139,21 +140,13 @@ fn llvm_faults_and_caps_match() {
     }
 }
 
-/// A small first-order expression generator (arithmetic/comparison/if only; shape borrowed from
-/// `native_oracle.rs`'s `arb_native_safe_expr`) for a randomized cross-backend differential. Kept
-/// deliberately SMALL: each generated program here compiles SEVEN times (Cranelift once, plus LLVM at
-/// all six opt levels), unlike the single-backend suite it's borrowed from.
+/// A small first-order expression generator (arithmetic/comparison/if only; shape supplied by
+/// `redextape-test-support`'s `arb_expr_over`, shared with `native_oracle.rs`'s generators rather than
+/// copied from them) for a randomized cross-backend differential. Kept deliberately SMALL: each
+/// generated program here compiles SEVEN times (Cranelift once, plus LLVM at all six opt levels),
+/// unlike the single-backend suite whose generator this one shares.
 fn arb_first_order_expr() -> impl Strategy<Value = String> {
-    let leaf = (0u64..1000).prop_map(|n| n.to_string());
-    leaf.prop_recursive(3, 8, 3, |inner| {
-        prop_oneof![
-            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("({a} + {b})")),
-            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("({a} - {b})")),
-            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("if {a} > {b} {{ 1 }} else {{ 0 }}")),
-            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("if {a} == {b} {{ 1 }} else {{ 0 }}")),
-            (inner.clone(), inner.clone(), inner).prop_map(|(c, a, b)| format!("if {c} > 0 {{ {a} }} else {{ {b} }}")),
-        ]
-    })
+    arb_expr_over((0u64..1000).prop_map(|n| n.to_string()))
 }
 
 proptest! {

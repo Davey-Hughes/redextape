@@ -49,7 +49,7 @@ fn described(src: &str, kind: EncodingKind) -> DescribedRun {
 #[test]
 fn the_headers_recipe_reproduces_its_literal_tapes() {
     for &src in CORPUS {
-        for kind in [EncodingKind::Unary, EncodingKind::Binary] {
+        for &kind in EncodingKind::ALL {
             let d = described(src, kind);
             let file = print_tm_with(&d.machine, &d.header);
             let (pm, h, ds) = parse_tm_full(&file);
@@ -219,7 +219,7 @@ fn sabotaging_the_header_is_caught_by_the_end_to_end_decode() {
 #[test]
 fn emit_then_run_round_trip_matches_the_reference() {
     for &src in CORPUS {
-        for kind in [EncodingKind::Unary, EncodingKind::Binary] {
+        for &kind in EncodingKind::ALL {
             let (core, ty) = core_and_ty(src);
             let expected =
                 redextape_core::interp::eval(&core).unwrap_or_else(|e| panic!("reference failed for {src}: {e:?}"));
@@ -252,7 +252,7 @@ fn emit_then_run_round_trip_matches_the_reference() {
 #[test]
 fn a_described_run_computes_what_an_ordinary_run_computes() {
     for &src in CORPUS {
-        for kind in [EncodingKind::Unary, EncodingKind::Binary] {
+        for &kind in EncodingKind::ALL {
             let (core, ty) = core_and_ty(src);
             // `interp::eval` is this project's reference interpreter for the mini-language `Core` AST
             // built above from a fixed test corpus — not a dynamic/untrusted code-execution primitive.

@@ -63,7 +63,9 @@ fn arb_machine(tapes: usize, n_states: u32) -> impl Strategy<Value = Machine> {
 }
 
 fn arb_encoding() -> impl Strategy<Value = EncodingKind> {
-    prop_oneof![Just(EncodingKind::Unary), Just(EncodingKind::Binary)]
+    // Derived from `EncodingKind::ALL`, not written out: a hand-listed strategy would keep generating
+    // only the encodings someone remembered, and the generator is exactly where that goes unnoticed.
+    proptest::sample::select(EncodingKind::ALL)
 }
 
 fn arb_result_ty() -> impl Strategy<Value = Ty> {

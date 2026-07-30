@@ -20,15 +20,15 @@ use redextape_core::parser::parse;
 mod common;
 use common::{box_tape_is_well_formed, heap_tape_is_well_formed, reg_bank_is_well_formed};
 use redextape_core::tm::{
-    AT, BLANK, Binary, Builder, Encoding, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Move, REG, RuleSpec, SEP, TAPES,
-    TM_DEFAULT_CAPS, Tape, TmCaps, TmRun, TmStatus, Unary, WORK, ZERO, defunc, lower_asm, lower_tm_guarded, n_slots_of,
-    run_tm_at, simulate_watched,
+    AT, BLANK, Binary, Builder, Encoding, EncodingKind, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Move, REG, RuleSpec,
+    SEP, TAPES, TM_DEFAULT_CAPS, Tape, TmCaps, TmRun, TmStatus, Unary, WORK, ZERO, defunc, lower_asm, lower_tm_guarded,
+    n_slots_of, run_tm_at, simulate_watched,
 };
 
-/// Both encodings this layer must cover, at a given width. `Binary` has its own bank with its own write
-/// sites, so a corpus that only ever lowers to `Unary` verifies nothing about it.
+/// EVERY encoding. Each has its own bank with its own write sites, so a corpus that only exercises
+/// one encoding verifies nothing about the others.
 fn encodings_at(width: usize) -> Vec<(&'static str, Box<dyn Encoding>)> {
-    vec![("unary", Box::new(Unary::at(width))), ("binary", Box::new(Binary::at(width)))]
+    EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(width))).collect()
 }
 
 /// A representative spread of the survey corpus: arithmetic, monus, comparison, `if`, `let`/assign,

@@ -35,16 +35,15 @@
 
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{BLANK, BOX, Binary, Encoding, MARK, REG, SEP, Unary, defunc, lower_asm, lower_tm_guarded};
+use redextape_core::tm::{BLANK, BOX, Encoding, EncodingKind, MARK, REG, SEP, defunc, lower_asm, lower_tm_guarded};
 
 mod common;
 use common::{assert_delimiter_safe, unsafe_rules};
 
-/// Both encodings this rung must cover. `Binary` has its own bank with its own write sites (REG, BOX
-/// and — under `Binary` specifically — WORK, since `Binary::init_work` is non-empty), so a corpus that
-/// only ever lowers to `Unary` verifies nothing about them.
+/// EVERY encoding. Each has its own bank with its own write sites (REG, BOX, and for some encodings
+/// like `Binary`, also WORK), so a corpus that only exercises one encoding verifies nothing about the others.
 fn encodings_at(width: usize) -> Vec<(&'static str, Box<dyn Encoding>)> {
-    vec![("unary", Box::new(Unary::at(width))), ("binary", Box::new(Binary::at(width)))]
+    EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(width))).collect()
 }
 
 /// The corpus, spanning every gadget family. Kept in step with `tm_bank_invariant.rs`.

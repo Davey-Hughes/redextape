@@ -18,25 +18,39 @@
 //! extraction of `FIRST_ORDER_DEMOS` (by `CARGO_MANIFEST_DIR`-relative path, not by module name) for no
 //! gain, so the filename/doc mismatch is a deliberate decision, not an oversight.
 //!
-//! DISCOVERY (Task 14), SINCE RESOLVED: every binary leg below runs via `run_tm_fitted`, not `run_tm`,
-//! and decodes with `Binary::at(width)` at the WIDTH THE FIT ACTUALLY SETTLED ON. That was once
-//! REQUIRED. `Binary::decode_nat`/`parse_heap_cells` were width-STRICT (they required a field to close
-//! exactly `self.width` cells later) where `Unary`'s content-driven decode scans to the next `#` and so
-//! works at any width, and decoding a fitted-at-16 binary tape with a 64-wide `Binary` silently returned
-//! `None` for every single demo, not just `100 * 100` -- measured directly, not assumed.
+//! DECODE IS STRUCTURAL AT EVERY WIDTH, UNDER BOTH ENCODINGS. A `Binary` instantiated at any width reads
+//! a tape laid out at any other (`binary.rs`, "Reading a tape back"); `tm.rs`'s
+//! `a_tape_decodes_the_same_at_every_reader_width` pins exactly that. So `run_tm` paired with a default
+//! instance would work here too, and NOTHING below depends on the fitted width for correctness.
 //!
-//! Both decoders are structural now (see `binary.rs`, "Reading a tape back"), so `run_tm` paired with a
-//! default instance would work here too; `tm.rs`'s `a_tape_decodes_the_same_at_every_reader_width` is
-//! what pins that. The fitted form stays below because the width is worth naming in a failure message
-//! and because it keeps `at_width` on this file's executed path.
+//! The binary legs nonetheless run via `run_tm_fitted` and decode with `Binary::at(width)`, for two
+//! reasons that are both conveniences: the width the fit settles on is worth naming in a failure
+//! message, and it keeps `at_width` on this file's executed path. CONVENTION, NOT REQUIREMENT — do not
+//! cite this file as evidence that a fitted decode is necessary.
+//!
+//! (Historical, stated in the past tense deliberately. Decode WAS once width-strict: `Binary::decode_nat`
+//! and `parse_heap_cells` required a field to close exactly `self.width` cells later, where `Unary`'s
+//! content-driven decode scanned to the next `#` and so worked at any width; a fitted-at-16 binary tape
+//! read with a 64-wide `Binary` returned `None` for every demo, measured directly rather than assumed.
+//! That stopped being true when both decoders became structural. This note is subordinate to the
+//! statement above, and phrased so it cannot be quoted as current fact, BECAUSE IT REPEATEDLY WAS: the
+//! obsolete half of the older wording — which led with "that was once REQUIRED" and put the retraction
+//! in a separate paragraph — was copied into other files as a live correctness constraint seven times
+//! across two branches before anyone checked it against `binary.rs`. Any sentence anywhere in this tree
+//! claiming that binary decode needs the fitted width describes a version of this code that no longer
+//! exists.)
 
 use proptest::prelude::*;
 use redextape_core::desugar::desugar;
 use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, run_lambda};
 use redextape_core::parser::parse;
-use redextape_core::tm::{Binary, Encoding, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary, decode_tape, run_tm, run_tm_fitted};
+use redextape_core::tm::{
+    Binary, Encoding, EncodingKind, MAX_FIELD_WIDTH, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary, decode_tape, run_tm,
+    run_tm_fitted,
+};
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
+use redextape_test_support::arb_expr_over;
 
 /// reference == λ == unary-TM == binary-TM, guided by the reference value's type. All four must run
 /// to a value that decodes equal.
@@ -460,27 +474,23 @@ fn latent_traps_agree_reference_and_tm_while_lambda_refuses() {
 }
 
 /// A first-order expression generator whose value — AND every intermediate — stays under MAX_FIELD_WIDTH
-/// (64) (the `depth=3` recursion cap plus value-non-growing ops keep it there; measured max 27 over 2M
-/// samples), so the TM's fixed-width unary fields never overflow. Leaves are `< 8` and the node budget
-/// keeps the total leaf-sum small; it emits only value-non-growing ops: `+` (bounded by the leaf-sum),
-/// monus `-` (shrinks), comparisons and `if` (yield 0/1 or select one branch). It deliberately OMITS `*`
-/// (blows values up) and value-reusing `let` (`let q = v; q + q` doubles) — the curated demos cover
-/// `*`/`let`/`while`/calls/lists; this property stresses the arithmetic / comparison / if structure
-/// three ways. Every generated program terminates to a value (no loops, no functions, no faults), so
-/// the value arm always fires. SAFETY LEVER: it is `depth=3` (`prop_recursive`'s first argument, the
-/// recursion-depth cap), not `desired_size` (the second argument), that bounds the worst case — a
-/// future editor raising the leaf range (`0u64..8`) must keep the depth cap to preserve this bound.
+/// (64), so the TM's fixed-width unary fields never overflow. This function only supplies the LEAF
+/// range (`< 8`); the recursion cap and the arm set that make the bound hold both live in
+/// `redextape-test-support`'s `arb_expr_over`, which this function calls — see that function's doc for
+/// where the safety lever actually is. Summarized here because it is why this generator is safe to use
+/// on the TM at all: the `depth=3` recursion cap plus value-non-growing ops keep every value under the
+/// bound (measured max 27 over 2M samples); the node budget keeps the total leaf-sum small; and the arm
+/// set emits only value-non-growing ops — `+` (bounded by the leaf-sum), monus `-` (shrinks),
+/// comparisons and `if` (yield 0/1 or select one branch) — deliberately OMITTING `*` (blows values up)
+/// and value-reusing `let` (`let q = v; q + q` doubles); the curated demos cover `*`/`let`/`while`/
+/// calls/lists, so this property stresses the arithmetic / comparison / if structure three ways. Every
+/// generated program terminates to a value (no loops, no functions, no faults), so the value arm always
+/// fires. SAFETY LEVER: it is `depth=3` (`arb_expr_over`'s `prop_recursive` first argument, the
+/// recursion-depth cap — NOT set here), not `desired_size` (the second argument), that bounds the worst
+/// case — a future editor raising the leaf range below (`0u64..8`) must keep `arb_expr_over`'s depth cap
+/// to preserve this bound.
 fn arb_tm_safe_expr() -> impl Strategy<Value = String> {
-    let leaf = (0u64..8).prop_map(|n| n.to_string());
-    leaf.prop_recursive(3, 8, 3, |inner| {
-        prop_oneof![
-            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("({a} + {b})")),
-            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("({a} - {b})")),
-            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("if {a} > {b} {{ 1 }} else {{ 0 }}")),
-            (inner.clone(), inner.clone()).prop_map(|(a, b)| format!("if {a} == {b} {{ 1 }} else {{ 0 }}")),
-            (inner.clone(), inner.clone(), inner).prop_map(|(c, a, b)| format!("if {c} > 0 {{ {a} }} else {{ {b} }}")),
-        ]
-    })
+    arb_expr_over((0u64..8).prop_map(|n| n.to_string()))
 }
 
 proptest! {
@@ -848,12 +858,15 @@ fn assert_equiv(lhs: &str, rhs: &str) -> Result<(), TestCaseError> {
     match (&rl, &rr) {
         (Ok(vl), Ok(vr)) => {
             prop_assert_eq!(vl, vr, "law violated on the reference:\n  {} = {:?}\n  {} = {:?}", lhs, vl, rhs, vr);
-            // BOTH encodings. A law is a property of the pipeline, not of one representation, so a
+            // EVERY encoding. A law is a property of the pipeline, not of one representation, so a
             // law that held under unary and broke under binary would be exactly the kind of defect
             // this file exists to catch — and until now these ~14 law proptests ran unary only.
-            for (name, enc) in
-                [("unary", &Unary::default() as &dyn Encoding), ("binary", &Binary::default() as &dyn Encoding)]
-            {
+            // `at(MAX_FIELD_WIDTH)`, not a default: identical to `{Unary,Binary}::default()` today, and
+            // stated explicitly so a future encoding whose default differs cannot silently re-width this
+            // test.
+            let encs: Vec<(&'static str, Box<dyn Encoding>)> =
+                EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(MAX_FIELD_WIDTH))).collect();
+            for (name, enc) in encs.iter().map(|(n, e)| (*n, e.as_ref())) {
                 let (tl, tr) = (tm_val_with(lhs, enc), tm_val_with(rhs, enc));
                 prop_assert_eq!(tl.as_ref(), Some(vl), "{}-TM violates the law (lhs): {}", name, lhs);
                 prop_assert_eq!(tr.as_ref(), Some(vr), "{}-TM violates the law (rhs): {}", name, rhs);

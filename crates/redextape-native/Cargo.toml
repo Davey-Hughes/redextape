@@ -22,6 +22,7 @@ inkwell = { version = "0.9", optional = true, features = ["llvm22-1"] }
 
 [dev-dependencies]
 proptest = "1"
+redextape-test-support = { path = "../redextape-test-support" }
 
 [lints]
 workspace = true

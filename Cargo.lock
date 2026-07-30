@@ -604,6 +604,7 @@ name = "redextape-core"
 version = "0.0.0"
 dependencies = [
  "proptest",
+ "redextape-test-support",
 ]
 
 [[package]]
@@ -620,6 +621,7 @@ dependencies = [
  "proptest",
  "redextape-core",
  "redextape-native-rt",
+ "redextape-test-support",
 ]
 
 [[package]]
@@ -627,6 +629,13 @@ name = "redextape-native-rt"
 version = "0.0.0"
 dependencies = [
  "redextape-core",
+]
+
+[[package]]
+name = "redextape-test-support"
+version = "0.0.0"
+dependencies = [
+ "proptest",
 ]
 
 [[package]]

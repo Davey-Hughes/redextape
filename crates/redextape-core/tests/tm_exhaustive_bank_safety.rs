@@ -22,7 +22,7 @@ use redextape_core::tm::Encoding;
 mod common;
 use common::{reg_bank_is_well_formed, unsafe_rules};
 use redextape_core::tm::{
-    BOX, Binary, Instr, Program, REG, Reg, TAPES, Tape, TmCaps, TmStatus, Unary, WORK, lower_tm_guarded, n_slots_of,
+    BOX, EncodingKind, Instr, Program, REG, Reg, TAPES, Tape, TmCaps, TmStatus, WORK, lower_tm_guarded, n_slots_of,
     parse_tm, print_tm, simulate_watched,
 };
 
@@ -50,33 +50,40 @@ const UNARY_WIDTHS: &[usize] = &[2, 3, 4, 5];
 /// overflow-is-common regime. Widths 1-3 hold {0..1}, {0..3} and {0..7}, which is the analogue.
 const BINARY_WIDTHS: &[usize] = &[1, 2, 3];
 
-/// The two encodings this sweep covers, paired with the widths chosen for THEIR regime. A single
-/// shared `WIDTHS` list would mean the same cell count for both, but "narrow enough that overflow is
-/// common" is a property of the value RANGE (`width` for unary, `2^width` for binary), not of the cell
-/// count — see `UNARY_WIDTHS`/`BINARY_WIDTHS`.
-fn sweep_targets() -> [(&'static str, &'static [usize]); 2] {
-    [("unary", UNARY_WIDTHS), ("binary", BINARY_WIDTHS)]
+/// The width sweep for one `EncodingKind`, chosen for THAT encoding's overflow REGIME rather than a
+/// shared cell count — see `UNARY_WIDTHS`/`BINARY_WIDTHS`. "Narrow enough that overflow is common" is a
+/// property of the value RANGE (`width` for unary, `2^width` for binary), which is exactly what differs
+/// between encodings, so there is no width list a new encoding could inherit: the VALUES here are
+/// irreducibly manual, and whoever adds a variant to `EncodingKind` has to pick them deliberately.
+///
+/// WILDCARD-FREE on purpose. That manual step used to be enforced by a runtime test
+/// (`every_encoding_has_a_sweep_target`, since deleted — see this test file's history) that could only
+/// ever fail *after* a new encoding already compiled with no widths chosen for it. A missing match arm
+/// here is a COMPILE ERROR instead, which is strictly stronger and needs no separate guard to fail loudly.
+fn widths_for(kind: EncodingKind) -> &'static [usize] {
+    match kind {
+        EncodingKind::Unary => UNARY_WIDTHS,
+        EncodingKind::Binary => BINARY_WIDTHS,
+    }
 }
 
-/// Build the named encoding at `width`. The one place that maps a sweep target's name to a concrete
-/// `Encoding`, so every other function can stay generic over `&dyn Encoding`.
-fn encoding_named(name: &str, width: usize) -> Box<dyn Encoding> {
-    match name {
-        "binary" => Box::new(Binary::at(width)),
-        "unary" => Box::new(Unary::at(width)),
-        other => panic!("unknown sweep target `{other}`"),
-    }
+/// Every `EncodingKind`, paired with its width sweep. Derived from `EncodingKind::ALL` through
+/// `widths_for`, so the pairing itself cannot omit an encoding — only the width VALUES in `widths_for`
+/// are hand-chosen, not the enumeration of which encodings get swept.
+fn sweep_targets() -> Vec<(EncodingKind, &'static [usize])> {
+    EncodingKind::ALL.iter().map(|&kind| (kind, widths_for(kind))).collect()
 }
 
 /// The number of distinct values a `width`-cell field can hold, per encoding: `width` for unary (the
 /// bound `v < width` is strict), `2^width` for binary (`v < 2^width` — see `Binary::fits`). Neither
 /// formula is on the `Encoding` trait (`field_width`'s own doc says the cell count is "not directly a
 /// value bound, since what a `width`-cell field can hold is encoding-specific"), so the sweep has to
-/// know each one itself, in exactly this one place.
-fn capacity(name: &str, width: usize) -> u64 {
-    match name {
-        "binary" => 1u64 << width,
-        _ => width as u64,
+/// know each one itself, in exactly this one place — WILDCARD-FREE, so a new encoding cannot silently
+/// fall back to unary's formula the way a `_ => width as u64` arm once let it.
+fn capacity(kind: EncodingKind, width: usize) -> u64 {
+    match kind {
+        EncodingKind::Unary => width as u64,
+        EncodingKind::Binary => 1u64 << width,
     }
 }
 
@@ -91,12 +98,12 @@ fn literals_for(capacity: u64) -> Vec<u64> {
     v
 }
 
-/// Every instruction in the alphabet, at a given `(encoding name, width)`. `Jz`/`Jmp`/`Call` target the
+/// Every instruction in the alphabet, at a given `(encoding kind, width)`. `Jz`/`Jmp`/`Call` target the
 /// single label at index 0, which is enough to close a loop.
-fn alphabet(name: &str, width: usize) -> Vec<Instr> {
+fn alphabet(kind: EncodingKind, width: usize) -> Vec<Instr> {
     let mut out = Vec::new();
     for &d in REGS {
-        for &n in &literals_for(capacity(name, width)) {
+        for &n in &literals_for(capacity(kind, width)) {
             out.push(Instr::Li(d, n));
         }
         out.push(Instr::Nil(d));
@@ -196,13 +203,13 @@ const FAST_CAPS: TmCaps = TmCaps { steps: 2_000, cells: 2_000 };
 /// edit that shrinks the alphabet — dropping an instruction, deduping a literal away — would otherwise
 /// reduce coverage silently while every sweep stayed green.
 fn expected_pair_count() -> usize {
-    sweep_targets().iter().map(|&(name, widths)| widths.iter().map(|&w| alphabet(name, w).len()).sum::<usize>()).sum()
+    sweep_targets().iter().map(|&(kind, widths)| widths.iter().map(|&w| alphabet(kind, w).len()).sum::<usize>()).sum()
 }
 
-/// All length-1 programs, over every width, for one named encoding. Fast enough for the default tier,
+/// All length-1 programs, over every width, for one `EncodingKind`. Fast enough for the default tier,
 /// and it is the sweep that covers every INSTRUCTION at every boundary literal at least once.
-fn length_one_programs(name: &str, width: usize) -> Vec<Program> {
-    alphabet(name, width).into_iter().map(|i| Program { code: vec![i], labels: vec![("L".to_string(), 0)] }).collect()
+fn length_one_programs(kind: EncodingKind, width: usize) -> Vec<Program> {
+    alphabet(kind, width).into_iter().map(|i| Program { code: vec![i], labels: vec![("L".to_string(), 0)] }).collect()
 }
 
 /// The sweep's widths are chosen for a REGIME — overflow being the common case, not a rare one — and
@@ -210,18 +217,30 @@ fn length_one_programs(name: &str, width: usize) -> Vec<Program> {
 /// {0..4}; a binary one holds {0..31}. Copying unary's numbers to binary would quietly move the sweep
 /// out of the regime it was designed for while looking identical in the source.
 ///
-/// This test does not check a machine. It checks that the constants still describe what their comment
-/// claims, which is the failure mode this suite keeps finding in itself.
+/// Iterates `EncodingKind::ALL` through `widths_for`, WILDCARD-FREE, so "for each encoding" in this
+/// test's name is true by construction — a whole-tree sabotage that adds a third encoding either lands
+/// a regime check for it here or fails to compile, rather than passing this test having checked two of
+/// three kinds. This test does not check a machine. It checks that the constants still describe what
+/// their comment claims, which is the failure mode this suite keeps finding in itself.
 #[test]
 fn the_swept_widths_cover_the_overflow_regime_for_each_encoding() {
-    for &w in UNARY_WIDTHS {
-        assert!(w <= 5, "unary width {w} holds values < {w}, too wide for the overflow regime");
+    for &kind in EncodingKind::ALL {
+        let widths = widths_for(kind);
+        assert!(!widths.is_empty(), "{kind:?}'s width sweep must not be silently empty");
+        match kind {
+            EncodingKind::Unary => {
+                for &w in widths {
+                    assert!(w <= 5, "unary width {w} holds values < {w}, too wide for the overflow regime");
+                }
+            }
+            EncodingKind::Binary => {
+                for &w in widths {
+                    let max = 1u64 << w;
+                    assert!(max <= 32, "binary width {w} holds values < {max}, too wide for the overflow regime");
+                }
+            }
+        }
     }
-    for &w in BINARY_WIDTHS {
-        let max = 1u64 << w;
-        assert!(max <= 32, "binary width {w} holds values < {max}, too wide for the overflow regime");
-    }
-    assert!(!BINARY_WIDTHS.is_empty(), "the binary sweep must not be silently empty");
 }
 
 // ================================================================================================
@@ -235,13 +254,14 @@ fn the_swept_widths_cover_the_overflow_regime_for_each_encoding() {
 fn measure_enumeration_cost() {
     let caps = TmCaps { steps: 20_000, cells: 20_000 };
     println!("\n  encoding | width | alphabet | length-1 programs | checked | total steps");
-    for (name, widths) in sweep_targets() {
+    for (kind, widths) in sweep_targets() {
+        let name = kind.name();
         for &width in widths {
-            let alpha = alphabet(name, width).len();
-            let programs = length_one_programs(name, width);
+            let alpha = alphabet(kind, width).len();
+            let programs = length_one_programs(kind, width);
             let mut total_steps = 0u64;
             for p in &programs {
-                let enc = encoding_named(name, width);
+                let enc = kind.at(width);
                 match check(p, enc.as_ref(), caps) {
                     Ok(s) => total_steps += s,
                     Err(why) => panic!("length-1 program `{}` at width {width} ({name}): {why}", describe(p)),
@@ -254,7 +274,7 @@ fn measure_enumeration_cost() {
             );
         }
     }
-    let alpha = alphabet("unary", 4).len();
+    let alpha = alphabet(EncodingKind::Unary, 4).len();
     println!("\n  alphabet size at width 4 (unary): {alpha}");
     println!("  length-2 enumeration would be {} programs per width", alpha * alpha);
     println!("  length-3 enumeration would be {} programs per width", (alpha as u64).pow(3));
@@ -268,23 +288,34 @@ fn measure_enumeration_cost() {
 /// corrupt the bank by itself; a length-2 one can corrupt it through a state the first instruction
 /// left behind, which is the whole class of defect that head-position reasoning gets wrong.
 ///
-/// Measured cost, not estimated: the length-1 sweep runs 892 pairs in 0.46s release (~0.52 ms/pair),
-/// so this is ~200k pairs in roughly two minutes. That measurement is why the spec's original plan to
-/// sample length 2 was dropped in favour of enumerating it outright.
+/// Cost, MEASURED DIRECTLY (2026-07-30): **305s in release**, a little over five minutes.
+///
+/// The figure here previously read "roughly two minutes" and called itself "measured, not estimated".
+/// Half of that was true. The 892-pair length-1 sweep at 0.46s release (~0.52 ms/pair) was measured;
+/// ~200k pairs at that rate EXTRAPOLATES to ~104s. The extrapolation assumed per-pair cost is flat
+/// across program lengths, and it is not — a length-2 program executes more TM steps than a length-1
+/// one — so the real sweep is ~2.9x the projection. A rate measured at one length is not a measurement
+/// of another, and labelling the product "measured" hid that it was a derivation.
+///
+/// The DECISION that figure justified — enumerating length 2 outright rather than sampling it, per the
+/// spec's original plan — still holds at five minutes in a tier that runs separately from the merge
+/// gate. The number was wrong; the conclusion was not. Both are recorded because whoever revisits this
+/// trade needs the real cost, not the one that made it look cheap.
 ///
 /// Reports the outcome mix rather than only pass/fail, because a sweep where every program instantly
 /// halted would be green while covering nothing.
 #[test]
-#[ignore = "slow tier: exhaustive over ~200k (program, encoding, width) triples, ~2 min; run via scripts/check-slow.sh"]
+#[ignore = "slow tier: exhaustive over ~200k (program, encoding, width) triples, ~5 min release; run via scripts/check-slow.sh"]
 fn every_two_instruction_program_keeps_the_bank_well_formed() {
     let caps = TmCaps { steps: 20_000, cells: 20_000 };
     let mut total = 0usize;
     let mut capped = 0usize;
     let mut total_steps = 0u64;
-    for (name, widths) in sweep_targets() {
+    for (kind, widths) in sweep_targets() {
+        let name = kind.name();
         for &width in widths {
-            let alpha = alphabet(name, width);
-            let enc = encoding_named(name, width);
+            let alpha = alphabet(kind, width);
+            let enc = kind.at(width);
             let mut per_width = 0usize;
             for first in &alpha {
                 for second in &alpha {
@@ -309,14 +340,14 @@ fn every_two_instruction_program_keeps_the_bank_well_formed() {
     }
     let expected: usize = sweep_targets()
         .iter()
-        .map(|&(name, widths)| widths.iter().map(|&w| alphabet(name, w).len().pow(2)).sum::<usize>())
+        .map(|&(kind, widths)| widths.iter().map(|&w| alphabet(kind, w).len().pow(2)).sum::<usize>())
         .sum();
     assert_eq!(
         total,
         expected,
         "the sweep covered fewer pairs than the alphabet defines (summed over: {:?}) — coverage shrank \
          silently; the per-encoding `{{name}} width {{width}}` lines above say which one",
-        sweep_targets().iter().map(|&(n, w)| (n, w.len())).collect::<Vec<_>>()
+        sweep_targets().iter().map(|&(k, w)| (k.name(), w.len())).collect::<Vec<_>>()
     );
     println!(
         "\n  EXHAUSTIVE over {total} (length-2 program, encoding, width) triples, {total_steps} steps total.\n  \
@@ -340,11 +371,12 @@ fn every_two_instruction_program_keeps_the_bank_well_formed() {
 fn every_single_instruction_program_keeps_the_bank_well_formed() {
     let caps = FAST_CAPS;
     let mut checked = 0usize;
-    for (name, widths) in sweep_targets() {
+    for (kind, widths) in sweep_targets() {
+        let name = kind.name();
         let mut n_programs = 0usize;
         for &width in widths {
-            let enc = encoding_named(name, width);
-            for p in length_one_programs(name, width) {
+            let enc = kind.at(width);
+            for p in length_one_programs(kind, width) {
                 if let Err(why) = check(&p, enc.as_ref(), caps) {
                     panic!("width {width} ({name}), program `{}`: {why}", describe(&p));
                 }
@@ -381,10 +413,11 @@ fn every_single_instruction_program_keeps_the_bank_well_formed() {
 fn every_seeded_two_instruction_program_keeps_the_bank_well_formed() {
     let caps = FAST_CAPS;
     let mut checked = 0usize;
-    for (name, widths) in sweep_targets() {
+    for (kind, widths) in sweep_targets() {
+        let name = kind.name();
         for &width in widths {
-            let alpha = alphabet(name, width);
-            let enc = encoding_named(name, width);
+            let alpha = alphabet(kind, width);
+            let enc = kind.at(width);
             let seeds: Vec<&Instr> = alpha.iter().filter(|i| matches!(i, Instr::Li(..))).collect();
             assert!(!seeds.is_empty(), "the alphabet must contain `Li` seeds at width {width} ({name})");
             for seed in &seeds {
@@ -400,11 +433,11 @@ fn every_seeded_two_instruction_program_keeps_the_bank_well_formed() {
     }
     let expected: usize = sweep_targets()
         .iter()
-        .map(|&(name, widths)| {
+        .map(|&(kind, widths)| {
             widths
                 .iter()
                 .map(|&w| {
-                    let a = alphabet(name, w);
+                    let a = alphabet(kind, w);
                     a.iter().filter(|i| matches!(i, Instr::Li(..))).count() * a.len()
                 })
                 .sum::<usize>()
@@ -420,21 +453,23 @@ fn every_seeded_two_instruction_program_keeps_the_bank_well_formed() {
 #[test]
 fn every_single_instruction_machine_round_trips_through_the_text_form() {
     let mut checked = 0usize;
-    for (name, widths) in sweep_targets() {
+    for (kind, widths) in sweep_targets() {
         for &width in widths {
-            let enc = encoding_named(name, width);
-            for p in length_one_programs(name, width) {
+            let enc = kind.at(width);
+            for p in length_one_programs(kind, width) {
                 let (m, _) = lower_tm_guarded(&p, enc.as_ref());
                 let (parsed, errors) = parse_tm(&print_tm(&m));
                 assert!(
                     errors.is_empty(),
-                    "width {width} ({name}), `{}`: text form has errors: {errors:?}",
+                    "width {width} ({}), `{}`: text form has errors: {errors:?}",
+                    kind.name(),
                     describe(&p)
                 );
                 assert_eq!(
                     parsed.as_ref(),
                     Some(&m),
-                    "width {width} ({name}), `{}`: does not round-trip",
+                    "width {width} ({}), `{}`: does not round-trip",
+                    kind.name(),
                     describe(&p)
                 );
                 checked += 1;

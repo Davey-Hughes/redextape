@@ -21,9 +21,9 @@ use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::run;
 use redextape_core::tm::{
-    BLANK, BOX, Binary, Encoding, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, REG, SEP, TAPES, TM_DEFAULT_CAPS, Tape,
-    TmCaps, TmRun, TmStatus, Unary, WORK, ZERO, decode_tape, defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm,
-    run_tm_at, run_tm_fitted, simulate_counts, simulate_watched,
+    BLANK, BOX, Binary, Encoding, EncodingKind, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, REG, SEP, TAPES,
+    TM_DEFAULT_CAPS, Tape, TmCaps, TmRun, TmStatus, Unary, WORK, ZERO, decode_tape, defunc, lower_asm,
+    lower_tm_guarded, n_slots_of, run_tm, run_tm_at, run_tm_fitted, simulate_counts, simulate_watched,
 };
 
 mod common;
@@ -38,26 +38,18 @@ fn widths() -> Vec<usize> {
     w
 }
 
-/// Both encodings this file's properties must hold for, each at its OWN default (`MAX_FIELD_WIDTH`)
+/// EVERY encoding. This file's properties must hold for each, tested at its OWN default (`MAX_FIELD_WIDTH`)
 /// width — the width `run_tm_at`/`run_tm` pin to when no explicit width is given.
 fn encodings() -> Vec<(&'static str, Box<dyn Encoding>)> {
-    vec![("unary", Box::new(Unary::default())), ("binary", Box::new(Binary::default()))]
+    // `at(MAX_FIELD_WIDTH)`, not a default: identical to `{Unary,Binary}::default()` today, and stated
+    // explicitly so a future encoding whose default differs cannot silently re-width this test.
+    EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(MAX_FIELD_WIDTH))).collect()
 }
 
-/// Both encodings at a given width — used where the property is checked at every rung of `widths()`
+/// EVERY encoding at a given width — used where the property is checked at every rung of `widths()`
 /// rather than only at the default.
 fn encodings_at(width: usize) -> Vec<(&'static str, Box<dyn Encoding>)> {
-    vec![("unary", Box::new(Unary::at(width))), ("binary", Box::new(Binary::at(width)))]
-}
-
-/// Build the named encoding at `width`, for callers that iterate `["unary", "binary"]` directly rather
-/// than through `encodings_at`'s paired list (e.g. because they need independent per-encoding state,
-/// like a running `previous` step count).
-fn encoding_named(name: &str, width: usize) -> Box<dyn Encoding> {
-    match name {
-        "binary" => Box::new(Binary::at(width)),
-        _ => Box::new(Unary::at(width)),
-    }
+    EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(width))).collect()
 }
 
 // ================================================================================================
@@ -487,11 +479,12 @@ fn step_count_is_non_decreasing_in_the_field_width() {
             Ok(p) => p,
             Err(_) => lower_asm(&defunc(&core).expect("defuncs")).expect("lowers after defunc"),
         };
-        for name in ["unary", "binary"] {
+        for &kind in EncodingKind::ALL {
+            let name = kind.name();
             let mut previous: Option<(usize, u64)> = None;
             let mut compared = 0usize;
             for width in widths() {
-                let enc = encoding_named(name, width);
+                let enc = kind.at(width);
                 // Only compare widths at which the program actually completes: a narrower run that halts
                 // in the guard stopped early by design and says nothing about monotonicity.
                 if !matches!(run_tm_at(&core, enc.as_ref(), TM_DEFAULT_CAPS), TmRun::Ran { .. }) {

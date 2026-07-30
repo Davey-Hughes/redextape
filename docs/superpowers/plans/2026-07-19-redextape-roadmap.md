@@ -1014,30 +1014,177 @@ produce. The oracle validates every combination.
   too. **What stays open:**
   arbitrary-precision (variable-length) fields — every widening write would have to shift the bank,
   invalidating the fixed-window in-place-write invariant every gadget rests on — a large separate slice,
-  deferred not rejected. Also open, filed honestly rather than done: `arb_native_safe_expr` and
-  `arb_tm_mixed_range_expr` are copy-paste duplicates differing only in the leaf strategy, and nothing
-  structurally enforces that they stay in lockstep — a future edit to one's operator set or recursion
-  parameters could silently desync them. Deduplicating would have required editing the pre-existing
-  generator, which this branch's additive-only constraint forbade.
+  deferred not rejected. (The generator-duplication item that also sat here — `arb_native_safe_expr` and
+  `arb_tm_mixed_range_expr` as copy-paste duplicates nothing enforced the lockstep of — is **CLOSED**;
+  see item 2 below. It is struck from this list rather than left standing, because a "what stays open"
+  list carrying an item that is shut is the same defect the branch below it exists to remove.)
 
-  Two more, filed after the whole-branch review rather than left in a review transcript:
+  Two more, filed after the whole-branch review rather than left in a review transcript, both now
+  **DONE (2026-07-29)** — branch `encoding-registry-and-generator-dedup`, spec
+  `docs/superpowers/specs/2026-07-29-encoding-registry-and-generator-dedup-design.md`, plan
+  `docs/superpowers/plans/2026-07-29-encoding-registry-and-generator-dedup.md`:
 
-  1. **No structural link between `EncodingKind` and the six files that each keep a local encodings
-     list.** `native_oracle.rs`'s `every_encoding_has_a_four_way_test` catches drift between
-     `encodings()` and `EMITTED` — two lists inside one file — and its doc now says so precisely. What
-     nothing catches is a developer adding a third `EncodingKind`, satisfying the compile-forced
-     `tm_leg` match arm, and never extending `encodings()`: that encoding is covered by nothing and
-     every guard still passes. `native_oracle.rs` is the BEST-defended of the six (`tm_bank_invariant.rs`,
-     `tm_width_equivalence.rs`, `tm_heap_stack_shape.rs`, `tm_static_delimiter_safety.rs`,
-     `three_way_oracle.rs` construct `Box<dyn Encoding>` from concrete types and get no compile error at
-     all). Closing it properly means an `EncodingKind::ALL` in core plus an exhaustiveness round-trip
-     each list is checked against — one slice covering all six, not a per-file patch.
-  2. **The proptest's 60.4% unary fire rate is load-bearing evidence protected only by prose.** That
-     number is the whole justification that the unary half is not near-vacuous — the generator was
-     changed precisely because 0.6% meant it asserted nothing on ~70% of runs. Nothing fails if a future
-     weight or leaf-range edit walks it back; the doc comment would simply become false. A deterministic
-     fixed-seed sampling test asserting the `Ran` fraction exceeds a floor is cheap and would make the
-     claim self-defending.
+  1. **DONE (2026-07-29). No structural link between `EncodingKind` and the files keeping local
+     encoding lists.** **The site survey undercounted three times, which is itself the finding worth
+     recording.** The original filing said 6 sites across 5 files, counting only functions literally
+     named `encodings`/`encodings_at`. A full grep for every way a file could enumerate the variant set
+     found **13 sites across 10 files in 3 shapes** (`Box<dyn Encoding>` lists, `EncodingKind` arrays, and
+     a proptest strategy — the spec's own prose rounded this to "nine files," but its own table lists 10;
+     the count here is the table's) — the spec that closes this item corrected itself on the 6-vs-13 point
+     before planning began, because filing a follow-up smaller than it is would have been the same defect
+     this item exists to fix. Executing the plan then found a **14th site in a 4th shape**:
+     `tm_width_equivalence.rs`'s width-monotonicity loop iterated a bare `["unary", "binary"]` string
+     array into a hand-written `encoding_named` dispatcher, which matched neither the `EncodingKind::`
+     variant-pair greps nor the `("unary", …)` tuple greps that found the other 13. (Hardened first,
+     commit `d97cee9` — `encoding_named`'s catch-all silently returned `Unary` for any unrecognized name,
+     so a third encoding's tests would have quietly run `Unary` twice while reporting as coverage — then
+     converted and deleted, commit `c398422`, since a dispatcher with no remaining callers that stays
+     "hardened" reads as protection while protecting nothing.) **A whole-branch review — after this task
+     was believed done — then found a 15th, in a place none of the three previous passes looked: core's
+     own unit tests.** `encoding_kind_instantiates_the_named_encoding_at_the_given_width` in
+     `crates/redextape-core/src/tm/header.rs` hard-coded `Unary`/`Binary` by name to check
+     `at(width).field_width()` and boundedness, so a third registry row would compile clean and pass this
+     test while it still exercised only two of three kinds. Fixed in commit `48f8231` by looping both
+     assertions over `EncodingKind::ALL`.
+
+     **Shipped:** a `macro_rules! encoding_kinds!` registry in `crates/redextape-core/src/tm/header.rs`
+     (commit `8ded4de`) generating `EncodingKind`, `ALL`, `at`, `name` and `parse` from one row per
+     encoding — complete by construction. All 15 known sites now derive their ENUMERATION of encodings
+     from `ALL` instead of naming variants by hand (commits `057cd6a`, `74fefba`, `c398422`, `d97cee9`,
+     `d5a283a`, `48f8231`) — stated precisely as "enumeration" because one of the 15,
+     `tm_exhaustive_bank_safety.rs`'s `sweep_targets()`, derives *which* encodings get a width list from
+     `ALL` but still hand-picks the width VALUES themselves; see below for why that half stays manual. A
+     hand-written `ALL` was rejected for a reason, not on taste: it cannot be made self-verifying in
+     stable Rust — a developer can add a variant, fix every exhaustive match the compiler flags, and still
+     leave the list short, and every guard would still pass. `strum`/`enum-iterator` were rejected too, to
+     keep `redextape-core`'s `[dependencies]` **empty** — the crate is deliberately WASM-clean, and a
+     derive macro is still a dependency edge. **Cost recorded, not hidden:** the enum is now
+     macro-generated, so it is less greppable and produces weaker rustdoc than a plain `enum`.
+
+     **This entry once said one site "could not be converted at all" — that claim has since been
+     falsified, and the falsification is itself worth recording.** `sweep_targets()` in
+     `tm_exhaustive_bank_safety.rs` pairs each encoding with its OWN width list, and the width VALUES
+     genuinely cannot be inherited by a new encoding: "narrow enough that overflow is common" is a
+     property of the value RANGE (`width` for unary, `2^width` for binary), not the cell count. That half
+     was, and remains, irreducibly manual — whoever adds a registry row must pick its widths on purpose.
+     But the ENUMERATION of which encodings get swept at all was never actually irreducible, and this
+     entry originally chose a *runtime* guard (`every_encoding_has_a_sweep_target`, a count-and-name
+     check, commit `b493bf0`, later widened to check both directions by commit `0db85f8`) without ever
+     recording that compile-time forcing had been considered and set aside — which is a stronger claim
+     than the evidence supported, the same defect shape this item exists to remove from the rest of the
+     tree. **Found by the whole-branch review, not during the original task, and converted by commits
+     `d5a283a` and `48f8231`:** `widths_for(kind: EncodingKind) -> &'static [usize]` and
+     `capacity(kind: EncodingKind, width: usize) -> u64` are now wildcard-free matches on `EncodingKind`,
+     and `sweep_targets()` derives from `EncodingKind::ALL` through `widths_for` — a new registry row is
+     now an `error[E0004]` (non-exhaustive patterns) at three sites (`widths_for`, `capacity`, and
+     `the_swept_widths_cover_the_overflow_regime_for_each_encoding`) before any test runs, not a guard
+     that only fires after a developer already forgot to add a width list.
+     `every_encoding_has_a_sweep_target` was deleted as vacuous once `sweep_targets()` satisfied its own
+     assertions by construction, and `encoding_named` was deleted with it — its callers now hold an `EncodingKind`
+     directly from `sweep_targets()` and call `kind.at(width)` themselves. **The lesson:** the width
+     values were a genuine hand-judgment case; the enumeration never was, and stating "made LOUD instead"
+     as if that were the ceiling on what this site could do was a claim the evidence never supported.
+
+     **Two sabotage recipes answer different questions**, discovered when the wrong one was used (Task
+     2 of the plan). ADDITION (add a registry row) tests count-derived guards — the shape Tasks 3-5
+     needed, and the shape that makes `tm_bank_invariant.rs`'s cross-product guard, the sweep-target
+     count, and `native_oracle.rs`'s wildcard-free `tm_leg` match all turn genuinely red. REMOVAL (delete
+     a row) tests "did this site stop naming variants by hand" — a converted site names no variant and
+     compiles; an unconverted one fails to compile, naming itself. An addition-sabotage carries ZERO
+     distinguishing bits for the second question, because Rust array literals are not
+     exhaustiveness-checked: a site still reading `for k in [Unary, Binary]` survives an added row just
+     as cleanly as a converted site does.
+
+     **Still open, filed here rather than left implicit.** `crates/redextape-core/examples/width_report.rs`
+     names both encodings explicitly to build a two-column comparison table — a third encoding would be
+     silently omitted from the report. Lower stakes than a test (an incomplete report, not a false-green
+     check), but the same shape. `TmRun::Ran`'s doc comment in `crates/redextape-core/src/tm.rs` ("Both
+     encodings read STRUCTURALLY") is a factual statement about the two encodings that exist today, which
+     a third would make stale — cited by symbol rather than line number, per `49f386d`'s reasoning earlier
+     in this same branch: line numbers in docs rot silently, symbol names do not. And
+     `crates/redextape-core/examples/tm_emit.rs`'s user-facing help and error text (its usage banner and
+     `--encoding` argument parser) hard-code `unary|binary` and are equally derivable from `ALL` — the
+     same shape as the other two, and its absence from this list until now was the same defect this
+     paragraph exists to fix: a "still open" list that is short is not automatically a complete one.
+
+     **UNRESOLVED, and filed as unresolved rather than as a flake: nextest's `(1 leaky)` marker.** One
+     run of `scripts/check-all.sh` (2026-07-29) reported `45 tests run: 45 passed (1 leaky)` in the
+     `--no-default-features --features llvm` config, naming
+     `redextape-native analysis::tests::partitions_main_and_one_subroutine`. nextest marks a test leaky
+     when its process exits but something still holds the test's stdout/stderr pipe past a grace period
+     (default 100ms). **It had been dismissed as "a pre-existing timing flake" in three separate agent
+     reports without anyone naming the test or the mechanism**, which is the reason this entry exists:
+     the dismissal was an assertion, not a finding.
+
+     Investigated; ROOT CAUSE NOT FOUND. What was ruled out, so nobody re-derives it:
+
+     - **Not the test's own work.** `partitions_main_and_one_subroutine` builds a `Program` literal,
+       calls `partition`, and asserts. No threads, no I/O, no subprocess. Verified by reading it.
+     - **Not `aot.rs`'s nested `cargo build`** (the one real subprocess in the crate, at
+       `ensure_staticlib`'s best-effort branch). That config never reaches it: the runtime staticlib was
+       deleted and nothing in the run rebuilt it.
+     - **Not the runner threads.** Both `jit.rs` and `llvm.rs` spawn via `thread::scope` +
+       `spawn_scoped`, which is joined at scope exit by construction.
+     - **Not LLVM linkage spawning threads per test binary.** Many clean runs in that exact config.
+     - **Not generic pipe-teardown latency.** Re-run with `leak-timeout = "1ms"` (vs the 100ms default):
+       zero leaks. Slowness would have caught many.
+     - **Not CPU contention.** Reproduced attempts under 8-way saturation: clean. (The original occurred
+       during a 15-config gate at 206% CPU, which is why this was the leading theory.)
+
+     ~25 isolated runs across both feature configs produced no second occurrence. **Impact is nil** —
+     the test passed, nextest treats leaky as a warning, and the gate exits 0. Deliberately NOT handled
+     by setting an explicit `leak-timeout` in a repo `nextest.toml`: that would tune a threshold to
+     suppress a signal nobody understands, which is the defect class this whole line of work removes.
+     If it recurs, the useful next step is `--no-capture` plus `lsof` on the test process, or checking
+     whether nextest 0.9.140 has a known macOS pipe-teardown race.
+
+  2. **DONE (2026-07-29). The generator duplication, and the prose-only 60.4% figure.** This list
+     previously said `arb_native_safe_expr` and `arb_tm_mixed_range_expr` were copy-paste duplicates
+     that "nothing structurally enforces stay in lockstep," and that deduplicating was forbidden by the
+     previous branch's additive-only constraint. **That is now false.** A new `redextape-test-support`
+     crate (commit `b10be2c`) holds the one `prop_recursive(3, 8, 3, …)` five-arm shape
+     (`arb_expr_over`, parameterised only by its leaf strategy), and all four call sites —
+     `arb_native_safe_expr`/`arb_tm_mixed_range_expr` (`redextape-native/tests/native_oracle.rs`),
+     `arb_first_order_expr` (`llvm_oracle.rs`), `arb_tm_safe_expr` (`redextape-core/tests/three_way_
+     oracle.rs`) — now call it (commit `365d535`).
+
+     **The dedup needed a NEW dev-only crate**, not a module in `redextape-core`, because a feature-gated
+     module there would require `proptest` as an optional REGULAR dependency, and an entry in
+     `[dependencies]` is an entry whether or not a feature enables it — spending the same WASM-clean
+     invariant item 1 above protects by a different route. `redextape-test-support` is a
+     `[dev-dependencies]` entry of both `redextape-core` and `redextape-native`; core's own
+     `[dependencies]` was not touched.
+
+     **Seed-identity: the SHA-256 recomputation is not the load-bearing evidence, though this entry once
+     read as if it were.** Each of the four generators' output was captured — 20 values off a fixed
+     `TestRng::deterministic_rng(RngAlgorithm::ChaCha)` — before and after the conversion; all four were
+     byte-identical, and the reviewer independently recomputed the SHA-256 of each capture
+     (`cb51b986…`/`19f848b3…`/`d7c977c6…`) rather than trusting the reported hashes. **What that
+     recomputation actually proves is narrower than "PROVEN, not argued": it shows the report is
+     internally consistent — the pasted "before" and "after" samples match each other bit-for-bit — but
+     it carries ZERO bits on whether the "before" capture predates the edit. Capturing "before" after
+     already converting the generator would reproduce the identical matching hashes; a hash comparison
+     cannot see when either sample was taken.** The conclusion survives on a different argument that does
+     not depend on capture order and is the one actually load-bearing here: `arb_expr_over`'s body (in
+     `redextape-test-support/src/lib.rs`) is textually identical to each of the four deleted generator
+     bodies, and commit `365d535`'s diff shows every call site passing its original leaf strategy
+     unchanged — so the strategy tree provably cannot have changed, independent of any trust in when a
+     capture happened.
+
+     **The 60.4% figure now defends itself.** A new deterministic fixed-seed test
+     (`the_unary_leg_of_the_random_test_actually_fires`, commit `937b82f`) measures **126/200 (63.0%)**
+     against a floor of 60 — close to, and consistent with, the neighbouring proptest's 60.4% aggregate
+     over 1920 randomized cases, the small difference being ordinary sampling variance at a much smaller
+     n. Sabotaging the generator's leaf back to a single wide range (`0u64..1000`, dropping the
+     `prop_oneof![4 => 0..8, 1 => 0..1000]` mix) drops the measured rate to **1/200 (0.5%)**, reproducing
+     the pre-fix ~0.6% condition and confirming the floor test catches exactly the regression it exists
+     to catch.
+
+     **Honest bound, carried over from the item this closes:** all of it — the 63.0% floor, the 60.4%
+     aggregate, the seed-identity proof — is measured on this suite's demo corpora, built for backend
+     feature coverage rather than workload representativeness. That is the same standing caveat every
+     other measured entry in this roadmap carries, restated here because this item's whole claim rests
+     on a number.
 
 - **TM bank-safety: the four items left on the table (2026-07-26).** The per-program field-width slice
   built a verification ladder for the register bank — enumeration of write sites, guard-rule position,

@@ -28,20 +28,22 @@ use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::run;
 use redextape_core::tm::{
-    AT, BLANK, Binary, Encoding, HEAP, MARK, SEP, STACK, TM_DEFAULT_CAPS, TmRun, Unary, decode_tape, run_tm_fitted,
+    AT, BLANK, Binary, Encoding, EncodingKind, HEAP, MARK, MAX_FIELD_WIDTH, SEP, STACK, TM_DEFAULT_CAPS, TmRun, Unary,
+    decode_tape, run_tm_fitted,
 };
 
 mod common;
 use common::{heap_tape_is_well_formed, stack_is_empty};
 
-/// Both encodings this rung must cover. `run_tm_fitted` (not `run_tm`) is used everywhere below because
-/// `Binary`'s decode is WIDTH-STRICT — `decode_nat`/`parse_heap_cells` require a field to close exactly
-/// at `width` — so a tape fitted at a narrower width than the encoding instance's own must be decoded
-/// with an encoding re-instantiated AT that fitted width (`Encoding::at_width`), never at the encoding's
-/// default. `Unary`'s decode has no such requirement (it counts marks structurally), which is why this
-/// distinction was invisible before `Binary` existed.
+/// EVERY encoding. `run_tm_fitted` (not `run_tm`) is used everywhere below, but NOT because decode
+/// needs the fitted width: both decoders are structural at every width, so a default-width instance
+/// would decode a fitted tape correctly too — `a_tape_decodes_the_same_at_every_reader_width`
+/// (`redextape-core/src/tm.rs`) pins exactly that. The fitted form is kept because the width it settles
+/// on is worth naming in a failure message and because it keeps `at_width` on this file's executed path.
 fn encodings() -> Vec<(&'static str, Box<dyn Encoding>)> {
-    vec![("unary", Box::new(Unary::default())), ("binary", Box::new(Binary::default()))]
+    // `at(MAX_FIELD_WIDTH)`, not a default: identical to `{Unary,Binary}::default()` today, and stated
+    // explicitly so a future encoding whose default differs cannot silently re-width this test.
+    EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(MAX_FIELD_WIDTH))).collect()
 }
 
 /// Programs spanning both tapes: list construction and access (HEAP), calls and recursion (STACK),
@@ -74,8 +76,9 @@ fn check(src: &str, name: &str, enc: &dyn Encoding) -> usize {
     let TmRun::Ran { tapes } = outcome else {
         panic!("`{src}` ({name}) must run to a value on the TM");
     };
-    // Decode at the WIDTH ACTUALLY FITTED, not the encoding instance's own — required for `Binary`,
-    // harmless for `Unary` (see `encodings()`).
+    // Decode at the WIDTH ACTUALLY FITTED, not the encoding instance's own. Not required by either
+    // decoder (both are structural at every width — see `encodings()`); kept so the width checked here
+    // is the one `run_tm_fitted` actually reported.
     let fitted = enc.at_width(width.expect("a bounded encoding always reports a fitted width"));
     assert_eq!(decode_tape(&tapes, &expected, fitted.as_ref()), Some(expected), "`{src}` ({name}) decoded wrong");
 
