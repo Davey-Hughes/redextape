@@ -10,14 +10,19 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # LINEAR HISTORY. `main` has no merge commits and is kept that way: `ff = only` makes a
-# non-fast-forward merge or pull FAIL rather than quietly creating one. Rebase a feature branch onto
-# main before merging it.
+# non-fast-forward merge or pull FAIL rather than quietly creating one.
 #
-# This is convenience, not enforcement — a local setting cannot bind anyone. The actual gate is CI's
-# `linear-history` job, which rejects a merge commit on main regardless of how it got there.
+# Feature branches land as ONE squashed commit via scripts/land.sh, which gates the merged tree
+# before the commit exists — every commit on main builds and passes CI by itself. `ff = only` does
+# not conflict with that: `git merge --squash` stages changes without committing, so it is not a
+# merge for ff purposes.
+#
+# This is convenience, not enforcement — a local setting cannot bind anyone. Two things that do: the
+# remote allows only squash and fast-forward merges, and CI's `linear-history` job rejects a merge
+# commit on main regardless of how it got there.
 git config merge.ff only
 git config pull.ff only
-echo "==> git: merge.ff=only, pull.ff=only (linear history)"
+echo "==> git: merge.ff=only, pull.ff=only (linear history; land with scripts/land.sh)"
 
 # cargo-nextest is the test runner `scripts/check-all.sh` requires. Installed here rather than left to
 # the README because that gate HARD-FAILS without it — deliberately, so the runner is the same

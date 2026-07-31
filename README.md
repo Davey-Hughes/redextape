@@ -72,12 +72,29 @@ than looking like a passing one.
 
 ## Conventions
 
-`main` is **linear** — no merge commits. Rebase a feature branch onto `main` before merging it.
+`main` is **linear** — no merge commits — and every commit on it is an **atomic unit**: it builds and
+passes the gate on its own. Work happens on a feature branch, which lands as **one squashed commit**.
 
-`scripts/setup-dev.sh` (run once per clone) sets `merge.ff = only` and `pull.ff = only` locally, so a
-non-fast-forward merge fails instead of quietly creating a merge commit, and installs the pre-commit
-hooks. That is convenience, not enforcement: `.git/config` is untracked and cannot bind anyone. The
-actual gate is CI's `linear-history` job, which rejects a merge commit on `main` however it arrived.
+    scripts/land.sh                    # land the current branch (opens an editor for the subject)
+    scripts/land.sh --no-llvm          # same, skipping the LLVM configs
+
+`land.sh` refuses a dirty tree, a `main` that differs from `origin/main`, and a branch that is behind
+`main`. It then squash-merges, runs `scripts/check-all.sh` **on the merged tree before the commit
+exists**, and commits only if that passes — which is what makes "every commit on `main` passes CI" a
+property rather than a hope. Delete the branch after landing; the squashed commit is the record.
+
+A plain `git merge --squash` discards every commit message on the branch, so `land.sh` prefills the
+message with all of them under a `--- Squashed from N commits ---` marker. Delete what you do not
+want; what is left is kept verbatim. Losing the reasoning is not the price of a tidy graph.
+
+Three layers keep this true, none of which trusts the other two:
+
+- `scripts/setup-dev.sh` (run once per clone) sets `merge.ff = only` and `pull.ff = only`, so a
+  non-fast-forward merge fails rather than quietly creating a merge commit. Convenience only —
+  `.git/config` is untracked and cannot bind anyone.
+- The **remote** allows only squash and fast-forward merges; merge commits and rebase-merge are
+  disabled, so a PR merged in the web UI cannot produce a shape CI rejects.
+- CI's **`linear-history`** job rejects a merge commit on `main` however it arrived. This is the gate.
 
 Object-size baselines live in `crates/redextape-native/baselines/<target-triple>.txt` and gate the
 `size_baseline` test with a 10% band. Regenerate after an intentional codegen change:
