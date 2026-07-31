@@ -76,7 +76,10 @@ than looking like a passing one.
 passes the gate on its own. Work happens on a feature branch, which lands as **one squashed commit**.
 
     scripts/land.sh                    # land the current branch (opens an editor for the subject)
-    scripts/land.sh --no-llvm          # same, skipping the LLVM configs
+    scripts/land.sh -- --no-llvm       # same, skipping the LLVM configs
+
+Arguments after `--` go to `scripts/check-all.sh`, so `land.sh` itself is the same file in every
+repo that uses it and only the gate differs.
 
 `land.sh` refuses a dirty tree, a `main` that differs from `origin/main`, and a branch that is behind
 `main`. It then squash-merges, runs `scripts/check-all.sh` **on the merged tree before the commit

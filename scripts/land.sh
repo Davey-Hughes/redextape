@@ -3,7 +3,7 @@
 #
 #   scripts/land.sh                      # land the current branch (opens an editor for the subject)
 #   scripts/land.sh my-branch            # land a named branch
-#   scripts/land.sh --no-llvm            # pass --no-llvm through to check-all.sh
+#   scripts/land.sh -- --flag            # pass --flag through to scripts/check-all.sh
 #   scripts/land.sh -m "feat(tm): ..."   # skip the editor, use this subject
 #   scripts/land.sh --no-gate            # land without running the gate (loud, discouraged)
 #   scripts/land.sh --keep-branch        # do not delete the branch after landing
@@ -40,9 +40,9 @@ branch=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --no-llvm)     gate_args+=("--no-llvm"); shift ;;
     --no-gate)     skip_gate=1; shift ;;
     --keep-branch) keep_branch=1; shift ;;
+    --)            shift; while [ "$#" -gt 0 ]; do gate_args+=("$1"); shift; done ;;
     -m)        subject="${2:?-m needs a subject}"; shift 2 ;;
     -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)        echo "error: unknown argument: $1" >&2; exit 2 ;;
