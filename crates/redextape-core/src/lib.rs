@@ -1,7 +1,9 @@
 //! Redextape core: the mini-language front end, the λ and TM backends, and the shared analysis
 //! layer. This crate is compiled to WASM for the web UI and reused by the CLI and LSP.
 //!
-//! Foundation slice (this plan): lexer -> parser -> typecheck -> desugar -> reference interpreter.
+//! Pipeline: lexer -> parser -> typecheck -> desugar -> Core AST, from which the reference
+//! interpreter, the λ backend, and the TM backend each independently produce a `Value` (the
+//! three-way oracle).
 
 pub mod analysis;
 pub mod ast;
@@ -269,6 +271,172 @@ mod drop_tests {
                     acc = Core::LetRecGroup(g.fresh(), vec![("f".to_string(), acc)], Box::new(Core::Nat(g.fresh(), 0)));
                 }
                 drop(acc);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Deep `LambdaTerm` via a right-nested `Abs` chain: exercises the `Abs` arm of `LambdaTerm`'s
+    /// `Drop` — both of them, the root unlink and the worklist descent.
+    ///
+    /// `term.rs` gives `LambdaTerm` the same hand-written iterative `Drop` the types above have, and
+    /// before this NOTHING tested it directly — `decode.rs`'s small-stack decode exercised it only
+    /// incidentally, as a side effect of a test about a different subject. This closed that gap
+    /// BEFORE the representation changed, so the net was known to work before it was needed.
+    ///
+    /// Built with an iterative loop, not a recursive helper: the build must not be what overflows.
+    #[test]
+    fn dropping_deep_lambda_abs_chain_does_not_overflow() {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                use crate::lambda::term::{abs, var};
+                let mut acc = var(0);
+                for _ in 0..40_000 {
+                    acc = abs("x", acc);
+                }
+                drop(acc); // must tear down iteratively, not recurse 40,000 deep.
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Deep `LambdaTerm` via a left-nested `App` chain: exercises the `App` arm of `LambdaTerm`'s
+    /// `Drop`, which unlinks TWO children rather than one. This is the left-nested half of a pair — the same
+    /// device the `LetRecGroup` pair above uses — so it is falsifiable only for a forgotten `f`;
+    /// its twin below (deep via `a`) is what makes a forgotten `a` falsifiable too.
+    #[test]
+    fn dropping_deep_lambda_app_chain_does_not_overflow() {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                use crate::lambda::term::{app, var};
+                let mut acc = var(0);
+                for _ in 0..40_000 {
+                    acc = app(acc, var(1)); // chain via the LEFT child; the right is a shallow leaf.
+                }
+                drop(acc);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// The right-nested twin: deep via `a`, with `f` a shallow leaf. The `App` arm unlinks TWO
+    /// children, so it needs TWO chains, and without this one the pair is not the device the test
+    /// above claims it is.
+    ///
+    /// Concretely: a destructor that unlinked `f` and forgot `a` would leave `a` to the
+    /// compiler's recursive drop glue — which is O(1) when `a` is always `var(1)`, so the left-nested
+    /// test PASSES with that half broken. Verified by sabotage, not reasoned about.
+    #[test]
+    fn dropping_deep_lambda_app_chain_through_the_argument_does_not_overflow() {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                use crate::lambda::term::{app, var};
+                let mut acc = var(0);
+                for _ in 0..40_000 {
+                    acc = app(var(1), acc); // chain via the RIGHT child; the left is a shallow leaf.
+                }
+                drop(acc);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Deep `LambdaTerm` where EVERY child is SHARED: each level is `App(c, c)` over one allocation.
+    ///
+    /// Not reachable at all before the `Rc` conversion — under `Box` this term is a tree of 2^40,000
+    /// nodes and could not be built — but `subst` now installs the substituted argument at every
+    /// occurrence as a refcount bump, so a node holding two handles to the same child is the ordinary
+    /// product of reducing `(\x. x x) M`, and iterating that nests it.
+    ///
+    /// THE THREE CHAINS ABOVE CANNOT CATCH WHAT THIS CATCHES. In each of them every child is uniquely
+    /// owned, so a destructor that unlinked only uniquely-owned children — leaving shared ones to the
+    /// compiler's glue on the reasoning that a decrement frees nothing — passes all three. Here it
+    /// overflows: at each level the glue's SECOND decrement is the one that reaches zero, and the free
+    /// it triggers recurses into the next level through drop glue rather than through the worklist.
+    /// The fix is the invariant `Drop` actually maintains: unlink ALL children, so the handle that
+    /// finally reaches zero does so inside the loop.
+    #[test]
+    fn dropping_deep_lambda_shared_child_chain_does_not_overflow() {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                use crate::lambda::term::{app, var};
+                let mut acc = var(0);
+                for _ in 0..40_000 {
+                    acc = app(acc.clone(), acc); // BOTH children are the same allocation.
+                }
+                drop(acc);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// A deep chain SHARED partway down — the failure mode `Rc` introduces and `Box` could not have.
+    /// The walk must stop unlinking where the strong count exceeds one and merely decrement, without
+    /// either corrupting the still-live `keep` or falling back to a recursive teardown of the rest.
+    ///
+    /// THIS IS A DIFFERENT SHAPE FROM `dropping_deep_lambda_shared_child_chain_does_not_overflow`
+    /// ABOVE, and deliberately so — do not fold one into the other. That test shares at EVERY level
+    /// and everything dies together in one `drop`; it cannot catch a corrupted survivor because
+    /// nothing survives. Here sharing is at exactly ONE interior node — the top of `keep`'s chain —
+    /// unique above it (in `outer`'s own 20,000 "y" levels) and unique below it (in `keep`'s 20,000
+    /// "x" levels), and `outer` is dropped while `keep` is still alive, so the shared node IS shared
+    /// at teardown time. The property only this test can catch is non-corruption of a survivor: after
+    /// `drop(outer)`, `keep` must still be a valid, fully intact 20,000-deep term.
+    ///
+    /// That check has to be more than "did not crash", and what it does and does not distinguish is
+    /// worth being exact about. `Drop` contains no `unsafe`, so "corrupted" here cannot mean torn or
+    /// freed memory: `Rc` will not hand out an owned `Node` while another handle holds it, and the
+    /// sabotage that tries to force one does not compile. What the depth assert distinguishes is a
+    /// STRUCTURAL LOGIC bug — a walk that unlinked a shared child anyway would leave `keep` TRUNCATED
+    /// at the shared node — from a run that merely did not crash. Walking and counting the spine
+    /// BEFORE `keep` is dropped is what turns that into a failed assertion here, rather than a silently
+    /// shortened term that tears down fine at the second `drop`.
+    ///
+    /// Two drops, in this order on purpose: the outer chain goes first while `keep` is still alive
+    /// (so the shared node IS shared at teardown time — the whole point), then `keep` goes, which is
+    /// itself a 20,000-deep uniquely-owned teardown.
+    #[test]
+    fn dropping_a_deep_chain_shared_partway_down_does_not_overflow() {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                use crate::lambda::term::{Node, abs, var};
+                let mut keep = var(0);
+                for _ in 0..20_000 {
+                    keep = abs("x", keep);
+                }
+                let mut outer = keep.clone(); // strong count 2 at this node
+                for _ in 0..20_000 {
+                    outer = abs("y", outer);
+                }
+                drop(outer); // must stop at the shared node, not recurse past it
+
+                // Observe that `keep` survived intact, rather than merely not crashing: walk its
+                // spine iteratively and count the levels.
+                let mut depth = 0u32;
+                let mut cur = &keep;
+                loop {
+                    match cur.node() {
+                        Node::Abs(_, body) => {
+                            depth += 1;
+                            cur = body;
+                        }
+                        Node::Var(_) => break,
+                        Node::App(..) => panic!("keep should be a pure Abs chain over a Var leaf"),
+                    }
+                }
+                assert_eq!(depth, 20_000, "keep must still be a fully intact 20,000-deep chain");
+
+                drop(keep); // now uniquely owned again; tears down iteratively
             })
             .unwrap()
             .join()

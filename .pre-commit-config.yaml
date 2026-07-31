@@ -1,7 +1,8 @@
 # Local pre-commit hooks mirroring the CI gates (.forgejo/workflows/ci.yml). Install with:
 #   pre-commit install
-# Hooks only fire when matching files are staged, so they stay dormant until the crates / web app
-# exist. Rust hooks run on *.rs; web hooks run on the web/ sources.
+# Hooks only fire when matching files are staged: the Rust hooks now fire for real since the crates
+# exist; the web hooks stay dormant until web/ lands. Rust hooks run on *.rs; web hooks run on the
+# web/ sources.
 repos:
   - repo: local
     hooks:

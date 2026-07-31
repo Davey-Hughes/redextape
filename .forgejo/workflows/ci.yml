@@ -1,9 +1,10 @@
 # Forgejo Actions CI for Redextape (self-hosted runner on git.daveynet.xyz).
 # Adapted from the ws-sim setup for a Rust -> WASM static site + CLI (no server process).
 #
-# The project has no code yet. The `detect` job checks what exists and gates the rest, so this
-# pipeline SKIPS cleanly (green) until the crates / web app land — then activates automatically
-# with no edits. See docs/ for the design spec.
+# The Rust crates have landed; the web app has not. The `detect` job checks what exists and gates
+# the rest, so `rust`/`rust-llvm`/`rust-slow` now run for real while `web` (and the `docker` job
+# behind it) still SKIPS cleanly (green) until web/package.json lands — then activates
+# automatically with no edits. See docs/ for the design spec.
 #
 # Forgejo specifics (vs GitHub): actions come from the code.forgejo.org mirror, toolchains are
 # installed as steps (no fat preinstalled image), the image is built with `docker buildx build

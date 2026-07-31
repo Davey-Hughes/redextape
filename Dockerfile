@@ -5,9 +5,10 @@
 # process, no runtime data, no volumes. Three stages: compile the core crate to WASM, bundle the web
 # app, serve the output.
 #
-# NOTE: the paths below (crates/, web/) do not exist until implementation begins. This Dockerfile is
-# the intended build, ready to activate — CI only runs it once the code lands (see .forgejo/workflows
-# /ci.yml). Tool versions and the exact web build command are finalized at v1. See docs/ for the spec.
+# NOTE: `crates/` now exists (redextape-core, redextape-native, ...), but not yet the two paths this
+# build actually needs, `crates/redextape-wasm` and `web/`. This Dockerfile is the intended build,
+# ready to activate once both land — CI only runs it then (see .forgejo/workflows/ci.yml's `web`
+# gate). Tool versions and the exact web build command are finalized at v1. See docs/ for the spec.
 
 ########################  1. WASM (Rust -> wasm32) → /app/pkg  #################################
 FROM rust:slim-bookworm AS wasm

@@ -29,7 +29,9 @@ Copied verbatim from the spec / existing repo config:
 - CI auto-activates on the presence of a **root `Cargo.toml`** and **`web/package.json`** — the
   workspace manifest must live at the repo root.
 - Planned crates: `redextape-core` (lib), `redextape-cli` (bin), `redextape-wasm` (cdylib),
-  `redextape-lsp` (bin, v2); web app under `web/`.
+  `redextape-lsp` (bin, v2); web app under `web/`. Landed since this list was written, and not
+  originally planned as separate crates: `redextape-native` and `redextape-native-rt` (the native
+  backend and its runtime).
 - **Every Core-AST node carries a stable `NodeId`** — the source-map / sync anchor (§5.4, §9).
 - **No panics on user input** — malformed source produces spanned `Diagnostic`s, never a panic
   (§9.4: parse-error diagnostics from day one).
@@ -78,7 +80,9 @@ Copied verbatim from the spec / existing repo config:
   Defunctionalization may itself be phased (first-order core first, closures second — §13.3).
 - **Depends on:** Plan 1. Shares the demo suite + oracle harness with Plan 2.
 - **Key interfaces exposed:** `Machine`, `lower_tm(&Core) -> Machine`, `simulate_trace(...)`,
-  `decode_tape(...) -> Option<Value>`, `parse_tm`/`print_tm`, `parse_asm`/`print_asm`.
+  `decode_tape(...) -> Option<Value>`, `parse_tm`/`print_tm`, `print_asm`. *(`parse_asm` was
+  promised here but never landed — `tm/asm.rs` prints but cannot read the asm form back. See the
+  Plan 6 survey note below, "Genuinely missing and unclaimed.")*
 - **Testable outcome:** three-way oracle passes on the demo suite; proptest generates random
   valid programs and checks all three agree (§10.2); TM text round-trips.
 
@@ -152,6 +156,8 @@ unedited, which is the evidence for that claim.
   gap applies to the sibling guards `MAX_EVAL_DEPTH`, `MAX_LOWER_DEPTH` and `MAX_DEFUNC_DEPTH`, all
   calibrated the same way. **Decide it with the WASM slice**, where the target's real stack is known.
 - **`Rc<LambdaTerm>` remains the λ performance fix**, not checkpoints. Evidence in the design doc §7.
+  **It landed 2026-07-31, and what it measured corrects the 99 ms this entry quotes** — see the λ
+  structural-sharing note at the end of this Plan 4 section.
 
 **Deferred by the final whole-branch review (2026-07-30), each with why.** None is wrong code; all are
 unfinished contract. Ordered by when a consumer will hit them.
@@ -296,6 +302,267 @@ meant Plan 6 growing a span layer Plan 4 then duplicated. See the Plan 6 note be
   `parse_tm` accepts any declared count, so a fixed array would silently mis-shape every hand-written
   machine. Nothing in the suite would have caught it, because every machine the lowering builds has five
   tapes — hence the explicit non-`TAPES` regression test in the design's §6.
+
+#### λ structural sharing landed, and it corrects the 99 ms above (2026-07-31)
+
+Design: [`2026-07-30-lambda-structural-sharing-design.md`](../specs/2026-07-30-lambda-structural-sharing-design.md).
+`LambdaTerm` is now a structurally shared `Rc` newtype (`LambdaTerm(Rc<Node>)`, match sites go through
+`.node()`), with a hand-written iterative `Drop` over `Rc::into_inner`, an `Rc::ptr_eq` fast path on
+`PartialEq`, and `Rc<str>` name hints. Every pre-existing golden, oracle, round-trip, proptest and
+fixture passes unedited, and `redextape-core` still has zero dependencies.
+
+**The 99 ms above was row 9 of 46, not the worst case.** Measured over the whole first-order corpus
+rather than two hand-picked programs, **seven of 46 programs exceeded 350 ms and the worst was
+2,580 ms**. That is a hang, not "a visible hitch on a scrub". The conclusion Plan 4 drew from 99 ms —
+that λ replay cost did not block its own slice — is unaffected. The characterisation of the cost is
+what was wrong.
+
+**What `Rc` bought: a uniform 2.1x–2.8x**, on the nine heaviest programs. `sum(5)` 116 ms →
+**41.6 ms** — the probe measures 116 ms for the program Plan 4's instrument reported at 99 ms above, and
+the point of this block is the distribution, not that gap; the corpus worst case 2,580 ms →
+**1,216.7 ms**; programs over 350 ms, seven → **one**. Full before/after table in the design's §2.
+
+**The worst case is still a hang.** 1,216.7 ms is ~76 frames at 16 ms. λ scrubbing is not yet usable on
+the worst program in the *existing* demo suite, and Plan 5 must not assume it is. The design's §7
+therefore gates further optimization on first explaining what actually dominates λ replay time — node
+count demonstrably does not predict it, and the evidence got stronger, not weaker: row 7 runs **6.7x**
+faster than row 31 while being larger by every available measure, a gap that **widened** from 5.5x under
+`Box`. **That gate is no longer open: layer 1.5 answered it, and the answer is below.**
+
+**Hash-consing was measured NOT to be YAGNI**, which is the finding that shaped the type — a newtype
+rather than `Rc` children on the enum, so an interned handle can be swapped in later without touching a
+match site. Two independent measurements say so:
+
+- **within-term** (the discriminating ratio: structurally identical subterms *built separately*, which
+  `Rc` cannot share and interning can) — **1.3x–64.2x**, corpus-wide 43,580 nodes collapsing to 2,994
+  distinct (**14.56x**). The distinct count never exceeds ~155 anywhere in the corpus, whether the term
+  holds 16 nodes or 9,763: it is bounded by the program's encoding vocabulary, not by how far the
+  reduction has run.
+- **the three-way count, available only once `Rc` shipped and there were allocations to count.**
+  `sum(5)`'s whole trace: 502,146 logical nodes → 140,529 distinct `Rc` allocations → 13,590 distinct
+  structural subterms. `Rc` removes 72%; interning would remove a further **90% of what `Rc` leaves**,
+  **10.3x beyond `Rc`** — and 50.0x on the `while`-loop program. The design's §3 originally argued this
+  ratio away, on the grounds that since "`Rc` already captures the bulk of it" the ratio "proves nothing
+  about interning". The bulk clause is fair; the conclusion drawn from it is measurably false, because
+  what survives `Rc` is still an order of magnitude above the structural floor. Corrected there.
+
+**This is a memory/allocation argument, not a speed one**, and the distinction is load-bearing rather
+than a hedge: `subst`/`shift` still traverse the whole abstraction body, and under de Bruijn a shifted
+copy carries *different indices*, so it is a structurally new term that interning does not dedupe.
+Turning fewer nodes into less work needs memoized traversals keyed on interned ids. That was queued as
+"a further layer, behind the same gate" until the gate was answered; **it is not the next layer** — see
+below.
+
+**One hazard carried forward.** Structural sharing lets a term's **logical** size exceed its
+**physical** size — thirty nested `App(c, c)` levels is 30 allocations and 2^30 logical nodes — and
+`depth_exceeds`, `print_lambda`, `PartialEq` and `decode` all walk the logical expansion. Under `Box`
+such a term was **impossible to construct**; under `Rc` it is ~~**possible and merely unreached** by the
+current corpus, which is a weaker guarantee~~ — **possible AND REACHED, from 512 bytes of ordinary
+source; falsified 2026-07-31, see the blow-up entry below.** `MAX_TERM_DEPTH` bounds depth, not
+width-by-sharing. `LambdaTerm`'s `Drop` is the one traversal bounded by allocation count rather than
+logical size, and that half held under measurement. Full statement in the design's §10.
+
+#### Layer 1.5 answered the gate, and the answer is neither interning nor memoization (2026-07-31)
+
+**What dominates λ replay time is `subst` re-copying the argument under every binder** — **86.8%** of the
+nodes the reducer visits, and **95.6%** of the ones it *constructs*, which is the bucket that is 90.8% of
+all nodes and **99.7% of the time**. `subst`'s `Abs` arm re-shifts the argument on the way down
+(`abs(n, subst(j + 1, &shift(1, 0, s), b))`), so the argument is deep-copied **once per binder in the
+body** — not once per occurrence, and whether or not the variable occurs beneath that binder at all.
+Over the corpus's 5,955 β-steps `subst` replaced 6,220 occurrences and built 273,004 copies of the
+argument: **44 copies for every use the step had for one.** Measured by
+`examples/lambda_sharing_probe.rs` PART B/C.
+
+**This closes the gate the block above leaves open.** "Explain what actually dominates λ replay time" is
+answered, and the explanation is verified against **all 46 rows** rather than the two that raised the
+question: the counter `Σ abs×arg` reaches Spearman ρ 0.996 against `replay ms`, and — the discriminating
+test, since ρ stays near 1.0 for anything that merely grows with the program — the whole accounting
+prices at **18.0 to 34.5 ns per node** across traces spanning five orders of magnitude of work. Row 31 is
+the worst case because `lower_group` lowers a mutually recursive group as one fixpoint over an n-tuple,
+making every member's body binder-dense: the argument-weighted mean binder count is **232 on row 31
+against 44 on row 7**, which is the 6.74x. The corpus's five mutually recursive programs are its five
+slowest.
+
+**The hypothesis layer 1.5 was written to test was refuted.** That hypothesis was *substitution blowup* —
+a large argument copied into many occurrences. There is none anywhere in this corpus: the mean occurrence
+count is 1.04, so `Σ occ×arg` and `Σ arg` sit within 5% of each other on every row that takes measurable
+time. The argument is copied 44 times and used once.
+
+**Layers 2 and 3 are therefore declared not worth planning, and this is the evidence rather than a
+deferral.** Neither addresses the 86.8%. **Interning cannot touch it** — every one of those nodes is
+produced by `shift`, and a shifted copy carries *different de Bruijn indices*, so it is a structurally
+new term with nothing to deduplicate; worse, interning does not *avoid* constructing a node, it *hashes*
+one, at ~60 ns/node against the ~35 ns/node the reducer pays to construct one. **Memoization would cache
+a computation that can simply be deleted** — a `shift` memo keyed on `(d, cutoff, alloc_id)` does hit,
+but the six-line fix recovers all of it with no cache, no ids and no invalidation question.
+
+**What survives of the interning case above, stated precisely because the two halves come apart.** The
+**memory** argument is untouched: the residual after `Rc` is still 10.3x and 50.0x on the two rows with
+allocation counts, and that stands on its own. What is refuted is its **speed corollary** — the cost
+interning would attack is 13% of the nodes, and the 87% is structurally invisible to it.
+
+**The next target is `subst`'s per-binder re-shift.** At binder depth `d` the argument is `shift(1,0,·)`
+applied `d` times, which is `shift(d,0,·)`, so the lift can be carried down and paid once per occurrence
+instead of once per binder — turning `Σ abs×arg` into `Σ occ×arg`, 70.5M nodes into 828,569. The design
+records it written out, with a shift-additivity lemma verified exhaustively (53,376 cases) and a
+differential against today's `subst` (355,840 triples, 0 mismatches). After it, the largest remaining
+cost is **not** `depth_exceeds` — that is 64% of the remaining *nodes* but ~5% of the remaining *time* —
+but `beta`'s closing `shift(-1, 0, ·)`, at ~37%, which a second, independent line of evidence reaches
+from the sharing side: because `shift` has no sharing-preserving arm, that call rebuilds the whole reduct
+node for node and its output shares **zero** allocations with either of `beta`'s inputs.
+
+**Explicitly not "fix `subst` and then do interning".** The next slice is: fix `subst`, re-run the probe,
+and **re-derive** layers 2 and 3 from the new measurement — the instrument is committed and reproducible,
+so the next bottleneck gets named the way this one was. That discipline has now refuted two intuitions in
+one slice: hash-consing priced as YAGNI, and substitution blowup. Full statement in the design's §10.
+
+#### THE NEXT λ SLICE IS NOT the `subst` fix: 512 bytes of ordinary source reaches an unbounded β-step (2026-07-31)
+
+Found by an investigation run after the branch was reviewed and green, and recorded here rather than
+fixed on it — **the branch lands, this is what the next slice is planned from**. Instrument:
+`crates/redextape-core/examples/blowup_probe.rs`, committed with the branch so the repro can be re-run
+instead of quoted. Full statement, sizing and confidence in the design's §10.
+
+**The hazard the block above carries forward as "possible and merely unreached" is REACHED.** Not by a
+hand-built term — by **512 bytes of surface syntax** that parses, typechecks and lowers through the
+public pipeline. It lowers in **196 µs** to **1,644 allocations holding 616,152 logical nodes (375x)**,
+and its **first β-step did not finish in 13 minutes**, holding **974 MB**. At 3,215 bytes the ratio is
+**5.8e17** (9,541 allocations, 2^72.2 logical) and `lower` still returns in 2.9 ms.
+
+**Nothing fires.** `MAX_TERM_DEPTH` is not approached — depth **141** against 3,000, and depth grows ~12
+per nesting level, so the guard is reached around 250 levels at a ratio of 2^250. `MAX_REDUCTION_STEPS`
+is **never consulted**, because control never returns from `reduce_step`. And a wall budget checked
+between steps cannot help: 90 s produced a 330-second run. **The failure mode is a hang at GB scale, not
+a clean OOM** — the investigation expected a kill, set the ramp up to be killed, and did not get one.
+
+**The mechanism is `lower.rs:453`** — `out = app(out, projection(group.clone(), j))` inside `for j in
+0..n` in `lower_group`, which clones the whole group term once per member of a mutually recursive `fn`
+group. That is a factor of n, i.e. linear. **It becomes exponential because it nests and multiplies:** a
+member's body is a block, and a block may declare its own mutually recursive group.
+
+**The signature changed and the root cause did not, which is the part that routes the fix.** Under `Box`,
+`group.clone()` was a deep copy, so the same program died **loudly, inside `lower`**, at a much smaller
+size — n deep copies, immediately, in a pure function. Under `Rc` it is n refcount bumps, so **`lower`
+succeeds** and the program dies **later and silently in the reducer**. **The root cause is pre-existing
+in `lower_group`; this branch did not create it — it moved the detonation.** That is also why the corpus
+never hit it: nothing in the corpus nests mutual recursion, and under `Box` anyone who tried was told
+immediately.
+
+**The obvious fix does not work, and this is why the entry names four options rather than one.** Binding
+`group` once makes the *lowered* term linear, but `g` then occurs n times in the body and the first
+β-step substitutes `G` into all n occurrences — so under call-by-name the same expansion reappears at
+reduction time, one level per step. It is a delay, not a fix, and it moves every pinned step count and
+every `Origins` path in `lower_group`. **Do not take it for the blow-up.** The design's §10 sizes all
+four: a logical-size guard at the end of `lower` (~25 lines, O(allocations), the only cheap one, and it
+must measure *logical* size because physical size is exactly the number that looks fine here); the
+`lower_group` rewrite just described; call-by-need or a graph reducer, which is the only thing that
+removes the class rather than an instance and is a different project; and a node budget inside
+`LambdaCursor`, rejected because one β-step can produce |body| × |arg| nodes, so a check between steps
+reads a number that says nothing about the next one.
+
+**Three supporting results the same investigation established, kept because each stands alone.**
+**`Drop`'s Θ(physical) claim holds** — 10,001 allocations carrying 2^10001 logical nodes, freed in
+175 µs; it is the one traversal that survives this shape. **`beta`'s closing `shift(-1, 0, …)` means
+reduction cannot COMPOUND the ratio — it MATERIALIZES it**, measured at exactly 1.00x within-term after
+≥6 steps from starting ratios up to 114x; this reaches the design's §8 conclusion about that same
+`shift` from the opposite direction, and it is the second independent line of evidence for why
+`tests/lambda_sharing.rs`'s four constants cannot move. **`PartialEq`'s `ptr_eq` saves the
+same-allocation case and only that case** — a separately built structurally equal term pays the full 2^n
+and crosses 2 s at n = 30 — and **`parse_lambda` introduces no sharing**, verified on three inputs and
+argued structurally (`syntax.rs` holds exactly one `.clone()`, on a binder *name*).
+
+**Ordering against the `subst` fix.** These are independent: the `subst` rewrite is a constant-factor win
+on programs that terminate, and this is a class of programs that does not. Neither blocks the other. The
+`subst` fix has a written design, an exhaustive differential and a test target; this has a measurement
+and a decision to make. **The decision is which of the four to take, or none.**
+
+#### Minor findings from the λ structural-sharing review (2026-07-31)
+
+Recorded here because the execution ledger they were logged in is git-ignored scratch, so leaving them
+there would have discarded them at merge — the same reason and the same treatment as the Plan 4 producer
+slice's minors above. The ledger held **fifteen**. **Nine were fixed before the branch landed and a
+tenth is fixed by this commit; the status below is what is true now, not what the review first found.**
+Four remain and two were judged not worth carrying — each for a stated reason rather than by omission.
+
+- **STILL OPEN — `term.rs:206`'s `if let Some(root) = Rc::get_mut(..)` has a silently empty else-branch.**
+  Unreachable today (no `Weak` anywhere in the workspace, grep-verified) and the comment above it says
+  why. But if a `Weak` is ever added, the destructor degenerates to compiler drop glue and overflows —
+  the exact failure it exists to prevent, with nothing to catch it. A `debug_assert!` would make the
+  trap explicit. Not taken here because the blow-up commit is doc-and-example only by construction.
+- **STILL OPEN — `lambda.rs:16` re-exports `Dir`, `LambdaTerm` and `Path` but not `Node`,** so every
+  consumer that matches on a term needs two imports (`lambda::LambdaTerm` + `lambda::term::Node`). A
+  papercut paid by each of this branch's seven tasks in turn. It is a public-API addition, so it belongs
+  to a slice that is allowed to make one.
+- **STILL OPEN — `term.rs:381`'s across-step sharing assertion is weaker than its message.**
+  `before_ids.intersection(&after_ids).next().is_some()` requires only SOME shared allocation, not the
+  specific untouched sibling at each `App` branch, so on the two deepest steps a regression that broke
+  sharing at one level but not another would pass. The realistic regression — total loss of sharing — is
+  still caught on all four asserted steps, which is why this was filed rather than blocking.
+- **STILL OPEN, cosmetic — doc-comment density on `lib.rs`'s new `App` drop-test trio** diverges from the
+  `LetRecGroup` pair it invokes as its model: that pair documents the shared "why two chains" reason once,
+  on the first test only. Substantively the same device, stylistically not.
+- ~~`lib.rs:331` pointed a permanent source comment at the branch's review notes~~ — **fixed here.**
+  `.superpowers/sdd/` is git-ignored, so it named an artifact nobody who clones the repo will have. The
+  comment was otherwise self-contained (the O(1)-vs-O(depth) sabotage argument is spelled out in the
+  block), so the pointer was dead weight rather than a lost explanation, and the sentence is now deleted
+  rather than repointed. Introduced by a fix dispatch on this branch, which is where the class of error
+  the lesson below describes comes from.
+- ~~`reduce.rs`'s `depth_exceeds` doc said the early exit made it "bounded work"~~ — **fixed before
+  landing**, and superseded twice over: it bounds DEPTH, not WORK, and the blow-up entry above is that
+  distinction being cashed. The doc now leads with it.
+- ~~Three stale references to a `take_children` helper~~ (`lib.rs:278`, `:303`, `:328`) — **fixed.** It
+  existed in the `Box` destructor and the `Rc` rewrite inlined it away; grep now returns zero hits
+  workspace-wide.
+- ~~`alloc_id`'s doc claimed shared-id implies same-allocation without the liveness qualifier~~ —
+  **fixed.** It now says WHILE BOTH ARE ALIVE and argues why an allocator may reuse a freed address.
+- ~~The restored `PartialEq` sentence credited "fires on real terms" to the wrong test~~ — **fixed.**
+  All three tests are now credited for what each one actually carries: agreement from the hand-built
+  case, firing from the two that run real reductions.
+- ~~The design said the probe carried the falsified across-trace claim "in two places"~~ — **fixed.** It
+  was three; an inline `// ACROSS-TRACE:` comment nobody had named was the third, which is itself the
+  lesson below in miniature.
+- ~~The design stated the intern pass's `ns/node` band with confidence the instrument does not
+  support~~ — **fixed.** Both bands are single-pass rather than best-of-three; a same-session re-run gave
+  56.9–61.9 against the quoted 58.9–65.1, and the caveat plus "re-derive the band rather than reconciling
+  a re-run against these two rows" now sits with the number.
+- ~~The plan's File Structure table undercounted the λ drop tests~~ — **fixed**, and so was the same
+  undercount in the design's §8; the shipped count is five.
+- ~~Task 3's new drop-test doc comment overclaimed that a corrupted survivor "fails an assertion
+  here"~~ — **fixed.** `Drop` has no `unsafe`, so a freed-while-shared survivor is unreachable in safe
+  Rust; what the depth walk distinguishes is a STRUCTURAL logic bug from "did not crash", and the comment
+  now says exactly that.
+
+**Two were judged not worth carrying, with the reason, rather than left unmentioned.** The plan's Task 1
+"Estimate: 20 minutes" was not bumped when the task grew a third test and a second sabotage round — the
+Plan 4 entry above already records that the plan documents' checkboxes are not the status of record, so
+a stale estimate inside one is not a finding. And `term.rs`'s new tests were filed for putting
+cross-module `use` statements inside each test fn rather than once atop `mod tests`, on a comparison
+with `reduce.rs`; the comparison picks the wrong sibling, because `lib.rs::drop_tests` — the module this
+branch's other new tests live in and were modelled on — uses the per-fn form throughout.
+
+#### The lesson this branch cost the most to learn: grep the tree for a falsified claim, not the document that stated it first (2026-07-31)
+
+Recorded as a working practice, not as an anecdote, because it is the shape of the last defect this
+branch had left. **Three of the four findings in the final whole-branch review were the same failure
+mode:** a superseded claim surviving somewhere nobody re-read — two architecture summary lines, a
+**printed runtime legend**, and this roadmap. The pattern recurred the whole run. The falsified
+across-trace claim survived in **three** separate probe sites, one of which (an inline `// ACROSS-TRACE:`
+comment) nobody had even enumerated, so the correction that fixed "both" of them was itself wrong about
+the count. The plan document carried non-terminating `Drop` code for **two tasks** after the shipped code
+had diverged from it.
+
+**The rule: when a claim is falsified, grep the whole tree for it — including printed output and example
+transcripts — rather than fixing the document that stated it first.** A claim's first statement is
+rarely its last copy. Printed legends are the copy most often missed, because they are read by users and
+by nobody doing a documentation pass; a stale legend is a wrong answer shipped in a UI.
+
+The corollary this branch also paid for: **correct in place and date it, rather than quietly replacing
+the text.** The falsified sentences above are struck through and left standing next to the measurement
+that killed them, because in every case the wrong conclusion was reached from individually true clauses,
+and a reader who only sees the corrected text learns the fact but not the trap. That is the same
+discipline the TM-header and optimizer-tier entries above record from their own reviews — what is new
+here is the *printed-output* leg, and the observation that a fix dispatch can introduce a fresh instance
+of the class it was dispatched to close.
 
 ### Plan 5 — Web UI: editable panes, renderers, linking, detach, caps
 

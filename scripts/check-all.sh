@@ -48,9 +48,9 @@ fi
 # finding. Every config below therefore pairs nextest with an explicit `cargo test --doc` AT THE SAME
 # FEATURE FLAGS. Keep the pairing if a config is ever added.
 #
-# There are zero doctests in the tree today, which is precisely why this is easy to get wrong: the
-# paired run costs seconds and asserts nothing right now, and its whole value is the day someone adds
-# a `///` example.
+# There is one doctest in the tree today, `ty::show` (crates/redextape-core/src/ty.rs) — the paired
+# run is what actually executes it, since nextest alone cannot. Its value only grows as more `///`
+# examples land.
 test_cfg() { run cargo nextest run "$@"; run cargo test "$@" --doc; }
 
 # Every config gets clippy AND tests; a config that is built but never tested is a blind spot. The

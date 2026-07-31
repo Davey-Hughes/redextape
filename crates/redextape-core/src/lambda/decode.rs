@@ -3,7 +3,7 @@
 //! same de Bruijn term (`\.\. 0`), as are `nil` and `true` (`\.\. 1`), and `[0]` is
 //! indistinguishable from `[false]`. `expected` (the reference result) says how to read `nf`.
 
-use crate::lambda::term::LambdaTerm;
+use crate::lambda::term::{LambdaTerm, Node};
 use crate::ty::Ty;
 use crate::value::Value;
 use std::rc::Rc;
@@ -75,17 +75,17 @@ fn decode_list_ty(nf: &LambdaTerm, elem: &Ty) -> Option<Value> {
     let mut heads: Vec<Value> = Vec::new();
     let mut cur = nf;
     loop {
-        let LambdaTerm::Abs(_, outer) = cur else { return None };
-        let LambdaTerm::Abs(_, body) = outer.as_ref() else { return None };
-        match body.as_ref() {
-            LambdaTerm::Var(1) => break, // nil
-            LambdaTerm::App(ca, t_term) => {
-                let LambdaTerm::App(c, h_term) = ca.as_ref() else { return None };
-                if !matches!(c.as_ref(), LambdaTerm::Var(0)) {
+        let Node::Abs(_, outer) = cur.node() else { return None };
+        let Node::Abs(_, body) = outer.node() else { return None };
+        match body.node() {
+            Node::Var(1) => break, // nil
+            Node::App(ca, t_term) => {
+                let Node::App(c, h_term) = ca.node() else { return None };
+                if !matches!(c.node(), Node::Var(0)) {
                     return None;
                 }
                 heads.push(decode_lambda_ty(h_term, elem)?);
-                cur = t_term.as_ref();
+                cur = t_term;
             }
             _ => return None,
         }
@@ -99,20 +99,20 @@ fn decode_list_ty(nf: &LambdaTerm, elem: &Ty) -> Option<Value> {
 
 /// Church numeral `\f.\x. f (f … x)` -> the count of `f`-applications. `f` is index 1, `x` is 0.
 fn decode_church(t: &LambdaTerm) -> Option<u64> {
-    let LambdaTerm::Abs(_, outer) = t else { return None };
-    let LambdaTerm::Abs(_, body_box) = outer.as_ref() else { return None };
-    let mut body = body_box.as_ref();
+    let Node::Abs(_, outer) = t.node() else { return None };
+    let Node::Abs(_, body_term) = outer.node() else { return None };
+    let mut body = body_term;
     let mut count = 0u64;
     loop {
-        match body {
-            LambdaTerm::Var(0) => return Some(count), // reached x
-            LambdaTerm::App(f, a) => {
+        match body.node() {
+            Node::Var(0) => return Some(count), // reached x
+            Node::App(f, a) => {
                 // must be `f (…)` where f is Var(1)
-                if !matches!(f.as_ref(), LambdaTerm::Var(1)) {
+                if !matches!(f.node(), Node::Var(1)) {
                     return None;
                 }
                 count += 1;
-                body = a.as_ref();
+                body = a;
             }
             _ => return None,
         }
@@ -121,21 +121,21 @@ fn decode_church(t: &LambdaTerm) -> Option<u64> {
 
 /// Scott bool `\t.\f. t` (true) or `\t.\f. f` (false). `t` is index 1, `f` is index 0.
 fn decode_bool(t: &LambdaTerm) -> Option<bool> {
-    let LambdaTerm::Abs(_, outer) = t else { return None };
-    let LambdaTerm::Abs(_, body) = outer.as_ref() else { return None };
-    match body.as_ref() {
-        LambdaTerm::Var(1) => Some(true),
-        LambdaTerm::Var(0) => Some(false),
+    let Node::Abs(_, outer) = t.node() else { return None };
+    let Node::Abs(_, body) = outer.node() else { return None };
+    match body.node() {
+        Node::Var(1) => Some(true),
+        Node::Var(0) => Some(false),
         _ => None,
     }
 }
 
 /// Scott `nil = \n.\c. n` (`Abs(_, Abs(_, Var(1)))`).
 fn decode_nil(t: &LambdaTerm) -> Option<Value> {
-    let LambdaTerm::Abs(_, outer) = t else { return None };
-    let LambdaTerm::Abs(_, body) = outer.as_ref() else { return None };
-    match body.as_ref() {
-        LambdaTerm::Var(1) => Some(Value::Nil),
+    let Node::Abs(_, outer) = t.node() else { return None };
+    let Node::Abs(_, body) = outer.node() else { return None };
+    match body.node() {
+        Node::Var(1) => Some(Value::Nil),
         _ => None,
     }
 }
@@ -143,12 +143,12 @@ fn decode_nil(t: &LambdaTerm) -> Option<Value> {
 /// Scott `cons = \n.\c. c H T` (`Abs(_, Abs(_, App(App(Var(0), H), T)))`). Decode `H`/`T` guided by
 /// the expected head/tail values.
 fn decode_cons(t: &LambdaTerm, exp_h: &Value, exp_t: &Value) -> Option<Value> {
-    let LambdaTerm::Abs(_, outer) = t else { return None };
-    let LambdaTerm::Abs(_, body) = outer.as_ref() else { return None };
-    let LambdaTerm::App(ca, t_term) = body.as_ref() else { return None };
+    let Node::Abs(_, outer) = t.node() else { return None };
+    let Node::Abs(_, body) = outer.node() else { return None };
+    let Node::App(ca, t_term) = body.node() else { return None };
     // ca must be `c H`, i.e. App(Var(0), H)
-    let LambdaTerm::App(c, h_term) = ca.as_ref() else { return None };
-    if !matches!(c.as_ref(), LambdaTerm::Var(0)) {
+    let Node::App(c, h_term) = ca.node() else { return None };
+    if !matches!(c.node(), Node::Var(0)) {
         return None;
     }
     // H and T are closed subterms (don't reference n/c); decode them directly, guided by expected.
@@ -314,18 +314,23 @@ mod tests {
     /// `PartialEq` (`value.rs`) happens to have. Extracting to a `Vec<u64>` first keeps this test
     /// independent of that separate question, in either direction.
     ///
-    /// The decode AND its assertion both run inside the thread: `Value` holds `Rc`s, so it is not `Send`
-    /// and cannot be returned across the join. `Vec<u64>` can, so `ns` is moved in and the expected list
-    /// rebuilt there. The term is built out here, on the full-size stack, so only the decode is measured —
-    /// and dropping it inside costs no stack either, since `LambdaTerm` and `Value` both have iterative
-    /// `Drop`s.
+    /// The decode AND its assertion both run inside the thread: `Value` holds `Rc`s, so it is not
+    /// `Send` — and since `LambdaTerm` became `Rc`-backed, neither is the term. `Vec<u64>` is, so
+    /// `ns` is moved in and both the term and the expected list are built there.
+    ///
+    /// WIDER THAN IT WAS, stated rather than glossed. The term used to be built on the main thread
+    /// so only the DECODE was measured against the small stack; it now also covers construction and
+    /// teardown. That is acceptable because `scott_list_nf` builds with an iterative loop and
+    /// `LambdaTerm`'s `Drop` is iterative by contract — but it means a failure here no longer points
+    /// at the decode alone, and the 256 KiB below was re-measured with construction included rather
+    /// than inherited: it still passes unchanged.
     #[test]
     fn decode_lambda_ty_is_iterative_over_the_list_spine() {
         let ns: Vec<u64> = (0..5_000).map(|i| i % 10).collect();
-        let term = scott_list_nf(&ns);
         std::thread::Builder::new()
             .stack_size(256 * 1024)
             .spawn(move || {
+                let term = scott_list_nf(&ns);
                 let decoded = decode_lambda_ty(&term, &Ty::List(Box::new(Ty::Nat))).expect("a 5,000-cell list decodes");
                 assert_eq!(nat_list_to_vec(&decoded), Some(ns));
             })

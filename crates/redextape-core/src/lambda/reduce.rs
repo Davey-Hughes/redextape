@@ -35,7 +35,7 @@
 //! thunking `head`/`tail`'s nil branch retires (3), and switching to Z retires (2). Until all three are
 //! retired, none of them may be assumed.
 
-use crate::lambda::term::{Dir, LambdaTerm, Path, beta};
+use crate::lambda::term::{Dir, LambdaTerm, Node, Path, abs, app, beta};
 
 /// Default reduction step cap. High enough for the demo suite, low enough to fail fast instead of
 /// hanging. Mirrors the interpreter's `DEFAULT_BUDGET` philosophy.
@@ -49,18 +49,38 @@ pub const MAX_REDUCTION_STEPS: u64 = 5_000_000;
 /// follow-up).
 pub const MAX_TERM_DEPTH: u32 = 3_000;
 
-/// True if `t` has any subterm deeper than `limit`. Iterative (explicit stack) and early-exits at
-/// the limit, so it is bounded work and cannot itself overflow on a deep term.
+/// True if `t` has any subterm deeper than `limit`. Iterative (explicit stack), so it cannot itself
+/// overflow on a deep term, and it early-exits at the limit.
+///
+/// THE EARLY EXIT BOUNDS *DEPTH*, NOT *WORK*, and under structural sharing those stopped being the same
+/// quantity. This walks the LOGICAL expansion — it descends into both children of every `App` without
+/// asking whether they are one allocation — so a term that is shallow but heavily shared is walked once
+/// per edge reaching each subterm rather than once per allocation: thirty nested `App(c, c)` levels is
+/// 30 allocations and 2^30 logical nodes, and this returns `false` on all of them. `MAX_TERM_DEPTH` does
+/// not cover that, because it bounds depth and this is width by sharing. Under `Box` such a term was
+/// impossible to construct; under `Rc` it is possible.
+///
+/// CORRECTED 2026-07-31: IT IS ALSO REACHED. This comment used to close by calling the shape "merely
+/// unreached — nothing in the corpus builds one", which was true of the corpus and false as a
+/// guarantee. `examples/blowup_probe.rs` reaches it from **512 bytes of ordinary surface syntax**:
+/// `lower_group` clones the whole group term once per member (`lower.rs:453`) and the factor nests,
+/// so nested mutually recursive `fn` groups lower to 1,644 allocations holding 616,152 logical nodes
+/// (375x) — and that term's first β-step did not finish in 13 minutes at 974 MB. Nothing in this file
+/// fires: the term's depth is 141 against `MAX_TERM_DEPTH`, and `MAX_REDUCTION_STEPS` is never
+/// consulted because control does not return from `reduce_step`. This guard is Θ(logical) and crosses
+/// 3.6 s at 1,124 bytes of source, but it is not the failure — it is the part that still returns. See
+/// the design's §10 and the roadmap's λ-blow-up entry; the fix is a lowering-side decision, not one
+/// this function can make.
 pub(crate) fn depth_exceeds(t: &LambdaTerm, limit: u32) -> bool {
     let mut stack: Vec<(&LambdaTerm, u32)> = vec![(t, 0)];
     while let Some((node, d)) = stack.pop() {
         if d > limit {
             return true;
         }
-        match node {
-            LambdaTerm::Var(_) => {}
-            LambdaTerm::Abs(_, b) => stack.push((b, d + 1)),
-            LambdaTerm::App(f, a) => {
+        match node.node() {
+            Node::Var(_) => {}
+            Node::Abs(_, b) => stack.push((b, d + 1)),
+            Node::App(f, a) => {
                 stack.push((f, d + 1));
                 stack.push((a, d + 1));
             }
@@ -94,29 +114,31 @@ pub struct Trace {
 /// `None` if `t` is already in normal form.
 pub fn reduce_step(t: &LambdaTerm) -> Option<(LambdaTerm, Path)> {
     // Redex at the root: (\. body) arg
-    if let LambdaTerm::App(f, a) = t
-        && let LambdaTerm::Abs(_, body) = f.as_ref()
+    if let Node::App(f, a) = t.node()
+        && let Node::Abs(_, body) = f.node()
     {
         return Some((beta(body, a), Vec::new()));
     }
-    match t {
-        LambdaTerm::App(f, a) => {
-            // Try the function side first (leftmost), then the argument.
+    match t.node() {
+        Node::App(f, a) => {
+            // Try the function side first (leftmost), then the argument. Both `clone`s below are
+            // refcount bumps; under `Box` they deep-copied the untouched sibling at every level of
+            // the path, which is the cost this representation exists to remove.
             if let Some((f2, mut path)) = reduce_step(f) {
                 path.insert(0, Dir::AppL);
-                Some((LambdaTerm::App(Box::new(f2), a.clone()), path))
+                Some((app(f2, a.clone()), path))
             } else if let Some((a2, mut path)) = reduce_step(a) {
                 path.insert(0, Dir::AppR);
-                Some((LambdaTerm::App(f.clone(), Box::new(a2)), path))
+                Some((app(f.clone(), a2), path))
             } else {
                 None
             }
         }
-        LambdaTerm::Abs(n, b) => reduce_step(b).map(|(b2, mut path)| {
+        Node::Abs(n, b) => reduce_step(b).map(|(b2, mut path)| {
             path.insert(0, Dir::AbsBody);
-            (LambdaTerm::Abs(n.clone(), Box::new(b2)), path)
+            (abs(std::rc::Rc::clone(n), b2), path)
         }),
-        LambdaTerm::Var(_) => None,
+        Node::Var(_) => None,
     }
 }
 

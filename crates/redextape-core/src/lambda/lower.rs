@@ -844,6 +844,7 @@ mod tests {
     use crate::desugar::desugar;
     use crate::lambda::decode::decode;
     use crate::lambda::reduce::{MAX_REDUCTION_STEPS, reduce_to_normal_form};
+    use crate::lambda::term::Node;
     use crate::parser::parse;
     use crate::value::Value;
 
@@ -1022,10 +1023,10 @@ mod tests {
     fn subterm_at<'a>(t: &'a LambdaTerm, path: &[Dir]) -> Option<&'a LambdaTerm> {
         let mut cur = t;
         for d in path {
-            cur = match (d, cur) {
-                (Dir::AppL, LambdaTerm::App(f, _)) => f,
-                (Dir::AppR, LambdaTerm::App(_, a)) => a,
-                (Dir::AbsBody, LambdaTerm::Abs(_, b)) => b,
+            cur = match (d, cur.node()) {
+                (Dir::AppL, Node::App(f, _)) => f,
+                (Dir::AppR, Node::App(_, a)) => a,
+                (Dir::AbsBody, Node::Abs(_, b)) => b,
                 _ => return None,
             };
         }

@@ -35,7 +35,7 @@
 
 use crate::analysis::push_span;
 use crate::diagnostic::Diagnostic;
-use crate::lambda::term::{LambdaTerm, abs, app, var};
+use crate::lambda::term::{LambdaTerm, Node, abs, app, var};
 use crate::span::Span;
 
 /// Nesting-depth guard for the recursive-descent parser (mirrors the source parser). Tuned below
@@ -201,13 +201,13 @@ pub fn print_lambda_mapped(t: &LambdaTerm) -> (String, crate::analysis::Classifi
 
 fn write_term(t: &LambdaTerm, names: &mut Vec<String>, out: &mut String, spans: &mut crate::analysis::Classified) {
     use crate::analysis::TokenClass as C;
-    match t {
-        LambdaTerm::Var(i) => {
+    match t.node() {
+        Node::Var(i) => {
             let idx = names.len().checked_sub(1 + *i as usize);
             let name = idx.and_then(|k| names.get(k)).cloned().unwrap_or_else(|| format!("?{i}"));
             push_span(out, spans, &name, C::Ident);
         }
-        LambdaTerm::Abs(hint, body) => {
+        Node::Abs(hint, body) => {
             let name = fresh(hint, names);
             push_span(out, spans, "λ", C::Binder);
             push_span(out, spans, &name, C::Binder);
@@ -220,7 +220,7 @@ fn write_term(t: &LambdaTerm, names: &mut Vec<String>, out: &mut String, spans: 
             write_term(body, names, out, spans);
             names.pop();
         }
-        LambdaTerm::App(f, a) => {
+        Node::App(f, a) => {
             write_app_fn(f, names, out, spans);
             out.push(' ');
             write_atom(a, names, out, spans);
@@ -230,16 +230,16 @@ fn write_term(t: &LambdaTerm, names: &mut Vec<String>, out: &mut String, spans: 
 
 /// The function position of an application: an abstraction there needs parens.
 fn write_app_fn(t: &LambdaTerm, names: &mut Vec<String>, out: &mut String, spans: &mut crate::analysis::Classified) {
-    match t {
-        LambdaTerm::Abs(..) => parenthesized(t, names, out, spans),
+    match t.node() {
+        Node::Abs(..) => parenthesized(t, names, out, spans),
         _ => write_term(t, names, out, spans),
     }
 }
 
 /// An atom in argument position: abstractions and applications need parens.
 fn write_atom(t: &LambdaTerm, names: &mut Vec<String>, out: &mut String, spans: &mut crate::analysis::Classified) {
-    match t {
-        LambdaTerm::Var(_) => write_term(t, names, out, spans),
+    match t.node() {
+        Node::Var(_) => write_term(t, names, out, spans),
         _ => parenthesized(t, names, out, spans),
     }
 }
