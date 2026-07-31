@@ -89,7 +89,11 @@ impl Ctx {
     /// `Lambda` lowering binds several parameters into one shared call-frame scope.
     fn bind(&mut self, name: &str) -> Reg {
         let r = self.fresh_local();
-        self.scopes.last_mut().unwrap().push((name.to_string(), r));
+        // `scopes` is seeded non-empty in `Ctx::new` and every push is paired with a pop, so `last_mut`
+        // always finds a scope; `if let` rather than `unwrap` keeps the no-panic rule mechanical.
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.push((name.to_string(), r));
+        }
         r
     }
 
@@ -115,7 +119,10 @@ impl Ctx {
 
     /// Bind `name` to a function's entry `label` and `arity` in the current function scope.
     fn bind_fn(&mut self, name: &str, label: String, arity: usize) {
-        self.fn_scopes.last_mut().unwrap().push((name.to_string(), FnInfo { label, arity }));
+        // Non-empty for the same reason `scopes` is; see `bind`.
+        if let Some(scope) = self.fn_scopes.last_mut() {
+            scope.push((name.to_string(), FnInfo { label, arity }));
+        }
     }
 
     /// Place a label at the current end of `code`.

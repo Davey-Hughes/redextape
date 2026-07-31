@@ -4,6 +4,11 @@
 //! reads the result back with `decode_nat`. Nothing here goes through `lower_tm` or `run_tm` — those
 //! arrive in Phase 3 — so a failure here localizes to a single gadget.
 
+// Test target: a fixture that fails to build IS the failure this file reports, so panicking is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
+// `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use redextape_core::tm::{
     BLANK, BOX, Binary, Builder, Encoding, HEAP, MARK, REG, SEP, STACK, StateId, TAPES, TM_DEFAULT_CAPS, TmStatus,
     WORK, ZERO, simulate_final,

@@ -329,7 +329,14 @@ No core change is required for any of these upgrades.
    All three implementations must agree.
 2. **Property-based** (proptest): generate random valid programs, run the three-way check.
 3. **Encoding round-trips:** `Nat/Bool/List` ↔ Church/Scott ↔ tape encodings.
-4. **Source-map coverage:** every Core node maps to a non-empty lambda span **and** TM block.
+4. **Source-map coverage:** every Core node maps to a non-empty lambda span, and every node *of a kind
+   that emits code* maps to a non-empty TM block. **Corrected 2026-07-30 — as originally written this
+   said every node maps to both, and that is false of the shipped `lower_asm`:** `Lambda`, `Seq`, a
+   `Let` whose value is not a `Lambda`, and an `Apply`'s callee `Var` emit no instructions at all, so
+   they map to `None`. The map says nothing where the lowering said nothing; a companion test names the
+   instruction-free kinds and asserts they are `None`, so the discovery is a regression guard rather
+   than an erasure. Full reasoning in
+   [`2026-07-30-plan4-sourcemap-trace-and-tokens-design.md`](2026-07-30-plan4-sourcemap-trace-and-tokens-design.md) §1.
 5. **Golden tests:** sample programs → expected lambda term and TM step count.
 6. **Per-pass unit tests:** parse, desugar, each lowering.
 7. **Print ↔ parse round-trips** (§7.2): for each editable language, `parse(print(x)) == x`

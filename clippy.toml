@@ -1,0 +1,17 @@
+# Companion to `[workspace.lints.clippy]` in `Cargo.toml`, which warns (and, under CI's
+# `-D warnings`, denies) `unwrap_used`, `expect_used`, `panic`, `todo` and `unimplemented`.
+#
+# Test code is allowed to panic deliberately — an assertion IS a panic — so these three keys exempt
+# it. Two limits are worth knowing before adding a test:
+#
+#   * The exemption reaches code lexically inside a `#[test]` function or a `#[cfg(test)]` module.
+#     A free helper in a `tests/` or `examples/` target is in neither, so those targets carry a
+#     file-level `#![allow(...)]` instead.
+#   * Clippy matches a BARE `#[cfg(test)]`. `#[cfg(all(test, feature = "..."))]` is not recognized,
+#     so the feature-gated test modules in `redextape-native` restate the allow at module level.
+#
+# `todo` and `unimplemented` have no in-tests key and are not exempted anywhere: a placeholder is
+# not more acceptable in a test than in the library.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

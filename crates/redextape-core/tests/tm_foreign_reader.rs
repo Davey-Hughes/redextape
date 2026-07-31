@@ -58,6 +58,11 @@
 //! `redextape_core::tm` beyond the plain data it returns. No `simulate`, no `Tape`, no `Encoding`,
 //! no `decode_tape_ty`.
 
+// Test target: a fixture that fails to build IS the failure this file reports, so panicking is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
+// `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use redextape_core::tm::{BLANK, Machine, Move, parse_tm_full};
 
 /// Generous — this fixture halts in the low hundreds of steps; this cap exists only so a foreign

@@ -2,6 +2,11 @@
 //! agree on every first-order demo. This is the intermediate oracle that makes Part 2's TM δ-tables
 //! debuggable (a disagreement is localized to Core→asm before the TM even exists).
 
+// Test target: a fixture that fails to build IS the failure this file reports, so panicking is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
+// `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use proptest::prelude::*;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;

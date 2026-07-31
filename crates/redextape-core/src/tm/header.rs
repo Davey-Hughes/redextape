@@ -215,11 +215,12 @@ impl TmHeader {
     }
 }
 
+use crate::analysis::{Classified, TokenClass, push_span};
 use crate::ty::show;
-use std::fmt::Write as _;
 
-/// Render `h`'s directives, one per line, ending in a newline. Emitted between `start` and the states
-/// by `syntax::print_tm_with`.
+/// Append `h`'s directives to `out`, one per line, each ending in a newline, pushing a class per span
+/// onto `spans`. Emitted between `start` and the states by `syntax::print_tm_inner`, which owns the
+/// buffer — so the offsets recorded here are already absolute in the finished file, with no rebasing.
 ///
 /// The order — `version`, `encoding`, `width`, `slots`, `result`, then `tape` lines ascending — is
 /// FIXED, even though the parser accepts any order. A printer has to choose one, and a fixed choice is
@@ -231,25 +232,38 @@ use std::fmt::Write as _;
 /// this tree writes one — the tape alphabet is `_ # 1 0 @` — and `Machine::validate()` already
 /// reserves `;`. A hand-built machine using `;` as a data symbol is outside the representable subset
 /// the text form is specified for, the same as one whose state name contains a space.
-pub(crate) fn print_header(h: &TmHeader) -> String {
-    let mut out = String::new();
-    let _ = writeln!(out, "version {HEADER_VERSION}");
-    let _ = writeln!(out, "encoding {}", h.encoding.name());
-    let _ = writeln!(out, "width {}", h.width);
-    let _ = writeln!(out, "slots {}", h.slots);
-    let _ = writeln!(out, "result {}", show(&h.result));
+pub(crate) fn write_header(out: &mut String, spans: &mut Classified, h: &TmHeader) {
+    let directive = |out: &mut String, spans: &mut Classified, key: &str, val: &str, class: TokenClass| {
+        push_span(out, spans, key, TokenClass::Keyword);
+        out.push(' ');
+        push_span(out, spans, val, class);
+        out.push('\n');
+    };
+    // `encoding` and `result` name an encoding and a type; neither has a class of its own, and `Ident`
+    // is the vocabulary's word for "a name whose meaning comes from elsewhere in the file".
+    directive(out, spans, "version", &HEADER_VERSION.to_string(), TokenClass::Nat);
+    directive(out, spans, "encoding", h.encoding.name(), TokenClass::Ident);
+    directive(out, spans, "width", &h.width.to_string(), TokenClass::Nat);
+    directive(out, spans, "slots", &h.slots.to_string(), TokenClass::Nat);
+    directive(out, spans, "result", &show(&h.result), TokenClass::Ident);
     for (i, cells) in &h.tapes {
         let packed: String = cells.iter().collect();
-        match tape_name(*i) {
-            Some(name) => {
-                let _ = writeln!(out, "tape {i} {packed}  ; {name}");
-            }
-            None => {
-                let _ = writeln!(out, "tape {i} {packed}");
-            }
+        push_span(out, spans, "tape", TokenClass::Keyword);
+        out.push(' ');
+        push_span(out, spans, &i.to_string(), TokenClass::Nat);
+        out.push(' ');
+        // ONE span for the whole cell run, not one per cell: the run is a single packed lexeme (D4),
+        // and a 120-cell bank would otherwise contribute 120 adjacent identical spans for no gain.
+        // `TmHeader::new` drops empty tapes, so the guard is belt-and-braces against a zero-width span.
+        if !packed.is_empty() {
+            push_span(out, spans, &packed, TokenClass::TapeSymbol);
         }
+        if let Some(name) = tape_name(*i) {
+            out.push_str("  ");
+            push_span(out, spans, &format!("; {name}"), TokenClass::Comment);
+        }
+        out.push('\n');
     }
-    out
 }
 
 /// Unpack a `tape` line's cell run: strip a trailing `;` comment, trim, and take one `Symbol` per
@@ -457,8 +471,15 @@ impl HeaderParts {
         if !errs.is_empty() {
             return (None, errs);
         }
-        let (encoding, width) = (self.encoding.unwrap(), self.width.unwrap());
-        let (slots, result) = (self.slots.unwrap(), self.result.unwrap());
+        // `missing` is empty here, so all four ARE `Some` — but destructure rather than unwrap, so the
+        // no-panic rule holds by construction rather than by reading the twenty lines above. The `else`
+        // arm is unreachable in practice and reports the same incomplete-header diagnostic it would
+        // have reported above, so a future edit that breaks the invariant degrades to a diagnostic.
+        let (Some(encoding), Some(width), Some(slots), Some(result)) =
+            (self.encoding, self.width, self.slots, self.result)
+        else {
+            return (None, vec![("incomplete header: missing a required directive".into(), None)]);
+        };
         let tapes: Vec<(usize, Vec<Symbol>)> = self.tapes.into_iter().map(|(i, cells, _)| (i, cells)).collect();
         (Some(TmHeader::new(encoding, width, slots, result, tapes)), Vec::new())
     }
@@ -468,6 +489,14 @@ impl HeaderParts {
 mod tests {
     use super::*;
     use crate::tm::build::{MAX_FIELD_WIDTH, TAPES};
+
+    /// The header block on its own, for the tests below that assert its text rather than a whole file.
+    /// A one-line wrapper over the one formatter — the spans are simply discarded here.
+    fn print_header(h: &TmHeader) -> String {
+        let mut out = String::new();
+        write_header(&mut out, &mut Vec::new(), h);
+        out
+    }
 
     fn a_header() -> TmHeader {
         TmHeader::new(

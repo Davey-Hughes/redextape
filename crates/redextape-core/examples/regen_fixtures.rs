@@ -14,6 +14,10 @@
 //! Regenerates BOTH fixtures — do not add a second `#[ignore]`d writer for a new one; extend the list
 //! below instead.
 
+// Example target: a demo that cannot build its own input has nothing to demonstrate, so aborting is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use redextape_core::core::Core;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;

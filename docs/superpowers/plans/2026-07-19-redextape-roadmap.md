@@ -89,12 +89,213 @@ Copied verbatim from the spec / existing repo config:
   `analysis.rs` (symbols + semantic tokens on top of Plan 1's diagnostics, §8/§9.4);
   new crate `crates/redextape-wasm` (cdylib, `wasm-bindgen`).
 - **Delivers:** the data contract the UI renders — structured view models, a scrubbable trace,
-  and source maps with full node coverage (§10.4). No rendering yet.
+  and source maps (§10.4). No rendering yet. *(Said "full node coverage" until 2026-07-30; see the
+  correction below — full coverage is false of the TM half.)*
 - **Depends on:** Plans 1–3.
 - **Key interfaces exposed:** `LambdaState`, `TmState`, `StepEvent`, `SourceMap`; WASM exports
   `compile`, `step`, `run_to_cap`.
-- **Testable outcome:** source-map coverage test (every Core node → non-empty λ span **and** TM
-  block); view models serialize/round-trip; `wasm-pack build` succeeds.
+- **Testable outcome:** source-map coverage test (every Core node → non-empty λ span, and every node
+  *of a kind that emits code* → non-empty TM block — **corrected 2026-07-30**, see below); view models
+  serialize/round-trip; `wasm-pack build` succeeds.
+
+#### Plan 4's producer slice is DELIVERED (2026-07-30)
+
+Plan: [`2026-07-30-plan4-sourcemap-trace-and-tokens.md`](2026-07-30-plan4-sourcemap-trace-and-tokens.md).
+`redextape-core` still has **zero dependencies** (`cargo tree -p redextape-core --edges normal` shows
+only itself), and no printed byte moved — every pre-existing golden, round-trip and fixture passed
+unedited, which is the evidence for that claim.
+
+**Interfaces now exposed:**
+
+| module | surface |
+| --- | --- |
+| `sourcemap` | `SourceMap { node_to_lambda, node_to_tm }`, `build`, `lambda_path`, `tm_block` |
+| `lambda` | `lower_mapped(&Core) -> Result<(LambdaTerm, Vec<(NodeId, Path)>), LowerError>` |
+| `trace` | `StepEvent::{Beta, Delta}`, `LambdaCursor`, `TmCursor` — both `Iterator`, both O(1) in steps |
+| `analysis` | `TokenClass`, `Classified`, `Attributed`, `classify_source`, `attribute_tm_spans` |
+| printers | `print_lambda_mapped`, `print_tm_with_mapped`, `print_tm_mapped`, `print_asm_mapped` |
+
+**Still open — the consumer slice:** `viewmodel.rs`, `crates/redextape-wasm`, serde. Lands with Plan 5.
+
+**What implementation falsified, recorded rather than absorbed:**
+
+- **§10.4's premise was false** and the spec is corrected: `Lambda`, `Seq`, a `Let` whose value is not a
+  `Lambda`, and an `Apply`'s callee `Var` emit no instructions at all, so they map to `None`. The map
+  says nothing where the lowering said nothing. `LetRec`/`LetRecGroup` are NOT in that set.
+- **The root is not always covered.** `lower_asm_mapped` bills the terminating `Halt` to `core.id()` on
+  the direct path only — on the defunc path it runs on the *defunctionalized* Core. The corpus was
+  entirely first-order, so nothing exercised it; it now includes higher-order programs asserting
+  `lower_asm(&core).is_err()` to prove defunc really runs.
+- **Path→node is not injective:** a zero-argument `Apply` gives the `Apply` node and its callee the same
+  path. Anything inverting the λ map must not assume otherwise.
+- **λ lowering had NO depth guard** (pre-existing, not introduced here) — **now closed.**
+  `lambda/lower.rs` recursed unbounded while every other stage was guarded, and a list literal past
+  ~1470 elements aborted the process with an uncatchable stack overflow inside `lower` on an 8 MiB
+  stack. It now measures the input's nesting depth once, iteratively (`too_deep_node`, the shape
+  `defunc` already used), before any recursive pass — the lowering itself *and* the `assigns_captured`
+  / `collect_region_vars` analyses that walk a sub-tree before it is lowered — and answers
+  `LowerError::TooDeep`. Bound `MAX_LAMBDA_LOWER_DEPTH = 700`: ~2.1x below the measured crash, and
+  exactly `MAX_EVAL_DEPTH`, so nothing the reference interpreter can evaluate is refused.
+
+  **Two consequences worth stating rather than discovering later.** First, this is a *capability
+  reduction* on λ-only paths, not purely an abort-to-error conversion: programs between depth 701 and
+  ~1470 lowered successfully before and now answer `TooDeep`. That is justified by the bound equalling
+  `MAX_EVAL_DEPTH` — the invariant becomes "if the reference interpreter can evaluate it, the λ backend
+  can lower it", and anything deeper already failed elsewhere (interp faults, and the TM guards are
+  stricter at 580) — but it is a real change, not a free one.
+
+  **Second, and still open: an 8 MiB-calibrated bound does not protect WASM.** The measurement behind
+  700 was taken on a native 8 MiB stack; WASM's is ~1 MB, where the crash arrives around **depth 180**.
+  So a browser build can still abort inside that window. This matters more than it looks, because Plan 4
+  exists specifically to feed the WASM/web target — the one place the guard does not yet reach. Closing
+  it properly needs a per-target bound (or a stack-probing check) rather than one constant, and the same
+  gap applies to the sibling guards `MAX_EVAL_DEPTH`, `MAX_LOWER_DEPTH` and `MAX_DEFUNC_DEPTH`, all
+  calibrated the same way. **Decide it with the WASM slice**, where the target's real stack is known.
+- **`Rc<LambdaTerm>` remains the λ performance fix**, not checkpoints. Evidence in the design doc §7.
+
+**Deferred by the final whole-branch review (2026-07-30), each with why.** None is wrong code; all are
+unfinished contract. Ordered by when a consumer will hit them.
+
+1. **Nothing pairs a `SourceMap` to the `Machine` it describes** — *fixed on this branch*, recorded here
+   because the failure was severe and the shape of the fix is the lesson. `build` lowered a machine and
+   discarded it, and `attribute_tm_spans` took map and machine separately, so a map built under one
+   encoding against a machine lowered under another mis-attributed **1049 of 1374** spans silently. The
+   fix records the state-name association at build time and removes the `Machine` parameter, so there is
+   no second object to mismatch.
+2. **No `NodeId → source Span` — the sync anchor has no source leg.** §5.4 asks for exactly two maps
+   (`node → λ span`, `node → TM block`) and never specifies a source one, so this is a gap in the
+   DESIGN, surfaced only by asking how a renderer lights the source pane. **Nothing is lost by
+   deferring:** `desugar(&Program) -> Core` already takes the AST, every AST node carries a `Span`
+   (`ast.rs:16-23`), and the ids are minted right there — so `desugar_mapped` later is the same
+   `_mapped` shape used four times on this branch. **Decide it in Plan 5**, where the renderer defines
+   what it actually needs.
+3. **~~The four printers disagree on span coverage.~~ CLOSED.** The design's §6 asks for spans covering
+   the printed string except whitespace; the shipped test omitted that property and it did not hold.
+   Measured non-whitespace gaps: **λ 56** (the binder `.` was unclassified while `(`/`)` two lines away
+   were not), **asm 16** (the label `:` and the `, ` operand separator), **TM 0**. Resolved by taking the
+   first option: `check` in `tests/span_wellformed.rs` now asserts coverage, and the λ binder `.`, the asm
+   label `:` and the asm operand `,` classify as `Punct`, matching what the TM printer already did. No
+   printed byte changed. `classify_source` is held to the same property, with the one documented
+   exception below — item 4's comment bytes, which the corpus therefore excludes on purpose.
+4. **`classify_source` can never emit `TokenClass::Comment`, and this is the `fmt` blocker wearing a
+   different hat.** `lexer.rs` discards `//` comments, so `TokenKind` has no variant for them and the
+   one class every source highlighter needs is unreachable. Fixing it means deciding how trivia
+   attaches — token stream or AST — **which is exactly the decision that blocks `redextape fmt`**, since
+   a `print ∘ parse` formatter over an AST that never saw comments deletes every comment in the file.
+   Patching it for the highlighter alone would likely be redone once `fmt` forces the real design.
+   **Do it once, as its own slice, and both consumers are served.** See the Plan 6 note below.
+**Minor findings from the same review.** Recorded here because the execution ledger they were logged in
+is git-ignored scratch, so leaving them there would have discarded them at merge. Six of the seven were
+fixed before merge; the status below is what is true now, not what the review first found.
+
+- **STILL OPEN — a third copy of the direct-then-defunc lowering match:** `sourcemap.rs` ≈
+  `tm/attribute.rs` ≈ `tm.rs`. `sourcemap.rs` admits it in a comment. All three answer "lower this Core,
+  falling back to `defunc` only on `Unsupported` and never on `TooDeep`" — a decision that should exist
+  once. Not folded here only because it was the one Minor needing real design (the three callers want
+  different outputs from the same choice), and the branch was already long.
+- ~~`Core::for_each_child` vs recursive test helpers~~ — **fixed.** `nat_nodes` is now iterative over an
+  explicit worklist; `children` deleted.
+- ~~The `_mapped` suffix convention inverted for the TM printer~~ — **fixed.** It was
+  `print_tm`↔`print_tm_mapped_bare` and `print_tm_with`↔`print_tm_mapped`, so the suffix meant opposite
+  things. Now `print_tm`↔`print_tm_mapped` and `print_tm_with`↔`print_tm_with_mapped`.
+- ~~Argument-order drift among the write-in-place helpers~~ — **fixed.** All are `(out, spans, payload)`.
+- ~~`print_asm_mapped` rescanned every label per instruction~~ — **fixed.** Labels are bucketed by index
+  once, preserving the order several labels at one index print in, with a test pinning that order.
+- ~~No lint enforced the no-`unwrap` cardinal rule~~ — **fixed, and it found seven real violations**:
+  four `unwrap`s in `tm/header.rs::finish`, two in `tm/lower_asm.rs`, one in `lambda/syntax.rs`. All
+  fixed rather than allowed. `[workspace.lints.clippy]` now warns `unwrap_used`, `expect_used`, `panic`,
+  `todo`, `unimplemented`; `clippy.toml` exempts test code and documents the two limits of that
+  exemption. The rule had been documentation-only since the project began.
+- ~~`core_of` defined four times~~ — **mostly fixed.** The two integration tests share one from
+  `tests/common/mod.rs`. Two copies remain inside `src/` `#[cfg(test)]` modules, unreachable from
+  `tests/common`, and one of those differs on purpose.
+
+**STILL OPEN — five `unreachable!` on library paths.** `clippy::unreachable` is deliberately NOT enabled,
+so these are listed rather than silently pre-allowed: the arith/compare dispatch split in both encodings
+(`tm/encoding/binary.rs`, `tm/encoding/unary.rs`, two each) and `tm/lower_asm.rs`'s arity table. Each
+marks an invariant between two tables. Removing them means changing the *types* so the impossible arm
+cannot be written — a design change, not a cleanup. A sixth, a bare `unreachable!()` in `lambda/syntax.rs`'s
+`fresh`, WAS removed: its unbounded `0..` search is now bounded by a pigeonhole argument and returns a
+value instead of aborting a printer.
+
+5. ~~**`sim::run` and `TmCursor::next` are a duplicated 8-guard sequence (~29 lines).**~~ **CLOSED** —
+   `sim::run` is now a consumer of `TmCursor`, so the δ-stepping loop exists once, matching what the λ
+   half already did. `sim.rs` retains only the `rule_matches`/`apply` definitions the cursor calls; all
+   three distinctive guards (`stuck == halt`, the pre-allocation tape-count check, the malformed-rule
+   check) appear in exactly one file. The three optional recorders survive: `record` snapshots ahead of
+   each step, `counts` tallies the emitted event's state, `watch` sees post-step tapes and stops at
+   `cursor.state()`. One API addition, `TmCursor::into_tapes`, to spare `run` a clone. Perf within noise
+   on the three heaviest δ tests.
+
+   **One trade-off this created — and how it was closed.** Folding forced `run` to handle a non-`Delta`
+   event and an absent status, both structurally impossible today. The `unwrap_used` deny (added the same
+   day) rules out asserting they cannot happen, so the code breaks the loop and defaults instead — which
+   would have meant a future `StepEvent` variant silently truncating a run rather than failing loudly,
+   with the λ half identically exposed. The wildcard keeping them total is the same wildcard that would
+   hide the bug. Closed by `trace::tests::every_step_event_variant_has_a_declared_producer`, an
+   exhaustive match with no wildcard: **adding a variant is now a build error**, verified, so the
+   decision must be made deliberately. Same device as `analysis::class_of` and `Core::for_each_child`.
+   **Original finding, for context:** The design §2 said
+   `simulate_trace` would be reimplemented over the cursor as `reduce_trace` was; only the λ half
+   happened, and this is an unrecorded deviation rather than a decision. Mitigated by the differential
+   tests in `tests/trace_equivalence.rs`, which pin the two against each other on every corpus program,
+   at each cap boundary, and on a machine whose tape count is not `TAPES`. `simulate_trace`'s
+   `record`/`counts`/`watch` hooks are all expressible over the cursor, so nothing forced the split.
+
+#### Plan 4 is split in two, and its first half is designed (2026-07-30)
+
+Design: [`2026-07-30-plan4-sourcemap-trace-and-tokens-design.md`](../specs/2026-07-30-plan4-sourcemap-trace-and-tokens-design.md).
+
+**Producer slice (designed):** `sourcemap.rs`, `trace.rs`, `analysis.rs`, highlight composition —
+`redextape-core` only, zero new dependencies. **Consumer slice (deferred):** `viewmodel.rs` +
+`crates/redextape-wasm` + serde, landing with Plan 5, which is what renders them.
+
+The split resolves a contradiction in this entry as written. §9.1 asks for *serde-serializable* view
+models, but the shipped source-map slice mandates that `redextape-core` stay WASM-clean and
+dependency-free. Deferring serialization to the WASM crate — which may depend on serde — satisfies both,
+and nothing consumes a view model until Plan 5 exists anyway.
+
+**Half of this entry already shipped** via the 2026-07-24 source-map slice: `lower_asm_mapped`,
+`defunc_mapped`, `lower_tm_mapped` and `tm/attribute.rs` are the Core→asm→TM chain. What remains is the λ
+half (`lower_mapped`, giving `NodeId → Path`) plus an inversion of the shipped chain. Note that plan doc's
+35 checkboxes are all still unticked despite the work having landed — the code, not the checkboxes, is the
+status of record.
+
+**`analysis.rs` ships semantic tokens only; resolved symbols are dropped.** The LSP is v2 and nothing in
+v1 consumes symbols. YAGNI.
+
+**Three highlighting tasks scoped against Plan 6 moved here**, because two of them are this entry's own
+deliverable: `NodeId → λ-subterm span` is `sourcemap.rs`'s first bullet verbatim, and colouring a derived
+artifact by originating source construct is that map's consumer. Building them under the CLI would have
+meant Plan 6 growing a span layer Plan 4 then duplicated. See the Plan 6 note below for what stayed.
+
+**Measurements that fixed the trace design** (release, native, best of three — full tables in the design):
+
+| | steps | materialized | replay from 0 |
+| --- | --- | --- | --- |
+| TM `sum(5)` | 178,222 | **592.9 MB** | 1.5 ms |
+| TM `map` | 344,999 | — | **3.0 ms** |
+| λ `sum(5)` | 626 | ~23 MB | **99 ms** |
+
+- **Materializing is not viable and never was.** 593 MB for row 7 of the existing demo suite. The
+  5,000,000-step cap bounds *steps*, not bytes, and at ~3.5 KB/step it authorizes terabytes.
+- **The TM needs no checkpoints — lazy stepping is the final answer there, not a stopgap.** ~115M steps/s
+  means a full replay of the largest demo is 3.0 ms against a 16 ms frame budget.
+- **λ is 18,000× slower per step, and the remedy is `Rc<LambdaTerm>`, not checkpoints.** Two hypotheses
+  were tested and refuted: not the `depth_exceeds` guard (the measured loop never calls it), and not term
+  growth or the O(depth²) `path.insert(0, ..)` — measured max term depth **69**, max size **1,213 nodes**,
+  max redex path **30**. The cause is `Box`-based `LambdaTerm`: `reduce_step` rebuilds the spine as
+  `App(Box::new(f2), a.clone())`, deep-cloning the untouched sibling at every level — ~36k node
+  allocations per step, which at ~4 ns/node predicts ~150 µs against 158 µs measured. Structural sharing
+  makes spine rebuild O(path) *and* snapshots nearly free, collapsing the trade-off instead of working
+  around it. **Own slice:** `LambdaTerm` is public and derives `PartialEq`, used across
+  `lower`/`decode`/`encode`/`syntax`/`reduce`.
+- **The TM delta is `(state, rule)` — 8 bytes, no allocation.** The machine is immutable during a run, so
+  a rule reference determines the writes and moves. An earlier draft stored `[Option<Symbol>; TAPES]`,
+  which is **wrong**: `TAPES` is the lowering's convention but `Machine::tapes` is a runtime field and
+  `parse_tm` accepts any declared count, so a fixed array would silently mis-shape every hand-written
+  machine. Nothing in the suite would have caught it, because every machine the lowering builds has five
+  tapes — hence the explicit non-`TAPES` regression test in the design's §6.
 
 ### Plan 5 — Web UI: editable panes, renderers, linking, detach, caps
 
@@ -114,6 +315,43 @@ Copied verbatim from the spec / existing repo config:
   emit + run λ / TM artifacts.
 - **Depends on:** Plans 1–3 (parsers, printers, interpreters).
 - **Testable outcome:** `trycmd`/`assert_cmd` golden tests for `fmt` idempotency and `run` output.
+
+#### What surveying Plan 6 turned up, before it was deferred behind Plan 4 (2026-07-30)
+
+Plan 6 was surveyed as the next slice and its dependencies confirmed present, then deferred: the
+highlighting work it wanted turned out to be Plan 4's deliverable, and the CLI reads better as a consumer
+of that than as a thing growing its own span layer. What is recorded here is what the survey found, so the
+next reader does not re-derive it.
+
+**`fmt` needs a surface printer that does not exist.** λ, TM and asm all have printers; the mini-language
+has a parser and no printer. §7.2 defines the formatter as exactly `print ∘ parse`, so this is the bulk of
+the work, not a wrapper over something existing.
+
+**The blocking decision for `fmt` is comment retention, and it is bigger than the printer.** `lexer.rs`
+skips `//` comments entirely, so a `print ∘ parse` formatter over an AST that never saw them **deletes
+every comment in the file**. Either trivia gets attached to tokens/AST, or `fmt` is comment-destroying and
+unshippable. Decide this before writing the printer.
+
+**That decision now has a second consumer, so do it once.** Plan 4's producer slice shipped
+`analysis::classify_source`, and it can never emit `TokenClass::Comment` for exactly the same reason —
+the lexer discards comments, so `TokenKind` has no variant for them. The one class every source
+highlighter needs is unreachable on the source path. Whoever settles trivia representation serves both
+`fmt` and the highlighter; settling it for either alone means redoing it. See item 4 of the deferral list
+under Plan 4 above.
+
+**Already present, contrary to an earlier reading:** `value.rs` exports `format_value`, so `run` output
+needs no new formatting (`42`, `[1, 2, 3]`, `()`), and `examples/tm_emit.rs`, `tm_demo.rs`,
+`lambda_demo.rs`, `step_survey.rs` already do most of what emit/run subcommands need.
+
+**Genuinely missing and unclaimed:** `parse_asm`. The asm form prints but cannot be read back — this entry
+promised it (see Plan 3's key interfaces) and it never landed. Only needed if the asm pane should
+round-trip or be editable like λ and TM; costs a parser plus round-trip proptests, so priced and left out
+of v1 unless a consumer asks.
+
+**Stays with Plan 6:** colouring the *source* language, which needs no new producer — `lexer::lex` already
+yields `Token { kind, span }` — and is what `lint` output actually wants. Also the printed-form token spans
+for λ/TM/asm if Plan 4's `analysis.rs` has not already covered them by then; that half was the one piece of
+the highlighting work no plan claimed, and a CLI dump is its natural consumer.
 
 ## Deferred beyond v1 (tracked, not planned here)
 

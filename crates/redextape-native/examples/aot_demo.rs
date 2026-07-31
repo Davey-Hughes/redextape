@@ -1,5 +1,10 @@
 //! `cargo run --example aot_demo -p redextape-native` — compile a mini-language program to a real
 //! standalone native binary, run it, and show its output.
+
+// Example target: a demo that cannot build its own input has nothing to demonstrate, so aborting is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[cfg(feature = "cranelift")]
 fn main() {
     use redextape_core::tm::{DEFAULT_CAPS, lower_asm};

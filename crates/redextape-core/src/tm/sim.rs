@@ -3,6 +3,7 @@
 //! input hangs or overflows the native stack. Defensive on a malformed `Machine` (halts, never panics).
 
 use crate::tm::machine::{BLANK, Machine, Move, Rule, StateId, Symbol};
+use crate::trace::{StepEvent, TmCursor};
 
 /// Why the run stopped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,7 +61,7 @@ impl Tape {
         }
     }
 
-    fn cells(&self) -> usize {
+    pub(crate) fn cells(&self) -> usize {
         self.left.len() + 1 + self.right.len()
     }
 
@@ -89,7 +90,9 @@ pub struct Trace {
     pub status: Status,
 }
 
-fn rule_matches(read: &[Option<Symbol>], tapes: &[Tape]) -> bool {
+/// The rule matcher, kept here beside `Tape` because it reads the zipper's private head. `trace::TmCursor`
+/// is its only caller, and since `run` is written over that cursor it is the crate's only δ-matcher.
+pub(crate) fn rule_matches(read: &[Option<Symbol>], tapes: &[Tape]) -> bool {
     read.len() == tapes.len()
         && read.iter().zip(tapes).all(|(pat, t)| match pat {
             None => true,
@@ -97,7 +100,8 @@ fn rule_matches(read: &[Option<Symbol>], tapes: &[Tape]) -> bool {
         })
 }
 
-fn apply(rule: &Rule, tapes: &mut [Tape]) {
+/// A rule's writes and head moves, here for the same reason as `rule_matches` and with the same one caller.
+pub(crate) fn apply(rule: &Rule, tapes: &mut [Tape]) {
     for (i, t) in tapes.iter_mut().enumerate() {
         if let Some(s) = rule.write[i] {
             t.write(s);
@@ -110,9 +114,12 @@ fn apply(rule: &Rule, tapes: &mut [Tape]) {
 /// `simulate_watched`.
 pub type Watcher<'a> = &'a mut dyn FnMut(&[Tape]) -> bool;
 
-/// The shared iterative loop. `record` optionally collects a step trace; `counts` optionally
-/// accumulates a per-state step tally (indexed by state id, charging the state being *left*).
-/// Defensive on a malformed machine (missing state / out-of-range target / stuck state all halt).
+/// The shared driver behind all five entry points below. The δ-stepping itself — the guard sequence,
+/// the matcher, the step accounting, the defensiveness on a malformed machine (missing state /
+/// out-of-range target / stuck state all halt) — lives in `trace::TmCursor`, so that loop exists once in
+/// this crate rather than twice; what remains here is the three optional recorders. `record` optionally
+/// collects a step trace; `counts` optionally accumulates a per-state step tally (indexed by state id,
+/// charging the state being *left*).
 fn run(
     m: &Machine,
     init: &[Vec<Symbol>],
@@ -121,60 +128,50 @@ fn run(
     mut counts: Option<&mut Vec<u64>>,
     mut watch: Option<Watcher<'_>>,
 ) -> (Vec<Tape>, StateId, Status) {
-    // `m.tapes` is an unbounded `usize` from the machine (not yet validated here); the initial live
-    // cell count is >= the tape count (each tape starts with >= 1 cell), so the cells cap already
-    // implies this bound. Guard it *before* allocating a `Tape` per declared tape, so a machine
-    // declaring e.g. `tapes 10_000_000_000` hits the cap instead of attempting that many allocations.
-    if m.tapes as u64 > caps.cells {
-        return (Vec::new(), m.start, Status::HitCap);
-    }
-    let mut tapes: Vec<Tape> = (0..m.tapes).map(|i| Tape::new(init.get(i).map_or(&[][..], Vec::as_slice))).collect();
-    let mut cur = m.start;
-    let mut steps = 0u64;
+    let mut cursor = TmCursor::new(m, init, caps);
     loop {
-        let Some(state) = m.states.get(cur as usize) else {
-            return (tapes, cur, Status::Halted);
+        // The tapes BEFORE this step — `next` applies the rule in place, so they cannot be read
+        // afterwards. Taken only when a trace is being recorded, and dropped unused when the cursor ends
+        // instead of stepping, which is what keeps a malformed rule (or a cap) from pushing a `Step`.
+        let before: Option<Vec<(Vec<Symbol>, usize)>> =
+            record.is_some().then(|| cursor.tapes().iter().map(Tape::snapshot).collect());
+        // `state` is the state the machine was in when the rule fired, which is the convention `Step`
+        // documents. A `TmCursor` emits nothing but `Delta`; stopping on anything else ends the run with
+        // a well-formed result rather than panicking on a library path.
+        let Some(StepEvent::Delta { state, .. }) = cursor.next() else {
+            break;
         };
-        if state.accept {
-            return (tapes, cur, Status::Halted);
-        }
-        if steps >= caps.steps {
-            return (tapes, cur, Status::HitCap);
-        }
-        let total: usize = tapes.iter().map(Tape::cells).sum();
-        if total as u64 > caps.cells {
-            return (tapes, cur, Status::HitCap);
-        }
-        let Some(rule) = state.rules.iter().find(|r| rule_matches(&r.read, &tapes)) else {
-            return (tapes, cur, Status::Halted); // stuck == halt
-        };
-        if (rule.next as usize) >= m.states.len() || rule.write.len() != m.tapes || rule.moves.len() != m.tapes {
-            return (tapes, cur, Status::Halted); // defensive: malformed rule
-        }
-        if let Some(rec) = record.as_deref_mut() {
-            rec.push(Step { state: cur, tapes: tapes.iter().map(Tape::snapshot).collect() });
-        }
-        apply(rule, &mut tapes);
-        // The invariant hook (see `simulate_watched`): called on every applied step, and a `false`
-        // return stops the run here. Reported as `Halted` — the machine did not hit a cap, an observer
-        // chose to stop it — which keeps the hook from being mistaken for a resource outcome.
-        if let Some(w) = watch.as_deref_mut()
-            && !w(&tapes)
+        // `before` is `Some` exactly when `record` is, so no applied step goes unrecorded.
+        if let Some(rec) = record.as_deref_mut()
+            && let Some(tapes) = before
         {
-            return (tapes, rule.next, Status::Halted);
+            rec.push(Step { state, tapes });
+        }
+        // The invariant hook (see `simulate_watched`): called on every applied step with the tapes as
+        // they are *after* it, and a `false` return stops the run here. Reported as `Halted` — the
+        // machine did not hit a cap, an observer chose to stop it — which keeps the hook from being
+        // mistaken for a resource outcome. The state reported is the one the rule moved to, which is
+        // what the cursor holds now that it has advanced.
+        if let Some(w) = watch.as_deref_mut()
+            && !w(cursor.tapes())
+        {
+            let stopped_in = cursor.state();
+            return (cursor.into_tapes(), stopped_in, Status::Halted);
         }
         if let Some(c) = counts.as_deref_mut()
-            && let Some(slot) = c.get_mut(cur as usize)
+            && let Some(slot) = c.get_mut(state as usize)
         {
-            // `cur` indexed `m.states` successfully above and `simulate_counts` sizes `counts` from
-            // that same machine, so this is in bounds on every real call. `get_mut` rather than `[]`
-            // makes the "never panics" contract line above structurally true instead of true by
+            // `state` indexed `m.states` successfully inside the cursor and `simulate_counts` sizes
+            // `counts` from that same machine, so this is in bounds on every real call. `get_mut` rather
+            // than `[]` makes the "never panics" contract structurally true instead of true by
             // argument — a caller passing a short `counts` loses tallies rather than panicking.
             *slot = slot.saturating_add(1);
         }
-        cur = rule.next;
-        steps += 1;
     }
+    let final_state = cursor.state();
+    // `None` only if the loop broke on an event a `TmCursor` cannot emit; the run is over either way.
+    let status = cursor.status().unwrap_or(Status::Halted);
+    (cursor.into_tapes(), final_state, status)
 }
 
 /// Simulate to a halt or a cap, without retaining the step trace.

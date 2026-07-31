@@ -51,7 +51,7 @@ pub const MAX_TERM_DEPTH: u32 = 3_000;
 
 /// True if `t` has any subterm deeper than `limit`. Iterative (explicit stack) and early-exits at
 /// the limit, so it is bounded work and cannot itself overflow on a deep term.
-fn depth_exceeds(t: &LambdaTerm, limit: u32) -> bool {
+pub(crate) fn depth_exceeds(t: &LambdaTerm, limit: u32) -> bool {
     let mut stack: Vec<(&LambdaTerm, u32)> = vec![(t, 0)];
     while let Some((node, d)) = stack.pop() {
         if d > limit {
@@ -120,44 +120,37 @@ pub fn reduce_step(t: &LambdaTerm) -> Option<(LambdaTerm, Path)> {
     }
 }
 
-/// Reduce to normal form (or the cap), recording every step and its redex path.
+/// Reduce to normal form (or the cap), recording every step and its redex path. Materializes a
+/// snapshot per step BY CONTRACT — this is the API that promises the full history; `trace::LambdaCursor`
+/// is the O(1) alternative for callers that only walk forward. The stepping itself lives in the cursor,
+/// so there is one β-reduction loop in this crate rather than two that must be kept in agreement.
 pub fn reduce_trace(t: &LambdaTerm, cap: u64) -> Trace {
-    let mut current = t.clone();
+    let mut cursor = crate::trace::LambdaCursor::new(t, cap);
     let mut steps = Vec::new();
-    let mut n = 0u64;
-    while n < cap {
-        if depth_exceeds(&current, MAX_TERM_DEPTH) {
-            return Trace { steps, normal_form: current, status: Status::HitCap };
-        }
-        match reduce_step(&current) {
-            Some((next, redex)) => {
-                steps.push(Step { term: current.clone(), redex });
-                current = next;
-                n += 1;
-            }
-            None => return Trace { steps, normal_form: current, status: Status::Normalized },
+    loop {
+        // The term BEFORE this step — `next` replaces it, so it cannot be read afterwards.
+        let before = cursor.term().clone();
+        match cursor.next() {
+            Some(crate::trace::StepEvent::Beta { redex }) => steps.push(Step { term: before, redex }),
+            // Unreachable in practice: a `LambdaCursor` only ever emits `Beta`. Stopping here returns a
+            // well-formed partial trace if that ever changes, rather than panicking on a library path.
+            Some(_) => break,
+            None => break,
         }
     }
-    Trace { steps, normal_form: current, status: Status::HitCap }
+    // `None` only if the loop broke on an event a `LambdaCursor` cannot emit; the run is over either way.
+    let status = cursor.status().unwrap_or(Status::Normalized);
+    Trace { steps, normal_form: cursor.term().clone(), status }
 }
 
-/// Reduce to normal form (or the cap) without retaining the intermediate steps.
+/// Reduce to normal form (or the cap) without retaining the intermediate steps. Drives a
+/// `trace::LambdaCursor` to exhaustion and discards the redex paths, so this shares the same
+/// cap-then-depth-then-step guard order as `reduce_trace` rather than a second copy of it.
 pub fn reduce_to_normal_form(t: &LambdaTerm, cap: u64) -> (LambdaTerm, Status) {
-    let mut current = t.clone();
-    let mut n = 0u64;
-    while n < cap {
-        if depth_exceeds(&current, MAX_TERM_DEPTH) {
-            return (current, Status::HitCap);
-        }
-        match reduce_step(&current) {
-            Some((next, _)) => {
-                current = next;
-                n += 1;
-            }
-            None => return (current, Status::Normalized),
-        }
-    }
-    (current, Status::HitCap)
+    let mut cursor = crate::trace::LambdaCursor::new(t, cap);
+    while cursor.next().is_some() {}
+    let status = cursor.status().unwrap_or(Status::Normalized);
+    (cursor.term().clone(), status)
 }
 
 #[cfg(test)]

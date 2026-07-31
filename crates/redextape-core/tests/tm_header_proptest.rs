@@ -6,6 +6,11 @@
 //! type can hold, and asserting a round-trip over one would be asserting a property `TmHeader` does
 //! not have.
 
+// Test target: a fixture that fails to build IS the failure this file reports, so panicking is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
+// `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use proptest::prelude::*;
 use redextape_core::tm::{
     EncodingKind, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Machine, Move, Rule, State, StateId, TmHeader, parse_tm_full,

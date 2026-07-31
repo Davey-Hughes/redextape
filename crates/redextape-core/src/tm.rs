@@ -18,7 +18,8 @@ pub mod sim;
 pub mod syntax;
 
 pub use asm::{
-    AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, Instr, Program, Reg, decode_asm, decode_asm_ty, print_asm, run_asm,
+    AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, Instr, Program, Reg, decode_asm, decode_asm_ty, print_asm,
+    print_asm_mapped, run_asm,
 };
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
@@ -36,7 +37,7 @@ pub use sim::{
     Caps as TmCaps, DEFAULT_CAPS as TM_DEFAULT_CAPS, Status as TmStatus, Step, Tape, Trace, Watcher, simulate,
     simulate_counts, simulate_final, simulate_trace, simulate_watched,
 };
-pub use syntax::{parse_tm, parse_tm_full, print_tm, print_tm_with};
+pub use syntax::{parse_tm, parse_tm_full, print_tm, print_tm_mapped, print_tm_with, print_tm_with_mapped};
 
 use crate::core::Core;
 use crate::ty::Ty;

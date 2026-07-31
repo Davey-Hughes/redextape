@@ -19,6 +19,12 @@
 //! Ruled out as an observable: `rt_tick` counts. `rt_tick` is an opaque external call, so unrolling
 //! duplicates the calls rather than eliminating them and the count is codegen-invariant.
 
+// Developer tooling, not a runtime path: this module compiles a FIXED in-repo corpus and times it.
+// A corpus program that no longer parses, lowers, or codegens is a bug in the repo to surface at
+// once, and there is no caller here with a diagnostic channel to surface it through. Stated once for
+// the module rather than at each site, since every `expect` below is that same corpus contract.
+#![allow(clippy::expect_used)]
+
 use std::time::{Duration, Instant};
 
 use redextape_core::core::Core;

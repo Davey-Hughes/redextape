@@ -10,3 +10,11 @@ repository = "https://git.daveynet.xyz/davey/redextape"
 [workspace.lints.clippy]
 # Deny is enforced by CI (`-D warnings`); keep the crate clippy-clean.
 all = "warn"
+# No library path may panic: every failure is a `Diagnostic`, a `RuntimeError`, or a typed `Err`.
+# That rule was documentation until now; these five make it mechanical. Test code panics on purpose
+# and is exempted in `clippy.toml` — read that file before adding a test that trips one of these.
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"

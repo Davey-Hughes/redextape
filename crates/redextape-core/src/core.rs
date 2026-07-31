@@ -80,6 +80,43 @@ impl Core {
             Core::LetRecGroup(id, ..) => *id,
         }
     }
+
+    /// Visit each direct child once. NON-RECURSIVE by contract: `Core` carries a hand-written
+    /// iterative `Drop` precisely because a big list literal or long statement sequence desugars to a
+    /// spine tens of thousands of nodes deep, and recursive traversal of that spine aborts the process
+    /// with an uncatchable stack overflow. A caller walks the tree with its own explicit worklist (see
+    /// `all_ids` in `tests/sourcemap_coverage.rs`); this method must never call itself.
+    pub fn for_each_child<'a>(&'a self, f: &mut impl FnMut(&'a Core)) {
+        match self {
+            Core::Nat(..) | Core::Bool(..) | Core::Unit(..) | Core::Var(..) => {}
+            Core::BinOp(_, _, a, b) | Core::Seq(_, a, b) | Core::While(_, a, b) => {
+                f(a);
+                f(b);
+            }
+            Core::If(_, c, t, e) => {
+                f(c);
+                f(t);
+                f(e);
+            }
+            Core::Lambda(_, _, body) | Core::Assign(_, _, body) => f(body),
+            Core::Apply(_, callee, args) => {
+                f(callee);
+                for a in args {
+                    f(a);
+                }
+            }
+            Core::Let { value, body, .. } | Core::LetRec { value, body, .. } => {
+                f(value);
+                f(body);
+            }
+            Core::LetRecGroup(_, bindings, body) => {
+                for (_, value) in bindings {
+                    f(value);
+                }
+                f(body);
+            }
+        }
+    }
 }
 
 /// Hand-written iterative destructor. `Core` is a recursively-owned tree (`Box<Core>` / `Vec<Core>`

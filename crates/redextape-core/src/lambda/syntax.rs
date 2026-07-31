@@ -33,6 +33,7 @@
 //! that intends to DECODE a term to a value needs the type from its caller. See `encode.rs`'s module
 //! doc for the full statement.
 
+use crate::analysis::push_span;
 use crate::diagnostic::Diagnostic;
 use crate::lambda::term::{LambdaTerm, abs, app, var};
 use crate::span::Span;
@@ -166,8 +167,9 @@ impl Parser<'_> {
 
     fn parse_ident(&mut self) -> String {
         let mut s = String::new();
-        while matches!(self.peek(), Some(c) if is_ident_continue(c)) {
-            s.push(self.bump().unwrap());
+        while let Some(c) = self.peek().filter(|c| is_ident_continue(*c)) {
+            self.bump();
+            s.push(c);
         }
         s
     }
@@ -184,45 +186,69 @@ fn is_ident_continue(c: char) -> bool {
 /// Print a term with readable names, freshening on shadow collision, minimal parens. Binders print as
 /// `λ`, never `\` — see the module doc on why input accepts both and output picks one.
 pub fn print_lambda(t: &LambdaTerm) -> String {
-    let mut names: Vec<String> = Vec::new();
-    print_term(t, &mut names)
+    print_lambda_mapped(t).0
 }
 
-fn print_term(t: &LambdaTerm, names: &mut Vec<String>) -> String {
+/// `print_lambda`, plus a class per span. Spans are pushed as text is appended, so offsets are exact by
+/// construction; `λ` is multi-byte, so nothing here may assume one byte per character.
+pub fn print_lambda_mapped(t: &LambdaTerm) -> (String, crate::analysis::Classified) {
+    let mut out = String::new();
+    let mut spans: crate::analysis::Classified = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    write_term(t, &mut names, &mut out, &mut spans);
+    (out, spans)
+}
+
+fn write_term(t: &LambdaTerm, names: &mut Vec<String>, out: &mut String, spans: &mut crate::analysis::Classified) {
+    use crate::analysis::TokenClass as C;
     match t {
         LambdaTerm::Var(i) => {
             let idx = names.len().checked_sub(1 + *i as usize);
-            idx.and_then(|k| names.get(k)).cloned().unwrap_or_else(|| format!("?{i}"))
+            let name = idx.and_then(|k| names.get(k)).cloned().unwrap_or_else(|| format!("?{i}"));
+            push_span(out, spans, &name, C::Ident);
         }
         LambdaTerm::Abs(hint, body) => {
             let name = fresh(hint, names);
-            names.push(name.clone());
-            let inner = print_term(body, names);
+            push_span(out, spans, "λ", C::Binder);
+            push_span(out, spans, &name, C::Binder);
+            // The binder's `.` is punctuation, classified like the `(` and `)` in `parenthesized` and
+            // like the TM printer's `:`/`,`/`->`. The space after it is whitespace and stays outside
+            // the span: §6 asks for coverage of everything EXCEPT whitespace.
+            push_span(out, spans, ".", C::Punct);
+            out.push(' ');
+            names.push(name);
+            write_term(body, names, out, spans);
             names.pop();
-            format!("λ{name}. {inner}")
         }
         LambdaTerm::App(f, a) => {
-            let fs = print_app_fn(f, names);
-            let as_ = print_atom(a, names);
-            format!("{fs} {as_}")
+            write_app_fn(f, names, out, spans);
+            out.push(' ');
+            write_atom(a, names, out, spans);
         }
     }
 }
 
 /// The function position of an application: an abstraction there needs parens.
-fn print_app_fn(t: &LambdaTerm, names: &mut Vec<String>) -> String {
+fn write_app_fn(t: &LambdaTerm, names: &mut Vec<String>, out: &mut String, spans: &mut crate::analysis::Classified) {
     match t {
-        LambdaTerm::Abs(..) => format!("({})", print_term(t, names)),
-        _ => print_term(t, names),
+        LambdaTerm::Abs(..) => parenthesized(t, names, out, spans),
+        _ => write_term(t, names, out, spans),
     }
 }
 
 /// An atom in argument position: abstractions and applications need parens.
-fn print_atom(t: &LambdaTerm, names: &mut Vec<String>) -> String {
+fn write_atom(t: &LambdaTerm, names: &mut Vec<String>, out: &mut String, spans: &mut crate::analysis::Classified) {
     match t {
-        LambdaTerm::Var(_) => print_term(t, names),
-        _ => format!("({})", print_term(t, names)),
+        LambdaTerm::Var(_) => write_term(t, names, out, spans),
+        _ => parenthesized(t, names, out, spans),
     }
+}
+
+fn parenthesized(t: &LambdaTerm, names: &mut Vec<String>, out: &mut String, spans: &mut crate::analysis::Classified) {
+    use crate::analysis::TokenClass as C;
+    push_span(out, spans, "(", C::Punct);
+    write_term(t, names, out, spans);
+    push_span(out, spans, ")", C::Punct);
 }
 
 fn fresh(hint: &str, names: &[String]) -> String {
@@ -230,13 +256,20 @@ fn fresh(hint: &str, names: &[String]) -> String {
     if !names.iter().any(|n| n == base) {
         return base.to_string();
     }
-    for k in 0.. {
+    // PIGEONHOLE, which is what lets this be a bounded loop rather than `0..` with an `unreachable!()`
+    // tail: `names` holds at most `names.len()` strings, so among the `names.len() + 1` candidates
+    // `base0 ..= base{names.len()}` at least one is unused. The search cannot fall through.
+    //
+    // The fallthrough therefore returns a value instead of panicking. It is unreachable by the argument
+    // above, and a panic here would be a library-path abort in a printer — the one place a caller has
+    // no way to recover — for a case that cannot arise.
+    for k in 0..=names.len() {
         let cand = format!("{base}{k}");
         if !names.contains(&cand) {
             return cand;
         }
     }
-    unreachable!()
+    base.to_string()
 }
 
 #[cfg(test)]
@@ -406,6 +439,84 @@ mod tests {
             let once = print_lambda(&t);
             let (t2, _) = parse_lambda(&once);
             prop_assert_eq!(print_lambda(&t2.unwrap()), once);
+        }
+    }
+
+    #[test]
+    fn print_lambda_mapped_agrees_and_classifies_binders_and_variables() {
+        use crate::analysis::TokenClass;
+        let t = abs("f", abs("x", app(var(1), var(0))));
+        let (text, spans) = print_lambda_mapped(&t);
+        assert_eq!(text, print_lambda(&t), "the wrapper must return the mapped form's text verbatim");
+        assert_eq!(text, "λf. λx. f x");
+        for w in spans.windows(2) {
+            assert!(w[0].0.end <= w[1].0.start, "spans overlap or are unordered: {:?} then {:?}", w[0], w[1]);
+        }
+        let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&text[s.start..s.end], *c)).collect();
+        // ASSERT THE WHOLE SEQUENCE, not "some span has this class". Task 6 found the weaker style
+        // vacuous: `named.contains(&("done", Label))` passed even with every operand deliberately
+        // misclassified, because `"done"` also occurs as its own label definition. Here `f` occurs twice —
+        // once as a binder, once as a variable — so any per-text assertion is satisfied by the wrong
+        // occurrence. Only the full ordered sequence pins which is which.
+        assert_eq!(
+            named,
+            vec![
+                ("λ", TokenClass::Binder),
+                ("f", TokenClass::Binder),
+                (".", TokenClass::Punct),
+                ("λ", TokenClass::Binder),
+                ("x", TokenClass::Binder),
+                (".", TokenClass::Punct),
+                ("f", TokenClass::Ident),
+                ("x", TokenClass::Ident),
+            ]
+        );
+    }
+
+    /// The term above needs no parentheses, so nothing there pins that `(` and `)` are classified at
+    /// all: deleting their spans entirely leaves the printed text unchanged and every other assertion
+    /// satisfied. This term forces parens in BOTH positions the printer inserts them — an abstraction
+    /// in function position and one in argument position — and asserts the whole sequence, so a
+    /// dropped or misplaced paren span fails here.
+    #[test]
+    fn print_lambda_mapped_classifies_the_parentheses_it_inserts() {
+        use crate::analysis::TokenClass;
+        let t = app(abs("x", var(0)), abs("y", var(0)));
+        let (text, spans) = print_lambda_mapped(&t);
+        assert_eq!(text, print_lambda(&t), "the wrapper must return the mapped form's text verbatim");
+        assert_eq!(text, "(λx. x) (λy. y)");
+        let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&text[s.start..s.end], *c)).collect();
+        assert_eq!(
+            named,
+            vec![
+                ("(", TokenClass::Punct),
+                ("λ", TokenClass::Binder),
+                ("x", TokenClass::Binder),
+                (".", TokenClass::Punct),
+                ("x", TokenClass::Ident),
+                (")", TokenClass::Punct),
+                ("(", TokenClass::Punct),
+                ("λ", TokenClass::Binder),
+                ("y", TokenClass::Binder),
+                (".", TokenClass::Punct),
+                ("y", TokenClass::Ident),
+                (")", TokenClass::Punct),
+            ]
+        );
+    }
+
+    #[test]
+    fn print_lambda_mapped_spans_stay_in_bounds_on_every_demo() {
+        for src in ["1 + 2 * 3", "3 - 5", "let x = 1; let y = x + x; y * 3", "[1, 2, 3]"] {
+            let (prog, ds) = crate::parser::parse(src);
+            assert!(ds.is_empty(), "parse errors in {src:?}: {ds:?}");
+            let term = crate::lambda::lower(&crate::desugar::desugar(&prog.unwrap())).expect("lowers");
+            let (text, spans) = print_lambda_mapped(&term);
+            assert_eq!(text, print_lambda(&term), "text differs for {src:?}");
+            for (s, _) in &spans {
+                assert!(s.end <= text.len() && s.start < s.end, "{src:?}: bad span {s:?}");
+                assert!(text.is_char_boundary(s.start) && text.is_char_boundary(s.end), "{src:?}: {s:?} splits a char");
+            }
         }
     }
 }

@@ -342,6 +342,10 @@ pub fn link_executable(obj: &[u8], out: &std::path::Path, opts: &LinkOptions) ->
 
 #[cfg(all(test, feature = "cranelift"))]
 mod tests {
+    // Clippy's `allow-*-in-tests` keys (see `clippy.toml`) recognize a BARE `#[cfg(test)]` only, not
+    // the feature-gated form this module needs, so the test exemption is restated here.
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
     use super::*;
     use cranelift_object::object::{Object, ObjectSymbol};
     use redextape_core::tm::{DEFAULT_CAPS, lower_asm};

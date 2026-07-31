@@ -16,6 +16,11 @@
 //! `lower_asm` would emit — that is the point: the gadget library's safety must not depend on the
 //! lowerer's habits.
 
+// Test target: a fixture that fails to build IS the failure this file reports, so panicking is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
+// `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use redextape_core::core::BinOp;
 use redextape_core::tm::Encoding;
 

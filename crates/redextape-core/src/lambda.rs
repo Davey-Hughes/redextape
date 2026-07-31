@@ -10,9 +10,9 @@ pub mod syntax;
 pub mod term;
 
 pub use decode::{decode, decode_lambda_ty};
-pub use lower::{LowerError, lower};
+pub use lower::{LowerError, lower, lower_mapped};
 pub use reduce::{MAX_REDUCTION_STEPS, Status, Step, Trace, reduce_to_normal_form, reduce_trace};
-pub use syntax::{parse_lambda, print_lambda};
+pub use syntax::{parse_lambda, print_lambda, print_lambda_mapped};
 pub use term::{Dir, LambdaTerm, Path};
 
 use crate::core::Core;

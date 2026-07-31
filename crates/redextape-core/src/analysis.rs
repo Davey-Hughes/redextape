@@ -1,0 +1,179 @@
+//! Token classification for every language in the project (§8, §9.4). One vocabulary spans all four,
+//! so a renderer learns one enum rather than four.
+//!
+//! CORE EMITS CLASSES, NEVER COLOURS. No ANSI, no CSS, no theme — those belong to consumers (the CLI,
+//! the web UI), which keeps this crate WASM-clean and matches the model/renderer split §9.1 locks in.
+//!
+//! WHY THE PRINTERS REPORT SPANS INSTEAD OF SOMETHING RE-LEXING THEIR OUTPUT. Only the source language
+//! has a reusable lexer. λ's parser scans chars inline with no token type, TM's is line-oriented, and
+//! asm has no parser at all — so "re-lex the printed text" would mean three new scanners recovering
+//! structure the printer just discarded, each obliged to stay in step with its printer and nothing
+//! forcing them to agree. That is the second-parallel-implementation failure this project's
+//! conventions treat as a defect rather than a style choice.
+
+use crate::core::NodeId;
+use crate::lexer::lex;
+use crate::sourcemap::SourceMap;
+use crate::span::Span;
+use crate::token::TokenKind;
+
+/// What a span of printed or authored text IS. Shared variants first, then form-specific ones.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenClass {
+    Ident,
+    Nat,
+    Bool,
+    Keyword,
+    Operator,
+    Punct,
+    Comment,
+    /// A λ binder: the `λ` and the name it binds.
+    Binder,
+    /// An asm mnemonic (`add`, `jz`, `cons`).
+    Mnemonic,
+    /// An asm register (`r0`, `a1`, `rr`).
+    Register,
+    /// An asm or TM label / state name in DEFINING position.
+    Label,
+    /// A TM state name in REFERENCE position (a `goto` target).
+    StateName,
+    /// A symbol on a TM tape, or a wildcard.
+    TapeSymbol,
+    /// A TM head move (`L`, `R`, `S`).
+    Move,
+}
+
+pub type Classified = Vec<(Span, TokenClass)>;
+
+/// Append `text` to `out` and record the span it just occupied as `class`. The whole point of the
+/// mapped printers: a span is produced BY the write that creates the text, so an offset cannot drift
+/// from what was printed — there is no second pass to keep in step.
+///
+/// Sets the argument order every write-in-place helper follows: `(out, spans, ..payload)`. The two
+/// sinks lead, always in that order, so a reader never has to check which end of a call the buffer is
+/// at — and so the payload, the part that actually varies between helpers, is the part that varies in
+/// the call.
+pub(crate) fn push_span(out: &mut String, spans: &mut Classified, text: &str, class: TokenClass) {
+    let start = out.len();
+    out.push_str(text);
+    spans.push((Span::new(start, out.len()), class));
+}
+
+/// A classified span plus the Core node it came from, when one is known. `None` covers machine
+/// scaffolding and `defunc`-minted constructs, which have no source construct to point at — the same
+/// asymmetry `tm::attribute`'s `StepBucket` already models. It is NOT a gap to be filled: the map says
+/// nothing where the lowering said nothing, and a nearest-enclosing-node fallback is the caller's UI
+/// heuristic to compute at its own call site, where it reads as one.
+pub type Attributed = Vec<(Span, TokenClass, Option<NodeId>)>;
+
+/// Cross printed TM spans with the source map: a span NAMING a state is attributed to whichever Core
+/// node produced that state. This is what lets one construct light up in source, λ and TM at once.
+///
+/// Only `Label` (a state definition) and `StateName` (a `start`/`goto` target) can carry an origin. A
+/// mnemonic, tape symbol or move is not a state reference even when its text happens to be spelled
+/// like one, so it is left unattributed rather than looked up.
+///
+/// TAKES NO `Machine`, AND THAT IS THE WHOLE OF THE GUARANTEE. It once took one, purely to turn the
+/// map's `StateId`s into the names the text uses; `SourceMap` now records that association itself, at
+/// build time, against the very machine it was built from (`SourceMap::tm_owner`). There is therefore
+/// no second object to pass and no wrong one to pass. The version that took both could not check they
+/// described one lowering: a map built at one encoding, indexed through a machine lowered at another,
+/// resolved each id to some other state's name and attributed the majority of state-naming spans to
+/// the wrong construct — no error, no empty result, just a confidently wrong highlight.
+///
+/// Takes `text` because a `Span` carries offsets, not the bytes at those offsets — resolving a state
+/// name means slicing the string the spans were produced against. Total: an out-of-range span or an
+/// unknown name yields `None`, never a panic, and the span sequence is returned unchanged in order.
+pub fn attribute_tm_spans(text: &str, map: &SourceMap, spans: &Classified) -> Attributed {
+    spans
+        .iter()
+        .map(|(span, class)| {
+            let node = matches!(class, TokenClass::Label | TokenClass::StateName)
+                .then(|| text.get(span.start..span.end).and_then(|name| map.tm_owner(name)))
+                .flatten();
+            (*span, *class, node)
+        })
+        .collect()
+}
+
+/// Classify mini-language source. Reuses the existing lexer — no second scanner. Diagnostics are
+/// discarded here on purpose: highlighting a file with errors is exactly when it matters most, so
+/// whatever tokens the lexer recovered are classified and the errors are surfaced through `analyze`.
+pub fn classify_source(src: &str) -> Classified {
+    let (tokens, _diagnostics) = lex(src);
+    tokens.iter().filter(|t| t.kind != TokenKind::Eof).map(|t| (t.span, class_of(t.kind))).collect()
+}
+
+fn class_of(k: TokenKind) -> TokenClass {
+    match k {
+        TokenKind::Nat(_) => TokenClass::Nat,
+        TokenKind::Ident => TokenClass::Ident,
+        TokenKind::True | TokenKind::False => TokenClass::Bool,
+        TokenKind::Fn | TokenKind::Let | TokenKind::Mut | TokenKind::If | TokenKind::Else | TokenKind::While => {
+            TokenClass::Keyword
+        }
+        TokenKind::Plus
+        | TokenKind::Minus
+        | TokenKind::Star
+        | TokenKind::Eq
+        | TokenKind::Ne
+        | TokenKind::Lt
+        | TokenKind::Le
+        | TokenKind::Gt
+        | TokenKind::Ge
+        | TokenKind::Assign => TokenClass::Operator,
+        TokenKind::LParen
+        | TokenKind::RParen
+        | TokenKind::LBrace
+        | TokenKind::RBrace
+        | TokenKind::LBracket
+        | TokenKind::RBracket
+        | TokenKind::Comma
+        | TokenKind::Semi
+        | TokenKind::Pipe
+        | TokenKind::Dot => TokenClass::Punct,
+        TokenKind::Eof => TokenClass::Punct,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_source_labels_keywords_names_and_literals() {
+        let src = "let mut x = 1 + y;";
+        let got = classify_source(src);
+        let slice = |s: Span| &src[s.start..s.end];
+        let pairs: Vec<(&str, TokenClass)> = got.iter().map(|(s, c)| (slice(*s), *c)).collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("let", TokenClass::Keyword),
+                ("mut", TokenClass::Keyword),
+                ("x", TokenClass::Ident),
+                ("=", TokenClass::Operator),
+                ("1", TokenClass::Nat),
+                ("+", TokenClass::Operator),
+                ("y", TokenClass::Ident),
+                (";", TokenClass::Punct),
+            ]
+        );
+    }
+
+    #[test]
+    fn classify_source_omits_eof_and_stays_in_bounds() {
+        let src = "1 + 2";
+        for (span, _) in classify_source(src) {
+            assert!(span.start <= span.end && span.end <= src.len(), "span out of bounds: {span:?}");
+            assert!(span.start < span.end, "no zero-width spans: {span:?}");
+        }
+    }
+
+    #[test]
+    fn classify_source_is_total_on_malformed_input() {
+        // Lexing a program with an illegal character must not panic; whatever tokens survive classify.
+        let _ = classify_source("let x = @@@;");
+        let _ = classify_source("");
+    }
+}

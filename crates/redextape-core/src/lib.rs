@@ -3,6 +3,7 @@
 //!
 //! Foundation slice (this plan): lexer -> parser -> typecheck -> desugar -> reference interpreter.
 
+pub mod analysis;
 pub mod ast;
 pub mod core;
 pub mod desugar;
@@ -12,9 +13,11 @@ pub mod lambda;
 pub mod lexer;
 pub mod parser;
 pub mod prelude;
+pub mod sourcemap;
 pub mod span;
 pub mod tm;
 pub mod token;
+pub mod trace;
 pub mod ty;
 pub mod typeck;
 pub mod value;

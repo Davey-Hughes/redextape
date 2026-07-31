@@ -14,6 +14,10 @@
 //! total over their argument list and over whatever the file/program string turns out to say: every
 //! failure prints a diagnostic to stderr and exits non-zero rather than panicking.
 
+// Example target: a demo that cannot build its own input has nothing to demonstrate, so aborting is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use redextape_core::Diagnostic;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;

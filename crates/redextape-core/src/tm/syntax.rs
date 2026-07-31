@@ -23,6 +23,11 @@
 //! a thin wrapper that discards it, so a header-less file and a headered one both parse to the same
 //! machine.
 //!
+//! Each printer has a `_mapped` counterpart returning the same text plus a class per span:
+//! `print_tm`/`print_tm_mapped` and `print_tm_with`/`print_tm_with_mapped`. The suffix means the same
+//! thing here as in `print_asm`/`print_asm_mapped` and `print_lambda`/`print_lambda_mapped` — adding
+//! it never changes WHICH text is produced, only whether the classification comes back with it.
+//!
 //! ## What a reader must assume beyond δ and q₀
 //!
 //! These are properties of the FORMAT, not of any one machine, and a foreign simulator that assumes
@@ -36,81 +41,142 @@
 //!   final tapes are the result. Only an `accept` state is distinguished, and only for readers that
 //!   care about acceptance rather than output.
 
+use crate::analysis::{Classified, TokenClass as C, push_span};
 use crate::diagnostic::Severity;
 use crate::tm::build::MAX_TAPES;
-use crate::tm::header::{HeaderParts, TmHeader, print_header};
+use crate::tm::header::{HeaderParts, TmHeader, write_header};
 use crate::tm::machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
 use crate::{Diagnostic, Span};
-use std::fmt::Write as _;
 
-fn sym_str(s: &Option<Symbol>) -> String {
-    match s {
-        None => "*".to_string(),
-        Some(c) => c.to_string(),
+/// One read/write entry: `*` for the wildcard (read) / unchanged (write) marker, else the symbol.
+fn write_sym(out: &mut String, spans: &mut Classified, s: &Option<Symbol>) {
+    let mut buf = [0u8; 4];
+    let text: &str = match s {
+        None => "*",
+        Some(c) => c.encode_utf8(&mut buf),
+    };
+    push_span(out, spans, text, C::TapeSymbol);
+}
+
+/// A space-separated symbol list, as it appears inside a `[..]` group.
+fn write_syms(out: &mut String, spans: &mut Classified, v: &[Option<Symbol>]) {
+    for (i, s) in v.iter().enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        write_sym(out, spans, s);
     }
 }
 
-fn syms_str(v: &[Option<Symbol>]) -> String {
-    v.iter().map(sym_str).collect::<Vec<_>>().join(" ")
-}
-
-fn move_str(m: Move) -> char {
-    match m {
-        Move::L => 'L',
-        Move::R => 'R',
-        Move::S => 'S',
+/// A space-separated move list, as it appears inside `move [..]`.
+fn write_moves(out: &mut String, spans: &mut Classified, v: &[Move]) {
+    for (i, m) in v.iter().enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        let text = match m {
+            Move::L => "L",
+            Move::R => "R",
+            Move::S => "S",
+        };
+        push_span(out, spans, text, C::Move);
     }
 }
 
-fn moves_str(v: &[Move]) -> String {
-    v.iter().map(|m| move_str(*m).to_string()).collect::<Vec<_>>().join(" ")
-}
-
-/// The name of a state by id, or a fallback so `print_tm` never panics on a malformed `Machine`.
-fn state_name(m: &Machine, id: u32) -> String {
-    m.states.get(id as usize).map_or_else(|| format!("<state {id}>"), |s| s.name.clone())
+/// The name of a state by id, or a fallback so printing never panics on a malformed `Machine`. `class`
+/// is the caller's, because the same name is `Label` where it is DEFINED and `StateName` where it is
+/// referenced (`start`, `goto`) — that distinction is the whole reason a renderer can link the two.
+fn write_state_name(out: &mut String, spans: &mut Classified, m: &Machine, id: u32, class: C) {
+    match m.states.get(id as usize) {
+        Some(s) => push_span(out, spans, &s.name, class),
+        None => push_span(out, spans, &format!("<state {id}>"), class),
+    }
 }
 
 /// Render `m` as the readable TM text form, with NO header. Byte-identical to what this function has
 /// always emitted — a machine printed without a header must stay exactly as readable, and as
 /// parseable, as it was before headers existed.
 pub fn print_tm(m: &Machine) -> String {
-    print_tm_inner(m, "")
+    print_tm_mapped(m).0
 }
 
 /// Render `m` with `h`'s directives between `start` and the states. The result is a complete,
 /// self-describing `.tm` file: a reader can build the initial configuration and simulate it with no
 /// knowledge of this project, and decode the answer given the encoding implementations.
 pub fn print_tm_with(m: &Machine, h: &TmHeader) -> String {
-    print_tm_inner(m, &print_header(h))
+    print_tm_with_mapped(m, h).0
 }
 
-/// The one printer. `header` is either empty or a block of directives ending in a newline; it is the
-/// ONLY difference between the two entry points above, which is what keeps them from drifting.
-fn print_tm_inner(m: &Machine, header: &str) -> String {
+/// `print_tm`, plus a class per span of the produced text.
+pub fn print_tm_mapped(m: &Machine) -> (String, Classified) {
+    print_tm_inner(m, None)
+}
+
+/// `print_tm_with`, plus a class per span of the produced text — header directives included.
+pub fn print_tm_with_mapped(m: &Machine, h: &TmHeader) -> (String, Classified) {
+    print_tm_inner(m, Some(h))
+}
+
+/// The one printer. The header's presence is the ONLY difference between the entry points above, which
+/// is what keeps them from drifting. Spans are pushed as each piece is appended, so an offset is exact
+/// by construction and nothing re-scans the output.
+fn print_tm_inner(m: &Machine, header: Option<&TmHeader>) -> (String, Classified) {
     let mut out = String::new();
-    let _ = writeln!(out, "tapes {}", m.tapes);
-    let _ = writeln!(out, "start {}", state_name(m, m.start));
-    out.push_str(header);
-    let _ = writeln!(out);
-    for s in &m.states {
-        if s.accept {
-            let _ = writeln!(out, "state {}: accept", s.name);
-        } else {
-            let _ = writeln!(out, "state {}:", s.name);
-            for r in &s.rules {
-                let _ = writeln!(
-                    out,
-                    "  [{}] -> write [{}], move [{}], goto {}",
-                    syms_str(&r.read),
-                    syms_str(&r.write),
-                    moves_str(&r.moves),
-                    state_name(m, r.next),
-                );
-            }
+    let mut spans: Classified = Vec::new();
+    let (o, s) = (&mut out, &mut spans);
+    push_span(o, s, "tapes", C::Keyword);
+    o.push(' ');
+    push_span(o, s, &m.tapes.to_string(), C::Nat);
+    o.push('\n');
+    push_span(o, s, "start", C::Keyword);
+    o.push(' ');
+    write_state_name(o, s, m, m.start, C::StateName);
+    o.push('\n');
+    if let Some(h) = header {
+        write_header(o, s, h);
+    }
+    o.push('\n');
+    for st in &m.states {
+        push_span(o, s, "state", C::Keyword);
+        o.push(' ');
+        push_span(o, s, &st.name, C::Label);
+        push_span(o, s, ":", C::Punct);
+        if st.accept {
+            o.push(' ');
+            push_span(o, s, "accept", C::Keyword);
+            o.push('\n');
+            continue;
+        }
+        o.push('\n');
+        for r in &st.rules {
+            o.push_str("  ");
+            push_span(o, s, "[", C::Punct);
+            write_syms(o, s, &r.read);
+            push_span(o, s, "]", C::Punct);
+            o.push(' ');
+            push_span(o, s, "->", C::Punct);
+            o.push(' ');
+            push_span(o, s, "write", C::Keyword);
+            o.push(' ');
+            push_span(o, s, "[", C::Punct);
+            write_syms(o, s, &r.write);
+            push_span(o, s, "]", C::Punct);
+            push_span(o, s, ",", C::Punct);
+            o.push(' ');
+            push_span(o, s, "move", C::Keyword);
+            o.push(' ');
+            push_span(o, s, "[", C::Punct);
+            write_moves(o, s, &r.moves);
+            push_span(o, s, "]", C::Punct);
+            push_span(o, s, ",", C::Punct);
+            o.push(' ');
+            push_span(o, s, "goto", C::Keyword);
+            o.push(' ');
+            write_state_name(o, s, m, r.next, C::StateName);
+            o.push('\n');
         }
     }
-    out
+    (out, spans)
 }
 
 fn err(span: Span, message: impl Into<String>) -> Diagnostic {
@@ -454,6 +520,119 @@ state halt: accept
             .map(|l| format!("{l}\n"))
             .collect();
         assert_eq!(stripped, plain);
+    }
+
+    /// The classified form of `print_tm`, asserted as the FULL ORDERED sequence of `(text, class)`.
+    /// Nothing weaker will do: `scan` occurs three times — once referenced by `start`, once DEFINING a
+    /// state, once as a `goto` target — so any "some span has class Label" assertion is satisfied by the
+    /// wrong occurrence and never looks at the text at all. The sequence pins which is which.
+    #[test]
+    fn print_tm_mapped_agrees_and_classifies_states_symbols_and_moves() {
+        use crate::analysis::TokenClass;
+        use TokenClass::{Keyword as Kw, Label as Lb, Move as Mv, Nat as Nt, Punct as Pu};
+        use TokenClass::{StateName as Sn, TapeSymbol as Ts};
+        let m = increment();
+        let (text, spans) = print_tm_mapped(&m);
+        assert_eq!(text, print_tm(&m), "the wrapper must return the mapped form's text verbatim");
+        for w in spans.windows(2) {
+            assert!(w[0].0.end <= w[1].0.start, "spans overlap or are unordered: {:?} then {:?}", w[0], w[1]);
+        }
+        for (s, _) in &spans {
+            assert!(s.end <= text.len() && s.start < s.end, "bad span {s:?}");
+            assert!(text.is_char_boundary(s.start) && text.is_char_boundary(s.end), "{s:?} splits a char");
+        }
+        let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&text[s.start..s.end], *c)).collect();
+        assert_eq!(
+            named,
+            vec![
+                ("tapes", Kw),
+                ("1", Nt),
+                ("start", Kw),
+                ("scan", Sn),
+                ("state", Kw),
+                ("scan", Lb),
+                (":", Pu),
+                ("[", Pu),
+                ("1", Ts),
+                ("]", Pu),
+                ("->", Pu),
+                ("write", Kw),
+                ("[", Pu),
+                ("*", Ts),
+                ("]", Pu),
+                (",", Pu),
+                ("move", Kw),
+                ("[", Pu),
+                ("R", Mv),
+                ("]", Pu),
+                (",", Pu),
+                ("goto", Kw),
+                ("scan", Sn),
+                ("[", Pu),
+                ("*", Ts),
+                ("]", Pu),
+                ("->", Pu),
+                ("write", Kw),
+                ("[", Pu),
+                ("1", Ts),
+                ("]", Pu),
+                (",", Pu),
+                ("move", Kw),
+                ("[", Pu),
+                ("S", Mv),
+                ("]", Pu),
+                (",", Pu),
+                ("goto", Kw),
+                ("halt", Sn),
+                ("state", Kw),
+                ("halt", Lb),
+                (":", Pu),
+                ("accept", Kw),
+            ]
+        );
+        // Stated again as the property, independent of the layout above: ONE name, three positions,
+        // and the class tracks the position rather than the name. A printer that classified every
+        // state name identically would still satisfy any per-text assertion, and fails this.
+        let scans: Vec<TokenClass> = named.iter().filter(|(t, _)| *t == "scan").map(|(_, c)| *c).collect();
+        assert_eq!(scans, vec![Sn, Lb, Sn], "`start`/`goto` references are StateName, the definition is Label");
+    }
+
+    /// The header block classifies too, in position: `print_tm_with_mapped` is `print_tm_with`'s text plus
+    /// spans, so the directives between `start` and the states carry classes like everything else.
+    #[test]
+    fn print_tm_with_mapped_still_agrees() {
+        use crate::analysis::TokenClass;
+        use TokenClass::{Comment as Cm, Ident as Id, Keyword as Kw, Nat as Nt, TapeSymbol as Ts};
+        let m = increment();
+        let h = a_header();
+        let (text, spans) = print_tm_with_mapped(&m, &h);
+        assert_eq!(text, print_tm_with(&m, &h));
+        for w in spans.windows(2) {
+            assert!(w[0].0.end <= w[1].0.start, "spans overlap or are unordered: {:?} then {:?}", w[0], w[1]);
+        }
+        let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&text[s.start..s.end], *c)).collect();
+        // The header occupies exactly the four spans after `tapes N` / `start scan` and before the states.
+        assert_eq!(
+            &named[4..18],
+            &[
+                ("version", Kw),
+                ("1", Nt),
+                ("encoding", Kw),
+                ("unary", Id),
+                ("width", Kw),
+                ("4", Nt),
+                ("slots", Kw),
+                ("1", Nt),
+                ("result", Kw),
+                ("Nat", Id),
+                ("tape", Kw),
+                ("0", Nt),
+                ("#____#", Ts),
+                ("; reg", Cm),
+            ]
+        );
+        assert_eq!(&named[..4], &[("tapes", Kw), ("1", Nt), ("start", Kw), ("scan", TokenClass::StateName)]);
+        assert_eq!(named[18], ("state", Kw), "the states resume immediately after the header");
     }
 
     use crate::Severity;

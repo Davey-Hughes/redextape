@@ -42,6 +42,10 @@
 //!    embedded JIT-compile timer plus execution, which conflates two unrelated quantities. The
 //!    columns sit next to each other because both are worth reporting, not because they subtract.
 
+// Example target: a demo that cannot build its own input has nothing to demonstrate, so aborting is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
 fn main() {
     use redextape_native::measure::{Backend, CORPUS, OPT_LEVELS, RUNS, measure_all};

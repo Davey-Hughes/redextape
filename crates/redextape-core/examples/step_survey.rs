@@ -32,6 +32,10 @@
 //! CEILING on a shape built to suit it — not what it would recover on a real program. Part A is what
 //! tells you whether that shape actually occurs.
 
+// Example target: a demo that cannot build its own input has nothing to demonstrate, so aborting is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::collections::BTreeMap;
 
 use redextape_core::core::{BinOp, Core, NodeId};

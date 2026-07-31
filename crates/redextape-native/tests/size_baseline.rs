@@ -35,6 +35,11 @@
 //! (catches orphans). Without the second direction the gate has a blind side: shrink `CORPUS` and the
 //! removed program's rows sit in the file forever as dead weight that nothing ever flags, and a
 //! typo'd program name in a hand-edited baseline would be silently ignored rather than reported.
+
+// Test target: a fixture that fails to build IS the failure this file reports, so panicking is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
+// `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![cfg(all(feature = "cranelift", feature = "llvm"))]
 
 use redextape_native::measure::measure_all;

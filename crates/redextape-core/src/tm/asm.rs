@@ -3,6 +3,7 @@
 //! hold `u64` words; because Core is typed, the compiled code statically knows whether a word is a
 //! `Nat` count, a `0`/`1` `Bool`, or a heap pointer, so there are no runtime type tags.
 
+use crate::analysis::push_span;
 use crate::core::BinOp;
 use crate::ty::Ty;
 use crate::value::Value;
@@ -69,8 +70,6 @@ impl Program {
     }
 }
 
-use std::fmt::Write as _;
-
 fn reg_str(r: Reg) -> String {
     match r {
         Reg::Loc(n) => format!("r{n}"),
@@ -93,58 +92,114 @@ fn bin_mnemonic(op: BinOp) -> &'static str {
     }
 }
 
-/// One instruction split into its mnemonic and its operand text (empty when it takes none).
-/// The two are joined in ONE place — `instr_str` — so the mnemonic/operand separator is stated
-/// once rather than in every arm; a newly added instruction cannot get its own spacing wrong.
-fn instr_parts(i: &Instr) -> (&'static str, String) {
-    match i {
-        Instr::Li(rd, n) => ("li", format!("{}, #{n}", reg_str(*rd))),
-        Instr::Mov(rd, rs) => ("mov", format!("{}, {}", reg_str(*rd), reg_str(*rs))),
-        Instr::Bin(op, rd, ra, rb) => {
-            (bin_mnemonic(*op), format!("{}, {}, {}", reg_str(*rd), reg_str(*ra), reg_str(*rb)))
+/// One operand, classified by what it IS rather than how it prints — so a label named `retry` can
+/// never be mistaken for a register, which any spelling-based rule would get wrong.
+enum Operand<'a> {
+    Reg(Reg),
+    Imm(u64),
+    Label(&'a str),
+}
+
+impl Operand<'_> {
+    fn class(&self) -> crate::analysis::TokenClass {
+        use crate::analysis::TokenClass as C;
+        match self {
+            Operand::Reg(_) => C::Register,
+            Operand::Imm(_) => C::Nat,
+            Operand::Label(_) => C::Label,
         }
-        Instr::Jz(r, l) => ("jz", format!("{}, {l}", reg_str(*r))),
-        Instr::Jmp(l) => ("jmp", l.clone()),
-        Instr::Call(l) => ("call", l.clone()),
-        Instr::Ret => ("ret", String::new()),
-        Instr::Halt => ("halt", String::new()),
-        Instr::Nil(rd) => ("nil", reg_str(*rd)),
-        Instr::Cons(rd, rh, rt) => ("cons", format!("{}, {}, {}", reg_str(*rd), reg_str(*rh), reg_str(*rt))),
-        Instr::Head(rd, rl) => ("head", format!("{}, {}", reg_str(*rd), reg_str(*rl))),
-        Instr::Tail(rd, rl) => ("tail", format!("{}, {}", reg_str(*rd), reg_str(*rl))),
-        Instr::IsEmpty(rd, rl) => ("isempty", format!("{}, {}", reg_str(*rd), reg_str(*rl))),
-        Instr::Box(rd, rv) => ("box", format!("{}, {}", reg_str(*rd), reg_str(*rv))),
-        Instr::BoxGet(rd, rb) => ("box_get", format!("{}, {}", reg_str(*rd), reg_str(*rb))),
-        Instr::BoxSet(rb, rv) => ("box_set", format!("{}, {}", reg_str(*rb), reg_str(*rv))),
     }
 }
 
-/// Mnemonic, then a TAB, then the operands — so operands line up in a column whatever the mnemonic's
-/// width, without the printer having to know the longest one. An operand-less instruction (`ret`,
-/// `halt`) prints bare: a trailing tab would be invisible trailing whitespace in the listing.
-fn instr_str(i: &Instr) -> String {
-    let (mnemonic, operands) = instr_parts(i);
-    if operands.is_empty() { mnemonic.to_string() } else { format!("{mnemonic}\t{operands}") }
+fn operand_str(o: &Operand<'_>) -> String {
+    match o {
+        Operand::Reg(r) => reg_str(*r),
+        Operand::Imm(n) => format!("#{n}"),
+        Operand::Label(l) => (*l).to_string(),
+    }
+}
+
+/// The mnemonic and operands of one instruction. `print_asm_mapped` is the only place that joins
+/// them into text, so the listing's separator and its classification cannot disagree about where an
+/// operand starts.
+fn instr_parts(i: &Instr) -> (&'static str, Vec<Operand<'_>>) {
+    match i {
+        Instr::Li(rd, n) => ("li", vec![Operand::Reg(*rd), Operand::Imm(*n)]),
+        Instr::Mov(rd, rs) => ("mov", vec![Operand::Reg(*rd), Operand::Reg(*rs)]),
+        Instr::Bin(op, rd, ra, rb) => {
+            (bin_mnemonic(*op), vec![Operand::Reg(*rd), Operand::Reg(*ra), Operand::Reg(*rb)])
+        }
+        Instr::Jz(r, l) => ("jz", vec![Operand::Reg(*r), Operand::Label(l)]),
+        Instr::Jmp(l) => ("jmp", vec![Operand::Label(l)]),
+        Instr::Call(l) => ("call", vec![Operand::Label(l)]),
+        Instr::Ret => ("ret", Vec::new()),
+        Instr::Halt => ("halt", Vec::new()),
+        Instr::Nil(rd) => ("nil", vec![Operand::Reg(*rd)]),
+        Instr::Cons(rd, rh, rt) => ("cons", vec![Operand::Reg(*rd), Operand::Reg(*rh), Operand::Reg(*rt)]),
+        Instr::Head(rd, rl) => ("head", vec![Operand::Reg(*rd), Operand::Reg(*rl)]),
+        Instr::Tail(rd, rl) => ("tail", vec![Operand::Reg(*rd), Operand::Reg(*rl)]),
+        Instr::IsEmpty(rd, rl) => ("isempty", vec![Operand::Reg(*rd), Operand::Reg(*rl)]),
+        Instr::Box(rd, rv) => ("box", vec![Operand::Reg(*rd), Operand::Reg(*rv)]),
+        Instr::BoxGet(rd, rb) => ("box_get", vec![Operand::Reg(*rd), Operand::Reg(*rb)]),
+        Instr::BoxSet(rb, rv) => ("box_set", vec![Operand::Reg(*rb), Operand::Reg(*rv)]),
+    }
 }
 
 /// Render a `Program` as the readable assembly listing (labels at column 0, instructions indented).
 pub fn print_asm(prog: &Program) -> String {
+    print_asm_mapped(prog).0
+}
+
+/// `print_asm`, plus a class per span of the produced text. Spans are pushed as each piece is written,
+/// so offsets are exact by construction — nothing re-scans the output.
+pub fn print_asm_mapped(prog: &Program) -> (String, crate::analysis::Classified) {
+    use crate::analysis::TokenClass as C;
     let mut out = String::new();
-    for (idx, instr) in prog.code.iter().enumerate() {
-        for (name, at) in &prog.labels {
-            if *at == idx {
-                let _ = writeln!(out, "{name}:");
-            }
+    let mut spans: crate::analysis::Classified = Vec::new();
+    let emit_label = |out: &mut String, spans: &mut crate::analysis::Classified, name: &str| {
+        push_span(out, spans, name, C::Label);
+        push_span(out, spans, ":", C::Punct);
+        out.push('\n');
+    };
+    // Bucket the labels by the index they precede, once. Rescanning `prog.labels` inside the loop over
+    // `prog.code` made printing O(code x labels), and both grow with program size.
+    //
+    // `prog.labels` ORDER is load-bearing: when several labels sit at one index they print in the order
+    // they appear there, and the goldens pin that. Pushing into per-index buckets in `prog.labels` order
+    // reproduces it exactly. The `code.len() + 1` length covers the one-past-the-end targets handled
+    // below; a label further past the end is dropped by `get_mut`, which is what the old scan did too
+    // (neither loop had an index for it).
+    let mut labels_at: Vec<Vec<&str>> = vec![Vec::new(); prog.code.len() + 1];
+    for (name, at) in &prog.labels {
+        if let Some(bucket) = labels_at.get_mut(*at) {
+            bucket.push(name);
         }
-        let _ = writeln!(out, "    {}", instr_str(instr));
+    }
+    for (idx, instr) in prog.code.iter().enumerate() {
+        for name in labels_at.get(idx).into_iter().flatten() {
+            emit_label(&mut out, &mut spans, name);
+        }
+        out.push_str("    ");
+        let (mnemonic, operands) = instr_parts(instr);
+        push_span(&mut out, &mut spans, mnemonic, C::Mnemonic);
+        for (i, operand) in operands.iter().enumerate() {
+            // The `\t` before the first operand and the space after each `,` are whitespace and belong
+            // to no span; the `,` itself is punctuation, classified as the TM printer already does.
+            if i == 0 {
+                out.push('\t');
+            } else {
+                push_span(&mut out, &mut spans, ",", C::Punct);
+                out.push(' ');
+            }
+            push_span(&mut out, &mut spans, &operand_str(operand), operand.class());
+        }
+        out.push('\n');
     }
     // Any labels pointing one past the end (e.g. a trailing skip target) still print.
-    for (name, at) in &prog.labels {
-        if *at == prog.code.len() {
-            let _ = writeln!(out, "{name}:");
-        }
+    for name in labels_at.get(prog.code.len()).into_iter().flatten() {
+        emit_label(&mut out, &mut spans, name);
     }
-    out
+    (out, spans)
 }
 
 /// Resource caps for `run_asm`, mirroring the reference interpreter's budget/depth guards.
@@ -689,6 +744,52 @@ mod tests {
     }
 
     #[test]
+    fn print_asm_mapped_agrees_with_print_asm_and_classifies_every_piece() {
+        use crate::analysis::TokenClass;
+        let prog = Program {
+            code: vec![Instr::Li(Reg::Loc(0), 5), Instr::Jz(Reg::Loc(0), "done".to_string()), Instr::Halt],
+            labels: vec![("done".to_string(), 3)],
+        };
+        let (text, spans) = print_asm_mapped(&prog);
+        assert_eq!(text, print_asm(&prog), "the wrapper must return the mapped form's text verbatim");
+        for (s, _) in &spans {
+            assert!(s.end <= text.len(), "span {s:?} out of bounds for {} bytes", text.len());
+            assert!(s.start < s.end, "zero-width span {s:?}");
+        }
+        // Spans must be ordered and non-overlapping.
+        for w in spans.windows(2) {
+            assert!(w[0].0.end <= w[1].0.start, "spans overlap or are unordered: {:?} then {:?}", w[0], w[1]);
+        }
+        // Pin the separators here rather than relying on the goldens below: swapping `\t` and `, `
+        // leaves every span well-formed and every class correct, so only exact text catches it.
+        assert_eq!(text, concat!("    li\tr0, #5\n", "    jz\tr0, done\n", "    halt\n", "done:\n"));
+
+        // ASSERT THE WHOLE ORDERED SEQUENCE. Every weaker form has now failed on this branch. A
+        // `named.contains(&("done", Label))` is satisfied by EITHER occurrence — "done" is both the
+        // `jz` operand and the trailing label definition — so it cannot tell a broken operand
+        // classification from a correct one while the unrelated definition span is still right. And
+        // per-text checks say nothing at all about `#5`, which is how the `Nat` arm went untested:
+        // mutating `Operand::Imm => Nat` to `Register` was caught by no test in the suite.
+        let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&text[s.start..s.end], *c)).collect();
+        assert_eq!(
+            named,
+            vec![
+                ("li", TokenClass::Mnemonic),
+                ("r0", TokenClass::Register),
+                (",", TokenClass::Punct),
+                ("#5", TokenClass::Nat),
+                ("jz", TokenClass::Mnemonic),
+                ("r0", TokenClass::Register),
+                (",", TokenClass::Punct),
+                ("done", TokenClass::Label),
+                ("halt", TokenClass::Mnemonic),
+                ("done", TokenClass::Label),
+                (":", TokenClass::Punct),
+            ]
+        );
+    }
+
+    #[test]
     fn print_asm_is_a_stable_readable_listing() {
         let prog = Program {
             code: vec![
@@ -717,6 +818,19 @@ mod tests {
             "    ret\n",
         );
         assert_eq!(print_asm(&prog), expected);
+    }
+
+    /// Several labels at ONE index print in `prog.labels` order, and a label one past the end still
+    /// prints last. `print_asm_mapped` buckets labels by index rather than rescanning, and a bucket
+    /// filled in the wrong order would emit the same two names swapped — which nothing else here would
+    /// catch, because every golden above has at most one label per index.
+    #[test]
+    fn labels_sharing_an_index_print_in_prog_labels_order() {
+        let prog = Program {
+            code: vec![Instr::Halt],
+            labels: vec![("second".into(), 0), ("first".into(), 0), ("past_end".into(), 1)],
+        };
+        assert_eq!(print_asm(&prog), "second:\nfirst:\n    halt\npast_end:\n");
     }
 
     #[test]

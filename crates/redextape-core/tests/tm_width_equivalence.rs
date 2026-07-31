@@ -16,6 +16,11 @@
 //!      retrying wider, which is only sound if a run that caps at a narrow width would also cap at
 //!      every wider one. That is an argument about monotonicity; this measures it.
 
+// Test target: a fixture that fails to build IS the failure this file reports, so panicking is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
+// `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use proptest::prelude::*;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;

@@ -2,6 +2,11 @@
 //! result, and round-tripped through its text form. Part 2b compiles register-assembly down to such
 //! machines and checks them against the reference (the three-way oracle).
 
+// Test target: a fixture that fails to build IS the failure this file reports, so panicking is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
+// `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use redextape_core::tm::{TM_DEFAULT_CAPS, TmStatus, parse_tm, print_tm, simulate};
 
 const INCREMENT: &str = "\

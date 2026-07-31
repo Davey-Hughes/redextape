@@ -1,4 +1,4 @@
-//! Shared checkers for the TM bank-safety test suite.
+//! Shared helpers for the integration tests: the TM bank-safety checkers, and `core_of`.
 //!
 //! Integration tests are separate binaries and cannot import one another, so these were originally
 //! duplicated across `tm_bank_invariant.rs`, `tm_exhaustive_bank_safety.rs` and
@@ -13,9 +13,26 @@
 //!   * `unsafe_rules` inspects a machine's rules without running anything. It verifies every execution
 //!     the machine could have, of any length, including ones that never terminate.
 
+// Test target: a fixture that fails to build IS the failure this file reports, so panicking is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
+// `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![allow(dead_code)] // each test binary uses a different subset
 
+use redextape_core::core::Core;
+use redextape_core::desugar::desugar;
+use redextape_core::parser::parse;
 use redextape_core::tm::{AT, BLANK, BOX, Encoding, Machine, REG, SEP, WORK};
+
+/// Parse and desugar a fixture that must be clean, which is how every test here starts.
+///
+/// Panics on a diagnostic rather than returning it: a fixture that does not parse is a broken test,
+/// not a case under test, and the only useful thing to do with it is stop and name it.
+pub fn core_of(src: &str) -> Core {
+    let (p, ds) = parse(src);
+    assert!(ds.is_empty(), "parse errors in {src:?}: {ds:?}");
+    desugar(&p.expect("a program with no diagnostics parses"))
+}
 
 /// The width every generic checker measures against. A bounded encoding reports its field width; an
 /// unbounded one has no fixed skeleton to check, so the checkers refuse rather than guess.

@@ -1,3 +1,7 @@
+// Test target: a fixture that fails to build IS the failure this file reports, so panicking is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
+// `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![cfg(feature = "cranelift")]
 //! The native oracle: for every first-order demo, the reference tree-walker's value, the decoded λ
 //! normal form, the decoded TM final tape UNDER EVERY ENCODING, and the decoded native (Cranelift JIT)

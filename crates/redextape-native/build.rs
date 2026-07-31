@@ -1,3 +1,7 @@
+// Build script: Cargo guarantees `TARGET`, and a build script has no diagnostic channel to degrade
+// into — aborting the build is the only honest failure here.
+#![allow(clippy::unwrap_used)]
+
 fn main() {
     // Cargo sets TARGET for build scripts but not for the crate itself; re-export it so tests can
     // select the right per-triple baseline.

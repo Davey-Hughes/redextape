@@ -2,6 +2,11 @@
 //! the decoded lambda normal form. This is the first cross-backend agreement guarantee; Plan 3
 //! extends it to three ways.
 
+// Test target: a fixture that fails to build IS the failure this file reports, so panicking is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
+// `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use redextape_core::desugar::desugar;
 use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, run_lambda};
 use redextape_core::parser::parse;

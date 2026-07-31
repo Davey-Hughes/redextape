@@ -3,6 +3,10 @@
 //!
 //!     cargo run --example lambda_demo -p redextape-core
 
+// Example target: a demo that cannot build its own input has nothing to demonstrate, so aborting is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use redextape_core::desugar::desugar;
 use redextape_core::lambda::{MAX_REDUCTION_STEPS, decode, lower, parse_lambda, print_lambda, reduce_trace};
 use redextape_core::parser::parse;

@@ -4,6 +4,11 @@
 //! oracle leg (`tests/llvm_oracle.rs`) made visible.
 //!
 //! (Companion to `native_demo.rs`/`aot_demo.rs`, which show the Cranelift JIT and AOT legs.)
+
+// Example target: a demo that cannot build its own input has nothing to demonstrate, so aborting is
+// deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[cfg(feature = "llvm")]
 fn main() {
     use redextape_core::tm::{DEFAULT_CAPS, decode_asm};
