@@ -6,6 +6,7 @@
 #   scripts/land.sh --no-llvm            # pass --no-llvm through to check-all.sh
 #   scripts/land.sh -m "feat(tm): ..."   # skip the editor, use this subject
 #   scripts/land.sh --no-gate            # land without running the gate (loud, discouraged)
+#   scripts/land.sh --keep-branch        # do not delete the branch after landing
 #
 # WHY A SCRIPT AND NOT `git merge --squash`:
 #
@@ -33,13 +34,15 @@ MARK='#LAND#'
 
 gate_args=()
 skip_gate=0
+keep_branch=0
 subject=""
 branch=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --no-llvm) gate_args+=("--no-llvm"); shift ;;
-    --no-gate) skip_gate=1; shift ;;
+    --no-llvm)     gate_args+=("--no-llvm"); shift ;;
+    --no-gate)     skip_gate=1; shift ;;
+    --keep-branch) keep_branch=1; shift ;;
     -m)        subject="${2:?-m needs a subject}"; shift 2 ;;
     -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)        echo "error: unknown argument: $1" >&2; exit 2 ;;
@@ -154,7 +157,25 @@ if ! git commit --quiet --file "$msg" --cleanup=whitespace; then
 fi
 
 echo "==> landed: $(git log --oneline -1)"
+
+# `git branch -d` ALWAYS refuses a squash-merged branch: the squash commit has no parent link back to
+# it, so git cannot see the work as merged and -d's reachability check is measuring the wrong thing.
+# Reaching for -D by reflex is the wrong lesson — it is the flag that also throws away work that was
+# genuinely never merged. The check that IS meaningful after a squash is whether the branch's TREE
+# matches main; if it does, the work is on main by content and the branch is redundant. So: verify
+# that here, delete on the strength of it, and refuse if it does not hold.
+if [ "$keep_branch" -eq 1 ]; then
+  echo "==> keeping $branch (--keep-branch)"
+elif git diff --quiet "$MAIN" "$branch"; then
+  git branch -D "$branch" >/dev/null
+  echo "==> deleted $branch (its tree matched $MAIN exactly)"
+  if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+    echo "    a remote copy remains: git push origin --delete $branch"
+  fi
+else
+  echo "!!! $branch differs from $MAIN after landing — NOT deleting it" >&2
+  git --no-pager diff --stat "$MAIN" "$branch" >&2
+fi
+
 echo
-echo "Next:"
-echo "  git push origin $MAIN"
-echo "  git branch -d $branch && git push origin --delete $branch"
+echo "Next: git push origin $MAIN"
