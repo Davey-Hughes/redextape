@@ -508,6 +508,77 @@ design — is untouched and still available.
 Instrument: `crates/redextape-core/examples/shift_cost_probe.rs`, committed with the fix — it carries the
 memory-cap rules in its module docs and is the re-runnable source for every figure above.
 
+#### Concurrency was asked of both interpreters and measured out: five rejections, one sequential win (2026-08-01)
+
+Design: [`2026-08-01-interpreter-concurrency-design.md`](../specs/2026-08-01-interpreter-concurrency-design.md).
+**Nothing built.** Raised as a question — can threads make the TM simulator or the λ reducer faster? — and
+answered by measurement, in the same spirit as the two blocks above: the interesting output is the
+rejections, because each is a thing a reader will re-propose.
+
+**The governing numbers, on the `map` demo under `Unary::default()` (3,203 states, 5 tapes, 344,999 steps,
+32 logical CPUs):** a full δ-step is **12.99 ns** (77.0 M steps/s); a 5-thread barrier is **2,063 ns**.
+**Every intra-run parallel scheme loses on that ratio alone** — break-even for a 5-way split needs ~200×
+more work per step than exists, and k = 2 is no kinder (cheaper barrier, worse k/(k−1)). Rejected with
+numbers: parallel `apply` over tapes via thread pool *or* async runtime (§3, and the async case is wrong
+by category — there is nothing blocking to hide); speculative δ-stepping (§4 — no latency asymmetry to
+exploit, and dispatch turns out to be *well* predicted, not badly); parallel β-reduction (§5); `Rc` →
+`Arc` (§6 — **20.0× on refcount bumps**, landing exactly on the clones the `shift` fix above made the hot
+path). Test-suite parallelism is not a target either: **646 tests, 1.976 s wall** in release on this host
+(§7).
+
+**The strongest form of the rejection**, because it is the case most favourable to threads:
+`simulate_trace`'s `Tape::snapshot` is the only genuinely O(cells) per-tape operation in either
+interpreter — 1,011 ns/step, 78× untraced, five independent tapes. Split perfectly across five threads it
+is still **2.25× slower** than sequential. The barrier is not close to payable anywhere.
+
+**What survives is sequential, and BOTH loops have the same bug class as `depth_exceeds` above** — per-step
+recomputation of something the previous step already knew. **The two want different fixes, and finding that
+out was the useful part.**
+
+**TM (§8.1) — run-length fusion, and the ENCODING decides whether it pays.** Under `Unary` the corpus
+confirms it overwhelmingly: **99.3% of δ-steps sit in a same-state run averaging 38.56** (on `map`, longest
+65 = `MAX_FIELD_WIDTH` + 1 — these are field sweeps, the simulator-side view of the 92–97% padding share
+`width_report` already reports). The interpreter re-runs the whole `TmCursor::next` preamble once per cell
+to perform 38 identical one-cell moves; bulk-apply a self-looping rule and replay the individual
+`StepEvent`s so no observer sees a difference. **But `Binary`'s mean run is 7.77 — five times shorter.**
+Modelling a fused op at `c` ordinary steps makes the win ~`R/c`: at the pessimistic `c = 10` this block
+originally used to claim "~3.7×", `Unary` gives ~3.9× and **`Binary` gives 0.78×, a net loss.** `c` decides
+it, not `R`, and `c` belongs to an implementation nobody has written. **No slice may quote a number from
+here** — and a change tuned on `Unary` that regressed `Binary` would leave every oracle green, since fusion
+is semantics-preserving by construction.
+
+**λ (§8.2) — the analogue was measured and does NOT carry; the fix is a zipper, and it should go LAST.**
+Over 5,955 β-steps across every corpus program λ accepts, same-redex-path runs average **1.22** against the
+TM's 38.56, and consecutive root redexes are **1.3%** — so neither run fusion nor n-ary β has a surface,
+because the redex *moves* after nearly every step. (This negative result is corpus-wide, which is why it is
+stated with more confidence than the positive one above.) What the same data shows instead: **93.7% of all
+descent retraces the path the previous step already walked** (97.2% on `sum(5)`), because
+`LambdaCursor::next` re-enters `reduce_step` from the **root** every step and rebuilds the spine coming
+back up. **Then Part H measured the denominator: a β-step is 1,323 ns, ~102× a δ-step** — so the ~8.7
+retraced spine nodes are a single-digit-percent lever, a large share of a small thing. **The standing
+`subst` re-shift target attacks where that 1,323 ns actually lives and is already designed, differentially
+tested and unbuilt; it goes first.** That settles §11 item 6 in the opposite direction to how §8.2 was
+drafted.
+
+**The real parallelism is Plan 4/5's, and the premise hands it over:** λ reduction and TM simulation of the
+same Core are wholly independent, so one worker each is genuine task parallelism with no shared terms, no
+per-step barrier, and no `Arc`. The point is latency — a 7.48 s λ reduction on the UI thread is a frozen
+tab — plus run-ahead buffering, which is a *prefetcher* rather than a speculator and therefore never
+squashes. `trace`'s lazy cursors over a shared `StepEvent` vocabulary are already the right interface.
+
+**Caveat that applies to parallelising the probes, not the interpreters:** fan-out multiplies peak RSS, and
+one λ measurement has already cost 60 GiB and all swap. A parallel sweep must size its per-process cap at
+`total / N` rather than handing each worker the single-run cap.
+
+**Instrument: `crates/redextape-core/examples/concurrency_probe.rs`, committed with the design** — every
+figure above is one run of it, and it carries the memory-cap rules in its module docs the way
+`shift_cost_probe.rs` does. **Writing it changed two conclusions the throwaway harness had reached** —
+`Binary`'s 7.77 against `Unary`'s 38.56, and the 1,323 ns β-step that demoted §8.2 — which is the argument
+for this discipline rather than an accident of it, and the third time on this thread that a measurement has
+overturned a plausible estimate. Part G's four run columns exist to keep §8.2's *negative* result
+falsifiable: if same-path runs ever approach the TM's, the conclusion flips and fusion becomes a λ
+optimization after all.
+
 #### THE NEXT λ SLICE IS NOT the `subst` fix: 512 bytes of ordinary source reaches an unbounded β-step (2026-07-31)
 
 **Superseded by the block above — read as history.** Found by an investigation run after the branch was

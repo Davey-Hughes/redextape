@@ -433,13 +433,14 @@ fn extract_str_array(source: &str, const_name: &str) -> Vec<String> {
 }
 
 /// `examples/step_survey.rs`, `redextape-native/tests/native_oracle.rs`,
-/// `examples/list_reduction_probe.rs` and `examples/lambda_sharing_probe.rs` each hand-copy this file's
+/// `examples/list_reduction_probe.rs`, `examples/lambda_sharing_probe.rs` and
+/// `examples/concurrency_probe.rs` each hand-copy this file's
 /// `FIRST_ORDER_DEMOS` — an example is a separate binary crate and cannot `use` an integration test's
-/// module, and the native crate's oracle predates a shared fixtures crate — so all four are duplicated
+/// module, and the native crate's oracle predates a shared fixtures crate — so all five are duplicated
 /// by hand rather than referencing this array. That has already drifted twice (documented in
 /// `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`'s survey caveat and, within this very
 /// branch, in `step_survey.rs` again after the FIRST fix), so a one-off resync is demonstrably not
-/// durable on its own. This test reads all five files as TEXT (via `CARGO_MANIFEST_DIR`, so it works
+/// durable on its own. This test reads all six files as TEXT (via `CARGO_MANIFEST_DIR`, so it works
 /// under `cargo test` from any directory) and asserts their extracted string literals are byte-for-byte
 /// equal, catching the next drift at compile-time cost instead of the next survey run silently
 /// describing a stale corpus.
@@ -455,40 +456,49 @@ fn extract_str_array(source: &str, const_name: &str) -> Vec<String> {
 /// fifth was added, so this closed an uncovered copy rather than live drift; that is the window this
 /// test exists to shut, and it stayed open through one deliberate attempt to shut it.
 ///
+/// **THE SIXTH (2026-08-01, `examples/concurrency_probe.rs`) IS THE FIRST ADDED *WITH* ITS COPY RATHER
+/// THAN AFTER IT**, which is what the paragraph above asks for and had not yet been tested. Two things
+/// changed to make that the cheap path rather than the diligent one. The per-copy `read_to_string` +
+/// `extract_str_array` + `assert_eq!` triple became one row in a `copies` table, so adding a copy is a
+/// one-line edit instead of a three-place one — the shape that made the fifth easy to miss. And the
+/// count is now asserted (`copies.len() + 1 == 6`), because a table makes a *deletion* silent in a way
+/// three hand-written asserts did not: dropping a row would leave this test green while that file
+/// drifted. The assert is deliberately a literal, so bumping it is a conscious act that re-runs the
+/// `grep`.
+///
 /// An example target is not a test target, but that was never what made a copy checkable — the check is
 /// textual and path-based, so an untracked-by-CI probe costs one more `read_to_string` and closes the
 /// drift window instead of documenting it.
 #[test]
-fn first_order_demos_stay_synced_across_all_five_copies() {
+fn first_order_demos_stay_synced_across_all_six_copies() {
     let manifest = env!("CARGO_MANIFEST_DIR");
+    // Every copy in the tree, as (path relative to this crate, label for the failure message). Adding a
+    // row is the whole cost of adding a copy — which is the point, and is why this is a table rather than
+    // five hand-written `read_to_string`/`assert_eq!` pairs: the fifth copy was missed because each new
+    // one meant editing three places, and the sixth is the first added under this shape.
+    let copies: &[(&str, &str)] = &[
+        ("examples/step_survey.rs", "examples/step_survey.rs"),
+        ("../redextape-native/tests/native_oracle.rs", "redextape-native/tests/native_oracle.rs"),
+        ("examples/list_reduction_probe.rs", "examples/list_reduction_probe.rs"),
+        ("examples/lambda_sharing_probe.rs", "examples/lambda_sharing_probe.rs"),
+        ("examples/concurrency_probe.rs", "examples/concurrency_probe.rs"),
+    ];
+
     let canonical_src =
         std::fs::read_to_string(format!("{manifest}/tests/three_way_oracle.rs")).expect("read this file's own source");
-    let step_survey_src =
-        std::fs::read_to_string(format!("{manifest}/examples/step_survey.rs")).expect("read step_survey.rs");
-    let native_oracle_src = std::fs::read_to_string(format!("{manifest}/../redextape-native/tests/native_oracle.rs"))
-        .expect("read native_oracle.rs");
-    let probe_src = std::fs::read_to_string(format!("{manifest}/examples/list_reduction_probe.rs"))
-        .expect("read list_reduction_probe.rs");
-    let sharing_probe_src = std::fs::read_to_string(format!("{manifest}/examples/lambda_sharing_probe.rs"))
-        .expect("read lambda_sharing_probe.rs");
-
     let canonical = extract_str_array(&canonical_src, "FIRST_ORDER_DEMOS");
-    let step_survey = extract_str_array(&step_survey_src, "FIRST_ORDER_DEMOS");
-    let native_oracle = extract_str_array(&native_oracle_src, "FIRST_ORDER_DEMOS");
-    let probe = extract_str_array(&probe_src, "FIRST_ORDER_DEMOS");
-    let sharing_probe = extract_str_array(&sharing_probe_src, "FIRST_ORDER_DEMOS");
-
     assert_eq!(canonical.len(), FIRST_ORDER_DEMOS.len(), "this file's own extraction lost or gained entries");
-    assert_eq!(step_survey, canonical, "examples/step_survey.rs's FIRST_ORDER_DEMOS has drifted from this file's");
-    assert_eq!(
-        native_oracle, canonical,
-        "redextape-native/tests/native_oracle.rs's FIRST_ORDER_DEMOS has drifted from this file's"
-    );
-    assert_eq!(probe, canonical, "examples/list_reduction_probe.rs's FIRST_ORDER_DEMOS has drifted from this file's");
-    assert_eq!(
-        sharing_probe, canonical,
-        "examples/lambda_sharing_probe.rs's FIRST_ORDER_DEMOS has drifted from this file's"
-    );
+
+    for (path, label) in copies {
+        let src = std::fs::read_to_string(format!("{manifest}/{path}")).unwrap_or_else(|e| panic!("read {label}: {e}"));
+        let found = extract_str_array(&src, "FIRST_ORDER_DEMOS");
+        assert_eq!(found, canonical, "{label}'s FIRST_ORDER_DEMOS has drifted from this file's");
+    }
+
+    // The count is asserted, not just the contents: a copy silently DROPPED from `copies` would leave
+    // this test green while its file drifted. `grep -rn FIRST_ORDER_DEMOS` over the tree is the
+    // enumeration method this doc names, and 6 is what it returns — this file plus `copies`.
+    assert_eq!(copies.len() + 1, 6, "a copy was added to or removed from the tree without updating this count");
 }
 
 #[test]
