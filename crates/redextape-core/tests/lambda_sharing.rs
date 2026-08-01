@@ -33,14 +33,24 @@ const SUBJECT: &str = "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum
 /// justification for a second test: a regression that broke sharing only along the loop-desugaring
 /// path, and not the recursion path, would slip past a `sum(5)`-only gate.
 ///
-/// This is NOT justified by `examples/lambda_sharing_probe.rs`'s across-trace ratio (371.7x for this
-/// row vs 36.9x for `sum(5)`, a ~10x spread) — that ratio is the WRONG axis for this gate. It comes
-/// from the probe's structural hash-consing pass, which merges subterms that were built separately
-/// but happen to be shape-identical; plain `Rc` sharing can never do that, and this gate does not
-/// credit it. What this gate actually counts is distinct `Rc` allocations (the assertions below), and
-/// on that axis the two programs are `sum(5)`'s 3.57x against this program's 7.44x — about a 2x
-/// spread, not the probe's ~10x. Still a real difference: the two desugaring paths do share different
-/// amounts of their traces, just not by the margin the across-trace number would suggest.
+/// The axis distinction still holds and is still the reason to read the two numbers separately:
+/// `examples/lambda_sharing_probe.rs`'s across-trace ratio (371.7x for this row vs 36.9x for `sum(5)`,
+/// a ~10x spread) comes from a structural hash-consing pass, which merges subterms that were built
+/// separately but happen to be shape-identical. Plain `Rc` sharing can never do that, and this gate
+/// does not credit it: what it counts is distinct `Rc` allocations.
+///
+/// **THE CONCLUSION THIS PARAGRAPH USED TO DRAW IS NOW FALSE, and the reversal is the point.** It read
+/// ~~"on that axis the two programs are `sum(5)`'s 3.57x against this program's 7.44x — about a 2x
+/// spread, not the probe's ~10x"~~, and treated that gap as the gate correcting an inflated figure.
+/// Since the `maxfree` short-circuit in `term.rs` (`shift` and `subst` return their argument's
+/// allocation when no free index is in range), the gate measures **26.51x against 316.04x — a 11.92x
+/// spread, against the probe's 10.07x**. The two axes now agree closely.
+///
+/// What changed is not the measurement but the reducer: `shift` used to rebuild every node it visited,
+/// so a β-step's output aliased nothing and most of what `Rc` COULD have shared was destroyed before
+/// this gate ever counted it. The hash-consing figure was the better estimate of the available sharing
+/// all along; the allocation count was low because the reducer was throwing sharing away, not because
+/// `Rc` cannot express it.
 ///
 /// Two rows, not five: these two paths are what this gate is meant to distinguish between, and more
 /// rows would mostly repeat one of these two facts rather than test something new.
@@ -90,22 +100,30 @@ fn reduce_trace_shares_its_snapshots() {
     // 1. Non-vacuity. A representation that shares nothing has distinct == nodes.
     assert!((seen.len() as u64) < nodes, "no sharing at all: {} distinct allocations for {nodes} nodes", seen.len());
 
-    // Measured 2026-07-31. 502,146 nodes -> 140,529 distinct allocations (3.57x). Smaller than the
-    // probe's across-trace 36.9x for this row (`examples/lambda_sharing_probe.rs`) on purpose, not a
-    // discrepancy: the probe's `distinct` is a structural hash-consing count (separately built but
-    // shape-identical subterms collapse to one id), while this test counts distinct `Rc` allocations
-    // (`alloc_id`) — what plain `Rc` sharing actually gives, a strictly weaker and smaller notion.
-    // Both being > 1 confirms sharing is real at the layer each one measures.
+    // Measured 2026-08-01. 502,146 nodes -> 18,939 distinct allocations (26.51x).
     //
-    // Cross-check, not an identity this test asserts on: the probe also reports a WITHIN-TERM ratio
-    // for this row (its largest single term, 1,213 nodes -> 117 distinct, 10.37x) — a reviewer
-    // reconciled the two numbers arithmetically as this gate's ratio times the probe's within-term
-    // ratio: 3.57 * 10.37 ≈ 37.0, close to the probe's across-trace 36.9x above. That is only an
-    // approximation (confirmed here, but it does not hold nearly as tightly for the loop program
-    // below), offered as a sanity check that the two ratios aren't contradicting each other, not as a
-    // proven relationship.
+    // **THE NODE TOTAL IS UNCHANGED AND THE ALLOCATION COUNT FELL 7.42x** (was 140,529, measured
+    // 2026-07-31). Those two facts together are the evidence that the `maxfree` short-circuit in
+    // `term.rs` is a representation change and not a semantic one: the same reduction, step for step
+    // and node for node, held in a seventh of the memory. `shift` and `subst` now return their
+    // argument's allocation when no free index is in range, instead of rebuilding a structurally
+    // identical copy — so a β-step preserves sharing rather than materialising the logical expansion.
+    // Every oracle in this tree passed unedited across that change.
+    //
+    // The probe's across-trace 36.9x for this row (`examples/lambda_sharing_probe.rs`) is still a
+    // DIFFERENT AXIS, not a target: its `distinct` is a structural hash-consing count (separately
+    // built but shape-identical subterms collapse to one id), while this counts distinct `Rc`
+    // allocations. Plain `Rc` cannot merge separately-built terms and this gate does not credit it.
+    // The gap is now 26.51x against 36.9x rather than 3.57x against 36.9x, which says most of what
+    // hash-consing was finding was sharing the reducer had destroyed rather than sharing `Rc` cannot
+    // express.
+    //
+    // NOT RE-DERIVED: the old arithmetic cross-check (this gate's ratio x the probe's within-term
+    // 10.37x ≈ the probe's across-trace figure) was calibrated on the pre-fix numbers, and the
+    // within-term ratio moved too. It is dropped rather than restated with new numbers, because
+    // nothing here re-measured it. Run the probe if you want it back.
     assert_eq!(nodes, 502_146, "total nodes across the trace");
-    assert_eq!(seen.len(), 140_529, "distinct allocations across the trace");
+    assert_eq!(seen.len(), 18_939, "distinct allocations across the trace");
 }
 
 #[test]
@@ -128,13 +146,21 @@ fn reduce_trace_shares_its_snapshots_for_a_loop_shaped_program() {
     // 1. Non-vacuity. A representation that shares nothing has distinct == nodes.
     assert!((seen.len() as u64) < nodes, "no sharing at all: {} distinct allocations for {nodes} nodes", seen.len());
 
-    // Measured 2026-07-31. 1,379,187 nodes -> 185,459 distinct allocations (7.44x). By the same
-    // allocation-vs-structure distinction noted above (and on the doc comment for `SUBJECT_LOOP`),
-    // this is smaller than the probe's 371.7x across-trace figure for this row, and larger than
-    // `sum(5)`'s 3.57x here. UNVERIFIED HYPOTHESIS for that last part, not demonstrated by anything in
-    // this test: the loop body may be physically shared step to step just as the recursive spine is,
-    // but being a bigger term, more of it would survive untouched per step. Recorded as a guess for a
-    // future reader to check, not as a fact this test establishes.
+    // Measured 2026-08-01. 1,379,187 nodes -> 4,364 distinct allocations (316.04x).
+    //
+    // **THE NODE TOTAL IS UNCHANGED AND THE ALLOCATION COUNT FELL 42.5x** (was 185,459, measured
+    // 2026-07-31) — the same representation-not-semantics evidence as the `sum(5)` gate above, and a
+    // far larger drop. This is the row where the reducer was destroying the most sharing: 316.04x is
+    // now within striking distance of the probe's 371.7x hash-consing figure for this row, where
+    // before it was 7.44x against that same 371.7x.
+    //
+    // THE HYPOTHESIS THIS COMMENT USED TO CARRY IS NOW SUPPORTED, having been recorded as a guess.
+    // It read: "the loop body may be physically shared step to step just as the recursive spine is,
+    // but being a bigger term, more of it would survive untouched per step." That is what a 42.5x drop
+    // against `sum(5)`'s 7.42x says — the bigger term had more to preserve, and preserving it is
+    // exactly what the short-circuit added. Still not PROVEN by this test, which counts allocations
+    // rather than attributing them; it is a guess the numbers now favour instead of one they were
+    // silent on.
     assert_eq!(nodes, 1_379_187, "total nodes across the trace");
-    assert_eq!(seen.len(), 185_459, "distinct allocations across the trace");
+    assert_eq!(seen.len(), 4_364, "distinct allocations across the trace");
 }

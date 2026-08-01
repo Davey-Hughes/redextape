@@ -416,15 +416,110 @@ and **re-derive** layers 2 and 3 from the new measurement — the instrument is 
 so the next bottleneck gets named the way this one was. That discipline has now refuted two intuitions in
 one slice: hash-consing priced as YAGNI, and substitution blowup. Full statement in the design's §10.
 
+#### CLOSED 2026-08-01 — the hang was `shift`, and fixing it removed the need for the guard
+
+**Read this before the two blocks below, which are now history.** The record said the next λ slice was a
+per-redex work budget, with "worth doing first: re-examine `lower_group`'s duplication, since fixing the
+root cause may remove the need for a guard at all." That is what happened, one level deeper than
+`lower_group`.
+
+`term.rs`'s `shift` rebuilt every node it visited, unconditionally — no memo by allocation, and no check
+for whether any free index was in range. So it was **Θ(logical) rather than Θ(physical)**, and it
+**destroyed sharing**: `shift(App(c, c))` recursed twice and produced two separate copies of `c`.
+`lower_group`'s duplication only writes the promise; `shift` was what cashed it, on every β-step. That is
+why `|arg|` in the measured cost model `|body| + Abs(body) × |arg|` was the logical number and not the
+physical one — the part of that diagnosis that was never stated.
+
+**Two committed measurements had already recorded the cause as a symptom, from opposite ends, and
+neither was read that way.** `blowup_probe.rs`'s `step` section: *"a β-step's output aliases nothing, and
+the within-term ratio is exactly 1.00x after ≥6 steps."* And the perf entry immediately above this one:
+*"because `shift` has no sharing-preserving arm, that call rebuilds the whole reduct node for node and
+its output shares **zero** allocations with either of `beta`'s inputs."* The second names the mechanism
+outright, as a note on what to fix *after* `subst`.
+
+**The fix is one comparison in each of two functions.** Each `LambdaTerm` handle carries `maxfree` — the
+highest free de Bruijn index plus one, so `0` means closed — maintained in O(1) by `var`/`abs`/`app`.
+`shift(d, cutoff, t)` is the identity exactly when `maxfree(t) <= cutoff`; `subst(j, s, t)` is exactly
+when `maxfree(t) <= j`. Both then return `t.clone()`, which preserves the **allocation** — the half that
+matters, since the rebuilt copy was always structurally *equal*, which is why `==` never noticed and the
+cost stayed invisible for as long as it did. The `subst` check also sits above that function's `Abs` arm,
+so the per-binder `&shift(1, 0, s)` is never built for a variable that does not occur — the argument
+expression that made the re-shift unconditional.
+
+#### …and then `depth_exceeds` was 96% of what remained
+
+With `shift` fixed the reduction ramp still doubled per level, and almost none of that was reduction.
+`reduce.rs`'s `depth_exceeds` walked the **logical** expansion once per β-step — the same bug class, one
+file over, and it survived the first fix. Sampled 1-in-200 against a memoized equivalent, verdicts
+identical on every sample:
+
+| level | steps | logical walk | memoized | speedup |
+| --- | --- | --- | --- | --- |
+| 7 | 107,379 | 11.630 s | 25.110 s | 0.5x |
+| 9 | 106,493 | 46.863 s | 23.527 s | 2.0x |
+| 11 | 105,607 | **187.599 s** | 23.824 s | 7.9x |
+
+**187.6 s of level 11's 195.7 s was the depth guard.** Memoizing was measured and **rejected** — the
+level-7 row is why: a `HashMap` per call is a net loss on the small terms the ordinary corpus reduces,
+and that flat ~24 s is per-call allocation overhead across ~105,000 calls, not walking. `depth` is
+instead carried on the handle beside `maxfree`, O(1) at construction and O(1) to read, so `depth_exceeds`
+is now `t.depth() > limit` — no walk, no allocation.
+
+Two smaller items landed with it, both consequences of the `shift` change rather than independent work:
+`shift`'s `else { var(*k) }` became **provably unreachable** (the short-circuit returns whenever
+`k < cutoff`, so reaching the match guarantees `k >= cutoff`; coverage confirmed it) and is replaced by a
+`debug_assert!`; and `subst`'s `k > j` arm now returns `t.clone()` rather than rebuilding an identical
+`var(*k)`.
+
+| program | before either fix | `shift` only | both |
+| --- | --- | --- | --- |
+| the 512-byte nested-group hang | one β-step unfinished at 13 min / 974 MB | 105,607 steps, 195.7 s | **7.48 s** |
+| `let xs = [0..500); let ys = […]; head(xs) + head(ys)` | **19.0 s in the first β-step** | 0.024 s | **<0.001 s** |
+| `[0, 1, …, 698]` | 35 s over 1,398 steps | 3.187 s | **0.986 s**, same 1,398 steps |
+
+**The reduction ramp is now flat** — 7.5–9.0 s at every level from 1 to 11, against a logical size
+growing 306 → 616,152 across that range.
+
+**Semantics are unchanged, and that is asserted rather than claimed.** Every oracle, golden, round-trip
+and proptest in the workspace passed unedited (34 test binaries, 0 failures). Step counts are identical
+wherever they were pinned. The only tests that moved are the two sharing gates, which pin *allocation
+counts* and which fell **7.42x** (140,529 → 18,939) and **42.5x** (185,459 → 4,364) at **unchanged node
+totals** — same reduction, node for node, in a fraction of the memory.
+
+**The per-redex work budget was not built.** Its reasoning survives — it priced the measured cost model
+rather than a proxy, and it checked per step — but the quantity it was going to bound is no longer large,
+because `|arg|` is no longer paid logically. A bound sized from the pre-fix numbers would be calibrated
+against costs inflated up to ~9,500x on these programs. If a guard is wanted later it must be
+re-measured from scratch. `tests/guard_counterexamples.rs` still holds, and both its programs now
+reduce quickly rather than merely lowering.
+
+**What is NOT closed.** Divergence is untouched and was never this slice's to solve; the nested-group
+family has no base case, so "terminates" means it reaches a cap in bounded time. The cap it reaches is
+`MAX_TERM_DEPTH`, **not** `MAX_REDUCTION_STEPS` — 105,607 steps against a step cap of 5,000,000 — because
+the family grows deep as it diverges.
+
+**The flat ramp is a fact about this family, not a complexity claim.** What both fixes removed is cost
+that scaled with the *logical* size while the physical size stayed small — which is exactly what this
+family is built to exhibit. A program whose physical size genuinely grows still pays for it, and `subst`
+still rebuilds the spine of whatever it descends into. The older next target — carrying `subst`'s
+per-binder re-shift down as one `shift(d, 0, ·)`, with an additivity lemma already verified in the perf
+design — is untouched and still available.
+
+Instrument: `crates/redextape-core/examples/shift_cost_probe.rs`, committed with the fix — it carries the
+memory-cap rules in its module docs and is the re-runnable source for every figure above.
+
 #### THE NEXT λ SLICE IS NOT the `subst` fix: 512 bytes of ordinary source reaches an unbounded β-step (2026-07-31)
 
-Found by an investigation run after the branch was reviewed and green, and recorded here rather than
-fixed on it — **the branch lands, this is what the next slice is planned from**. Instrument:
-`crates/redextape-core/examples/blowup_probe.rs`, committed with the branch so the repro can be re-run
-instead of quoted. Full statement, sizing and confidence in the design's §10.
+**Superseded by the block above — read as history.** Found by an investigation run after the branch was
+reviewed and green, and recorded here rather than fixed on it — **the branch lands, this is what the next
+slice is planned from**. Instrument: `crates/redextape-core/examples/blowup_probe.rs`, committed with the
+branch so the repro can be re-run instead of quoted. Full statement, sizing and confidence in the
+design's §10.
 
-> **REVERTED 2026-08-01 — READ THIS BLOCK AS HISTORY. THE HANG IS OPEN AND NOTHING REFUSES THIS
-> PROGRAM.** ~~"LANDED 2026-07-31 — the program is refused at lowering time"~~ — true for one day.
+> **REVERTED 2026-08-01 — READ THIS BLOCK AS HISTORY.** ~~"THE HANG IS OPEN AND NOTHING REFUSES THIS
+> PROGRAM."~~ — nothing refuses it still, and **nothing needs to**: the hang was closed later the same
+> day by fixing `shift` and `depth_exceeds`, two sections above. ~~"LANDED 2026-07-31 — the program is
+> refused at lowering time"~~ — true for one day.
 > `MAX_SHARED_LOGICAL_NODES` = 10,000 with `LowerError::TooShared` (`1652e09`) was **falsified by
 > measurement and removed**; what stays is the measurement it read, `max_shared_logical_size`
 > (`b832c89`), which is sound. The whole record is the design's **§10**, and the three-line version is:
@@ -458,7 +553,13 @@ instead of quoted. Full statement, sizing and confidence in the design's §10.
 > product, from the other end, in the same directory, while this guard was being designed against
 > "occurrences × |arg|".
 >
-> **THE NEXT λ SLICE IS A PER-REDEX WORK BUDGET.** `logical_abs_count(body) × logical_size(arg)`, both
+> **~~THE NEXT λ SLICE IS A PER-REDEX WORK BUDGET.~~ NOT BUILT — OVERTAKEN 2026-08-01 by the `shift`
+> fix, recorded in its own section above.** This design was sound and was never falsified; it was made
+> unnecessary. It would have bounded `logical_abs_count(body) × logical_size(arg)`, and `|arg|` is no
+> longer paid logically, so the quantity it priced is no longer large. A bound read off the numbers below
+> would be calibrated against costs inflated up to ~9,500x. Re-measure from scratch if a guard is wanted.
+> The rest of this block is still the best account of WHY the two earlier guards failed, which is why it
+> is kept rather than deleted. `logical_abs_count(body) × logical_size(arg)`, both
 > O(physical), checked in **`LambdaCursor::next` BEFORE performing the step** it prices.
 > `logical_abs_count` is already written and exercised in `examples/guard_hole_probe.rs`. Two properties,
 > and they are exactly the two failures above: it prices the **measured** cost model rather than a proxy

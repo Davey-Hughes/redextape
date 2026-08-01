@@ -62,10 +62,15 @@
 //! groups printing `lower error: TooShared { .. }`. **Measurement then falsified the guard.** The
 //! mechanism it was calibrated against is not the one `subst` implements, and a program with no
 //! recursion at all — `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)`, 4,821 bytes — measures
-//! `max_shared` = 4 against that bound of 10,000 while spending 19.0 s in its FIRST β-step. Instrument:
+//! `max_shared` = 4 against that bound of 10,000 while spending 19.0 s in its FIRST β-step — **a
+//! pre-2026-08-01 timing; that step is now under a millisecond, see `examples/shift_cost_probe.rs`. The
+//! score of 4 is unchanged, so the falsification stands.** Instrument:
 //! `examples/guard_hole_probe.rs`; record: the shared-subterm design's §10. So the figures above at
-//! seven groups and beyond are **live measurements again, not a pre-guard record**, and `family-reduce 7`
-//! is once more the hazard this file warns about rather than a typed error.
+//! seven groups and beyond are **live measurements again, not a pre-guard record**. ~~"`family-reduce 7`
+//! is once more the hazard this file warns about"~~ — **no longer true as of 2026-08-01: it reduces.**
+//! Every WALL-CLOCK figure in this file predates the `shift` and `depth` fixes and will not reproduce;
+//! every SIZE and STEP COUNT is unaffected, because `lower` builds the same term it always did and the
+//! reductions take the same steps.
 //!
 //! `lower_src` RETURNS `Option` ANYWAY and must not go back to panicking. It used to `panic!` on `Err`,
 //! which killed the documented no-argument invocation below at `q3` — before `corpus` or `family` ran at

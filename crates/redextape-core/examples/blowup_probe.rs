@@ -42,15 +42,36 @@
 //! falsified by measurement and reverted** — the mechanism it named is not what `subst` does, and
 //! `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)` scores 4 against its bound of 10,000 while
 //! spending 19.0 s in one β-step (`examples/guard_hole_probe.rs`, and the design's §10). So every ramp
-//! here runs to its own budget again, every figure this file records is re-reachable, and **the hang
-//! this probe demonstrates is open.** The `--tm` section was never affected either way — it goes through
-//! `lower_asm`, not `lower`.
+//! here runs to its own budget again, and `lower` still refuses nothing. The `--tm` section was never
+//! affected either way — it goes through `lower_asm`, not `lower`.
 //!
-//! WHAT THE `step` SECTION IS FOR, since it looks redundant next to `oom`. It shows that reduction
-//! cannot COMPOUND the ratio — it MATERIALIZES it. `beta`'s closing `shift(-1, 0, ..)` rebuilds every
-//! node it visits, so a β-step's output aliases nothing, and the within-term ratio is exactly 1.00x
+//! **~~"the hang this probe demonstrates is open"~~ — CLOSED 2026-08-01, and this probe's own `step`
+//! section is what identified the cause.** See the next paragraph, then `examples/shift_cost_probe.rs`.
+//! Every LOWERING figure here is unchanged and still re-reachable: `lower` builds the same term it
+//! always did, so PART 2's ratios, the 512-byte / 1,644-allocation / 616,152-logical row, and the
+//! `--beta-curve` sizes all still hold. What changed is what REDUCING one costs.
+//!
+//! WHAT THE `step` SECTION IS FOR, since it looks redundant next to `oom`. It showed that reduction
+//! cannot COMPOUND the ratio — it MATERIALIZES it: `beta`'s closing `shift(-1, 0, ..)` rebuilt every
+//! node it visited, so a β-step's output aliased nothing, and the within-term ratio was exactly 1.00x
 //! after ≥6 steps from starting ratios up to 114x. The compact term was never small; it was a promise
-//! to allocate, and the reducer keeps it.
+//! to allocate, and the reducer kept it.
+//!
+//! **THAT WAS THE ROOT CAUSE, RECORDED HERE AS A SYMPTOM FOR A DAY BEFORE ANYONE READ IT THAT WAY.**
+//! "a β-step's output aliases nothing" is not a fact about β-reduction; it is a fact about a `shift`
+//! that rebuilt unconditionally — Θ(logical) rather than Θ(physical), and sharing-destroying, since
+//! `shift(App(c, c))` recursed twice and built two copies of `c`. `lower_group`'s duplication only
+//! writes the promise; `shift` was what cashed it, on every step. `term.rs` now carries a `maxfree` per
+//! handle and both `shift` and `subst` return their argument's ALLOCATION when no free index is in
+//! range. **RE-RUN THIS SECTION: the 1.00x figure above is the pre-fix measurement and is not expected
+//! to reproduce.** The two-list counterexample went from 19.0 s in its first β-step to 0.002 s, and the
+//! 512-byte program that did not finish one β-step in 13 minutes ran 105,607 steps in 195.7 s.
+//!
+//! **`depth_exceeds` was then 96% of what remained** — 187.6 s of that 195.7 s — for the same reason
+//! one function over: it walked the logical expansion, once per step. `LambdaTerm` now carries `depth`
+//! beside `maxfree`, so that guard is a `u32` comparison. The same program is **7.48 s**, and the ramp
+//! is FLAT at 7.5–9.0 s across all eleven levels. **`--beta-curve`'s timings are all pre-fix**; the
+//! sizes it reports are unchanged, since `lower` builds the same term it always did.
 //!
 //! MEASURED WITHOUT MATERIALIZING ANYTHING. Sizes come from `lambda::term::logical_size`, a memoized
 //! fold over the DAG, O(one visit per allocation) — NOT a walk of the logical tree — so the ratio of a
@@ -95,8 +116,9 @@
 //! systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0 -- \
 //!   cargo run --release --example blowup_probe -p redextape-core -- --tm
 //!
-//! # the failure boundary. RUNS FOR AS LONG AS YOU LET IT and holds ~1 GB from ten levels on, where a
-//! # single β-step does not finish. Never run this without the cap. Stop it by hand.
+//! # the failure boundary. RUNS FOR AS LONG AS YOU LET IT and holds ~1 GB from ten levels on. A single
+//! # β-step used to not finish there; since 2026-08-01 it does, and the wall has moved out rather than
+//! # gone away — this section ramps until something gives. Never run this without the cap.
 //! systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0 -- \
 //!   cargo run --release --example blowup_probe -p redextape-core -- oom
 //! ```
@@ -696,17 +718,26 @@ fn part_oom() {
 /// does and does not establish; none of it is a margin against anything.
 ///
 /// WHAT THE LAST COLUMN ACTUALLY TIMES is one CURSOR step, not one β-step alone. `LambdaCursor::next`
-/// runs `depth_exceeds` over the full logical tree before every step (`trace.rs:73`) and does not
-/// short-circuit at these depths — 141 against `MAX_TERM_DEPTH` = 3,000 — so every row is the depth
-/// guard PLUS a β-step, and each row is an UPPER BOUND on its β-step rather than that step's cost.
+/// ran `depth_exceeds` over the full logical tree before every step (`trace.rs:73`) and did not
+/// short-circuit at these depths — 141 against `MAX_TERM_DEPTH` = 3,000 — so every row was the depth
+/// guard PLUS a β-step, and each row was an UPPER BOUND on its β-step rather than that step's cost.
 ///
-/// THE DEPTH GUARD'S SHARE IS ~2%, DERIVED, NOT MEASURED — this section never times the two halves
-/// separately. `depth_exceeds` is Θ(logical) and `reduce.rs` records it crossing 3.6 s at 2.52e9
-/// logical nodes, i.e. ~1.4 ns/node; at 616,152 nodes that is ~0.9 ms against a 50 ms row, and the
-/// same ~2% comes out at every other row (0.4 ms / 22 ms at 307,928; 14 ms / 847 ms at 9,862,872).
-/// A derivation from two committed figures, stated as one — the earlier "~1%" here was neither
-/// measured nor derived, and it was low by 2x. It still changes no conclusion, which is why the fix is
-/// to show the arithmetic rather than to run a second timer.
+/// **ALL OF THAT IS PRE-2026-08-01. `depth_exceeds` IS NOW O(1)** — `LambdaTerm` carries `depth` as a
+/// construction-time invariant, so the guard is a `u32` comparison and contributes nothing measurable.
+/// Each row is now the β-step alone rather than an upper bound on it. **Re-run before quoting any
+/// timing here.**
+///
+/// THE DERIVATION THIS REPLACES, kept because it is the arithmetic someone will want if they re-derive
+/// the split. The guard's share was put at ~2%, DERIVED rather than measured, from `reduce.rs`'s
+/// Θ(logical) rate of ~1.4 ns/node: at 616,152 nodes that is ~0.9 ms against a 50 ms row, and the same
+/// ~2% came out at every other row (0.4 ms / 22 ms at 307,928; 14 ms / 847 ms at 9,862,872).
+///
+/// **AND ~2% WAS WRONG BY A FACTOR OF ~48 FOR THE RUN AS A WHOLE, which is the lesson.** It is right
+/// for ONE step on the terms this section builds, and the section only ever times one step. Measured
+/// across a full reduction of the same family, `depth_exceeds` was **96%** of the time (187.6 s of
+/// 195.7 s at eleven levels) — because the guard is Θ(logical) per step while a single early step is
+/// cheap, so a per-step share says nothing about the run. That is the same error as sizing a guard from
+/// a one-step curve, recorded two paragraphs down.
 ///
 /// MEASURED 2026-07-31, under `MemoryMax=2G MemorySwapMax=0`: the 10 s budget is never reached. One
 /// cursor step is 0.022 s at 307,928 logical nodes, 0.847 s at 9,862,872, and at 19,726,040 (16
@@ -737,10 +768,10 @@ fn part_oom() {
 fn beta_curve() {
     head("PART D — one cursor step (depth guard + β-step), against logical size");
     line(&format!("  cursor cap 1 step, {BETA_BUDGET_S:.0}s budget per level; no snapshots, one term alive at a time"));
-    line("  last column is ONE CURSOR STEP = depth guard + β-step: LambdaCursor::next walks the full");
-    line("  logical tree in depth_exceeds before stepping, and does not short-circuit at these depths");
-    line("  (141 against MAX_TERM_DEPTH=3000). The guard is ~2% of each row, derived from its Θ(logical)");
-    line("  rate (~1.4 ns/node) rather than timed here; each row is an UPPER BOUND on its β-step.");
+    line("  last column is ONE CURSOR STEP. Since 2026-08-01 depth_exceeds is O(1) — LambdaTerm carries");
+    line("  `depth` as a construction-time invariant — so the row is the β-step alone. It used to walk");
+    line("  the full logical tree first, making each row an UPPER BOUND on its step; the doc comment on");
+    line("  this function has that history and the ~2%-per-step figure that went with it.");
     line("");
     line(&format!("  {:>6}  {:>8}  {:>20}  {:>12}", "levels", "source", "logical", "cursor step"));
     for levels in 1..=MAX_N {

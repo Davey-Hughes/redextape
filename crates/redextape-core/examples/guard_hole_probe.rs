@@ -1,3 +1,23 @@
+//! **ALL TIMINGS BELOW ARE PRE-2026-08-01 AND WILL NOT REPRODUCE.** The costs this probe was built to
+//! expose were removed at the root, not guarded: `term.rs`'s `shift` was Θ(logical) and
+//! sharing-destroying, and `reduce.rs`'s `depth_exceeds` walked the logical tree once per step. Both now
+//! read `u32`s the constructors maintain. The counterexample below went from **19.0 s in its first
+//! β-step to under a millisecond**, and the whole program normalises. See
+//! `examples/shift_cost_probe.rs`.
+//!
+//! **The quantities are unchanged and the falsification stands** — `max_shared` is still 4, the corpus
+//! maximum is still 684, and `max_shared` still collapses rather than grows. What this file establishes
+//! about the two reverted guards does not depend on the timings, which is why it is corrected in place
+//! rather than rewritten.
+//!
+//! **EXPECT THE `predicted node-copies` COLUMN TO LOOK ABSURD NOW, AND DO NOT "FIX" IT.** It is
+//! `Abs(body) × |arg|`, the cost model this probe established, and it still correctly predicts what the
+//! OLD `subst`/`shift` pair would copy — 773,869,551 node-copies on the n=500 two-list row. Beside it
+//! that row's first β-step now reads **0.000 s**, and the ns/predicted-copy rate collapses toward zero.
+//! That divergence is the fix, stated in the probe's own units: the model was never wrong about what
+//! was being copied, and `shift` no longer copies it. The 23.1–23.6 ns/copy figure below is the rate
+//! measured while it did.
+//!
 //! **The instrument that falsified `lambda/lower.rs`'s shared-subterm guard.** It asked the MIRROR
 //! question the guard's own record never did. That record documents one direction of error (could a
 //! legitimate program EXCEED 10,000 and be wrongly refused?). This probe asks the other — **can a
@@ -8,7 +28,7 @@
 //! **Both answers were no, and `MAX_SHARED_LOGICAL_NODES` was reverted on the strength of them.** The
 //! `source` section's counterexample is `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)` —
 //! 4,821 bytes, no recursion, no `while`, no closure — which measures `max_shared` = **4** against a
-//! bound of 10,000 and spends **19.0 s in its first β-step**; `lets` shows that cost is linear in the
+//! bound of 10,000 and **spent 19.0 s in its first β-step**; `lets` shows that cost was linear in the
 //! number of let-bound lists (2.2 / 7.1 / 17.6 / 42.0 s at k = 2/4/8/16), so it is a family rather than
 //! an artifact of one ceiling; and `curve` shows `max_shared` COLLAPSING rather than growing — sampled
 //! after every step across six programs it is non-increasing in all six, so the lowering-time reading

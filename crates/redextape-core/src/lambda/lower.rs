@@ -49,12 +49,25 @@ const MAX_LAMBDA_LOWER_DEPTH: u32 = 700;
 // body, unconditionally, before anything checks whether the variable occurs. A step costs
 // `|body| + Abs(body) × |arg|`, and NEITHER factor is a sharing property: `let xs = [0..500); let ys =
 // [0..500); head(xs) + head(ys)` is 4,821 bytes with no recursion, measures `max_shared` = **4** against
-// the bound of 10,000, and its FIRST β-step takes 19.0 s. The guard was 2,500x off on a program anyone
+// the bound of 10,000, and its FIRST β-step took 19.0 s. The guard was 2,500x off on a program anyone
 // could write by accident. The measurement stays (`term::max_shared_logical_size` is sound and the two
-// tests below pin it); the refusal does not. **The hang is open.** Full record:
-// `docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §10, instrument
-// `examples/guard_hole_probe.rs`. The successor design is a per-redex work budget checked inside
-// `LambdaCursor::next` — see the roadmap.
+// tests below pin it); the refusal does not.
+//
+// **~~The hang is open.~~ CLOSED 2026-08-01, AND NOTHING WAS ADDED HERE.** The account above stops one
+// level short of the cause, and the missing level is why no guard was needed: it does not say why
+// `|arg|` was the LOGICAL size rather than the physical one. `term.rs`'s `shift` rebuilt every node it
+// visited — Θ(logical), and sharing-destroying, since `shift(App(c, c))` recursed twice. `lower_group`'s
+// per-member clone (below) only writes the promise; `shift` cashed it on every step. Both `shift` and
+// `subst` now return their argument's allocation when no free index is in range, and `reduce.rs`'s
+// `depth_exceeds` reads a stored `depth` instead of walking. That 19.0 s step is now under a
+// millisecond, and `lower` still refuses nothing on these grounds — **deliberately, and this is the
+// third design on this hazard not to land here.** The successor named below, a per-redex work budget in
+// `LambdaCursor::next`, was never built: not falsified, made unnecessary.
+//
+// Full record: the λ section of `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`; the
+// falsifications in `docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §10
+// (whose quantities stand and whose timings do not); instruments `examples/shift_cost_probe.rs` for the
+// fix and `examples/guard_hole_probe.rs` for the guard's verdict per row.
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LowerError {

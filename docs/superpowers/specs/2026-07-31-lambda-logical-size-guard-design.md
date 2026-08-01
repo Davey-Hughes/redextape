@@ -1,5 +1,21 @@
 # λ logical-size guard — design
 
+> **HANG CLOSED 2026-08-01 — READ THIS FIRST.** Everywhere below that says the hang is open, that a
+> β-step does not finish, or that the next step is a guard, is **superseded**. The hang was closed by
+> fixing the root cause rather than by refusing anything: `term.rs`'s `shift` was Θ(logical) and
+> destroyed sharing on every β-step, and `reduce.rs`'s `depth_exceeds` walked the logical tree once per
+> step. Both now read `u32`s the constructors maintain. The 512-byte program that did not finish one
+> β-step in 13 minutes reduces in **7.48 s**; the two-list counterexample went from **19.0 s in its
+> first β-step to under a millisecond**.
+>
+> **The falsifications in this document stand and are why it is kept.** The quantities are unchanged —
+> `max_shared` is still 4 on the counterexample, the corpus maximum is still 684 — so the reasoning
+> about *why these guards fail* is unaffected. What is stale is every wall-clock figure and every
+> forward-looking "next slice". The **per-redex work budget** named as the successor was never built:
+> not falsified, made unnecessary. See the λ section of
+> [`../plans/2026-07-19-redextape-roadmap.md`](../plans/2026-07-19-redextape-roadmap.md) and
+> `crates/redextape-core/examples/shift_cost_probe.rs`.
+
 **SUPERSEDED — do not build what this document specifies.** Its successor is
 [`2026-07-31-lambda-shared-subterm-guard-design.md`](2026-07-31-lambda-shared-subterm-guard-design.md),
 which landed 2026-07-31 and bounded the largest *shared* subterm instead of the term's total size,
@@ -31,7 +47,8 @@ placement, §5's error, §6's guard tests, and §4's capability claim — correc
 
 ## 1. Why this slice exists
 
-**512 bytes of ordinary surface syntax reach a β-step that does not finish.** Eleven nested two-member
+**512 bytes of ordinary surface syntax reach a β-step that does not finish.** *(As of 2026-08-01 it
+finishes — the whole program reduces in 7.48 s. See the banner above.)* Eleven nested two-member
 mutually recursive `fn` groups lower in 196 µs to 1,644 allocations holding 616,152 logical nodes;
 reducing that term reaches a β-step that ran 13 minutes at 974 MB without completing.
 
@@ -183,8 +200,10 @@ than what its sentence named, and that pattern is what §10 is about.
 **What one cursor step costs.** The column above. It times `LambdaCursor::next`, which runs
 `depth_exceeds` over the full logical tree *before* every β-step (`trace.rs:73`) and does not
 short-circuit at these depths — 141 against `MAX_TERM_DEPTH` = 3,000 — so each row is the depth guard
-plus a β-step, and is an **upper bound** on that β-step rather than its cost. The guard's share is
-**~2%, derived rather than measured**: `depth_exceeds` is Θ(logical) and `reduce.rs` records it
+plus a β-step, and is an **upper bound** on that β-step rather than its cost. *(Both facts are
+pre-2026-08-01: `depth_exceeds` is now O(1), so a row is the β-step alone.)* The guard's share is
+**~2%, derived rather than measured — and ~48x low for a whole run, since it was later measured at 96%
+of one; a per-step share says nothing about the run**: `depth_exceeds` is Θ(logical) and `reduce.rs` records it
 crossing 3.6 s at 2.52e9 logical nodes, so ~1.4 ns/node, so ~0.9 ms at 616,152 against a 50 ms row —
 and the same ~2% falls out at every other row (0.4 ms / 22 ms at 307,928, 14 ms / 847 ms at 9,862,872).
 This used to read "~1%", which was neither measured nor derived and was low by 2x. It still changes no
@@ -599,17 +618,21 @@ would have admitted `deep_list(699)` untouched while still refusing the 512-byte
 
 **It is a new slice with its own design**, and the numbers above are its inputs, not its conclusions.
 
-### ~~The hang is still open~~ ~~— CLOSED 2026-07-31~~ — THE HANG IS OPEN (2026-08-01)
+### ~~The hang is still open~~ ~~— CLOSED 2026-07-31~~ ~~— THE HANG IS OPEN (2026-08-01)~~ — CLOSED 2026-08-01, AT THE ROOT
 
 "512 bytes of ordinary surface syntax still lower to 616,152 logical nodes and still reach a β-step that
-does not finish. **Nothing in the tree refuses it.**" — struck through on 2026-07-31 and **restored on
-2026-08-01**, which is why the original sentence is unstruck again rather than rewritten. Successor
+does not finish. **Nothing in the tree refuses it.**" — struck through on 2026-07-31, **restored on
+2026-08-01** when the guard was reverted, and **struck for good later the same day**. Nothing in the
+tree refuses it and nothing needs to: `shift` and `depth_exceeds` were fixed, the 616,152 logical nodes
+are unchanged, and the program reduces in **7.48 s**. The heading's four states are left visible because
+the oscillation is the point — three of them were written by someone certain. Successor
 design: [`2026-07-31-lambda-shared-subterm-guard-design.md`](2026-07-31-lambda-shared-subterm-guard-design.md),
 whose §10 is the falsification. `lower` and `lower_mapped` refused a term whose largest SHARED subterm
 exceeded **`MAX_SHARED_LOGICAL_NODES = 10_000`** with `LowerError::TooShared` (`1652e09`) for one day;
 the constant and the variant were then removed. What stays is the measurement,
 `lambda::term::max_shared_logical_size` (`b832c89`), which is sound and is what the investigation ran.
-**The nesting family lowers at every level again, and the 512-byte program hangs.**
+**The nesting family lowers at every level again, and the 512-byte program hangs.** *(That last clause
+held for part of one day. Since 2026-08-01 it reduces in 7.48 s — see the banner at the top.)*
 
 **§1's argument for guarding at lowering time was taken by the successor and is now the thing that
 failed.** The successor guarded in exactly that place, at the tail of `lower_mapped`, and the quantity it

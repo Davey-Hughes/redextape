@@ -1,5 +1,21 @@
 # λ logical-size guard — Implementation Plan
 
+> **HANG CLOSED 2026-08-01 — READ THIS FIRST.** Everywhere below that says the hang is open, that a
+> β-step does not finish, or that the next step is a guard, is **superseded**. The hang was closed by
+> fixing the root cause rather than by refusing anything: `term.rs`'s `shift` was Θ(logical) and
+> destroyed sharing on every β-step, and `reduce.rs`'s `depth_exceeds` walked the logical tree once per
+> step. Both now read `u32`s the constructors maintain. The 512-byte program that did not finish one
+> β-step in 13 minutes reduces in **7.48 s**; the two-list counterexample went from **19.0 s in its
+> first β-step to under a millisecond**.
+>
+> **The falsifications in this document stand and are why it is kept.** The quantities are unchanged —
+> `max_shared` is still 4 on the counterexample, the corpus maximum is still 684 — so the reasoning
+> about *why these guards fail* is unaffected. What is stale is every wall-clock figure and every
+> forward-looking "next slice". The **per-redex work budget** named as the successor was never built:
+> not falsified, made unnecessary. See the λ section of
+> [`2026-07-19-redextape-roadmap.md`](2026-07-19-redextape-roadmap.md) and
+> `crates/redextape-core/examples/shift_cost_probe.rs`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 ## Status: Tasks 1 and 2 landed. Task 3 was ABANDONED. The goal below was not reached.
@@ -657,7 +673,8 @@ sentence is true of no constant.
 [`2026-07-31-lambda-shared-subterm-guard.md`](2026-07-31-lambda-shared-subterm-guard.md) shipped
 `MAX_SHARED_LOGICAL_NODES = 10_000` on the largest SHARED subterm plus `LowerError::TooShared`
 (`1652e09`); measurement then falsified it — a two-list program with no recursion scores 4 against that
-bound and takes 19.0 s in one β-step — and it was removed. **The 512-byte program hangs.** This plan's
+bound and took 19.0 s in one β-step — and it was removed. ~~**The 512-byte program hangs.**~~ — **it
+reduces in 7.48 s since 2026-08-01; see the banner at the top of this file.** This plan's
 `MAX_LOGICAL_NODES` still does not exist and must not be re-applied, and neither must the successor's
 constant. The measurement above is what it was worth: Task 1's
 `logical_size` is a dependency of the successor's `max_shared_logical_size`, and Task 2's curve is what

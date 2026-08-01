@@ -22,10 +22,15 @@ before that slice was planned.** The design's §10 also sized a hazard this plan
 rather than created: 512 bytes of ordinary source lower to a term whose reduction reaches a β-step that
 does not return, and the roadmap re-routed the next λ slice at that instead (its
 *"THE NEXT λ SLICE IS NOT the `subst` fix"* entry). Two guards were built against it and both were
-falsified by measurement; **the hang is open** and the next slice is a per-redex work budget. The
-`subst` fix is unaffected and still worth taking — it is a constant-factor win on programs that
-terminate, and this is a class that does not — but it is not next. Read the roadmap for the ordering,
-not this line.
+falsified by measurement; ~~**the hang is open** and the next slice is a per-redex work budget~~ —
+**CLOSED 2026-08-01, and that budget was never built.** The cause was one level below where this line
+looked: `term.rs`'s `shift` was Θ(logical) and destroyed sharing on every β-step, and `reduce.rs`'s
+`depth_exceeds` walked the logical tree once per step. Both now read `u32`s the constructors maintain,
+and the 512-byte program reduces in 7.48 s.
+
+The `subst` fix this plan pointed at is **still unaffected and still worth taking** — a constant-factor
+win on programs that terminate — and it is now genuinely next rather than displaced. Read the roadmap
+for the ordering, not this line.
 
 ## Global Constraints
 

@@ -176,28 +176,42 @@ fn two_list_src(n: usize) -> String {
 /// That design refused any term whose largest shared subterm exceeded 10,000 logical nodes, calibrated
 /// against a corpus whose maximum is 684. This program is **4,821 bytes with no recursion, no `while`,
 /// no closure and no mutual-recursion group** — nothing that design identifies as a source of sharing
-/// at all. It scores **`max_shared` = 4**, it lowers, and **its first β-step takes 19.0 seconds**.
+/// at all. It scores **`max_shared` = 4**, it lowers, and **its first β-step took 19.0 seconds**.
 /// 2,500x under a bound meant to catch exactly this cost. The gap is not near any threshold: no
 /// constant admits the corpus's 684 and refuses this 4.
 ///
-/// **THE 19 SECONDS ARE PROSE HERE, DELIBERATELY.** They are the falsifying fact and they are not
-/// asserted, because they are neither deterministic nor cheap — a timing assertion would be a flaky
-/// gate, and one β-step is far too expensive for the fast tier. Re-derive with
-/// `cargo run --release --example guard_hole_probe source`, which also reports the control below and
-/// prints the withdrawn guard's verdict per row. What IS asserted is the number the guard would have
-/// read, which is deterministic, and which is 4.
+/// **THE 19 SECONDS ARE PROSE HERE, DELIBERATELY, AND THAT DECISION IS WHY THIS TEST STILL PASSES.**
+/// They were the falsifying fact and they were not asserted, because they are neither deterministic nor
+/// cheap — a timing assertion would be a flaky gate. Since 2026-08-01 that step is **under a
+/// millisecond** and the whole program normalises in well under one: `term.rs`'s `shift` was Θ(logical)
+/// and sharing-destroying, and fixing it removed the cost this guard was supposed to refuse. **A timing
+/// assertion here would now be failing for a good reason, which is the worst kind of red gate.**
+///
+/// What IS asserted is the number the guard would have read, which is deterministic, still 4, and
+/// **still falsifies the design** — the guard is blind to this program in kind, not in degree, and that
+/// was never a claim about how long it took. Re-derive the current timings with
+/// `cargo run --release --example shift_cost_probe`; `examples/guard_hole_probe.rs` remains the
+/// instrument for the guard's verdict per row, with its own timings marked as pre-fix.
 ///
 /// **The single-list control is why this is decisive.** `let xs = [0, …, 499]; head(xs)` — same
-/// element count, same lowering path, one binding instead of two — takes **0.043 s** and scores 0.
+/// element count, same lowering path, one binding instead of two — took **0.043 s** and scores 0.
 /// 442x apart in cost, and the guard's quantity is 4 against 0. It is a family, not a ceiling
-/// artifact: ramping the number of let-bound lists at fixed element count costs 2.2 / 7.1 / 17.6 /
-/// 42.0 s at k = 2 / 4 / 8 / 16, linear in k, with `max_shared` pinned at 4 throughout.
+/// artifact: ramping the number of let-bound lists at fixed element count cost 2.2 / 7.1 / 17.6 /
+/// 42.0 s at k = 2 / 4 / 8 / 16, linear in k, with `max_shared` pinned at 4 throughout. **All five
+/// timings are pre-2026-08-01; the `max_shared` values are not, and they are what the argument rests
+/// on.**
 ///
-/// **Why sharing was the wrong quantity.** A β-step costs `|body| + Abs(body) x |arg|`: `subst`'s
-/// `Var` arm is an `Rc` bump and is free, while its `Abs` arm takes `shift(1, 0, s)` — a full logical
-/// copy of the argument — once per `Abs` node in the body, unconditionally, before anything checks
+/// **Why sharing was the wrong quantity.** A β-step cost `|body| + Abs(body) x |arg|`: `subst`'s
+/// `Var` arm is an `Rc` bump and is free, while its `Abs` arm took `shift(1, 0, s)` — a full logical
+/// copy of the argument — once per `Abs` node in the body, unconditionally, before anything checked
 /// whether the variable occurs there. Neither factor is a sharing property; both are large in a term
-/// that aliases nothing. This program lowers to `(\xs. (\ys. BODY) YS) XS`, whose leftmost-outermost
+/// that aliases nothing.
+///
+/// **That account was one level too shallow, and the missing level is what closed the hang.** It does
+/// not say why `|arg|` was the LOGICAL size rather than the physical one. `shift` rebuilt every node it
+/// visited — Θ(logical), and sharing-destroying, since `shift(App(c, c))` recursed twice. Both `shift`
+/// and `subst` now return their argument's allocation when no free index is in range, so the `Abs` arm
+/// no longer builds that copy and the whole cost model collapses on these programs. This program lowers to `(\xs. (\ys. BODY) YS) XS`, whose leftmost-outermost
 /// redex is the root, so the first step re-shifts the whole of `XS` once per `Abs` in `(\ys. BODY) YS`
 /// — and `YS` supplies ~6 of those per element.
 ///

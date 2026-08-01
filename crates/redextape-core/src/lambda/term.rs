@@ -13,8 +13,28 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 /// A lambda-term. One `Rc` per node; `.node()` reaches the variant.
+///
+/// Two `u32`s ride alongside the pointer, both maintained as CONSTRUCTION-TIME INVARIANTS by `var` /
+/// `abs` / `app` in O(1) and never recomputed by a walk:
+///
+///   * `maxfree` — the highest free de Bruijn index in this term, plus one, so **0 means closed**.
+///   * `depth` — the length of the longest path to a leaf, i.e. the depth of the tree this term
+///     DENOTES.
+///
+/// **THE SECOND IS NOT DERIVABLE CHEAPLY ANY OTHER WAY, which is the whole reason it is stored.** Under
+/// structural sharing a term's denoted depth is a property of the DAG's longest path, and the obvious
+/// implementation — walk the term, track the running depth — visits each allocation once per EDGE
+/// reaching it, so 10,001 allocations denoting 2^10001 nodes take exponential time to measure. That is
+/// what `reduce.rs`'s `depth_exceeds` used to do, once per β-step; it was **96% of the reduction time**
+/// on the nested-group family at eleven levels (187.6 s of 195.7 s) and it doubled per level. Memoizing
+/// the walk by allocation fixes the growth but costs a `HashMap` per call, which is a net LOSS on the
+/// small terms the ordinary corpus reduces. Carrying the number is O(1) at both ends.
+///
+/// They ride on the HANDLE rather than inside the `Node`, which keeps `Drop`, `PartialEq` and every
+/// existing walker untouched: the `Rc` is still an `Rc<Node>`. Two handles to the same allocation always
+/// carry the same numbers, since both are functions of the node.
 #[derive(Clone, Debug)]
-pub struct LambdaTerm(Rc<Node>);
+pub struct LambdaTerm(Rc<Node>, u32, u32);
 
 /// The shape of a term. `pub` because five modules in `src/` match on it; a private inner enum would
 /// need a parallel view type for no gain.
@@ -57,6 +77,27 @@ impl LambdaTerm {
     /// which is the in-tree consumer that depends on it.
     pub fn alloc_id(&self) -> usize {
         Rc::as_ptr(&self.0) as usize
+    }
+
+    /// The highest free de Bruijn index in this term, **plus one** — so `0` means the term is closed.
+    /// Maintained in O(1) by the three constructors, never recomputed by a walk.
+    ///
+    /// The off-by-one encoding is what makes both short-circuits a single comparison rather than an
+    /// `Option` match: `shift(d, cutoff, t)` is the identity exactly when `maxfree(t) <= cutoff`, and
+    /// `subst(j, s, t)` is the identity exactly when `maxfree(t) <= j`. A plain "highest index" would
+    /// need a separate "has no free variable" case for both.
+    pub fn maxfree(&self) -> u32 {
+        self.1
+    }
+
+    /// The depth of the tree this term DENOTES — the longest path from here to a leaf. O(1): the
+    /// constructors carry it up, so this reads a field rather than walking anything.
+    ///
+    /// Saturating at `u32::MAX`, which is a FLOOR rather than a value: exact below the ceiling, and
+    /// "at least that much" at it. A wrapping version would report a tiny depth for an enormous term
+    /// and the guard reading it would admit exactly what it exists to refuse.
+    pub fn depth(&self) -> u32 {
+        self.2
     }
 }
 
@@ -189,15 +230,25 @@ pub enum Dir {
 pub type Path = Vec<Dir>;
 
 pub fn var(i: u32) -> LambdaTerm {
-    LambdaTerm(Rc::new(Node::Var(i)))
+    // `saturating_add` rather than `+ 1`: a `Var(u32::MAX)` is unreachable from lowering, and
+    // saturating there fails toward "has a free variable", which is the side that does more work
+    // rather than less. An overflow panic in a constructor would be the wrong trade.
+    LambdaTerm(Rc::new(Node::Var(i)), i.saturating_add(1), 0)
 }
 
 pub fn abs(name: impl Into<Rc<str>>, body: LambdaTerm) -> LambdaTerm {
-    LambdaTerm(Rc::new(Node::Abs(name.into(), body)))
+    // The binder consumes index 0, so every free index in the body is one lower out here. Saturating
+    // is exact rather than defensive: a closed body is `0` and stays `0`.
+    let maxfree = body.maxfree().saturating_sub(1);
+    let depth = body.depth().saturating_add(1);
+    LambdaTerm(Rc::new(Node::Abs(name.into(), body)), maxfree, depth)
 }
 
 pub fn app(f: LambdaTerm, a: LambdaTerm) -> LambdaTerm {
-    LambdaTerm(Rc::new(Node::App(f, a)))
+    let maxfree = f.maxfree().max(a.maxfree());
+    // The DEEPER child, not the sum: depth is the longest path, not a size.
+    let depth = f.depth().max(a.depth()).saturating_add(1);
+    LambdaTerm(Rc::new(Node::App(f, a)), maxfree, depth)
 }
 
 /// Shift the free variables of `t` (those with index >= `cutoff`) by `d`.
@@ -219,15 +270,28 @@ pub fn app(f: LambdaTerm, a: LambdaTerm) -> LambdaTerm {
 /// guarded version's range around the unguarded one (0.2078–0.2191s vs 0.2123–0.2151s for 2,000 shifts
 /// over a 400-deep term), i.e. below run-to-run noise.
 pub fn shift(d: i64, cutoff: u32, t: &LambdaTerm) -> LambdaTerm {
+    // Every free index in `t` is below `cutoff`, so no index is in range and this call is the
+    // identity. Returning the handle preserves the ALLOCATION, which is the half that matters: the
+    // rebuilt copy was always structurally equal, so `==` never noticed, and the cost stayed invisible
+    // while sharing was silently destroyed on every β-step. See
+    // `a_beta_step_is_bounded_by_allocations_not_by_logical_nodes`.
+    if t.maxfree() <= cutoff {
+        return t.clone();
+    }
     match t.node() {
+        // NO `else` ARM, AND THE SHORT-CIRCUIT ABOVE IS WHY. `maxfree(Var(k))` is `k + 1`, so this line
+        // is reached only when `k + 1 > cutoff` — that is, `k >= cutoff` unconditionally. The
+        // `else { var(*k) }` this used to carry became dead the moment the short-circuit landed, and
+        // coverage confirmed it: a branch that cannot run is worse than no branch, because it reads as
+        // a case someone considered.
         Node::Var(k) => {
-            if *k >= cutoff {
-                let shifted = i64::from(*k) + d;
-                assert!(shifted >= 0, "shift({d}, {cutoff}) produced a negative de Bruijn index from Var({k})");
-                var(shifted as u32)
-            } else {
-                var(*k)
-            }
+            debug_assert!(
+                *k >= cutoff,
+                "the maxfree short-circuit should have returned for Var({k}) at cutoff {cutoff}"
+            );
+            let shifted = i64::from(*k) + d;
+            assert!(shifted >= 0, "shift({d}, {cutoff}) produced a negative de Bruijn index from Var({k})");
+            var(shifted as u32)
         }
         Node::Abs(n, b) => abs(Rc::clone(n), shift(d, cutoff + 1, b)),
         Node::App(f, a) => app(shift(d, cutoff, f), shift(d, cutoff, a)),
@@ -236,6 +300,20 @@ pub fn shift(d: i64, cutoff: u32, t: &LambdaTerm) -> LambdaTerm {
 
 /// Substitute `s` for the variable with index `j` in `t`.
 pub fn subst(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> LambdaTerm {
+    // Index `j` cannot occur free in `t`, so there is nothing to replace.
+    //
+    // THIS CHECK IS ALSO WHAT STOPS THE `Abs` ARM SHIFTING FOR NOTHING, and that ordering is the
+    // whole point rather than a side effect. That arm's `&shift(1, 0, s)` is an argument expression,
+    // so Rust evaluates it BEFORE the recursive call that would discover the variable is absent —
+    // which is exactly the "copies the whole argument once per `Abs` node in the body,
+    // unconditionally" cost. Checking here, at the top, happens before that argument is built.
+    //
+    // For `t = Abs(_, b)` the condition is the same one the recursive call would apply: `maxfree(t)`
+    // is `maxfree(b) - 1`, so `maxfree(t) <= j` iff `maxfree(b) <= j + 1`. Nothing is checked twice
+    // and nothing is missed.
+    if t.maxfree() <= j {
+        return t.clone();
+    }
     match t.node() {
         Node::Var(k) => {
             if *k == j {
@@ -243,7 +321,10 @@ pub fn subst(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> LambdaTerm {
                 // once per occurrence. That single line is a large share of the win.
                 s.clone()
             } else {
-                var(*k)
+                // `k > j` here — `k < j` short-circuits above — so this variable is untouched and the
+                // term is its own answer. `t.clone()` rather than `var(*k)`: the rebuilt node was
+                // structurally identical, so this changes nothing except that it stops allocating.
+                t.clone()
             }
         }
         Node::Abs(n, b) => abs(Rc::clone(n), subst(j + 1, &shift(1, 0, s), b)),
@@ -625,5 +706,131 @@ mod tests {
         // Every level shares its child with itself, so the largest shared subterm is the one directly
         // below the root — saturating, exactly as `logical_size` does.
         assert_eq!(max_shared_logical_size(&c), u64::MAX);
+    }
+
+    /// Distinct allocations reachable from `t`. Local to the tests: `examples/blowup_probe.rs` has the
+    /// same walk, but an `examples/` target and a unit test cannot share a private helper.
+    fn physical(t: &LambdaTerm) -> usize {
+        let mut seen: HashSet<usize> = HashSet::new();
+        let mut stack: Vec<&LambdaTerm> = vec![t];
+        while let Some(n) = stack.pop() {
+            if !seen.insert(n.alloc_id()) {
+                continue;
+            }
+            match n.node() {
+                Node::Var(_) => {}
+                Node::Abs(_, b) => stack.push(b),
+                Node::App(f, a) => {
+                    stack.push(f);
+                    stack.push(a);
+                }
+            }
+        }
+        seen.len()
+    }
+
+    /// `shift` is the IDENTITY on a term with no free index at or above the cutoff, so it must return
+    /// that term's allocation rather than a copy of it.
+    ///
+    /// Stated on `alloc_id` rather than on `==`, because `==` passed the whole time: the rebuilt copy
+    /// is structurally equal to what it replaced, which is exactly why this cost stayed invisible. A
+    /// closed term is the common case in compiled output — every encoded value, every lowered
+    /// function — and `beta` shifts its argument on every single β-step.
+    #[test]
+    fn shift_of_a_closed_term_returns_the_same_allocation() {
+        let closed = abs("x", abs("y", app(var(1), var(0))));
+        assert_eq!(shift(1, 0, &closed).alloc_id(), closed.alloc_id());
+        // Also at a cutoff above the free indices, which is the general form of the same fact.
+        let free_at_2 = abs("x", var(3)); // one free index, 2 once the binder is accounted for
+        assert_eq!(shift(1, 3, &free_at_2).alloc_id(), free_at_2.alloc_id());
+    }
+
+    /// The neighbouring case must still move: a free index AT the cutoff is shifted, so the result is
+    /// a different term and necessarily a different allocation. Without this, "return `t` always"
+    /// passes the test above.
+    #[test]
+    fn shift_still_moves_a_free_index_at_the_cutoff() {
+        assert_eq!(shift(1, 0, &var(0)), var(1));
+        // Under the binder the cutoff is 2, so `Var(2)` is free and moves; `Var(1)` would not.
+        assert_eq!(shift(2, 1, &abs("x", var(2))), abs("x", var(4)));
+    }
+
+    /// `subst` has nothing to do when the index it replaces cannot occur, and must say so by returning
+    /// the same allocation. `maxfree(t) <= j` is the test: every free index in `t` is below `j`.
+    #[test]
+    fn subst_of_an_absent_index_returns_the_same_allocation() {
+        let target = abs("x", app(var(0), var(1))); // free index 0 outside the binder
+        let s = abs("s", var(0));
+        // Index 1 does not occur free in `target`, so this is a no-op.
+        assert_eq!(subst(1, &s, &target).alloc_id(), target.alloc_id());
+    }
+
+    /// The neighbouring case: an index that DOES occur is replaced.
+    #[test]
+    fn subst_still_replaces_an_index_that_occurs() {
+        let s = abs("s", var(0));
+        assert_eq!(subst(0, &s, &var(0)), s);
+        assert_eq!(subst(0, &s, &app(var(0), var(1))), app(s.clone(), var(1)));
+    }
+
+    /// `depth` must be O(1) to read and O(PHYSICAL) to establish — a term denoting 2^10001 nodes is
+    /// 10,001 allocations, and anything that walks the denoted tree to find its depth never returns.
+    ///
+    /// Written as a construction-time invariant rather than a walk, exactly like `maxfree`: `var` is 0,
+    /// `abs` is one more than its body, `app` is one more than its deeper child. The 10,000-level term
+    /// below is built in a loop, so the assertion is on the value the constructors carried up, not on
+    /// anything this test recomputes. Same shape as
+    /// `max_shared_is_bounded_by_allocations_not_by_logical_nodes`, and for the same reason.
+    #[test]
+    fn depth_is_bounded_by_allocations_not_by_logical_nodes() {
+        assert_eq!(var(0).depth(), 0);
+        assert_eq!(abs("x", var(0)).depth(), 1);
+        // `app` takes the DEEPER child, not the sum: depth is the longest path, not a size.
+        assert_eq!(app(var(0), abs("x", abs("y", var(0)))).depth(), 3);
+
+        let mut c = var(0);
+        for _ in 0..10_000 {
+            c = app(c.clone(), c);
+        }
+        assert_eq!(c.depth(), 10_000, "one level per `app`, however much each level is shared");
+    }
+
+    /// Saturating rather than wrapping, for the same reason `logical_size` saturates: a depth past
+    /// `u32::MAX` is a floor, and a guard that WRAPS reads a tiny number for an enormous term and
+    /// admits it. Unreachable in practice — 4 billion nested binders cannot be allocated — so this
+    /// pins the arithmetic directly rather than by building one.
+    #[test]
+    fn depth_saturates_instead_of_wrapping() {
+        let deep = var(0);
+        // Reach into the invariant the only way a test can: build up from a handle claiming to be at
+        // the ceiling. `abs` must not roll this over to 0.
+        let at_ceiling = LambdaTerm(Rc::clone(&deep.0), deep.maxfree(), u32::MAX);
+        assert_eq!(abs("x", at_ceiling).depth(), u32::MAX);
+    }
+
+    /// THE ONE THE HANG TURNS ON. A β-step must cost the DAG, not the tree it denotes.
+    ///
+    /// `beta` is `shift(-1, 0, subst(0, shift(1, 0, arg), body))`, and all three of those rebuilt every
+    /// node they visited — so handing it a closed argument of 19 allocations denoting 262,144 nodes
+    /// materialised all 262,144. That is the mechanism behind the open hang: `lower_group` writes a
+    /// term whose logical size runs 375x ahead of its physical size, and the reducer cashes the promise
+    /// on the first step that touches it. `examples/blowup_probe.rs` recorded the symptom — "a β-step's
+    /// output aliases nothing, and the within-term ratio is exactly 1.00x after ≥6 steps" — without
+    /// naming this as the cause.
+    #[test]
+    fn a_beta_step_is_bounded_by_allocations_not_by_logical_nodes() {
+        // Closed: 20 allocations denoting 786,431 nodes — a ratio of 39,321x.
+        let mut arg = abs("x", var(0));
+        for _ in 0..18 {
+            arg = app(arg.clone(), arg);
+        }
+        assert_eq!(physical(&arg), 20);
+        assert_eq!(logical_size(&arg), 786_431);
+
+        // (\f. f) arg — the body is one `Var(0)`, so the step is a substitution and nothing else.
+        let out = beta(&var(0), &arg);
+        assert_eq!(out, arg, "the answer must not change");
+        assert_eq!(out.alloc_id(), arg.alloc_id(), "and it must BE the argument, not a copy of it");
+        assert_eq!(physical(&out), 20, "a β-step must not materialise the logical expansion");
     }
 }

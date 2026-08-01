@@ -1,12 +1,28 @@
 # λ shared-subterm guard — design
 
+> **HANG CLOSED 2026-08-01 — READ THIS FIRST.** Everywhere below that says the hang is open, that a
+> β-step does not finish, or that the next step is a guard, is **superseded**. The hang was closed by
+> fixing the root cause rather than by refusing anything: `term.rs`'s `shift` was Θ(logical) and
+> destroyed sharing on every β-step, and `reduce.rs`'s `depth_exceeds` walked the logical tree once per
+> step. Both now read `u32`s the constructors maintain. The 512-byte program that did not finish one
+> β-step in 13 minutes reduces in **7.48 s**; the two-list counterexample went from **19.0 s in its
+> first β-step to under a millisecond**.
+>
+> **The falsifications in this document stand and are why it is kept.** The quantities are unchanged —
+> `max_shared` is still 4 on the counterexample, the corpus maximum is still 684 — so the reasoning
+> about *why these guards fail* is unaffected. What is stale is every wall-clock figure and every
+> forward-looking "next slice". The **per-redex work budget** named as the successor was never built:
+> not falsified, made unnecessary. See the λ section of
+> [`../plans/2026-07-19-redextape-roadmap.md`](../plans/2026-07-19-redextape-roadmap.md) and
+> `crates/redextape-core/examples/shift_cost_probe.rs`.
+
 **Status: IMPLEMENTED, THEN REVERTED.** Designed 2026-07-31, landed 2026-07-31
 (`MAX_SHARED_LOGICAL_NODES` plus `LowerError::TooShared` at the tail of `lower_mapped`, `1652e09`), and
 **reverted 2026-08-01 after measurement falsified it — see §10, which is the part of this document to
 read first.** A trivially-written two-list program defeats the bound by 2,500x; the mechanism §1 and §2
 name is not what `subst` does; and the quantity the guard reads collapses to zero within two β-steps of
-the moment it is read. **This is the third design on this hazard to be falsified by measurement, and the
-hang is open.**
+the moment it is read. **This is the third design on this hazard to be falsified by measurement.** ~~"and the hang is
+open"~~ — closed 2026-08-01 at the root; see the banner at the top of this file.
 
 **What survives, and it is most of the slice.** `lambda::term::max_shared_logical_size` (`b832c89`) is a
 sound O(physical) measurement and **stays in the tree with its tests** — the investigation that killed
@@ -31,7 +47,9 @@ in §10 and routed from the roadmap.
 
 ## 1. Why this design exists, and what killed the previous one
 
-The hazard is unchanged: **512 bytes of ordinary surface syntax reach a β-step that does not finish.**
+The hazard as it stood: **512 bytes of ordinary surface syntax reach a β-step that does not finish.**
+**No longer true since 2026-08-01** — that program now reduces in 7.48 s. Kept in the present tense of
+its own moment, because the rest of this section reasons from it.
 `lower_group` clones the whole recursive-group tuple once per member (`lambda/lower.rs:453`), which is
 linear in the member count and becomes exponential once groups nest, because a member's body is a block
 that may declare its own group.

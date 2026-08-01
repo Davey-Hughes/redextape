@@ -1,5 +1,21 @@
 # λ-term structural sharing — design
 
+> **HANG CLOSED 2026-08-01 — READ THIS FIRST.** Everywhere below that says the hang is open, that a
+> β-step does not finish, or that the next step is a guard, is **superseded**. The hang was closed by
+> fixing the root cause rather than by refusing anything: `term.rs`'s `shift` was Θ(logical) and
+> destroyed sharing on every β-step, and `reduce.rs`'s `depth_exceeds` walked the logical tree once per
+> step. Both now read `u32`s the constructors maintain. The 512-byte program that did not finish one
+> β-step in 13 minutes reduces in **7.48 s**; the two-list counterexample went from **19.0 s in its
+> first β-step to under a millisecond**.
+>
+> **The falsifications in this document stand and are why it is kept.** The quantities are unchanged —
+> `max_shared` is still 4 on the counterexample, the corpus maximum is still 684 — so the reasoning
+> about *why these guards fail* is unaffected. What is stale is every wall-clock figure and every
+> forward-looking "next slice". The **per-redex work budget** named as the successor was never built:
+> not falsified, made unnecessary. See the λ section of
+> [`../plans/2026-07-19-redextape-roadmap.md`](../plans/2026-07-19-redextape-roadmap.md) and
+> `crates/redextape-core/examples/shift_cost_probe.rs`.
+
 **Status:** designed 2026-07-30; **layers 0, 1 and 1.5 landed 2026-07-31** and their numbers are recorded
 in §2, §3 and §10 (which §3 corrects in one place — the across-trace ratio). **Layers 2 and 3 are
 deliberately not planned**, on layer 1.5's evidence: §10 records that 86.8% of the nodes the reducer
@@ -13,12 +29,14 @@ scope table). Supersedes that entry's framing of the problem size; see §2.
 
 **§10 is also where a second, unrelated hazard was sized, and it is the head of a sequence this
 document does not otherwise name.** A term's logical size can now outrun its physical size, and 512
-bytes of ordinary source reaches a β-step that does not return. §10 prices four options for it. Option
+bytes of ordinary source reaches a β-step that does not return *(closed 2026-08-01 — see the banner at
+the top of this file)*. §10 prices four options for it. Option
 (a) was taken twice, in two shapes, and **both were built and both were falsified by measurement** —
 [`2026-07-31-lambda-logical-size-guard-design.md`](2026-07-31-lambda-logical-size-guard-design.md)
 (total size, withdrawn before commit) and
 [`2026-07-31-lambda-shared-subterm-guard-design.md`](2026-07-31-lambda-shared-subterm-guard-design.md)
-(largest shared subterm, landed `1652e09` and reverted 2026-08-01). **The hang is open**, the next
+(largest shared subterm, landed `1652e09` and reverted 2026-08-01). ~~**The hang is open**~~ — closed
+2026-08-01 by fixing `shift` and `depth_exceeds`; the next
 design is a per-redex work budget (the latter's §10.6), and §10's option list below is annotated in
 place with what each option turned into. Read them in that order; the roadmap routes the same
 sequence.
@@ -1061,7 +1079,8 @@ human's.
   [`2026-07-31-lambda-logical-size-guard-design.md`](2026-07-31-lambda-logical-size-guard-design.md) §10.
 
   ~~**CLOSED 2026-07-31, and the successor is not the ratio guard this paragraph predicted.**~~ —
-  **REVERTED 2026-08-01; the hang is open.** Design:
+  ~~**REVERTED 2026-08-01; the hang is open.**~~ — **CLOSED 2026-08-01 at the root; no guard was
+  needed.** Design of the reverted attempt:
   [`2026-07-31-lambda-shared-subterm-guard-design.md`](2026-07-31-lambda-shared-subterm-guard-design.md),
   and its **§10** is the falsification. `lambda::term::max_shared_logical_size` (`b832c89`) stays — it is
   a sound O(physical) measurement — but the refusal built on it (`MAX_SHARED_LOGICAL_NODES = 10_000`,

@@ -49,71 +49,91 @@ pub const MAX_REDUCTION_STEPS: u64 = 5_000_000;
 /// follow-up).
 pub const MAX_TERM_DEPTH: u32 = 3_000;
 
-/// True if `t` has any subterm deeper than `limit`. Iterative (explicit stack), so it cannot itself
-/// overflow on a deep term, and it early-exits at the limit.
+/// True if the tree `t` denotes is deeper than `limit`. **O(1) since 2026-08-01** — `LambdaTerm::depth`
+/// is a construction-time invariant, so this reads a `u32` and compares it.
 ///
-/// THE EARLY EXIT BOUNDS *DEPTH*, NOT *WORK*, and under structural sharing those stopped being the same
-/// quantity. This walks the LOGICAL expansion — it descends into both children of every `App` without
-/// asking whether they are one allocation — so a term that is shallow but heavily shared is walked once
-/// per edge reaching each subterm rather than once per allocation: thirty nested `App(c, c)` levels is
-/// 30 allocations and 2^30 logical nodes, and this returns `false` on all of them. `MAX_TERM_DEPTH` does
-/// not cover that, because it bounds depth and this is width by sharing. Under `Box` such a term was
-/// impossible to construct; under `Rc` it is possible.
+/// WHY THE GUARD EXISTS AT ALL: `reduce_step` (and `beta`'s `shift`/`subst`) recurse once per term node,
+/// so a value whose Church/Scott encoding is very deep would overflow the native stack instead of
+/// failing cleanly. The quantity that matters is therefore the DENOTED depth — the longest path — which
+/// is what a recursive descent actually follows.
 ///
-/// CORRECTED 2026-07-31: IT IS ALSO REACHED. This comment used to close by calling the shape "merely
-/// unreached — nothing in the corpus builds one", which was true of the corpus and false as a
-/// guarantee. `lower_group` clones the whole group term once per member (`lower.rs:453`) and the factor
-/// nests, so nested mutually recursive `fn` groups lower to a term whose logical size runs far ahead of
-/// its physical one. `examples/blowup_probe.rs` reaches it from **512 bytes**: 1,644 allocations holding
-/// 616,152 logical nodes (375x), and reducing that term reaches a β-step that did not finish in 13
-/// minutes at 974 MB.
-/// **That step is not the first one**, which this line used to say it was: `blowup_probe`'s
-/// `--beta-curve` times ONE CURSOR STEP — this function walked over the whole logical tree, plus the
-/// first β-step — and gets 50 ms at those same 616,152 nodes. So 50 ms is an UPPER BOUND on that
-/// β-step rather than its cost alone, and this guard's share of it is ~2%, from the Θ(logical) rate
-/// below. The cost accrues ACROSS the run — a step's output can be |body| x |arg| nodes and the next
-/// step starts from that output — which is why a bound calibrated by timing one step is about 32x too
-/// loose: that curve's wall is at 19,726,040 logical nodes and the program that actually hangs is
-/// 616,152, so 19,726,040 / 616,152 = 32.0. (The same wall is 65.75x above the 300,000-node bound the
-/// *withdrawn* total-size design settled on — that guard never landed, and `MAX_LOGICAL_NODES` is not
-/// in the tree. Both ratios are right; they answer different questions, and the loose-by figure is the
-/// one against the observed hang.) Nothing in this file fired: the term's depth
-/// was 141 against `MAX_TERM_DEPTH`, and `MAX_REDUCTION_STEPS` was never consulted because control did
-/// not return from `reduce_step`. This guard is Θ(logical) and crosses 3.6 s at 1,124 bytes of source
-/// — 2.52e9 logical nodes, so ~1.4 ns/node, which is where the ~2% above comes from — but it was not
-/// the failure; it is the part that still returns.
+/// **THIS USED TO BE A WALK, AND THAT WALK WAS 96% OF THE REDUCER'S TIME.** It pushed an explicit stack
+/// and descended into both children of every `App` without asking whether they were one allocation, so
+/// it visited each allocation once per EDGE reaching it — the LOGICAL expansion. That is the same bug
+/// class as the `shift` fix one file over, and it survived it: with `shift` fixed, the nested-group
+/// family's reduction still doubled per level, and sampling showed **187.6 s of level 11's 195.7 s was
+/// this function**. Carrying `depth` on the handle took that level to 7.48 s and made the whole ramp
+/// FLAT — 7.5–9.0 s at every level from 1 to 11, against a logical size growing 306 → 616,152.
 ///
-/// **THE HANG IS OPEN. NOTHING REFUSES THESE SIZES.** ~~"the sizes at which one step does not return
-/// are refused before reduction ever starts"~~ — **false, and this was the single most misleading line
-/// in the record.** A lowering-side guard was made and then reverted: `MAX_SHARED_LOGICAL_NODES` =
-/// 10,000 on the largest SHARED subterm (`1652e09`), removed after measurement falsified it. The
-/// counterexample is not exotic — `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)`, 4,821
-/// bytes, no recursion, measures `max_shared` = **4** against that bound of 10,000 and takes **19.0 s in
-/// its first β-step**. The reason is visible in `term.rs`: `subst`'s `Var` arm is `s.clone()` (an `Rc`
-/// bump — occurrences are FREE), while its `Abs` arm re-shifts the whole argument once per `Abs` node in
-/// the body, unconditionally. A step costs **`|body| + Abs(body) × |arg|`**, measured at 23.1–23.6
-/// ns/node-copy over a 1,255x range, and neither factor is a sharing property. So this function still
-/// pays the logical number on terms `lower` still emits at every size, and a single `reduce_step` can
-/// still fail to return. See `examples/guard_hole_probe.rs` (the instrument),
-/// `docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §10, and the roadmap for
-/// the successor design — a per-redex work budget `logical_abs_count(body) × logical_size(arg)`, checked
-/// in `LambdaCursor::next` BEFORE the step it prices, which is the one place that sees both factors.
+/// **Memoizing the walk by allocation was measured and rejected.** It gives the same answer in
+/// O(physical), but costs a `HashMap` per call, and at eleven levels that is a flat ~24 s of pure
+/// allocation overhead across ~105,000 calls — a net LOSS at the small end (25.1 s against the walk's
+/// 11.6 s at level 7), which is where the ordinary corpus lives. A number the constructors already know
+/// is free at both ends. `examples/shift_cost_probe.rs` has the table.
+///
+/// THE HISTORY THIS REPLACES, kept because the shape it warned about is real and someone will
+/// reintroduce it. The walk's early exit bounded *depth*, not *work*: thirty nested `App(c, c)` levels
+/// is 30 allocations and 2^30 logical nodes, and it returned `false` on all of them after walking every
+/// one. That was called "merely unreached — nothing in the corpus builds one" until 2026-07-31, which
+/// was true of the corpus and false as a guarantee: `lower_group` clones the whole group term once per
+/// member and the factor nests, so `examples/blowup_probe.rs` reaches 1,644 allocations holding 616,152
+/// logical nodes (375x) from **512 bytes**. Nothing in this file fired on it — the term's depth was 141
+/// against `MAX_TERM_DEPTH` = 3,000 — and `MAX_REDUCTION_STEPS` was never consulted, because control did
+/// not return from `reduce_step`. Every one of those numbers is still true of the term; none of them is
+/// still true of the cost.
+///
+/// **THE HANG IS CLOSED, AND NOT BY A GUARD — BY FIXING `shift` (2026-08-01).** What no longer holds is
+/// the conclusion this block used to end on.
+///
+/// ~~"THE HANG IS OPEN. NOTHING REFUSES THESE SIZES."~~ — and before that,
+/// ~~"the sizes at which one step does not return are refused before reduction ever starts"~~. The
+/// first was true when written; the second never was. Both are superseded: nothing refuses these sizes
+/// now either, because **nothing needs to**. A single β-step returns.
+///
+/// The diagnosis in the middle of that block was right and pointed one level too shallow. `subst`'s
+/// `Var` arm is `s.clone()` (an `Rc` bump — occurrences are FREE) while its `Abs` arm re-shifted the
+/// whole argument once per `Abs` node in the body, unconditionally: a step cost
+/// **`|body| + Abs(body) × |arg|`**, at 23.1–23.6 ns/node-copy over a 1,255x range. What that account
+/// left implicit is WHY `|arg|` was the logical number rather than the physical one. `shift` rebuilt
+/// every node it visited, so it was Θ(logical) AND it destroyed sharing — `shift(App(c, c))` recursed
+/// twice and produced two copies of `c`. `lower_group`'s duplication only writes the promise; `shift`
+/// was what cashed it, on every step.
+///
+/// `term.rs` now carries a `maxfree` per handle (highest free index + 1; 0 means closed), maintained in
+/// O(1) by the constructors, and both `shift` and `subst` return their argument's ALLOCATION when it
+/// cannot be affected. The counterexample that killed the shared-subterm guard —
+/// `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)`, 4,821 bytes, `max_shared` = 4 — went
+/// from **19.0 s in its first β-step to 0.002 s**. The 512-byte nested-group program that did not
+/// finish one β-step in 13 minutes at 974 MB then ran 105,607 steps in 195.7 s under a 2 GiB cap.
+///
+/// **AND THEN THIS FUNCTION WAS 96% OF WHAT WAS LEFT** — see the top of this comment. With `depth`
+/// stored too, that same program is **7.48 s**, the two-list counterexample is under a millisecond, and
+/// the ramp is flat across all eleven levels. Instrument: `examples/shift_cost_probe.rs`.
+///
+/// **THE PER-REDEX WORK BUDGET WAS NOT BUILT, and this is the record of why it was not needed.** The
+/// roadmap's next λ slice was `logical_abs_count(body) × logical_size(arg)` checked in
+/// `LambdaCursor::next` before the step it prices. That design is sound and its reasoning survives —
+/// it prices the measured cost model rather than a proxy, and it checks per step. It was overtaken:
+/// the quantity it was going to bound is no longer large, because `|arg|` is no longer paid logically.
+/// A guard sized against the pre-fix numbers would be calibrated against costs inflated up to ~9,500x
+/// on these programs. If one is wanted later it must be re-measured from scratch.
+///
+/// **WHAT IS STILL OPEN, stated because "the hang is closed" will be read as covering more than it
+/// does.** Divergence is untouched and was never this slice's to solve — the nested-group family has no
+/// base case, so "terminates" above means it reaches a cap in bounded time, not that it computes an
+/// answer. The cap it reaches is **this function's**, not the step cap: `MAX_TERM_DEPTH` fires at
+/// 105,607 steps against a `MAX_REDUCTION_STEPS` of 5,000,000, because the family grows deep as it
+/// diverges. Both are reachable now only because control returns from each step, which is the whole
+/// change.
+///
+/// **THE RAMP BEING FLAT IS A FACT ABOUT THIS FAMILY, NOT A COMPLEXITY CLAIM.** What the two fixes
+/// removed is cost that scaled with the LOGICAL size while the physical size stayed small — which is
+/// exactly what this family is built to exhibit. A program whose physical size genuinely grows still
+/// pays for it, and `subst` still rebuilds the spine of whatever it descends into. The older next
+/// target — carrying `subst`'s per-binder re-shift down as one `shift(d, 0, ·)`, with an additivity
+/// lemma already verified in the perf design — is untouched and still available.
 pub(crate) fn depth_exceeds(t: &LambdaTerm, limit: u32) -> bool {
-    let mut stack: Vec<(&LambdaTerm, u32)> = vec![(t, 0)];
-    while let Some((node, d)) = stack.pop() {
-        if d > limit {
-            return true;
-        }
-        match node.node() {
-            Node::Var(_) => {}
-            Node::Abs(_, b) => stack.push((b, d + 1)),
-            Node::App(f, a) => {
-                stack.push((f, d + 1));
-                stack.push((a, d + 1));
-            }
-        }
-    }
-    false
+    t.depth() > limit
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
