@@ -77,7 +77,9 @@
 //! separate binary crate and Cargo has no supported way to share a `const` with a test target).
 //! It was extracted mechanically rather than retyped: that list has drifted from hand-copying twice
 //! before, as `step_survey.rs`'s module doc records. Programs the λ backend cannot lower are skipped
-//! and counted, not silently dropped.
+//! and counted, not silently dropped. The copy below is now CHECKED, by
+//! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_five_copies` — see its own doc
+//! comment, which reads this file, and the array's, for why it took two attempts to get here.
 
 // Example target: `clippy.toml`'s `allow-*-in-tests` keys do not reach example targets at all, so the
 // exemption is stated per target. A probe that cannot build its own fixture has nothing to report.
@@ -93,6 +95,12 @@ use redextape_core::lambda::{LambdaTerm, MAX_REDUCTION_STEPS, Trace, lower, redu
 use redextape_core::parser::parse;
 
 /// Verbatim copy of `tests/three_way_oracle.rs::FIRST_ORDER_DEMOS` (comments stripped).
+///
+/// THIS COPY IS COVERED, and was not until the whole-branch review found it. `three_way_oracle.rs`'s
+/// `first_order_demos_stay_synced_across_all_five_copies` reads this file as text and asserts its
+/// literals are byte-for-byte equal to the canonical array's. It was the FIFTH copy and the last one
+/// found: that test had just been extended from three to four, by a fix that enumerated the damage and
+/// missed this file. Nothing here needs a by-hand diff before it is trusted.
 const FIRST_ORDER_DEMOS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",

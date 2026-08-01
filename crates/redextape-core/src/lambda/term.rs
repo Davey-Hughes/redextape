@@ -8,6 +8,8 @@
 //! at every level of the redex path; that is what this representation removes. See
 //! `docs/superpowers/specs/2026-07-30-lambda-structural-sharing-design.md`.
 
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 /// A lambda-term. One `Rc` per node; `.node()` reaches the variant.
@@ -56,6 +58,124 @@ impl LambdaTerm {
     pub fn alloc_id(&self) -> usize {
         Rc::as_ptr(&self.0) as usize
     }
+}
+
+/// The number of nodes reached by walking BOTH children of every `App` — the size of the tree this
+/// term DENOTES, as distinct from the DAG that stores it. Under structural sharing the two diverge
+/// without bound: 9,541 allocations can denote 2^72 nodes.
+///
+/// **O(PHYSICAL), NOT O(LOGICAL), AND THAT IS THE WHOLE POINT.** Each allocation's size is computed
+/// once and memoized by allocation identity, so a term denoting an astronomical number of nodes still
+/// folds in microseconds. A version that walked the logical tree would BE the hang this measurement
+/// exists to refuse — `logical_size_is_bounded_by_allocations_not_by_logical_nodes` is the test that
+/// tells the two apart, and every other test here passes either way.
+///
+/// Iterative, over an explicit `(node, expanded)` stack: a walk added to prevent a stack overflow must
+/// not overflow. Children are pushed after their parent's `expanded` marker, so LIFO ordering
+/// guarantees every child is sized before the parent that reads it.
+///
+/// Saturating. The measured quantity reaches 2^72 and `u64` holds 2^64, so the result is a FLOOR:
+/// exact below `u64::MAX`, and `u64::MAX` meaning "at least that much". Callers comparing against a
+/// bound far below saturation are unaffected; anything wanting an exact count must check for
+/// `u64::MAX` first.
+pub fn logical_size(t: &LambdaTerm) -> u64 {
+    logical_sizes(t).get(&t.alloc_id()).copied().unwrap_or(u64::MAX)
+}
+
+/// Every allocation's logical size, memoized by allocation identity — the single fold behind both
+/// `logical_size` and `max_shared_logical_size`, so the two cannot drift and neither pays O(physical)
+/// more than once.
+///
+/// Iterative, over an explicit `(node, expanded)` stack: a walk added to prevent a stack overflow must
+/// not overflow. Children are pushed after their parent's `expanded` marker, so LIFO ordering
+/// guarantees every child is sized before the parent that reads it. Saturating, because the measured
+/// quantity reaches 2^72 and `u64` holds 2^64.
+fn logical_sizes(t: &LambdaTerm) -> HashMap<usize, u64> {
+    let mut sizes: HashMap<usize, u64> = HashMap::new();
+    let mut stack: Vec<(&LambdaTerm, bool)> = vec![(t, false)];
+    while let Some((node, expanded)) = stack.pop() {
+        let id = node.alloc_id();
+        if sizes.contains_key(&id) {
+            continue;
+        }
+        if !expanded {
+            stack.push((node, true));
+            match node.node() {
+                Node::Var(_) => {}
+                Node::Abs(_, b) => stack.push((b, false)),
+                Node::App(f, a) => {
+                    stack.push((f, false));
+                    stack.push((a, false));
+                }
+            }
+            continue;
+        }
+        // `child_size` cannot miss: the LIFO order above sizes every child before its parent's
+        // `expanded` entry is popped. `u64::MAX` rather than `0` on the impossible branch because a
+        // guard that UNDER-counts on a bug is a guard that does not guard — this fails toward refusing.
+        let child_size = |c: &LambdaTerm| sizes.get(&c.alloc_id()).copied().unwrap_or(u64::MAX);
+        let size = match node.node() {
+            Node::Var(_) => 1,
+            Node::Abs(_, b) => 1u64.saturating_add(child_size(b)),
+            Node::App(f, a) => 1u64.saturating_add(child_size(f)).saturating_add(child_size(a)),
+        };
+        sizes.insert(id, size);
+    }
+    sizes
+}
+
+/// The largest logical size among subterms this term references MORE THAN ONCE.
+///
+/// **IN-DEGREE, NOT `Rc::strong_count`, and this is load-bearing.** In-degree counts references from
+/// within this term. `strong_count` counts every live handle anywhere, so a caller retaining
+/// snapshots — which `reduce_trace` does by contract — would inflate it, and the answer would depend
+/// on who happened to be holding the term. A measurement whose value changes with observers cannot
+/// gate anything.
+///
+/// Returns **0** when nothing is shared. That is the answer for every unshared term however large:
+/// a 699-element list literal is ~497,691 logical nodes, reduces cleanly in 1,398 steps, and scores
+/// 0 here. That property is why a guard on *sharing* was written to replace a guard on *total size* —
+/// and then why it failed, since a term can be huge, unshared, and still cost 19 s in one β-step.
+///
+/// **A MEASUREMENT, NOT A GUARD, AND IT HAS NO IN-LIBRARY CALLER.** The guard that read it
+/// (`MAX_SHARED_LOGICAL_NODES`, `LowerError::TooShared`) was reverted; nothing in `src/` calls this
+/// today. It is kept `pub` deliberately, as the measurement surface the `examples/` probes and any
+/// future guard need — an `examples/` target cannot reach a private item, and the investigation that
+/// falsified the guard ran entirely through this function. Callers: `tests/guard_counterexamples.rs`,
+/// `examples/guard_hole_probe.rs`, `examples/list_reduction_probe.rs`.
+///
+/// O(PHYSICAL): one walk for in-degree, one memoized fold for sizes, then a lookup per shared node.
+/// Calling `logical_size` per shared node instead would be O(shared x physical) — quadratic on exactly
+/// the terms this exists to measure. **Cost is stated in PHYSICAL size on purpose:** 92.6 ms optimized
+/// on that 497,691-allocation list, against a `lower()` of 9.7 ms. "O(physical)" is the expensive case
+/// for a term at a 1.000x ratio, not the cheap one.
+pub fn max_shared_logical_size(t: &LambdaTerm) -> u64 {
+    let mut indeg: HashMap<usize, u32> = HashMap::new();
+    let mut expanded: HashSet<usize> = HashSet::new();
+    let mut stack: Vec<&LambdaTerm> = vec![t];
+    while let Some(node) = stack.pop() {
+        if !expanded.insert(node.alloc_id()) {
+            continue; // already expanded; its outgoing edges were counted then
+        }
+        // Written out rather than via a closure: a closure capturing `indeg` mutably would hold that
+        // borrow across the `stack.push` calls in the same arm, which is a needless fight with the
+        // borrow checker in code whose whole job is to be obviously correct.
+        match node.node() {
+            Node::Var(_) => {}
+            Node::Abs(_, b) => {
+                *indeg.entry(b.alloc_id()).or_insert(0) += 1;
+                stack.push(b);
+            }
+            Node::App(f, a) => {
+                *indeg.entry(f.alloc_id()).or_insert(0) += 1;
+                *indeg.entry(a.alloc_id()).or_insert(0) += 1;
+                stack.push(f);
+                stack.push(a);
+            }
+        }
+    }
+    let sizes = logical_sizes(t);
+    indeg.iter().filter(|&(_, &c)| c > 1).filter_map(|(id, _)| sizes.get(id).copied()).max().unwrap_or(0)
 }
 
 /// A direction into a `LambdaTerm`; a `Path` locates a subterm (e.g. the reduced redex).
@@ -389,5 +509,121 @@ mod tests {
              from its predecessor — that shared allocation is exactly what makes `==` take the \
              `ptr_eq` path"
         );
+    }
+
+    /// Exact small cases, countable by eye. A tree with no sharing has logical size == node count.
+    #[test]
+    fn logical_size_counts_the_denoted_tree() {
+        assert_eq!(logical_size(&var(0)), 1);
+        assert_eq!(logical_size(&abs("x", var(0))), 2);
+        assert_eq!(logical_size(&app(var(0), var(1))), 3);
+        assert_eq!(logical_size(&abs("x", app(var(0), var(0)))), 4);
+    }
+
+    /// A shared child is counted ONCE PER EDGE, not once per allocation — that is the entire
+    /// distinction being measured. `c = app(c.clone(), c)` applied n times is n+1 allocations
+    /// denoting 2^(n+1) - 1 nodes.
+    #[test]
+    fn logical_size_counts_shared_subterms_once_per_edge() {
+        let mut c = var(0);
+        for n in 0..12u32 {
+            assert_eq!(logical_size(&c), (1u64 << (n + 1)) - 1, "at depth {n}");
+            c = app(c.clone(), c);
+        }
+    }
+
+    /// THE ONE THAT MATTERS. The fold must be O(physical), so a term denoting 2^10001 nodes must
+    /// still measure instantly. A fold that walked the logical tree would pass every test above and
+    /// hang here — which is precisely the failure this whole slice exists to refuse.
+    ///
+    /// Saturation is the expected answer, not a defect: `u64` holds 2^64 and this denotes 2^10001.
+    #[test]
+    fn logical_size_is_bounded_by_allocations_not_by_logical_nodes() {
+        let mut c = var(0);
+        for _ in 0..10_000 {
+            c = app(c.clone(), c);
+        }
+        assert_eq!(logical_size(&c), u64::MAX, "an astronomically large term saturates");
+    }
+
+    /// `parse_lambda` builds fresh nodes with no sharing, so a parsed term's logical size equals its
+    /// allocation count. Design §9 argued this rather than testing it; this is the test.
+    #[test]
+    fn a_parsed_term_has_no_sharing() {
+        let (t, ds) = crate::lambda::parse_lambda("\\f. \\x. f (f (f x))");
+        assert!(ds.is_empty(), "diagnostics: {ds:?}");
+        let t = t.expect("parses");
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![&t];
+        while let Some(n) = stack.pop() {
+            seen.insert(n.alloc_id());
+            match n.node() {
+                Node::Var(_) => {}
+                Node::Abs(_, b) => stack.push(b),
+                Node::App(f, a) => {
+                    stack.push(f);
+                    stack.push(a);
+                }
+            }
+        }
+        assert_eq!(logical_size(&t), seen.len() as u64, "a parsed term must have no shared allocations");
+    }
+
+    /// An unshared term has no shared subterm at all, so the answer is 0 — not "small", zero. Written
+    /// when a guard read this number, where it was what made that guard SILENT on large unshared
+    /// programs rather than merely lenient toward them. **Both guards are gone**, and zero-not-small
+    /// is now the property that killed the second one: the 699-element list and the 4,821-byte
+    /// two-list program are both essentially unshared, so a bound here cannot see either of them.
+    /// See `crates/redextape-core/tests/guard_counterexamples.rs`.
+    #[test]
+    fn an_unshared_term_has_no_shared_subterm() {
+        assert_eq!(max_shared_logical_size(&var(0)), 0);
+        assert_eq!(max_shared_logical_size(&abs("x", var(0))), 0);
+        assert_eq!(max_shared_logical_size(&app(var(0), var(1))), 0);
+        // Structurally identical but SEPARATELY BUILT children are two allocations, not one.
+        assert_eq!(max_shared_logical_size(&app(abs("x", var(0)), abs("x", var(0)))), 0);
+    }
+
+    /// One allocation referenced twice is shared, and it is reported at its FULL logical size —
+    /// because that is what this measurement is defined to report, an in-degree > 1 allocation counted
+    /// once at its whole denoted size.
+    ///
+    /// ~~"the quantity `subst` pays per occurrence it substitutes into"~~ — **that was the reason
+    /// given, and it is false.** `subst`'s `Var` arm is `s.clone()`, a refcount bump, so occurrences
+    /// are FREE; its `Abs` arm re-shifts the whole argument once per `Abs` node in the body,
+    /// unconditionally. A β-step costs `|body| + Abs(body) × |arg|` and this number is neither factor.
+    /// The assertion below is unchanged and still correct — only its justification was wrong. Record:
+    /// `docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §10.2.
+    #[test]
+    fn a_subterm_referenced_twice_is_reported_at_full_size() {
+        let c = abs("x", app(var(0), var(0))); // logical size 4
+        assert_eq!(logical_size(&c), 4);
+        assert_eq!(max_shared_logical_size(&app(c.clone(), c)), 4);
+    }
+
+    /// The MAXIMUM over shared subterms, not the first or the sum. A small shared node must not mask a
+    /// large one.
+    #[test]
+    fn the_largest_shared_subterm_wins() {
+        let small = abs("s", var(0)); // 2
+        let large = abs("l", app(app(var(0), var(0)), app(var(0), var(0)))); // 8
+        assert_eq!(logical_size(&small), 2);
+        assert_eq!(logical_size(&large), 8);
+        let t = app(app(small.clone(), small), app(large.clone(), large));
+        assert_eq!(max_shared_logical_size(&t), 8);
+    }
+
+    /// THE ONE THAT MATTERS. Like `logical_size`, this must be O(PHYSICAL). A term denoting 2^10001
+    /// nodes is 10,001 allocations, every one of them shared — so a version that re-folds per shared
+    /// node is quadratic, and one that walks logically never returns. Both pass every test above.
+    #[test]
+    fn max_shared_is_bounded_by_allocations_not_by_logical_nodes() {
+        let mut c = var(0);
+        for _ in 0..10_000 {
+            c = app(c.clone(), c);
+        }
+        // Every level shares its child with itself, so the largest shared subterm is the one directly
+        // below the root — saturating, exactly as `logical_size` does.
+        assert_eq!(max_shared_logical_size(&c), u64::MAX);
     }
 }

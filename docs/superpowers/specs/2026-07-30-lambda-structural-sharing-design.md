@@ -11,6 +11,18 @@ Implements the `Rc<LambdaTerm>` item the Plan 4 producer slice
 deferred ("**`Rc<LambdaTerm>` remains the λ performance fix**, not checkpoints" — roadmap, Plan 4
 scope table). Supersedes that entry's framing of the problem size; see §2.
 
+**§10 is also where a second, unrelated hazard was sized, and it is the head of a sequence this
+document does not otherwise name.** A term's logical size can now outrun its physical size, and 512
+bytes of ordinary source reaches a β-step that does not return. §10 prices four options for it. Option
+(a) was taken twice, in two shapes, and **both were built and both were falsified by measurement** —
+[`2026-07-31-lambda-logical-size-guard-design.md`](2026-07-31-lambda-logical-size-guard-design.md)
+(total size, withdrawn before commit) and
+[`2026-07-31-lambda-shared-subterm-guard-design.md`](2026-07-31-lambda-shared-subterm-guard-design.md)
+(largest shared subterm, landed `1652e09` and reverted 2026-08-01). **The hang is open**, the next
+design is a per-redex work budget (the latter's §10.6), and §10's option list below is annotated in
+place with what each option turned into. Read them in that order; the roadmap routes the same
+sequence.
+
 **Scope:** `redextape-core` only. Zero new dependencies. No printed byte moves.
 
 ## 1. Why this slice exists
@@ -948,12 +960,28 @@ The smallest program that shows it is **47 bytes** and already 1.99x:
 | 1,124 B | ~600 µs | 3,432 | 2.52e9 | 7.4e5x | 285 |
 | 3,215 B | 2.9 ms | 9,541 | 5.55e21 (2^72.2) | **5.8e17x** | 777 |
 
+**The last row's `5.55e21 (2^72.2)` came from a private `f64` fold that no longer exists.** It was
+deleted in favour of `lambda::term::logical_size`, which is `u64` and **saturates**, so `blowup_probe`
+now prints that term as `>=2^64 (SATURATED)` — a floor reported as a floor. Same term (9,541
+allocations from 3,215 bytes) and the row is kept for the magnitude it records; read 2^72.2 as the size
+the term denotes, not as a figure still printed anywhere. The logical-size guard's design §6 carries
+the full note.
+
 **`lower` stays linear and fast the whole way down that table** — 2.9 ms for a term of 2^72 logical
 nodes — which is the entire problem. Every size intuition anyone has about the returned term is
 satisfied.
 
-**The 512-byte row is where it stops.** That term's **first β-step had not returned after 13 minutes**,
-with the cgroup's peak resident set at **974 MB** (`memory.peak` = 1,021,349,888 B) and creeping ~1 MB
+**The 512-byte row is where it stops.** ~~That term's **first β-step had not returned after 13
+minutes**~~ — **corrected 2026-07-31: it is not the first step.** `blowup_probe --beta-curve` times one
+*cursor* step — the depth guard plus the first β-step — and gets **50 ms** at those same 616,152 nodes,
+so the first β-step costs at most that. What is true is that **reducing that term reaches a β-step that
+had not returned after 13 minutes**; the cost accrues across the run, because a step's output can be
+|body| x |arg| nodes and the next step starts from that output. The distinction is load-bearing — a
+bound calibrated by timing one step is **32x** too loose against the size that actually hangs
+(19,726,040 / 616,152; the same wall is 65.75x above the 300,000 the guard settled on, which is a
+different ratio answering a different question).
+
+Measured with the cgroup's peak resident set at **974 MB** (`memory.peak` = 1,021,349,888 B), creeping ~1 MB
 per 40 s. **I expected an OOM kill and did not get one**: the reducer is not accumulating toward a limit,
 it is allocating and freeing gigabyte-scale terms over and over inside one call to `reduce_step`. The
 honest characterisation is **an unbounded single β-step at GB scale, i.e. a hang** — worse than an OOM
@@ -1016,11 +1044,55 @@ human's.
   costs nothing on ordinary programs (194 allocations for `sum(5)`) and refuses the pathological ones
   before a single β-step. It composes with `MAX_LAMBDA_LOWER_DEPTH`, the tree's existing precedent for "a
   capability reduction recorded as an explicit decision": that guard bounds the lowering's own recursion,
-  this one bounds the term it produces. **Capability cost:** it rejects deeply nested mutually recursive
+  this one bounds the term it produces. ~~**Capability cost:** it rejects deeply nested mutually recursive
   `fn` groups — programs that do not terminate today anyway — but the bound is a number someone has to
-  pick and defend. **Scope note if this is chosen:** the guard belongs in `lower`, not the reducer, and it
+  pick and defend.~~ **Scope note if this is chosen:** the guard belongs in `lower`, not the reducer, and it
   must measure **logical** size. Physical size is the obvious thing to measure and is exactly the number
   that looks fine here (1,644).
+
+  **(a) WAS TAKEN, BUILT, AND WITHDRAWN — falsified 2026-07-31.** The struck capability cost is wrong,
+  and structurally so: the guard does not reject "deeply nested mutually recursive `fn` groups", it
+  rejects **anything over the bound**, and it cannot tell the two apart. At 300,000 nodes it refuses
+  `lambda/lower.rs`'s own 699-element list literal — 497,691 logical nodes at a logical/physical ratio of
+  exactly **1.000x**, a working program with no sharing at all. **The scope note is also half a
+  requirement:** logical size is the symptom, and physical size, dismissed here as "the number that looks
+  fine", is ~~the missing **denominator** — the ratio is what separates the hazard from a big program~~
+  — **not that either.** The next attempt guards on sharing. See
+  [`2026-07-31-lambda-logical-size-guard-design.md`](2026-07-31-lambda-logical-size-guard-design.md) §10.
+
+  ~~**CLOSED 2026-07-31, and the successor is not the ratio guard this paragraph predicted.**~~ —
+  **REVERTED 2026-08-01; the hang is open.** Design:
+  [`2026-07-31-lambda-shared-subterm-guard-design.md`](2026-07-31-lambda-shared-subterm-guard-design.md),
+  and its **§10** is the falsification. `lambda::term::max_shared_logical_size` (`b832c89`) stays — it is
+  a sound O(physical) measurement — but the refusal built on it (`MAX_SHARED_LOGICAL_NODES = 10_000`,
+  `LowerError::TooShared`, `1652e09`) was removed after a two-list program with **no recursion at all**
+  scored 4 against the bound of 10,000 while spending **19.0 s in its first β-step**.
+
+  **Why the ratio was the wrong quantity, since this section argued for it twice — and why the
+  replacement was wrong too.** The ratio is a whole-term *average*, and the hazard is not an average.
+  ~~"`subst` copies a shared subterm into every occurrence of the variable it substitutes into, so what
+  makes a single step expensive is the size of the largest one"~~ — **that is not what `subst` does.**
+  Its `Var` arm is `s.clone()`, an `Rc` bump, so **occurrences are free**; its `Abs` arm copies the whole
+  argument once per binder in the body, unconditionally. A step costs `|body| + Abs(body) × |arg|`, and
+  neither factor is a sharing property at all. Every quantity this section has proposed — total size,
+  the ratio, the largest shared subterm — is a function of numbers that were already being computed, and
+  the answer was a pair that nobody computed until `examples/guard_hole_probe.rs` did. A term can be 114x shared and
+  step fine (§4's own table, at 9 nesting levels) while a term at a similar ratio hangs — the ratio
+  cannot separate them, ~~and the largest shared subterm can~~ — **and neither can the largest shared
+  subterm, falsified 2026-08-01.** `max_shared` is **4** on a program whose first β-step takes 19.0 s
+  and **0** on the 43-millisecond control at the same element count. **No quantity this section has
+  proposed separates them**, because all three are properties of the *term* and the cost is a property
+  of the *redex*. Physical size was indeed not "the number that looks fine"; it was also not the
+  denominator. It was not in the answer at all.
+
+  ~~**What is still open:** *divergence*. The family is non-terminating at every level, including the
+  levels the guard admits, and that is the step cap's job rather than this guard's. The hang inside a
+  single step is what closed.~~ — **BOTH ARE OPEN, corrected 2026-08-01. The single-step hang did not
+  close; the guard that was said to have closed it was reverted**, and there are no "levels the guard
+  admits" because there is no guard. Divergence remains separately the step cap's job, which is the one
+  part of this that survives. Successor design in
+  [`2026-07-31-lambda-shared-subterm-guard-design.md`](2026-07-31-lambda-shared-subterm-guard-design.md)
+  §10.6 — a per-redex work budget checked before each step, not a bound on the term at lowering time.
 - **(b) Stop `lower_group` duplicating `group` — and it is NOT enough.** Binding it once,
   `(\g. (\f1 … fn. body) (proj_1 g) … (proj_n g)) G`, makes the *lowered term* linear. But `g` then occurs
   n times in the body, the first β-step substitutes `G` into all n occurrences and deep-copies the result,
@@ -1035,6 +1107,17 @@ human's.
 - **(d) A node budget inside `LambdaCursor` — rejected.** A single β-step's output is |body| × |arg|
   logical nodes in the worst case, so a check between steps reads a number that says nothing about the
   next step. It would make the small cases fail and leave the fatal one untouched. Security theatre.
+
+  **THIS DOES NOT REJECT THE SUCCESSOR, AND THE OVERLAP IS EXACT ENOUGH TO MISLEAD — noted 2026-08-01.**
+  The design that follows (a)'s revert is *also* inside `LambdaCursor`
+  ([`2026-07-31-lambda-shared-subterm-guard-design.md`](2026-07-31-lambda-shared-subterm-guard-design.md)
+  §10.6), and this bullet reads as having priced it out. It has not. What is rejected here is a budget
+  on the **size of the current term**, read **between** steps — a number about the step that just
+  finished. The successor is a **pre-flight check on the specific redex about to be reduced**,
+  `logical_abs_count(body) × logical_size(arg)`, read **before** that step runs: the two factors of
+  *that* step's cost, which is precisely the quantity this bullet observes a between-steps check does
+  not have. Same location, opposite information. The roadmap's copy of this rejection carries the same
+  note, for the same reason.
 
 **Confidence, and what would falsify this.** Reachability is **certain** — 512 bytes of ordinary surface
 syntax that parses, typechecks and lowers through the public pipeline, with the failure observed under a

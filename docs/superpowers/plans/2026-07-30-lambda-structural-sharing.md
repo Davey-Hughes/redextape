@@ -16,8 +16,16 @@ Design: [`docs/superpowers/specs/2026-07-30-lambda-structural-sharing-design.md`
 (pre-plan) and this plan `14e4771`; Task 1 `2f51e65` + `8fa6832`; Task 2 `8846f8d`; Task 3 `5e41c01`;
 Task 4 `2123ea2`; Task 5 `07e98a5` + `1c5f3d0`; Task 6 `5e38f36` + `d3ab121`; Task 7 `427bc2e` +
 `e93bd07` + `a22b382`. Layer 1 bought a uniform 2.1x–2.8x and the worst case is **still a hang**
-(1,216.7 ms); layer 1.5 answered §7's gate and **layers 2 and 3 are not planned** on its evidence. The
-next slice is `subst`'s per-binder re-shift, not interning — design §10.
+(1,216.7 ms); layer 1.5 answered §7's gate and **layers 2 and 3 are not planned** on its evidence. ~~The
+next slice is `subst`'s per-binder re-shift, not interning — design §10.~~ — **superseded 2026-07-31,
+before that slice was planned.** The design's §10 also sized a hazard this plan's own conversion moved
+rather than created: 512 bytes of ordinary source lower to a term whose reduction reaches a β-step that
+does not return, and the roadmap re-routed the next λ slice at that instead (its
+*"THE NEXT λ SLICE IS NOT the `subst` fix"* entry). Two guards were built against it and both were
+falsified by measurement; **the hang is open** and the next slice is a per-redex work budget. The
+`subst` fix is unaffected and still worth taking — it is a constant-factor win on programs that
+terminate, and this is a class that does not — but it is not next. Read the roadmap for the ordering,
+not this line.
 
 ## Global Constraints
 

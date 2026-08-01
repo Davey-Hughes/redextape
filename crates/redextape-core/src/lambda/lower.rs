@@ -41,6 +41,21 @@ const GROUP: &str = "$group";
 /// this against a smaller test thread — see `lower_asm::MAX_LOWER_DEPTH`'s doc for why.
 const MAX_LAMBDA_LOWER_DEPTH: u32 = 700;
 
+// A SECOND GUARD USED TO SIT HERE AND IT WAS REVERTED. `MAX_SHARED_LOGICAL_NODES` = 10,000 refused a
+// term whose largest SHARED subterm exceeded it (`1652e09`), on the theory that `subst` duplicates a
+// shared subterm once per occurrence of the substituted variable. **Measurement falsified it, and the
+// mechanism it named was not what `subst` does.** `subst`'s `Var` arm is `s.clone()` — an `Rc` bump, so
+// occurrences are free — while its `Abs` arm re-shifts the whole argument once per `Abs` node in the
+// body, unconditionally, before anything checks whether the variable occurs. A step costs
+// `|body| + Abs(body) × |arg|`, and NEITHER factor is a sharing property: `let xs = [0..500); let ys =
+// [0..500); head(xs) + head(ys)` is 4,821 bytes with no recursion, measures `max_shared` = **4** against
+// the bound of 10,000, and its FIRST β-step takes 19.0 s. The guard was 2,500x off on a program anyone
+// could write by accident. The measurement stays (`term::max_shared_logical_size` is sound and the two
+// tests below pin it); the refusal does not. **The hang is open.** Full record:
+// `docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §10, instrument
+// `examples/guard_hole_probe.rs`. The successor design is a per-redex work budget checked inside
+// `LambdaCursor::next` — see the roadmap.
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LowerError {
     /// A closure assigns a variable captured from an outer scope (§5.3 — v1 limitation).
@@ -207,6 +222,9 @@ pub fn lower_mapped(core: &Core) -> Result<(LambdaTerm, Vec<(NodeId, Path)>), Lo
     for (_, p) in &mut origins.pairs {
         p.reverse();
     }
+    // A SHARING GUARD USED TO RUN HERE, at the end, as the deliberate mirror of `too_deep_node` at the
+    // start. It was reverted — see the note above `LowerError` — so `too_deep_node` is once again the
+    // only refusal this function makes, and lowering is total on every Core within the depth bound.
     Ok((term, origins.pairs))
 }
 
@@ -1219,5 +1237,42 @@ mod tests {
         assert!(lower(&at_bound).is_ok(), "a Core exactly at the bound must still lower");
         let past_bound = deep_list(MAX_LAMBDA_LOWER_DEPTH as usize); // depth == MAX + 1
         assert!(matches!(lower(&past_bound), Err(LowerError::TooDeep { .. })), "one level past must refuse");
+    }
+
+    // --- Shared-subterm MEASUREMENTS (the guard that read them was reverted) ------------------------
+    //
+    // These two used to gate. `MAX_SHARED_LOGICAL_NODES` was falsified and removed (see the note above
+    // `LowerError`), so they now assert what `max_shared_logical_size` reports rather than what `lower`
+    // does with it. They stay because the numbers are worth pinning and cost nothing: both are the
+    // extremes of the corpus profile the investigation ran, and either moving means the LOWERING
+    // changed shape, which is a thing a later reader wants told.
+
+    /// **The program that killed the total-size design.** A 699-element list literal is ~497,691 logical
+    /// nodes with NO sharing, and it reduces cleanly (1,398 steps, 35 s). Its `max_shared` is exactly 0
+    /// — which is also why the shared-subterm guard was silent on it, and, read the other way, the first
+    /// hint that `max_shared` is blind to the cost of stepping a large unshared term.
+    #[test]
+    fn a_large_unshared_list_measures_zero_shared_nodes() {
+        let big = deep_list(MAX_LAMBDA_LOWER_DEPTH as usize - 1);
+        let term = lower(&big).expect("a 699-element list must still lower");
+        assert_eq!(
+            crate::lambda::term::max_shared_logical_size(&term),
+            0,
+            "a list literal shares nothing; if this is non-zero the lowering changed"
+        );
+    }
+
+    /// The corpus maximum, pinned: 684 — the three-way mutual recursion at index 31 of
+    /// `FIRST_ORDER_DEMOS`, and the largest `max_shared` any of the 46 demos produces. Re-derive with
+    /// `examples/list_reduction_probe.rs corpus` rather than trusting this number.
+    #[test]
+    fn the_corpus_maximum_shared_subterm_is_684() {
+        let core = core_of(
+            "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
+             fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
+             fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
+        );
+        let term = lower(&core).expect("the corpus maximum must lower");
+        assert_eq!(crate::lambda::term::max_shared_logical_size(&term), 684, "the corpus maximum, pinned");
     }
 }

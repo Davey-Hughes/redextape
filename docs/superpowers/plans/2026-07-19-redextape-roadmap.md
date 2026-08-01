@@ -423,11 +423,201 @@ fixed on it — **the branch lands, this is what the next slice is planned from*
 `crates/redextape-core/examples/blowup_probe.rs`, committed with the branch so the repro can be re-run
 instead of quoted. Full statement, sizing and confidence in the design's §10.
 
+> **REVERTED 2026-08-01 — READ THIS BLOCK AS HISTORY. THE HANG IS OPEN AND NOTHING REFUSES THIS
+> PROGRAM.** ~~"LANDED 2026-07-31 — the program is refused at lowering time"~~ — true for one day.
+> `MAX_SHARED_LOGICAL_NODES` = 10,000 with `LowerError::TooShared` (`1652e09`) was **falsified by
+> measurement and removed**; what stays is the measurement it read, `max_shared_logical_size`
+> (`b832c89`), which is sound. The whole record is the design's **§10**, and the three-line version is:
+>
+> - **A trivially-written program defeats it by 2,500x.** `let xs = [0..500); let ys = [0..500);
+>   head(xs) + head(ys)` — 4,821 bytes, **no recursion, no `while`, no closure** — measures `max_shared`
+>   = **4** against the bound of 10,000 and takes **19.0 s in its first β-step**. The single-list
+>   control **at that same n=500** — same element count, same lowering path, one binding instead of two
+>   — takes **0.043 s** and scores 0: **442x apart, and invisible to every quantity the guard
+>   measures.** ~~"At the largest n `lower` accepts (697) one step takes 196.5 s; the single-list
+>   control at the same n takes 0.043 s. 442x apart"~~ — **corrected 2026-08-01: two different pairs
+>   were being read as one.** 442x is 19.0 / 0.043, both at n=500, and it is the control comparison.
+>   The **196.5 s** row is `guard_hole_probe ceiling 1500` — n=697 with every element the flat literal
+>   `1500`, so that `|arg|` rises without the Core's nesting depth rising with it — and **no control
+>   was run at that n**, so it sizes how far the shape goes inside `MAX_LAMBDA_LOWER_DEPTH` and divides
+>   into nothing. `tests/guard_counterexamples.rs` had the pairing right the whole time. Cost is linear
+>   in the number of let-bound lists (2.2 / 7.1 / 17.6 / 42.0 s at k = 2/4/8/16), so it is a family.
+> - **The stated mechanism is not what `subst` does.** Its `Var` arm is `s.clone()` — an `Rc` bump, so
+>   **occurrences are free** — while its `Abs` arm re-shifts the whole argument **once per `Abs` node in
+>   the body, unconditionally**, before anything checks whether the variable occurs. A step costs
+>   **`|body| + Abs(body) × |arg|`**, measured at 23.1–23.6 ns/node-copy over a 1,255x range.
+>   **Neither factor is a sharing property**; both are large in an alias-free term scoring 0.
+> - **The quantity collapses rather than growing.** Sampled after every step across six programs,
+>   `max_shared` is **non-increasing in all six** — peak is always the lowering-time value. At 6 groups
+>   it is 0 by step 2 while individual steps are reaching ~4.2 s each by step 9. **The guard read a
+>   property destroyed by the second β-step, at the one moment it is maximal.**
+>
+> **The deciding evidence was already committed and nobody connected it.**
+> `examples/lambda_sharing_probe.rs`'s PART B — on the branch immediately before this one — recorded
+> `Σ abs×arg` at **86.8% of all nodes the reducer visits, as its headline finding**. That is the same
+> product, from the other end, in the same directory, while this guard was being designed against
+> "occurrences × |arg|".
+>
+> **THE NEXT λ SLICE IS A PER-REDEX WORK BUDGET.** `logical_abs_count(body) × logical_size(arg)`, both
+> O(physical), checked in **`LambdaCursor::next` BEFORE performing the step** it prices.
+> `logical_abs_count` is already written and exercised in `examples/guard_hole_probe.rs`. Two properties,
+> and they are exactly the two failures above: it prices the **measured** cost model rather than a proxy
+> for it, and it runs **at every step**, so the one-shot problem cannot recur.
+>
+> **This is NOT the "checked between steps" blind spot this entry warns about**, and the distinction is
+> load-bearing because the warning is ~150 lines below and reads as covering it. That warning rejects "a
+> node budget inside `LambdaCursor` … because one β-step can produce |body| × |arg| nodes, so a check
+> between steps reads a number that says nothing about the next one" — and it is right, **about a check
+> on the size of the current term, after the fact**. This is a **pre-flight check on the specific redex
+> about to be reduced**, reading the two factors of *that step's* cost *before* that step runs. The
+> rejected design measures the wrong quantity too late; this one measures the right quantity in time.
+> Open and to be measured, not asserted: the budget's value, and whether an O(physical) check per step is
+> affordable (§9 records the reverted guard at ~87% of `lower()` on the largest program `lower` admits —
+> the same axis, now paid per step rather than once).
+>
+> Instrument: `crates/redextape-core/examples/guard_hole_probe.rs`, committed with the revert and the
+> only re-runnable source for the counterexample and the ns/node-copy rate. **Everything below in this
+> block was written while the guard was in the tree.** Its numbers are still right; its verdict is not.
+>
+> **The bound is read off a measured gap rather than derived from a growth law** — the previous attempt
+> is the record of what happens otherwise. Corpus maximum **684** (`fn s0/s1/s2 … s0(4)`, index 31 of
+> the 46; **twelve of them measure 0**). Largest case observed stepping steadily: the nesting family at
+> 6 groups, **9,453**. Smallest where a single step hangs: 7 groups, **19,085**. The comparison is
+> **strictly greater**, so every bound in **`[9,453, 19,085)`** — closed left, open right — accepts and
+> refuses exactly the same programs; 10,000 is an ordinary member of that band, at 14.6x over the
+> corpus, not a special point.
+>
+> **It is keyed on the largest shared subterm, not on the ratio this entry predicted.** ~~"Keyed on the
+> logical/physical ratio, or on size only when the ratio is high"~~ — **that direction is not what
+> landed.** The ratio is a whole-term average and the hazard is *one* big shared subterm: `subst` copies
+> a shared subterm into every occurrence of the variable, so what makes a single step expensive is the
+> largest one, not how much of the term is shared on average. In-degree rather than `Rc::strong_count`,
+> because `strong_count` counts every live handle anywhere — a caller retaining snapshots, which is
+> exactly what `reduce_trace` does by contract, would inflate it. **A guard whose verdict depends on who
+> is holding the term is not a guard.**
+>
+> **WHAT IT DOES NOT CLOSE, stated first because a guard named for sharing will be read as covering
+> more than it does.**
+>
+> - **Divergence — not closed, and not this guard's job.** The nesting family is non-terminating at
+>   every level (`nested_groups_src` emits `fn g{k}(n) { f{k}(n) }` at every level and every `f{k}` body
+>   ends in `+ g{k}(n)`, so `g{k} → f{k} → g{k}` closes with no base case at every group count), and
+>   **every level steps forever until `MAX_REDUCTION_STEPS`.** That is correct and it outlived the
+>   guard: divergence is the step cap's job and the halting problem was never this slice's to solve. The
+>   guard refused only the case where a SINGLE STEP does not return — and did not catch it.
+> - **Slow but terminating — not closed, deliberately.** The 699-element list literal that falsified the
+>   previous design reduces cleanly in **1,398 β-steps (exactly 2n), 35.2 s, 215 MB peak**, and must
+>   keep lowering. It measures `max_shared` = **0**, so this guard is *silent* on it rather than merely
+>   lenient — that is the property the previous one could not have. Its cost grows ~n³ and stops being
+>   comfortable between n=450 and n=500, which makes it a UX question: **Plan 5's "still running — hit
+>   50k steps" affordance is where it belongs**, not here.
+> - **`lower_group`'s duplication — the root cause, still unfixed.** `lower.rs:453` still clones the
+>   whole group term once per member. Binding `group` once was measured *not* to close the blow-up — `g`
+>   then occurs n times in the body, and under call-by-name the first β-step substitutes `G` into all n
+>   occurrences, relocating the same expansion to reduction time — and it moves every pinned step count
+>   and every `Origins` path in that function. ~~"This slice makes the program fail fast and typed
+>   instead of hanging; it does not make it work."~~ — **it does neither, since the revert. The program
+>   hangs.** And the falsification widened the root cause: `lower_group`'s duplication is one source of
+>   an expensive step, not the source. Two let-bound list literals, which `lower_group` never touches,
+>   reach 196.5 s in a single step by the same `Abs(body) × |arg|` route.
+>
+> **Two results the measurement turned up that nothing else in the tree records.**
+>
+> **Level 7's hang is computational, not memory.** One step held 100% CPU for **15+ seconds** at a peak
+> RSS of only **93.6 MB**, and had to be killed from outside. That is the **first direct evidence** for
+> the claim this entry has asserted since it was written — that `MAX_REDUCTION_STEPS` is never consulted
+> because control never returns from `reduce_step`. Every prior observation of this family was a memory
+> one (974 MB at 11 groups, an OOM kill at 16 levels), so the failure *looked* like a memory failure;
+> at the size the guard actually refuses, it is not, and a memory cap alone would never have caught it.
+> **11 groups is also not the boundary** — this entry records it because that is the size the first
+> investigation ran, and the level-by-level ramp puts the smallest hanging level at **7**.
+>
+> **`MAX_TERM_DEPTH` already bounds large list literals, mid-reduction, at n≈800 — and nobody knew.** A
+> list's *static* depth is 2n+2, well under 3,000 out to n≈1500, but **reduction grows it to roughly
+> 4n**: the already-reduced cons prefix nests around the still-unreduced suffix, and traversing a
+> reduced cell costs 3 hops against 1 for an unreduced one. So a large list literal answers `HitCap`
+> from the *depth* guard mid-run rather than normalizing. Found by measurement, and it matches the
+> analytic prediction (`2i + 2n + 2 > 3000` at i≈700, n=800). No existing test or comment records it.
+>
+> **The instrument is committed:** `crates/redextape-core/examples/list_reduction_probe.rs`, the only
+> re-runnable source for the 699-element list's reduction, the 46-program corpus sharing profile and the
+> family's `max_shared` per level. A recorded finding whose repro cannot be re-run is the
+> non-re-runnable-evidence defect this project has already flagged twice.
+
+> **STILL OPEN, and the next slice changed shape — updated 2026-07-31.** A logical-**size** guard was
+> designed
+> ([`2026-07-31-lambda-logical-size-guard-design.md`](../specs/2026-07-31-lambda-logical-size-guard-design.md)),
+> planned, and **implemented; it was abandoned before commit.** The measurement it needs landed —
+> `lambda::term::logical_size` (`517f15e`) and the β-step curve plus the TM check (`1d53ed0`) are in the
+> tree and stay. **The guard did not, and nothing in the tree refuses this program today.**
+>
+> **What killed it.** `lambda/lower.rs`'s pre-existing depth-guard test builds a **699-element list
+> literal** — chosen only to sit exactly at `MAX_LAMBDA_LOWER_DEPTH` — which measures **497,691 logical
+> nodes at a logical/physical ratio of exactly 1.000x** (measured 2026-07-31). No sharing anywhere: half
+> a million real allocations, a working program that reduces normally. The size guard refuses it. The
+> design's capability claim — "every such program observed so far does not terminate anyway" — is
+> **false for that program**, and the reason is structural: **a bound on logical size cannot tell
+> sharing-induced blow-up from a program that is simply big.** The bound's calibration could not have
+> caught it either, because the corpus it was read off has no list literal larger than `[1, 2, 3]`.
+> Quantified: 300,000 nodes caps list literals at **541 elements** (541 → 299,717, 542 → 300,813) where
+> the depth guard admits **699** — a separately designed limit silently tightened by 23%.
+>
+> ~~**So the next λ slice is a SHARING-based guard, not a size guard.** Keyed on the logical/physical
+> ratio, or on size only when the ratio is high; the hazard is sharing, and `deep_list(699)` at 1.000x
+> is not it. **That is a direction, not a design** — nobody has checked whether the ratio is cheap to
+> compute (physical size needs its own pass), what threshold separates the corpus's measured 1.00x–2.89x
+> from the hazard's 375x, or whether a ratio guard has its own false positives. It is a new slice with
+> its own design, and **the hang stays open until it lands.**~~
+>
+> — **IT LANDED, ON A THIRD QUANTITY, AND THE HANG RE-OPENED (2026-08-01).** Not the ratio: the slice
+> that followed was keyed on the largest *shared* subterm, and it is the block above this one. Struck
+> whole rather than corrected clause by clause, because every clause is individually reasonable and the
+> paragraph is still wrong — the hazard was named as *sharing* off one program that had sharing and one
+> that did not, and a sharing bound was then calibrated correctly against a quantity that does not
+> govern the cost at all (`|body| + Abs(body) × |arg|`, neither factor a sharing property). **"The hang
+> stays open until it lands" is the sentence to keep**, for the shape of its mistake rather than its
+> content: a design's landing is not a hazard's closing, and this one landed, closed nothing, and was
+> reverted inside a day. **The next λ slice is a per-redex work budget** — read the block above, not
+> this one. Full record with every number: the
+> **logical-size-guard design's §10** (not the structural-sharing design's §10, which the paragraph above
+> this block cites — two documents, both with a §10, and this entry now points at both).
+>
+> **The headroom figure that sized the abandoned bound was also wrong**, and it is the reason this block
+> re-states the corpus maximum. ~~"a corpus whose largest lowered term is 2,007 logical nodes"~~ — that
+> is `blowup_probe.rs`'s six-program §2b baseline `fn a/b/c … a(5)`, **which is not in
+> `FIRST_ORDER_DEMOS` at all**. Measured over all 46 on 2026-07-31, the true corpus maximum is **2,173**
+> (751 physical, 2.89x), the `fn s0/s1/s2 … s0(4)` three-way mutual recursion. The bound's headroom was
+> stated against a program the corpus does not contain — the lesson below, surviving in a place nobody
+> thought to grep, because the number was right and only its attribution was wrong.
+
 **The hazard the block above carries forward as "possible and merely unreached" is REACHED.** Not by a
 hand-built term — by **512 bytes of surface syntax** that parses, typechecks and lowers through the
 public pipeline. It lowers in **196 µs** to **1,644 allocations holding 616,152 logical nodes (375x)**,
-and its **first β-step did not finish in 13 minutes**, holding **974 MB**. At 3,215 bytes the ratio is
-**5.8e17** (9,541 allocations, 2^72.2 logical) and `lower` still returns in 2.9 ms.
+and reducing it reaches a **β-step that did not finish in 13 minutes**, holding **974 MB**. At 3,215
+bytes the ratio is **5.8e17** (9,541 allocations, 2^72.2 logical) and `lower` still returns in 2.9 ms —
+though **2^72.2 is the deleted `f64` fold's figure**, and the probe now prints that term as
+`>=2^64 (SATURATED)` since `logical_size` is `u64` and saturates. Read it as the size the term denotes,
+not as a number still printed anywhere.
+
+> ~~"its **first** β-step did not finish in 13 minutes"~~ — **falsified 2026-07-31 and corrected in
+> place, per the lesson below.** `blowup_probe --beta-curve` times one *cursor* step — the depth guard
+> plus the first β-step — and gets **50 ms** at those same 616,152 nodes, so the first β-step costs at
+> most that; it is cheap at every size this family reaches. The cost accrues *across* the run, because
+> a step's output can be |body| x |arg| nodes and the next step starts from that output. This mattered,
+> and is not pedantry: the obvious way to calibrate a bound — time one step and see where it hurts —
+> measures the wrong curve, by **32x against the size that actually hangs** (19,726,040 / 616,152 =
+> 32.0; against `MAX_LOGICAL_NODES` = 300,000 the same wall is 65.75x, which is clearance rather than
+> looseness — both figures are right and each needs its base said). The correction is what kept
+> `MAX_LOGICAL_NODES` at 300,000 instead of ~19M — a bound that was itself withdrawn days later, so
+> both figures in this paragraph are arithmetic about a constant the tree does not contain; its
+> successor `MAX_SHARED_LOGICAL_NODES` = 10,000, on the largest *shared* subterm, was a different
+> quantity that neither ratio sizes — **and it was reverted in turn (2026-08-01), so the tree now
+> enforces no bound of either kind.** The claim had survived in
+> **seven** committed sites across five files — README, `reduce.rs`, this roadmap, the structural-sharing
+> design, and three separate places in the guard's plan, one of which was a commit message body. The
+> review that caught it enumerated six; grepping found the seventh. **That is the lesson below recurring
+> a fourth time, including its corollary that the fix's own count of the damage is not to be trusted
+> either.**
 
 **Nothing fires.** `MAX_TERM_DEPTH` is not approached — depth **141** against 3,000, and depth grows ~12
 per nesting level, so the guard is reached around 250 levels at a ratio of 2^250. `MAX_REDUCTION_STEPS`
@@ -459,6 +649,37 @@ must measure *logical* size because physical size is exactly the number that loo
 removes the class rather than an instance and is a different project; and a node budget inside
 `LambdaCursor`, rejected because one β-step can produce |body| × |arg| nodes, so a check between steps
 reads a number that says nothing about the next one.
+
+**Option (a) was taken, and it is the one that came back — corrected 2026-07-31.** "It must measure
+*logical* size because physical size is exactly the number that looks fine here" is true and is **half
+the requirement**. Logical size alone refuses working programs, because a large no-sharing term measures
+large too (the block above).
+
+~~"What the guard actually needs is **both numbers**: logical size is the hazard's symptom, and the
+logical/**physical** ratio is what tells the hazard apart from a big program. The sentence dismissed
+physical size as uninformative when what it is, is the missing denominator."~~ — **that direction is
+not what landed either, and this paragraph is 150 lines below the entry that already struck it.** The
+correction is the same one made at the λ-blow-up entry above and is repeated here rather than
+cross-referenced, because the hedge on that entry is a blockquote note scoped to the blockquote it sits
+in and does not reach this paragraph. What shipped is keyed on **the largest shared subterm** —
+`MAX_SHARED_LOGICAL_NODES` = 10,000 over `max_shared_logical_size`, `1652e09`. The ratio is a whole-term
+*average* and the hazard is *one* big shared subterm: `subst` copies a shared subterm into every
+occurrence of the variable, so what makes a single step expensive is the largest one, not how much of
+the term is shared on average. Physical size was not "uninformative" and was also **not the missing
+denominator** — it is not in the shipped measurement at all. Two successive corrections to this one
+sentence both named a quantity that turned out not to be the answer, which is worth more than either
+of them: the sentence was wrong about *what to measure*, and each attempt fixed it by proposing a
+different function of the same two whole-term totals.
+
+**A THIRD CORRECTION, 2026-08-01, and it retires the shipped one too.** "`subst` copies a shared subterm
+into every occurrence of the variable" is **not what `subst` does** — its `Var` arm is `s.clone()`, an
+`Rc` bump, so occurrences are free; its `Abs` arm copies the argument once per binder in the body,
+unconditionally. A step costs `|body| + Abs(body) × |arg|`, and **neither factor is a whole-term total,
+a ratio, or a sharing property.** `MAX_SHARED_LOGICAL_NODES` was reverted. That makes **three** successive
+answers to this one sentence, and the standing observation now has a sharper form: every attempt named a
+function of quantities that were already being computed, and the right answer was a pair of quantities
+nobody was computing until `examples/guard_hole_probe.rs` did. The full record is the shared-subterm
+design's §10.
 
 **Three supporting results the same investigation established, kept because each stands alone.**
 **`Drop`'s Θ(physical) claim holds** — 10,001 allocations carrying 2^10001 logical nodes, freed in
@@ -564,6 +785,93 @@ discipline the TM-header and optimizer-tier entries above record from their own 
 here is the *printed-output* leg, and the observation that a fix dispatch can introduce a fresh instance
 of the class it was dispatched to close.
 
+**Recurrence, 2026-07-31 — the printed-output leg for the third time, and the count short for the
+fourth.** `blowup_probe.rs`'s `--beta-curve` printed `"choose MAX_LOGICAL_NODES with margin BELOW that
+figure."` — a legend telling a user to calibrate a constant withdrawn with the total-size guard. The
+logical-size design had **named** the site twice (its "Four stale references left standing in code"
+subsection) and deferred it twice, so this is also the first recorded case of the class surviving *two*
+deliberate namings. Fixed with the three doc-comment siblings, and the enumeration of four was again
+short by two: `reduce.rs`'s `depth_exceeds` doc cited 300,000 as "the bound the guard's design settles
+on" in the present tense, and the probe's own module doc still described the nesting family as one that
+lowers, which it has not since `1652e09`. **The figures were not re-pointed at the successor constant** —
+`MAX_SHARED_LOGICAL_NODES` measured the largest *shared* subterm, not total size, so 65.75x re-based
+onto 10,000 would have been a stale number given a false denominator, which is this lesson's own trap
+committed while closing it.
+
+**Recurrence, 2026-08-01 — and the count short for the fifth time.** Reverting the shared-subterm guard
+was scoped as three documents plus "the probes' pre-guard notes". The grep found **eight** files needing
+edits, including `README.md`'s architecture summary (which asserted the hang was closed), both earlier
+designs' status lines, and both plans. `reduce.rs`'s `depth_exceeds` doc was the worst of them: it closed
+with "the sizes at which one step does not return are refused before reduction ever starts" — a sentence
+that was false the moment the guard came out and that a reader would have taken as a guarantee. Not
+declining to re-grep the tree; the tree was re-grepped. **The enumeration written before the grep was
+short again, for the fifth consecutive time on this class**, which is now less a warning than a
+measurement: on this codebase, a list of consequence sites written from memory runs ~2x short.
+
+#### The sibling lesson: a cost claim is not established until a program chosen to break it has been run (2026-08-01)
+
+Recorded beside the lesson above because it is the same discipline read from the other end. That one is
+about a claim that was **once true** surviving where nobody re-greps. This one is about a claim that was
+**never true** shipping because nobody looked for the counterexample — and the tree already contained it
+both times.
+
+**Three designs on the λ single-step hazard, three falsifications, each by measurement rather than
+reasoning.**
+
+**Two of the three are in the table, and which one is missing is this entry's whole subject.** The
+first falsification is the structural-sharing design's §10 claim that a term whose logical size runs
+away from its physical size was "possible and merely unreached" — falsified 2026-07-31 by 512 bytes of
+ordinary source, and recorded struck-through at the λ-structural-sharing entry above. It has no row
+because its falsifying program **was not already in the tree**: `examples/blowup_probe.rs` had to be
+written to find it. The two below are the ones where the program was already there, already passing,
+and already read — which is the failure this entry exists to name.
+
+| design | the claim | what falsified it | where the evidence already sat |
+| --- | --- | --- | --- |
+| total logical size ≥ 300,000 | "every such program observed so far does not terminate anyway" | a 699-element list literal reduces cleanly in 1,398 steps, 35 s | `lambda/lower.rs`'s own depth-guard test had been constructing it since before the design |
+| largest shared subterm > 10,000 | "`subst` copies a shared subterm into every occurrence of the variable" | a two-list program with no recursion scores **4** against 10,000 and takes **19.0 s in one step** | `examples/lambda_sharing_probe.rs` PART B, one branch earlier: `Σ abs×arg` at **86.8%** of visited nodes, its headline finding |
+
+**In both cases the deciding evidence was already in the tree, already passing, and already read by
+whoever wrote the design.** Neither was found by re-reading code; both were found by running a program
+picked to be inconvenient. Reasoning from the code's shape produced a plausible mechanism twice and both
+times the code did something else — the second time contradicted by a number the same author's previous
+branch had printed as its headline.
+
+**The rule: before a bound ships, run the program designed to defeat it, and look for that program in
+what the repository already runs.** The corpus is calibration, not coverage: it is chosen to be
+representative, so it cannot falsify. The 46-program corpus admitted both bounds. The tests admitted both
+bounds. What falsified them was one adversarial program each, cheap to write and cheap to run, in both
+cases derivable from a number the tree had already measured. **A guard's own instrument should include
+the case it is designed to miss**, and the reverted guard's record is what that looks like when it is
+added afterwards ([`2026-07-31-lambda-shared-subterm-guard-design.md`](../specs/2026-07-31-lambda-shared-subterm-guard-design.md) §10,
+`examples/guard_hole_probe.rs`).
+
+#### The same family, one level up: generate task briefs JUST-IN-TIME, never in a batch (2026-07-31)
+
+Recorded beside the lesson above because it is the same failure — a superseded claim surviving where
+nobody re-read — moved from documents into the **execution machinery**.
+
+**What happened, on the logical-size-guard slice.** The controller pre-generated all three task briefs
+at the start of execution. Task 2 then corrected an off-by-one in the plan's test literals — the
+generator's `nested_groups_src(m)` yields **m+1** groups, so both pinned programs were one level off —
+and the correction landed in the plan document (`d738bac`) and in Task 2's report. **`task-3-brief.md`
+had already been extracted and still carried the stale literals.** Task 3's implementer hit the failure
+on the first run, traced it, found the fix sitting one directory over, and applied it independently.
+Nothing was lost, but only because the stale literal happened to fail loudly; the same off-by-one on a
+figure that is merely *wrong* rather than *assertion-breaking* would have shipped.
+
+**The rule: a task brief is generated when its task starts, from the plan as it stands then.** A brief
+extracted ahead of time is a copy, and this roadmap's whole standing lesson is that copies do not
+receive corrections. Batching them converts every mid-run plan correction into a silent divergence for
+every task that has not started yet — and mid-run corrections are the *expected* case here, since the
+project's stated practice is to correct the plan when measurement contradicts it.
+
+**Why it belongs beside the lesson above rather than inside it.** That one is about *where* a falsified
+claim hides (printed output, example transcripts, a second design's summary line). This one is about
+*when* a copy is taken: even a perfect grep of the tree cannot reach a brief in git-ignored scratch that
+was extracted before the correction existed. The two together are the same rule read from both ends —
+**do not make copies you will not re-derive, and re-grep the ones you cannot avoid.**
+
 ### Plan 5 — Web UI: editable panes, renderers, linking, detach, caps
 
 - **New app:** `web/` (Vite + React + TypeScript + Biome). CodeMirror 6 panes for source / λ /
@@ -574,6 +882,46 @@ of the class it was dispatched to close.
 - **Testable outcome:** Vitest component tests + a Playwright smoke test (load a program, run,
   see linked highlights, edit a derived pane → detached badge). `npm run build` green (activates
   the CI `web` + `docker` jobs).
+
+#### Non-progress detection: a TM-only UI diagnostic, and NOT a guard (raised 2026-07-31)
+
+Raised while designing the λ logical-size guard, and recorded here rather than there because it is a
+renderer feature, not a safety one. **Nothing in the tree detects this today** — verified by grep:
+there is no cycle, spin-loop or non-progress check anywhere, and `non_termination_hits_the_cap`
+(`lambda/reduce.rs`) handles Ω purely by exhausting the step cap.
+
+**Why it is not a guard, which is the part worth keeping.** The 512-byte blow-up above is *not* a spin
+loop — the term is changing, it is being built, and the failure is that **one β-step never completes**.
+Control never returns from `reduce_step`. So a state-change check has exactly the same blind spot as
+the two guards that already miss it: `MAX_REDUCTION_STEPS` is read between steps, a wall-clock budget
+is read between steps (measured: a 90 s budget produced a 330-second run), and a "did the state move?"
+check would be read between steps too. **Anything that runs between steps cannot see a failure inside
+one.** ~~That is the whole reason the guard belongs at lowering time.~~ — **corrected 2026-08-01: it is
+the reason the check must be read BEFORE a step, which is not the same as at lowering time.** A
+lowering-time guard was built on that inference and reverted: the quantity it read is destroyed by the
+second β-step while the cost it was meant to bound keeps climbing. "Not between steps" leaves two
+placements, and the successor takes the other one — a per-redex work budget inside
+`LambdaCursor::next`, priced on the redex about to be reduced. See the λ blow-up entry above.
+
+**On the TM it is decidable, and for a bounded-tape run it is complete.** A configuration is (state,
+tapes, head positions); the machine is deterministic, so an identical configuration after a step means
+it loops forever — O(tape) to check. Stronger: if tape usage is bounded, the configuration space is
+*finite*, so non-halting ⟺ some configuration repeats, and Floyd/Brent cycle detection is a decision
+procedure rather than a heuristic. "This machine is in a loop, here is the repeating configuration" is
+a much better thing to show than "hit 5,000,000 steps".
+
+**On the λ side it is a trap, for two independent reasons.** First, Ω does β-reduce to itself
+structurally, but `beta` rebuilds through `shift`, which allocates on every arm — so the result is a
+fresh allocation, `PartialEq`'s `ptr_eq` fast path never fires, and each check costs a full structural
+compare, which is O(*logical* size) — the exponential quantity every guard proposed for this hazard has
+tried to avoid touching, and none of them is in the tree. **The check would itself be the hazard.** Second, the non-terminations that matter do not repeat: `Y f`
+and unbounded recursion produce ever-growing distinct terms forever. It would catch Ω and almost
+nothing else. The honest λ affordance is the step cap.
+
+**In general it is undecidable** — it is the halting problem, which is a pointed thing to meet in a
+project whose tagline is *"watch the Church–Turing thesis happen."* Worth saying out loud in the UI
+rather than hiding: the TM pane can sometimes prove a loop, the λ pane cannot, and that asymmetry is
+a real fact about the two models rather than a gap in the implementation.
 
 ### Plan 6 — CLI + formatter surface
 

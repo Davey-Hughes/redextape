@@ -70,12 +70,29 @@ Every backend is checked against every other on a shared 46-program corpus, whic
   the doc comments alone. It is the only check that the printed formats are documented well enough
   to reimplement.
 
-Two known limits, recorded rather than hidden. The λ backend **declines** a handful of programs the
-other legs run — a closure over a `let mut` binding — and answers `LowerError` rather than risk a
-silent miscompile; they live in `LAMBDA_LIMITATION_DEMOS` and are asserted TM-only. And **nested
-mutually recursive `fn` groups** blow the λ term up exponentially through structural sharing: 512
-bytes of ordinary source reaches a first β-step that does not finish. `examples/blowup_probe.rs`
-reproduces it and the roadmap sizes the four candidate fixes.
+Two known limits, recorded rather than hidden. **The first is a refusal; the second is not, and that
+is the whole difference between them.** The λ backend **declines** a handful of programs the other legs
+run — a closure over a `let mut` binding — and
+answers a `LowerError` rather than risk a silent miscompile; they live in
+`LAMBDA_LIMITATION_DEMOS` and are asserted TM-only. Separately, **nested mutually recursive `fn`
+groups** blow the λ term up exponentially through structural sharing, because `lower_group` clones the
+whole group term once per member and the factor nests. 512 bytes of ordinary source reaches a β-step
+that does not finish — a *later* step, not the first, which is cheap at every size the family reaches.
+**It is open, and it is wider than that.** Two guards were designed against it and both were falsified
+by measurement. A total-size bound refused a working 699-element list literal. Its successor,
+`MAX_SHARED_LOGICAL_NODES` = 10,000 on the largest *shared* subterm, landed and was reverted: a
+trivially-written program — `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)`, 4,821 bytes,
+no recursion — measures **4** against that bound of 10,000 and spends **19.0 s in its first β-step**.
+The mechanism both guards named was wrong. `subst`'s `Var` arm is an `Rc` bump, so occurrences are
+free; its `Abs` arm copies the whole argument once per binder in the body, whether the variable occurs
+or not, so a step costs `|body| + Abs(body) × |arg|` — **neither factor a sharing property**.
+`examples/blowup_probe.rs`, `examples/list_reduction_probe.rs` and `examples/guard_hole_probe.rs` are
+the instruments; the record is
+`docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §10, and the next design —
+a per-redex work budget checked before each step rather than once at lowering — is in the roadmap.
+
+Divergence is a separate matter and stays the step cap's job (`MAX_REDUCTION_STEPS`): the family does
+not terminate at any level, which no guard on a step's cost would change.
 
 ### Not built yet
 
@@ -123,7 +140,7 @@ each of the four configurations: the default (`cranelift`), `--no-default-featur
 llvm`, and `--no-default-features --features llvm`. CI runs this same script. Pass `--no-llvm` to
 skip the LLVM configurations when no LLVM 22 toolchain is installed.
 
-That gate currently covers **704 tests** at default features (`redextape-core` 627,
+That gate currently covers **719 tests** at default features (`redextape-core` 642,
 `redextape-native` 66, `redextape-native-rt` 11), and `--features llvm` takes `redextape-native` to
 104. Recount rather than trust those numbers: `cargo nextest list --workspace | wc -l`.
 

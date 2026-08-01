@@ -14,7 +14,7 @@
 //! reference==λ) stay for localization; this file is the unified capstone.
 //!
 //! This file keeps the name `three_way_oracle.rs` even though the oracle it drives is now four-way:
-//! renaming it would break `first_order_demos_stay_synced_across_all_three_copies`'s path-based
+//! renaming it would break `first_order_demos_stay_synced_across_all_five_copies`'s path-based
 //! extraction of `FIRST_ORDER_DEMOS` (by `CARGO_MANIFEST_DIR`-relative path, not by module name) for no
 //! gain, so the filename/doc mismatch is a deliberate decision, not an oversight.
 //!
@@ -432,18 +432,34 @@ fn extract_str_array(source: &str, const_name: &str) -> Vec<String> {
     out
 }
 
-/// `examples/step_survey.rs` and `redextape-native/tests/native_oracle.rs` each hand-copy this
-/// file's `FIRST_ORDER_DEMOS` — an example is a separate binary crate and cannot `use` an
-/// integration test's module, and the native crate's oracle predates a shared fixtures crate — so
-/// both are duplicated by hand rather than referencing this array. That has already drifted twice
-/// (documented in `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`'s survey caveat and,
-/// within this very branch, in `step_survey.rs` again after the FIRST fix), so a one-off resync is
-/// demonstrably not durable on its own. This test reads all three files as TEXT (via
-/// `CARGO_MANIFEST_DIR`, so it works under `cargo test` from any directory) and asserts their
-/// extracted string literals are byte-for-byte equal, catching the next drift at compile-time cost
-/// instead of the next survey run silently describing a stale corpus.
+/// `examples/step_survey.rs`, `redextape-native/tests/native_oracle.rs`,
+/// `examples/list_reduction_probe.rs` and `examples/lambda_sharing_probe.rs` each hand-copy this file's
+/// `FIRST_ORDER_DEMOS` — an example is a separate binary crate and cannot `use` an integration test's
+/// module, and the native crate's oracle predates a shared fixtures crate — so all four are duplicated
+/// by hand rather than referencing this array. That has already drifted twice (documented in
+/// `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`'s survey caveat and, within this very
+/// branch, in `step_survey.rs` again after the FIRST fix), so a one-off resync is demonstrably not
+/// durable on its own. This test reads all five files as TEXT (via `CARGO_MANIFEST_DIR`, so it works
+/// under `cargo test` from any directory) and asserts their extracted string literals are byte-for-byte
+/// equal, catching the next drift at compile-time cost instead of the next survey run silently
+/// describing a stale corpus.
+///
+/// COPIES WERE ADDED TO THIS TEST AFTER THE FACT, TWICE, AND THE SECOND TIME PROVES THE FIRST FIX'S OWN
+/// COUNT WRONG. `list_reduction_probe.rs` was committed with a copy and a comment claiming this test kept
+/// it in sync; it did not, because the test covered three, so the test went to four. It should have gone
+/// to five: `examples/lambda_sharing_probe.rs` carries a copy too, with its own module doc citing the
+/// same drift history, and nothing read it. **The fix's own count of the damage was short** — which is
+/// the roadmap's standing lesson about this class stated by a fresh instance of it, and the reason this
+/// doc names the enumeration method rather than the number: the check is `grep -rn FIRST_ORDER_DEMOS`
+/// over the whole tree, not a list anyone maintains by memory. All five were byte-identical when the
+/// fifth was added, so this closed an uncovered copy rather than live drift; that is the window this
+/// test exists to shut, and it stayed open through one deliberate attempt to shut it.
+///
+/// An example target is not a test target, but that was never what made a copy checkable — the check is
+/// textual and path-based, so an untracked-by-CI probe costs one more `read_to_string` and closes the
+/// drift window instead of documenting it.
 #[test]
-fn first_order_demos_stay_synced_across_all_three_copies() {
+fn first_order_demos_stay_synced_across_all_five_copies() {
     let manifest = env!("CARGO_MANIFEST_DIR");
     let canonical_src =
         std::fs::read_to_string(format!("{manifest}/tests/three_way_oracle.rs")).expect("read this file's own source");
@@ -451,16 +467,27 @@ fn first_order_demos_stay_synced_across_all_three_copies() {
         std::fs::read_to_string(format!("{manifest}/examples/step_survey.rs")).expect("read step_survey.rs");
     let native_oracle_src = std::fs::read_to_string(format!("{manifest}/../redextape-native/tests/native_oracle.rs"))
         .expect("read native_oracle.rs");
+    let probe_src = std::fs::read_to_string(format!("{manifest}/examples/list_reduction_probe.rs"))
+        .expect("read list_reduction_probe.rs");
+    let sharing_probe_src = std::fs::read_to_string(format!("{manifest}/examples/lambda_sharing_probe.rs"))
+        .expect("read lambda_sharing_probe.rs");
 
     let canonical = extract_str_array(&canonical_src, "FIRST_ORDER_DEMOS");
     let step_survey = extract_str_array(&step_survey_src, "FIRST_ORDER_DEMOS");
     let native_oracle = extract_str_array(&native_oracle_src, "FIRST_ORDER_DEMOS");
+    let probe = extract_str_array(&probe_src, "FIRST_ORDER_DEMOS");
+    let sharing_probe = extract_str_array(&sharing_probe_src, "FIRST_ORDER_DEMOS");
 
     assert_eq!(canonical.len(), FIRST_ORDER_DEMOS.len(), "this file's own extraction lost or gained entries");
     assert_eq!(step_survey, canonical, "examples/step_survey.rs's FIRST_ORDER_DEMOS has drifted from this file's");
     assert_eq!(
         native_oracle, canonical,
         "redextape-native/tests/native_oracle.rs's FIRST_ORDER_DEMOS has drifted from this file's"
+    );
+    assert_eq!(probe, canonical, "examples/list_reduction_probe.rs's FIRST_ORDER_DEMOS has drifted from this file's");
+    assert_eq!(
+        sharing_probe, canonical,
+        "examples/lambda_sharing_probe.rs's FIRST_ORDER_DEMOS has drifted from this file's"
     );
 }
 

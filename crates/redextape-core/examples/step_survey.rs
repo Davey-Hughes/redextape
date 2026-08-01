@@ -15,9 +15,12 @@
 //! which is outside this survey's scope (every program here must complete under `DEFAULT_CAPS`).
 //! This copy (and `redextape-native/tests/native_oracle.rs`'s) drifted from `FIRST_ORDER_DEMOS` twice
 //! across two slices despite the "verbatim" claim above, so hand-checking is no longer enough:
-//! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_three_copies` now asserts all three
-//! copies are textually identical, so a future drift fails a test instead of silently stale-ing this
-//! report's corpus count.
+//! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_five_copies` now asserts all five
+//! copies — this one, `native_oracle.rs`'s, `examples/list_reduction_probe.rs`'s,
+//! `examples/lambda_sharing_probe.rs`'s and the canonical — are textually identical, so a future drift
+//! fails a test instead of silently stale-ing this report's corpus count. It said "four" until the
+//! whole-branch review found the fifth; the enumeration is `grep -rn FIRST_ORDER_DEMOS` over the tree,
+//! not a count anyone maintains from memory.
 //!
 //! THE SURVEY'S OWN BIGGEST LIMITATION, stated up front because it bounds every number below: that
 //! corpus is an ORACLE suite, built to exercise BACKEND FEATURES (arithmetic, lists, recursion,

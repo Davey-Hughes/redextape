@@ -62,15 +62,42 @@ pub const MAX_TERM_DEPTH: u32 = 3_000;
 ///
 /// CORRECTED 2026-07-31: IT IS ALSO REACHED. This comment used to close by calling the shape "merely
 /// unreached — nothing in the corpus builds one", which was true of the corpus and false as a
-/// guarantee. `examples/blowup_probe.rs` reaches it from **512 bytes of ordinary surface syntax**:
-/// `lower_group` clones the whole group term once per member (`lower.rs:453`) and the factor nests,
-/// so nested mutually recursive `fn` groups lower to 1,644 allocations holding 616,152 logical nodes
-/// (375x) — and that term's first β-step did not finish in 13 minutes at 974 MB. Nothing in this file
-/// fires: the term's depth is 141 against `MAX_TERM_DEPTH`, and `MAX_REDUCTION_STEPS` is never
-/// consulted because control does not return from `reduce_step`. This guard is Θ(logical) and crosses
-/// 3.6 s at 1,124 bytes of source, but it is not the failure — it is the part that still returns. See
-/// the design's §10 and the roadmap's λ-blow-up entry; the fix is a lowering-side decision, not one
-/// this function can make.
+/// guarantee. `lower_group` clones the whole group term once per member (`lower.rs:453`) and the factor
+/// nests, so nested mutually recursive `fn` groups lower to a term whose logical size runs far ahead of
+/// its physical one. `examples/blowup_probe.rs` reaches it from **512 bytes**: 1,644 allocations holding
+/// 616,152 logical nodes (375x), and reducing that term reaches a β-step that did not finish in 13
+/// minutes at 974 MB.
+/// **That step is not the first one**, which this line used to say it was: `blowup_probe`'s
+/// `--beta-curve` times ONE CURSOR STEP — this function walked over the whole logical tree, plus the
+/// first β-step — and gets 50 ms at those same 616,152 nodes. So 50 ms is an UPPER BOUND on that
+/// β-step rather than its cost alone, and this guard's share of it is ~2%, from the Θ(logical) rate
+/// below. The cost accrues ACROSS the run — a step's output can be |body| x |arg| nodes and the next
+/// step starts from that output — which is why a bound calibrated by timing one step is about 32x too
+/// loose: that curve's wall is at 19,726,040 logical nodes and the program that actually hangs is
+/// 616,152, so 19,726,040 / 616,152 = 32.0. (The same wall is 65.75x above the 300,000-node bound the
+/// *withdrawn* total-size design settled on — that guard never landed, and `MAX_LOGICAL_NODES` is not
+/// in the tree. Both ratios are right; they answer different questions, and the loose-by figure is the
+/// one against the observed hang.) Nothing in this file fired: the term's depth
+/// was 141 against `MAX_TERM_DEPTH`, and `MAX_REDUCTION_STEPS` was never consulted because control did
+/// not return from `reduce_step`. This guard is Θ(logical) and crosses 3.6 s at 1,124 bytes of source
+/// — 2.52e9 logical nodes, so ~1.4 ns/node, which is where the ~2% above comes from — but it was not
+/// the failure; it is the part that still returns.
+///
+/// **THE HANG IS OPEN. NOTHING REFUSES THESE SIZES.** ~~"the sizes at which one step does not return
+/// are refused before reduction ever starts"~~ — **false, and this was the single most misleading line
+/// in the record.** A lowering-side guard was made and then reverted: `MAX_SHARED_LOGICAL_NODES` =
+/// 10,000 on the largest SHARED subterm (`1652e09`), removed after measurement falsified it. The
+/// counterexample is not exotic — `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)`, 4,821
+/// bytes, no recursion, measures `max_shared` = **4** against that bound of 10,000 and takes **19.0 s in
+/// its first β-step**. The reason is visible in `term.rs`: `subst`'s `Var` arm is `s.clone()` (an `Rc`
+/// bump — occurrences are FREE), while its `Abs` arm re-shifts the whole argument once per `Abs` node in
+/// the body, unconditionally. A step costs **`|body| + Abs(body) × |arg|`**, measured at 23.1–23.6
+/// ns/node-copy over a 1,255x range, and neither factor is a sharing property. So this function still
+/// pays the logical number on terms `lower` still emits at every size, and a single `reduce_step` can
+/// still fail to return. See `examples/guard_hole_probe.rs` (the instrument),
+/// `docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §10, and the roadmap for
+/// the successor design — a per-redex work budget `logical_abs_count(body) × logical_size(arg)`, checked
+/// in `LambdaCursor::next` BEFORE the step it prices, which is the one place that sees both factors.
 pub(crate) fn depth_exceeds(t: &LambdaTerm, limit: u32) -> bool {
     let mut stack: Vec<(&LambdaTerm, u32)> = vec![(t, 0)];
     while let Some((node, d)) = stack.pop() {
