@@ -16,6 +16,15 @@
 > [`../plans/2026-07-19-redextape-roadmap.md`](../plans/2026-07-19-redextape-roadmap.md) and
 > `crates/redextape-core/examples/shift_cost_probe.rs`.
 
+> **EVERY `Σ abs×arg` FIGURE IN THIS DOCUMENT IS STALE AS OF 2026-08-02 — §10 has the falsification.**
+> The counter is a static model (`count_abs(body) × size_of(arg)`) written against a `subst` whose `Abs`
+> arm copied unconditionally. The `maxfree` short-circuits that closed the hang on 2026-08-01 removed
+> the cost it counts without changing the counter, so it over-reports the corpus figure by **~1,584x**
+> (70,542,349 modelled against 44,539 allocations measured), and the fix it justified measures as a
+> **0.99x regression** on the family it was most likely to help. The percentages in the next paragraph
+> and everywhere below — 86.8%, 95.6%, 99.7% — are shares OF THAT COUNTER and inherit the error. They
+> are left in place because the falsification is stated against them.
+
 **Status:** designed 2026-07-30; **layers 0, 1 and 1.5 landed 2026-07-31** and their numbers are recorded
 in §2, §3 and §10 (which §3 corrects in one place — the across-trace ratio). **Layers 2 and 3 are
 deliberately not planned**, on layer 1.5's evidence: §10 records that 86.8% of the nodes the reducer
@@ -491,14 +500,29 @@ therefore the weakest of the candidates, not the strongest; §10's closing table
   the logical total is fixed by construction.
 
   **`seen.len()` cannot move either, for a sharper reason: none of `subst`'s sharing ever reaches a
-  snapshot.** `beta` closes the hole with `shift(-1, 0, …)` (`term.rs:129`), and `shift`
-  (`term.rs:94-108`) has no sharing-preserving arm — all three of its arms allocate. It therefore
+  snapshot.** `beta` closes the hole with `shift(-1, 0, …)`, and ~~`shift` has no sharing-preserving arm
+  — all three of its arms allocate~~. It therefore
   rebuilds the entire reduct node for node, discarding whatever `subst` shared internally before the
   result is ever stored in a step. Measured on `(\x. \a. \b. x x) arg` with a three-node argument:
   today's `subst` returns 9 logical nodes over **6** distinct allocations; after the closing shift it is
   9 over **9**; `beta`'s output shares **0** allocations with either `abs_body` or `arg`. And the
   general form, over the probe's own enumeration — every term to 6 nodes over 4 indices, `d ∈ 0..=2`,
   `cutoff ∈ 0..=2` — `shift`'s output shares an allocation with its input in **0 of 10,008** cases.
+
+  > **"`shift` HAS NO SHARING-PRESERVING ARM" IS FALSE AS OF 2026-08-01, AND IT IS THE MOST LOAD-BEARING
+  > STALE SENTENCE IN THIS DOCUMENT.** `shift` now opens with `if t.maxfree() <= cutoff { return
+  > t.clone(); }` — it returns the ALLOCATION whenever no free index is in range, which is the fix that
+  > closed the hang. Everything above was measured before that landed, including the 0-of-10,008 figure,
+  > and the enumeration would not come out that way today.
+  >
+  > **The conclusion still holds, for a reason the struck sentence stated too strongly.** The closing
+  > shift is `shift(-1, 0, ·)` at **cutoff 0** over a term that has just had a variable substituted into
+  > it, so its `maxfree` is above 0 and the short-circuit cannot fire at the root; it still rebuilds the
+  > reduct. What is no longer true is the general claim about `shift`, and the difference matters
+  > because the OPENING shift — `shift(1, 0, arg)` — hits the short-circuit whenever `arg` is closed,
+  > which is **88.4% of corpus β-steps**. That asymmetry between `beta`'s two shifts is exactly what the
+  > 2026-08-02 falsification turns on: measured, `Σ opening` is 5.7% of allocations and `Σ closing` is
+  > 12.3%.
 
   The draft's mechanism sentence was wrong about the baseline as well. It said depth-0 occurrences
   "stop being copied at all"; `term.rs:117` already returns `s.clone()` at every depth today, and the
@@ -516,9 +540,16 @@ therefore the weakest of the candidates, not the strongest; §10's closing table
   answer. A fast path that never fires is dead code that reads as an optimization.
 - **The probe ships** as `examples/lambda_sharing_probe.rs`, with its self-verification, so §2's and
   §3's tables are reproducible rather than quoted.
-- **`verify_subst_rewrite` moved into a test target — done.** The shift-additivity lemma, the
+- **`verify_subst_rewrite` moved into a test target — done, and its SUBJECT inverted 2026-08-02.** The
+  rewrite it validated is falsified on cost, so the file no longer proposes anything: `subst_lifted` and
+  a new eager `subst_naive` are REFERENCES, and the shipped `subst` is what the 355,840 triples are
+  checked against — two independent implementations instead of one, which is strictly stronger coverage
+  than the file used to carry. The lemma stays as a property of `shift` in its own right; the sharing
+  pin gains the short-circuit the falsification turns on (`shift(1, 0, ·)` on a closed term returns its
+  allocation). Renamed to `subst_differential.rs`, because "rewrite equivalence" named a rewrite that
+  no longer exists. The shift-additivity lemma, the
   exhaustive differential and the `lift == 0` allocation-identity pin, all three, now live in
-  `crates/redextape-core/tests/subst_rewrite_equivalence.rs` as three `#[test]` functions, which
+  `crates/redextape-core/tests/subst_differential.rs` as three `#[test]` functions, which
   `cargo nextest run -p redextape-core` runs on every invocation — including CI's. It used to live in
   the probe, where §10 called it a check that "runs on every invocation". That was true and weaker
   than it sounds: **CI compiles examples but never runs this one.** `.forgejo/workflows/ci.yml:112`
@@ -550,6 +581,16 @@ therefore the weakest of the candidates, not the strongest; §10's closing table
 ## 10. Open questions
 
 ### CLOSED 2026-07-31 by layer 1.5: what dominates λ replay time is `subst` re-copying the argument under every binder — 86.8% of the nodes the reducer visits, and 95.6% of the ones it constructs
+
+> **RE-OPENED AND ANSWERED DIFFERENTLY 2026-08-02.** This heading names a counter, not a measurement,
+> and the counter stopped tracking the clock on 2026-08-01 when the `maxfree` short-circuits landed.
+> `subst` no longer re-copies the argument under every binder — it re-copies it under the binders on the
+> path to an occurrence, of which there are fewer than there are occurrences. The measured figure is
+> **44,539 allocations corpus-wide against the 70,542,349 this section reports** (`subst` in total
+> costs 68,188, spine included), and the fix this
+> section proposes is a **0.99x regression**. The falsification is stated in full at the subsection
+> below that begins "The fix, written down and deliberately not implemented here"; everything between
+> here and there is history, and is kept because the reasoning is sound and the conclusion is not.
 
 Node count does not predict replay time because node count is not what the reducer spends its time on.
 Measured by `examples/lambda_sharing_probe.rs` PART B/C, which counts, per β-step, the size of every
@@ -686,6 +727,16 @@ confirm it, because there is no new measurement in either. The independent check
 one: re-run the probe after the `subst` fix and see whether the two-price column of the table below
 predicted the result.
 
+**THE OUT-OF-SAMPLE CHECK WAS RUN ON 2026-08-02, AND NAMING IT IN ADVANCE IS WHY THERE IS AN ANSWER.**
+It did not run the way this paragraph imagined — there is no `subst` fix, the `maxfree` short-circuits
+landed instead — but the check is the same one and the two-price split **passed it**. Refitted against a
+faithful accounting on a reducer three to four orders of magnitude faster, the allocating price is
+**42–50 ns/node with `a` stable to ~1% under leave-one-out**, and the accounting predicts the clock to
+about 3% (189,152 nodes → 7.6 ms against a 7.4 ms corpus). What did *not* survive is the **ranking** the
+column was used to produce — see the correction over the table in "Layers 2 and 3" below. The split is
+sound; the projection built on it was not, because it varied one counter and held three others fixed
+that were about to move.
+
 **What is *not* well determined is `r`, and it is less well determined than an earlier draft of this
 paragraph said.** That draft reported three runs landing at 1.07, 1.83 and 1.91 ns/node, leave-one-out
 swings of "roughly ±40%", and concluded the corpus pins `r` to *small and positive*, somewhere in
@@ -739,6 +790,55 @@ genuine cycle, so the corpus contains exactly five mutually recursive programs �
 leads row 7 (179.9 ms) by **0.5%** on this run, and by 1.4% on the run before it. The five mutually
 recursive programs and row 7 are the six slowest; which of the last two comes fifth is a coin flip. The
 claim that survives is the one about binder density, which is structural and does not move at all.
+
+> ## FALSIFIED 2026-08-02 — EVERYTHING FROM HERE TO THE END OF THIS SUBSECTION IS HISTORY
+>
+> **The fix below is not a win. Priced against what `subst` actually allocates today it is a 0.99x
+> LOSS on the nested-group family at every level, and 1.00x on both guard counterexamples — thirteen of
+> thirteen programs at ≤ 1.00x.** It is left standing in full, unedited except for this block and the
+> strike-throughs at the end, because every step of the reasoning is individually sound and the
+> conclusion is still wrong: that is the lesson, and deleting it would remove the evidence for it.
+>
+> **What went wrong is one thing and it is not the algebra.** The shift-additivity lemma is true, the
+> exhaustive differential is valid, and the `lift == 0` arm really is load-bearing. What is false is the
+> *sizing*. `Σ abs×arg` = 70,542,349 is `count_abs(body) × size_of(arg)`, a STATIC model written against
+> a `subst` whose `Abs` arm copied unconditionally. The `maxfree` short-circuits that closed the hang
+> (2026-08-01, further down) removed the cost it counts without changing the counter:
+>
+> | | model says | measured |
+> | --- | --- | --- |
+> | the target quantity, corpus-wide | 70,542,349 | **44,539** allocations (~1,584x over-count) |
+> | β-steps whose argument is CLOSED, so the re-shift is a refcount bump | not modelled | **88.4%** (5,266 / 5,955) |
+> | corpus-wide win from the rewrite | 7.0x / 18.0x | **2.16x**, on 36,595 allocations total |
+> | nested-group family, levels 1–11 | *(never measured)* | **0.99x — a regression** |
+>
+> **WHAT THIS IS NOT SAYING, because "falsified" reads as "negligible" and it is not.** On this corpus
+> the re-shift is **23.5% of every allocation the reducer makes** — the second-largest counter of seven —
+> and the rewrite really would cut it to ~7,944, about 19% off the total. Two things sink it anyway, and
+> both are magnitude rather than direction: the absolute is **~1.5 ms across all 46 programs**, and on
+> the nested-group family — the one that actually stresses the reducer — the same rewrite is a
+> regression. A change that is +19% on programs finishing in microseconds and −1% on the ones that do
+> not is not worth its blast radius. What is falsified is the *sizing* that made it look like a 7–18x
+> corpus-wide win, and the premise that it helps where help is needed.
+>
+> **And the sign flips for a structural reason, not a marginal one.** After the short-circuit `subst`
+> descends through only the binders ON THE PATH TO AN OCCURRENCE, not every `Abs` in the body — so
+> "binders crossed" is now *smaller* than "occurrences", and the whole premise ("the step has ~1 use for
+> an argument it copies 44 times") is inverted. The per-unit comparison agrees: today's arm shifts the
+> progressively lifted `s_d`, whose higher indices make the short-circuit fire *less* often, so each
+> unit of today's cost is at least each unit of the rewrite's. `per_occ`/`reshift` = 1.5 means the
+> rewrite performs at least 1.5x as many shifts as it removes.
+>
+> **What the census found instead**, and no counter in this design tracks either: the body **spine**
+> `subst` rebuilds is 60–90% of what it now allocates, and `beta`'s **opening** `shift(1, 0, arg)` is
+> the only quantity that still scales with the family — 20,725 → 190,666 allocations across levels 1 to
+> 11 while everything else is flat or falling.
+>
+> Instrument: `examples/shift_cost_probe.rs`'s census section, which mirrors `subst` arm for arm
+> INCLUDING both short-circuits rather than modelling it, and steps with `LambdaCursor`. Counts only, no
+> seconds. The candidate it prices is `tests/subst_differential.rs`'s `subst_at` with the
+> short-circuits merged in — the version in that file has neither, having been written before they
+> existed, so counting it as written would have priced a function nobody would ship.
 
 **The fix, written down and deliberately not implemented here** (this was a measurement task; §9's
 non-goals hold). The shift is redundant, not merely repeated: at binder depth `d` the argument is
@@ -797,7 +897,7 @@ the repo that no longer exists. Two things were wrong with that. It could not be
 de Bruijn term generation almost never produces the deep-binder/high-index configurations the `lift`
 arithmetic actually stresses — the one thing the check exists to cover. It is replaced by an
 **exhaustive** differential, living as three `#[test]`s in
-`crates/redextape-core/tests/subst_rewrite_equivalence.rs` and run by `cargo nextest run -p
+`crates/redextape-core/tests/subst_differential.rs` and run by `cargo nextest run -p
 redextape-core` on every invocation, including CI's: every `t` up to 6 nodes over 4 distinct indices
 against every `s` up to 4 nodes, for `j ∈ 0..=3` (`j ≠ 0` is the part of `subst`'s public contract
 `beta` never exercises) — **355,840 triples, 0 mismatches**, in well under a second. Exhaustive
@@ -855,6 +955,18 @@ because the earlier draft asserted its inversion as a result, and the correction
 silent replacement. Both agree on what matters — the worst case drops from 1.2 s to well inside a frame
 budget — and disagree by 2x on how far, and about whether the outlier survives at all.
 
+**RESOLVED 2026-08-02, and neither column was right — but this paragraph's discipline is what caught
+it.** Recording the two projections as falsifiable predictions is what made the answer checkable at all;
+what neither anticipated is that the *premise* would die before the fix was built. The worst case did
+drop from 1.2 s to inside a frame budget — to **0.305 ms**, ~4,000x, on row 31 — and it was the `maxfree`
+short-circuits that did it, not this fix, which was never applied. Both columns projected a win from
+deleting a cost that by then was not being paid: the flat column predicted 7.0x and the two-price column
+18.0x, and the measured figure is **2.16x on 36,595 allocations corpus-wide, and 0.99x on the family the
+fix was most likely to help.** The instrument that produced the two columns cannot see this — its
+counters are static, and re-running it today reports the same `Σ abs×arg` it always did while the clock
+underneath has moved by three orders of magnitude. Which is its own finding, recorded with the
+falsification: **a projection is only as falsifiable as the counter it is projected from.**
+
 ### Layers 2 and 3: not worth planning yet, and this is the evidence
 
 **Neither layer addresses the 86.8%.**
@@ -874,6 +986,29 @@ budget — and disagree by 2x on how far, and about whether the outlier survives
   would recover part of the 44x. But the fix above recovers *all* of it, in six lines, with no cache,
   no ids, no retained memory and no invalidation question. Caching redundant work is strictly worse
   than not doing it.
+
+> **THE TABLE BELOW WAS A PREDICTION AND IT WAS MEASURED WRONG — 2026-08-02.** It projects what remains
+> "after the `subst` fix". There is no `subst` fix; the `maxfree` short-circuits landed instead, and they
+> collapsed **three** of these counters rather than the one this table varied. Predicted against measured,
+> as shares of the allocations the reducer actually makes:
+>
+> | traversal | predicted (two-price) | **measured** |
+> | --- | --- | --- |
+> | spine rebuild — `Σ path` | 1.3% | **36.2% — the largest** |
+> | `beta`'s closing shift — `Σ closing` | **37.2% — predicted the largest** | 15.3% |
+> | `subst`'s body rebuild — `Σ spine` | 18.1% | 15.5% |
+> | `beta`'s opening shift — `Σ opening` | 19.0% | 7.1% |
+> | `depth_exceeds` — `Σ guard` | 5.2% | −0.6% (read-only, and now O(1)) |
+>
+> **The ranking inverted, and the mechanism is worth more than the correction.** `Σ path` is **55,226 in
+> both tables** — it never moved. It leads now because everything it was being compared against fell by
+> two to three orders of magnitude. A projection that varies one counter and holds the rest fixed is
+> sound only while the rest stay fixed, and nothing here said what would happen if they did not.
+>
+> What survives is the paragraph below it, which is the part that was actually load-bearing: neither
+> layer 2 nor layer 3 is the answer, and the traversals worth attacking are the ones that still *build*
+> terms. That is still true, and `Σ path` — `reduce_step` rebuilding the redex spine on the way back up —
+> is one of them and was dismissed at 0.5%. Measured figures: `examples/lambda_sharing_probe.rs`.
 
 **And planning either now would be optimizing the 13% of nodes the substitution redundancy is not.** What is left after the `subst` fix, and which
 traversal is then the largest, depends on which model prices it — and this is the one place where the
@@ -1156,6 +1291,13 @@ corpus ramp shows 1.00x and this was not pushed further); and the WASM shadow-st
 `MAX_TERM_DEPTH`'s doc defers, which is §9's first non-goal and stays there.
 
 ### Still open
+
+**Read this list against the 2026-08-02 falsification above**, which retires the item every remaining
+bullet was waiting on. There is no `subst` fix and there is not going to be one on these numbers, so
+"re-askable after the `subst` fix" below now means "re-askable against a measurement nobody has taken" —
+and the measurement to take first is named in the falsification: `beta`'s opening `shift(1, 0, arg)` is
+the only quantity that still scales, and the body spine `subst` rebuilds is 60–90% of what it allocates.
+Neither has a counter in this design.
 
 - **Which of (a)–(d) above to take, and whether to take one at all.** This is the only genuinely open
   question the blow-up leaves: the measurement is done, the mechanism is attributed, and (b) — the option

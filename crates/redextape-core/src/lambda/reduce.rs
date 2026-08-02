@@ -129,9 +129,23 @@ pub const MAX_TERM_DEPTH: u32 = 3_000;
 /// **THE RAMP BEING FLAT IS A FACT ABOUT THIS FAMILY, NOT A COMPLEXITY CLAIM.** What the two fixes
 /// removed is cost that scaled with the LOGICAL size while the physical size stayed small — which is
 /// exactly what this family is built to exhibit. A program whose physical size genuinely grows still
-/// pays for it, and `subst` still rebuilds the spine of whatever it descends into. The older next
+/// pays for it, and `subst` still rebuilds the spine of whatever it descends into. ~~The older next
 /// target — carrying `subst`'s per-binder re-shift down as one `shift(d, 0, ·)`, with an additivity
-/// lemma already verified in the perf design — is untouched and still available.
+/// lemma already verified in the perf design — is untouched and still available.~~
+///
+/// **THE OLDER NEXT TARGET IS FALSIFIED TOO — 2026-08-02, by the same short-circuit that closed the
+/// hang.** Priced against what `subst` NOW allocates it is not a win but a **0.99x loss** on this
+/// family at every level, and 1.00x on both counterexamples. The quantity it deletes is 5,696
+/// allocations across 105,607 β-steps — 0.05 per step, against a model that priced it at 44 copies of
+/// the argument per step. It inverts because `subst` descends only through the binders ON THE PATH TO
+/// AN OCCURRENCE, so binders-crossed is now smaller than occurrences and paying per occurrence costs
+/// more than paying per binder. Instrument: `examples/shift_cost_probe.rs`'s census section, which
+/// mirrors `subst` arm for arm rather than modelling it; full statement in the perf design's §10.
+///
+/// **What that leaves as the largest measured λ cost, neither of which any proposal so far addresses:**
+/// the body spine `subst` rebuilds (60–90% of its allocations), and `beta`'s own opening
+/// `shift(1, 0, arg)` — the only quantity on this family that still scales with it, 20,725 → 190,666
+/// allocations across levels 1 to 11 while everything else is flat or falling.
 pub(crate) fn depth_exceeds(t: &LambdaTerm, limit: u32) -> bool {
     t.depth() > limit
 }

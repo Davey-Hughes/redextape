@@ -461,6 +461,13 @@ records it as its **headline finding**. That is this same product, measured from
 in the same crate's examples directory while this guard was being designed against "occurrences × |arg|".
 Nobody connected them.
 
+**And then `Σ abs×arg` was itself falsified, 2026-08-02.** It is a static model of a `subst` whose `Abs`
+arm copied unconditionally, and the `maxfree` short-circuits that closed the hang removed the cost it
+counts without changing the counter — it over-reports by ~1,584x. That does not weaken §10.3: the point
+here is that the deciding evidence sat unconnected in the tree, which is true of a counter that was later
+found wrong just as much as of one that held. It does mean the *number* should not be quoted forward.
+See the perf design's §10.
+
 **This is the second time on this hazard.** The total-size design was falsified by a 699-element list
 literal that `lambda/lower.rs`'s own pre-existing depth-guard test had been constructing all along. In
 both cases the evidence that killed the design was already committed, already passing, and already read

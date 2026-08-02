@@ -71,6 +71,13 @@
 //! branch immediately before the guard's — so this is a re-derivation of a number that was already in
 //! the tree, unconnected, while the guard was being designed against a different mechanism.
 //!
+//! **`Σ abs×arg` ITSELF WAS FALSIFIED ON 2026-08-02** — it is a static model of a `subst` that no longer
+//! exists, over-reporting by ~1,584x since the `maxfree` short-circuits landed. That does not disturb
+//! the reasoning above, which is about which FACTORS the guard should have been reading and is a claim
+//! about the shape of the cost rather than its size; but a reader arriving here for the 86.8% should
+//! read `shift_cost_probe.rs`'s census section first. The per-node price measured below is likewise
+//! historical: it was fitted before the short-circuits.
+//!
 //! Measured here at **23.1–23.6 ns per predicted node-copy, constant over a 1,255x range** of predicted
 //! copies, which is what makes the model a fit rather than a story.
 //!

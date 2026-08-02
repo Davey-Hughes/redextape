@@ -1,5 +1,13 @@
 # λ-term structural sharing — Implementation Plan
 
+> **LANDED, AND ONE THING IT TOLD ITS WORKER TO WRITE DOWN HAS SINCE BEEN FALSIFIED.** Task 6 Step 6
+> instructs the worker to record "what the next target actually is — `subst`'s per-binder re-shift, then
+> `beta`'s closing `shift(-1, 0, ·)`". That was written down as instructed and **falsified 2026-08-02**:
+> the re-shift rewrite is a 0.99x regression on the nested-group family, and the closing shift is 15.3%
+> of allocations rather than the 37% the projection gave it. The roadmap this plan writes into carries
+> the correction, so following the pointer lands in the right place. Nothing else here is affected — the
+> plan's own subject, `Rc`-backed `LambdaTerm`, shipped and holds.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace `Box`-based `LambdaTerm` with a `Rc`-backed newtype so the λ reducer stops deep-cloning untouched sibling subtrees on every β-step, and trace snapshots become nearly free.

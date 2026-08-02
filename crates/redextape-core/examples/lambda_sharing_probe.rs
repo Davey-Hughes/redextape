@@ -2,6 +2,49 @@
 //!
 //!     cargo run --release --example lambda_sharing_probe -p redextape-core
 //!
+//! # PART B WENT STALE ON 2026-08-01 AND WAS REPAIRED ON 2026-08-02 — READ THIS BEFORE ANY B/C FIGURE
+//!
+//! **The failure is worth stating before the fix, because it is the interesting half.** PART B's cost
+//! counters were STATIC MODELS: `Σ abs×arg` is `count_abs(body) × size_of(arg)`, computed from the
+//! trace's terms rather than by watching `subst`. When the `maxfree` short-circuits and the stored
+//! `depth` landed and the reducer got three to four orders of magnitude faster, **every counter here
+//! reported exactly the number it had reported the day before.** An instrument built to falsify claims
+//! about cost could not detect that its own subject had changed underneath it.
+//!
+//! It showed up as nonsense rather than as silence, which is the only reason it was caught: only **2 of
+//! 46 rows** still cleared timer resolution, the two-price fit was left fitting two parameters to two
+//! points and returned **-77.04 ns/node** for read-only work, and the closing table projected
+//! **-427.5 ms** of remaining time. A negative millisecond is an instrument reporting that it can no
+//! longer price its corpus.
+//!
+//! **What the models were wrong by**, now printed by PART B itself rather than quoted here:
+//! `Σ abs×arg` over-reports the re-shift `subst` performs by **~1,584x** (70,542,349 against 44,539),
+//! and `Σ size` over-reports `depth_exceeds` by **~1,248x** (7,433,964 against 5,955 — it reads a
+//! stored field, once per step). The headline "86.8% of the nodes the reducer visits" is a share of the
+//! first and inherits its error. The fix PART C used to project at 7.0x/18.0x measures at **2.16x here
+//! and 0.99x — a regression — on the nested-group family**; it is falsified and will not be built. See
+//! `shift_cost_probe.rs`'s census section and the perf design's §10.
+//!
+//! **The repair, in three parts.** (1) Counters that MIRROR the functions — `Σ opening`, `Σ spine`,
+//! `Σ reshift`, `Σ closing`, `Σ guard` — replacing the products in `alloc`/`read`. (2) The stale models
+//! kept beside them as CONTROLS and entered in PART C's contest, where they lose: `Σ alloc` now prices
+//! at a spread of 1.8x against `Σ abs×arg`'s 4,318x. (3) Batched timing — each replay repeated until it
+//! clears `BATCH_MIN_MS` — which puts all 46 rows back above the timer and makes the two-price fit a
+//! fit again (`a` stable to ~1% under leave-one-out, where it printed `0.00 to 0.00 (infx)`).
+//!
+//! The accounting now predicts the clock: 189,152 nodes at the fitted prices is 7.6 ms against a corpus
+//! that replays in 7.4 ms.
+//!
+//! **What was never stale:** PART A. The sharing/interning measurement is structural — node and distinct
+//! counts over the trace — and does not depend on either fix. Its own module doc already records that
+//! its numbers did not move when `LambdaTerm` became `Rc`-backed.
+//!
+//! **THE LESSON THIS FILE IS NOW THE RECORD OF:** a counter that models a function instead of measuring
+//! it has no way to notice that the function changed. Mirroring the code costs one extra `subst` per
+//! step in `account` and is worth it. Where that is genuinely impossible, the counter needs a
+//! sanity check against the clock that fails loudly — which is what PART C's `spread` column turned out
+//! to be, and why it caught this at all.
+//!
 //! This exists to answer one question with data instead of intuition: **is interning (hash-consing)
 //! worth more than plain `Rc` structural sharing?** It answers it WITHOUT implementing interning, by
 //! running hash-consing's own algorithm — a bottom-up intern pass keyed on already-interned children —
@@ -90,7 +133,7 @@ use std::collections::hash_map::Entry;
 use std::time::Instant;
 
 use redextape_core::desugar::desugar;
-use redextape_core::lambda::term::{Dir, Node, abs, app, var};
+use redextape_core::lambda::term::{Dir, Node, abs, app, shift, subst, var};
 use redextape_core::lambda::{LambdaTerm, MAX_REDUCTION_STEPS, Trace, lower, reduce_to_normal_form, reduce_trace};
 use redextape_core::parser::parse;
 
@@ -294,9 +337,71 @@ fn size_of(t: &LambdaTerm) -> u64 {
 // CONSTRUCT a node for every node they walk. `Work::read` and `Work::alloc` are those two buckets.
 // ==================================================================================================
 
+/// Node-constructions `shift(d, cutoff, t)` performs, counted FAITHFULLY — the recursion mirrors
+/// `shift`'s arm for arm and reads the stored `maxfree` for the short-circuit, and there is no memo
+/// because `shift` has none. This and the two below are what made the model counters above obsolete:
+/// they measure the function, where `Σ arg` / `Σ abs×arg` / `Σ occ×arg` model a function that stopped
+/// existing on 2026-08-01.
+fn shift_allocs(cutoff: u32, t: &LambdaTerm) -> u64 {
+    if t.maxfree() <= cutoff {
+        return 0;
+    }
+    match t.node() {
+        Node::Var(_) => 1,
+        Node::Abs(_, b) => 1 + shift_allocs(cutoff + 1, b),
+        Node::App(f, a) => 1 + shift_allocs(cutoff, f) + shift_allocs(cutoff, a),
+    }
+}
+
+/// Allocations `subst(j, s, t)` makes, as `(body spine, per-binder re-shift)`. Mirrors `term.rs`'s
+/// `subst` arm for arm INCLUDING both `maxfree` short-circuits, so the `Abs` arm is charged only for
+/// the binders actually descended through and the `Var` arms are charged nothing at all — both return
+/// a handle.
+fn subst_allocs(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64) {
+    if t.maxfree() <= j {
+        return (0, 0);
+    }
+    match t.node() {
+        Node::Var(_) => (0, 0),
+        Node::Abs(_, b) => {
+            let re = shift_allocs(0, s);
+            let lifted = shift(1, 0, s);
+            let (spine, shifts) = subst_allocs(j + 1, &lifted, b);
+            (1 + spine, re + shifts)
+        }
+        Node::App(f, a) => {
+            let (sp1, sh1) = subst_allocs(j, s, f);
+            let (sp2, sh2) = subst_allocs(j, s, a);
+            (1 + sp1 + sp2, sh1 + sh2)
+        }
+    }
+}
+
 /// Per-step work accounting, summed over a whole trace. Units: nodes visited.
+///
+/// **TWO GENERATIONS OF COUNTER LIVE HERE AND THE TABLE PRINTS BOTH.** The `*_size` / `*_times_arg` /
+/// `term_size` fields are the ORIGINAL static models, kept as controls: they were written against a
+/// `subst` whose `Abs` arm copied unconditionally and a `depth_exceeds` that walked the whole term, and
+/// they report the same numbers today that they reported before those changed. The `opening` / `spine`
+/// / `reshift` / `closing` / `depth_guard` fields mirror the functions instead. Keeping both is the
+/// point rather than clutter — PART C's contest now has the stale counters in it, and watching them
+/// lose to the faithful ones on the same corpus is the falsification, run rather than quoted.
 #[derive(Default)]
 struct Work {
+    /// FAITHFUL. `beta`'s opening `shift(1, 0, arg)`. Zero whenever `arg` is closed, which is 88.4% of
+    /// corpus steps — the single fact that retired the `subst` lifted-shift slice.
+    opening: u64,
+    /// FAITHFUL. The body spine `subst` rebuilds on the way down.
+    spine: u64,
+    /// FAITHFUL. `subst`'s `Abs` arm, `shift(1, 0, s)` once per binder DESCENDED THROUGH — not once per
+    /// `Abs` node in the body, which is what `abs_times_arg` below still counts.
+    reshift: u64,
+    /// FAITHFUL. `beta`'s closing `shift(-1, 0, ·)` over the term `subst` just returned. It cannot
+    /// short-circuit at cutoff 0 on a term with a free variable, which is why it rebuilds the reduct.
+    closing: u64,
+    /// FAITHFUL, and it is 1 per step: `depth_exceeds` reads a stored field. It used to walk the whole
+    /// logical expansion, which is what `term_size` counts and what 96% of the hang turned out to be.
+    depth_guard: u64,
     /// Spine-rebuild work: one node constructed per path element. Should be negligible after
     /// structural sharing — a large share here would mean the sharing is not doing its job.
     path_len: u64,
@@ -336,27 +441,32 @@ struct Work {
 }
 
 impl Work {
-    /// The traversals that CONSTRUCT a node. Every node counted here is an `Rc::new` plus the write
-    /// that fills it: `subst` rebuilds the body it walks, `shift` rebuilds every node it walks (both
-    /// of `beta`'s, plus the per-binder re-shift of the argument), and the spine rebuild allocates one
-    /// node per path element.
+    /// The traversals that CONSTRUCT a node, **counted rather than modelled** since 2026-08-02. Every
+    /// node here is an `Rc::new` plus the write that fills it, and every term is measured by mirroring
+    /// the function that performs it:
     ///
-    /// The last term is `shift(-1, 0, …)` walking the reduct that `subst` just built: `subst` replaced
-    /// `occ` variable nodes by `occ` copies of the argument, so the reduct is `body - occ + occ×arg`.
+    ///     reduce_step's spine rebuild  -> path_len       (one node per path element)
+    ///     beta's shift(1, 0, arg)      -> opening
+    ///     subst's body rebuild         -> spine
+    ///     subst's Abs arm              -> reshift
+    ///     beta's shift(-1, 0, ·)       -> closing
+    ///
+    /// **THE PREVIOUS VERSION OF THIS FUNCTION WAS `path + arg + body + abs×arg + (body - occ +
+    /// occ×arg)`**, which is the same list expressed as static products — and every one of those
+    /// products over-counts now. `arg` charges a full copy of an argument that is closed 88.4% of the
+    /// time; `abs×arg` charges every `Abs` in the body where `subst` descends through the ones on the
+    /// path to an occurrence; `occ×arg` charges a copy per occurrence where `subst`'s `Var` arm returns
+    /// a handle. Corpus-wide the old sum reports 73,806,194 against a measured 68,188-plus-reduct.
     fn alloc(&self) -> u64 {
-        self.path_len
-            + self.arg_size
-            + self.body_size
-            + self.abs_times_arg
-            + (self.body_size.saturating_sub(self.occ) + self.occ_times_arg)
+        self.path_len + self.opening + self.spine + self.reshift + self.closing
     }
 
-    /// The traversals that only READ. `depth_exceeds` walks the whole term every step and returns a
-    /// bool; `reduce_step`'s search walks rejected left siblings and returns a path. Neither writes a
-    /// node. Split out from `alloc` above because assuming the two cost the same is a MODEL, and PART
-    /// C fits both prices rather than asserting one.
+    /// The traversals that only READ. `reduce_step`'s search walks rejected left siblings and returns a
+    /// path; `depth_exceeds` reads a stored `depth` and returns a bool, so it is 1 per step rather than
+    /// the whole-term walk `term_size` still counts. Split out from `alloc` because assuming the two
+    /// cost the same is a MODEL, and PART C fits both prices rather than asserting one.
     fn read(&self) -> u64 {
-        self.term_size + self.scan
+        self.depth_guard + self.scan
     }
 
     /// Every traversal above, summed: the total nodes the reducer visits over the whole trace.
@@ -475,6 +585,19 @@ fn account(trace: &Trace) -> Work {
         w.abs_count += abs_nodes;
         w.occ_times_arg += occ * arg_nodes;
         w.abs_times_arg += abs_nodes * arg_nodes;
+
+        // The faithful half, measured by replaying `beta`'s three calls and counting what each one
+        // actually allocates. It costs one real `subst` per step to do this — the reduct is needed to
+        // price the closing shift, and there is no way to know its size without building it — which is
+        // affordable on a 46-program corpus and is the price of an instrument that measures rather
+        // than models. `beta` is `shift(-1, 0, &subst(0, &shift(1, 0, arg), body))`.
+        w.opening += shift_allocs(0, arg);
+        let opened = shift(1, 0, arg);
+        let (spine, reshift) = subst_allocs(0, &opened, body);
+        w.spine += spine;
+        w.reshift += reshift;
+        w.closing += shift_allocs(0, &subst(0, &opened, body));
+        w.depth_guard += 1;
     }
     w
 }
@@ -489,8 +612,21 @@ struct Row {
     max_term_distinct: u32,
     intern_ns_per_node: f64,
     interned: bool,
+    /// Wall time of the BATCH `replay_ms` was divided out of. This is what says whether the number can
+    /// be trusted, and it exists because `replay_ms` alone stopped saying so: after the 2026-08-01
+    /// fixes a single replay of 44 of the 46 programs finishes below the timer's resolution.
+    batch_ms: f64,
     work: Work,
 }
+
+/// A replay batch runs until it has taken at least this long, and `replay_ms` is the batch divided by
+/// its repetition count. Below this the clock, not the counter, is the uncertain quantity.
+const BATCH_MIN_MS: f64 = 50.0;
+
+/// Ceiling on repetitions, so a program that replays in nanoseconds cannot spin for a whole
+/// `BATCH_MIN_MS` worth of them. A row that hits it is reported with a short `batch ms` and is
+/// excluded from the fits by the same test as any other under-timed row.
+const BATCH_MAX_REPS: u32 = 20_000;
 
 fn measure(idx: usize, src: &str) -> Option<Row> {
     let (prog, ds) = parse(src);
@@ -500,14 +636,34 @@ fn measure(idx: usize, src: &str) -> Option<Row> {
     let core = desugar(&prog.unwrap());
     let term = lower(&core).ok()?;
 
-    // Replay cost, best of three — the same convention the Plan 4 design's tables were taken under.
+    // Replay cost: best of three BATCHES, each batch repeated until it clears `BATCH_MIN_MS`.
+    //
+    // **THIS USED TO BE BEST-OF-THREE SINGLE REPLAYS, AND THE 2026-08-01 FIXES BROKE IT.** Nothing
+    // about the corpus changed; it got three to four orders of magnitude faster, and an instrument that
+    // samples each program once went from timing 14 rows usably to timing 2. Everything downstream
+    // degraded with it — PART C.2 was left fitting two parameters to two points and returned a
+    // NEGATIVE price per read-only node, and the projection table printed negative milliseconds. That
+    // is what a measurement apparatus outliving its subject looks like from the inside, and the fix is
+    // to measure a batch rather than to widen the tolerances until the numbers look plausible again.
     let mut replay_ms = f64::MAX;
+    let mut batch_ms = 0.0f64;
     for _ in 0..3 {
+        let mut reps = 0u32;
         let t0 = Instant::now();
-        let (nf, _status) = reduce_to_normal_form(&term, MAX_REDUCTION_STEPS);
-        let dt = t0.elapsed().as_secs_f64() * 1000.0;
-        std::hint::black_box(&nf);
-        replay_ms = replay_ms.min(dt);
+        let dt = loop {
+            let (nf, _status) = reduce_to_normal_form(&term, MAX_REDUCTION_STEPS);
+            std::hint::black_box(&nf);
+            reps += 1;
+            let dt = t0.elapsed().as_secs_f64() * 1000.0;
+            if dt >= BATCH_MIN_MS || reps >= BATCH_MAX_REPS {
+                break dt;
+            }
+        };
+        let per_replay = dt / f64::from(reps);
+        if per_replay < replay_ms {
+            replay_ms = per_replay;
+            batch_ms = dt;
+        }
     }
 
     let trace = reduce_trace(&term, MAX_REDUCTION_STEPS);
@@ -533,6 +689,7 @@ fn measure(idx: usize, src: &str) -> Option<Row> {
             idx,
             steps: trace.steps.len(),
             replay_ms,
+            batch_ms,
             trace_nodes,
             trace_distinct: 0,
             max_term_nodes,
@@ -564,6 +721,7 @@ fn measure(idx: usize, src: &str) -> Option<Row> {
         idx,
         steps: trace.steps.len(),
         replay_ms,
+        batch_ms,
         trace_nodes,
         trace_distinct: across.next,
         max_term_nodes: within_nodes,
@@ -588,9 +746,11 @@ fn main() {
 fn run() {
     verify_interner();
     println!(
-        "subst rewrite check: moved to `crates/redextape-core/tests/subst_rewrite_equivalence.rs` \
-         (shift-additivity lemma, exhaustive differential vs `term.rs`'s subst, and the lift==0 \
-         allocation-identity pin) — run it with `cargo nextest run -p redextape-core`.\n"
+        "subst differential: `crates/redextape-core/tests/subst_differential.rs` (shift-additivity \
+         lemma, exhaustive differential of the SHIPPED `subst` against an eager and a lifted \
+         reference, and the allocation-identity sharing pins) — run it with `cargo nextest run -p \
+         redextape-core`. The lifted rewrite it used to propose was FALSIFIED 2026-08-02: 0.99x on the \
+         nested-group family. PART B's `Σ abs×arg` below is the stale model that justified it.\n"
     );
     println!(
         "λ-term sharing probe — hash-consing dry run over FIRST_ORDER_DEMOS ({} programs)\n",
@@ -686,49 +846,93 @@ struct Counter {
 const COUNTERS: &[Counter] = &[
     Counter { name: "Σ path", origin: "yes", f: |w| w.path_len },
     Counter { name: "Σ scan", origin: "NEW", f: |w| w.scan },
-    Counter { name: "Σ body", origin: "yes", f: |w| w.body_size },
-    Counter { name: "Σ arg", origin: "NEW", f: |w| w.arg_size },
-    Counter { name: "Σ occ×arg", origin: "yes", f: |w| w.occ_times_arg },
-    Counter { name: "Σ abs×arg", origin: "NEW", f: |w| w.abs_times_arg },
-    Counter { name: "Σ size", origin: "yes", f: |w| w.term_size },
+    Counter { name: "Σ body", origin: "STALE", f: |w| w.body_size },
+    Counter { name: "Σ arg", origin: "STALE", f: |w| w.arg_size },
+    Counter { name: "Σ occ×arg", origin: "STALE", f: |w| w.occ_times_arg },
+    Counter { name: "Σ abs×arg", origin: "STALE", f: |w| w.abs_times_arg },
+    Counter { name: "Σ size", origin: "STALE", f: |w| w.term_size },
+    Counter { name: "Σ opening", origin: "TRUE", f: |w| w.opening },
+    Counter { name: "Σ spine", origin: "TRUE", f: |w| w.spine },
+    Counter { name: "Σ reshift", origin: "TRUE", f: |w| w.reshift },
+    Counter { name: "Σ closing", origin: "TRUE", f: |w| w.closing },
+    Counter { name: "Σ guard", origin: "TRUE", f: |w| w.depth_guard },
     Counter { name: "Σ alloc", origin: "SPLIT", f: Work::alloc },
     Counter { name: "Σ read", origin: "SPLIT", f: Work::read },
     Counter { name: "Σ model", origin: "SUM", f: Work::model },
 ];
 
-/// Below this many milliseconds a best-of-three `Instant` measurement carries enough cache and
-/// scheduling noise that a 2x ratio means nothing; 32 of the 46 rows land there, and PART A prints
-/// most of them as `0.0` or `0.1`.
+/// A row is timer-reliable when the BATCH its `replay ms` was divided out of ran at least this long.
+///
+/// **THE SUBJECT OF THIS CONSTANT CHANGED ON 2026-08-02 AND THE NUMBER DELIBERATELY DID NOT.** It used
+/// to test `replay ms` itself, which was one replay: below a millisecond a single `Instant` reading
+/// carries enough cache and scheduling noise that a 2x ratio means nothing. That test was correct and
+/// it stopped selecting anything useful — after the 2026-08-01 fixes only 2 of 46 single replays
+/// cleared it, and a two-parameter fit over two points is not a measurement. Batching moved the
+/// uncertainty: `replay ms` is now a batch of `BATCH_MIN_MS`-or-`BATCH_MAX_REPS` divided by its
+/// repetition count, so what has to clear a millisecond is the BATCH. Essentially every row does, which
+/// is the repair — the corpus can price a node again.
 ///
 /// EVERY STATISTIC IS STILL REPORTED OVER ALL 46 ROWS. This constant selects the subset the failure
 /// test's BASELINE is taken from and the subset a row can be FLAGGED in — not the subset the table
-/// shows. Answering "which programs does this explain" about 14 of them would be answering a
-/// different question, and the sub-millisecond rows turn out to price at the same ns/node anyway,
-/// which is itself evidence and would have been discarded by filtering them out.
+/// shows.
 const RELIABLE_MS: f64 = 1.0;
 
 fn part_b(rows: &[Row]) {
     println!("\n\nPART B — COST: what replay actually spends, in nodes visited per trace.\n");
     println!(
-        "{:>3}  {:>9}  {:>10}  {:>11}  {:>10}  {:>9}  {:>12}  {:>12}  {:>11}",
-        "#", "replay ms", "Σ path", "Σ scan", "Σ body", "Σ arg", "Σ occ×arg", "Σ abs×arg", "Σ size"
+        "TWO GENERATIONS OF COUNTER, PRINTED SIDE BY SIDE. The `model` block is the original static\n\
+         accounting — products of node counts, written against a `subst` whose `Abs` arm copied\n\
+         unconditionally and a `depth_exceeds` that walked the whole term. The `measured` block mirrors\n\
+         the functions as they are, short-circuits included. The models were correct when written and\n\
+         are kept as controls, because PART C's contest is more useful with a known-wrong entrant in it.\n"
     );
-    println!("{}", "-".repeat(103));
+    println!(
+        "{:>3}  {:>9} | {:>10}  {:>9}  {:>12}  {:>12}  {:>11} | {:>9}  {:>9}  {:>9}  {:>9}",
+        "#",
+        "replay ms",
+        "Σ path",
+        "model:arg",
+        "model:occ×arg",
+        "model:abs×arg",
+        "model:size",
+        "opening",
+        "spine",
+        "reshift",
+        "closing"
+    );
+    println!("{}", "-".repeat(125));
     for r in rows {
         let w = &r.work;
         println!(
-            "{:>3}  {:>9.3}  {:>10}  {:>11}  {:>10}  {:>9}  {:>12}  {:>12}  {:>11}",
+            "{:>3}  {:>9.3} | {:>10}  {:>9}  {:>12}  {:>12}  {:>11} | {:>9}  {:>9}  {:>9}  {:>9}",
             r.idx,
             r.replay_ms,
             w.path_len,
-            w.scan,
-            w.body_size,
             w.arg_size,
             w.occ_times_arg,
             w.abs_times_arg,
-            w.term_size
+            w.term_size,
+            w.opening,
+            w.spine,
+            w.reshift,
+            w.closing
         );
     }
+
+    // The headline correction, stated as a ratio rather than left for the reader to divide.
+    let m_abs: u64 = rows.iter().map(|r| r.work.abs_times_arg).sum();
+    let t_reshift: u64 = rows.iter().map(|r| r.work.reshift).sum();
+    let m_size: u64 = rows.iter().map(|r| r.work.term_size).sum();
+    let t_guard: u64 = rows.iter().map(|r| r.work.depth_guard).sum();
+    println!(
+        "\nMODEL AGAINST MEASUREMENT, corpus-wide:\n  \
+         `Σ abs×arg` {m_abs} vs `Σ reshift` {t_reshift} — over-counts by {:.0}x\n  \
+         `Σ size`    {m_size} vs `Σ guard`   {t_guard} — over-counts by {:.0}x\n\
+         The first is the `subst` re-shift the retired lifted-shift slice existed to delete; the second\n\
+         is `depth_exceeds`, which reads a stored field and has walked nothing since 2026-08-01.",
+        m_abs as f64 / t_reshift.max(1) as f64,
+        m_size as f64 / t_guard.max(1) as f64,
+    );
     let malformed: u64 = rows.iter().map(|r| r.work.malformed).sum();
     println!(
         "\n{}",
@@ -747,11 +951,17 @@ fn part_b(rows: &[Row]) {
     let abs_count: u64 = rows.iter().map(|r| r.work.abs_count).sum();
     println!(
         "\nOver all {steps} β-steps in the corpus, `subst` replaced {occ} occurrences of the bound variable\n\
-         ({:.2} per step) and re-shifted the argument {abs_count} times ({:.1} per step), once per `Abs` node\n\
-         in the body. It therefore built {:.0}x as many copies of each argument as the step had uses for it.",
+         ({:.2} per step). The body holds {abs_count} `Abs` nodes in total ({:.1} per step), a ratio of\n\
+         {:.0}:1 — and THAT RATIO IS THE ONE THAT MISLED THE RECORD FOR A DAY. It counts `Abs` nodes in\n\
+         the body, not binders `subst` descends through: since the `maxfree` short-circuit, `subst`\n\
+         descends only along paths to an occurrence, and the re-shift it actually performs is {:.2} per\n\
+         step. Paying that once per occurrence instead — the retired lifted-shift slice — is a 0.99x\n\
+         REGRESSION on the nested-group family, because occurrences outnumber binders crossed. See\n\
+         `examples/shift_cost_probe.rs`'s census section and the perf design's §10.",
         occ as f64 / steps as f64,
         abs_count as f64 / steps as f64,
-        abs_count as f64 / occ.max(1) as f64
+        abs_count as f64 / occ.max(1) as f64,
+        rows.iter().map(|r| r.work.reshift).sum::<u64>() as f64 / steps.max(1) as f64,
     );
 
     part_c(rows);
@@ -767,7 +977,7 @@ fn part_b(rows: &[Row]) {
 /// distinguishes a cause from a correlate.
 fn part_c(rows: &[Row]) {
     let ms: Vec<f64> = rows.iter().map(|r| r.replay_ms).collect();
-    let reliable: Vec<usize> = (0..rows.len()).filter(|&i| ms[i] >= RELIABLE_MS).collect();
+    let reliable: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].batch_ms >= RELIABLE_MS).collect();
     let unit_prices = |vals: &[f64], idx: &[usize]| -> (f64, f64) {
         median_and_spread(&idx.iter().map(|&i| ms[i] * 1e6 / vals[i].max(1.0)).collect::<Vec<_>>())
     };
@@ -818,13 +1028,16 @@ fn part_c(rows: &[Row]) {
     // Unwrap: `COUNTERS` holds seven non-aggregate entries, so the loop above always assigns.
     let (_, winner) = best.unwrap();
     println!(
-        "\n`hyp?` — `yes` marks the four counters the substitution-blowup hypothesis proposed, `NEW` the\n\
-         three found by reading `reduce.rs`/`term.rs` for traversals the four do not bound, `SPLIT` the\n\
-         allocating/read-only partition of the whole accounting, and `SUM` its total. `spread` is\n\
+        "\n`hyp?` — `yes` marks a counter the substitution-blowup hypothesis proposed, `STALE` one of the\n\
+         static models written against the pre-2026-08-01 `subst`/`depth_exceeds` and kept as a control,\n\
+         `TRUE` one that mirrors the function as it is, `SPLIT` the allocating/read-only partition of\n\
+         the whole accounting, and `SUM` its total. **THE STALE ROWS ARE IN THIS CONTEST ON PURPOSE.**\n\
+         A counter that no longer describes the code should lose it, and watching one do so on the same\n\
+         corpus is worth more than a sentence asserting that it would. `spread` is\n\
          max/min of the ns-per-unit price: 1.0x is a counter that costs the same everywhere, and it is\n\
          the discriminating column — ρ stays high for any counter that merely grows with the program.\n\
          \n\
-         `ns/unit m46` is the median price over ALL 46 rows. The `vs med14` column further down divides\n\
+         `ns/unit m46` is the median price over ALL 46 rows. The `vs med` column further down divides\n\
          by the median over the {} timer-reliable rows instead; the two are different baselines and are\n\
          labelled apart because an earlier draft printed both as `median`.\n\
          \n\
@@ -832,8 +1045,12 @@ fn part_c(rows: &[Row]) {
          `AppR`, and `.max(1.0)` in the price divides by 1 there rather than by 0, so the printed max/min\n\
          is an artifact of that floor. What `Σ scan` actually says is its ρ: it does not track the clock.\n\
          \n\
-         The `(46)` and `({})` columns differ because below {RELIABLE_MS} ms a best-of-three `Instant`\n\
-         measurement is at its resolution. Both are printed rather than only the flattering one.",
+         THE TWO ρ/spread COLUMNS ARE NOW IDENTICAL, AND THAT IS A RESULT RATHER THAN A REDUNDANCY.\n\
+         They are `all 46 rows` against `the timer-reliable rows`, and {} of 46 rows are reliable — the\n\
+         batched timing restored the resolution that a single replay lost when the reducer got three to\n\
+         four orders of magnitude faster. Between 2026-08-01 and 2026-08-02 this read `(46)` and `(2)`,\n\
+         and a two-parameter fit over two points is what produced a negative price per read-only node.\n\
+         The columns are kept side by side so the day they diverge again is visible.",
         reliable.len(),
         reliable.len()
     );
@@ -853,7 +1070,7 @@ fn part_c(rows: &[Row]) {
 
     println!(
         "\nDominant traversal: {}. Below, every row — not only the timeable ones — priced against the\n\
-         COMPLETE accounting `Σ model`, with {}'s share of it alongside. `vs med14` is against the\n\
+         COMPLETE accounting `Σ model`, with {}'s share of it alongside. `vs med` is against the\n\
          median over the {} rows above {RELIABLE_MS} ms, so no amount of timer noise on the other {} can\n\
          move the baseline the failure test is measured from. (The counter table's `ns/unit m46` column\n\
          is a DIFFERENT baseline — the median over all 46 — which is why the two are named apart.)\n",
@@ -868,14 +1085,14 @@ fn part_c(rows: &[Row]) {
         "replay ms",
         "Σ model",
         "ns/node",
-        "vs med14",
+        "vs med",
         format!("{} %", winner.name)
     );
     println!("{}", "-".repeat(74));
     for &i in &order {
         let u = ms[i] * 1e6 / model[i].max(1.0);
         let rel = u / med;
-        let flag = if ms[i] < RELIABLE_MS {
+        let flag = if rows[i].batch_ms < RELIABLE_MS {
             "  (timer-limited)"
         } else if !(0.5..=2.0).contains(&rel) {
             "  <-- NOT EXPLAINED"
@@ -902,7 +1119,7 @@ fn part_c(rows: &[Row]) {
     // counter that is 96% of the work on one row and 16% on another cannot price the same on both, and
     // naming the rows where it does not is the honest form of the dominance claim.
     let win_vals: Vec<f64> = rows.iter().map(|r| (winner.f)(&r.work) as f64).collect();
-    let (win_med14, _) = unit_prices(&win_vals, &reliable);
+    let (win_med_rel, _) = unit_prices(&win_vals, &reliable);
     let (win_med46, _) = unit_prices(&win_vals, &all);
     let win_fail = |base: f64| -> Vec<usize> {
         let mut v: Vec<usize> = all
@@ -913,7 +1130,7 @@ fn part_c(rows: &[Row]) {
         v.sort_unstable();
         v
     };
-    let (fail14, fail46) = (win_fail(win_med14), win_fail(win_med46));
+    let (fail_rel, fail46) = (win_fail(win_med_rel), win_fail(win_med46));
     let name_rows = |v: &[usize]| -> String {
         if v.is_empty() {
             "none".to_string()
@@ -921,8 +1138,8 @@ fn part_c(rows: &[Row]) {
             v.iter().map(|&i| rows[i].idx.to_string()).collect::<Vec<_>>().join(", ")
         }
     };
-    let only46: Vec<usize> = fail46.iter().copied().filter(|i| !fail14.contains(i)).collect();
-    let timeable_fails: Vec<usize> = fail46.iter().copied().filter(|&i| ms[i] >= RELIABLE_MS).collect();
+    let only46: Vec<usize> = fail46.iter().copied().filter(|i| !fail_rel.contains(i)).collect();
+    let timeable_fails: Vec<usize> = fail46.iter().copied().filter(|&i| rows[i].batch_ms >= RELIABLE_MS).collect();
     println!(
         "\nTHE SAME 2x TEST, APPLIED TO {} ITSELF rather than to the `Σ model` control. Against the {}-row\n\
          median it fails on rows: {}. Against the 46-row median, additionally: {}.\n\
@@ -931,7 +1148,7 @@ fn part_c(rows: &[Row]) {
          the counter fails on, not because they weigh against it.",
         winner.name,
         reliable.len(),
-        name_rows(&fail14),
+        name_rows(&fail_rel),
         name_rows(&only46),
         name_rows(&timeable_fails)
     );
@@ -963,125 +1180,104 @@ fn part_c(rows: &[Row]) {
         100.0 * tot_alloc as f64 / tot_model.max(1) as f64,
     );
 
-    // WHAT THE FIX WOULD BUY, under BOTH cost models rather than under whichever one flatters it.
-    // `Σ abs×arg` becomes `Σ occ×arg` (the argument is shifted once per OCCURRENCE instead of once per
-    // BINDER); nothing else in the accounting moves. Deferring the shift does not change what
-    // `depth_exceeds` or the redex search walk, so `Σ read` is untouched — which is exactly why the two
-    // models disagree about the result, and why the disagreement has to be reported rather than
-    // resolved by preference.
-    projection(rows, &reliable, &ms);
+    // WHERE THE COST IS NOW, under BOTH price models rather than under whichever one flatters it.
+    //
+    // **THIS USED TO BE "WHAT THE FIX WOULD BUY", AND THERE IS NO FIX.** It projected `Σ abs×arg`
+    // becoming `Σ occ×arg` — the argument shifted once per OCCURRENCE instead of once per BINDER — at
+    // 7.0x flat and 18.0x allocating. Both were projections from a static counter, both were recorded as
+    // falsifiable predictions, and on 2026-08-02 both were falsified together: the rewrite measures at
+    // 2.16x on this corpus and 0.99x — a regression — on the nested-group family. What replaces the
+    // projection is the same table without the counterfactual: where the allocations actually go.
+    remaining(rows, &reliable, &ms);
 }
 
-/// Allocating nodes a trace would cost AFTER the fix: the per-binder re-shift of the argument
-/// (`Σ abs×arg`) becomes a per-occurrence one (`Σ occ×arg`), and nothing else moves.
+/// Where the reducer's allocations actually go, priced under both models. Forward guidance for the next
+/// plan, computed rather than inferred by hand from the node accounting.
 ///
-/// An UPPER BOUND on the post-fix cost, not an equality: the rewrite's `lift == 0` arm returns
-/// `s.clone()` — a refcount bump — so occurrences at binder depth 0 cost nothing at all. The
-/// projection therefore understates the win, which is the direction a projection should err in.
-fn alloc_after_fix(w: &Work) -> u64 {
-    w.alloc() + w.occ_times_arg - w.abs_times_arg
-}
-
-/// What the fix would buy, priced under BOTH cost models rather than under whichever one flatters it.
-/// Predictions contingent on a model — recorded, as the design says, precisely because re-running this
-/// probe after the fix falsifies whichever one is wrong.
-fn projection(rows: &[Row], reliable: &[usize], ms: &[f64]) {
-    let t_alloc: u64 = rows.iter().map(|r| r.work.alloc()).sum();
-    let t_read: u64 = rows.iter().map(|r| r.work.read()).sum();
-    let t_after: u64 = rows.iter().map(alloc_after_fix_of).sum();
-
+/// **EVERY ROW HERE IS A MEASURED TRAVERSAL, NOT A MODELLED ONE**, which is the difference between this
+/// and the projection it replaces. The two models still disagree about which traversal is largest, and
+/// both columns are still printed for the reason PART C.2 exists: a read-only traversal that is most of
+/// the remaining NODES is most of the remaining TIME only if a node costs the same to read as to
+/// construct, and that was measured to be false.
+fn remaining(rows: &[Row], reliable: &[usize], ms: &[f64]) {
     let a_v: Vec<f64> = rows.iter().map(|r| r.work.alloc() as f64).collect();
     let r_v: Vec<f64> = rows.iter().map(|r| r.work.read() as f64).collect();
     let m_v: Vec<f64> = rows.iter().map(|r| r.work.model() as f64).collect();
     let c_flat = ls_one(&m_v, ms, reliable);
     let (a_ns, r_ns) = ls_two(&a_v, &r_v, ms, reliable);
 
-    println!(
-        "\nPROJECTED EFFECT OF THE FIX (`Σ abs×arg` -> `Σ occ×arg`), under BOTH cost models.\n\
-         Corpus-wide the work falls {:.1}x by the flat measure ({} -> {} `Σ model` nodes) and {:.1}x by\n\
-         the allocating measure ({} -> {} `Σ alloc` nodes); read-only work is untouched, which is the\n\
-         whole reason the two models disagree about what happens to the outlier.\n",
-        (t_alloc + t_read) as f64 / (t_after + t_read).max(1) as f64,
-        t_alloc + t_read,
-        t_after + t_read,
-        t_alloc as f64 / t_after.max(1) as f64,
-        t_alloc,
-        t_after,
-    );
-    println!(
-        "{:>4}  {:>10}  {:>9}  {:>10}  {:>9}  {:>10}",
-        "#", "today ms", "flat x", "flat ms", "2-price x", "2-price ms"
-    );
-    println!("{}", "-".repeat(62));
-    for &i in reliable {
-        let w = &rows[i].work;
-        let after = alloc_after_fix(w);
-        println!(
-            "{:>4}  {:>10.1}  {:>8.1}x  {:>10.1}  {:>8.1}x  {:>10.1}",
-            rows[i].idx,
-            ms[i],
-            w.model() as f64 / (after + w.read()).max(1) as f64,
-            c_flat * (after + w.read()) as f64,
-            w.alloc() as f64 / after.max(1) as f64,
-            a_ns * after as f64 + r_ns * w.read() as f64,
-        );
-    }
-
-    // WHAT IS LEFT, AND WHICH TRAVERSAL IS THEN THE BIGGEST — the only forward guidance the next plan
-    // gets, so it is computed here rather than inferred from the node accounting by hand. The two
-    // models disagree about the answer, which is the whole reason both columns are printed: a read-only
-    // traversal that is 64% of the remaining NODES is 64% of the remaining TIME only if a node costs
-    // the same to read as to construct, and PART C.2 measured that it does not.
     let sum = |f: fn(&Work) -> u64| -> u64 { rows.iter().map(|r| f(&r.work)).sum() };
-    let after: [(&str, &str, u64, bool); 7] = [
-        ("spine rebuild", "Σ path", sum(|w| w.path_len), true),
-        ("beta's opening shift", "Σ arg", sum(|w| w.arg_size), true),
-        ("subst's body walk", "Σ body", sum(|w| w.body_size), true),
-        ("per-occurrence shift", "Σ occ×arg", sum(|w| w.occ_times_arg), true),
-        ("beta's closing shift", "Σ reduct", sum(|w| w.body_size.saturating_sub(w.occ) + w.occ_times_arg), true),
-        ("depth_exceeds", "Σ size", sum(|w| w.term_size), false),
+    let where_it_goes: [(&str, &str, u64, bool); 7] = [
+        ("reduce_step's spine", "Σ path", sum(|w| w.path_len), true),
+        ("beta's opening shift", "Σ opening", sum(|w| w.opening), true),
+        ("subst's body rebuild", "Σ spine", sum(|w| w.spine), true),
+        ("subst's per-binder shift", "Σ reshift", sum(|w| w.reshift), true),
+        ("beta's closing shift", "Σ closing", sum(|w| w.closing), true),
+        ("depth_exceeds", "Σ guard", sum(|w| w.depth_guard), false),
         ("redex search", "Σ scan", sum(|w| w.scan), false),
     ];
-    let node_tot: u64 = after.iter().map(|&(_, _, n, _)| n).sum();
-    let time_tot: f64 = after.iter().map(|&(_, _, n, al)| if al { a_ns } else { r_ns } * n as f64).sum();
+    let node_tot: u64 = where_it_goes.iter().map(|&(_, _, n, _)| n).sum();
+    let time_tot: f64 = where_it_goes.iter().map(|&(_, _, n, al)| if al { a_ns } else { r_ns } * n as f64).sum();
     println!(
-        "\nWHAT REMAINS AFTER THE FIX, and which traversal is then the largest. `nodes %` is a share of\n\
-         the remaining work COUNTED IN NODES; `time % (flat)` assumes every node costs the same and is\n\
+        "\nWHERE THE ALLOCATIONS ACTUALLY GO, and which traversal is the largest. `nodes %` is a share\n\
+         of the work COUNTED IN NODES; `time % (flat)` assumes every node costs the same and is\n\
          therefore identical to it; `time % (2-price)` prices allocating and read-only nodes separately\n\
-         at the rates fitted above. The two columns name DIFFERENT traversals as the largest, and that\n\
-         difference is the reason PART C.2 exists.\n"
+         at the rates fitted above.\n"
     );
     println!(
-        "{:<22}{:<11}  {:>10}  {:>8}  {:>13}  {:>13}",
+        "{:<26}{:<11}  {:>10}  {:>8}  {:>13}  {:>13}",
         "traversal", "counter", "nodes", "nodes %", "time % (flat)", "time % (2-pr)"
     );
-    println!("{}", "-".repeat(84));
-    for &(what, counter, n, allocating) in &after {
+    println!("{}", "-".repeat(88));
+    for &(what, counter, n, allocating) in &where_it_goes {
         let t = if allocating { a_ns } else { r_ns } * n as f64;
         let pct = 100.0 * n as f64 / node_tot.max(1) as f64;
         println!(
-            "{what:<22}{counter:<11}  {n:>10}  {pct:>7.1}%  {pct:>12.1}%  {:>12.1}%{}",
+            "{what:<26}{counter:<11}  {n:>10}  {pct:>7.1}%  {pct:>12.1}%  {:>12.1}%{}",
             100.0 * t / time_tot,
             if allocating { "" } else { "   (read-only)" }
         );
     }
+    // THE RANKING IS DERIVED, NOT ASSERTED, and the reason is this file's own history: the sentence
+    // that used to sit here named a winner by hand, and the hand-named winner was a static model that
+    // had stopped describing the code. A ranking printed from the table below it cannot go stale
+    // without the table going stale first.
+    let mut ranked: Vec<&(&str, &str, u64, bool)> = where_it_goes.iter().collect();
+    ranked.sort_by_key(|c| std::cmp::Reverse(c.2));
+    let top = ranked
+        .iter()
+        .take(3)
+        .map(|&&(what, counter, n, _)| format!("{counter} ({what}, {:.1}%)", 100.0 * n as f64 / node_tot.max(1) as f64))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let reshift = where_it_goes.iter().find(|c| c.1 == "Σ reshift").map_or(0, |c| c.2);
     println!(
-        "\nTotal remaining: {} nodes; {:.1} ms under the flat model, {:.1} ms under the two-price one.\n\
-         READ-ONLY WORK IS {:.1}% OF THE REMAINING NODES BUT {:.1}% OF THE REMAINING TIME. Stating the\n\
-         first as if it were the second is the specific error this table exists to prevent.",
+        "\nTotal: {} nodes; {:.1} ms under the flat model, {:.1} ms under the two-price one, against a\n\
+         corpus that replays in {:.1} ms. Read-only work is {:.1}% of the nodes and {:.1}% of the time.\n\
+         \n\
+         LARGEST THREE, ranked from the table above rather than named by hand: {top}.\n\
+         \n\
+         AND WHAT THAT DOES *NOT* SAY ABOUT THE RETIRED LIFTED-SHIFT SLICE. `Σ reshift` is the counter\n\
+         that slice was about and it is {:.1}% of this corpus's allocations — NOT negligible here, and a\n\
+         reader who came for the falsification should not leave thinking it was. The rewrite would\n\
+         replace those {reshift} allocations with ~7,944, a real ~19% cut. Two things sink it anyway,\n\
+         and both are about magnitude rather than direction: the absolute is ~1.5 ms across all 46\n\
+         programs, and on the nested-group family — the one that actually stresses the reducer — the\n\
+         same rewrite measures 0.99x, a REGRESSION, because there the binders `subst` descends through\n\
+         are fewer than the occurrences it would pay at. A change that is +19% on programs finishing in\n\
+         microseconds and -1% on the ones that do not is not worth its blast radius. The family numbers\n\
+         are in `examples/shift_cost_probe.rs`'s census section, where `Σ opening` is also the only\n\
+         counter that scales with the program: 20,725 to 190,666 across eleven levels.",
         node_tot,
         c_flat * node_tot as f64,
         time_tot,
-        100.0 * after.iter().filter(|&&(_, _, _, al)| !al).map(|&(_, _, n, _)| n).sum::<u64>() as f64
+        ms.iter().sum::<f64>(),
+        100.0 * where_it_goes.iter().filter(|&&(_, _, _, al)| !al).map(|&(_, _, n, _)| n).sum::<u64>() as f64
             / node_tot.max(1) as f64,
-        100.0 * after.iter().filter(|&&(_, _, _, al)| !al).map(|&(_, _, n, _)| r_ns * n as f64).sum::<f64>() / time_tot,
+        100.0 * where_it_goes.iter().filter(|&&(_, _, _, al)| !al).map(|&(_, _, n, _)| r_ns * n as f64).sum::<f64>()
+            / time_tot,
+        100.0 * reshift as f64 / node_tot.max(1) as f64,
     );
-}
-
-/// `alloc_after_fix` behind a `&&Row`-shaped call, so the sum above reads as a `map` rather than a
-/// closure that only exists to reach through the field.
-fn alloc_after_fix_of(r: &Row) -> u64 {
-    alloc_after_fix(&r.work)
 }
 
 /// PART C.2 — IS A NODE ONE PRICE, OR TWO?
@@ -1240,14 +1436,14 @@ fn two_price(rows: &[Row], reliable: &[usize], ms: &[f64], winner: &Counter) {
          `depth_exceeds` is 'the largest remaining cost' after the substitution fix is a claim about\n\
          TIME and must be derived under the price that fits, not read off the node accounting.\n\
          \n\
-         AN UNSTABLE `r` IS EXPECTED AND DOES NOT SEND YOU BACK TO THE FLAT MODEL. The leave-one-out\n\
-         ranges above DO straddle zero and DO swing by more than the coefficient itself — eight runs of\n\
-         this binary span -1.24 to 4.24 ns/node — and that is the corpus failing to price a nearly-free\n\
-         node, not the split failing. What the conclusions depend on is the RANKING, which is monotone\n\
-         in `r` and unchanged at BOTH ends of that range (`Σ reduct` leads in every one of the eight).\n\
-         `a` is the coefficient they lean on, and it does not move: 35.4-36.3 ns/node. Retreating to\n\
-         the flat column instead puts `depth_exceeds` back on top at 64% of nodes — the exact misreading\n\
-         the two-price split exists to prevent. See the design's §10."
+         AN UNSTABLE `r` IS EXPECTED AND DOES NOT SEND YOU BACK TO THE FLAT MODEL. It is the corpus\n\
+         failing to price a nearly-free node, not the split failing, and since 2026-08-02 there is less\n\
+         read-only work than ever to price: `depth_exceeds` reads a stored field, so `Σ read` is now\n\
+         essentially `Σ scan` alone. What the conclusions depend on is `a`, which the leave-one-out\n\
+         range above shows is stable to within a few percent — and note what changed to make that true.\n\
+         Until the timing was batched, this fit ran over TWO rows, `a`'s leave-one-out range printed as\n\
+         `0.00 to 0.00 (infx)` because dropping either row left one point, and `r` came out at -77\n\
+         ns/node. A degenerate fit is not a small-sample fit; it is not a fit. See the design's §10."
     );
 }
 
@@ -1437,9 +1633,13 @@ fn verify_interner() {
 // example (`.forgejo/workflows/ci.yml:112`, `cargo clippy --workspace --all-targets`) but never RUNS
 // it, so the check that makes the rewrite safe to act on gated nothing automatically.
 //
-// It now lives in `crates/redextape-core/tests/subst_rewrite_equivalence.rs` as three `#[test]`s,
-// which `cargo nextest run -p redextape-core` executes on every CI run. See that file for the
-// candidate rewrite, the lemma, the differential and the pin, and the design's §8/§10 for why each
-// exists. It is not duplicated here: two copies of an equivalence argument is exactly the kind of
-// drift this branch spent its effort removing.
+// It now lives in `crates/redextape-core/tests/subst_differential.rs` as three `#[test]`s,
+// which `cargo nextest run -p redextape-core` executes on every CI run. It is not duplicated here: two
+// copies of an equivalence argument is exactly the kind of drift this branch spent its effort removing.
+//
+// **AND ITS SUBJECT INVERTED ON 2026-08-02.** The candidate rewrite was falsified on cost — 0.99x on
+// the nested-group family, against a `Σ abs×arg` that over-reports by ~1,584x — so `subst_lifted` is
+// no longer a proposal. It and a new eager `subst_naive` are now REFERENCES, and the shipped `subst` is
+// the subject: the same 355,840 triples, checked against two independent implementations instead of
+// one. See that file's module doc, and the design's §8/§10.
 // ==================================================================================================

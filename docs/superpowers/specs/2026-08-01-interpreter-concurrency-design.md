@@ -359,12 +359,26 @@ recovering a **single-digit percentage at best** — the exact figure depends on
 small thing.** `subst`, which rebuilds the spine of whatever it descends into, is where the 1,323 ns
 actually lives, and a zipper does not touch it.
 
-**So the recommendation inverts the order this section was drafted in.** The roadmap's standing λ target —
+**So the recommendation inverts the order this section was drafted in.** ~~The roadmap's standing λ target —
 carrying `subst`'s per-binder re-shift down as one `shift(d, 0, ·)`, with a shift-additivity lemma already
 verified exhaustively (53,376 cases) and a differential already run (355,840 triples, 0 mismatches) —
-attacks the dominant cost and is *already designed*. **That should land first.** §8.2 is real, correctly
+attacks the dominant cost and is *already designed*. **That should land first.**~~ §8.2 is real, correctly
 diagnosed, and small; it is worth doing after the measurement it would then be a visible fraction of, not
 before. This is open question 6, and Part H is what answered it.
+
+> **THE TARGET NAMED HERE WAS FALSIFIED 2026-08-02 AND WILL NOT LAND.** The lifted-shift rewrite is a
+> **0.99x regression** on the nested-group family; it was sized against a static counter that
+> over-reports the cost it deletes by ~1,584x. The lemma and the differential above are both still valid
+> — what was wrong is the sizing, not the algebra. See the roadmap's **"CLOSED 2026-08-02"** block and
+> the perf design's §10.
+>
+> **WHAT THIS DOES TO §8.2's ORDERING ARGUMENT, which is the part that matters here.** The reasoning was
+> "the λ target attacks the dominant cost, so do it first and re-measure §8.2 against the smaller
+> baseline." Nothing is landing first. §8.2's 93.7% is still "a large share of a small thing" and the
+> sentence above it — **`subst`, which rebuilds the spine of whatever it descends into, is where the
+> 1,323 ns actually lives** — is now the *measured* finding rather than the aside it was written as:
+> `Σ spine` plus `Σ path` is ~52% of every allocation the reducer makes. So §8.2 stays deferred, on
+> stronger evidence than it was deferred with, and against a baseline nobody should now expect to shrink.
 
 ## 9. Where real parallelism belongs: Plan 4/5 workers
 
@@ -462,11 +476,18 @@ before the prototype does.
    recurse once per node and would otherwise overflow the native stack. An explicit context stack moves
    *one* of those three off the native stack and not the other two, so the guard is still needed — but
    whether its accounting still means the same thing against a zipper is unchecked.
-6. **ANSWERED: no — do the `subst` re-shift first.** Part H puts a β-step at **1,323 ns**, against which
-   the zipper's ~8.7 retraced spine nodes per step are a single-digit percentage at best. The `subst`
-   re-shift attacks where that 1,323 ns actually lives, and is already designed and differentially
-   tested. **Remaining:** the exact zipper share is still unmeasured — bounding it needs the per-level
-   cost of a `reduce_step` frame plus one `app()`, which Part H does not isolate.
+6. ~~**ANSWERED: no — do the `subst` re-shift first.**~~ **RE-OPENED 2026-08-02, and the answer now
+   points the other way.** Part H puts a β-step at **1,323 ns** (still valid — measured after the `shift`
+   fix, and the corpus independently prices a step at ~1,243 ns today). What was wrong is the
+   denominator: "~8.7 retraced spine nodes are a single-digit percentage" divided them into a per-step
+   node count taken from `Σ abs×arg`, a static counter that over-reports by **~1,584x**. Against the
+   measured accounting a β-step allocates **~31.8 nodes**, of which **`Σ path` is ~9.3 — 29.2% of nodes
+   and 36.2% of fitted time, the largest single allocating traversal in the corpus.** Same 8.7 nodes,
+   right denominator. The `subst` re-shift that was to go first is falsified and will not be built.
+   **Remaining, and it is the same gap as before:** the exact zipper share is still unmeasured. A zipper
+   *changes* what the spine rebuild costs rather than deleting it, so the saving is a fraction of 36.2%
+   and bounding it still needs the per-level cost of a `reduce_step` frame plus one `app()`, which Part H
+   does not isolate. `examples/lambda_sharing_probe.rs` is repaired and can now answer it.
 7. **Why is a β-step ~102× a δ-step?** Not a defect claim — the two do incomparable work — but the ratio
    is unexplained, it spans 303 ns to 15,034 ns across the corpus, and the outliers are where `subst`
    rebuilds most. Whatever explains the spread is likely the same thing item 6 is pointing at.

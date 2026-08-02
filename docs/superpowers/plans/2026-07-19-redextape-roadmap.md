@@ -364,6 +364,16 @@ logical size, and that half held under measurement. Full statement in the design
 
 #### Layer 1.5 answered the gate, and the answer is neither interning nor memoization (2026-07-31)
 
+> **EVERY PERCENTAGE IN THIS BLOCK IS A SHARE OF `Σ abs×arg`, AND THAT COUNTER WAS FALSIFIED ON
+> 2026-08-02 — see "CLOSED 2026-08-02" below.** It is a static model, `count_abs(body) × size_of(arg)`,
+> written against a `subst` whose `Abs` arm copied unconditionally; the `maxfree` short-circuits that
+> closed the hang removed the cost it counts without changing the counter, and it over-reports by
+> **~1,584x** (70,542,349 modelled, 44,539 measured). So 86.8%, 95.6%, 99.7% and the ρ 0.996 below are
+> all measurements of a function that no longer exists. **What survives is the negative half** — that
+> neither interning nor memoization is the answer — because that rests on the *mechanism* (a shifted
+> copy carries different de Bruijn indices and has nothing to dedupe), not on the size. What does not
+> survive is any ranking taken from these shares, including the one that deferred the zipper.
+
 **What dominates λ replay time is `subst` re-copying the argument under every binder** — **86.8%** of the
 nodes the reducer visits, and **95.6%** of the ones it *constructs*, which is the bucket that is 90.8% of
 all nodes and **99.7% of the time**. `subst`'s `Abs` arm re-shifts the argument on the way down
@@ -400,6 +410,21 @@ but the six-line fix recovers all of it with no cache, no ids and no invalidatio
 **memory** argument is untouched: the residual after `Rc` is still 10.3x and 50.0x on the two rows with
 allocation counts, and that stands on its own. What is refuted is its **speed corollary** — the cost
 interning would attack is 13% of the nodes, and the 87% is structurally invisible to it.
+
+> **FALSIFIED 2026-08-02 — READ THE NEXT PARAGRAPH AS HISTORY.** ~~"The next target is `subst`'s
+> per-binder re-shift."~~ Measured against what `subst` NOW allocates it is a **0.99x loss** on the
+> nested-group family at every level and 1.00x on both guard counterexamples. The whole record is
+> further down this file, under **"CLOSED 2026-08-02 — the `subst` slice is falsified, and the short-
+> circuit is why"**; the paragraph is left standing because the 70.5M figure it quotes is what the
+> falsification is about.
+>
+> **It also contains a SECOND stale claim, and it is a different one.** "`shift` has no
+> sharing-preserving arm" stopped being true on 2026-08-01: `shift` now returns its argument's
+> allocation whenever `maxfree(t) <= cutoff`. The conclusion drawn from it survives — `beta`'s *closing*
+> `shift(-1, 0, ·)` is at cutoff 0 over a term with a free variable, so the short-circuit cannot fire at
+> the root and it does still rebuild the reduct — but the general claim does not, and the difference is
+> load-bearing: `beta`'s *opening* shift takes the short-circuit on 88.4% of steps. Measured,
+> `Σ opening` is 5.7% of allocations against `Σ closing`'s 12.3%.
 
 **The next target is `subst`'s per-binder re-shift.** At binder depth `d` the argument is `shift(1,0,·)`
 applied `d` times, which is `shift(d,0,·)`, so the lift can be carried down and paid once per occurrence
@@ -501,9 +526,10 @@ the family grows deep as it diverges.
 **The flat ramp is a fact about this family, not a complexity claim.** What both fixes removed is cost
 that scaled with the *logical* size while the physical size stayed small — which is exactly what this
 family is built to exhibit. A program whose physical size genuinely grows still pays for it, and `subst`
-still rebuilds the spine of whatever it descends into. The older next target — carrying `subst`'s
+still rebuilds the spine of whatever it descends into. ~~The older next target — carrying `subst`'s
 per-binder re-shift down as one `shift(d, 0, ·)`, with an additivity lemma already verified in the perf
-design — is untouched and still available.
+design — is untouched and still available.~~ **Falsified a day later by the same short-circuit — see
+"CLOSED 2026-08-02" below.**
 
 Instrument: `crates/redextape-core/examples/shift_cost_probe.rs`, committed with the fix — it carries the
 memory-cap rules in its module docs and is the re-runnable source for every figure above.
@@ -555,10 +581,25 @@ stated with more confidence than the positive one above.) What the same data sho
 descent retraces the path the previous step already walked** (97.2% on `sum(5)`), because
 `LambdaCursor::next` re-enters `reduce_step` from the **root** every step and rebuilds the spine coming
 back up. **Then Part H measured the denominator: a β-step is 1,323 ns, ~102× a δ-step** — so the ~8.7
-retraced spine nodes are a single-digit-percent lever, a large share of a small thing. **The standing
+retraced spine nodes are a single-digit-percent lever, a large share of a small thing. ~~**The standing
 `subst` re-shift target attacks where that 1,323 ns actually lives and is already designed, differentially
-tested and unbuilt; it goes first.** That settles §11 item 6 in the opposite direction to how §8.2 was
+tested and unbuilt; it goes first.**~~ That settles §11 item 6 in the opposite direction to how §8.2 was
 drafted.
+
+> **BOTH HALVES OF THAT ORDERING ARE OVERTURNED — 2026-08-02, and this one goes the other way.** The
+> `subst` re-shift target is falsified (below), so nothing goes first ahead of §8.2. And the reason §8.2
+> was demoted does not survive either: "a single-digit-percent lever" divided ~8.7 spine nodes into a
+> per-step node count taken from `Σ abs×arg`, which over-counted by ~1,584x. Against the measured
+> accounting a β-step allocates **~31.8 nodes**, of which **`Σ path` — the spine `reduce_step` rebuilds —
+> is ~9.3, or 29.2% of nodes and 36.2% of fitted time. It is the largest single allocating traversal in
+> the corpus.** That is the same ~8.7 nodes, re-divided by a denominator that is right.
+>
+> **This RE-OPENS §8.2; it does not decide it.** A zipper changes what the spine rebuild costs rather
+> than deleting it, so the saving is a fraction of 36.2% and nobody has measured which fraction. The
+> β-step figure itself is unaffected — Part H's 1,323 ns was taken after the `shift` fix, and the corpus
+> independently prices a step at ~1,243 ns today. What changed is only the denominator the lever was
+> compared against. `examples/lambda_sharing_probe.rs` is the instrument, repaired to be able to answer
+> this.
 
 **The real parallelism is Plan 4/5's, and the premise hands it over:** λ reduction and TM simulation of the
 same Core are wholly independent, so one worker each is genuine task parallelism with no shared terms, no
@@ -578,6 +619,63 @@ for this discipline rather than an accident of it, and the third time on this th
 overturned a plausible estimate. Part G's four run columns exist to keep §8.2's *negative* result
 falsifiable: if same-path runs ever approach the TM's, the conclusion flips and fusion becomes a λ
 optimization after all.
+
+#### CLOSED 2026-08-02 — the `subst` slice is falsified, and the short-circuit is why
+
+**The standing next λ slice is not a win. On the family it was most likely to help it is a 0.99x LOSS.**
+Carrying `subst`'s per-binder re-shift down as one `shift(d, 0, ·)` — paying it once per occurrence
+instead of once per binder — was sized against `Σ abs×arg` = 70,542,349 corpus-wide. That counter is
+`count_abs(body) × size_of(arg)`, a **static model written before either `maxfree` short-circuit
+existed**, and it models neither of them. Priced instead against what `subst` now actually allocates:
+
+| program | β-steps | closed arg | `reshift` (today) | `per_occ` (rewrite) | win |
+| --- | --- | --- | --- | --- | --- |
+| nested groups, level 1 | 109,565 | 89.2% | 5,921 | 8,881 | **0.99x** |
+| nested groups, level 11 | 105,607 | 89.2% | 5,696 | 8,549 | **0.99x** |
+| two 500-element lists | 22 | 81.8% | 0 | 0 | 1.00x |
+| 699-element literal | 1,398 | 100.0% | 0 | 0 | 1.00x |
+
+Thirteen of thirteen programs at **≤ 1.00x**. `reshift` — the quantity the rewrite deletes — is **5,696
+allocations across 105,607 β-steps**, 0.05 per step, against a model that priced it at 44 copies of the
+argument per step. The ordinary corpus agrees from the other end: **88.4% of its 5,955 β-steps have a
+CLOSED argument**, so `shift(1, 0, arg)` is a refcount bump and the re-shift is already free; its win is
+2.16x on a quantity that is 36,595 allocations across all 46 programs.
+
+**"FALSIFIED" DOES NOT MEAN "NEGLIGIBLE", and the distinction is the whole of what to carry forward.** On
+the ordinary corpus the re-shift is **23.5% of every allocation the reducer makes**, second-largest of
+seven counters, and the rewrite really would cut it to ~7,944 — about 19% off the total. What sinks it is
+magnitude and target, not direction: the absolute is **~1.5 ms across all 46 programs**, and on the
+family that actually stresses the reducer it is a regression. A change that is +19% on programs finishing
+in microseconds and −1% on the ones that do not is not worth its blast radius. What is falsified is the
+*sizing* — the 7.0x/18.0x corpus-wide win — and the premise that it helps where help is needed.
+
+**WHY IT INVERTS, and the direction is forced rather than incidental.** `subst`'s short-circuit means it
+descends through only the binders **on the path to an occurrence**, not every `Abs` node in the body — so
+"binders crossed" is now *smaller* than "occurrences", and paying once per occurrence costs more than
+paying once per binder crossed. The 44:1 abs-to-occ ratio the design quotes is over the whole body,
+computed statically. The per-unit comparison runs the same way: today's `Abs` arm shifts the
+progressively lifted `s_d`, whose higher indices make the short-circuit fire *less* often, so each unit
+of today's cost is at least each unit of the rewrite's. `per_occ`/`reshift` = 1.5 therefore means the
+rewrite performs at least 1.5x as many shifts as it removes.
+
+**What the census found instead, and neither column was being tracked.** The body **spine** `subst`
+rebuilds is 60–90% of what it now allocates, and no guard or rewrite proposed so far touches it.
+`beta`'s own **opening** `shift(1, 0, arg)` is the only column that scales with the family — 20,725 →
+190,666 across levels 1 to 11 while every other column is flat or falling. If anything here is the next
+target it is that, and it is a different function from the one every proposal so far has been about.
+
+**This is the third measurement on this thread to overturn a written-down cost claim**, after
+hash-consing (priced as YAGNI, refuted) and substitution blowup (hypothesized, refuted). The pattern is
+the same each time and worth naming: a *model* of a cost outlived the *code* it modelled. `Σ abs×arg` was
+correct when it was written and stayed in the record, quoted by four documents, for one day after the
+change that made it wrong. That is exactly the failure "grep the tree for a falsified claim, not the
+document that stated it first" (below, 2026-07-31) is about — and the grep that would have caught it here
+is not for prose but for the counter's *name*, because the claim lives in a probe's arithmetic rather
+than in a sentence.
+
+Instrument: `crates/redextape-core/examples/shift_cost_probe.rs`'s census section — it mirrors `subst`
+arm for arm including both short-circuits, rather than modelling it, and steps with `LambdaCursor`.
+Counts only, no seconds. Full statement in the perf design's §10.
 
 #### THE NEXT λ SLICE IS NOT the `subst` fix: 512 bytes of ordinary source reaches an unbounded β-step (2026-07-31)
 

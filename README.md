@@ -70,29 +70,53 @@ Every backend is checked against every other on a shared 46-program corpus, whic
   the doc comments alone. It is the only check that the printed formats are documented well enough
   to reimplement.
 
-Two known limits, recorded rather than hidden. **The first is a refusal; the second is not, and that
-is the whole difference between them.** The λ backend **declines** a handful of programs the other legs
+Two known limits, recorded rather than hidden. **The first is a refusal and stands; the second was a
+hang and is closed — the difference between them is the whole point, and the history is kept because
+four designs died against the second.** The λ backend **declines** a handful of programs the other legs
 run — a closure over a `let mut` binding — and
 answers a `LowerError` rather than risk a silent miscompile; they live in
 `LAMBDA_LIMITATION_DEMOS` and are asserted TM-only. Separately, **nested mutually recursive `fn`
 groups** blow the λ term up exponentially through structural sharing, because `lower_group` clones the
-whole group term once per member and the factor nests. 512 bytes of ordinary source reaches a β-step
-that does not finish — a *later* step, not the first, which is cheap at every size the family reaches.
-**It is open, and it is wider than that.** Two guards were designed against it and both were falsified
-by measurement. A total-size bound refused a working 699-element list literal. Its successor,
-`MAX_SHARED_LOGICAL_NODES` = 10,000 on the largest *shared* subterm, landed and was reverted: a
-trivially-written program — `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)`, 4,821 bytes,
-no recursion — measures **4** against that bound of 10,000 and spends **19.0 s in its first β-step**.
-The mechanism both guards named was wrong. `subst`'s `Var` arm is an `Rc` bump, so occurrences are
-free; its `Abs` arm copies the whole argument once per binder in the body, whether the variable occurs
-or not, so a step costs `|body| + Abs(body) × |arg|` — **neither factor a sharing property**.
-`examples/blowup_probe.rs`, `examples/list_reduction_probe.rs` and `examples/guard_hole_probe.rs` are
-the instruments; the record is
-`docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §10, and the next design —
-a per-redex work budget checked before each step rather than once at lowering — is in the roadmap.
+whole group term once per member and the factor nests. 512 bytes of ordinary source used to reach a
+β-step that did not finish. **CLOSED 2026-08-01, at the root rather than by refusing anything** — that
+program now reduces in 7.48 s, and the two-list counterexample below went from 19.0 s in its first
+β-step to under a millisecond.
 
-Divergence is a separate matter and stays the step cap's job (`MAX_REDUCTION_STEPS`): the family does
-not terminate at any level, which no guard on a step's cost would change.
+**Nothing guards it, and nothing needs to.** `term.rs`'s `shift` rebuilt every node it visited
+unconditionally, so it was Θ(*logical*) *and* it destroyed sharing on every β-step; `reduce.rs`'s
+`depth_exceeds` walked the logical expansion once per step and was 96% of what remained after that was
+fixed. Both now read `u32`s the three constructors maintain in O(1) — `maxfree` (highest free index + 1;
+`0` means closed) and `depth` — so `shift` and `subst` return their argument's *allocation* when it
+cannot be affected, and the depth guard is a comparison.
+
+**Four designs aimed at this hazard are dead, and the record keeps all four on purpose.** Two guards
+were falsified by counterexample: a total-size bound refused a working 699-element list literal, and
+`MAX_SHARED_LOGICAL_NODES` = 10,000 on the largest *shared* subterm landed and was reverted after a
+trivially-written program — `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)`, 4,821 bytes,
+no recursion — measured **4** against it while spending 19.0 s in one step. A third, a per-redex work
+budget, was never built: not falsified, made unnecessary. The fourth was a performance rewrite carrying
+`subst`'s per-binder re-shift down as one `shift(d, 0, ·)`; **falsified 2026-08-02**, and on the family
+it was most likely to help it is a 0.99x regression.
+
+**The cost model those first three were argued from is also gone, and it is the interesting part.**
+`|body| + Abs(body) × |arg|` was true of a `subst` whose `Abs` arm copied the argument once per binder
+*whether or not the variable occurred below it*. The `maxfree` short-circuit means it no longer does —
+`subst` descends only along paths to an occurrence, and `shift(1, 0, arg)` is a refcount bump for the
+88.4% of β-steps whose argument is closed. Measured, the model over-reports the cost it names by
+~1,584x. The probe that carried it could not detect this on its own, because its counters *modelled* the
+functions instead of measuring them; that is repaired, and it is the lesson the record is built around.
+
+`examples/shift_cost_probe.rs` is the instrument (it carries its own memory-cap rules — read them
+first), with `examples/lambda_sharing_probe.rs`, `examples/blowup_probe.rs`,
+`examples/list_reduction_probe.rs` and `examples/guard_hole_probe.rs` alongside; the falsified
+counterexamples run in CI as `tests/guard_counterexamples.rs`. Start from the λ section of
+`docs/superpowers/plans/2026-07-19-redextape-roadmap.md` rather than the specs, two of which are
+withdrawn designs retained deliberately.
+
+**Divergence is a separate matter and is untouched** — the family has no base case, so "terminates"
+means it reaches a cap in bounded time. The cap it reaches is **`MAX_TERM_DEPTH`, not
+`MAX_REDUCTION_STEPS`** (105,607 steps against a step cap of 5,000,000), because the family grows deep
+as it diverges. Both are reachable only because control now returns from each β-step.
 
 ### Not built yet
 
