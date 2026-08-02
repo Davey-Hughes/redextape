@@ -529,7 +529,7 @@ cap's job, and the root cause in lower_group, which is still unfixed."
 
 ## Where this plan stops
 
-**It does not fix `lower_group`.** The duplication at `lower.rs:453` is the root cause and predates structural sharing. Binding `group` once was measured *not* to close the blow-up — it relocates the same expansion to reduction time under call-by-name, and moves every pinned step count and `Origins` path in that function. That is a lowering slice with its own design.
+**It does not fix `lower_group`.** Its `group.clone()` is the root cause and predates structural sharing. Binding `group` once was measured *not* to close the blow-up — it relocates the same expansion to reduction time under call-by-name, and moves every pinned step count and `Origins` path in that function. That is a lowering slice with its own design.
 
 ~~"This plan makes the program fail **fast and typed** rather than hanging, without refusing the large unshared programs the previous attempt rejected."~~ — **it does not**, and the second half is the trap rather than the achievement. Task 2 was reverted 2026-08-01; the program still hangs and nothing refuses it. Not refusing large *unshared* programs is exactly what makes this guard blind: the 4,821-byte two-list counterexample is a large unshared program that takes 19.0 s in one β-step, so the property this sentence claims as a virtue is the reason the bound cannot see it. What the plan actually delivered is Task 1's `max_shared_logical_size` and Task 3's instrument. (The sibling plan, [`2026-07-31-lambda-logical-size-guard.md`](2026-07-31-lambda-logical-size-guard.md), strikes its identical sentence; this one was missed until the 2026-08-01 sweep.)
 

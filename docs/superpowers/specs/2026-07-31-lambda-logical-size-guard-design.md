@@ -64,7 +64,7 @@ Two corrections to that sentence, both measured on 2026-07-31 and both load-bear
   step and see where it hurts — measures the wrong thing, by **32x** against the size that actually
   hangs (19,726,040 / 616,152). §4 records what that curve actually shows.
 
-The mechanism is `lambda/lower.rs:453` — `out = app(out, projection(group.clone(), j))` inside
+The mechanism is `lambda/lower.rs`'s `lower_group` — `out = app(out, projection(group.clone(), j))` inside
 `for j in 0..n` in `lower_group`, which clones the whole group term once per member. That is linear in
 n. It becomes exponential because it *nests*: a member's value is a lowered `fn` body, a body is a
 block, and a block may declare its own mutually recursive group, so level k's group sits inside level

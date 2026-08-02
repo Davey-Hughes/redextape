@@ -50,7 +50,7 @@ in §10 and routed from the roadmap.
 The hazard as it stood: **512 bytes of ordinary surface syntax reach a β-step that does not finish.**
 **No longer true since 2026-08-01** — that program now reduces in 7.48 s. Kept in the present tense of
 its own moment, because the rest of this section reasons from it.
-`lower_group` clones the whole recursive-group tuple once per member (`lambda/lower.rs:453`), which is
+`lower_group` clones the whole recursive-group tuple once per member (`lambda/lower.rs`'s `lower_group`), which is
 linear in the member count and becomes exponential once groups nest, because a member's body is a block
 that may declare its own group.
 
@@ -145,7 +145,7 @@ four lines above already said so.** Re-measured by re-running `list_reduction_pr
 
 So 34 of the 46 share something, not 34 minus the twelve claimed to be the only sharers. The
 discriminator is **group size, not recursion**: the multiplier is `lower_group` cloning the whole group
-term once per member (`lower.rs:453`), so a one-member group — which is what a self-recursive `fn` is —
+term once per member (`lower_group`), so a one-member group — which is what a self-recursive `fn` is —
 costs the same 6 as a non-recursive one, and only a group of two or more reaches the hundreds.
 
 The headroom conclusion survives the correction, on a narrower premise. It is spent where a legitimate

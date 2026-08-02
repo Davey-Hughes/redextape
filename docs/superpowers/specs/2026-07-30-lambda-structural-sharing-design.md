@@ -382,7 +382,7 @@ and only reaching zero matters". The first clause is false of the shipped code a
 does not terminate.** It is corrected here because §6 is the section a future implementer reads for the
 destructor, and it was the only part of this document still carrying the superseded shape.
 
-The shipped destructor is **`impl Drop for LambdaTerm`** (`term.rs:181`), and `Node` deliberately has no
+The shipped destructor is **`impl Drop for LambdaTerm`** (in `term.rs`), and `Node` deliberately has no
 `Drop` at all. Three things follow, none of which the `Node` version can have:
 
 1. **A `Node`-level `Drop` never terminates.** The walk opens by allocating a placeholder `blank = var(0)`,
@@ -525,7 +525,7 @@ therefore the weakest of the candidates, not the strongest; §10's closing table
   > 12.3%.
 
   The draft's mechanism sentence was wrong about the baseline as well. It said depth-0 occurrences
-  "stop being copied at all"; `term.rs:117` already returns `s.clone()` at every depth today, and the
+  "stop being copied at all"; `subst`'s `Var` hit arm already returns `s.clone()` at every depth today, and the
   `lift == 0` arm **preserves** that behaviour rather than introducing it.
 
   **So this gate is expected to hold unedited, those four constants included, and movement in any of
@@ -598,7 +598,7 @@ traversal the reducer actually performs and then checks the candidate against **
 rather than the two that motivated the question.
 
 The counter is **`Σ abs×arg`**: for each step, `#Abs(body) × |arg|`. It exists because `subst`'s
-abstraction arm (`term.rs:122`) is
+abstraction arm (`subst`'s `Abs` arm) is
 
 ```rust
 Node::Abs(n, b) => abs(Rc::clone(n), subst(j + 1, &shift(1, 0, s), b)),
@@ -684,7 +684,7 @@ trustworthy part of it — row 12 is 118 nodes of work measured at 2 µs — and
 the accounting" and that is too strong.** `Σ model` is 86.8% `Σ abs×arg`, so its band mostly tests
 whether that *one* counter is linear in time. A traversal **proportional** to it is invisible to the
 control and gets folded into the constant rather than showing up as drift — the obvious candidate being
-the `Drop` walk that frees those same nodes (`term.rs:181-222`), which by construction visits roughly
+the `Drop` walk that frees those same nodes (`term.rs`'s `impl Drop for LambdaTerm`), which by construction visits roughly
 what `subst` allocated. What the evidence supports is **"nothing large and non-proportional is
 missing"**, which is what the flat band actually demonstrates and is still enough for the dominance
 claim: a hidden traversal proportional to `Σ abs×arg` makes the substitution redundancy *more* of the
@@ -862,7 +862,7 @@ fn subst_at(j: u32, lift: u32, s: &LambdaTerm, t: &LambdaTerm) -> LambdaTerm {
 
 **`lift == 0` MUST NOT BE "SIMPLIFIED" BACK OUT INTO THE GENERAL ARM.** `shift` allocates a fresh node
 on every arm regardless of `d`, so `shift(0, 0, s)` **deep-rebuilds** the argument — where today's
-`term.rs:117` returns `s.clone()`, a refcount bump. Substituting into a body with no binders therefore
+`subst`'s `Var` hit arm returns `s.clone()`, a refcount bump. Substituting into a body with no binders therefore
 costs **0** today and would cost **`|arg|`** without this arm: a strict regression at exactly those
 sites, and one that discards the structural-sharing property this whole branch exists to establish.
 Every substitution into an occurrence at binder depth 0 goes through it. The probe pins the arm by
@@ -878,7 +878,7 @@ shift(a, c, shift(b, c, t)) == shift(a + b, c, t)      for a, b >= 0
 ```
 
 **The side condition is not decoration, and an earlier draft omitted it.** Stated unconditionally the
-lemma is **false**: `shift(-1, 0, Var 0)` trips `term.rs:99`'s negative-index assert, so the inner
+lemma is **false**: `shift(-1, 0, Var 0)` trips `shift`'s negative-index assert, so the inner
 application does not even have a value to be additive with. Nothing is lost by the restriction — the
 rewrite accumulates `lift` upward through `Abs`, so every shift it composes has `d = 1`, and the
 non-negative case is the whole of what the induction over `Abs` needs. The one negative shift in the
@@ -920,7 +920,7 @@ way. After the rewrite it becomes, at no extra cost, a committed differential ch
 kept eager for exactly that reason.
 
 **Blast radius, corrected.** This section previously said "`beta` is the only in-tree caller of either
-function". That is true of **`subst`** — `beta` (`term.rs:129`) is its only caller, and `beta`'s only
+function". That is true of **`subst`** — `beta` (in `term.rs`) is its only caller, and `beta`'s only
 caller is `reduce_step` (`reduce.rs:100`). It is **false of `shift`**, which has a second in-tree
 caller: `lower.rs:72`, inside `store_of`, calls `shift(1, 0, v)` when a store value moves under the new
 `\sel` binder. The rewrite does not change `shift`, so that call site is unaffected — but a reader
@@ -1086,7 +1086,7 @@ through and dated, because what it got wrong is the useful part. Instrument:
 `crates/redextape-core/examples/blowup_probe.rs`, committed with this slice for exactly this reason.
 Full report: the investigation's own write-up, summarized here to the numbers.
 
-**The multiplier is `lower.rs:453`, and it is not new.**
+**The multiplier is `lower_group`'s `group.clone()`, and it is not new.**
 
 ```rust
 for j in 0..n {
@@ -1151,7 +1151,7 @@ nothing like it exists in production.
   levels. **Nothing placed between β-steps can bound a β-step.**
 
 **What `Rc` changed is WHERE it detonates, and that is the sentence this slice most needs to hand
-forward.** Under `Box`, `lower.rs:453`'s `group.clone()` was a deep copy, so the same program built the
+forward.** Under `Box`, `lower_group`'s `group.clone()` was a deep copy, so the same program built the
 2^m tree **during lowering** — physically, immediately, fatally, and at a much smaller m. It was already
 a bomb. Under `Rc` the clone is n refcount bumps, so `lower` **succeeds** in 196 µs holding 1,644
 allocations and the explosion moves into the reducer, where it presents as a hang rather than an
@@ -1166,7 +1166,7 @@ branch and was not reconstructed. It is the one claim in this subsection without
 
 1. **`Drop`'s Θ(physical) claim holds, demonstrated rather than argued.** A 10,000-deep
    `app(c.clone(), c)` chain — 10,001 allocations, **2^10001 logical nodes** — is freed in **175 µs**.
-   The mechanism is `Rc::into_inner` in the worklist loop (`term.rs:222`): a node with two parents is
+   The mechanism is `Rc::into_inner` in `Drop`'s worklist loop: a node with two parents is
    popped twice but expanded once, so total pops are bounded by 2 × allocations. It is the one traversal
    that survives this shape, which is what the bullet below already claimed and now has a number for.
 2. **Reduction cannot COMPOUND the ratio — it MATERIALIZES it.** `beta`'s closing `shift(-1, 0, …)`
@@ -1275,7 +1275,7 @@ human's.
 
 **Confidence, and what would falsify this.** Reachability is **certain** — 512 bytes of ordinary surface
 syntax that parses, typechecks and lowers through the public pipeline, with the failure observed under a
-hard cap rather than inferred. The mechanism attribution to `lower.rs:453` is **high confidence**: it is
+hard cap rather than inferred. The mechanism attribution to `lower_group` is **high confidence**: it is
 the only `.clone()` of a user-controlled `LambdaTerm` in the lowering not immediately undone by a `shift`,
 and the measured ratio is 2^levels to three significant figures for a 2-member group, which is what the
 code predicts. **Falsified by:** a program family with an exponential ratio containing no `LetRecGroup`

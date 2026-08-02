@@ -14,7 +14,7 @@
 
 **Architecture:** `LambdaTerm` becomes `struct LambdaTerm(Rc<Node>)` with a public `Node` enum reached through `.node()`. Cloning any term at any level becomes one refcount bump. The hand-written iterative `Drop` **stays on `LambdaTerm`** and may only descend into uniquely-owned children. Everything else — reduction strategy, printers, spans, error types, depth guards — is untouched.
 
-> **Corrected 2026-07-31.** This line originally read "the hand-written iterative `Drop` moves to `Node`". **That design does not terminate and was never shipped** — Task 2's Step 4 records the whole diagnosis, and the shipped destructor is `impl Drop for LambdaTerm` (`term.rs:181`), opening with a strong-count guard and a `Node::Var(_)` leaf guard. The leaf guard is what terminates the placeholder cascade; `Node` deliberately has no `Drop` at all, which is also what lets `Rc::into_inner`'s result be destructured by value. See the design's §6.
+> **Corrected 2026-07-31.** This line originally read "the hand-written iterative `Drop` moves to `Node`". **That design does not terminate and was never shipped** — Task 2's Step 4 records the whole diagnosis, and the shipped destructor is `impl Drop for LambdaTerm` (in `term.rs`), opening with a strong-count guard and a `Node::Var(_)` leaf guard. The leaf guard is what terminates the placeholder cascade; `Node` deliberately has no `Drop` at all, which is also what lets `Rc::into_inner`'s result be destructured by value. See the design's §6.
 
 **Tech Stack:** Rust (stable channel), `cargo-nextest`, `cargo-llvm-cov`. No new dependencies; `redextape-core` must stay dependency-free.
 
@@ -177,7 +177,7 @@ Expected: `3 tests run: 3 passed`. They pass because the existing `Drop` is alre
 
 - [x] **Step 3: Prove the tests are non-vacuous**
 
-Temporarily delete the `impl Drop for LambdaTerm` block in `crates/redextape-core/src/lambda/term.rs:107-115` and re-run.
+Temporarily delete the `impl Drop for LambdaTerm` block in `crates/redextape-core/src/lambda/term.rs` and re-run.
 
 Run: `cargo nextest run -p redextape-core -E 'test(dropping_deep_lambda)'`
 Expected: the test process **aborts** (SIGABRT / stack overflow), not a clean failure. This is what proves 512 KiB is small enough to catch a recursive teardown at depth 40,000.

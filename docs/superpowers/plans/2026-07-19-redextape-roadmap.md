@@ -781,7 +781,7 @@ design's §10.
 >   lenient — that is the property the previous one could not have. Its cost grows ~n³ and stops being
 >   comfortable between n=450 and n=500, which makes it a UX question: **Plan 5's "still running — hit
 >   50k steps" affordance is where it belongs**, not here.
-> - **`lower_group`'s duplication — the root cause, still unfixed.** `lower.rs:453` still clones the
+> - **`lower_group`'s duplication — the root cause, still unfixed.** Its `group.clone()` still clones the
 >   whole group term once per member. Binding `group` once was measured *not* to close the blow-up — `g`
 >   then occurs n times in the body, and under call-by-name the first β-step substitutes `G` into all n
 >   occurrences, relocating the same expansion to reduction time — and it moves every pinned step count
@@ -895,7 +895,7 @@ is **never consulted**, because control never returns from `reduce_step`. And a 
 between steps cannot help: 90 s produced a 330-second run. **The failure mode is a hang at GB scale, not
 a clean OOM** — the investigation expected a kill, set the ramp up to be killed, and did not get one.
 
-**The mechanism is `lower.rs:453`** — `out = app(out, projection(group.clone(), j))` inside `for j in
+**The mechanism is `lower_group`'s projection loop** — `out = app(out, projection(group.clone(), j))` inside `for j in
 0..n` in `lower_group`, which clones the whole group term once per member of a mutually recursive `fn`
 group. That is a factor of n, i.e. linear. **It becomes exponential because it nests and multiplies:** a
 member's body is a block, and a block may declare its own mutually recursive group.
@@ -975,7 +975,7 @@ slice's minors above. The ledger held **fifteen**. **Nine were fixed before the 
 tenth is fixed by this commit; the status below is what is true now, not what the review first found.**
 Four remain and two were judged not worth carrying — each for a stated reason rather than by omission.
 
-- **STILL OPEN — `term.rs:206`'s `if let Some(root) = Rc::get_mut(..)` has a silently empty else-branch.**
+- **STILL OPEN — the `if let Some(root) = Rc::get_mut(..)` in `term.rs`'s `impl Drop for LambdaTerm` has a silently empty else-branch.**
   Unreachable today (no `Weak` anywhere in the workspace, grep-verified) and the comment above it says
   why. But if a `Weak` is ever added, the destructor degenerates to compiler drop glue and overflows —
   the exact failure it exists to prevent, with nothing to catch it. A `debug_assert!` would make the
@@ -984,7 +984,7 @@ Four remain and two were judged not worth carrying — each for a stated reason 
   consumer that matches on a term needs two imports (`lambda::LambdaTerm` + `lambda::term::Node`). A
   papercut paid by each of this branch's seven tasks in turn. It is a public-API addition, so it belongs
   to a slice that is allowed to make one.
-- **STILL OPEN — `term.rs:381`'s across-step sharing assertion is weaker than its message.**
+- **STILL OPEN — the across-step sharing assertion in `term.rs`'s `a_real_multi_step_reduction_still_shares_allocations_across_steps` is weaker than its message.**
   `before_ids.intersection(&after_ids).next().is_some()` requires only SOME shared allocation, not the
   specific untouched sibling at each `App` branch, so on the two deepest steps a regression that broke
   sharing at one level but not another would pass. The realistic regression — total loss of sharing — is

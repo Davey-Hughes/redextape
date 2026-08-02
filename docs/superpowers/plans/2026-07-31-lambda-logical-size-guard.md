@@ -661,7 +661,7 @@ the other says the output is too big to reduce."
 
 ## Where this plan stops
 
-**It does not fix `lower_group`.** The duplication at `lower.rs:453` is the root cause, it predates structural sharing, and binding `group` once was measured *not* to close the blow-up — it relocates the same expansion to reduction time under call-by-name, and it moves every pinned step count and `Origins` path in that function. Fixing it properly is a lowering slice with its own design.
+**It does not fix `lower_group`.** Its `group.clone()` is the root cause, it predates structural sharing, and binding `group` once was measured *not* to close the blow-up — it relocates the same expansion to reduction time under call-by-name, and it moves every pinned step count and `Origins` path in that function. Fixing it properly is a lowering slice with its own design.
 
 ~~"This plan makes the program fail *fast and typed* instead of hanging. That is the whole
 deliverable."~~ — **it does not.** Task 3 was abandoned; the program still hangs and nothing refuses it.

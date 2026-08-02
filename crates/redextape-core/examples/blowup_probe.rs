@@ -19,7 +19,7 @@
 //!   * PART 2 — is the shape reachable from a source program? The only path a user controls is
 //!     parse -> desugar -> Core -> `lower` -> reduce, so this ramps a family of source programs and
 //!     measures the ratio of the term `lower` returns. ANSWER: REACHABLE, from 512 bytes. The
-//!     multiplier is `lower.rs:453` — `lower_group` clones the whole group term once per member of a
+//!     multiplier is `lower_group`'s `group.clone()` — it clones the whole group term once per member of a
 //!     mutually recursive `fn` group — and it NESTS, because a member's body is a block that can
 //!     declare its own group. 512 bytes lowers in ~196 µs to 1,644 allocations holding 616,152
 //!     logical nodes (375x), and reducing that term reaches a β-step that did not finish in 13
@@ -355,7 +355,7 @@ fn part1() {
 
     ramp(
         "c == c.clone() — the ptr_eq fast path",
-        "term.rs:152; both sides are ONE allocation, so this must short-circuit at the root",
+        "PartialEq's Rc::ptr_eq short-circuit; both sides are ONE allocation, so this must fire at the root",
         |n| {
             let c = doubling_chain(n);
             let d = c.clone();
@@ -368,7 +368,7 @@ fn part1() {
 
     ramp(
         "c == d — structurally equal, separately built",
-        "the ptr_eq path cannot fire; term.rs:155-160 walks both logical trees",
+        "the ptr_eq path cannot fire; PartialEq's structural match walks both logical trees",
         |n| {
             let c = doubling_chain(n);
             let d = doubling_chain(n);
@@ -393,7 +393,7 @@ fn part1() {
         },
     );
 
-    ramp("drop(c)", "term.rs:193-234, claimed to be the ONE traversal bounded by allocation count", |n| {
+    ramp("drop(c)", "impl Drop for LambdaTerm, claimed to be the ONE traversal bounded by allocation count", |n| {
         let c = doubling_chain(n);
         let t0 = Instant::now();
         drop(black_box(c));
