@@ -18,6 +18,10 @@ use crate::lambda::{LambdaTerm, Path, Status};
 use crate::tm::machine::{Machine, StateId, Symbol};
 use crate::tm::sim::{Caps as TmCaps, Status as TmStatus, Tape, apply, rule_matches};
 
+mod zipper;
+
+pub use zipper::ZipperCursor;
+
 /// One step of either backend. `Delta`'s `state` is the state BEFORE the transition, matching the
 /// convention `sim::Step` and `lambda::reduce::Step` already use.
 #[derive(Clone, Debug, PartialEq, Eq)]

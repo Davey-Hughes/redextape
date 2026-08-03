@@ -134,8 +134,9 @@ use std::time::Instant;
 
 use redextape_core::desugar::desugar;
 use redextape_core::lambda::term::{Dir, Node, abs, app, shift, subst, var};
-use redextape_core::lambda::{LambdaTerm, MAX_REDUCTION_STEPS, Trace, lower, reduce_to_normal_form, reduce_trace};
+use redextape_core::lambda::{LambdaTerm, MAX_REDUCTION_STEPS, Trace, lower, reduce_trace};
 use redextape_core::parser::parse;
+use redextape_core::trace::{LambdaCursor, ZipperCursor};
 
 /// Verbatim copy of `tests/three_way_oracle.rs::FIRST_ORDER_DEMOS` (comments stripped).
 ///
@@ -645,26 +646,10 @@ fn measure(idx: usize, src: &str) -> Option<Row> {
     // NEGATIVE price per read-only node, and the projection table printed negative milliseconds. That
     // is what a measurement apparatus outliving its subject looks like from the inside, and the fix is
     // to measure a batch rather than to widen the tolerances until the numbers look plausible again.
-    let mut replay_ms = f64::MAX;
-    let mut batch_ms = 0.0f64;
-    for _ in 0..3 {
-        let mut reps = 0u32;
-        let t0 = Instant::now();
-        let dt = loop {
-            let (nf, _status) = reduce_to_normal_form(&term, MAX_REDUCTION_STEPS);
-            std::hint::black_box(&nf);
-            reps += 1;
-            let dt = t0.elapsed().as_secs_f64() * 1000.0;
-            if dt >= BATCH_MIN_MS || reps >= BATCH_MAX_REPS {
-                break dt;
-            }
-        };
-        let per_replay = dt / f64::from(reps);
-        if per_replay < replay_ms {
-            replay_ms = per_replay;
-            batch_ms = dt;
-        }
-    }
+    let (replay_ms, batch_ms) = batch_best_of_three(|| {
+        let nf = drain_lambda_cursor(&term);
+        std::hint::black_box(&nf);
+    });
 
     let trace = reduce_trace(&term, MAX_REDUCTION_STEPS);
     let work = account(&trace);
@@ -831,6 +816,7 @@ fn run() {
     println!("                                      costs, so they compare directly: ~1.7x, not ~15x.");
 
     part_b(&rows);
+    part_d(&rows);
 }
 
 /// Counters, in the order the table prints them. `f` reads one off a `Work`; `origin` says whether the
@@ -1643,3 +1629,135 @@ fn verify_interner() {
 // the subject: the same 355,840 triples, checked against two independent implementations instead of
 // one. See that file's module doc, and the design's §8/§10.
 // ==================================================================================================
+
+/// Time one closure, batched: repeat until the batch clears `BATCH_MIN_MS`, divide by the repetition
+/// count, take the best of three. Used by both `measure` (the corpus replay cost) and PART D (the A/B
+/// timing), so the two are directly comparable — one batching implementation rather than two copies
+/// held together by a comment, which is the drift pattern this tree has fought before.
+///
+/// Returns `(per_rep_ms, batch_ms)`: the per-repetition time (what callers usually want) alongside the
+/// raw wall time of the batch that produced the winning per-rep figure — `measure` needs both, to also
+/// report whether that batch cleared `BATCH_MIN_MS`.
+fn batch_best_of_three(mut run_once: impl FnMut()) -> (f64, f64) {
+    let mut best_per_rep = f64::MAX;
+    let mut best_batch_ms = 0.0f64;
+    for _ in 0..3 {
+        let mut reps = 0u32;
+        let t0 = Instant::now();
+        let dt = loop {
+            run_once();
+            reps += 1;
+            let dt = t0.elapsed().as_secs_f64() * 1000.0;
+            if dt >= BATCH_MIN_MS || reps >= BATCH_MAX_REPS {
+                break dt;
+            }
+        };
+        let per_rep = dt / f64::from(reps);
+        if per_rep < best_per_rep {
+            best_per_rep = per_rep;
+            best_batch_ms = dt;
+        }
+    }
+    (best_per_rep, best_batch_ms)
+}
+
+/// PART D — the reduction-context zipper, measured against the cursor it would replace.
+///
+/// **LAZY CONSUMER ONLY, and that is not a convenience.** `reduce_trace` materialises `term()` every
+/// step BY CONTRACT, so the spine is rebuilt per step whatever the reducer does internally and its
+/// ceiling is exactly zero. Measuring it would produce a number that says nothing about the zipper.
+/// What is timed here is `reduce_to_normal_form`'s shape: drain the cursor, read the term once at the
+/// end — the same shape the UI's `LambdaCursor` path has.
+///
+/// `Σ path` is the ceiling: the spine rebuild the zipper does not perform. `climbs` is what it pays
+/// back — `advance` rebuilding a parent per level climbed past an exhausted subtree, the one place
+/// zipper navigation allocates. The design's ceiling is `Σ path − climbs`, and until this table existed
+/// nobody had the second term.
+fn part_d(rows: &[Row]) {
+    println!("\n\nPART D — ZIPPER A/B: what carrying the reduction context actually recovers.\n");
+    println!(
+        "Lazy consumer only. `reduce_trace` materialises `term()` per step BY CONTRACT, so its ceiling\n\
+         is exactly zero and it is not measured here — see the design's §2.\n\
+         `Σ path` is the ceiling (spine rebuilds avoided); `climbs` is what `advance` pays back.\n"
+    );
+    println!(
+        "{:>3}  {:>10}  {:>10}  {:>9}  {:>10}  {:>9}  {:>9}",
+        "#", "today ms", "zipper ms", "speedup", "Σ path", "climbs", "net"
+    );
+    println!("{}", "-".repeat(70));
+
+    let (mut t_today, mut t_zip, mut t_path, mut t_climb) = (0.0f64, 0.0f64, 0u64, 0u64);
+    for r in rows {
+        let Some(term) = term_of_demo(r.idx) else { continue };
+
+        let (today, _) = batch_best_of_three(|| {
+            let nf = drain_lambda_cursor(&term);
+            std::hint::black_box(&nf);
+        });
+        let (zip, _) = batch_best_of_three(|| {
+            let mut z = ZipperCursor::new(&term, MAX_REDUCTION_STEPS);
+            while z.next().is_some() {}
+            std::hint::black_box(z.term());
+        });
+
+        // One un-timed run purely to read the climb counter.
+        let mut counted = ZipperCursor::new(&term, MAX_REDUCTION_STEPS);
+        while counted.next().is_some() {}
+        let climbs = counted.climbs();
+
+        let path = r.work.path_len;
+        let net = path as i64 - climbs as i64;
+        t_today += today;
+        t_zip += zip;
+        t_path += path;
+        t_climb += climbs;
+        println!(
+            "{:>3}  {:>10.3}  {:>10.3}  {:>8.2}x  {:>10}  {:>9}  {:>9}",
+            r.idx,
+            today,
+            zip,
+            today / zip.max(f64::MIN_POSITIVE),
+            path,
+            climbs,
+            net
+        );
+    }
+
+    let net = t_path as i64 - t_climb as i64;
+    println!(
+        "\nCORPUS TOTAL: today {t_today:.3} ms, zipper {t_zip:.3} ms — {:.2}x.\n\
+         Ceiling `Σ path` = {t_path}; `climbs` = {t_climb}; net node saving = {net} \
+         ({:.1}% of the ceiling).\n\
+         \n\
+         READ THE NET COLUMN, NOT THE CEILING. The design projected the zipper would recover `Σ path`\n\
+         in full and was corrected mid-slice when the climb turned out to allocate; this is the number\n\
+         that correction was waiting for. A net far below the ceiling means the climb is the cost, which\n\
+         is exactly where the plan said to look first.",
+        t_today / t_zip.max(f64::MIN_POSITIVE),
+        100.0 * net as f64 / t_path.max(1) as f64,
+    );
+}
+
+/// Re-lower one corpus program by index. PART A/B keep only counts per row, not the terms.
+fn term_of_demo(idx: usize) -> Option<LambdaTerm> {
+    let (prog, ds) = parse(FIRST_ORDER_DEMOS.get(idx)?);
+    if !ds.is_empty() {
+        return None;
+    }
+    lower(&desugar(&prog?)).ok()
+}
+
+/// Drain `LambdaCursor` to normal form and read the term once — what `reduce_to_normal_form` did
+/// before it was wired to `ZipperCursor`.
+///
+/// **THE PROBE MUST NAME ITS CURSOR EXPLICITLY, and this helper is why.** PART B's counters and PART
+/// C's fitted prices describe `LambdaCursor`'s traversals. If the baseline kept calling
+/// `reduce_to_normal_form`, the moment that function switched cursors every timing here would silently
+/// become the zipper's while every counter still described the old reducer — a model describing one
+/// thing and a clock measuring another, which is precisely the failure this file was repaired for on
+/// 2026-08-02. PART D would also have compared the zipper against itself.
+fn drain_lambda_cursor(term: &LambdaTerm) -> LambdaTerm {
+    let mut c = LambdaCursor::new(term, MAX_REDUCTION_STEPS);
+    while c.next().is_some() {}
+    c.term().clone()
+}

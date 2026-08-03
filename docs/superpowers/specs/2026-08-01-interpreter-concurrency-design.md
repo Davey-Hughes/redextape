@@ -1,11 +1,12 @@
 # Interpreter concurrency and parallelism — design
 
-**Status: MEASURED, NOT IMPLEMENTED.** Raised 2026-08-01 as a question — *can the TM simulator or the λ
-reducer be made faster with threads?* — and answered by measurement rather than by argument. **Five
-schemes are rejected here, each with the number that rejected it.** What survives is two *sequential*
-fixes for one shared defect — **TM run-length fusion** (§8.1) and a **λ reduction-context zipper** (§8.2) —
-plus one genuine use of parallelism, **Plan 4/5 workers** (§9). Nothing in this document has been built;
-§10 is the instrument it all depends on, and that has not been built either.
+**Status: MEASURED, NOT IMPLEMENTED, EXCEPT §8.2.** Raised 2026-08-01 as a question — *can the TM
+simulator or the λ reducer be made faster with threads?* — and answered by measurement rather than by
+argument. **Five schemes are rejected here, each with the number that rejected it.** What survives is two
+*sequential* fixes for one shared defect — **TM run-length fusion** (§8.1) and a **λ reduction-context
+zipper** (§8.2) — plus one genuine use of parallelism, **Plan 4/5 workers** (§9). Nothing else in this
+document has been built; §8.2 was, on 2026-08-02 (§11 item 6) — 1.41–1.43x on the corpus, 99.0% of the `Σ path`
+ceiling. §10 is the instrument the rest of it depends on, and that has not been built either.
 
 **Scope:** `redextape-core`, both step loops (`tm/sim.rs` + `trace::TmCursor`, `lambda/reduce.rs` +
 `trace::LambdaCursor`). Zero new dependencies — and §3 and §6 are largely *about* why that constraint
@@ -472,12 +473,29 @@ before the prototype does.
 4. **§8.1's cleanup 1 changes when the cells cap fires** if done carelessly — an incrementally maintained
    total must agree with the recomputed one *exactly*, including on the step that trips the cap.
    `cells_cap_stops_unbounded_tape_growth` is the existing pin and is not sufficient alone.
-5. **Does a λ zipper survive `MAX_TERM_DEPTH`?** The guard exists because `reduce_step`/`shift`/`subst`
-   recurse once per node and would otherwise overflow the native stack. An explicit context stack moves
-   *one* of those three off the native stack and not the other two, so the guard is still needed — but
-   whether its accounting still means the same thing against a zipper is unchecked.
-6. ~~**ANSWERED: no — do the `subst` re-shift first.**~~ **RE-OPENED 2026-08-02, and the answer now
-   points the other way.** Part H puts a β-step at **1,323 ns** (still valid — measured after the `shift`
+5. **ANSWERED 2026-08-02 BY BUILDING IT: yes, the accounting means the same thing.** The guard exists
+   because `reduce_step`/`shift`/`subst` recurse once per node and would otherwise overflow the native
+   stack; an explicit context stack moves *one* of those three off the native stack and not the other
+   two, so the guard is still needed, and it is: `ZipperCursor::root_depth()` (`trace/zipper.rs`)
+   maintains whole-term depth in O(1) — the `(depth_add, depth_floor)` pair described on the field docs
+   there, not a stored field re-walked per step — and
+   `root_depth_tracks_the_whole_terms_depth_at_every_position` pins it against `t.depth()` at every
+   position a caller can observe it from. Both cursors guard on the same quantity the same way:
+   `> MAX_TERM_DEPTH`, not `>=` — `LambdaCursor`'s `depth_exceeds` and `ZipperCursor`'s check agree at
+   the boundary, pinned by `the_depth_guard_does_not_fire_at_exactly_max_term_depth`.
+6. **ANSWERED 2026-08-02 BY BUILDING IT: yes, and it is the first §8 item to survive measurement.**
+   `ZipperCursor` (`trace/zipper.rs`) is **1.41–1.43x** wall-clock on the corpus and recovers **99.0%** of
+   the `Σ path` ceiling; row 31 runs **4.55x**. §8.2's fix was right and its *deferral* was wrong, for
+   the reason below. Full record:
+   [`2026-08-02-lambda-reduction-context-zipper-design.md`](2026-08-02-lambda-reduction-context-zipper-design.md).
+   **Also settled: what to do with it.** Routing by consumer — `reduce_to_normal_form` drives the
+   zipper, `reduce_trace` keeps `LambdaCursor`, because the win exists only where the term is read once
+   at the end. Depth-selection was rejected: the sub-1.0x rows lose microseconds while row 31 gains
+   milliseconds. What stays open is only whether `reduce_trace`'s per-step materialisation contract is
+   worth changing, which is an API question rather than a performance one.
+
+   ~~**RE-OPENED 2026-08-02, and the answer now points the other way.**~~ Kept below as the reasoning
+   that got there. Part H puts a β-step at **1,323 ns** (still valid — measured after the `shift`
    fix, and the corpus independently prices a step at ~1,243 ns today). What was wrong is the
    denominator: "~8.7 retraced spine nodes are a single-digit percentage" divided them into a per-step
    node count taken from `Σ abs×arg`, a static counter that over-reports by **~1,584x**. Against the

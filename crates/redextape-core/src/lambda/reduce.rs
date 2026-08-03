@@ -205,8 +205,22 @@ pub fn reduce_step(t: &LambdaTerm) -> Option<(LambdaTerm, Path)> {
 
 /// Reduce to normal form (or the cap), recording every step and its redex path. Materializes a
 /// snapshot per step BY CONTRACT — this is the API that promises the full history; `trace::LambdaCursor`
-/// is the O(1) alternative for callers that only walk forward. The stepping itself lives in the cursor,
-/// so there is one β-reduction loop in this crate rather than two that must be kept in agreement.
+/// is the O(1) alternative for callers that only walk forward.
+///
+/// **THIS DRIVES `LambdaCursor`, AND IT IS THE ONE CONSUMER THAT SHOULD.** `reduce_to_normal_form`
+/// switched to `ZipperCursor` on 2026-08-02 for a 1.41–1.43x win; this function cannot take it. The
+/// zipper's saving is the per-step spine rebuild, and it is only a saving for a caller that reads the
+/// term ONCE. Calling `cursor.term()` every step — which is this function's entire promise — makes the
+/// zipper fold its context stack per step, paying the same cost back with frame bookkeeping on top.
+///
+/// **THERE ARE NOW TWO β-REDUCTION LOOPS IN THIS CRATE, AND THIS COMMENT USED TO SAY THERE WAS ONE.**
+/// It read "the stepping itself lives in the cursor, so there is one β-reduction loop in this crate
+/// rather than two that must be kept in agreement" — true until the zipper landed, and the reason it is
+/// tolerable now is that the two ARE kept in agreement, mechanically:
+/// `tests/zipper_equivalence.rs` asserts identical `StepEvent` sequences, identical terms and identical
+/// statuses across 256 generated programs and ten curated shapes. The guarantee moved from "there is
+/// only one" to "there are two and a gate holds them equal"; a slice that deletes that gate reintroduces
+/// exactly the hazard the old sentence was avoiding.
 pub fn reduce_trace(t: &LambdaTerm, cap: u64) -> Trace {
     let mut cursor = crate::trace::LambdaCursor::new(t, cap);
     let mut steps = Vec::new();
@@ -226,14 +240,31 @@ pub fn reduce_trace(t: &LambdaTerm, cap: u64) -> Trace {
     Trace { steps, normal_form: cursor.term().clone(), status }
 }
 
-/// Reduce to normal form (or the cap) without retaining the intermediate steps. Drives a
-/// `trace::LambdaCursor` to exhaustion and discards the redex paths, so this shares the same
-/// cap-then-depth-then-step guard order as `reduce_trace` rather than a second copy of it.
+/// Reduce to normal form (or the cap) without retaining the intermediate steps. Drives a cursor to
+/// exhaustion and discards the redex paths, so this shares the same cap-then-depth-then-step guard
+/// order as `reduce_trace` rather than a second copy of it.
+///
+/// **THIS DRIVES `ZipperCursor`, WHERE `reduce_trace` DRIVES `LambdaCursor`, AND THE SPLIT IS THE
+/// WHOLE POINT.** A zipper carries the reduction context across steps instead of re-descending from
+/// the root, which removes the spine rebuild `reduce_step` pays per step — **1.41–1.43x on the corpus,
+/// recovering 99.0% of that ceiling**. It can only do that for a caller that reads the term ONCE, at
+/// the end. `reduce_trace` materialises `cursor.term()` every step by contract, so under a zipper it
+/// would fold the context stack per step and pay the same cost back with frame bookkeeping on top —
+/// measurably worse, not merely neutral. Routing by consumer rather than replacing one with the other
+/// is what captures the win without taking the regression.
+///
+/// **The two cursors are held to being interchangeable, not assumed to be.**
+/// `tests/zipper_equivalence.rs` asserts identical `StepEvent` sequences, identical terms and
+/// identical statuses over 256 generated programs, six curated terminating shapes and four curated
+/// capping cases. Any divergence is a correctness defect, not a performance trade — normal order is
+/// required, not chosen (see this module's own doc comment for the three independent reasons).
+///
+/// Full record: `docs/superpowers/specs/2026-08-02-lambda-reduction-context-zipper-design.md`.
 pub fn reduce_to_normal_form(t: &LambdaTerm, cap: u64) -> (LambdaTerm, Status) {
-    let mut cursor = crate::trace::LambdaCursor::new(t, cap);
+    let mut cursor = crate::trace::ZipperCursor::new(t, cap);
     while cursor.next().is_some() {}
     let status = cursor.status().unwrap_or(Status::Normalized);
-    (cursor.term().clone(), status)
+    (cursor.term(), status)
 }
 
 #[cfg(test)]

@@ -620,6 +620,49 @@ overturned a plausible estimate. Part G's four run columns exist to keep §8.2's
 falsifiable: if same-path runs ever approach the TM's, the conclusion flips and fusion becomes a λ
 optimization after all.
 
+#### BUILT 2026-08-02 — the reduction-context zipper works: ~1.4x, and the first λ design on this thread to survive
+
+**Four designs on this thread were falsified by measurement. This one was corrected twice by measurement
+and then confirmed by it.** `ZipperCursor` (`src/trace/zipper.rs`) carries the reduction context across
+β-steps instead of re-descending from the root, and on the lazy consumer it is:
+
+| | measured |
+| --- | --- |
+| corpus wall-clock | **1.41–1.43x** — 7.4 ms → 5.3 ms, four runs |
+| ceiling `Σ path` recovered | **99.0%** — 54,655 of 55,226 nodes |
+| what the climb costs | **571 nodes**, 1% of the ceiling |
+| row 31, the mutually-recursive worst case | **4.55x** |
+| worst row | **0.62x** |
+
+**It is not free on trivial input, and that is reported rather than smoothed.** The rows meaningfully
+below 1.0x are programs where `climbs` exceeds `Σ path` outright — terms shallow enough that the search
+climbs more than it descends, so carrying the context costs more than rebuilding it. (Rows at
+0.96x–0.98x have positive net and are ordinary run-to-run noise, not this mechanism.)
+
+**What to do about it is settled here, by routing rather than replacement.** `reduce_to_normal_form`
+drives the zipper; `reduce_trace` keeps `LambdaCursor`, because it materialises `cursor.term()` every
+step by contract and under a zipper would fold the stack per step and pay the cost back with frame
+bookkeeping on top. Depth-selection was rejected — the sub-1.0x rows lose microseconds while row 31
+gains milliseconds, so a runtime branch buys noise. **The whole suite now reduces through the zipper**:
+748 tests green, including the three-way oracle, which is stronger evidence than the 256-program
+proptest alone.
+
+**The prediction discipline paid twice here.** §7 of the design predicted "recovers more than half of
+`Σ path`"; it recovered 99.0%. And §2's second correction — made during review, that `advance`'s climb
+allocates and the ceiling is therefore `Σ path − climbs` — was *right about the mechanism and wrong
+about the magnitude*, which only the `climbs` column could establish. The plan required that column
+before the code existed, precisely so a null result could be attributed instead of guessed at.
+
+**Correctness is proven, not assumed.** `tests/zipper_equivalence.rs`: 256 generated programs plus six
+curated terminating shapes and four curated capping cases (added by the whole-branch review that closed
+out `EQUIV_CAP` as dead code — it had never fired before them), identical `StepEvent` sequences,
+identical terms, identical statuses. It landed one task *before* the optimization and stayed green
+through it with zero edits, which is what made resumption safe to add.
+
+Full record: [`../specs/2026-08-02-lambda-reduction-context-zipper-design.md`](../specs/2026-08-02-lambda-reduction-context-zipper-design.md).
+This also answers §8.2 and open question 6 of the concurrency design, which had deferred the zipper on
+the stale accounting the block below retired.
+
 #### CLOSED 2026-08-02 — the `subst` slice is falsified, and the short-circuit is why
 
 **The standing next λ slice is not a win. On the family it was most likely to help it is a 0.99x LOSS.**
