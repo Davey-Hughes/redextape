@@ -1,7 +1,7 @@
 # The binary `Encoding` — Design Spec
 
 > **Status:** DESIGN (2026-07-26). Implementation plan not yet written.
-> **Context:** `Encoding` (`tm/encoding.rs:18`) has been the TM backend's declared "swappable seam" since
+> **Context:** `Encoding` (the trait in `tm/encoding.rs`) has been the TM backend's declared "swappable seam" since
 > Part 2b-1, and `Unary` has been its only implementation. Every slice since has repeated the same
 > promise in its own words — "the HEAP's *structural* bookkeeping is unary-always; head-word *values*
 > follow the encoding — a boundary the binary follow-on refines." This slice is that follow-on: a second
@@ -121,7 +121,7 @@ is not a new style to invent: it is already the house style on the BOX tape, whe
 delimiter to stop at" (`common/mod.rs:53`). Binary generalizes the BOX tape's discipline to every tape.
 
 A second consequence, small but real: `write_literal` emits a chain of `n` states under unary
-(`encoding.rs:940`), so a large literal inflates the state count linearly in its *value*. Binary emits `w`
+(`tm/encoding/unary.rs`'s `write_literal`), so a large literal inflates the state count linearly in its *value*. Binary emits `w`
 states regardless of `n`.
 
 ### 2. Module layout
@@ -219,7 +219,7 @@ materially more states than its unary counterpart.
 
 **`compare`** — **free**, and this is the payoff of mirroring unary's decomposition rather than inventing
 one. `Unary::compare` derives all six comparisons from two primitives, `monus` and `is_zero`
-(`encoding.rs:1007-1047`): `le(x,y) = is_zero(monus(x,y))`, `ge = le(rb,ra)`, `lt = !ge`, `gt = !le`,
+(`tm/encoding/unary.rs`'s `monus_to_work` and `is_zero_work`): `le(x,y) = is_zero(monus(x,y))`, `ge = le(rb,ra)`, `lt = !ge`, `gt = !le`,
 `eq = le(ra,rb) && le(rb,ra)`, `ne = !eq`. Binary supplies binary `monus` (above) and a binary `is_zero`
 (scan `w` cells for a non-`'0'`), and the entire derivation carries over unchanged.
 

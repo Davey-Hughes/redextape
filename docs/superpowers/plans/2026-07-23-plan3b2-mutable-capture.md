@@ -498,8 +498,8 @@ git add -A && git commit -m "feat(tm): add the fixed-width BOX tape (TAPES 4 -> 
 > This is the δ-authoring task — the one place the TM δ-layer grows. Use the most capable model. The unit tests below are the exact contract; author the rules to satisfy them, mirroring the existing HEAP/REG gadgets.
 
 **Files:**
-- Modify: `crates/redextape-core/src/tm/encoding.rs` (the `Encoding` trait `encoding.rs:18-79`; the `Unary` impl; BOX-tape sub-primitives near the HEAP sub-primitives `encoding.rs:448-595`)
-- Test: `encoding.rs` `#[cfg(test)] mod tests` (add a `run_box` harness mirroring `run_heap` `encoding.rs:1262-1273`)
+- Modify: the `Encoding` trait in `crates/redextape-core/src/tm/encoding.rs`, and the `Unary` impl in `tm/encoding/unary.rs` (BOX-tape sub-primitives beside its HEAP sub-primitives)
+- Test: `tm/encoding/unary.rs`'s `#[cfg(test)] mod tests` (add a `run_box` harness mirroring its `run_heap`)
 
 **Interfaces:**
 - Produces: `Encoding::box_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rv: Slot, rd: Slot)`, `box_get_op(&self, b, entry, exit, rb: Slot, rd: Slot)`, `box_set_op(&self, b, entry, exit, rb: Slot, rv: Slot)`.
@@ -608,7 +608,7 @@ Add end-to-end fault tests in `lower_tm.rs` (Task 6) rather than here, since a n
 Run: `cargo test -p redextape-core --lib tm::encoding::tests::box 2>&1 | tail -20`
 Expected: compile error (no `box_op` trait method).
 
-- [ ] **Step 3: Add the three trait methods to `Encoding`** (`encoding.rs:18-79`)
+- [ ] **Step 3: Add the three trait methods to `Encoding`** (in `tm/encoding.rs`)
 
 ```rust
     fn box_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rv: Slot, rd: Slot);

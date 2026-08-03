@@ -482,7 +482,7 @@ invariant (no other stuck state is reachable) that nothing here proves."
 ### Task 3: Guard the universal REG store
 
 **Files:**
-- Modify: `crates/redextape-core/src/tm/encoding.rs:190-212` (`append_work_to_field`)
+- Modify: `crates/redextape-core/src/tm/encoding/unary.rs`'s `append_work_to_field`
 - Test: `crates/redextape-core/src/tm/lower_tm.rs` (`#[cfg(test)] mod tests`)
 
 **Interfaces:**
@@ -602,7 +602,7 @@ the good path."
 ### Task 4: Guard `write_literal`
 
 **Files:**
-- Modify: `crates/redextape-core/src/tm/encoding.rs:819-841` (`write_literal`)
+- Modify: `crates/redextape-core/src/tm/encoding/unary.rs`'s `write_literal`
 - Test: `crates/redextape-core/src/tm/lower_tm.rs`
 
 **Interfaces:**
@@ -682,8 +682,8 @@ padding blank -- which the test pins directly rather than assuming."
 ### Task 5: Guard the BOX tape
 
 **Files:**
-- Modify: `crates/redextape-core/src/tm/encoding.rs:688-702` (`box_append_field`)
-- Modify: `crates/redextape-core/src/tm/encoding.rs:775-790` (`box_overwrite_field` — restructured)
+- Modify: `crates/redextape-core/src/tm/encoding/unary.rs`'s `box_append_field`
+- Modify: `crates/redextape-core/src/tm/encoding/unary.rs`'s `box_overwrite_field` (— restructured)
 - Test: `crates/redextape-core/src/tm/lower_tm.rs`
 
 **Interfaces:**

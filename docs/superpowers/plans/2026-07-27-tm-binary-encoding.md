@@ -4,7 +4,7 @@
 
 **Goal:** A second `impl Encoding` in base 2, so one program compiles to two different Turing machines that compute the same answer — `reference == λ == unary-TM == binary-TM` — moving the TM's value ceiling from 64 to 2⁶⁴.
 
-**Architecture:** `Encoding` (`tm/encoding.rs:18`) has been the declared swappable seam since Part 2b-1 with exactly one implementation. This plan splits `encoding.rs` into a module directory, adds three trait methods that remove the last unary assumptions from code outside the impls (`parse_heap_cells`, `field_symbols`, `init_work`), generalizes the two shared navigation primitives over (tape, content-symbol set), and then builds `Binary` gadget family by gadget family. Every binary gadget is a **counted chain over `w`-cell fields** rather than a content-driven loop over marks — the style the BOX tape already uses.
+**Architecture:** `Encoding` (the trait in `tm/encoding.rs`) has been the declared swappable seam since Part 2b-1 with exactly one implementation. This plan splits `encoding.rs` into a module directory, adds three trait methods that remove the last unary assumptions from code outside the impls (`parse_heap_cells`, `field_symbols`, `init_work`), generalizes the two shared navigation primitives over (tape, content-symbol set), and then builds `Binary` gadget family by gadget family. Every binary gadget is a **counted chain over `w`-cell fields** rather than a content-driven loop over marks — the style the BOX tape already uses.
 
 **Tech Stack:** Rust (edition from `rust-toolchain.toml`), `proptest` for generators, no new dependencies.
 
