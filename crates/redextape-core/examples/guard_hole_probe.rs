@@ -48,7 +48,10 @@
 //!
 //! # The cost model this probe was written to test
 //!
-//! `beta(body, arg)` is `shift(-1, 0, subst(0, shift(1, 0, arg), body))`, and `subst`'s `Abs` arm is
+//! **HISTORICAL, LIKE THE TIMINGS ABOVE: `beta` no longer has this shape.** `beta(body, arg)` WAS
+//! `shift(-1, 0, subst(0, shift(1, 0, arg), body))` when this model was fitted — β-fusion (2026-08-03)
+//! replaced the three-pass form with one walk; see `examples/shift_cost_probe.rs`. The reasoning below
+//! is kept because it is what the reverted guard was measured against, and `subst`'s `Abs` arm is still
 //!
 //! ```text
 //! Node::Abs(n, b) => abs(Rc::clone(n), subst(j + 1, &shift(1, 0, s), b)),
@@ -144,8 +147,30 @@
 //! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_five_copies` to keep in sync. Keep it
 //! that way: a sixth copy would have to be added to that test, and the roadmap's standing lesson is
 //! about copies that do not receive corrections.
+//!
+//! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
+//!
+//! **This target has set `mimalloc` as its global allocator since 2026-08-04. Every timing recorded
+//! in this file above this note was measured under glibc's malloc and is NOT comparable to a run
+//! made today.** Counts are: node counts, allocation counts and step counts are properties of the
+//! reduction, not of the machine, and did not move. Seconds, ms and ns did.
+//!
+//! It is here for a measured reason rather than a preference. The reducer allocates one `Rc<Node>`
+//! per term node and frees on the same order, and glibc's layout for that pattern costs real
+//! address-translation pressure: on the nested-group family, swapping ONLY the allocator took L1
+//! DTLB misses from 1.20e9 to 0.92e9 for the three-pass `beta` and from 1.83e9 to 0.93e9 for the
+//! fused one, with the wall clock following at ~9% and ~16%. That is also how the β-fusion family
+//! regression was explained — it was glibc's layout, not the reducer's work.
+//!
+//! `mimalloc` is a `[dev-dependencies]` entry and reaches examples and tests ONLY.
+//! `redextape-core`'s `[dependencies]` stays empty and WASM-clean: `libmimalloc-sys` is C that does
+//! not build for wasm32, and a library must not choose a global allocator for its consumers.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+#[cfg(not(target_arch = "wasm32"))]
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;

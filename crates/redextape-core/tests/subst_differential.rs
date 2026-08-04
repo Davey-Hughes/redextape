@@ -39,15 +39,28 @@
 //!   3. **The sharing pins.** Structural `==` cannot tell a returned handle from a deep copy, so the
 //!      differential above would pass just as happily with every short-circuit deleted. `alloc_id()` is
 //!      the only thing that distinguishes them.
+//!
+//! **SECOND QUESTION, ADDED BY THE 2026-08-02 DESIGN (this paragraph landed 2026-08-03): does β-FUSION preserve `beta`?** `beta` **was** three
+//! traversals — `shift(-1, 0, subst(0, shift(1, 0, arg), body))`. β-fusion **replaced** them with one
+//! walk that carries the argument incrementally and decrements free indices in place. ~~A tense that
+//! holds whichever side of that change this file is read from.~~ **Corrected 2026-08-03:** it did not
+//! hold — the change landed, so the present tense became a false statement about shipped code, in the
+//! one paragraph of this file claiming to be immune to exactly that. The rewrite is index arithmetic
+//! whose
+//! correctness rests on a cancellation (`shift(-1, ·)` undoing the opening `+1` on the substituted
+//! argument), which is exactly the kind of claim an exhaustive differential settles and an example does
+//! not. `beta_three_pass` below is the old formulation, kept for the same reason `subst_naive` is: a
+//! differential needs the thing it differentiates against to survive the change.
 
 // Test target: `clippy.toml`'s `allow-*-in-tests` keys reach a `#[test]` function's own body but not
 // free helpers in a `tests/` target (its doc comment explains why), and the enumeration below is all
 // free helpers. Exemption stated per target, same idiom as `lambda_sharing.rs`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
-use redextape_core::lambda::term::{LambdaTerm, Node, abs, app, shift, subst, var};
+use redextape_core::lambda::term::{LambdaTerm, Node, abs, app, beta, shift, subst, var};
 
 /// Reference 1: the textbook eager `subst`, with NO short-circuit and no handle reuse — every arm
 /// allocates, and the argument is re-shifted under every `Abs` whether or not the variable occurs
@@ -95,6 +108,16 @@ fn subst_at(j: u32, lift: u32, s: &LambdaTerm, t: &LambdaTerm) -> LambdaTerm {
     }
 }
 
+/// `beta` as THREE PASSES — the formulation `term.rs` shipped until β-fusion.
+///
+/// This is not dead code and it is not a duplicate: it is the reference the shipped `beta` is
+/// differentiated against, and the moment it stops being spelled out here the differential compares
+/// `beta` to itself. `tests/lambda_foreign_reader.rs` verified all three shifts independently against
+/// the corpus, which is where the confidence that THIS is the right reference comes from.
+fn beta_three_pass(body: &LambdaTerm, arg: &LambdaTerm) -> LambdaTerm {
+    shift(-1, 0, &subst(0, &shift(1, 0, arg), body))
+}
+
 /// Every term of exactly `n` nodes over `vars` distinct de Bruijn indices, indexed by `n`.
 ///
 /// Four indices rather than two: the risk the enumeration exists to cover is index arithmetic that
@@ -138,9 +161,16 @@ const J_MAX: u32 = 3;
 ///
 /// **THE SIDE CONDITION IS LOAD-BEARING.** Stated unconditionally the lemma is FALSE:
 /// `shift(-1, 0, Var 0)` trips `term.rs`'s negative-index assert, so the inner application has no value
-/// to be additive with. The loop ranges `a, b` over the non-negative case exactly for that reason. The
-/// reducer's one negative shift (`beta`'s closing `shift(-1, 0, ·)`) is applied after substitution
-/// finishes and is composed with nothing.
+/// to be additive with. The loop ranges `a, b` over the non-negative case exactly for that reason.
+/// **The reducer has no negative shift to compose it with at all, and has had none since β-fusion
+/// (2026-08-03)** — `beta_go` decrements free indices in place rather than by calling `shift` with a
+/// negative `d`, so the excluded case is not merely unexercised by this suite; **no non-test call site
+/// in `src/` produces it any more.** The qualifier is load-bearing: `term.rs`'s own `#[cfg(test)]`
+/// module still calls `shift(-1, …)` in the two tests that pin the `# Panics` contract.
+///
+/// Deliberate direct calls to `shift(-1, 0, ·)` in THIS file are `beta_three_pass`'s, which spells the
+/// pre-fusion `beta` out on purpose. Not this test's: its loop ranges `a, b` over `0..=3`, so it never
+/// constructs a negative shift at all — which is the whole point of the side condition above.
 #[test]
 fn shift_additivity_holds_over_every_non_negative_composition() {
     let by_size = terms_up_to(T_NODES, VARS);
@@ -224,9 +254,16 @@ fn the_shipped_subst_agrees_with_both_references_on_every_enumerated_triple() {
 /// retired rewrite existed to delete is already free. Delete the short-circuit and that stops being
 /// true — so this test failing is the signal that the census's numbers no longer describe the tree.
 ///
-/// AND NOTE WHAT THIS SHARING IS NOT: it does not reach a trace snapshot. `beta` closes the hole with
-/// `shift(-1, 0, ·)`, whose own short-circuit cannot fire at cutoff 0 on a term with free variables, so
-/// it rebuilds the reduct and discards what `subst` shared. See the design's §8 and §10.
+/// AND NOTE WHAT THIS SHARING USED TO NOT REACH, until β-fusion (2026-08-03): a trace snapshot. `beta`
+/// used to close the hole with a separate `shift(-1, 0, ·)` pass over the term `subst` had just built.
+/// That pass walked `subst`'s result as a TREE — `shift` does not memoise — so it revisited every
+/// occurrence of a shared argument separately and rebuilt each one as its own allocation, discarding
+/// exactly what `subst`'s `s.clone()` above had just shared. `beta_go` now performs the substitution and
+/// the decrement in ONE walk and never makes that second pass, so what this test pins now survives to be
+/// what a β-step actually produces. See the design's §2.3 and `term.rs`'s
+/// `a_beta_step_shares_one_allocation_across_every_occurrence_of_an_open_argument`, which pins the
+/// mechanism directly, and `tests/lambda_sharing.rs`, which pins the consequence at 17,920 and 4,305
+/// distinct allocations.
 #[test]
 fn the_shipped_subst_shares_the_argument_rather_than_rebuilding_it() {
     let s = app(abs("x", var(0)), var(1));
@@ -257,5 +294,165 @@ fn the_shipped_subst_shares_the_argument_rather_than_rebuilding_it() {
         closed.alloc_id(),
         "`shift(1, 0, ·)` on a CLOSED term must return its allocation — this is why the per-binder \
          re-shift is already free, and why carrying the lift down wins nothing"
+    );
+}
+
+/// **THE GATE FOR β-FUSION, AND IT LANDED BEFORE THE OPTIMIZATION DID.** Today it compares the shipped
+/// `beta` against a spelled-out copy of itself and passes trivially. That is deliberate: a test written
+/// after the change is a test written to the change, and the zipper slice's equivalence gate landed one
+/// task early for the same reason.
+///
+/// **Where a wrong index would hide.** The fused walk substitutes `shift(d, 0, arg)` at depth `d`,
+/// where the three-pass form substitutes `shift(d+1, 0, arg)` and then decrements it. Those agree only
+/// because the opening shift and the closing shift are an up-and-down pair that cancels — a claim about
+/// arithmetic. `term.rs`'s `beta_reduces_const_application` already reaches this case once:
+/// `beta(abs("y", var(1)), var(5)) == abs("y", var(6))` substitutes a free argument at `d = 1`, and a
+/// mutant that substitutes `shift(d-1, 0, arg)` there fails it — the curated test is not blind to the
+/// cancellation, and this differential must not be read as covering ground it misses outright. What the
+/// curated test has is one instance: one `Var` argument, `d = 1`. What the enumeration has is 25,112 of
+/// the 88,960 pairs — those where `maxfree(arg) > 0` with a substitution site under a binder — spread
+/// over `d` up to 3 (site-depth histogram: 306 at `d=0`, 273 at `d=1`, 47 at `d=2`, 32 at `d=3`), with
+/// compound arguments and multiple occurrences of the bound variable: the breadth that turns the curated
+/// test's single passing case into a property instead of a coincidence. `d = 3` is the ceiling because
+/// `VARS` caps the substitution depth this enumeration exercises at 3, not because binder depth runs out
+/// — the generator produces binder depths past that, up to 5 at `T_NODES` (`λλλλλ.k`).
+///
+/// **`beta` is total on every pair here.** `subst(0, …)` replaces every free `Var(0)` before the
+/// closing `shift(-1, 0, ·)` runs, so the negative-index assert is unreachable — the invariant
+/// `shift`'s own doc block spells out.
+#[test]
+fn the_shipped_beta_agrees_with_the_three_pass_formulation_on_every_enumerated_pair() {
+    let bodies = terms_up_to(T_NODES, VARS);
+    let args = terms_up_to(S_NODES, VARS);
+    let mut pairs = 0u64;
+    for body in bodies.iter().flatten() {
+        for arg in args.iter().flatten() {
+            assert_eq!(
+                beta(body, arg),
+                beta_three_pass(body, arg),
+                "β-fusion changed the answer for body {body:?} and arg {arg:?}"
+            );
+            pairs += 1;
+        }
+    }
+    // The enumeration is the test; a collapsed generator would pass vacuously.
+    // `the_shipped_subst_agrees_with_both_references_on_every_enumerated_triple` above guards its own
+    // count the same way — `assert_eq!(triples, 355_840, …)`, an exact count, not a lower bound — and
+    // this now matches it: the count is deterministic (1112 bodies × 80 args), so a bound was never as
+    // tight as it could be. It was also weaker than it looked: every one-parameter shrink of this
+    // generator lands well below 80,000 regardless (`VARS` 4→3: 25,056 pairs; `T_NODES` 6→5: 24,640), so
+    // `> 80_000` only ever caught catastrophic collapse, never drift.
+    assert_eq!(pairs, 88_960, "the (body, arg) enumeration drifted from its expected exact count");
+    println!("β-fusion differential: {pairs} (body, arg) pairs, 0 mismatches");
+}
+
+/// Every allocation-identity claim β-fusion makes, over the same 88,960 pairs — **the half the
+/// differential above is blind to.**
+///
+/// **THIS EXISTS BECAUSE `==` CANNOT SEE THE PROPERTY THE SLICE WAS SOLD ON.** The test above compares
+/// terms structurally, so a `beta` that rebuilt every untouched subterm instead of returning its handle
+/// would pass all 88,960 pairs while destroying the sharing that makes a β-step cost the DAG rather than
+/// the tree it denotes. This file's module doc already lists that gap as property 3 and pins it with
+/// three hand-built terms; this is the exhaustive form of the same property, and it was written after a
+/// review pointed out that the strongest evidence for the fusion existed only as a throwaway experiment.
+/// The predecessor slice on this branch shipped a headline quantity — `climbs` — with no test behind it
+/// at all, and its own final review is what found that out.
+///
+/// Two properties, and neither is a count:
+///
+/// 1. **Fusion loses no inherited allocation.** Every input allocation the three-pass form handed
+///    through to its result is handed through by the fused walk too. This is design §2.3: the fused
+///    prune is `subst`'s prune, so the same subterms are returned by handle.
+/// 2. **Fusion allocates no more fresh nodes**, on any pair.
+///
+/// The strict inequality on the totals is the non-vacuity guard, and it is the one that would catch the
+/// whole thing being tested against itself. **The totals themselves are deliberately NOT pinned:** they
+/// are derived from the generator, so pinning them would force a re-pin on any coverage change while the
+/// two properties above would be untouched by one. `tests/lambda_sharing.rs` is where exact allocation
+/// counts are pinned, on real programs, for real reasons.
+///
+/// `alloc_id()` is an address and means "identity" only while the term is alive, so `body`, `arg` and
+/// both results are held for the whole of each iteration — the liveness rule `lambda_sharing.rs` spells
+/// out. Nothing is compared across iterations, where a freed address could be reused.
+#[test]
+fn beta_fusion_inherits_every_allocation_the_three_pass_form_did_and_allocates_no_more() {
+    fn alloc_ids(t: &LambdaTerm, out: &mut HashSet<usize>) {
+        if !out.insert(t.alloc_id()) {
+            return; // already walked; a DAG reached twice is not two allocations
+        }
+        match t.node() {
+            Node::Var(_) => {}
+            Node::Abs(_, b) => alloc_ids(b, out),
+            Node::App(f, a) => {
+                alloc_ids(f, out);
+                alloc_ids(a, out);
+            }
+        }
+    }
+
+    let bodies = terms_up_to(T_NODES, VARS);
+    let args = terms_up_to(S_NODES, VARS);
+    let (mut pairs, mut lost, mut more_fresh) = (0u64, 0u64, 0u64);
+    let (mut fresh_fused, mut fresh_three) = (0u64, 0u64);
+    // A count localises nothing. Every other assertion in this file names the offending item, and a red
+    // run here would otherwise report "on 37 pairs" with nothing to open — so the first offender of each
+    // kind is carried out of the loop. The generator caps bodies at 6 nodes and arguments at 4, so
+    // whatever this prints is small enough to reduce by hand.
+    let (mut first_lost, mut first_more_fresh) = (None, None);
+
+    for body in bodies.iter().flatten() {
+        for arg in args.iter().flatten() {
+            let fused = beta(body, arg);
+            let three = beta_three_pass(body, arg);
+
+            let mut inputs = HashSet::new();
+            alloc_ids(body, &mut inputs);
+            alloc_ids(arg, &mut inputs);
+            let (mut f_ids, mut t_ids) = (HashSet::new(), HashSet::new());
+            alloc_ids(&fused, &mut f_ids);
+            alloc_ids(&three, &mut t_ids);
+
+            // An allocation the three-pass form inherited from the input, that fusion did not.
+            if t_ids.iter().any(|id| inputs.contains(id) && !f_ids.contains(id)) {
+                lost += 1;
+                first_lost.get_or_insert_with(|| format!("body {body:?}, arg {arg:?}"));
+            }
+            let (f_new, t_new) = (
+                f_ids.iter().filter(|id| !inputs.contains(*id)).count() as u64,
+                t_ids.iter().filter(|id| !inputs.contains(*id)).count() as u64,
+            );
+            if f_new > t_new {
+                more_fresh += 1;
+                first_more_fresh
+                    .get_or_insert_with(|| format!("body {body:?}, arg {arg:?} — {f_new} fresh against {t_new}"));
+            }
+            fresh_fused += f_new;
+            fresh_three += t_new;
+            pairs += 1;
+        }
+    }
+
+    assert_eq!(pairs, 88_960, "the (body, arg) enumeration drifted from its expected exact count");
+    assert_eq!(
+        lost,
+        0,
+        "fusion dropped an allocation the three-pass form inherited, on {lost} pairs; first: {}",
+        first_lost.as_deref().unwrap_or("-")
+    );
+    assert_eq!(
+        more_fresh,
+        0,
+        "fusion allocated MORE fresh nodes than three passes, on {more_fresh} pairs; first: {}",
+        first_more_fresh.as_deref().unwrap_or("-")
+    );
+    // Non-vacuity. Without this the two properties above are satisfiable by comparing a function with
+    // itself, which is what this file's β test necessarily does today and what this one must not.
+    assert!(
+        fresh_fused < fresh_three,
+        "fusion must allocate strictly fewer fresh nodes overall: {fresh_fused} against {fresh_three}"
+    );
+    println!(
+        "β-fusion allocation differential: {pairs} pairs, {lost} lost, {more_fresh} over-allocating, \
+         {fresh_fused} fresh against {fresh_three}"
     );
 }

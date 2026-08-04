@@ -35,6 +35,60 @@
 //! The accounting now predicts the clock: 189,152 nodes at the fitted prices is 7.6 ms against a corpus
 //! that replays in 7.4 ms.
 //!
+//! # PART B RAN THE β-FUSION GATE ON 2026-08-03, AND IT PASSED AT 4.3%
+//!
+//! PART B gained `Σ per_occ` and `Σ freevar` and a β-FUSION block for
+//! `docs/superpowers/specs/2026-08-02-lambda-beta-fusion-design.md`, whose §5 set a GO/NO-GO bar
+//! **before** any of these numbers existed: `Σ freevar` under 40% of `Σ opening + Σ closing`, and no
+//! row's total allocations rising. Measured here:
+//!
+//! ```text
+//! GATE (design §5): Σ freevar = 1458 against Σ opening + Σ closing = 34085 — 4.3%, and the bar is under 40%.
+//! ```
+//!
+//! and **0 of the 46 rows rise** under either candidate. `Σ β today` 102,273 → `Σ β fused` 69,646.
+//!
+//! **`Σ freevar` is the design's null-result counter, and this corpus tests its defining claim 46 times
+//! without being asked to.** §4 calls it a proper subset of `Σ closing`; `freevar <= closing` holds on
+//! every row and `freevar == 0` on exactly the rows where `closing == 0`. The corpus-wide ratio is
+//! **6.3%**, which is the mechanism rather than luck: the closing shift rebuilds whole PATHS to free
+//! variables and `Σ freevar` counts only the leaves at their ends.
+//!
+//! **`Σ opening + Σ closing = 34,085` is NOT independent corroboration of that**, and the temptation to
+//! read it as such is why this paragraph exists. It agrees to the unit with the zipper design's §5b —
+//! but both are pre-existing `Work` fields that the β-fusion work never touched, and §5b's table was
+//! built from THIS probe, so the agreement is an identity and could not have come out otherwise. The
+//! one thing it establishes is that adding `Σ per_occ` and `Σ freevar` perturbed neither counter.
+//!
+//! **THE FORMULATION CONTEST WENT AGAINST THE DESIGN ON THIS CORPUS.** `Σ β fused` (design §2, `s`
+//! carried per binder) is **69,646**; `Σ β occ` (design §5b, the shift paid per occurrence) is
+//! **33,051**. The whole gap is `Σ reshift` **44,539** against `Σ per_occ` **7,944**, since `Σ spine`
+//! and `Σ freevar` are common to both. §2 predicted the reverse and argued the direction was *"forced
+//! rather than incidental"* from `shift_cost_probe.rs`'s nested-group family, where the sign genuinely
+//! is reversed (64,006 against 96,036, `incr` ahead by 1.0095x). **Both corpora were already in the
+//! record; the design generalised one of them.** Neither formulation regresses a row, so this decides
+//! WHICH fusion, not whether — see the design's §5 GATE RESULT.
+//!
+//! **AND ON THE CLOCK, 2026-08-03: THIS CORPUS WON AND THE FAMILY LOST.** The `replay ms` column below
+//! (PART B's three-decimal column, not PART A's one) sums to **7.416–7.466 ms three-pass against
+//! 5.707–5.760 ms fused, a 1.288–1.308x** over four runs a side across two builds. No row's median
+//! regresses and three carry 87% of it — rows 35, 9 and 36 — while four (28, 31, 32, 33) have
+//! overlapping ranges and are at parity rather than improved. The nested-group family measured **0.910–0.925x** on the same pair of
+//! builds, so the design's ship bar — `>= 1.10x` on the family AND `>= 1.00x` here — is MISSED on a
+//! clause this corpus passes. **The half expected to show nothing is the half that moved**, which is
+//! the design's §9 prediction 3 failing in both directions at once; §5's SHIP RESULT has the tables.
+//!
+//! **`Σ per_occ` is not `Σ occ×arg`.** The latter is one of the STALE static models kept below as a
+//! control; reusing it here would have reproduced the exact error this file was repaired for. `Σ per_occ`
+//! mirrors `shift_cost_probe.rs`'s `subst_allocs_lifted` arm for arm, as `Σ freevar` mirrors its
+//! `beta_allocs_fused`. **Both are marked `HYPO` in PART C and one of them has outgrown the label:**
+//! `Σ per_occ` still mirrors the falsified lifted-shift rewrite and is genuinely the cost of a function
+//! nobody runs, but `Σ freevar` mirrors the fused `beta` that SHIPPED in `eb9e134`, so by the legend's
+//! own definition it is now `TRUE`. The labels are left as they are and the discrepancy is named here
+//! rather than silently repaired, because relabelling would move a column PART C's contest is fitted
+//! against; see that legend for the same note and for `Σ β today`, which is the one that now models
+//! code no longer in the tree.
+//!
 //! **What was never stale:** PART A. The sharing/interning measurement is structural — node and distinct
 //! counts over the trace — and does not depend on either fix. Its own module doc already records that
 //! its numbers did not move when `LambdaTerm` became `Rc`-backed.
@@ -123,10 +177,32 @@
 //! and counted, not silently dropped. The copy below is now CHECKED, by
 //! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_five_copies` — see its own doc
 //! comment, which reads this file, and the array's, for why it took two attempts to get here.
+//!
+//! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
+//!
+//! **This target has set `mimalloc` as its global allocator since 2026-08-04. Every timing recorded
+//! in this file above this note was measured under glibc's malloc and is NOT comparable to a run
+//! made today.** Counts are: node counts, allocation counts and step counts are properties of the
+//! reduction, not of the machine, and did not move. Seconds, ms and ns did.
+//!
+//! It is here for a measured reason rather than a preference. The reducer allocates one `Rc<Node>`
+//! per term node and frees on the same order, and glibc's layout for that pattern costs real
+//! address-translation pressure: on the nested-group family, swapping ONLY the allocator took L1
+//! DTLB misses from 1.20e9 to 0.92e9 for the three-pass `beta` and from 1.83e9 to 0.93e9 for the
+//! fused one, with the wall clock following at ~9% and ~16%. That is also how the β-fusion family
+//! regression was explained — it was glibc's layout, not the reducer's work.
+//!
+//! `mimalloc` is a `[dev-dependencies]` entry and reaches examples and tests ONLY.
+//! `redextape-core`'s `[dependencies]` stays empty and WASM-clean: `libmimalloc-sys` is C that does
+//! not build for wasm32, and a library must not choose a global allocator for its consumers.
 
 // Example target: `clippy.toml`'s `allow-*-in-tests` keys do not reach example targets at all, so the
 // exemption is stated per target. A probe that cannot build its own fixture has nothing to report.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+#[cfg(not(target_arch = "wasm32"))]
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -320,8 +396,10 @@ fn size_of(t: &LambdaTerm) -> u64 {
 // Sharing did not touch it — both rows sped up ~2.5x when `LambdaTerm` became `Rc`-backed and the
 // ratio between them barely moved. Whatever separates them is therefore not allocation volume.
 //
-// Each counter below is the size of one traversal the reducer actually performs, summed over the
-// trace, in NODES VISITED. Read them as a cost model of `LambdaCursor::next`, which per step does:
+// Each counter below was the size of one traversal the reducer performed WHEN THIS TABLE WAS WRITTEN —
+// before the `maxfree` short-circuits (2026-08-01) and before β-fusion (2026-08-03) — summed over the
+// trace, in NODES VISITED. Read them as the cost model `LambdaCursor::next` was priced against then,
+// which per step did:
 //
 //     depth_exceeds(term)          -> `term_size`                 (whole term, every step)
 //     reduce_step's search         -> `scan` (+ `path_len`)
@@ -329,6 +407,9 @@ fn size_of(t: &LambdaTerm) -> u64 {
 //     subst(0, arg', body)         -> `body_size` + `abs_times_arg` + O(1) per occurrence
 //     shift(-1, 0, result)         -> `body_size` + `occ_times_arg`, i.e. the reduct
 //     spine rebuild                -> `path_len`
+//
+// See "PART B WENT STALE ON 2026-08-01" and "TWO GENERATIONS OF COUNTER LIVE HERE" below for what
+// replaced this mapping and why these fields are kept anyway, as controls.
 //
 // THE COUNTERS ARE CHOSEN TO SEPARATE CANDIDATES, NOT TO CONFIRM ONE. If two move together across
 // the corpus, neither is the answer, and PART C is what decides that rather than the eye.
@@ -378,6 +459,72 @@ fn subst_allocs(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64) {
     }
 }
 
+/// Allocations the falsified lifted rewrite WOULD make, as `(body spine, per-occurrence shift)`.
+///
+/// Body ported verbatim from `shift_cost_probe.rs`'s `subst_allocs_lifted`, which is the faithful
+/// mirror — one sentence of that file's inline `lift == 0` comment did not make the crossing.
+/// **`Work::occ_times_arg` is NOT this** — that is `occ × size_of(arg)`, a static model kept as a
+/// control, and the whole point of the 2026-08-02 repair was to stop products standing in for walks.
+/// This exists so the β-fusion design's disagreement with §5b's formulation is measured on this corpus.
+fn subst_allocs_lifted(j: u32, lift: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64) {
+    if t.maxfree() <= j {
+        return (0, 0);
+    }
+    match t.node() {
+        // The `lift == 0` arm: a refcount bump, where `shift(0, 0, s)` would deep-rebuild.
+        Node::Var(k) if *k == j => (0, if lift == 0 { 0 } else { shift_allocs(0, s) }),
+        Node::Var(_) => (0, 0),
+        Node::Abs(_, b) => {
+            let (spine, shifts) = subst_allocs_lifted(j + 1, lift + 1, s, b);
+            (1 + spine, shifts)
+        }
+        Node::App(f, a) => {
+            let (sp1, sh1) = subst_allocs_lifted(j, lift, s, f);
+            let (sp2, sh2) = subst_allocs_lifted(j, lift, s, a);
+            (1 + sp1 + sp2, sh1 + sh2)
+        }
+    }
+}
+
+/// Allocations the FUSED `beta` of the β-fusion design §2 would make, as
+/// `(body spine, per-binder re-shift, free-variable rebuild)`.
+///
+/// **Mirrors `beta_go` arm for arm, prune included** — the discipline `subst_allocs` exists to
+/// enforce and that `Σ abs×arg` was retired for breaking. **`beta_go` IS in this tree** — it is the
+/// shipped fused `beta` in `src/lambda/term.rs`, since `eb9e134`. ~~`beta_go` is not in this tree; it
+/// is the spec's proposed fused `beta`, named here so a reader grepping the crate lands on the spec
+/// instead of an empty search.~~ **Corrected 2026-08-04:** that was true when this counter was written
+/// against a proposal and false from the moment the proposal landed — and it justified itself by an
+/// appeal to `grep`, which is exactly what falsifies it. Note the
+/// caller passes `arg` ITSELF, not `shift(1, 0, arg)`: never building the `+1` is the mechanism, not an
+/// optimization on top of it.
+fn beta_allocs_fused(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64, u64) {
+    // The same prune as `subst`'s, and the same one the closing shift applies at this depth: every
+    // free index in `t` is below `j`, so there is nothing to substitute AND nothing to decrement.
+    if t.maxfree() <= j {
+        return (0, 0, 0);
+    }
+    match t.node() {
+        // `s.clone()` — a refcount bump, exactly as `subst`'s hit arm is today.
+        Node::Var(k) if *k == j => (0, 0, 0),
+        // `var(*k - 1)`. `k > j` here (the prune took `k < j`), so `k >= 1` and the subtraction cannot
+        // underflow. This is the ONE node today's closing shift allocates that fusion cannot delete —
+        // the null-result counter of §4.
+        Node::Var(_) => (0, 0, 1),
+        Node::Abs(_, b) => {
+            let re = shift_allocs(0, s);
+            let lifted = shift(1, 0, s);
+            let (spine, shifts, fv) = beta_allocs_fused(j + 1, &lifted, b);
+            (1 + spine, re + shifts, fv)
+        }
+        Node::App(f, a) => {
+            let (sp1, sh1, fv1) = beta_allocs_fused(j, s, f);
+            let (sp2, sh2, fv2) = beta_allocs_fused(j, s, a);
+            (1 + sp1 + sp2, sh1 + sh2, fv1 + fv2)
+        }
+    }
+}
+
 /// Per-step work accounting, summed over a whole trace. Units: nodes visited.
 ///
 /// **TWO GENERATIONS OF COUNTER LIVE HERE AND THE TABLE PRINTS BOTH.** The `*_size` / `*_times_arg` /
@@ -389,17 +536,33 @@ fn subst_allocs(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64) {
 /// lose to the faithful ones on the same corpus is the falsification, run rather than quoted.
 #[derive(Default)]
 struct Work {
-    /// FAITHFUL. `beta`'s opening `shift(1, 0, arg)`. Zero whenever `arg` is closed, which is 88.4% of
-    /// corpus steps — the single fact that retired the `subst` lifted-shift slice.
+    /// FAITHFUL, AND OF THE PRE-FUSION `beta` DELIBERATELY. `beta`'s opening `shift(1, 0, arg)` — the
+    /// separate up-front lift β-fusion (2026-08-03) deleted; the fused `beta_go` starts from `arg`
+    /// itself instead. Priced here anyway because it is the baseline `Σ opening + Σ closing` the
+    /// fusion design's ceiling and gate are computed against. Zero whenever `arg` is closed, which is
+    /// 88.4% of corpus steps — the single fact that retired the `subst` lifted-shift slice.
     opening: u64,
     /// FAITHFUL. The body spine `subst` rebuilds on the way down.
     spine: u64,
     /// FAITHFUL. `subst`'s `Abs` arm, `shift(1, 0, s)` once per binder DESCENDED THROUGH — not once per
     /// `Abs` node in the body, which is what `abs_times_arg` below still counts.
     reshift: u64,
-    /// FAITHFUL. `beta`'s closing `shift(-1, 0, ·)` over the term `subst` just returned. It cannot
-    /// short-circuit at cutoff 0 on a term with a free variable, which is why it rebuilds the reduct.
+    /// FAITHFUL, AND OF THE PRE-FUSION `beta` DELIBERATELY, LIKE `opening` ABOVE. `beta`'s closing
+    /// `shift(-1, 0, ·)` over the term `subst` just returned — the separate rebuilding pass β-fusion
+    /// deleted; the fused `beta_go` decrements in the same walk and never revisits the result as a
+    /// tree. It cannot short-circuit at cutoff 0 on a term with a free variable, which is why it
+    /// rebuilds the reduct. Kept, unlike the shipped reducer, because this is the other half of the
+    /// baseline the fusion ceiling is priced against — see `freevar` below.
     closing: u64,
+    /// FAITHFUL. The falsified lifted rewrite's replacement for `reshift`: `shift(lift, 0, s)` once per
+    /// OCCURRENCE at `lift > 0`. New 2026-08-03 with β-fusion, which needs it to price §5b's
+    /// formulation against §2's. `occ_times_arg` below is the STALE model of the same idea and loses to
+    /// this in PART C.
+    per_occ: u64,
+    /// FAITHFUL, and it is β-fusion's NULL-RESULT COUNTER. The `var(k-1)` nodes the one-walk `beta`
+    /// still allocates for a body free variable above the binder — a proper subset of `closing`, which
+    /// also pays the spine down to them and a rebuild of every substituted argument copy.
+    freevar: u64,
     /// FAITHFUL, and it is 1 per step: `depth_exceeds` reads a stored field. It used to walk the whole
     /// logical expansion, which is what `term_size` counts and what 96% of the hang turned out to be.
     depth_guard: u64,
@@ -444,13 +607,14 @@ struct Work {
 impl Work {
     /// The traversals that CONSTRUCT a node, **counted rather than modelled** since 2026-08-02. Every
     /// node here is an `Rc::new` plus the write that fills it, and every term is measured by mirroring
-    /// the function that performs it:
+    /// the function that performed it — `opening` and `closing` mirror the PRE-FUSION `beta`
+    /// deliberately, per the field docs above:
     ///
-    ///     reduce_step's spine rebuild  -> path_len       (one node per path element)
-    ///     beta's shift(1, 0, arg)      -> opening
-    ///     subst's body rebuild         -> spine
-    ///     subst's Abs arm              -> reshift
-    ///     beta's shift(-1, 0, ·)       -> closing
+    ///     reduce_step's spine rebuild          -> path_len   (one node per path element)
+    ///     pre-fusion beta's shift(1, 0, arg)   -> opening
+    ///     subst's body rebuild                 -> spine
+    ///     subst's Abs arm                      -> reshift
+    ///     pre-fusion beta's shift(-1, 0, ·)    -> closing
     ///
     /// **THE PREVIOUS VERSION OF THIS FUNCTION WAS `path + arg + body + abs×arg + (body - occ +
     /// occ×arg)`**, which is the same list expressed as static products — and every one of those
@@ -468,6 +632,22 @@ impl Work {
     /// cost the same is a MODEL, and PART C fits both prices rather than asserting one.
     fn read(&self) -> u64 {
         self.depth_guard + self.scan
+    }
+
+    /// β-FUSION's contest. `beta_today` is `alloc()` minus the traversals fusion does not touch, so
+    /// the ratio below is about `beta` and not about the whole reducer.
+    fn beta_today(&self) -> u64 {
+        self.opening + self.spine + self.reshift + self.closing
+    }
+
+    /// Design §2: `s` carried incrementally, both of `beta`'s shifts gone, `reshift` untouched.
+    fn beta_fused_incr(&self) -> u64 {
+        self.spine + self.reshift + self.freevar
+    }
+
+    /// Design §5b's formulation, the one §2 rejects: the shift paid once per occurrence.
+    fn beta_fused_occ(&self) -> u64 {
+        self.spine + self.per_occ + self.freevar
     }
 
     /// Every traversal above, summed: the total nodes the reducer visits over the whole trace.
@@ -587,17 +767,35 @@ fn account(trace: &Trace) -> Work {
         w.occ_times_arg += occ * arg_nodes;
         w.abs_times_arg += abs_nodes * arg_nodes;
 
-        // The faithful half, measured by replaying `beta`'s three calls and counting what each one
-        // actually allocates. It costs one real `subst` per step to do this — the reduct is needed to
-        // price the closing shift, and there is no way to know its size without building it — which is
-        // affordable on a 46-program corpus and is the price of an instrument that measures rather
-        // than models. `beta` is `shift(-1, 0, &subst(0, &shift(1, 0, arg), body))`.
+        // The faithful half, measured by replaying the PRE-FUSION `beta`'s three calls and counting what
+        // each one actually allocates — deliberately, since `Σ opening` and `Σ closing` are the baseline
+        // the fusion design's ceiling and gate are computed against, not a description of the shipped
+        // reducer (see `Work::opening`/`Work::closing`). It costs one real `subst` per step to do this —
+        // the reduct is needed to price the closing shift, and there is no way to know its size without
+        // building it — which is affordable on a 46-program corpus and is the price of an instrument
+        // that measures rather than models. Pre-fusion `beta` was
+        // `shift(-1, 0, &subst(0, &shift(1, 0, arg), body))`.
         w.opening += shift_allocs(0, arg);
         let opened = shift(1, 0, arg);
         let (spine, reshift) = subst_allocs(0, &opened, body);
+        let (spine_lifted, per_occ) = subst_allocs_lifted(0, 0, &opened, body);
+        assert_eq!(spine, spine_lifted, "the lifted candidate must rebuild the same body spine");
+
+        // The fused walk takes `arg`, not `opened` — β-fusion design §2. These two assertions are DRIFT
+        // GUARDS between `subst_allocs` and `beta_allocs_fused`, forced true by construction rather than
+        // a check of the design (`shift_cost_probe.rs`'s `SubstCensus::observe` states the reason: the
+        // two mirrors share the identical prune and spine recursion, and the fused walk's `s` is exactly
+        // one `shift(1, 0, ·)` behind today's, under which `shift_allocs(0, ·)` is invariant). What they
+        // catch is a later desync between the two mirrors, not a design error.
+        let (spine_fused, reshift_fused, freevar) = beta_allocs_fused(0, arg, body);
+        assert_eq!(spine, spine_fused, "fusion must rebuild the same body spine as `subst`");
+        assert_eq!(reshift, reshift_fused, "fusion must re-shift once per binder, as `subst` does");
+
         w.spine += spine;
         w.reshift += reshift;
+        w.per_occ += per_occ;
         w.closing += shift_allocs(0, &subst(0, &opened, body));
+        w.freevar += freevar;
         w.depth_guard += 1;
     }
     w
@@ -842,6 +1040,11 @@ const COUNTERS: &[Counter] = &[
     Counter { name: "Σ reshift", origin: "TRUE", f: |w| w.reshift },
     Counter { name: "Σ closing", origin: "TRUE", f: |w| w.closing },
     Counter { name: "Σ guard", origin: "TRUE", f: |w| w.depth_guard },
+    Counter { name: "Σ per_occ", origin: "HYPO", f: |w| w.per_occ },
+    Counter { name: "Σ freevar", origin: "HYPO", f: |w| w.freevar },
+    Counter { name: "Σ β today", origin: "SPLIT", f: Work::beta_today },
+    Counter { name: "Σ β fused", origin: "SPLIT", f: Work::beta_fused_incr },
+    Counter { name: "Σ β occ", origin: "SPLIT", f: Work::beta_fused_occ },
     Counter { name: "Σ alloc", origin: "SPLIT", f: Work::alloc },
     Counter { name: "Σ read", origin: "SPLIT", f: Work::read },
     Counter { name: "Σ model", origin: "SUM", f: Work::model },
@@ -904,6 +1107,43 @@ fn part_b(rows: &[Row]) {
             w.closing
         );
     }
+
+    println!(
+        "\nβ-FUSION (design 2026-08-02-lambda-beta-fusion §4). `beta today` is the three passes;\n\
+         `fused incr` carries `s` per binder and deletes both shifts; `fused occ` is the\n\
+         per-occurrence formulation §2 rejects, paying `per_occ` where `fused incr` pays `reshift`\n\
+         (printed in the table above). `freevar` is the null-result counter — what the fused walk\n\
+         still has to rebuild, and the gate is that it stays under 40% of opening+closing. `per_occ`\n\
+         is printed here — not only in `Σ β occ` — so `spine` (above) + `per_occ` + `freevar` =\n\
+         `fused occ` checks in place instead of needing `per_occ` back-solved.\n"
+    );
+    println!(
+        "{:>3} | {:>9}  {:>9}  {:>9}  {:>9} | {:>10}  {:>10}  {:>10}",
+        "#", "opening", "closing", "per_occ", "freevar", "β today", "fused incr", "fused occ"
+    );
+    println!("{}", "-".repeat(90));
+    let (mut oc, mut fv) = (0u64, 0u64);
+    for r in rows {
+        let w = &r.work;
+        oc += w.opening + w.closing;
+        fv += w.freevar;
+        println!(
+            "{:>3} | {:>9}  {:>9}  {:>9}  {:>9} | {:>10}  {:>10}  {:>10}",
+            r.idx,
+            w.opening,
+            w.closing,
+            w.per_occ,
+            w.freevar,
+            w.beta_today(),
+            w.beta_fused_incr(),
+            w.beta_fused_occ()
+        );
+    }
+    println!(
+        "\nGATE (design §5): Σ freevar = {fv} against Σ opening + Σ closing = {oc} — {:.1}%, \
+         and the bar is under 40%.",
+        if oc == 0 { 0.0 } else { 100.0 * fv as f64 / oc as f64 }
+    );
 
     // The headline correction, stated as a ratio rather than left for the reader to divide.
     let m_abs: u64 = rows.iter().map(|r| r.work.abs_times_arg).sum();
@@ -1011,15 +1251,28 @@ fn part_c(rows: &[Row]) {
         }
     }
 
-    // Unwrap: `COUNTERS` holds seven non-aggregate entries, so the loop above always assigns.
+    // Unwrap: needs one `COUNTERS` entry whose `origin` is neither `SUM` nor `SPLIT` — that invariant,
+    // not a headcount that goes stale every time this list grows, is what the loop above relies on to
+    // always assign `best`.
     let (_, winner) = best.unwrap();
     println!(
         "\n`hyp?` — `yes` marks a counter the substitution-blowup hypothesis proposed, `STALE` one of the\n\
          static models written against the pre-2026-08-01 `subst`/`depth_exceeds` and kept as a control,\n\
-         `TRUE` one that mirrors the function as it is, `SPLIT` the allocating/read-only partition of\n\
-         the whole accounting, and `SUM` its total. **THE STALE ROWS ARE IN THIS CONTEST ON PURPOSE.**\n\
-         A counter that no longer describes the code should lose it, and watching one do so on the same\n\
-         corpus is worth more than a sentence asserting that it would. `spread` is\n\
+         `TRUE` one that mirrors the function as it is, `HYPO` a faithful walk over code that is\n\
+         PROPOSED OR FALSIFIED rather than shipped: `Σ per_occ` mirrors the falsified lifted-shift\n\
+         rewrite and its fitted price is the cost of a function nobody runs. `Σ freevar` mirrored a\n\
+         PROPOSED fused `beta` when it was written and that `beta` SHIPPED on 2026-08-03, so by this\n\
+         legend it is now TRUE and the label understates it. Inverted, `Σ β today` models the\n\
+         three-pass `beta` that no longer exists, and prints a fitted price with no caveat at all --\n\
+         read that column as the cost of a function nobody runs. `SPLIT` marks an aggregate over\n\
+         several\n\
+         counters above — `Σ alloc`/`Σ read` are the allocating/read-only partition of the WHOLE\n\
+         accounting, and `Σ β today`/`Σ β fused`/`Σ β occ` are the β-fusion aggregates from the block\n\
+         above: a DIFFERENT partition, not a further split of the first, so none of the three sums\n\
+         against `Σ read` or `Σ alloc`. `SUM` is the total.\n\
+         **THE STALE AND HYPO ROWS ARE IN THIS CONTEST ON PURPOSE.** A counter that no longer describes\n\
+         the shipped code — or never did — should lose it, and watching one do so on the same corpus is\n\
+         worth more than a sentence asserting that it would. `spread` is\n\
          max/min of the ns-per-unit price: 1.0x is a counter that costs the same everywhere, and it is\n\
          the discriminating column — ρ stays high for any counter that merely grows with the program.\n\
          \n\

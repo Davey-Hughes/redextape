@@ -76,8 +76,30 @@
 //! Part G's negative result did survive the corpus, and is stated with more confidence than the positive
 //! one it contrasts with: same-redex-path runs average **1.22** against the TM's 38.56, and consecutive
 //! root redexes are 1.3%, so there is nothing to fuse in λ and n-ary β has no surface.
+//!
+//! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
+//!
+//! **This target has set `mimalloc` as its global allocator since 2026-08-04. Every timing recorded
+//! in this file above this note was measured under glibc's malloc and is NOT comparable to a run
+//! made today.** Counts are: node counts, allocation counts and step counts are properties of the
+//! reduction, not of the machine, and did not move. Seconds, ms and ns did.
+//!
+//! It is here for a measured reason rather than a preference. The reducer allocates one `Rc<Node>`
+//! per term node and frees on the same order, and glibc's layout for that pattern costs real
+//! address-translation pressure: on the nested-group family, swapping ONLY the allocator took L1
+//! DTLB misses from 1.20e9 to 0.92e9 for the three-pass `beta` and from 1.83e9 to 0.93e9 for the
+//! fused one, with the wall clock following at ~9% and ~16%. That is also how the β-fusion family
+//! regression was explained — it was glibc's layout, not the reducer's work.
+//!
+//! `mimalloc` is a `[dev-dependencies]` entry and reaches examples and tests ONLY.
+//! `redextape-core`'s `[dependencies]` stays empty and WASM-clean: `libmimalloc-sys` is C that does
+//! not build for wasm32, and a library must not choose a global allocator for its consumers.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+#[cfg(not(target_arch = "wasm32"))]
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -208,7 +208,7 @@ pub fn reduce_step(t: &LambdaTerm) -> Option<(LambdaTerm, Path)> {
 /// is the O(1) alternative for callers that only walk forward.
 ///
 /// **THIS DRIVES `LambdaCursor`, AND IT IS THE ONE CONSUMER THAT SHOULD.** `reduce_to_normal_form`
-/// switched to `ZipperCursor` on 2026-08-02 for a 1.41–1.43x win; this function cannot take it. The
+/// switched to `ZipperCursor` on 2026-08-02 for a 1.41–1.43x (glibc) win; this function cannot take it. The
 /// zipper's saving is the per-step spine rebuild, and it is only a saving for a caller that reads the
 /// term ONCE. Calling `cursor.term()` every step — which is this function's entire promise — makes the
 /// zipper fold its context stack per step, paying the same cost back with frame bookkeeping on top.
@@ -246,7 +246,7 @@ pub fn reduce_trace(t: &LambdaTerm, cap: u64) -> Trace {
 ///
 /// **THIS DRIVES `ZipperCursor`, WHERE `reduce_trace` DRIVES `LambdaCursor`, AND THE SPLIT IS THE
 /// WHOLE POINT.** A zipper carries the reduction context across steps instead of re-descending from
-/// the root, which removes the spine rebuild `reduce_step` pays per step — **1.41–1.43x on the corpus,
+/// the root, which removes the spine rebuild `reduce_step` pays per step — **1.41–1.43x (glibc) on the corpus,
 /// recovering 99.0% of that ceiling**. It can only do that for a caller that reads the term ONCE, at
 /// the end. `reduce_trace` materialises `cursor.term()` every step by contract, so under a zipper it
 /// would fold the context stack per step and pay the same cost back with frame bookkeeping on top —

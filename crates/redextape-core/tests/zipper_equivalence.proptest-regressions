@@ -4,5 +4,4 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
-cc c1c131f22b48861fb6769541f46520feac51ebcc870eb004b419936d1ebd1856 # shrinks to a = 0, b = 0, c = 0
-cc 585bc1605749f3d69574981907fc584ce05b440caa2a7632f1c805fd2516eb8c # shrinks to src = "(0 - 1)"
+cc 65649eb1f2fa5af735445f9eb2a0b63f4015ce6afb11cc6c8fb0d749abb72633 # shrinks to src = "((0 - 1) + 0)"

@@ -116,7 +116,10 @@
 //! 0.05 per step, where the model that sized the slice priced it at 44 copies of the argument per step
 //! (`lambda_sharing_probe.rs` PART B's `Σ abs×arg`, 70,542,349 corpus-wide).
 //!
-//! **WHY IT INVERTS, and the direction is forced rather than incidental.** `subst`'s `maxfree`
+//! **WHY IT INVERTS** — ~~and the direction is forced rather than incidental~~. **CORRECTED 2026-08-03:**
+//! it is not forced; it is this family's direction only, and "THE TWO FORMULATIONS DISAGREE ABOUT WHICH
+//! CORPUS THEY ARE MEASURED ON" below is where the 46-program corpus inverts it — the same `reshift`
+//! against `per_occ` split, with the sign flipped. `subst`'s `maxfree`
 //! short-circuit means it descends through only the binders ON THE PATH TO AN OCCURRENCE, not every
 //! `Abs` node in the body — so "binders crossed" is now SMALLER than "occurrences", and paying once per
 //! occurrence costs more than paying once per binder crossed. The 44:1 abs-to-occ ratio the design
@@ -139,12 +142,97 @@
 //! 20,725 to 190,666 across levels 1 to 11 while every other column is flat or falling. If anything here
 //! is the next target it is that, and it is a different function from the one every proposal so far has
 //! been about.
+//!
+//! # AND THAT COLUMN BECAME A SLICE WITH A GATE — RUN 2026-08-03, PASSED AT 4.3%
+//!
+//! The census gained `closing`, `freevar` and a SECOND contest — `beta_today` against `beta_fused_incr`
+//! and `beta_fused_occ` — for `docs/superpowers/specs/2026-08-02-lambda-beta-fusion-design.md`, which
+//! proposes collapsing `beta`'s three passes into one walk. **`today()` and `lifted()` above are
+//! deliberately untouched**: `closing` is paid by both sides of that ratio and cancels, and the 0.99x it
+//! produced is a landed finding. The rows above are unchanged to the unit across the addition, which is
+//! the evidence that the new columns moved nothing.
+//!
+//! ```text
+//! program          steps    opening     spine   reshift   per_occ   closing   freevar   beta_today  fused_incr  fused_occ    win
+//! nested lvl 1    109565      20725    296124      5921      8881     68089      8881       390859      310926     313886   1.26x
+//! nested lvl 11   105607     190666    285574      5696      8549    236274      8549       718210      299819     302672   2.40x
+//! two 500-lists       22          7        43         0         0         5         0           55          43         43   1.28x
+//! 699-literal       1398          0      5592         0         0         0         0         5592        5592       5592   1.00x
+//! ```
+//!
+//! **The `win` column climbs monotonically 1.26x, 1.37x, 1.49x, 1.60x, 1.71x, 1.83x, 1.94x, 2.05x,
+//! 2.17x, 2.28x, 2.40x across levels 1 to 11** — because `beta_today` carries `opening` and `closing`,
+//! the two columns that scale, and `fused_incr` carries neither. Over all 13 rows `beta_today` is
+//! 6,138,291 against `fused_incr`'s 3,370,731, a 1.82x. **These are allocation counts and say nothing
+//! about the clock** — the lifted-shift slice cut ~19% of allocations and measured 0.99x, which is why
+//! the design's ship bar is in seconds and is a separate measurement from this one.
+//!
+//! **`freevar` is the null-result counter and it came in at 4.3%** of `opening + closing` on the
+//! 46-program corpus (1,458 against 34,085), against a bar of 40% written before the number existed.
+//! No row of either the corpus or this family allocates more under fusion than it does today.
+//!
+//! # AND THEN THE CLOCK SAID NO, ON THIS VERY FAMILY — MEASURED 2026-08-03
+//!
+//! **The 1.82x above buys nothing here. The reduction ramp printed by `main` below is 0.910–0.925x
+//! FUSED AGAINST THREE-PASS — a regression on every one of the eleven levels**, worst 0.880–0.895x at
+//! level 7, best 0.965–0.997x at level 1, four runs a side across two builds with this file held
+//! constant. The design's ship bar was `>= 1.10x` on exactly this ramp, and it is MISSED. (The
+//! 46-program corpus went the other way, 1.288–1.308x; the split is the whole result.)
+//!
+//! **The paragraph above warned that counts say nothing about the clock, and it was right for a reason
+//! it did not name.** At level 11 fusion removes 3.96 allocations per β-step and the clock loses 7.0 µs
+//! per β-step — three orders of magnitude apart, so the loss is not in `beta` at all. What the ramp
+//! actually spends its ~70 µs a step on is `reduce_step`, which has NO MEMO: it recurses into both
+//! children of every `App` hunting the leftmost-outermost redex, so it costs the LOGICAL tree, which is
+//! identical under both `beta`s. **No allocation saving can reach it**, which is why this family — the
+//! one `Σ opening` was selected on — was never able to pay fusion back. Why it additionally LOSES 7
+//! µs/step is not established; see the design's §5 SHIP RESULT, which leaves it open rather than
+//! guessing.
+//!
+//! # THE TWO FORMULATIONS DISAGREE ABOUT WHICH CORPUS THEY ARE MEASURED ON
+//!
+//! `fused_incr` carries `s` per binder (design §2); `fused_occ` pays the shift once per occurrence
+//! (design §5b). The whole gap between them is `reshift` against `per_occ`, since `spine` and `freevar`
+//! are common to both — **and the two corpora disagree about the sign:**
+//!
+//! | | `reshift` | `per_occ` | winner |
+//! | --- | --- | --- | --- |
+//! | this family, 13 rows | 64,006 | 96,036 | `incr`, by 32,030 — a 1.0095x |
+//! | the 46-program corpus | 44,539 | 7,944 | `occ`, by 36,595 — a 2.11x |
+//!
+//! The family row is the one the falsification heading above already reported: binders crossed are
+//! fewer than occurrences *here*. **The corpus row is the same 36,595 that heading calls a 2.16x win on
+//! a small quantity** — it was in this file's own record the whole time, and the fusion design's §2
+//! generalised the family's sign over it. Neither formulation regresses any row, so this decides which
+//! fusion to build rather than whether to build one.
+//!
+//! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
+//!
+//! **This target has set `mimalloc` as its global allocator since 2026-08-04. Every timing recorded
+//! in this file above this note was measured under glibc's malloc and is NOT comparable to a run
+//! made today.** Counts are: node counts, allocation counts and step counts are properties of the
+//! reduction, not of the machine, and did not move. Seconds, ms and ns did.
+//!
+//! It is here for a measured reason rather than a preference. The reducer allocates one `Rc<Node>`
+//! per term node and frees on the same order, and glibc's layout for that pattern costs real
+//! address-translation pressure: on the nested-group family, swapping ONLY the allocator took L1
+//! DTLB misses from 1.20e9 to 0.92e9 for the three-pass `beta` and from 1.83e9 to 0.93e9 for the
+//! fused one, with the wall clock following at ~9% and ~16%. That is also how the β-fusion family
+//! regression was explained — it was glibc's layout, not the reducer's work.
+//!
+//! `mimalloc` is a `[dev-dependencies]` entry and reaches examples and tests ONLY.
+//! `redextape-core`'s `[dependencies]` stays empty and WASM-clean: `libmimalloc-sys` is C that does
+//! not build for wasm32, and a library must not choose a global allocator for its consumers.
+
+#[cfg(not(target_arch = "wasm32"))]
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 use redextape_core::lambda::lower;
-use redextape_core::lambda::term::{Dir, LambdaTerm, Node, logical_size, shift};
+use redextape_core::lambda::term::{Dir, LambdaTerm, Node, logical_size, shift, subst};
 
 fn line(s: &str) {
     println!("{s}");
@@ -363,6 +451,45 @@ fn subst_allocs_lifted(j: u32, lift: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u6
     }
 }
 
+/// Allocations the FUSED `beta` of the β-fusion design §2 would make, as
+/// `(body spine, per-binder re-shift, free-variable rebuild)`.
+///
+/// **Mirrors `beta_go` arm for arm, prune included** — the discipline `subst_allocs_today` exists to
+/// enforce and that `Σ abs×arg` was retired for breaking. **`beta_go` IS in this tree** — it is the
+/// shipped fused `beta` in `src/lambda/term.rs`, since `eb9e134`. ~~`beta_go` is not in this tree; it
+/// is the spec's proposed fused `beta`, named here so a reader grepping the crate lands on the spec
+/// instead of an empty search.~~ **Corrected 2026-08-04:** that was true when this counter was written
+/// against a proposal and false from the moment the proposal landed — and it justified itself by an
+/// appeal to `grep`, which is exactly what falsifies it. Note the
+/// caller passes `arg` ITSELF, not `shift(1, 0, arg)`: never building the `+1` is the mechanism, not an
+/// optimization on top of it.
+fn beta_allocs_fused(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64, u64) {
+    // The same prune as `subst`'s, and the same one the closing shift applies at this depth: every
+    // free index in `t` is below `j`, so there is nothing to substitute AND nothing to decrement.
+    if t.maxfree() <= j {
+        return (0, 0, 0);
+    }
+    match t.node() {
+        // `s.clone()` — a refcount bump, exactly as `subst`'s hit arm is today.
+        Node::Var(k) if *k == j => (0, 0, 0),
+        // `var(*k - 1)`. `k > j` here (the prune took `k < j`), so `k >= 1` and the subtraction cannot
+        // underflow. This is the ONE node today's closing shift allocates that fusion cannot delete —
+        // the null-result counter of §4.
+        Node::Var(_) => (0, 0, 1),
+        Node::Abs(_, b) => {
+            let re = shift_allocs(0, s);
+            let lifted = shift(1, 0, s);
+            let (spine, shifts, fv) = beta_allocs_fused(j + 1, &lifted, b);
+            (1 + spine, re + shifts, fv)
+        }
+        Node::App(f, a) => {
+            let (sp1, sh1, fv1) = beta_allocs_fused(j, s, f);
+            let (sp2, sh2, fv2) = beta_allocs_fused(j, s, a);
+            (1 + sp1 + sp2, sh1 + sh2, fv1 + fv2)
+        }
+    }
+}
+
 /// Per-β-step totals for one program. Everything here is an allocation COUNT, deterministic and
 /// machine-independent — the section that prints it reports no seconds, for the reason
 /// `guard_counterexamples.rs` states: a timing gate is a flaky gate.
@@ -379,15 +506,54 @@ struct SubstCensus {
     reshift: u64,
     /// The rewrite's replacement: `shift(lift, 0, s)` once per occurrence at `lift > 0`.
     per_occ: u64,
+    /// **PRE-FUSION** `beta`'s closing `shift(-1, 0, ·)` over the term `subst` returns. Deliberately
+    /// still the three-pass quantity: it is what the fusion's ceiling was computed against, so pointing
+    /// it at current code would make this census stop measuring the thing it exists to measure. Same
+    /// intent as `lambda_sharing_probe.rs`'s `Work::closing`, which prices the same quantity on the
+    /// 46-program corpus where this one prices it on the nested-group family — the distinction this
+    /// file's own section on the two formulations disagreeing by corpus exists to make.
+    ///
+    /// **ABSENT FROM THIS CENSUS UNTIL 2026-08-03, AND CORRECTLY SO FOR THE QUESTION IT WAS BUILT
+    /// FOR.** Comparing today's `subst` against the lifted rewrite, the closing shift is paid by both
+    /// sides and cancels out of `today()/lifted()`. It does not cancel against β-fusion, which deletes
+    /// it — so it is counted here and enters only the second contest below.
+    closing: u64,
+    /// FUSION's null-result counter — the `var(k-1)` nodes the one-walk `beta` still allocates for a
+    /// body free variable ABOVE the binder. A proper subset of `closing`: today's closing pass
+    /// allocates these same nodes, PLUS the spine down to them (which `subst` had already rebuilt),
+    /// PLUS a rebuild of every substituted argument copy. The last two are what fusion deletes; this is
+    /// what it cannot, and a slice that cannot attribute a null result is how four designs on this
+    /// thread died.
+    freevar: u64,
 }
 
 impl SubstCensus {
+    /// THE LIFTED-REWRITE CONTEST, DELIBERATELY UNCHANGED. `closing` is paid by both sides and cancels,
+    /// and the 0.99x this ratio produced is a landed finding the roadmap quotes. Adding a term to both
+    /// sides of it would move a published number without adding information.
     fn today(&self) -> u64 {
         self.opening + self.spine + self.reshift
     }
 
     fn lifted(&self) -> u64 {
         self.opening + self.spine + self.per_occ
+    }
+
+    /// THE FUSION CONTEST. `closing` does not cancel here — it is half of what fusion deletes — so
+    /// these three totals carry it where the pair above does not.
+    fn beta_today(&self) -> u64 {
+        self.opening + self.spine + self.reshift + self.closing
+    }
+
+    /// Design §2: `s` carried incrementally, both of `beta`'s shifts gone, `reshift` untouched.
+    fn beta_fused_incr(&self) -> u64 {
+        self.spine + self.reshift + self.freevar
+    }
+
+    /// Design §5b's formulation: the shift paid once per occurrence. Carried so that the design's
+    /// disagreement with the sentence it inherited is MEASURED rather than argued.
+    fn beta_fused_occ(&self) -> u64 {
+        self.spine + self.per_occ + self.freevar
     }
 
     /// Census one β-step, given the term BEFORE it and the redex path `LambdaCursor` emitted with it.
@@ -406,9 +572,25 @@ impl SubstCensus {
         let (spine_today, reshift) = subst_allocs_today(0, &opened, body);
         let (spine_lifted, per_occ) = subst_allocs_lifted(0, 0, &opened, body);
         assert_eq!(spine_today, spine_lifted, "the two candidates must rebuild the same body spine");
+
+        // The fused walk takes `arg`, not `opened` — design §2. The two assertions below are DRIFT
+        // GUARDS between `subst_allocs_today` and `beta_allocs_fused`, not a check of the design — both
+        // are forced true by construction, not by the design being right. `spine`: the two mirrors share
+        // the identical prune and the identical spine recursion, so `spine_today == spine_fused` cannot
+        // fail. `reshift`: the fused walk's `s` is exactly one `shift(1, 0, ·)` behind today's, and
+        // `shift_allocs(0, ·)` is invariant under that shift — it changes neither the tree shape nor
+        // which occurrences are free, so the prune flips identically on both sides. What these catch is a
+        // LATER edit that desynchronises the two mirrors; the actual check that the shipped `beta`
+        // matches this design is the equivalence differential in Task 4, not these.
+        let (spine_fused, reshift_fused, freevar) = beta_allocs_fused(0, arg, body);
+        assert_eq!(spine_today, spine_fused, "fusion must rebuild the same body spine as `subst`");
+        assert_eq!(reshift, reshift_fused, "fusion must re-shift once per binder, as `subst` does");
+
         self.spine += spine_today;
         self.reshift += reshift;
         self.per_occ += per_occ;
+        self.closing += shift_allocs(0, &subst(0, &opened, body));
+        self.freevar += freevar;
     }
 }
 
@@ -588,6 +770,7 @@ fn main() {
         format!("let xs = [{}]; let ys = [{}]; head(xs) + head(ys)", list(500), list(500)),
     ));
     family.push(("699-literal".to_string(), format!("[{}]", list(699))));
+    let mut censuses: Vec<(String, SubstCensus, String)> = Vec::new();
     for (label, src) in family {
         let Some(core) = core_of(&src) else {
             line(&format!("{label:<14}   parse/type failed"));
@@ -603,9 +786,13 @@ fn main() {
             _ => "",
         };
         let malformed = if c.malformed == 0 { String::new() } else { format!("  {} MALFORMED", c.malformed) };
+        let suffix = format!("{capped}{malformed}");
+        // Printed HERE, before the next program's census runs — the row is flushed, not deferred, so an
+        // OOM-kill on a later program leaves this one on stdout. `censuses` below is table 2's copy of
+        // the same already-computed row, not a second `census_run`.
         let win = if c.lifted() == 0 { 0.0 } else { c.today() as f64 / c.lifted() as f64 };
         line(&format!(
-            "{label:<14}  {:>6}  {:>9.1}%  {:>8}  {:>8}  {:>8}  {:>8}  {:>8}  {:>8}  {win:>5.2}x{capped}{malformed}",
+            "{label:<14}  {:>6}  {:>9.1}%  {:>8}  {:>8}  {:>8}  {:>8}  {:>8}  {:>8}  {win:>5.2}x{suffix}",
             c.steps,
             100.0 * c.closed_arg as f64 / c.steps.max(1) as f64,
             c.opening,
@@ -614,6 +801,31 @@ fn main() {
             c.per_occ,
             c.today(),
             c.lifted(),
+        ));
+        censuses.push((label, c, suffix));
+    }
+
+    line("");
+    line("β-FUSION contest — `beta` as three passes against `beta` as one. `closing` is counted here and");
+    line("is NOT in the `today` column above: it cancels in the lifted contest and does not cancel here.");
+    line("`freevar` is the null-result counter — what the fused walk still has to rebuild.");
+    line(
+        "program          steps    opening     spine   reshift   per_occ   closing   freevar   beta_today  fused_incr  fused_occ    win",
+    );
+    for (label, c, suffix) in &censuses {
+        let win = if c.beta_fused_incr() == 0 { 0.0 } else { c.beta_today() as f64 / c.beta_fused_incr() as f64 };
+        line(&format!(
+            "{label:<14}  {:>6}  {:>9}  {:>8}  {:>8}  {:>8}  {:>8}  {:>8}  {:>11}  {:>10}  {:>9}  {win:>5.2}x{suffix}",
+            c.steps,
+            c.opening,
+            c.spine,
+            c.reshift,
+            c.per_occ,
+            c.closing,
+            c.freevar,
+            c.beta_today(),
+            c.beta_fused_incr(),
+            c.beta_fused_occ(),
         ));
     }
 }

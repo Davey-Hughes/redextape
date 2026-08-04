@@ -255,20 +255,34 @@ pub fn app(f: LambdaTerm, a: LambdaTerm) -> LambdaTerm {
 ///
 /// # Panics
 ///
-/// If a shifted index would go negative. `d` is signed and only `beta` ever passes a negative one
-/// (`shift(-1, 0, …)`, to close the hole after substituting), so this can only fire when a `Var(0)`
-/// survives to that call — which `subst(0, …)` is supposed to have replaced. **Panicking is the point:
-/// the arithmetic was `(i64::from(*k) + d) as u32`, which WRAPS a negative result to a huge index, so
-/// the failure mode was a term full of dangling references that reduces to a wrong answer rather than
-/// to an error. A miscompile is worse than a crash.**
+/// If a shifted index would go negative. `d` is signed, and **as of β-fusion (2026-08-03) NO
+/// NON-TEST CALL SITE IN THIS CRATE PASSES A NEGATIVE ONE.** `beta`'s closing `shift(-1, 0, …)` was
+/// the only such caller; `beta_go` decrements in place, at `k > j >= 0`, so the case is now impossible
+/// by branch rather than by check. **The qualifier is exact rather than defensive** — this file's own
+/// `#[cfg(test)]` module still calls `shift(-1, 0, &var(0))`, `shift(-1, 0, &var(3))` and
+/// `shift(-1, 5, &var(0))`, in `shift_panics_instead_of_wrapping_to_a_dangling_index` and
+/// `a_negative_shift_that_stays_in_range_is_fine`, which are precisely the tests that keep this
+/// `# Panics` contract honest. A doc that said "nothing" would be falsified by `grep` from inside the
+/// same file.
 ///
-/// The invariant that keeps this unreachable from compiled output is not local to either function: it
-/// holds because `subst`'s `j + 1` and this function's `cutoff + 1` step in lockstep under `Abs`, so
-/// the index `subst` replaces is exactly the one this call would decrement. Two functions agreeing by
-/// construction is precisely the kind of coupling a refactor breaks silently, which is why the check is
-/// unconditional rather than a `debug_assert!`. Measured cost in release: none — five runs put the
-/// guarded version's range around the unguarded one (0.2078–0.2191s vs 0.2123–0.2151s for 2,000 shifts
-/// over a 400-deep term), i.e. below run-to-run noise.
+/// **The assert and the signed `d` stay, and not out of caution:** `shift` is `pub`,
+/// `tests/subst_differential.rs` passes negative `d` deliberately, and the failure this guards is a
+/// term full of dangling references that reduces to a wrong answer — the arithmetic was
+/// `(i64::from(*k) + d) as u32`, which WRAPS. A miscompile is worse than a crash. Narrowing the
+/// signature is a separate slice with a public-API survey to do first.
+///
+/// **The lockstep argument this invariant used to rest on is now internal to `beta_go`, not to this
+/// function's relationship with `subst`.** Before fusion, `subst`'s `j + 1` and this function's
+/// `cutoff + 1` stepped together under `Abs`, so the index `subst` replaced was exactly the one `beta`'s
+/// closing call would decrement — two functions agreeing by construction, which a refactor could break
+/// silently. `beta_go` now carries that same pairing (its own `j + 1` against `shift(1, 0, s)`) inside
+/// one function, guarded by its own unconditional `assert!(*k > j, …)`. What keeps THIS function's
+/// panic unreachable from compiled output is simpler and no longer a two-function argument: nothing in
+/// `src/` calls `shift` with a negative `d` at all. The check stays unconditional rather than a
+/// `debug_assert!` regardless, because `shift` is `pub` and a refactor can reintroduce a caller
+/// silently. Measured cost in release: none — five runs put the guarded version's range around the
+/// unguarded one (0.2078–0.2191s vs 0.2123–0.2151s for 2,000 shifts over a 400-deep term), i.e. below
+/// run-to-run noise.
 pub fn shift(d: i64, cutoff: u32, t: &LambdaTerm) -> LambdaTerm {
     // Every free index in `t` is below `cutoff`, so no index is in range and this call is the
     // identity. Returning the handle preserves the ALLOCATION, which is the half that matters: the
@@ -332,9 +346,83 @@ pub fn subst(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> LambdaTerm {
     }
 }
 
-/// β-reduce `(\. abs_body) arg`: substitute `arg` for index 0 in `abs_body`, then close the hole.
+/// β-reduce `(\. abs_body) arg`: substitute `arg` for index 0 in `abs_body` and close the hole, in ONE
+/// walk.
+///
+/// **This was three walks until 2026-08-03** — `shift(-1, 0, subst(0, shift(1, 0, arg), body))`, the
+/// textbook de Bruijn formulation — and `Σ opening + Σ closing` was 18.0% of every allocation the
+/// reducer made. The opening shift and the closing shift are an up-and-down pair that cancels on the
+/// substituted argument: three passes build `shift(d+1, 0, arg)` at binder depth `d` and then decrement
+/// it, where `beta_go` carries `shift(d, 0, arg)` and never builds the `+1`.
+///
+/// **The per-binder re-shift is deliberately NOT fused away, and WHICH quantity is smaller depends on
+/// the corpus — do not read the family's answer as the general one.** Paying `shift(·, 0, arg)` once
+/// per OCCURRENCE instead of once per binder crossed measures **1.5x worse on the nested-group family**
+/// (`Σ reshift` 5,921 against `Σ per_occ` 8,881) and **5.6x BETTER on the 46-program corpus**
+/// (`Σ reshift` 44,539 against `Σ per_occ` 7,944). The direction is not forced: `subst`'s `maxfree`
+/// short-circuit descends only through the binders on the path to an occurrence, and whether that
+/// leaves binders-crossed above or below occurrence-count is a property of the terms, not of the
+/// algorithm.
+///
+/// The incremental form is kept anyway — it leaves `Σ reshift` untouched and so inherits none of the
+/// falsified lifted-shift slice's risk, which is the reason of the two that does not depend on a
+/// corpus. ~~binders crossed is the SMALLER quantity~~ was the first form of this comment and is the
+/// family-only overgeneralisation the same branch struck from three other files; this copy, in shipped
+/// library source, was missed until the whole-branch review. See
+/// `docs/superpowers/specs/2026-08-02-lambda-beta-fusion-design.md`.
+///
+/// Equivalence to the three-pass form is exhaustive, not exemplary:
+/// `tests/subst_differential.rs::the_shipped_beta_agrees_with_the_three_pass_formulation_on_every_enumerated_pair`.
 pub fn beta(abs_body: &LambdaTerm, arg: &LambdaTerm) -> LambdaTerm {
-    shift(-1, 0, &subst(0, &shift(1, 0, arg), abs_body))
+    // `arg`, NOT `shift(1, 0, arg)` — see the doc above.
+    beta_go(abs_body, 0, arg)
+}
+
+/// One walk of `beta`: substitute `s` for index `j`, decrement every free index above `j`.
+///
+/// `s` is `arg` lifted by `j`, maintained by the `Abs` arm exactly as `subst`'s is — which is why
+/// `Σ reshift` is unchanged by fusion, and `shift(1, 0, s)` short-circuits to a refcount bump on the
+/// 88.4% of corpus steps whose argument is closed either way.
+fn beta_go(t: &LambdaTerm, j: u32, s: &LambdaTerm) -> LambdaTerm {
+    // `subst`'s short-circuit, and simultaneously the closing shift's: every free index in `t` is below
+    // `j`, so there is nothing to substitute AND nothing to decrement. Returning the handle preserves
+    // the ALLOCATION, which is what `a_beta_step_is_bounded_by_allocations_not_by_logical_nodes` pins.
+    if t.maxfree() <= j {
+        return t.clone();
+    }
+    match t.node() {
+        // NO THIRD ARM, and the argument is `shift`'s verbatim: `maxfree(Var(k))` is `k + 1`, so this
+        // is reached only when `k + 1 > j`, i.e. `k >= j` unconditionally. `k < j` cannot arrive here.
+        Node::Var(k) => {
+            if *k == j {
+                // A refcount bump. `subst`'s hit arm, unchanged.
+                s.clone()
+            } else {
+                // `k > j`, hence `k >= 1`, so the subtraction cannot underflow — by the branch rather
+                // than by a check. This is the node the closing `shift(-1, 0, ·)` used to allocate.
+                //
+                // **THE CHECK IS UNCONDITIONAL, AND THAT IS `shift`'s POLICY RATHER THAN CAUTION HERE.**
+                // A `debug_assert!` was the first shape of this and it is the trade `shift`'s own doc
+                // block explicitly refuses: this workspace sets no `[profile]` overrides, so a release
+                // build has neither debug assertions nor overflow checks, and a `k < j` arriving from a
+                // wrong `maxfree` would WRAP to `u32::MAX` — a term full of dangling references that
+                // reduces to a wrong answer, rather than an error. A miscompile is worse than a crash,
+                // and `shift` measured its equivalent unconditional check at below run-to-run noise.
+                //
+                // The invariant it guards is not local: `maxfree(Var(k))` is `k + 1`, so the prune above
+                // returns for every `k < j` — including at the `saturating_add` ceiling, where
+                // `maxfree` saturates at `u32::MAX` and the prune still fires for any `j` below it.
+                // That reasoning spans two functions, which is exactly when a check earns its keep.
+                // Asserting `*k > j` rather than `*k != 0` on purpose: `checked_sub` would catch only
+                // the underflow at `k == 0` and would silently emit a wrong index for any other
+                // `k < j`. The branch invariant is the thing worth guarding, and it implies `k >= 1`.
+                assert!(*k > j, "beta_go reached Var({k}) at index {j}; the maxfree prune should have returned");
+                var(*k - 1)
+            }
+        }
+        Node::Abs(n, b) => abs(Rc::clone(n), beta_go(b, j + 1, &shift(1, 0, s))),
+        Node::App(f, a) => app(beta_go(f, j, s), beta_go(a, j, s)),
+    }
 }
 
 impl PartialEq for LambdaTerm {
@@ -483,6 +571,43 @@ mod tests {
         assert_eq!(shift(-1, 5, &var(0)), var(0));
     }
 
+    /// **THE UNDERFLOW IS UNREACHABLE BY BRANCH AND ENFORCED BY CHECK, AND THIS IS WHAT REACHES THE
+    /// BRANCH AT ALL.** `beta_go` reaches `var(*k - 1)` only when `k > j >= 0`, so `k >= 1` and the
+    /// subtraction cannot underflow — that much is structural. But structural is a property of the code
+    /// as written, not of the code as edited, so the arm also carries an unconditional
+    /// `assert!(*k > j, …)`: this workspace sets no `[profile]` overrides, and in release a wrong
+    /// `maxfree` would otherwise wrap to `u32::MAX` with neither debug assertions nor overflow checks to
+    /// stop it. That is the same trade `shift`'s own doc block makes and for the same stated reason —
+    /// "a miscompile is worse than a crash".
+    ///
+    /// ~~Fusion does not weaken that guarantee; it makes it structural.~~ **Corrected 2026-08-03:** the
+    /// first version of this arm used a `debug_assert!` and that sentence was written for it, which made
+    /// the guarantee weaker in release than the `shift` call it replaced rather than stronger.
+    ///
+    /// ~~What this test contributes is that it is the only case in the suite that reaches `k = j + 1`.~~
+    /// **Corrected again, same day, and the second correction was checked rather than reasoned:**
+    /// making the decrement arm panic on `k == j + 1` fails **15 tests across 7 targets** — the lib
+    /// target's `lower::arithmetic_matches_the_reference`, `lower::recursion_via_fix`,
+    /// `reduce::church_arithmetic_normalizes`,
+    /// `trace::lambda_cursor_emits_the_same_redex_paths_as_reduce_trace` and this one; both β tests in
+    /// `tests/subst_differential.rs`; every oracle (`three_way_oracle`'s three,
+    /// `lambda_oracle`'s two, the two `four_way_oracle` rows); `zipper_equivalence`'s two; and
+    /// `lambda_sharing`'s `reduce_trace_shares_its_snapshots`. **The count was wrong twice before
+    /// this** — "five in the lib target" was measured with `cargo test`'s default fail-fast, which
+    /// stops at the first failing target, so it was a floor reported as a total. Run it with
+    /// `--no-fail-fast` or do not quote a number. What is true is narrower: **this is the only test that
+    /// reaches the case deliberately and in isolation.** The corpus tests reach it incidentally, so a
+    /// break in the decrement arm fails them for reasons that take a trace to localise, where this one
+    /// names the case in its title. That is the whole of its value, and it is worth having.
+    #[test]
+    fn beta_decrements_a_free_index_directly_above_the_binder() {
+        // Body `\y. (0 1)` under the redex binder: index 1 is the binder's own variable seen from inside
+        // `y`, and index 2 is one above it — the `k = j + 1` case at `j = 1`.
+        let body = abs("y", app(var(1), var(2)));
+        let arg = var(7);
+        assert_eq!(beta(&body, &arg), abs("y", app(var(7 + 1), var(1))));
+    }
+
     #[test]
     fn beta_reduces_const_application() {
         // (\x. \y. x) a  ->  \y. a   (a is a free var, index 0 outside)
@@ -534,6 +659,78 @@ mod tests {
             sibling.alloc_id(),
             "the untouched sibling must be inherited by identity, not rebuilt"
         );
+    }
+
+    /// **THE MECHANISM BEHIND β-FUSION'S SHARING WIN, PINNED AS A MECHANISM RATHER THAN AS A NUMBER.**
+    /// `tests/lambda_sharing.rs` pins the consequence — 17,920 and 4,305 distinct allocations — but a
+    /// pinned count says only that something moved, not what. This says what: N occurrences of the bound
+    /// variable at ONE binder depth must come back as N handles on ONE allocation.
+    ///
+    /// The three-pass `beta` this replaced could not do that. Its closing `shift(-1, 0, ·)` walked
+    /// `subst`'s result as a TREE — `shift` does not memoise — so it descended into each of the N
+    /// occurrences separately and rebuilt N independent copies, flattening the DAG `subst` had just
+    /// built. Restoring `shift(-1, 0, &subst(0, &shift(1, 0, arg), abs_body))` turns this test RED,
+    /// which is the only reason to trust it: the counts in `lambda_sharing.rs` would also move, but
+    /// they would not say why.
+    ///
+    /// THE ARGUMENT MUST BE OPEN AND THE ASSERT BELOW ENFORCES IT. For a CLOSED argument both
+    /// formulations share — `shift(1, 0, arg)` is a refcount bump and the closing shift's own `maxfree`
+    /// prune returns the handle — so the same test written with a closed argument passes against both
+    /// and pins nothing at all.
+    #[test]
+    fn a_beta_step_shares_one_allocation_across_every_occurrence_of_an_open_argument() {
+        use crate::lambda::reduce::reduce_step;
+        // OPEN: free indices 3, 4 and 5 survive the step, so neither shift can short-circuit on it.
+        let arg = app(var(3), app(var(4), var(5)));
+        assert!(arg.maxfree() > 0, "an open argument is the whole point — a closed one pins nothing");
+
+        // (\x. x x) arg — two occurrences of index 0, both at binder depth 0.
+        let t = app(abs("x", app(var(0), var(0))), arg.clone());
+        let (next, _path) = reduce_step(&t).expect("a redex exists");
+
+        let Node::App(l, r) = next.node() else { panic!("expected an App at the root") };
+        assert_eq!(
+            l.alloc_id(),
+            r.alloc_id(),
+            "both occurrences must be handles on ONE allocation, not two structurally equal copies"
+        );
+        // And that one allocation is the CALLER's own `arg`, not a copy of a copy: at depth 0 the fused
+        // walk hands `arg` straight through, where three passes shifted it up and back down again.
+        assert_eq!(l.alloc_id(), arg.alloc_id(), "the argument must be inherited by identity, not rebuilt");
+
+        // The step is still the right term — sharing that changed the answer would be a miscompile.
+        assert_eq!(next, app(arg.clone(), arg.clone()));
+
+        // ------------------------------------------------------------------------------------------
+        // **AND THE SAME PROPERTY AT BINDER DEPTH >= 1, WHICH IS A SEPARATE CLAIM AND THE ONE A
+        // DEPTH-0-ONLY TEST MISSES.** The two assertions above are not independent at depth 0 —
+        // inheriting `arg` by identity implies the two occurrences agree — so alone they pin only the
+        // handing-through, and a `beta` that shares at depth 0 while rebuilding once per occurrence
+        // deeper passes every other unit test in this file while moving
+        // `tests/lambda_sharing.rs`'s gates by 184 and 3 allocations. That variant was built and run;
+        // this block is what catches it.
+        //
+        // At depth >= 1 the substituted term is NOT `arg` — it is `shift(1, 0, arg)`, which the `Abs`
+        // arm builds once and then hands to both occurrences. So the claim inverts: the two must be one
+        // allocation, and that allocation must NOT be `arg`. Three passes fail this because the closing
+        // `shift(-1, 1, ·)` descends into each occurrence separately and rebuilds each.
+        let deep = app(abs("x", abs("y", app(var(1), var(1)))), arg.clone());
+        let (next_deep, _path) = reduce_step(&deep).expect("a redex exists");
+
+        let Node::Abs(_, inner) = next_deep.node() else { panic!("expected an Abs at the root") };
+        let Node::App(dl, dr) = inner.node() else { panic!("expected an App under the binder") };
+        assert_eq!(
+            dl.alloc_id(),
+            dr.alloc_id(),
+            "under a binder the two occurrences must still be ONE allocation, not one lift apiece"
+        );
+        assert_ne!(
+            dl.alloc_id(),
+            arg.alloc_id(),
+            "at depth >= 1 the shared allocation is the LIFTED argument — identity with `arg` here \
+             would mean the lift was skipped, which is a wrong answer rather than better sharing"
+        );
+        assert_eq!(next_deep, abs("y", app(shift(1, 0, &arg), shift(1, 0, &arg))));
     }
 
     /// The prior test pins the mechanism on one hand-built redex; this pins it over a full
@@ -810,8 +1007,9 @@ mod tests {
 
     /// THE ONE THE HANG TURNS ON. A β-step must cost the DAG, not the tree it denotes.
     ///
-    /// `beta` is `shift(-1, 0, subst(0, shift(1, 0, arg), body))`, and all three of those rebuilt every
-    /// node they visited — so handing it a closed argument of 19 allocations denoting 262,144 nodes
+    /// `beta` was `shift(-1, 0, subst(0, shift(1, 0, arg), body))`, when the hang was diagnosed, and all
+    /// three of those rebuilt every node they visited — so handing it a closed argument of 19 allocations
+    /// denoting 262,144 nodes
     /// materialised all 262,144. That is the mechanism behind the open hang: `lower_group` writes a
     /// term whose logical size runs 375x ahead of its physical size, and the reducer cashes the promise
     /// on the first step that touches it. `examples/blowup_probe.rs` recorded the symptom — "a β-step's

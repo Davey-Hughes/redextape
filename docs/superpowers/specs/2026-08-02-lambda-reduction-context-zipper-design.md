@@ -2,7 +2,7 @@
 
 > **BUILT AND MEASURED 2026-08-02 — and it is the first design on this thread that survived.**
 > `ZipperCursor` is **wired in**: `reduce_to_normal_form` drives it, `reduce_trace` keeps
-> `LambdaCursor`. **1.41–1.43x wall-clock on the corpus**
+> `LambdaCursor`. **1.41–1.43x (glibc) wall-clock on the corpus**
 > (7.4 ms → 5.3 ms; four runs, two of them by an independent reviewer, and the node counts below are
 > identical across all four where the milliseconds are not), recovering **99.0% of the `Σ path` ceiling** (54,655 of 55,226 nodes; the climb costs
 > 571). Row 31 — the mutually-recursive program that has been the worst case since the hang — runs
@@ -32,6 +32,13 @@
 >
 > Four designs on this thread were falsified by measurement. This one was corrected twice by
 > measurement and then confirmed by it, which is a different outcome and worth naming as one.
+>
+> **THE WALL-CLOCK FIGURES HERE ARE GLIBC MEASUREMENTS AND HAVE NOT BEEN RE-RUN.** The probes took
+> `mimalloc` as their global allocator on 2026-08-04, which is worth ~9–16% on the λ path on its
+> own, and this slice's mechanism is *reducing allocation* — so a cheaper allocator plausibly
+> shrinks its margin. The node counts are unaffected (they are properties of the reduction), and
+> so is the 99.0% ceiling recovery, which is a count. Re-measurement is deferred until the WASM
+> target lands and settles which allocator is the reference environment.
 
 **Status: GATE PASSED THE SAME DAY IT WAS WRITTEN, AND NOT BY THE ROUTE IT EXPECTED.** This began as a
 measurement slice: compute the ceiling on what a zipper could recover, decide against a bar set in §3
@@ -250,10 +257,19 @@ Recorded here so the next reader does not price it again.
 
 **THE TARGET IS `beta`'s THREE PASSES.** `beta(body, arg)` is
 `shift(-1, 0, subst(0, shift(1, 0, arg), body))` — three traversals where the textbook single-pass
-formulation folds the index adjustment into `subst` itself: replace `Var(j)` with `shift(j, 0, arg)` and
-decrement free indices above `j`, in one walk. **Same semantics, same reduction order, no model change.**
+formulation folds the index adjustment into `subst` itself: ~~replace `Var(j)` with `shift(j, 0, arg)` and
+decrement free indices above `j`, in one walk.~~ **Same semantics, same reduction order, no model change.**
 Together `Σ opening` + `Σ closing` is **34,085 nodes, 18.0% of allocations — and 25.3% of what remains
 once this slice removes `Σ path`.**
+
+> **THE STRUCK SENTENCE IS THE FALSIFIED SHAPE, AND THE SLICE THAT TOOK THIS TARGET SAYS SO — 2026-08-02.**
+> `shift(j, 0, arg)` at the occurrence pays **once per occurrence**, which is the quantity the block two
+> paragraphs down was falsified for; the paragraph below correctly says "different quantity, different
+> mechanism" about the *target* and then reaches for the wrong *formulation* of it. What is built instead
+> carries `s` incrementally, exactly as `subst` does today, so `Σ reshift` is unchanged bit for bit and
+> both shifts still disappear. Both forms are measured rather than argued, as `Σ fused_incr` against
+> `Σ fused_occ`. Full record:
+> [`2026-08-02-lambda-beta-fusion-design.md`](2026-08-02-lambda-beta-fusion-design.md).
 
 **IT SOUNDS LIKE THE SLICE FALSIFIED THIS MORNING AND IT IS NOT THE SAME ONE.** That one deferred the
 per-binder *re-shift* (`Σ reshift`) and inverted because `subst` descends through fewer binders than it
@@ -283,7 +299,7 @@ credits with catching its own error.
 
 - ~~**The bookkeeping eats the win.**~~ **PREDICTION MADE AND MET — measured 2026-08-02.** The stated
   prediction was "the prototype recovers more than half of `Σ path` on the lazy consumer." **It recovers
-  99.0%**: ceiling 55,226 nodes, `climbs` 571, net 54,655 — and **1.41–1.43x wall-clock corpus-wide** across four runs, 7.4
+  99.0%**: ceiling 55,226 nodes, `climbs` 571, net 54,655 — and **1.41–1.43x (glibc) wall-clock corpus-wide** across four runs, 7.4
   ms → 5.3 ms. Per row it ranges from **4.55x on row 31** — the mutually-recursive program that has
   been the worst case throughout this thread — down to 0.62x. Instrument: `lambda_sharing_probe.rs`
   PART D.

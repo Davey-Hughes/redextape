@@ -137,8 +137,30 @@
 //! (`cargo clippy --workspace --all-targets`) and does not run them, which for this target is the
 //! intended arrangement rather than a gap. It is committed so the finding in the design's §10 has a
 //! re-runnable repro instead of a quoted number.
+//!
+//! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
+//!
+//! **This target has set `mimalloc` as its global allocator since 2026-08-04. Every timing recorded
+//! in this file above this note was measured under glibc's malloc and is NOT comparable to a run
+//! made today.** Counts are: node counts, allocation counts and step counts are properties of the
+//! reduction, not of the machine, and did not move. Seconds, ms and ns did.
+//!
+//! It is here for a measured reason rather than a preference. The reducer allocates one `Rc<Node>`
+//! per term node and frees on the same order, and glibc's layout for that pattern costs real
+//! address-translation pressure: on the nested-group family, swapping ONLY the allocator took L1
+//! DTLB misses from 1.20e9 to 0.92e9 for the three-pass `beta` and from 1.83e9 to 0.93e9 for the
+//! fused one, with the wall clock following at ~9% and ~16%. That is also how the β-fusion family
+//! regression was explained — it was glibc's layout, not the reducer's work.
+//!
+//! `mimalloc` is a `[dev-dependencies]` entry and reaches examples and tests ONLY.
+//! `redextape-core`'s `[dependencies]` stays empty and WASM-clean: `libmimalloc-sys` is C that does
+//! not build for wasm32, and a library must not choose a global allocator for its consumers.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+#[cfg(not(target_arch = "wasm32"))]
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::collections::{HashMap, HashSet};
 use std::hint::black_box;
@@ -650,10 +672,20 @@ fn part_step() {
 /// `m`=k is k+1 groups and is level k+1 in PART D's and the design's tables; the two indexings are one
 /// apart and that has already caused one misreading.
 ///
-/// NOTHING IN-PROCESS CAN BOUND THIS, which is why the bound is external. A β-step's output is
-/// `shift(-1, 0, subst(0, shift(1, 0, arg), body))` — every occurrence of the bound variable in `body`
-/// is replaced by `arg` and the whole result is then deep-copied by the outer `shift`, so ONE step can
-/// produce on the order of |body| x |arg| LOGICAL nodes as real allocations. A guard that checked the
+/// NOTHING IN-PROCESS COULD BOUND THIS AS MEASURED HERE, which is why the bound was external. A β-step's
+/// output WAS `shift(-1, 0, subst(0, shift(1, 0, arg), body))` — every occurrence of the bound variable
+/// in `body` was replaced by `arg` and the whole result was then deep-copied by the outer `shift`, so ONE
+/// step could produce on the order of |body| x |arg| LOGICAL nodes as real allocations. **Both the
+/// `maxfree` short-circuit (2026-08-01) and β-fusion (2026-08-03) have since removed that outer
+/// deep-copy — see `examples/shift_cost_probe.rs` — so this section's own hang is not expected to
+/// reproduce.** It survives as the re-runnable source for the LOWERING figures, which are unchanged
+/// and still reachable — the RSS and timing figures above it ARE the hang (974 MB, 13 minutes without
+/// returning), so a section that no longer hangs cannot re-produce those. What changed is what
+/// REDUCING one of these terms costs, which is the line this file's own header already draws.
+/// **The "not expected" is a prediction, not a measurement** — refuting it means an unbounded reduction
+/// run, which this repo's λ-measurement rule requires a hard cgroup cap for, and nothing here has run
+/// one. A guard
+/// that checked the
 /// term's size between steps would therefore be reading a number that says nothing about what the next
 /// step is about to allocate. `part_step`'s node ceiling is honest only because it runs at sizes where
 /// the product is small.

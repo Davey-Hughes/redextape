@@ -50,16 +50,25 @@
 //!     whitespace, an identifier character, nor one of `\ λ . ( )` is a lex error. **UNEXERCISED.**
 //!  5. WHICH INDEX ARITHMETIC IS THE β RULE? This is the gap that mattered most. `term.rs` documents
 //!     `shift(d, cutoff, t)` ("shift the free variables ... by `d`"), `subst(j, s, t)` ("substitute
-//!     `s` for the variable with index `j`") and `beta` ("substitute `arg` for index 0 in `abs_body`,
-//!     then close the hole") — but the de Bruijn β rule needs THREE shifts, and that phrasing names
-//!     only one. It does not say that `s` must be shifted up by one each time `subst` crosses a
-//!     binder, and it does not say whether the argument's +1 pre-shift lives inside `subst` or
-//!     outside it. "Substitution is pure index arithmetic (no fresh names, no capture)" tells you it
-//!     IS index arithmetic, not WHICH. *Resolved:* the textbook formulation (Pierce, TAPL §6.2),
-//!     `beta body arg = shift(-1, 0, subst(0, shift(1, 0, arg), body))` with `subst` renumbering both
-//!     sides at a binder. **VERIFIED, all three shifts independently** — dropping the pre-shift trips
-//!     the negative-index assertion; dropping `subst`'s per-binder shift (i.e. allowing capture)
-//!     fails the corpus; dropping the closing `shift(-1)` fails the corpus.
+//!     `s` for the variable with index `j`") and `beta` ("substitute `arg` for index 0 in `abs_body`
+//!     and close the hole") — but does not spell out the index arithmetic itself, so a reader has to
+//!     derive it from the rule the printed text form implies: closing a hole after substituting needs
+//!     the substituted argument shifted up before it goes in and the reduct shifted down afterward, and
+//!     crossing a binder during substitution renumbers both sides. "Substitution is pure index
+//!     arithmetic (no fresh names, no capture)" tells you it IS index arithmetic, not WHICH. *Resolved:*
+//!     the textbook formulation (Pierce, TAPL §6.2), `beta body arg = shift(-1, 0, subst(0, shift(1, 0,
+//!     arg), body))` with `subst` renumbering both sides at a binder — implemented as three genuinely
+//!     separate passes below, deliberately, even though `term.rs`'s shipped `beta` has computed the same
+//!     answer in one fused walk since 2026-08-03 (β-fusion — see its doc block's note that this was
+//!     three walks until that date). Staying three-pass here is what makes this file an independent oracle
+//!     for that fusion rather than a restatement of it: `tests/subst_differential.rs`'s
+//!     `the_shipped_beta_agrees_with_the_three_pass_formulation_on_every_enumerated_pair` checks the
+//!     shipped `beta` against `subst_differential.rs`'s own three-pass reference, `beta_three_pass` — a reference this
+//!     file's finding is what justified trusting in the first place, since it VERIFIED the same formula
+//!     independently, from the doc comments alone, against the corpus rather than against `term.rs`.
+//!     **VERIFIED, all three shifts independently** — dropping the pre-shift trips the negative-index
+//!     assertion; dropping `subst`'s per-binder shift (i.e. allowing capture) fails the corpus; dropping
+//!     the closing `shift(-1)` fails the corpus.
 //!  6. DOES "NORMAL FORM" MEAN REDUCING UNDER BINDERS? `reduce.rs` says "normal-order
 //!     (leftmost-outermost) β-reduction" and "reduce to normal form", but never says the reducer
 //!     descends into `Abs` — which is precisely what the decoder depends on, since a Church numeral

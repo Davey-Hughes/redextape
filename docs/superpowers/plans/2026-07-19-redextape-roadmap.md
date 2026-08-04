@@ -628,7 +628,7 @@ and then confirmed by it.** `ZipperCursor` (`src/trace/zipper.rs`) carries the r
 
 | | measured |
 | --- | --- |
-| corpus wall-clock | **1.41–1.43x** — 7.4 ms → 5.3 ms, four runs |
+| corpus wall-clock | **1.41–1.43x (glibc)** — 7.4 ms → 5.3 ms, four runs |
 | ceiling `Σ path` recovered | **99.0%** — 54,655 of 55,226 nodes |
 | what the climb costs | **571 nodes**, 1% of the ceiling |
 | row 31, the mutually-recursive worst case | **4.55x** |
@@ -663,6 +663,83 @@ Full record: [`../specs/2026-08-02-lambda-reduction-context-zipper-design.md`](.
 This also answers §8.2 and open question 6 of the concurrency design, which had deferred the zipper on
 the stale accounting the block below retired.
 
+#### BUILT, MEASURED AND SHIPPED — β-fusion, 1.29–1.31x on the corpus, and a bar retired for being unsatisfiable
+
+> **UPDATED 2026-08-04: THE FAMILY BAR IS RETIRED AS MALFORMED, AND THAT IS NOT THE SAME AS MISSED.**
+> An in-process clock split puts **all of `beta` at 0.106–0.114 s of an ~85 s family run — 0.13%**, so
+> the `>= 1.10x` this block was written against **could not have been reached by any change to `beta`**;
+> making it free gives 1.0013x. The bar was chosen on a sound principle (measure what a user waits for)
+> and then never sized against a measured denominator — the family is dominated by `reduce_step`
+> chasing a ~2,840-node spine from the root every step, because it caps on DEPTH.
+> **A bar must be sized against a measured denominator, not a workload's importance.** Fifth time on
+> this thread that a number was sized against something nobody had measured.
+>
+> **Under `mimalloc`** (the probes' allocator since 2026-08-04) the family is **0.978x** — three-pass
+> faster in 30 of 36 pairings, a real and recorded ~2% regression, *mostly* explained: the L1 DTLB gap
+> driving the glibc result closes from **+52% to +1.9–2.2%**, and the remainder has no named mechanism.
+> **WASM is unmeasured** — `dlmalloc` is neither allocator and the mechanism is allocator-specific.
+>
+> **Shipped on this instead:** correct over two 88,960-pair differentials; **~1.30x on the corpus**,
+> which is what the demonstration actually reduces; **14.6% fewer instructions**; and **more sharing**
+> (18,939 → 17,920 allocations at identical node totals), because the three-pass closing shift had been
+> *un-sharing* argument copies it walked as a tree. Full record and the coherent counter-argument:
+> [`../specs/2026-08-02-lambda-beta-fusion-design.md`](../specs/2026-08-02-lambda-beta-fusion-design.md) §5.1.
+
+~~#### BUILT AND MEASURED 2026-08-03, SHIP BAR MISSED — β-fusion is correct, 1.29–1.31x on the corpus, and a REGRESSION on the family it was selected for~~
+
+**`beta` is one walk now — `shift(-1, 0, subst(0, shift(1, 0, arg), body))` became `beta_go(body, 0, arg)`
+carrying the argument incrementally — and it does not ship on the bar its own design wrote.** The bar was
+a conjunction: **≥ 1.10x on nested-group levels 1–11 AND ≥ 1.00x on the 46-program corpus.** Measured
+across two builds, four runs each side, probes held constant:
+
+| | measured |
+| --- | --- |
+| corpus wall-clock | **1.288–1.308x** — 7.416–7.466 ms → 5.707–5.760 ms. PASSES `>= 1.00x` |
+| nested-group family, Σ levels 1–11 | **0.910–0.925x** — 84.1–84.8 s → 91.7–92.5 s. **MISSES `>= 1.10x`** |
+| worst row | **0.880–0.895x** (level 7) |
+| best family row | **0.965–0.997x** (level 1) — still below 1.00x |
+| GO/NO-GO count gate | **PASSED at 4.3%** — `Σ freevar` 1,458 against `Σ opening + Σ closing` 34,085, bar 40% |
+| `Σ freevar` as a share | **4.3%** of `opening + closing`, **6.3%** of `closing` alone; 0 of 46 corpus rows and 0 of 13 family rows allocate more |
+| allocation win, corpus | `Σ β today` 102,273 → `Σ β fused` 69,646, **1.47x** |
+| allocation win, family level 11 | 718,210 → 299,819, **2.40x** |
+
+**EVERY FAMILY ROW REGRESSES. Not one of eleven reaches 1.00x**, and the two shallowest are the only ones
+that come close. Ordering was the obvious confound — all fused runs ran before all three-pass runs — and
+it points the wrong way, since the later runs are the faster ones; it was tested anyway by snapshotting
+both binaries and alternating them, and the split reproduces (family 0.917–0.930x, corpus 1.292–1.299x).
+
+**A COUNT WIN IS A CLOCK LOSS, FOR THE SECOND TIME ON THIS FAMILY AND WITH A BIGGER COUNT BEHIND IT.** The
+`subst` slice below cut ~19% of allocations for 0.99x. This one cuts **2.40x of `beta`'s allocations at
+level 11** for **0.90x**. The arithmetic says plainly that the loss is not in `beta`: fusion removes 3.96
+allocations per β-step and the clock loses **7.0 µs per β-step**. What dominates the family is
+`reduce_step`, an **unmemoized** leftmost-outermost search that recurses into both children of every
+`App` — so its cost tracks the *logical* tree, which is identical on both sides, and **no allocation
+saving can reach it.** The design selected this family because `Σ opening` scales with it and never asked
+what share of the family's *seconds* that column could reach. Why fusion additionally *loses* 7 µs/step
+is **not established and is left open**: `perf` is unavailable on this host and neither probe carries a
+counter that separates locality from allocator churn from anything else.
+
+**WHAT STANDS REGARDLESS, AND IT IS NOT NOTHING.** Equivalence is exhaustive — 88,960 (body, arg) pairs
+against a three-pass reference, 0 mismatches, plus the three-way oracle, every golden and every step count
+unmoved. And **sharing improved, which nothing predicted**: the old closing shift walked `subst`'s result
+as a tree with no memoisation and rebuilt every substituted argument copy, so deleting it collapses N
+copies back to N handles on one allocation. `tests/lambda_sharing.rs`'s pins moved **18,939 → 17,920** and
+**4,364 → 4,305** distinct allocations with their node totals (502,146 and 1,379,187) unchanged to the
+unit. Those two edited constants are also the one place §7's *"zero edited expectations"* gate was not
+literally met, and they are declared rather than absorbed. Side effect, as designed: nothing in `src/`
+passes a negative `d` to `shift` any more.
+
+**STATE OF THE WORK.** The code is landed on `lambda/beta-fusion` and nothing has been reverted — the
+measurement is the deliverable, and what to do with a change that is +29% on a corpus replaying in
+microseconds and −9% on the family that actually stresses the reducer is the same trade the `subst` block
+below adjudicated in the opposite direction, and is the owner's call rather than this task's. Note the
+symmetry before deciding: that block rejected a slice for being *"+19% on programs finishing in
+microseconds and −1% on the ones that do not"*, and this slice is a larger version of the same shape.
+
+Full record, with the per-level table and the §9 predictions marked hit or missed:
+[`../specs/2026-08-02-lambda-beta-fusion-design.md`](../specs/2026-08-02-lambda-beta-fusion-design.md) §5
+and §9.1.
+
 #### CLOSED 2026-08-02 — the `subst` slice is falsified, and the short-circuit is why
 
 **The standing next λ slice is not a win. On the family it was most likely to help it is a 0.99x LOSS.**
@@ -692,7 +769,13 @@ family that actually stresses the reducer it is a regression. A change that is +
 in microseconds and −1% on the ones that do not is not worth its blast radius. What is falsified is the
 *sizing* — the 7.0x/18.0x corpus-wide win — and the premise that it helps where help is needed.
 
-**WHY IT INVERTS, and the direction is forced rather than incidental.** `subst`'s short-circuit means it
+~~**WHY IT INVERTS**~~ **WHY IT INVERTS ON THIS FAMILY** — ~~and the direction is forced rather than incidental~~. **CORRECTED
+2026-08-03, from the β-fusion design's §5 GATE RESULT (Task 3):** it is not forced, it is this family's
+direction only. The identical quantity, `Σ reshift` against `Σ per_occ`, inverts a second time on the
+46-program corpus — where `occ` (per-occurrence) wins, not `reshift` — which is the same 2.16x already
+recorded two paragraphs above; the family's and the corpus's verdicts on the same quantity point opposite
+ways, and neither generalises to the other. What follows in this paragraph is this family's mechanism and
+stays correct as a statement about the family alone. `subst`'s short-circuit means it
 descends through only the binders **on the path to an occurrence**, not every `Abs` node in the body — so
 "binders crossed" is now *smaller* than "occurrences", and paying once per occurrence costs more than
 paying once per binder crossed. The 44:1 abs-to-occ ratio the design quotes is over the whole body,
@@ -2474,3 +2557,85 @@ produce. The oracle validates every combination.
   open and is deliberately framed as a DECISION: it preserves the case count but changes the
   distribution and the seeds and can orphan a recorded regression, and on its own it moves the floor by
   only ~5s. Splitting width 64 further BY PROGRAM only becomes worthwhile once that proptest is split.
+
+#### NOT BUILT, AND NOT YET JUSTIFIED — arena allocation for `Node`, raised 2026-08-03 by the β-fusion regression
+
+**Raised by a measurement, and deliberately NOT designed yet.** β-fusion is 1.29–1.31x on the corpus and
+**0.91x on the nested-group family** — a regression whose mechanism is, at the time of writing, *not
+established*. What is established: the reducer enters identical nodes in identical order under both
+`beta`s (counted, to the unit, at all eleven levels), so the whole difference is **~2 ns on each of
+2,840 node visits per β-step**, and the fastest variants are the ones that **allocate more**. V4 —
+which un-shares the substituted argument per occurrence, strictly more work than shipped — recovers
+70% of the loss.
+
+**Why an arena is the shape that fits that finding.** Every direct proxy for "does more memory work"
+points the wrong way (V1 has the smallest RSS, the fewest minor faults, and the fewest allocations, and
+is the slowest). What survives is the *layout* of what the allocator hands back: nodes allocated
+together land together; nodes fetched from a free list at different times do not. An arena makes the
+first case universal — a spine rebuilt in one β-step is contiguous by construction, allocation is a
+pointer bump, and glibc's per-chunk metadata (~16 B against a small node) disappears. It would also
+delete the variable four allocator-knob screens failed to pin down, by deleting the free list.
+
+**Three obstacles, in increasing seriousness. The third is the one that makes this a rewrite.**
+
+1. **Zero new dependencies** is the crate's rule, so `bumpalo` / `typed_arena` are out. Hand-rolling is
+   ~50 lines and then this project owns an allocator.
+2. **`Rc` wants individual deallocation and an arena does not do that.** A pure bump arena never frees;
+   at level 11 the reducer makes on the order of 3×10^8 node allocations, which is tens of GB
+   unreclaimed — dead on exactly the family this would exist to fix. Region-per-step with survivor
+   copying is a garbage collector.
+3. **The lifetime propagates through the whole API.** `&'a Node` in place of `Rc<Node>` means
+   `LambdaTerm<'a>`, and that reaches `trace`, `ZipperCursor`, `LambdaCursor`, `reduce_trace`'s
+   per-step materialisation contract, `lower`, `decode` and every test that holds a term across a call.
+   This is the third representation change on this thread, and unlike the first two it is not local.
+
+**What it is NOT blocked by:** the project's premise. `README.md`'s "what you see is the genuine
+computation" forbids reaching the answer by a route that skips configurations — a Krivine machine, an
+environment, explicit substitutions. An arena changes *where nodes live*, not which configurations
+occur, so it is admissible on the same grounds structural sharing and the stored `depth` were.
+
+**THE CHEAP EXPERIMENT COMES FIRST, AND IT DISCRIMINATES.** Swapping the global allocator — one
+`#[global_allocator]` line and one dev-dependency, no change to the term type — tests the same
+hypothesis at ~15 minutes against a multi-week rewrite. mimalloc and jemalloc both use size-segregated
+free lists with reuse ordering unlike glibc's tcache:
+
+- if the V0/V1 gap **collapses** under a different allocator, the mechanism is free-list policy and an
+  arena is the principled fix for it;
+- if the gap **survives all three allocators**, it is a property of the access pattern and an arena
+  would have been an expensive way to discover that.
+
+**Do not design this before the mechanism is named.** Four designs on this thread were falsified because
+they were sized against cost models nobody had measured — the most recent over-counted by **1,584x**.
+"Arena-allocate the nodes" on the strength of an unexplained 2 ns is that same shape. The instrument
+that would name it is `perf stat` for cache and dTLB counters, with **V4 as the discriminator**: any
+counter that separates V0 from V1 must also separate V4 from V1 and must place V4 with V0. That control
+is what correctly rejected the traversal-locality story, which had looked obvious.
+
+#### DEFERRED UNTIL WASM — re-measuring every probe timing under mimalloc (2026-08-04)
+
+**The examples took `mimalloc` as their global allocator on 2026-08-04** (`[dev-dependencies]` only;
+`redextape-core`'s `[dependencies]` stays empty and WASM-clean). It is worth **~9% to the three-pass
+`beta` and ~16% to the fused one** on the nested-group family, and it is the explanation for that
+family's β-fusion regression: glibc took **52% more L1 DTLB misses** from the fused build's changed free
+pattern, and under mimalloc that gap is **1.9–2.2%**.
+
+**Every timing recorded in the seven measurement probes predates this and is not comparable.** Each
+carries a dated note saying so, so nothing in the tree is unmarked-stale. Counts are untouched — node,
+allocation and step counts are properties of the reduction, not of the machine, and every count-based
+result on this thread (the β-fusion gate at 4.28%, both 88,960-pair differentials, the sharing pins, the
+census shares) stands.
+
+**WHY IT IS DEFERRED RATHER THAN DONE: re-measuring now would answer a question by default that should
+be answered by decision.** There is no `[[bin]]` in this workspace and `web/` does not exist yet, so
+which allocator is the REFERENCE ENVIRONMENT is undecided — and WASM will not use `mimalloc` at all, it
+gets `dlmalloc`. Re-measuring to mimalloc before the deliverable exists bets on the answer, and if
+`web/` lands first the whole pass needs doing again.
+
+**What is actually at risk, ranked.** The zipper's **1.41–1.43x** is the one figure that could move
+materially — it is landed, quoted in four places, and its mechanism is *reducing allocation*, which a
+cheaper allocator plausibly shrinks the margin on. Every site is now caveated `(glibc)`. Next,
+`lambda_sharing_probe`'s PART C fitted node prices, which convert allocation counts into time shares —
+the counts do not move, the attribution does. **The concurrency design's 159× is NOT at risk and moves
+the safe way:** its argument is a ~13 ns δ-step against a ~2,063 ns barrier, barriers are allocator-
+independent, so a faster δ-step makes every one of its five rejections stronger.
+

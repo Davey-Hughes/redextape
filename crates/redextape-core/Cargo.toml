@@ -11,5 +11,20 @@ workspace = true
 [dependencies]
 
 [dev-dependencies]
+# Examples and tests only — NEVER a [dependencies] entry. `redextape-core`'s runtime
+# dependency list is empty by design and WASM-clean, and `libmimalloc-sys` is C that does
+# not build for wasm32. A library must not choose a global allocator anyway; that belongs
+# to the final binary. See any probe's ALLOCATOR note for the measured reason it is here.
 proptest = "1"
 redextape-test-support = { path = "../redextape-test-support" }
+
+# Target-gated so `cargo test --target wasm32-*` does not try to build C.
+#
+# MEASURED, because the first version of this comment overclaimed. `cargo check --target
+# wasm32-unknown-unknown -p redextape-core` (lib only) PASSES — that is what "WASM-clean" means for a
+# consumer, and `[dependencies]` being empty is what delivers it. `--all-targets` FAILS, on
+# `wait-timeout` and `getrandom` via `proptest`, and it failed identically at this branch's base
+# `30ac159` before `mimalloc` existed. So this gate does NOT make the dev graph WASM-clean; nothing
+# short of dropping `proptest` would. It removes ONE breakage, and the one that is C rather than Rust.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+mimalloc = { version = "0.1", default-features = false }

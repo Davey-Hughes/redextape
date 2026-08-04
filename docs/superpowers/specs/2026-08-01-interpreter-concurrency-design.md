@@ -5,7 +5,7 @@ simulator or the λ reducer be made faster with threads?* — and answered by me
 argument. **Five schemes are rejected here, each with the number that rejected it.** What survives is two
 *sequential* fixes for one shared defect — **TM run-length fusion** (§8.1) and a **λ reduction-context
 zipper** (§8.2) — plus one genuine use of parallelism, **Plan 4/5 workers** (§9). Nothing else in this
-document has been built; §8.2 was, on 2026-08-02 (§11 item 6) — 1.41–1.43x on the corpus, 99.0% of the `Σ path`
+document has been built; §8.2 was, on 2026-08-02 (§11 item 6) — 1.41–1.43x (glibc) on the corpus, 99.0% of the `Σ path`
 ceiling. §10 is the instrument the rest of it depends on, and that has not been built either.
 
 **Scope:** `redextape-core`, both step loops (`tm/sim.rs` + `trace::TmCursor`, `lambda/reduce.rs` +
@@ -433,7 +433,10 @@ lever rather than a headline one. Neither was visible from the throwaway harness
 Its parts, lettered as the file is:
 
 - **A.** ns per δ-step, from *N* whole-run repeats of a named corpus program (not a per-step timer).
-- **B.** *k*-thread barrier cost and the derived break-even work-per-step, so §3's 211× is re-derivable.
+- **B.** *k*-thread barrier cost and the derived break-even work-per-step, so §3's **159×** (barrier against δ-step) and **199×** (break-even work per step) are
+  re-derivable. ~~§3's 211×~~ — **corrected 2026-08-04**, found by the β-fusion branch's
+  whole-branch review: §3's table has no 211×. Its k = 5 row is 159× and 199×; 211× is not in it
+  at any k, and this back-reference has been citing a figure its own §3 does not contain.
 - **C.** Non-atomic vs. uncontended vs. contended RMW, for §6's 20.1×/37.1×.
 - **D.** Dispatch profile: states visited, top-10 step share, static and dynamic rules/state.
 - **E.** Same-state run-length distribution — count, mean, max, share in runs ≥ 2 — which is §8.1's whole
@@ -484,7 +487,7 @@ before the prototype does.
    `> MAX_TERM_DEPTH`, not `>=` — `LambdaCursor`'s `depth_exceeds` and `ZipperCursor`'s check agree at
    the boundary, pinned by `the_depth_guard_does_not_fire_at_exactly_max_term_depth`.
 6. **ANSWERED 2026-08-02 BY BUILDING IT: yes, and it is the first §8 item to survive measurement.**
-   `ZipperCursor` (`trace/zipper.rs`) is **1.41–1.43x** wall-clock on the corpus and recovers **99.0%** of
+   `ZipperCursor` (`trace/zipper.rs`) is **1.41–1.43x (glibc)** wall-clock on the corpus and recovers **99.0%** of
    the `Σ path` ceiling; row 31 runs **4.55x**. §8.2's fix was right and its *deferral* was wrong, for
    the reason below. Full record:
    [`2026-08-02-lambda-reduction-context-zipper-design.md`](2026-08-02-lambda-reduction-context-zipper-design.md).
