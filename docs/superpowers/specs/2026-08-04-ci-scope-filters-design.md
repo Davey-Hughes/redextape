@@ -131,7 +131,7 @@ Established because the first draft of §4 assumed `land.sh`, and that assumptio
 
 Every pull request ever opened on this repository (#1–#7) was merged in the Forgejo web UI, and all
 seven land in the last 12 commits. Interleaved with them are direct-to-`main` landings via
-`scripts/land.sh` (`51c6f8a`, `6bf108b`, and older). So:
+`scripts/land.sh` (`87bb35a`, `3602ea9`, and older). So:
 
 - **PRs are the dominant recent path.** PR CI, not `land.sh`, is the gate that matters.
 - **Direct landings still happen**, and they bypass PR CI entirely — the `push` trigger on `main` is
@@ -347,7 +347,7 @@ worse than no scoped run.
 > action     = synchronized          <- Forgejo's spelling; the `types: [synchronize]` filter matches it
 > draft      = [true]
 > before     = []                    <- EMPTY. There is no push increment in the payload.
-> base.sha   = [c2c9b9d]             <- the merge-base with main, i.e. the whole-branch diff
+> base.sha   = [a32e967]             <- the merge-base with main, i.e. the whole-branch diff
 > ```
 >
 > So `rust-scoped` always hands this script an unresolvable range and it always takes the

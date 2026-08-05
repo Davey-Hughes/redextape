@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (edition 2024, stable), `cargo-nextest`, `proptest` via `redextape-test-support`, `serde` as core's first optional dependency.
 
-This is **PR 2 of 3** from [`../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md`](../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md) §10, implementing its §3 and §4. **PR 1 landed as `c975e96`** — the wasm32 gate, and the dependency-rule change that makes this PR's optional `serde` admissible. PR 3 (`crates/redextape-wasm`, `web/`, pnpm) depends on this one and is not in scope.
+This is **PR 2 of 3** from [`../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md`](../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md) §10, implementing its §3 and §4. **PR 1 landed as `ca72ff0`** — the wasm32 gate, and the dependency-rule change that makes this PR's optional `serde` admissible. PR 3 (`crates/redextape-wasm`, `web/`, pnpm) depends on this one and is not in scope.
 
 > **SUPERSEDED IN PLACES — READ THE SPEC FOR THE SHIPPED SHAPE (added 2026-08-05, after the branch merged).**
 > This plan was amended once mid-flight (the `redex` field drop) and then left alone as later review

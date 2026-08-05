@@ -234,8 +234,12 @@ A plain `git merge --squash` discards every commit message on the branch. `land.
 around that by prefilling the squash message with every branch commit verbatim under a
 `--- Squashed from N commits ---` marker; a PR's written body does that job now, and does it better as
 prose. Measured on this repository: `9a7db07`, landed by `land.sh`, carries 521 lines and 31,925 bytes
-of concatenated commit messages; `c2c9b9d`, a squash-merged PR, carries 93 lines and 5,556 bytes of
-written body. What moves is *where* the intermediate messages live: they are no longer inside the
+of concatenated commit messages; `a32e967`, a squash-merged PR, carries 91 lines and 5,491 bytes of
+written body. (The squash figure moved slightly on 2026-08-05, when `main`'s history was rewritten
+to drop Forgejo's `Reviewed-on:` trailer, which was part of what was being measured — it read 93
+lines and 5,556 bytes before. `9a7db07` predates the rewrite and is untouched. The comparison the
+two support is unaffected, and a merge-message template now keeps the trailer off future commits.)
+What moves is *where* the intermediate messages live: they are no longer inside the
 commit object that lands on `main`. They still exist, on the PR page and under `refs/pull/N/head`, but
 only on `forge.daveynet.xyz` — a dependency the git history alone did not previously have. Losing the
 reasoning is still not the price of a tidy graph; keeping it now depends on the forge as well as on

@@ -24,7 +24,7 @@
   - `scripts/check-all.sh` → the roadmap's **748**. It is a different denominator, not a larger suite: the runner is `cargo-nextest`, it pairs each config with an explicit `cargo test --doc` (nextest cannot run doctests), and it runs `-p redextape-native --no-default-features` as a **second config**, so tests common to both are counted twice.
 
   Quote the command beside the number, always. `scripts/check-all.sh` is the branch gate; the per-crate count is what a single task moves.
-- **Cite by name, never by line number.** `51c6f8a` replaced drifted line citations with names that cannot drift; do not reintroduce them.
+- **Cite by name, never by line number.** `87bb35a` replaced drifted line citations with names that cannot drift; do not reintroduce them.
 
 ---
 

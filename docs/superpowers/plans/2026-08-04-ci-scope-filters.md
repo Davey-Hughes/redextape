@@ -1083,7 +1083,7 @@ spread, this says so rather than reporting a ratio off a single sample."
 
 - [x] **Step 1: Learn the exact status-check context strings — DONE 2026-08-04 by the controller**
 
-Read from the live API on `origin/main` (`c2c9b9d`, a push run) and on PR #7's head (`57dedbc`, a
+Read from the live API on `origin/main` (`a32e967`, a push run) and on PR #7's head (`57dedbc`, a
 pull_request run):
 
 ```
@@ -1336,7 +1336,7 @@ Measured on this repository's actual history:
 
 ```
 9a7db07  landed by land.sh        521 lines, 31,925 bytes   (every branch message, preserved)
-c2c9b9d  squash-merged PR #7       93 lines,  5,556 bytes   (a written PR body)
+a32e967  squash-merged PR #7       91 lines,  5,491 bytes   (a written PR body)
 ```
 
 The PR body is the better *document*. But the intermediate commit messages are no longer in the git
@@ -1439,7 +1439,7 @@ Branch protection with enable_status_check AND block_on_outdated_branch is what
 restores it; until that lands, the property is weaker than the README claimed.
 
 The squash message no longer carries every branch commit verbatim (521 lines on
-9a7db07) — the PR body does the job in 93 (c2c9b9d), better as prose, but the
+9a7db07) — the PR body does the job in 91 (a32e967), better as prose, but the
 intermediate messages now live on the forge rather than in the git object.
 
 The three layers that keep main linear are untouched: none of them was land.sh."
