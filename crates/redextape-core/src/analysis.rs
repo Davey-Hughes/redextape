@@ -19,6 +19,7 @@ use crate::token::TokenKind;
 
 /// What a span of printed or authored text IS. Shared variants first, then form-specific ones.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TokenClass {
     Ident,
     Nat,

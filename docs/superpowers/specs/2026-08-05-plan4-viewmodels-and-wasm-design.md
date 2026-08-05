@@ -131,8 +131,17 @@ This fills the gap Plan 4 deferral #2 identified in the **design**, not in the c
 exactly two maps and never specifies a source one, which surfaces only when a renderer asks how to
 light the source pane.
 
-**It is needed now because the view models hand out `NodeId`s.** `LambdaState.source_node` and
-`TmState.source_node` are unusable to a renderer without it — the field would ship dead.
+**It is needed now because the view models hand out `NodeId`s.** `TmState.source_node` is unusable to a
+renderer without it — the field would ship dead — and PR 3's click-linking needs the same leg regardless
+of what `LambdaState` does with its own.
+
+**Corrected in PR 2 — this sentence originally named `LambdaState.source_node` too, and that field no
+longer exists.** It shipped briefly, then was removed: `node_to_lambda`'s paths are root-relative into
+the INITIAL lowered term, while normal-order reduction contracts root redexes, so a `Beta` event's redex
+path is only a coordinate into that term on the first step — correct once, then confidently wrong for
+every step after (§4.2 below has the full argument). That removal is unrelated to this leg's own
+justification, which does not weaken: `TmState.source_node` and PR 3's click-linking are reason enough
+for `node_to_source` on their own.
 
 ### 3.3 `raise_cap` on both cursors
 
@@ -229,10 +238,10 @@ match, `core_of` defined four times, the inverted `_mapped` suffix).
 pub struct LambdaState {
     pub text: String,
     pub spans: Vec<(Span, TokenClass)>,
-    pub redex: Option<Span>,
     pub truncated: bool,
     pub step: u64,
-    pub source_node: Option<NodeId>,
+    // `source_node: Option<NodeId>` removed in PR 2 — see the note below. `redex: Option<Span>` had
+    // already been dropped before that, for the reason §4.3 records.
 }
 
 pub struct TmProgram {          // once per compile
@@ -245,7 +254,8 @@ pub struct TmProgram {          // once per compile
 pub struct TmState {            // per step — O(window), not O(tape)
     pub state: StateId,
     pub step: u64,
-    pub heads: Vec<i64>,
+    pub heads: Vec<usize>,        // corrected in PR 2 — see the note below
+    pub window_start: Vec<usize>, // added in PR 2 — see the note below
     pub window: Vec<Vec<Symbol>>,
     pub source_node: Option<NodeId>,
 }
@@ -253,10 +263,21 @@ pub struct TmState {            // per step — O(window), not O(tape)
 pub enum TermNode { Var(u32), Abs(String, Box<TermNode>), App(Box<TermNode>, Box<TermNode>) }
 ```
 
+**`source_node` was removed from `LambdaState` in PR 2 — corrected here, not silently edited.** It
+shipped for one PR, computed by an `owning_node` helper from a caller-supplied redex `Path`. It was
+right for exactly the first β-event and confidently wrong for every one after: `node_to_lambda`'s paths
+are root-relative into the INITIAL lowered term, but normal-order reduction contracts root redexes, so a
+redex path at step N > 1 indexes a structurally different tree — the coordinate system had stopped
+existing, and `owning_node` could not tell, because the root sits at the empty path and the empty path
+is a prefix of every path, so it always found a match. Measured on `let x = 40; x + 2`: all seven steps
+named the same node, "let x = 40;"; `x + 2` was never named. That is worse than shipping no field at all
+— the standard this same section already applied to `redex` — so the field is gone, not left `None`.
+`TmState.source_node` is untouched by this: it stays honestly `None`, and PR 3 decides it.
+
 ### 4.3 Core supplies budgets; the caller supplies numbers
 
 ```rust
-impl LambdaState { pub fn render(c: &LambdaCursor, byte_budget: usize) -> LambdaState; }
+impl LambdaState { pub fn render(c: &LambdaCursor, byte_budget: usize) -> LambdaState; } // corrected twice in PR 2 — see the note below
 impl LambdaState { pub fn ast(c: &LambdaCursor, node_budget: usize) -> Option<TermNode>; }
 impl TmProgram   { pub fn of(m: &Machine, width: usize) -> TmProgram; }
 impl TmState     { pub fn window<M: Borrow<Machine>>(c: &TmCursor<M>, radius: usize) -> TmState; }
@@ -264,6 +285,39 @@ impl TmState     { pub fn window<M: Borrow<Machine>>(c: &TmCursor<M>, radius: us
 
 **Core never picks a window radius or a truncation threshold.** Those are renderer policy, and policy
 in a library is how it stops being reusable. The builders take the numbers.
+
+**`LambdaState::render` gained two parameters during PR 2, then lost them again later in the same PR —
+both corrections recorded here, not silently edited.** This section originally specified `render(c:
+&LambdaCursor, byte_budget: usize)` alongside a `LambdaState::redex: Option<Span>` field. The redex a
+step highlights is not something `LambdaCursor` carries — `LambdaCursor::term()` is the term *after* the
+last emitted event, while the event's `Beta { redex }` path indexes the term *before* it, so which one
+to highlight is a caller decision, like the budget. `render` was accordingly widened to take `map:
+&SourceMap` and `redex: Option<&Path>`, resolving them internally via `owning_node` and storing the
+result in a new `source_node` field rather than in `redex`.
+
+**That widening is reverted, and the reason is `source_node` itself, not this section's first
+argument.** The resolution `owning_node` performed turned out to be wrong past the first β-step:
+`node_to_lambda`'s paths are root-relative into the INITIAL lowered term, and normal-order reduction
+contracts root redexes, so a later step's redex path is not a coordinate into that term at all —
+`owning_node` never surfaced this, because the root's empty path is a prefix of every path, so it always
+matched, confidently, and wrong from step two on (§4.2 has the measurement). `LambdaState.source_node`
+and `owning_node` are both gone, and `render` is back to the signature this section originally
+specified: `render(c: &LambdaCursor, byte_budget: usize) -> LambdaState`, with no `SourceMap` and no
+redex path required to call it. `TmState.source_node` is untouched by any of this — it stays honestly
+`None`, and PR 3 decides it.
+
+**`TmState`'s head coordinates changed during PR 2, and PR 3's `tapeSlice` depends on the new shape.**
+This section originally specified `heads: Vec<i64>` alone, which the implementation first read as an
+index into `window[i]` — enough to place a marker inside the window and nothing else, leaving
+`tapeSlice(tape, from, to)` with no coordinate space to speak in. Both fields are now indices into the
+tape **as materialized**: `heads[i]` is the head's position, `window_start[i]` is where `window[i][0]`
+sits, so the marker is `heads[i] - window_start[i]` and scrolling addresses the same space. `usize`
+rather than `i64` because they cannot be negative.
+
+**The caveat, stated because it is real:** `Tape` is a zipper, so this origin is the leftmost cell the
+tape has materialized. If the head moves left of that region the origin shifts. There is no
+process-wide absolute coordinate to report instead, and a renderer holding a `window_start` from an
+earlier step must not assume it still means the same cell.
 
 ### 4.4 Why the λ payload is text, and why the budget is not optional
 
@@ -283,14 +337,34 @@ tree: a truncated AST is a lie about the term's shape, where truncated text is v
 `ast` must also count as it walks and bail at the budget, for the same reason — building the whole
 tree and then measuring it defeats the purpose.
 
-**Native recursion is bounded but not by this budget.** `write_term` recurses per level, and the
-reducer's `MAX_TERM_DEPTH` is 3,000, so a term reachable through a cursor has bounded print depth.
-The budget bounds *width*; `MAX_TERM_DEPTH` bounds depth. Neither substitutes for the other.
+**Native recursion is bounded, but not by anything upstream of the printer — corrected 2026-08-05, this
+section originally argued the opposite.** It claimed the reducer's `MAX_TERM_DEPTH` (3,000) already
+bounded print depth, because a term reachable through a cursor could not exceed it. That premise is
+false: `LambdaCursor::new` performs no depth check at all, and `trace.rs`'s guard fires only when a
+caller *steps* the cursor — the very first term a cursor holds, before any step, can already be deeper
+than a native recursive walk survives. This is the same premise `viewmodel.rs`'s `to_tree` was written
+iteratively to honor, so the two disagreed with each other as well as with the code.
+
+Nor can the byte budget substitute for a depth limit on its own. A left-nested spine — `write_app_fn`
+delegating into `write_term` down the function-position chain, exactly the shape `lower.rs`'s
+`Core::Apply` builds — writes zero bytes while descending: every frame recurses again before writing
+anything of its own, so `out.len() >= byte_budget` cannot fire during that descent no matter how small
+`byte_budget` is. Native recursion depth there equals the spine length, and 100,000 juxtaposed atoms
+overflow the stack regardless of budget.
+
+`write_term`, `write_app_fn`, `write_atom` and `parenthesized` now thread a `depth` counter alongside
+`budget`, incremented once per `Abs`/`App` level and checked at the top of each function next to the
+budget check; past `MAX_TERM_DEPTH` the walk stops and sets `hit` the same way the budget does. So
+`truncated` means "bounded, for either reason" — the budget bounds *width*, the depth counter bounds
+*recursion*, and neither substitutes for the other.
 
 ### 4.5 Why the TM machine is split out
 
 §9.1 puts the machine inside the per-step `TmState`. The `map` demo is **3,203 states, 5 tapes,
-344,999 steps**, and `sim::Caps::cells` permits 5,000,000 cells per tape. Re-sending the machine per
+344,999 steps**, and `DEFAULT_CAPS.cells` permits 5,000,000 cells summed across all tapes
+(`trace.rs` totals `Tape::cells()` over every tape — it is not a per-tape limit, and it is a default
+rather than a property of `Caps`; **corrected 2026-08-05**, this section originally said "5,000,000
+cells per tape"). Re-sending the machine per
 step re-sends 3,203 states 344,999 times, and sending whole tapes per step is the O(tape) per-step
 cost `trace.rs`'s own header was written to avoid — it records 3,488 bytes/step and 592.9 MB for
 `sum(5)`.
@@ -345,7 +419,7 @@ class Session {
   tmStatus():     { available: true, width: number } | { available: false, reason: string }
 
   stepLambda(): boolean
-  lambdaState(byteBudget: number): LambdaState
+  lambdaState(byteBudget: number): LambdaState  // correct as written again — see the note below
   lambdaAst(nodeBudget: number): TermNode | null
 
   tmProgram(): TmProgram
@@ -362,6 +436,17 @@ class Session {
 
 The two legs step independently. **Synchronized stepping is v1.5** (§6.3, deferred for the
 order-mismatch reason in §13.1) and this API deliberately does not pretend otherwise.
+
+**Corrected again, later in the same PR — `lambdaState(byteBudget: number)` is correct exactly as
+written above, and the paragraph above no longer describes what it needs.** §4.2 and §4.3 record why:
+`LambdaState.source_node` was removed, `owning_node` went with it, and `render` dropped `map` and
+`redex` because they existed only to compute that field. `lambdaState` calls `render`, so it needs
+neither a `SourceMap` nor a redex path either — `byteBudget` alone is enough, which is what this line
+said in the first place, before the correction above walked it away and this one walks it back.
+`Session` still holds `map: SourceMap` (the struct above is unchanged): `sourceSpan(node)` needs it, and
+so does PR 3's click-linking. Retaining the last `Beta` event's path for `lambdaState`'s sake, though, is
+no longer something this API requires — whether `Session` needs it for some other reason is open and not
+decided here.
 
 ### 5.2 The crate is thin by design, and CI is why
 
@@ -518,14 +603,25 @@ analyze()                → Error-severity Diagnostic[]   → no session
 lambda::lower            → LowerError::{StatefulClosure, Unsupported, TooDeep}
 tm lowering              → TmRun::{TooLarge, LowerError(..)}    — never started
 tm run                   → TmRun::Overflow                      — not representable at any width
-either cursor, mid-run   → HitCap                               — recoverable
+either cursor, mid-run   → HitCap                               — recoverable, with one exception per cursor (see below)
 render budget exceeded   → truncated: true  /  ast() → None
 ```
 
 The distinctions are load-bearing in core already. `TooLarge` is reported once at the first width
 with no retry, because `run_tm_fitted`'s widen-and-retry loop would re-lower and re-refuse the same
 program at every width. `Overflow` *is* retried, because widening is exactly the fix. `HitCap` is the
-only continuable one, which is why §3.3's `raise_cap` clears it and nothing else.
+only *budget* outcome among the five, which is why §3.3's `raise_cap` targets it and nothing else.
+
+**"Continuable" is not the same claim as "a budget outcome" — corrected 2026-08-05, this section
+originally said `HitCap` was simply "the only continuable one."** `HitCap` has more than one producer
+on each cursor, and not every producer is a budget running out. `LambdaCursor`'s depth guard latches
+`HitCap` for a term already too deep to recurse over safely — a fact about the *term*, not about `cap`.
+Raising the cap cannot change a term's depth, so clearing `HitCap` on that path takes zero steps and
+re-latches it immediately: `LambdaCursor::raise_cap` now checks which producer fired before clearing.
+`TmCursor::new`'s absurd-declared-tape-count refusal is the same shape on the TM side: it latches
+`HitCap` *without ever allocating a tape*, so there is no "tapes and state it reached" to continue
+from — `TmCursor::raise_cap` now refuses to clear that one too. Both checks are documented on their
+respective `raise_cap` methods, in `trace.rs`.
 
 **Both legs declining is a normal outcome, not an error state.** `LAMBDA_LIMITATION_DEMOS` — a
 closure that assigns a captured `let mut` — produces `LowerError::StatefulClosure`, and a TM-only

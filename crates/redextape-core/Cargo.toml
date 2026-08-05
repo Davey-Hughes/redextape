@@ -9,6 +9,18 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# THE CRATE'S FIRST DEPENDENCY, AND IT IS OPTIONAL ON PURPOSE. `redextape-core` must build for wasm32,
+# which `scripts/check-all.sh`'s wasm leg now checks on every gate run — serde builds for wasm32, so it
+# is admissible under the rule that gate replaced ("dependencies are admissible; the gate decides",
+# PR #10). Optional and default-off keeps `cargo tree -p redextape-core --edges normal` listing only
+# this crate in a default build, which is no longer the guarantee but costs nothing to keep true.
+#
+# It is here rather than in a wrapper crate because §9.1's view models are CORE outputs and there is a
+# second consumer coming: Plan 6's CLI wants them and cannot depend on a cdylib.
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde"]
 
 [dev-dependencies]
 # Examples and tests only.
@@ -34,6 +46,7 @@ workspace = true
 # reason it is here.
 proptest = "1"
 redextape-test-support = { path = "../redextape-test-support" }
+serde_json = "1"
 
 # Target-gated so `cargo test --target wasm32-*` does not try to build C.
 #

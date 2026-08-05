@@ -23,6 +23,7 @@ pub mod trace;
 pub mod ty;
 pub mod typeck;
 pub mod value;
+pub mod viewmodel;
 
 pub use diagnostic::{Diagnostic, Severity};
 pub use interp::RuntimeError;

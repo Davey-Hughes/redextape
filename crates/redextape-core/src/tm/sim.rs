@@ -73,6 +73,43 @@ impl Tape {
         cells.extend(self.right.iter().rev());
         (cells, head)
     }
+
+    /// The head's index into the tape *as currently materialized* — `left.len()` cells lie to its
+    /// left. O(1), unlike `snapshot`, which clones the whole tape before computing the same value; a
+    /// per-step caller (`viewmodel::TmState::window`) cannot pay that cost just to learn this index.
+    pub(crate) fn head_index(&self) -> usize {
+        self.left.len()
+    }
+
+    /// Up to `radius` cells left of the head, the head itself, and up to `radius` cells right of the
+    /// head, in display (left-to-right) order — without materializing the rest of the tape. `snapshot`
+    /// builds the entire tape before any slice is taken, which is the O(tape) cost this exists to
+    /// avoid: `viewmodel::TmState::window` calls this once per tape per step, and `DEFAULT_CAPS.cells`
+    /// alone permits 5,000,000 cells TOTAL ACROSS EVERY TAPE — `TmCursor::next` sums `Tape::cells()`
+    /// over all of them and compares that one total against the cap, not against each tape
+    /// individually — so a single tape can be far larger than that number would suggest.
+    ///
+    /// `left` is already in natural left-to-right order (built up as the head visits cells moving
+    /// right — see `step`'s `Move::R` arm), so its slice needs no reversal; `right` is the mirror
+    /// image, so its slice is reversed the same way `snapshot` reverses the whole of `right`.
+    ///
+    /// Returns `(window, window_start)`, where `window_start` is the index of `window[0]` in the same
+    /// materialized-tape coordinates as `head_index` — so `head_index() - window_start` is always the
+    /// head's position within the returned window.
+    pub(crate) fn window(&self, radius: usize) -> (Vec<Symbol>, usize) {
+        let left_len = self.left.len();
+        let left_start = left_len.saturating_sub(radius);
+        let right_len = self.right.len();
+        let right_take = radius.min(right_len);
+        let right_start = right_len.saturating_sub(right_take);
+
+        let mut cells = Vec::with_capacity(left_len - left_start + 1 + right_take);
+        cells.extend_from_slice(&self.left[left_start..]);
+        cells.push(self.head);
+        cells.extend(self.right[right_start..].iter().rev());
+
+        (cells, left_start)
+    }
 }
 
 /// One recorded step: the state + tape snapshots *before* the rule was applied.

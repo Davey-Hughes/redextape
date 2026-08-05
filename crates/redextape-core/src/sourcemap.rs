@@ -28,8 +28,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::ast::Program;
 use crate::core::{Core, NodeId};
 use crate::lambda::{Path, lower_mapped};
+use crate::span::Span;
 use crate::tm::machine::StateId;
 use crate::tm::{Encoding, LowerError, defunc_mapped, lower_asm_mapped, lower_tm_mapped};
 
@@ -41,6 +43,11 @@ pub struct SourceMap {
     /// stays because a consumer may legitimately want the ids; this is the form something attributing
     /// printed text has to work in. See the module doc for why it is recorded rather than derived.
     pub tm_name_to_node: BTreeMap<String, NodeId>,
+    /// `NodeId` -> the source text that produced it. Empty unless the map was built by
+    /// `build_from_program`; see that constructor for why it offers no setter for this leg — though
+    /// the field is `pub`, like the other two, so `map.node_to_source = other_spans` compiles and
+    /// reintroduces the same mismatch a setter would.
+    pub node_to_source: BTreeMap<NodeId, Span>,
 }
 
 impl SourceMap {
@@ -63,7 +70,28 @@ impl SourceMap {
     /// which the unguarded λ lowering used to abort.
     pub fn build(core: &Core, enc: &dyn Encoding) -> SourceMap {
         let (node_to_tm, tm_name_to_node) = tm_half(core, enc);
-        SourceMap { node_to_lambda: lambda_half(core), node_to_tm, tm_name_to_node }
+        SourceMap { node_to_lambda: lambda_half(core), node_to_tm, tm_name_to_node, node_to_source: BTreeMap::new() }
+    }
+
+    /// Both backend halves AND the source leg, from the one desugar that produced the `Core`.
+    ///
+    /// THE CONSTRUCTORS OFFER NO `with_source` SETTER, AND THAT IS THE DESIGN. A setter would let a
+    /// caller attach one program's spans to a map built from another program's `Core`; the ids would
+    /// resolve, most of them to the wrong construct, and nothing would notice. That is the same failure
+    /// this module's TM name index was shaped to remove — see the module doc — and the same fix: record
+    /// the association where both sides are in hand, so there is no second object to mismatch.
+    /// `node_to_source` itself stays `pub`, like the other two legs, for a caller that legitimately
+    /// needs to read it — the type does not, and cannot, enforce the no-setter design; only the
+    /// constructors' shape does. Assigning the field directly (`map.node_to_source = other_spans`)
+    /// compiles and reintroduces exactly the mismatch this paragraph describes.
+    ///
+    /// `build` remains for callers holding no `Program` (tests, examples, the oracle) and leaves
+    /// `node_to_source` empty, staying total the way it already is over a λ backend that declines.
+    pub fn build_from_program(program: &Program, enc: &dyn Encoding) -> (Core, SourceMap) {
+        let (core, spans) = crate::desugar::desugar_mapped(program);
+        let mut map = SourceMap::build(&core, enc);
+        map.node_to_source = spans.into_iter().collect();
+        (core, map)
     }
 
     pub fn lambda_path(&self, id: NodeId) -> Option<&Path> {
@@ -80,6 +108,11 @@ impl SourceMap {
     /// said nothing: there is deliberately no fallback to a nearby or similarly-spelled state.
     pub fn tm_owner(&self, name: &str) -> Option<NodeId> {
         self.tm_name_to_node.get(name).copied()
+    }
+
+    /// The source text a Core node came from. `None` for a map built by `build`, which has no `Program`.
+    pub fn source_span(&self, id: NodeId) -> Option<Span> {
+        self.node_to_source.get(&id).copied()
     }
 }
 

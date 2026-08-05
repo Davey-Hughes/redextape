@@ -119,7 +119,10 @@ unedited, which is the evidence for that claim.
 | `analysis` | `TokenClass`, `Classified`, `Attributed`, `classify_source`, `attribute_tm_spans` |
 | printers | `print_lambda_mapped`, `print_tm_with_mapped`, `print_tm_mapped`, `print_asm_mapped` |
 
-**Still open — the consumer slice:** `viewmodel.rs`, `crates/redextape-wasm`, serde. Lands with Plan 5.
+~~**Still open — the consumer slice:** `viewmodel.rs`, `crates/redextape-wasm`, serde. Lands with Plan 5.~~
+**PARTLY CLOSED 2026-08-05 (PR #11).** `viewmodel.rs` and the optional `serde` feature landed;
+`crates/redextape-wasm` is what remains, and it lands with `web/` rather than with Plan 5 as a whole.
+See the entry at the end of this file.
 
 **What implementation falsified, recorded rather than absorbed:**
 
@@ -2694,3 +2697,67 @@ the encoding registry (design §9.5); `smallvec` stays rejected because `reduce_
 `path.insert(0, ..)` makes path construction O(d²) and smallvec fixes neither that nor anything
 measured (§9.6); `bumpalo` is unchanged, since the dependency was obstacle 1 of 3 and the other two
 are what make an arena a rewrite (§9.7).
+
+#### PLAN 4'S CONSUMER SLICE, HALF OF IT — `viewmodel.rs` AND FOUR MISSING CAPABILITIES (2026-08-05, PR #11)
+
+Design: [`../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md`](../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md) §3, §4.
+Plan: [`2026-08-05-core-viewmodels-and-source-leg.md`](2026-08-05-core-viewmodels-and-source-leg.md).
+
+**PR 2 of 3.** PR #10 was the wasm32 gate; PR 3 is `crates/redextape-wasm`, `web/` and the pnpm
+migration. This one ends with a tested contract and no consumer, which is the intended resting point.
+
+**`redextape-core` has a dependency for the first time** — `serde`, optional and default-off. Only
+admissible because #10 replaced "keep `[dependencies]` empty" with a gate that checks the real
+property. `cargo tree --edges normal` still lists only the crate in a default build.
+
+**Four capabilities the design assumed and the code did not have:**
+
+- **`TmCursor<M: Borrow<Machine>>`.** A session must hold the `Machine` AND a live cursor over it,
+  which `TmCursor<'m>` makes self-referential.
+- **`raise_cap` on both cursors.** §6.4's "still running — hit 50k steps ... continue" had nothing to
+  call: `LambdaCursor` latched `HitCap` forever and `TmCursor::new` restarts from `machine.start`.
+- **`print_lambda_capped`.** The λ term is an `Rc`-shared DAG whose printed size is its LOGICAL size.
+- **`desugar_mapped` + `SourceMap::node_to_source`.** §5.4 specified two maps and never a source one.
+
+**THREE DEFECTS PASSED EVERY TEST, AND THE SHAPE IS THE LESSON.**
+
+1. **`TmState::window` cloned the whole tape** while documented "never the whole tape" — O(tape) to
+   return O(radius), the exact cost the `TmProgram`/`TmState` split exists to avoid. Tests passed
+   because they asserted *lengths*.
+2. **`LambdaState::ast` transposed every application.** `to_tree` pushes `Enter(a)` then `Enter(f)`;
+   LIFO puts `a`'s result on top and the arm popped `f` first. The comment above it stated the
+   correct order. 692 tests passed because **nothing asserted a tree's shape**.
+3. **`print_lambda_capped` aborted the process.** `write_app_fn` descends writing zero bytes, so the
+   budget guard never fires and recursion depth equals the spine length — 100,000 juxtaposed atoms
+   overflowed the stack at a 16-byte budget. Under wasm that is an abort that poisons the module.
+
+Each was found by asking a question the suite was not asking — enumerate the write sites, assert a
+shape, check whether the depth premise is true. **A test that checks a size cannot catch a wrong
+value, and a test that checks presence cannot catch a wrong structure.**
+
+**The depth fix produced an invariant worth keeping:** the printer's depth counter maximum equals
+`LambdaTerm::depth()`, and `depth_exceeds` is `t.depth() > limit`, so **printable ⟺ steppable**. A
+renderer never sees depth-truncation without a matching "cannot continue" status.
+
+**TWO FIELDS WERE REMOVED RATHER THAN SHIPPED WRONG, and the second was measured.** `LambdaState` has
+no `redex` — a redex *span* needs the printer to record where a path lands, not in this PR, and a
+structurally-always-`None` field cannot be told from "not implemented". It has no `source_node`
+either: `node_to_lambda`'s paths are root-relative into the INITIAL term, a `Beta` event at step N
+indexes a structurally different tree, and the lookup matched anyway because the root sits at the
+empty path. On `let x = 40; x + 2` all seven steps reported `"let x = 40;"` and `x + 2` was never
+named — the fallback `sourcemap.rs` forbids, one layer out. `TmState.source_node` stays; it is
+honestly `None`.
+
+**FOURTEEN FALSE CLAIMS WERE CORRECTED, which was this branch's real defect class.** Comments
+asserting more than the code delivers, including two in this roadmap's own §4.5 wording and one — the
+worst — stating that `MAX_PARSE_DEPTH` made the deep-spine case unreachable from the parser.
+`parse_application` loops over juxtaposed atoms at constant parser depth, so `λa.` and 30,000 `a`s
+parses at depth **2**. Believed, that comment licenses deleting the guard that closes defect 3.
+
+**Recorded, not fixed** — each noted at the code: UFCS callee spans point at the whole method call,
+because `ast::Expr::Method` discards the name's span (a two-line parser change fixes it);
+`Block.span` is asymmetric, so a tail-less block's synthesized `Unit` highlights `"n; }"`;
+`TermNode` is `Box`-recursive with a derived `Drop`, bounded in practice by the caller's
+`node_budget` and NOT by `MAX_LAMBDA_LOWER_DEPTH` (a one-line `500000` lowers to a λ term of depth
+500,003); and `Tape`'s window accessors are `pub(crate)`, so PR 3 needs a small core change before it
+can implement `tapeSlice`.

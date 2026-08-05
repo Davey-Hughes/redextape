@@ -17,6 +17,7 @@ use crate::lambda::reduce::{MAX_TERM_DEPTH, depth_exceeds, reduce_step};
 use crate::lambda::{LambdaTerm, Path, Status};
 use crate::tm::machine::{Machine, StateId, Symbol};
 use crate::tm::sim::{Caps as TmCaps, Status as TmStatus, Tape, apply, rule_matches};
+use std::borrow::Borrow;
 
 mod zipper;
 
@@ -38,11 +39,14 @@ pub struct LambdaCursor {
     steps: u64,
     cap: u64,
     status: Option<Status>,
+    /// Set only when the DEPTH GUARD, not the step cap, produced the current `HitCap` — the two
+    /// producers `raise_cap`'s doc distinguishes. See `raise_cap` for why this matters.
+    depth_capped: bool,
 }
 
 impl LambdaCursor {
     pub fn new(t: &LambdaTerm, cap: u64) -> LambdaCursor {
-        LambdaCursor { current: t.clone(), steps: 0, cap, status: None }
+        LambdaCursor { current: t.clone(), steps: 0, cap, status: None, depth_capped: false }
     }
 
     /// The term as of the last emitted event (the initial term before the first `next`).
@@ -58,6 +62,32 @@ impl LambdaCursor {
     pub fn status(&self) -> Option<Status> {
         self.status
     }
+
+    /// Extend a capped run's budget and let it proceed. §6.4's "still running — hit 50k steps ...
+    /// continue" is what calls this.
+    ///
+    /// ADDITIVE AND SATURATING, not absolute. An absolute cap would let a caller set a budget BELOW the
+    /// steps already taken, which has no meaning for a run already past it; saturating removes the only
+    /// overflow path, so there is no argument value that misbehaves.
+    ///
+    /// IT CLEARS `HitCap` AND NOTHING ELSE. `Normalized` is a fact about the term, not about a budget,
+    /// and a run that finished must not be resurrectable by handing it more of one. This is the same
+    /// distinction `TmRun` already draws between `HitCap` and `TooLarge`/`Overflow` — the first says the
+    /// budget ran out, the others say the answer is in.
+    ///
+    /// **`HitCap` HAS TWO PRODUCERS, AND ONLY ONE OF THEM IS A BUDGET OUTCOME.** `next` also latches
+    /// `HitCap` when the depth guard fires — a fact about the TERM (it is deeper than the reducer can
+    /// safely recurse over), not about `cap`. Extending `cap` cannot change a term's depth, so clearing
+    /// `HitCap` on that path would take zero steps, re-run the same guard, and re-latch `HitCap`
+    /// immediately: a "continue" that provably cannot advance. `depth_capped` is set exactly when the
+    /// depth guard is the one that fired, and this checks it before clearing — so a depth-refused run
+    /// now stays honestly latched instead of cycling through a false "resumed" state on every call.
+    pub fn raise_cap(&mut self, extra_steps: u64) {
+        self.cap = self.cap.saturating_add(extra_steps);
+        if self.status == Some(Status::HitCap) && !self.depth_capped {
+            self.status = None;
+        }
+    }
 }
 
 impl Iterator for LambdaCursor {
@@ -69,13 +99,18 @@ impl Iterator for LambdaCursor {
         }
         if self.steps >= self.cap {
             self.status = Some(Status::HitCap);
+            self.depth_capped = false;
             return None;
         }
         // The depth guard is checked BEFORE the step, and the term is left unreduced when it fires.
         // That ordering is the contract `reduce_trace` had before it delegated here: a term deeper
         // than the reducer can safely recurse over yields `HitCap`, not a native stack overflow.
+        //
+        // `depth_capped = true` marks this producer of `HitCap` as the non-continuable one — see
+        // `raise_cap`'s doc on why extending `cap` cannot help a term that is simply too deep.
         if depth_exceeds(&self.current, MAX_TERM_DEPTH) {
             self.status = Some(Status::HitCap);
+            self.depth_capped = true;
             return None;
         }
         match reduce_step(&self.current) {
@@ -118,8 +153,8 @@ impl Iterator for LambdaCursor {
 ///
 /// `rule_matches` and `apply` stay in `sim` because they read `Tape`'s private zipper; this is their only
 /// caller.
-pub struct TmCursor<'m> {
-    machine: &'m Machine,
+pub struct TmCursor<M> {
+    machine: M,
     tapes: Vec<Tape>,
     cur: StateId,
     steps: u64,
@@ -127,22 +162,23 @@ pub struct TmCursor<'m> {
     status: Option<TmStatus>,
 }
 
-impl<'m> TmCursor<'m> {
-    pub fn new(m: &'m Machine, init: &[Vec<Symbol>], caps: TmCaps) -> TmCursor<'m> {
+impl<M: Borrow<Machine>> TmCursor<M> {
+    pub fn new(m: M, init: &[Vec<Symbol>], caps: TmCaps) -> TmCursor<M> {
         // Before allocating a `Tape` per declared tape: a machine declaring e.g. `tapes 10_000_000_000`
         // must hit the cap, not attempt that many allocations. `run` guards this the same way.
-        if m.tapes as u64 > caps.cells {
+        if m.borrow().tapes as u64 > caps.cells {
             return TmCursor {
+                cur: m.borrow().start,
                 machine: m,
                 tapes: Vec::new(),
-                cur: m.start,
                 steps: 0,
                 caps,
                 status: Some(TmStatus::HitCap),
             };
         }
-        let tapes = (0..m.tapes).map(|i| Tape::new(init.get(i).map_or(&[][..], Vec::as_slice))).collect();
-        TmCursor { machine: m, tapes, cur: m.start, steps: 0, caps, status: None }
+        let tapes = (0..m.borrow().tapes).map(|i| Tape::new(init.get(i).map_or(&[][..], Vec::as_slice))).collect();
+        let cur = m.borrow().start;
+        TmCursor { machine: m, tapes, cur, steps: 0, caps, status: None }
     }
 
     /// The tapes as of the last emitted event.
@@ -175,16 +211,45 @@ impl<'m> TmCursor<'m> {
         self.status = Some(status);
         None
     }
+
+    /// Extend a capped run's budget and let it proceed, continuing from the tapes and state it reached.
+    ///
+    /// THIS IS WHY THE CURSOR CANNOT BE REBUILT INSTEAD. `TmCursor::new` sets `cur` from `machine.start`
+    /// by construction, so a reconstructed cursor restarts the machine; only mutating the live one
+    /// continues it. Additive, saturating, and clears `HitCap` only — see `LambdaCursor::raise_cap` for
+    /// the reasoning on all three, which is identical.
+    ///
+    /// **EXCEPT the one `HitCap` that is not a budget outcome at all.** `TmCursor::new` refuses an
+    /// absurd declared tape count *before allocating*: `tapes` stays empty and `HitCap` latches without
+    /// ever running a step. There is no "tapes and state it reached" to continue from on that path —
+    /// `init` was not retained, so the tapes cannot be rebuilt either — and clearing the status here
+    /// would hand `next` zero tapes it thinks are real. `rule_matches` requires `read.len() ==
+    /// tapes.len()`, and a real machine's rules read as many symbols as it actually declares, so with
+    /// zero tapes nothing matches; the state has no matching rule for the wrong reason, and the cursor
+    /// takes the "stuck == halt" path, reporting a terminal `Halted` for a machine that never took a
+    /// single step. `self.tapes.is_empty() && self.machine.borrow().tapes > 0` is exactly that refusal
+    /// (a machine genuinely declaring 0 tapes has `tapes > 0` false and is unaffected), so it stays
+    /// latched instead.
+    pub fn raise_cap(&mut self, extra_steps: u64, extra_cells: u64) {
+        if self.tapes.is_empty() && self.machine.borrow().tapes > 0 {
+            return;
+        }
+        self.caps.steps = self.caps.steps.saturating_add(extra_steps);
+        self.caps.cells = self.caps.cells.saturating_add(extra_cells);
+        if self.status == Some(TmStatus::HitCap) {
+            self.status = None;
+        }
+    }
 }
 
-impl Iterator for TmCursor<'_> {
+impl<M: Borrow<Machine>> Iterator for TmCursor<M> {
     type Item = StepEvent;
 
     fn next(&mut self) -> Option<StepEvent> {
         if self.status.is_some() {
             return None;
         }
-        let Some(state) = self.machine.states.get(self.cur as usize) else {
+        let Some(state) = self.machine.borrow().states.get(self.cur as usize) else {
             return self.end(TmStatus::Halted);
         };
         if state.accept {
@@ -201,9 +266,9 @@ impl Iterator for TmCursor<'_> {
             return self.end(TmStatus::Halted); // stuck == halt
         };
         let rule = &state.rules[rule_index];
-        if (rule.next as usize) >= self.machine.states.len()
-            || rule.write.len() != self.machine.tapes
-            || rule.moves.len() != self.machine.tapes
+        if (rule.next as usize) >= self.machine.borrow().states.len()
+            || rule.write.len() != self.machine.borrow().tapes
+            || rule.moves.len() != self.machine.borrow().tapes
         {
             return self.end(TmStatus::Halted); // defensive: malformed rule
         }

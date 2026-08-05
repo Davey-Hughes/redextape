@@ -72,7 +72,9 @@ LEGS=(
   "base|wasmprobe|"
   "base|clippy|--workspace --all-targets"
   "base|test|--workspace"
+  "base|test|-p redextape-core --features serde"
   "base|wasm|"
+  "base|wasm|--features serde"
   "base|build|-p redextape-native --no-default-features"
   "base|clippy|-p redextape-native --no-default-features --all-targets"
   "base|test|-p redextape-native --no-default-features"
@@ -168,16 +170,17 @@ test_cfg() { run cargo nextest run "$@"; run cargo test "$@" --doc; }
 # box without rustup. Distro-packaged Rust without rustup is a real configuration, so rustup's
 # presence is checked first and reported honestly before the target is checked at all.
 #
-# CALLED FROM TWO ROWS ON PURPOSE, and the redundancy is the cheaper mistake. `base|wasmprobe|` runs it
-# FIRST in its tier so a missing target fails in seconds rather than after the workspace clippy and test
-# legs have already run — the same reason `llvm|probe|` leads the LLVM tier. The `wasm` leg then calls it
-# again so the leg is correct on its own: a future edit that drops or reorders the probe row degrades the
-# error message, where removing this call would let the leg run without its precondition and fail inside
-# cargo instead. It is a `grep` against a list rustup already has in memory, so running it twice costs
-# nothing worth saving. `ensure_llvm_prefix` is NOT called this way for a different reason: its own guard
-# (`if [ -z "${LLVM_SYS_221_PREFIX:-}" ]`) memoizes the probe, so the exported variable persists for the
-# rest of the process and a repeat call would add nothing but a duplicate log line. One call suffices —
-# that is why one row calls it, not that a second call would cost something.
+# CALLED FROM THREE ROWS ON PURPOSE, and the redundancy is the cheaper mistake. `base|wasmprobe|` runs
+# it FIRST in its tier so a missing target fails in seconds rather than after the workspace clippy and
+# test legs have already run — the same reason `llvm|probe|` leads the LLVM tier. Each `wasm` row (the
+# default build and the `--features serde` one) then calls it again so every leg is correct on its own:
+# a future edit that drops or reorders the probe row degrades the error message, where removing this
+# call would let a leg run without its precondition and fail inside cargo instead. It is a `grep`
+# against a list rustup already has in memory, so running it three times costs nothing worth saving.
+# `ensure_llvm_prefix` is NOT called this way for a different reason: its own guard (`if [ -z
+# "${LLVM_SYS_221_PREFIX:-}" ]`) memoizes the probe, so the exported variable persists for the rest of
+# the process and a repeat call would add nothing but a duplicate log line. One call suffices — that is
+# why one row calls it, not that a second call would cost something.
 ensure_wasm_target() {
   if ! command -v rustup >/dev/null 2>&1; then
     echo "error: rustup not found, so this gate cannot check the wasm32 build." >&2
@@ -235,7 +238,11 @@ do_leg() {
     test)   test_cfg "$@" ;;
     probe)  ensure_llvm_prefix ;;
     wasmprobe) ensure_wasm_target ;;
-    wasm)   ensure_wasm_target; run cargo check --target wasm32-unknown-unknown -p redextape-core --lib ;;
+    # Parameterized on cargo args, not a second kind: a `wasm` row is `cargo check --target
+    # wasm32-unknown-unknown -p redextape-core --lib` plus whatever the row appends, so `--features
+    # serde` builds exactly the wasm32+serde configuration PR 3 uses and `Cargo.toml`'s `serde`
+    # dependency comment cites — the one config the default-features-only wasm leg never built.
+    wasm)   ensure_wasm_target; run cargo check --target wasm32-unknown-unknown -p redextape-core --lib "$@" ;;
     *)      echo "error: unknown leg kind: $kind" >&2; exit 1 ;;
   esac
 }

@@ -8,12 +8,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use redextape_core::desugar::desugar;
+use redextape_core::lambda::Status;
 use redextape_core::parser::parse;
 use redextape_core::tm::{
     BLANK, Encoding, Machine, Move, REG, Rule, State, Symbol, TAPES, TM_DEFAULT_CAPS, TmCaps, TmStatus, Unary, WORK,
     defunc, lower_asm, lower_tm, n_slots_of, parse_tm, simulate_trace,
 };
-use redextape_core::trace::{StepEvent, TmCursor};
+use redextape_core::trace::{LambdaCursor, StepEvent, TmCursor};
 
 const CORPUS: &[&str] = &["1 + 2 * 3", "3 - 5", "if 2 > 1 { 10 } else { 20 }", "[1, 2, 3]"];
 
@@ -33,8 +34,17 @@ fn machine_and_init(src: &str) -> (Machine, Vec<Vec<Symbol>>) {
     (m, init)
 }
 
+/// A small closed term that reaches a normal form, for tests that need `Status::Normalized` rather
+/// than a capped or open-ended run. Same three-step shape `syntax.rs`'s
+/// `printed_lowering_of_every_demo_reparses` uses: parse, desugar, `lower`.
+fn closed_normalizing_term() -> redextape_core::lambda::LambdaTerm {
+    let (program, _) = redextape_core::parser::parse("let x = 1; x + 2");
+    let core = redextape_core::desugar::desugar(&program.expect("parses"));
+    redextape_core::lambda::lower(&core).expect("a first-order program lowers")
+}
+
 /// Collect the cursor's events, insisting every one is a `Delta` (the TM backend emits nothing else).
-fn deltas<'m>(m: &'m Machine, init: &[Vec<Symbol>], caps: TmCaps) -> (Vec<(u32, u32)>, TmCursor<'m>) {
+fn deltas<'m>(m: &'m Machine, init: &[Vec<Symbol>], caps: TmCaps) -> (Vec<(u32, u32)>, TmCursor<&'m Machine>) {
     let mut c = TmCursor::new(m, init, caps);
     let mut out = Vec::new();
     for e in c.by_ref() {
@@ -259,6 +269,63 @@ fn an_absurd_tape_count_hits_the_cap_without_allocating() {
     assert_eq!(c.state(), oracle.final_state);
 }
 
+/// `raise_cap` must NOT clear the constructor's absurd-tape-count refusal: `TmCursor::new` never
+/// allocated tapes on this path (`init` was not retained either), so there is nothing to continue
+/// FROM. Before the guard, clearing `HitCap` here let `next` run with zero allocated tapes against a
+/// machine declaring `tapes > 0` — `rule_matches` requires `read.len() == tapes.len()`, so no rule
+/// ever matches and the "stuck == halt" path reported a terminal, WRONG `Halted` for a machine that
+/// never took a single step.
+#[test]
+fn raise_cap_does_not_resurrect_the_absurd_tape_count_refusal() {
+    // Non-accepting, with a rule that reads as many symbols as the machine declares tapes: this is
+    // what makes the "stuck == halt" path below actually run through `rule_matches`, rather than
+    // returning `Halted` from the accepting-state check before rule search is ever reached.
+    let m = Machine {
+        tapes: 2,
+        start: 0,
+        states: vec![State {
+            name: "s".into(),
+            accept: false,
+            rules: vec![Rule {
+                read: vec![None, None],
+                write: vec![None, None],
+                moves: vec![Move::S, Move::S],
+                next: 0,
+            }],
+        }],
+    };
+    // `cells: 1` makes the constructor's refusal trip on `tapes: 2` (`machine.tapes as u64 > caps.cells`).
+    let caps = TmCaps { cells: 1, ..TM_DEFAULT_CAPS };
+    let mut c = TmCursor::new(&m, &[], caps);
+    assert_eq!(c.next(), None);
+    assert_eq!(c.status(), Some(TmStatus::HitCap));
+
+    c.raise_cap(1000, u64::MAX);
+    assert_eq!(
+        c.status(),
+        Some(TmStatus::HitCap),
+        "the constructor's refusal must stay latched, not resurrect into a false answer"
+    );
+    assert!(c.tapes().is_empty(), "still must not have allocated any tapes");
+    assert_eq!(c.next(), None, "an ended cursor must stay ended");
+    assert_eq!(c.status(), Some(TmStatus::HitCap), "must not silently become Halted");
+}
+
+/// The ownership parameter must not change semantics. A cursor that borrows the machine and one that
+/// owns it through an `Rc` are the same machine stepped the same way; if they ever diverge, the
+/// generic introduced a behavioural difference where it was supposed to introduce only a type one.
+/// Same device as `zipper_equivalence.rs` uses to hold the two β-loops equal.
+#[test]
+fn borrowed_and_owned_cursors_emit_identical_event_sequences() {
+    use std::rc::Rc;
+    for src in CORPUS {
+        let (machine, init) = machine_and_init(src);
+        let borrowed: Vec<StepEvent> = TmCursor::new(&machine, &init, TM_DEFAULT_CAPS).collect();
+        let owned: Vec<StepEvent> = TmCursor::new(Rc::new(machine), &init, TM_DEFAULT_CAPS).collect();
+        assert_eq!(borrowed, owned, "{src:?}: borrowed and owned cursors diverged");
+    }
+}
+
 /// A rule whose `goto` is out of range must halt defensively — and must do so *without* emitting the
 /// step, exactly as `run` skips its `record.push` on that path.
 #[test]
@@ -279,4 +346,79 @@ fn a_malformed_rule_halts_the_cursor_without_emitting_a_step() {
     assert!(stream.is_empty(), "the cursor must not emit the malformed step");
     assert_eq!(c.status(), Some(TmStatus::Halted));
     assert_eq!(c.state(), oracle.final_state);
+}
+
+/// Raising the cap on a capped run continues it — same tapes, same state, no restart. Rebuilding a
+/// cursor cannot do this: `TmCursor::new` starts at `m.start` by construction.
+#[test]
+fn raising_the_tm_cap_continues_rather_than_restarts() {
+    let (machine, init) = machine_and_init("1 + 2 * 3");
+    let stingy = TmCaps { steps: 3, cells: 5_000_000 };
+    let mut c = TmCursor::new(&machine, &init, stingy);
+    let first: Vec<StepEvent> = c.by_ref().collect();
+    assert_eq!(first.len(), 3, "precondition: the cap should bite at 3 steps");
+    assert_eq!(c.status(), Some(TmStatus::HitCap));
+
+    let state_at_cap = c.state();
+    c.raise_cap(1_000_000, 0);
+    assert_eq!(c.status(), None, "raise_cap must clear a latched HitCap");
+    assert_eq!(c.state(), state_at_cap, "continuing must not rewind to m.start");
+
+    let rest: Vec<StepEvent> = c.by_ref().collect();
+    assert!(!rest.is_empty(), "the run should have continued");
+
+    // The continued run must equal an uncapped run of the same machine, spliced.
+    let whole: Vec<StepEvent> = TmCursor::new(&machine, &init, TM_DEFAULT_CAPS).collect();
+    let spliced: Vec<StepEvent> = first.into_iter().chain(rest).collect();
+    assert_eq!(spliced, whole, "capped-then-raised must reconstruct the uncapped run exactly");
+}
+
+/// Only HitCap is a budget outcome. Normalized/Halted/Rejected are facts about the computation, and a
+/// finished run must not be resurrectable by handing it more budget.
+#[test]
+fn raising_the_cap_does_not_resurrect_a_finished_run() {
+    let t = closed_normalizing_term();
+    let mut c = LambdaCursor::new(&t, 1_000_000);
+    let before: Vec<StepEvent> = c.by_ref().collect();
+    assert_eq!(c.status(), Some(Status::Normalized), "precondition: this term normalizes");
+
+    c.raise_cap(1_000_000);
+    assert_eq!(c.status(), Some(Status::Normalized), "Normalized is terminal, not a budget outcome");
+    assert_eq!(c.next(), None);
+    assert_eq!(c.steps_taken() as usize, before.len(), "no further steps may be taken");
+}
+
+/// Additive, and saturating so there is no overflow path.
+#[test]
+fn raise_cap_is_additive_and_saturates() {
+    let t = closed_normalizing_term();
+    let mut c = LambdaCursor::new(&t, 1);
+    c.by_ref().count();
+    assert_eq!(c.status(), Some(Status::HitCap));
+    c.raise_cap(u64::MAX);
+    c.raise_cap(u64::MAX); // must not overflow
+    assert_eq!(c.status(), None);
+}
+
+/// `HitCap` has two producers, and only the step cap is a budget outcome. Before the fix, `raise_cap`
+/// cleared `HitCap` unconditionally, so calling it on a depth-refused term cleared the status, `next`
+/// re-ran the same depth guard against the same (unreduced) term, and re-latched `HitCap` immediately
+/// — a "continue" control that provably could never advance, however many times it was called.
+#[test]
+fn raise_cap_does_not_resurrect_a_depth_refused_run() {
+    let deep =
+        redextape_core::lambda::encode::church(u64::from(redextape_core::lambda::reduce::MAX_TERM_DEPTH) + 5_000);
+    let mut c = LambdaCursor::new(&deep, u64::MAX);
+    assert_eq!(c.next(), None);
+    assert_eq!(c.status(), Some(Status::HitCap), "precondition: the depth guard must fire");
+    assert_eq!(c.steps_taken(), 0);
+
+    c.raise_cap(u64::MAX);
+    assert_eq!(
+        c.status(),
+        Some(Status::HitCap),
+        "a depth refusal must stay latched, not resurrect into a false continue"
+    );
+    assert_eq!(c.next(), None, "an ended cursor must stay ended");
+    assert_eq!(c.steps_taken(), 0, "no step can ever be taken: the term's depth cannot change");
 }

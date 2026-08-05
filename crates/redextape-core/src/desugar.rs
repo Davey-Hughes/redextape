@@ -2,12 +2,38 @@
 //! block/statement structure. Assumes the program has already parsed and typechecked.
 
 use crate::ast::{self, Block, Expr, Program, Stmt};
-use crate::core::{BinOp, Core, NodeGen};
+use crate::core::{BinOp, Core, NodeGen, NodeId};
+use crate::span::Span;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub fn desugar(program: &Program) -> Core {
+/// `desugar`, plus the span each minted `NodeId` came from — §5.4's missing third leg.
+///
+/// A SYNTHESIZED NODE'S SPAN ANSWERS "WHAT DID THE USER WRITE THAT PRODUCED THIS NODE" — that is the
+/// rule's PURPOSE, and everything below serves it. Desugaring mints ids that correspond to no source
+/// text: the `Core::Unit` standing for a tail-less block's value, the scaffolding inside a
+/// `LetRecGroup`. `None` would leave holes precisely where the interesting lowering happened, which is
+/// the opposite of what a highlighter wants; `None` is a highlighter's report of nothing, and there is
+/// always an answer here. This is a deliberate difference from `node_to_tm`, which DOES say nothing
+/// where the lowering said nothing — that map answers "which states did this node emit", and the honest
+/// answer is sometimes none.
+///
+/// MECHANICALLY, the answer is usually the nearest enclosing expression: the construct that caused a
+/// synthesized node is, in the ordinary case, whatever surrounds it. But "nearest enclosing" is a means
+/// to the purpose above, not the purpose itself, and the two diverge for a list literal's `cons` cells:
+/// mechanically each cell is a CHILD of the literal, so "nearest enclosing" would point every cell at
+/// the whole literal (which is what this code used to do). The honest answer to "what produced this
+/// cell" is not the literal as a whole, though — it is the one element the cell exists for. So the i-th
+/// `cons` cell takes the i-th element's own span; `nil` keeps the literal's span, since it marks the
+/// literal's END rather than any element. See `Expr::List`'s arm in `lower_expr_at`.
+pub fn desugar_mapped(program: &Program) -> (Core, Vec<(NodeId, Span)>) {
     let mut g = NodeGen::default();
-    lower_block(&mut g, &program.block)
+    let mut spans = Vec::new();
+    let core = lower_block_at(&mut g, &program.block, &mut spans);
+    (core, spans)
+}
+
+pub fn desugar(program: &Program) -> Core {
+    desugar_mapped(program).0
 }
 
 fn map_op(op: ast::BinOp) -> BinOp {
@@ -24,14 +50,20 @@ fn map_op(op: ast::BinOp) -> BinOp {
     }
 }
 
-fn var(g: &mut NodeGen, name: &str) -> Core {
-    Core::Var(g.fresh(), name.to_string())
+/// A `Var` with no source text of its own — `nil`/`cons` synthesized for a list literal, or a method
+/// call's UFCS callee — so the caller passes the span of the construct that caused it (`at`).
+fn var_at(g: &mut NodeGen, name: &str, at: Span, spans: &mut Vec<(NodeId, Span)>) -> Core {
+    let id = g.fresh();
+    spans.push((id, at));
+    Core::Var(id, name.to_string())
 }
 
-/// Lower a block by processing its statements right-to-left into nested `Let`/`LetRec`/`Seq`,
-/// ending in the tail expression (or the unit value `nil`-less... — see note).
-fn lower_block(g: &mut NodeGen, block: &Block) -> Core {
-    lower_stmts(g, &block.stmts, block.tail.as_deref())
+/// Lower a block by processing its statements right-to-left into nested `Let`/`LetRec`/`Seq`, ending
+/// in the tail expression (or the unit value for a tail-less block). A `Block` always carries its own
+/// span, so it is read straight off `block` rather than taken as a parameter; it is what the tail-less
+/// unit value inherits, having no source text of its own.
+fn lower_block_at(g: &mut NodeGen, block: &Block, spans: &mut Vec<(NodeId, Span)>) -> Core {
+    lower_stmts_at(g, &block.stmts, block.tail.as_deref(), block.span, spans)
 }
 
 /// Iterative: fold the statements right-to-left onto an accumulator that starts as the lowered
@@ -40,12 +72,31 @@ fn lower_block(g: &mut NodeGen, block: &Block) -> Core {
 /// instead of one native stack frame per statement — so an arbitrarily long statement sequence
 /// cannot overflow the stack while desugaring (bounded instead by the typecheck depth guard that
 /// already ran over the same program upstream, and by the eval depth guard when it's run).
-fn lower_stmts(g: &mut NodeGen, stmts: &[Stmt], tail: Option<&Expr>) -> Core {
+///
+/// Each `Seq` folded on here is itself synthesized — no single `Expr` is "the seq" — so it inherits the
+/// span of the STATEMENT that caused it (the nearest thing with a span), not `at`: that is strictly more
+/// precise than the whole enclosing block, and `at` is reserved for the one node in this function with
+/// no nearby span to borrow at all, the tail-less block's `Core::Unit`. EXCEPTION: `Stmt::Expr` carries
+/// no span of its own — it wraps a bare `Expr`, not a spanned statement — so its `Seq` inherits
+/// `e.span()` instead, which ends AT the expression and so EXCLUDES a trailing `;` that the `Assign`
+/// and `While` arms' statement spans DO include.
+fn lower_stmts_at(
+    g: &mut NodeGen,
+    stmts: &[Stmt],
+    tail: Option<&Expr>,
+    at: Span,
+    spans: &mut Vec<(NodeId, Span)>,
+) -> Core {
     // A tail-less block appears only in statement (discarded) position; its value is the internal
-    // unit. `Core::Unit` makes that explicit (and distinct from the literal 0).
+    // unit. `Core::Unit` makes that explicit (and distinct from the literal 0). It has no source text
+    // of its own, so it inherits `at`.
     let mut acc = match tail {
-        Some(e) => lower_expr(g, e),
-        None => Core::Unit(g.fresh()),
+        Some(e) => lower_expr_at(g, e, spans),
+        None => {
+            let id = g.fresh();
+            spans.push((id, at));
+            Core::Unit(id)
+        }
     };
     let mut i = stmts.len();
     while i > 0 {
@@ -59,32 +110,53 @@ fn lower_stmts(g: &mut NodeGen, stmts: &[Stmt], tail: Option<&Expr>) -> Core {
             while start > 0 && matches!(stmts.get(start - 1), Some(Stmt::Fn { .. })) {
                 start -= 1;
             }
-            acc = lower_fn_run(g, stmts.get(start..i).unwrap_or(&[]), acc);
+            acc = lower_fn_run_at(g, stmts.get(start..i).unwrap_or(&[]), acc, spans);
             i = start;
             continue;
         }
         i -= 1;
         acc = match stmt {
-            Stmt::Let { name, mutable, value, .. } => {
-                let value = Box::new(lower_expr(g, value));
+            Stmt::Let { name, mutable, value, span } => {
+                let value = Box::new(lower_expr_at(g, value, spans));
                 let id = g.fresh();
+                spans.push((id, *span));
                 Core::Let { id, name: name.clone(), mutable: *mutable, value, body: Box::new(acc) }
             }
             // Unreachable: the branch above consumes every `Stmt::Fn` as part of a run. Routing a
             // lone one through the same helper (a run of one) keeps this arm correct rather than a
             // second, driftable copy of the lowering.
-            Stmt::Fn { .. } => lower_fn_run(g, std::slice::from_ref(stmt), acc),
-            Stmt::Assign { target, value, .. } => {
-                let assign = Core::Assign(g.fresh(), target.clone(), Box::new(lower_expr(g, value)));
-                Core::Seq(g.fresh(), Box::new(assign), Box::new(acc))
+            Stmt::Fn { .. } => lower_fn_run_at(g, std::slice::from_ref(stmt), acc, spans),
+            Stmt::Assign { target, value, span } => {
+                // `g.fresh()` for the `Assign` id is read BEFORE `value` is lowered — a single
+                // constructor call evaluates its arguments left to right — and preserving that order
+                // keeps every `NodeId` identical to what the unmapped lowering minted before this leg
+                // existed.
+                let assign_id = g.fresh();
+                let assign = Core::Assign(assign_id, target.clone(), Box::new(lower_expr_at(g, value, spans)));
+                spans.push((assign_id, *span));
+                let seq_id = g.fresh();
+                spans.push((seq_id, *span));
+                Core::Seq(seq_id, Box::new(assign), Box::new(acc))
             }
-            Stmt::While { cond, body, .. } => {
-                let while_ = Core::While(g.fresh(), Box::new(lower_expr(g, cond)), Box::new(lower_block(g, body)));
-                Core::Seq(g.fresh(), Box::new(while_), Box::new(acc))
+            Stmt::While { cond, body, span } => {
+                // Same left-to-right constructor-argument note as `Assign` above: `while_id` is minted
+                // before `cond`/`body` are lowered.
+                let while_id = g.fresh();
+                let while_ = Core::While(
+                    while_id,
+                    Box::new(lower_expr_at(g, cond, spans)),
+                    Box::new(lower_block_at(g, body, spans)),
+                );
+                spans.push((while_id, *span));
+                let seq_id = g.fresh();
+                spans.push((seq_id, *span));
+                Core::Seq(seq_id, Box::new(while_), Box::new(acc))
             }
             Stmt::Expr(e) => {
-                let first = lower_expr(g, e);
-                Core::Seq(g.fresh(), Box::new(first), Box::new(acc))
+                let first = lower_expr_at(g, e, spans);
+                let seq_id = g.fresh();
+                spans.push((seq_id, e.span()));
+                Core::Seq(seq_id, Box::new(first), Box::new(acc))
             }
         };
     }
@@ -115,7 +187,7 @@ fn lower_stmts(g: &mut NodeGen, stmts: &[Stmt], tail: Option<&Expr>) -> Core {
 ///    INNERMOST while a sibling that calls the name wants it OUTERMOST, and no nesting satisfies
 ///    both. **Also a deliberate language change**: `fn a … fn a …` in one run used to be legal with
 ///    the last definition winning. See `infer_fn_run`'s doc comment for the unsound shape it closes.
-fn lower_fn_run(g: &mut NodeGen, run: &[Stmt], acc: Core) -> Core {
+fn lower_fn_run_at(g: &mut NodeGen, run: &[Stmt], acc: Core, spans: &mut Vec<(NodeId, Span)>) -> Core {
     let groups = fn_run_groups(run);
     let mut acc = acc;
     for group in groups.iter().rev() {
@@ -125,28 +197,62 @@ fn lower_fn_run(g: &mut NodeGen, run: &[Stmt], acc: Core) -> Core {
             // A component of ONE is a plain `LetRec` — byte-identical to what a `fn` lowered to
             // before grouping existed, down to the `NodeId`s, which is the additive guarantee that
             // keeps every step-count golden still. `LetRec` already binds its own name in its value,
-            // so a self-recursive member needs nothing more.
+            // so a self-recursive member needs nothing more. Both minted ids are the member's own
+            // `Stmt::Fn` span — this member IS the source construct, not scaffolding.
             [i] => match run.get(*i) {
-                Some(Stmt::Fn { name, params, body, .. }) => {
-                    let lam = Core::Lambda(g.fresh(), params.clone(), Box::new(lower_block(g, body)));
+                Some(Stmt::Fn { name, params, body, span }) => {
+                    // `lam_id` is read before `body` is lowered — a single constructor call evaluates
+                    // its arguments left to right — preserving the `NodeId`s the unmapped lowering
+                    // already minted.
+                    let lam_id = g.fresh();
+                    let lam = Core::Lambda(lam_id, params.clone(), Box::new(lower_block_at(g, body, spans)));
+                    spans.push((lam_id, *span));
                     let id = g.fresh();
+                    spans.push((id, *span));
                     Core::LetRec { id, name: name.clone(), value: Box::new(lam), body: Box::new(acc) }
                 }
-                // Cannot happen: every index comes from `run`, and `lower_stmts` only ever passes a
+                // Cannot happen: every index comes from `run`, and `lower_stmts_at` only ever passes a
                 // run of `Stmt::Fn`.
                 _ => acc,
             },
             // Two or more members that reference each other: ONE `LetRecGroup`, every name bound
             // before any value is evaluated. Bindings keep source order (the indices are sorted).
+            // `LetRecGroup`'s own id is scaffolding no single member's `Stmt::Fn` owns, so it inherits
+            // the SPAN OF THE GROUP — the HULL of its members' spans (the smallest `Span` covering all
+            // of them), not the whole block. A hull is not a set: `Span` is a single contiguous
+            // `[start, end)` range, so it cannot exclude a non-member that sits BETWEEN two cycle
+            // members in source order — the hull swallows it too. `fn a(m){b(m)} fn indep(n){n}
+            // fn b(m){a(m)}` has its cycle members at indices 0 and 2 with `indep` sandwiched at index
+            // 1, so the hull IS the whole run, `indep` included. This is unavoidable given `Span`'s
+            // shape, not a bug; `letrecgroup_span_is_the_hull_and_can_cover_an_interleaved_non_member`
+            // in `sourcemap_coverage.rs` pins the interleaved case alongside the tight one.
             _ => {
+                let group_span = group.iter().filter_map(|i| run.get(*i)).fold(None::<Span>, |hull, stmt| {
+                    let Stmt::Fn { span, .. } = stmt else { return hull };
+                    Some(match hull {
+                        Some(h) => h.merge(*span),
+                        None => *span,
+                    })
+                });
                 let mut bindings = Vec::with_capacity(group.len());
                 for i in group {
-                    if let Some(Stmt::Fn { name, params, body, .. }) = run.get(*i) {
-                        let lam = Core::Lambda(g.fresh(), params.clone(), Box::new(lower_block(g, body)));
+                    if let Some(Stmt::Fn { name, params, body, span }) = run.get(*i) {
+                        let lam_id = g.fresh();
+                        let lam = Core::Lambda(lam_id, params.clone(), Box::new(lower_block_at(g, body, spans)));
+                        spans.push((lam_id, *span));
                         bindings.push((name.clone(), lam));
                     }
                 }
-                Core::LetRecGroup(g.fresh(), bindings, Box::new(acc))
+                let group_id = g.fresh();
+                // `group_span` is `None` only if `group` held no `Stmt::Fn` at all, which cannot
+                // happen — `lower_stmts_at` only ever hands `lower_fn_run_at` (and so `fn_run_groups`) a
+                // `run` slice that is ALL `Stmt::Fn`: the run-boundary scan that builds it stops at the
+                // first non-`Fn` statement, so every index `fn_run_groups` returns names a `Stmt::Fn`
+                // (`fn_run_groups` itself indexes every statement in `run`, not just the `Fn` ones — it
+                // is the caller's slice, not a filter inside it, that guarantees this). `Span::new(0, 0)`
+                // is an unreachable, total fallback rather than a panic on that impossible case.
+                spans.push((group_id, group_span.unwrap_or(Span::new(0, 0))));
+                Core::LetRecGroup(group_id, bindings, Box::new(acc))
             }
         };
     }
@@ -468,45 +574,83 @@ fn strongly_connected(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
     out
 }
 
-fn lower_expr(g: &mut NodeGen, expr: &Expr) -> Core {
+fn lower_expr_at(g: &mut NodeGen, expr: &Expr, spans: &mut Vec<(NodeId, Span)>) -> Core {
     match expr {
-        Expr::Nat { value, .. } => Core::Nat(g.fresh(), *value),
-        Expr::Bool { value, .. } => Core::Bool(g.fresh(), *value),
-        Expr::Var { name, .. } => Core::Var(g.fresh(), name.clone()),
-        Expr::List { items, .. } => {
-            // Build cons(i0, cons(i1, ... nil)) from the right.
-            let mut acc = var(g, "nil");
+        Expr::Nat { value, span } => {
+            let id = g.fresh();
+            spans.push((id, *span));
+            Core::Nat(id, *value)
+        }
+        Expr::Bool { value, span } => {
+            let id = g.fresh();
+            spans.push((id, *span));
+            Core::Bool(id, *value)
+        }
+        Expr::Var { name, span } => {
+            let id = g.fresh();
+            spans.push((id, *span));
+            Core::Var(id, name.clone())
+        }
+        Expr::List { items, span } => {
+            // Build cons(i0, cons(i1, ... nil)) from the right. `nil` is synthesized with no source
+            // text of its own to point at — it marks the literal's END, not any element — so it
+            // inherits the whole list literal's span. Each `cons` cell is different: it exists BECAUSE
+            // its own element is in the list, so `desugar_mapped`'s doc names this the case where
+            // "what produced this node" and "nearest enclosing expression" diverge, and the i-th
+            // cell's callee `Var` AND its `Apply` take `item.span()` — that element's own span — rather
+            // than `*span`. `item.span()` is read before `item` is consumed by `lower_expr_at`, so
+            // taking it first costs nothing extra.
+            let mut acc = var_at(g, "nil", *span, spans);
             for item in items.iter().rev() {
-                let elem = lower_expr(g, item);
-                let cons = var(g, "cons");
-                acc = Core::Apply(g.fresh(), Box::new(cons), vec![elem, acc]);
+                let elem_span = item.span();
+                let elem = lower_expr_at(g, item, spans);
+                let cons = var_at(g, "cons", elem_span, spans);
+                let id = g.fresh();
+                spans.push((id, elem_span));
+                acc = Core::Apply(id, Box::new(cons), vec![elem, acc]);
             }
             acc
         }
-        Expr::Binary { op, lhs, rhs, .. } => {
-            let l = Box::new(lower_expr(g, lhs));
-            let r = Box::new(lower_expr(g, rhs));
-            Core::BinOp(g.fresh(), map_op(*op), l, r)
+        Expr::Binary { op, lhs, rhs, span } => {
+            let l = Box::new(lower_expr_at(g, lhs, spans));
+            let r = Box::new(lower_expr_at(g, rhs, spans));
+            let id = g.fresh();
+            spans.push((id, *span));
+            Core::BinOp(id, map_op(*op), l, r)
         }
-        Expr::If { cond, then_blk, else_blk, .. } => {
-            let c = Box::new(lower_expr(g, cond));
-            let t = Box::new(lower_block(g, then_blk));
-            let e = Box::new(lower_block(g, else_blk));
-            Core::If(g.fresh(), c, t, e)
+        Expr::If { cond, then_blk, else_blk, span } => {
+            let c = Box::new(lower_expr_at(g, cond, spans));
+            let t = Box::new(lower_block_at(g, then_blk, spans));
+            let e = Box::new(lower_block_at(g, else_blk, spans));
+            let id = g.fresh();
+            spans.push((id, *span));
+            Core::If(id, c, t, e)
         }
-        Expr::Block { block, .. } => lower_block(g, block),
-        Expr::Lambda { params, body, .. } => Core::Lambda(g.fresh(), params.clone(), Box::new(lower_expr(g, body))),
-        Expr::Call { callee, args, .. } => {
-            let f = Box::new(lower_expr(g, callee));
-            let args = args.iter().map(|a| lower_expr(g, a)).collect();
-            Core::Apply(g.fresh(), f, args)
+        Expr::Block { block, .. } => lower_block_at(g, block, spans),
+        Expr::Lambda { params, body, span } => {
+            // `id` is read before `body` is lowered — a single constructor call evaluates its
+            // arguments left to right — preserving the `NodeId`s the unmapped lowering already minted.
+            let id = g.fresh();
+            spans.push((id, *span));
+            let inner = Box::new(lower_expr_at(g, body, spans));
+            Core::Lambda(id, params.clone(), inner)
         }
-        Expr::Method { recv, name, args, .. } => {
-            // UFCS: recv.m(args) -> m(recv, args).
-            let callee = Box::new(var(g, name));
-            let mut all = vec![lower_expr(g, recv)];
-            all.extend(args.iter().map(|a| lower_expr(g, a)));
-            Core::Apply(g.fresh(), callee, all)
+        Expr::Call { callee, args, span } => {
+            let f = Box::new(lower_expr_at(g, callee, spans));
+            let args: Vec<Core> = args.iter().map(|a| lower_expr_at(g, a, spans)).collect();
+            let id = g.fresh();
+            spans.push((id, *span));
+            Core::Apply(id, f, args)
+        }
+        Expr::Method { recv, name, args, span } => {
+            // UFCS: recv.m(args) -> m(recv, args). The callee `Var` is synthesized (the method name
+            // has no span of its own in this AST), so it inherits the whole call's span.
+            let callee = Box::new(var_at(g, name, *span, spans));
+            let mut all = vec![lower_expr_at(g, recv, spans)];
+            all.extend(args.iter().map(|a| lower_expr_at(g, a, spans)));
+            let id = g.fresh();
+            spans.push((id, *span));
+            Core::Apply(id, callee, all)
         }
     }
 }
