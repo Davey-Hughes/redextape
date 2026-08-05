@@ -12,17 +12,17 @@ cd "$(dirname "$0")/.."
 # LINEAR HISTORY. `main` has no merge commits and is kept that way: `ff = only` makes a
 # non-fast-forward merge or pull FAIL rather than quietly creating one.
 #
-# Feature branches land as ONE squashed commit via scripts/land.sh, which gates the merged tree
-# before the commit exists — every commit on main builds and passes CI by itself. `ff = only` does
-# not conflict with that: `git merge --squash` stages changes without committing, so it is not a
-# merge for ff purposes.
+# Feature branches land as ONE squashed commit via a PR, squash-merged in the Forgejo web UI —
+# that is now the only route to main. `ff = only` does not conflict with that: it governs local
+# merges/pulls, not the remote's squash-merge, and matters more here than before, since there is no
+# local landing step left to refuse a stale main on your behalf.
 #
 # This is convenience, not enforcement — a local setting cannot bind anyone. Two things that do: the
 # remote allows only squash and fast-forward merges, and CI's `linear-history` job rejects a merge
 # commit on main regardless of how it got there.
 git config merge.ff only
 git config pull.ff only
-echo "==> git: merge.ff=only, pull.ff=only (linear history; land with scripts/land.sh)"
+echo "==> git: merge.ff=only, pull.ff=only (linear history; land via a squash-merged PR)"
 
 # cargo-nextest is the test runner `scripts/check-all.sh` requires. Installed here rather than left to
 # the README because that gate HARD-FAILS without it — deliberately, so the runner is the same

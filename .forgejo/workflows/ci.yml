@@ -19,7 +19,37 @@ on:
     tags: ["v*"]
     paths-ignore: ["docs/**", "**/*.md", "LICENSE*"]
   pull_request:
-    paths-ignore: ["docs/**", "**/*.md", "LICENSE*"]
+    # `edited` is load-bearing, not decoration. Forgejo has NO `ready_for_review` event — its drafts
+    # are a `WIP:` title prefix — so taking a PR out of draft surfaces as `edited`. Without it the
+    # full jobs would not run until the next push, which is a window in which a draft-scoped PR could
+    # be merged having never had a full run. The cost is that editing a non-draft PR's title or body
+    # also re-runs the full jobs; that is the cheaper mistake.
+    types: [opened, synchronize, reopened, edited]
+    # NO `paths-ignore` HERE, unlike `push` above — that asymmetry is deliberate, not an oversight.
+    # On `pull_request`, a path filter that matches the WHOLE diff means the workflow never runs at
+    # all, which means no `ci / gate (pull_request)` status is ever posted. A required context with
+    # no status never passes, and this repository has no bypass left for that: `enable_push` is off
+    # and `scripts/land.sh` is gone. MEASURED: PR #6's head commit (23ffc978) is docs-only and has
+    # ZERO commit statuses — under today's protection that PR would be unmergeable forever. Docs-only
+    # PRs now pay a full CI run instead. That is wasteful, and it is the correct trade: a wasted run
+    # is recoverable, a PR with no route to green is not.
+    #
+    # PR #6 is the only docs-only PR this repository has ever had, and that is the right population
+    # to count — COMMITS are not. A `pull_request` path filter evaluates the whole `base...head`
+    # diff, so docs-only commits on a mixed branch never trip it; only a wholly docs-only PR does.
+    # (An earlier version of this comment cited a docs-only COMMIT count here, which measures
+    # nothing about this filter.)
+    #
+    # The narrower fix — a `detect` output that path-gates the heavy jobs so a docs-only PR runs only
+    # `detect`/`linear-history`/`gate` — is deliberately deferred: it needs `gate` to distinguish
+    # "legitimately not required" from "skipped", which is a second judgement call and the exact
+    # distinction this branch exists to get right.
+    #
+    # `push`'s `paths-ignore` above is untouched: a skipped push to `main` blocks
+    # nothing, so it stays harmless — but the same `paths-ignore` also covers `tags: ["v*"]`. Once
+    # `web/package.json` lands and the `docker` job activates, a `v*` tag on a docs-only diff would
+    # skip this workflow entirely and never publish the release image. That gap is real; it is
+    # deferred along with the narrower fix above, not solved by it.
   workflow_dispatch:
 
 concurrency:
@@ -78,9 +108,103 @@ jobs:
           fi
           echo "no merge commits in $range"
 
+  # DRAFT pull requests only. Explicitly NOT a gate — the moment the PR leaves draft,
+  # `rust`/`rust-llvm`/`rust-slow` run on every push and this job stops.
+  #
+  # WHAT THIS JOB ACTUALLY BUYS, corrected 2026-08-04 after measuring the live payload. It was
+  # designed to scope against the PUSH INCREMENT — "a WIP push that touched one test does not pay for
+  # the whole feature matrix". **It cannot.** `github.event.before` is EMPTY on Forgejo's
+  # `synchronize` (measured on PR #8 run 60; `action` reads `synchronized`, and the `types:` filter
+  # above matches it anyway). `base.sha` is the merge-base with `main`, so the payload offers no
+  # per-push increment at all — `check-scoped.sh` always takes its whole-branch fallback, which
+  # design §1.2 measured as narrowing anything on 3 of the last 40 commits.
+  #
+  # THE WALL-CLOCK SAVING IS LARGE, and a first version of this comment claimed it was ~zero.
+  # MEASURED: a draft run is 72s (run 60) or 163s (run 59) — `rust-scoped` alone; a non-draft run is
+  # 353s (run 63) — `max` over three jobs that overlap in full. **A 3.2-4.7m saving, not zero.**
+  #
+  # The wrong version reasoned "the jobs run in parallel, so wall = max, so draft ~= non-draft" from
+  # an UNMEASURED guess that `rust-scoped` costs about what `rust` costs. It does not: `rust` also
+  # runs `cargo llvm-cov nextest --workspace` on top of `check-all.sh --no-llvm`, and its 353s was
+  # measured WHILE CONTENDING with two other jobs. `rust-scoped`'s worst case — full escalation to
+  # `--no-llvm` — is 72s warm, consistent with the 50.1s `T_llvm_repeat` plus job overhead.
+  #
+  # `wall = max(jobs)` is right about scheduling and wrong about cost. Runner capacity is >= 3 in run
+  # 63 specifically (its three heavy jobs span 19:59:35-20:05:28 together, so nothing queued there —
+  # run 65 elsewhere queued twice, so capacity is a real constraint, just not this run's), but a job
+  # with the box to ITSELF is far cheaper than the same job sharing it — the same contention lever
+  # §6.5 credits for part of `rust-slow`'s PRE-to-POST mean shift (442s to 298s, untouched by any
+  # commit on this branch) — see §6.5 for the counter-evidence that weakens this story too.
+  #
+  # So this job buys BOTH: ~6 CPU-minutes instead of ~12, and 3-5 wall-clock minutes on a draft push.
+  # What it does not buy is a narrower diff. Restoring genuine per-push scoping would mean querying
+  # the previous run's head SHA from the API — considered and rejected as too much machinery, and a
+  # new network failure mode, for a job that is explicitly non-gating.
+  #
+  # The DRAFT BOOLEAN, not a `full-ci` label, decides. A label does not follow the head commit: push
+  # after labelling and it still reads green while the full run describes an older tree — the
+  # covers-less-than-it-claims failure this repository keeps finding. `draft` cannot go stale,
+  # because leaving draft makes the full jobs run on every subsequent push.
+  rust-scoped:
+    needs: detect
+    if: >-
+      needs.detect.outputs.has_rust == 'true'
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.draft
+    runs-on: docker
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0     # check-scoped.sh needs merge-base for its fallback
+      - name: Install Rust (respects rust-toolchain.toml)
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+          . "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup show
+      - name: Install cargo-nextest (pinned + checksummed)
+        run: ./scripts/install-nextest-ci.sh
+      # Restores the `rust` job's cache as a fallback, so a scoped run on a fresh branch starts warm
+      # rather than compiling the workspace from scratch to run one test binary.
+      - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-scoped-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-scoped-
+            cargo-
+      - name: Scoped check (NOT the merge gate)
+        env:
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          # `BEFORE` is ALWAYS empty here — measured, not assumed (PR #8 run 60). So this always
+          # expands to the literal `none..<sha>`, whose base does not resolve, and the script always
+          # takes its whole-branch fallback. That is safe (it checks MORE) and it is what the job
+          # header above says it delivers. The `${BEFORE:-none}` form is kept rather than simplified
+          # so that a future Forgejo which DOES populate `before` starts scoping narrowly with no
+          # edit here — the same auto-activate shape `detect` uses for `web`.
+          ./scripts/check-scoped.sh "${BEFORE:-none}..${SHA}"
+
   rust:
     needs: detect
-    if: needs.detect.outputs.has_rust == 'true'
+    # Non-draft PRs, pushes and dispatches. A DRAFT PR gets `rust-scoped` instead — see that job for
+    # why the draft boolean rather than a label decides. Note this runs on EVERY push to a non-draft
+    # PR, so a green full run always describes the head commit.
+    #
+    # IF FORGEJO EVER OMITS `draft`, THIS FAILS SAFE — worth stating because it is not obvious and
+    # nothing else here says it. `null` is falsy, so `!github.event.pull_request.draft` is `true` and
+    # all three full jobs RUN; `rust-scoped`'s trailing `&& ...draft` yields `null`, which coerces to
+    # false, so the only thing skipped is the non-gating job. The ambiguous case over-runs rather
+    # than under-runs. The `||` also short-circuits before `.draft` is touched at all on `push` and
+    # `workflow_dispatch`. Whether Forgejo populates it is Task 6's first question.
+    if: >-
+      needs.detect.outputs.has_rust == 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: docker                    # -> catthehacker/ubuntu:act-latest (node+git+curl)
     steps:
       - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -107,10 +231,6 @@ jobs:
             target
           key: cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-
-      - name: Format
-        run: cargo fmt --all --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Feature matrix (non-LLVM configs)
         run: ./scripts/check-all.sh --no-llvm
       # `llvm-cov nextest`, not `llvm-cov --all-targets`, for the same reason the gate above switched
@@ -137,7 +257,12 @@ jobs:
   # the whole point of the tier is that developers do not run it locally on every commit.
   rust-slow:
     needs: detect
-    if: needs.detect.outputs.has_rust == 'true'
+    # Non-draft PRs, pushes and dispatches. A DRAFT PR gets `rust-scoped` instead — see that job for
+    # why the draft boolean rather than a label decides. Note this runs on EVERY push to a non-draft
+    # PR, so a green full run always describes the head commit.
+    if: >-
+      needs.detect.outputs.has_rust == 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: docker
     steps:
       - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -173,7 +298,12 @@ jobs:
   # still skipping the network download once the archive cache is warm.
   rust-llvm:
     needs: detect
-    if: needs.detect.outputs.has_rust == 'true'
+    # Non-draft PRs, pushes and dispatches. A DRAFT PR gets `rust-scoped` instead — see that job for
+    # why the draft boolean rather than a label decides. Note this runs on EVERY push to a non-draft
+    # PR, so a green full run always describes the head commit.
+    if: >-
+      needs.detect.outputs.has_rust == 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: docker
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
@@ -223,10 +353,105 @@ jobs:
             target
           key: cargo-llvm-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-llvm-
-      - name: Feature matrix (all configs, including LLVM)
-        run: ./scripts/check-all.sh
+      # --llvm-only, NOT the bare invocation this used to be. Bare `check-all.sh` is `--no-llvm` plus
+      # the LLVM configs by construction, so this job re-ran every non-LLVM config the `rust` job had
+      # already run. MEASURED at 50.1s (`T_llvm_repeat`, warm) — and the mechanism is not what the
+      # first draft of this comment guessed. It said "a genuine rebuild rather than a warm no-op",
+      # reasoning from the separate cache key (`cargo-llvm-*` vs `cargo-*`). The measurement says
+      # otherwise: this job's cache is populated by its OWN previous run, which ran the full gauntlet,
+      # so the repeated legs start warm and what they cost is fingerprint-checking every crate plus
+      # re-running the whole test suite — not compilation. See
+      # docs/superpowers/specs/2026-08-04-ci-scope-filters-design.md §2.2(a).
+      #
+      # The union invariant in check-all.sh is what makes splitting the job safe: --no-llvm there
+      # plus --llvm-only here still covers every config, checkable with `check-all.sh --list`.
+      - name: Feature matrix (LLVM configs only — `rust` covers the rest)
+        run: ./scripts/check-all.sh --llvm-only
       - name: Optimization report (informational, never gating)
         run: cargo run --release --example opt_report -p redextape-native --features llvm
+
+  # THE ONE REQUIRED STATUS CHECK. Nothing else in this workflow should be one, and the reason is
+  # measured rather than stylistic.
+  #
+  # FORGEJO REPORTS A SKIPPED JOB AS `success` ON THE COMMIT-STATUS API. Measured on PR #8, run 59:
+  # the draft gating skipped `rust`, `rust-llvm` and `rust-slow`, and all three published `success`
+  # having never run, giving a combined state of `success` on a pull request that ran only `detect`,
+  # `linear-history` and the explicitly non-gating `rust-scoped`. So a required context naming those
+  # jobs directly cannot distinguish "ran and passed" from "did not run" — on ANY pull request, draft
+  # or not. A `detect` emitting `has_rust=false` would do the same thing on a non-draft PR.
+  #
+  # `needs.<job>.result` IS A DIFFERENT SUBSYSTEM AND IT DOES MAKE THAT DISTINCTION — it reports
+  # `skipped` as `skipped`. The `docker` job below has always relied on that correctly. This job is
+  # the bridge: it reads the internal results and publishes ONE external context that a skip cannot
+  # fake.
+  #
+  # `if: always()` IS LOAD-BEARING, NOT DEFENSIVE. Without it this job would itself be skipped
+  # whenever its `needs` were skipped, and a skipped `gate` publishes `success` — reproducing the
+  # exact hole it exists to close, one level up.
+  #
+  # See docs/superpowers/specs/2026-08-04-ci-scope-filters-design.md §4.4.
+  gate:
+    needs: [detect, linear-history, rust, rust-slow, rust-llvm, web]
+    if: always()
+    runs-on: docker
+    steps:
+      - name: Every gating job must have actually run and succeeded
+        env:
+          R_DETECT: ${{ needs.detect.result }}
+          R_LINEAR: ${{ needs.linear-history.result }}
+          R_RUST: ${{ needs.rust.result }}
+          R_SLOW: ${{ needs.rust-slow.result }}
+          R_LLVM: ${{ needs.rust-llvm.result }}
+          R_WEB: ${{ needs.web.result }}
+          HAS_RUST: ${{ needs.detect.outputs.has_rust }}
+          HAS_WEB: ${{ needs.detect.outputs.has_web }}
+        run: |
+          set -eu
+          echo "detect=$R_DETECT linear-history=$R_LINEAR has_rust=$HAS_RUST has_web=$HAS_WEB"
+          echo "rust=$R_RUST rust-slow=$R_SLOW rust-llvm=$R_LLVM web=$R_WEB"
+
+          fail=0
+          require() {
+            [ "$2" = success ] || { echo "error: $1 did not succeed — result: $2" >&2; fail=1; }
+          }
+
+          # `detect` is checked FIRST and unconditionally. Its outputs decide what else is required,
+          # so trusting them while it was failing or skipped would make every check below vacuous.
+          require detect "$R_DETECT"
+          require linear-history "$R_LINEAR"
+
+          # Only demand a tier when `detect` says there is something to build — the same "no-op
+          # until the code lands, then auto-activate" contract `detect` gives the rest of the
+          # workflow. `detect` is already required above, so an EMPTY (unset) HAS_RUST/HAS_WEB can
+          # only mean a real absence, never a swallowed failure. That claim is about emptiness, not
+          # about `false`: an explicit `false` is a normal, legitimate value and is exactly what the
+          # `else` branches below are for — it is not the case the claim covers.
+          if [ "$HAS_RUST" = true ]; then
+            require rust "$R_RUST"
+            require rust-slow "$R_SLOW"
+            require rust-llvm "$R_LLVM"
+          else
+            echo "detect reports no Rust — the Rust tier is not required on this run"
+          fi
+
+          # `web` "auto-activates with no edits" the moment `web/package.json` lands (see `detect`'s
+          # header comment) — this is what makes that activation actually gate anything instead of
+          # silently leaving a failing `web` job out of a green `gate`.
+          if [ "$HAS_WEB" = true ]; then
+            require web "$R_WEB"
+          else
+            echo "detect reports no web — the web tier is not required on this run"
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            echo >&2
+            echo "THIS is the required check, not the jobs above it. A job that was SKIPPED" >&2
+            echo "publishes 'success' to the status API, so requiring those directly would let a" >&2
+            echo "draft PR — or any run where they were skipped — read green having never run." >&2
+            echo "A draft PR is EXPECTED to fail here: take it out of draft to run the full tier." >&2
+            exit 1
+          fi
+          echo "all gating jobs ran and passed"
 
   web:
     needs: detect
