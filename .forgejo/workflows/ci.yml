@@ -162,6 +162,7 @@ jobs:
           . "$HOME/.cargo/env"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup show
+          rustup target add wasm32-unknown-unknown   # check-scoped.sh escalates to check-all.sh, which has a base-tier wasm leg
       - name: Install cargo-nextest (pinned + checksummed)
         run: ./scripts/install-nextest-ci.sh
       # Restores the `rust` job's cache as a fallback, so a scoped run on a fresh branch starts warm
@@ -214,6 +215,7 @@ jobs:
           . "$HOME/.cargo/env"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup show                        # installs the toolchain + rustfmt/clippy from rust-toolchain.toml
+          rustup target add wasm32-unknown-unknown   # scripts/check-all.sh's wasm leg checks against it
           rustup component add llvm-tools-preview
           curl -fsSL https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.8.7/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz \
             | tar xzf - -C "$HOME/.cargo/bin"

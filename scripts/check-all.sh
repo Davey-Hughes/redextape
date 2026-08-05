@@ -69,8 +69,10 @@ done
 # `--features "cranelift llvm"`; the genuinely LLVM-only config is --no-default-features --features llvm.
 LEGS=(
   "both|fmt|"
+  "base|wasmprobe|"
   "base|clippy|--workspace --all-targets"
   "base|test|--workspace"
+  "base|wasm|"
   "base|build|-p redextape-native --no-default-features"
   "base|clippy|-p redextape-native --no-default-features --all-targets"
   "base|test|-p redextape-native --no-default-features"
@@ -98,7 +100,7 @@ check_legs() {
       *) echo "error: leg tagged with unknown tier '$tier': $row" >&2; exit 1 ;;
     esac
     case "$kind" in
-      fmt|clippy|build|test|probe) ;;
+      fmt|clippy|build|test|probe|wasmprobe|wasm) ;;
       *) echo "error: leg tagged with unknown kind '$kind': $row" >&2; exit 1 ;;
     esac
   done
@@ -151,6 +153,45 @@ fi
 # examples land.
 test_cfg() { run cargo nextest run "$@"; run cargo test "$@" --doc; }
 
+# The wasm32 target is what makes `redextape-core`'s WASM-cleanliness a CHECK rather than a claim.
+#
+# A HARD FAILURE, not a skip. Before this leg existed the rule was "keep [dependencies] empty", which
+# is checkable in one line but is a PROXY: it is sufficient for WASM-clean and not necessary (serde
+# compiles to wasm32; a proc-macro dependency cannot break a wasm32 build at all). The proxy was worth
+# keeping only while nothing checked the real property — and nothing did, since `rustup target add
+# wasm32-unknown-unknown` appeared in ci.yml exactly once, inside the `web` job, which was gated off.
+# A gate that silently skips when the target is missing would recreate that situation with extra steps.
+#
+# TWO FAILURE MODES, not one. `rustup target list --installed 2>/dev/null` swallows stderr, so a
+# missing or broken `rustup` reported exactly the same "target is not installed" message as a present
+# rustup missing the target — and pointed at `rustup target add`, a command that does not exist on a
+# box without rustup. Distro-packaged Rust without rustup is a real configuration, so rustup's
+# presence is checked first and reported honestly before the target is checked at all.
+#
+# CALLED FROM TWO ROWS ON PURPOSE, and the redundancy is the cheaper mistake. `base|wasmprobe|` runs it
+# FIRST in its tier so a missing target fails in seconds rather than after the workspace clippy and test
+# legs have already run — the same reason `llvm|probe|` leads the LLVM tier. The `wasm` leg then calls it
+# again so the leg is correct on its own: a future edit that drops or reorders the probe row degrades the
+# error message, where removing this call would let the leg run without its precondition and fail inside
+# cargo instead. It is a `grep` against a list rustup already has in memory, so running it twice costs
+# nothing worth saving. `ensure_llvm_prefix` is NOT called this way for a different reason: its own guard
+# (`if [ -z "${LLVM_SYS_221_PREFIX:-}" ]`) memoizes the probe, so the exported variable persists for the
+# rest of the process and a repeat call would add nothing but a duplicate log line. One call suffices —
+# that is why one row calls it, not that a second call would cost something.
+ensure_wasm_target() {
+  if ! command -v rustup >/dev/null 2>&1; then
+    echo "error: rustup not found, so this gate cannot check the wasm32 build." >&2
+    echo "  this project's toolchain is managed by rustup (rust-toolchain.toml); install it from https://rustup.rs" >&2
+    exit 1
+  fi
+  if ! rustup target list --installed | grep -qx wasm32-unknown-unknown; then
+    echo "error: the wasm32-unknown-unknown target is not installed (this gate checks against it)." >&2
+    echo "  install: rustup target add wasm32-unknown-unknown" >&2
+    echo "  scripts/setup-dev.sh installs it too." >&2
+    exit 1
+  fi
+}
+
 # llvm-sys locates LLVM via a version-specific variable. Honor an existing setting; otherwise probe
 # the usual locations. If broadening the supported LLVM range later, derive the variable NAME from
 # the selected inkwell feature rather than hardcoding 221.
@@ -193,6 +234,8 @@ do_leg() {
     build)  run cargo build "$@" ;;
     test)   test_cfg "$@" ;;
     probe)  ensure_llvm_prefix ;;
+    wasmprobe) ensure_wasm_target ;;
+    wasm)   ensure_wasm_target; run cargo check --target wasm32-unknown-unknown -p redextape-core --lib ;;
     *)      echo "error: unknown leg kind: $kind" >&2; exit 1 ;;
   esac
 }

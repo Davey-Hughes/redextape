@@ -37,6 +37,19 @@ else
   echo "==> cargo-nextest installed (cargo install)"
 fi
 
+# The wasm32 target is what `scripts/check-all.sh`'s wasm leg checks against, and that gate HARD-FAILS
+# without it — same reason cargo-nextest is installed above rather than left to the README: a fresh
+# clone that cannot run the merge check is a fresh clone whose first gate run is a confusing error.
+#
+# `rustup target add` is idempotent, so this is safe to re-run; it prints "is up to date" on a second
+# pass rather than redownloading.
+if command -v rustup >/dev/null 2>&1; then
+  rustup target add wasm32-unknown-unknown
+  echo "==> rust target wasm32-unknown-unknown installed (scripts/check-all.sh's wasm leg needs it)"
+else
+  echo "==> rustup not found; skipping wasm32 target (scripts/check-all.sh's wasm leg will fail without it)" >&2
+fi
+
 if command -v pre-commit >/dev/null 2>&1; then
   pre-commit install
   echo "==> pre-commit hooks installed (cargo fmt + clippy)"

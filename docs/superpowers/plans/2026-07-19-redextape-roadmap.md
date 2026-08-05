@@ -2639,3 +2639,58 @@ the counts do not move, the attribution does. **The concurrency design's 159× i
 the safe way:** its argument is a ~13 ns δ-step against a ~2,063 ns barrier, barriers are allocator-
 independent, so a faster δ-step makes every one of its five rejections stronger.
 
+#### THE ZERO-DEPENDENCY RULE IS RETIRED AND REPLACED BY A GATE (2026-08-05)
+
+Design: [`../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md`](../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md) §2.
+
+**`redextape-core`'s empty `[dependencies]` was a PROXY, and the thing it proxies was unchecked.**
+Empty is *sufficient* for wasm32-cleanliness, not *necessary* — `serde` builds for wasm32, and a
+proc-macro dependency cannot break a wasm32 build at all, since it runs on the host at build time. The
+encoding-registry entry above shows the rule applied past its own justification: `strum` was rejected
+because "a derive macro is still a dependency edge."
+
+**Nothing in CI verified the real property.** `rustup target add wasm32-unknown-unknown` appeared in
+`ci.yml` exactly once, inside the `web` job — gated off until `web/package.json` lands — and
+`check-all.sh` did not mention wasm at all. The invariant was held up by a manifest comment and
+reviewer attention. **The rule was still right while that was true**, for a reason that is not about
+wasm: "is `[dependencies]` empty?" is checkable in one line forever, and "does the whole transitive
+closure build for wasm32 under every future version resolution?" is an audit nobody keeps running.
+
+**The replacement is `scripts/check-all.sh`'s `wasm` leg** — a base-tier row running `cargo check
+--target wasm32-unknown-unknown -p redextape-core --lib`, which checks the actual property at the PR
+that would break it. `setup-dev.sh` installs the target; so do the two CI jobs that reach a base-tier
+leg — `rust`, which runs `check-all.sh --no-llvm` directly, and `rust-scoped`, whose `check-scoped.sh`
+ESCALATES to the same command on any change its default-deny arm does not recognise. `rust-llvm` does
+not need it, because `--llvm-only` selects no base-tier row, and `rust-slow` runs a different script.
+That second job was missed on the first pass and caught in review: being non-gating means it cannot
+block a merge, not that it cannot go red. **The rule is now: dependencies are admissible, and the gate
+decides.**
+
+**Verified non-vacuous rather than assumed.** `mimalloc` was moved into `[dependencies]`, the leg
+failed on `libmimalloc-sys` (C, no wasm32 toolchain), and the edit was reverted. A gate that would
+pass anything is worse than no gate.
+
+**Scope of the claim, unchanged and still stated honestly:** `--lib`, not `--all-targets`. The dev
+graph is not wasm32-clean — `proptest` drags `wait-timeout` and `getrandom` — and was not before
+`mimalloc` existed. Nothing short of dropping `proptest` would fix it. `--lib` is what a consumer
+builds.
+
+**The one-line proof survives as a bonus, not as the guarantee.** `serde` enters core in PR 2 as an
+*optional* dependency, default off, so `cargo tree -p redextape-core --edges normal` with default
+features still lists only itself.
+
+**EIGHT PLAN DOCUMENTS RESTATE THE RULE FOR `REDEXTAPE-CORE`** (the roadmap is excluded — this change
+is recorded here) **AND ARE DELIBERATELY LEFT AS WRITTEN.** They are
+records of what was true when written, and this repository annotates rather than rewrites — the
+"ANNOTATION, not a rewrite" entry above is the precedent, as is `README.md` keeping four dead λ
+designs on purpose. A reader who lands in
+[`2026-07-29-encoding-registry-and-generator-dedup.md`](2026-07-29-encoding-registry-and-generator-dedup.md)'s
+"MUST STAY EMPTY" and obeys it does something harmless and slightly out of date; a history edited to
+agree with the present is worse, because nothing then records that the rule ever changed or why.
+
+**What this unblocks, and what it does NOT.** It makes PR 2's optional `serde` admissible. It does
+**not** license the three dependencies this thread rejected: `strum` is deferred to the next change to
+the encoding registry (design §9.5); `smallvec` stays rejected because `reduce_step`'s
+`path.insert(0, ..)` makes path construction O(d²) and smallvec fixes neither that nor anything
+measured (§9.6); `bumpalo` is unchanged, since the dependency was obstacle 1 of 3 and the other two
+are what make an arena a rewrite (§9.7).
