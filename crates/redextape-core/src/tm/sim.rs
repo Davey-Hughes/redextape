@@ -77,7 +77,7 @@ impl Tape {
     /// The head's index into the tape *as currently materialized* — `left.len()` cells lie to its
     /// left. O(1), unlike `snapshot`, which clones the whole tape before computing the same value; a
     /// per-step caller (`viewmodel::TmState::window`) cannot pay that cost just to learn this index.
-    pub(crate) fn head_index(&self) -> usize {
+    pub fn head_index(&self) -> usize {
         self.left.len()
     }
 
@@ -96,7 +96,7 @@ impl Tape {
     /// Returns `(window, window_start)`, where `window_start` is the index of `window[0]` in the same
     /// materialized-tape coordinates as `head_index` — so `head_index() - window_start` is always the
     /// head's position within the returned window.
-    pub(crate) fn window(&self, radius: usize) -> (Vec<Symbol>, usize) {
+    pub fn window(&self, radius: usize) -> (Vec<Symbol>, usize) {
         let left_len = self.left.len();
         let left_start = left_len.saturating_sub(radius);
         let right_len = self.right.len();
@@ -109,6 +109,53 @@ impl Tape {
         cells.extend(self.right[right_start..].iter().rev());
 
         (cells, left_start)
+    }
+
+    /// Cells `from..to` in materialized coordinates — the space `head_index` counts in and
+    /// `viewmodel::TmState`'s `heads`/`window_start` report. Clamped at both ends and empty for an
+    /// inverted range, so no argument value panics.
+    ///
+    /// THIS EXISTS SO SCROLLING DOES NOT COST A CLONE. `snapshot` materializes the whole tape; a
+    /// renderer dragging a scrollbar calls this per frame, and paying O(tape) each time is the cost
+    /// `TmState::window` was changed to stop paying.
+    ///
+    /// THE CLAMP IS OBSERVABLE FROM THE RESULT, which is why `cells` stays `pub(crate)`: a returned
+    /// `Vec` shorter than `to - from` is exactly the signal that the range ran off an end, so a caller
+    /// can tell "you asked past the end" from "the tape really is that short" without a length
+    /// accessor. `slice`'s contract therefore does not need one, and none is added speculatively.
+    ///
+    /// The three arms below are `window`'s reasoning generalized to an arbitrary range rather than one
+    /// centred on the head: `left` is already in natural left-to-right order, the head is the single
+    /// cell at index `left.len()`, and `right` is the mirror image and so is reversed — an index `i`
+    /// past the head reads `right[right.len() - (i - left.len())]`, which descends as `i` ascends.
+    pub fn slice(&self, from: usize, to: usize) -> Vec<Symbol> {
+        let len = self.cells();
+        let (from, to) = (from.min(len), to.min(len));
+        if from >= to {
+            return Vec::new();
+        }
+
+        let left_len = self.left.len();
+        let right_len = self.right.len();
+        let mut cells = Vec::with_capacity(to - from);
+
+        if from < left_len {
+            cells.extend_from_slice(&self.left[from..to.min(left_len)]);
+        }
+        if from <= left_len && left_len < to {
+            cells.push(self.head);
+        }
+        if to > left_len + 1 {
+            // `start` is the first index in this range that lands in `right`; `from < to` guarantees
+            // `start < to`, so the mapped range below is non-empty. Both bounds stay within `right`
+            // because `to <= len` and `start <= to - 1`.
+            let start = from.max(left_len + 1);
+            let lo = right_len - (to - 1 - left_len);
+            let hi = right_len - (start - left_len) + 1;
+            cells.extend(self.right[lo..hi].iter().rev());
+        }
+
+        cells
     }
 }
 

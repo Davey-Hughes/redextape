@@ -1,6 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/redextape-core", "crates/redextape-native", "crates/redextape-native-rt", "crates/redextape-test-support"]
+members = [
+    "crates/redextape-core",
+    "crates/redextape-native",
+    "crates/redextape-native-rt",
+    "crates/redextape-test-support",
+    "crates/redextape-wasm",
+]
 
 [workspace.package]
 edition = "2024"

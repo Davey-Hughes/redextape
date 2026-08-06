@@ -63,6 +63,19 @@ impl LambdaCursor {
         self.status
     }
 
+    /// Whether the CURRENT `HitCap` came from the depth guard rather than the step cap — i.e. whether
+    /// `raise_cap` can do anything for this run.
+    ///
+    /// THIS EXISTS SO A CALLER CAN OFFER "CONTINUE" HONESTLY. `status()` reports `HitCap` for both
+    /// producers, and `raise_cap` already refuses to clear the depth one (see its doc) — but a UI
+    /// reading only `status()` cannot tell them apart, so it would render a "continue" button that
+    /// provably cannot advance the run. That is the same defect `raise_cap`'s own guard fixed one
+    /// layer in. `false` whenever `status()` is not `HitCap`, because there is then no `HitCap` for
+    /// either producer to own.
+    pub fn depth_capped(&self) -> bool {
+        self.depth_capped
+    }
+
     /// Extend a capped run's budget and let it proceed. §6.4's "still running — hit 50k steps ...
     /// continue" is what calls this.
     ///
@@ -197,6 +210,13 @@ impl<M: Borrow<Machine>> TmCursor<M> {
         self.cur
     }
 
+    /// The machine being stepped. `state()` is only an INDEX; resolving it to anything a reader can use
+    /// — a name, its rules, whether it accepts — needs the machine, and `viewmodel::TmState::window`
+    /// needs exactly that to look the current state's name up in a `SourceMap`.
+    pub fn machine(&self) -> &Machine {
+        self.machine.borrow()
+    }
+
     pub fn steps_taken(&self) -> u64 {
         self.steps
     }
@@ -291,6 +311,45 @@ mod tests {
         let (p, ds) = crate::parser::parse(src);
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         lower(&crate::desugar::desugar(&p.unwrap())).expect("lowers")
+    }
+
+    /// `depth_capped` distinguishes `HitCap`'s two producers, which `status()` alone cannot. A caller
+    /// offering a "continue" affordance needs exactly this: raising the cap advances the step-capped
+    /// run and provably cannot advance the depth-capped one.
+    #[test]
+    fn depth_capped_tells_the_two_producers_of_hit_cap_apart() {
+        // A step cap of 1 on a program needing several: HitCap from the BUDGET, and raising it works.
+        let t = term_of("let x = 1; let y = x + x; y * 3");
+        let mut budget = LambdaCursor::new(&t, 1);
+        budget.by_ref().count();
+        assert_eq!(budget.status(), Some(Status::HitCap), "a 1-step budget must not finish this program");
+        assert!(!budget.depth_capped(), "the step cap produced this HitCap, not the depth guard");
+        budget.raise_cap(MAX_REDUCTION_STEPS);
+        assert_eq!(budget.status(), None, "raising a budget HitCap clears it");
+
+        // A term deeper than MAX_TERM_DEPTH: HitCap from the DEPTH GUARD, and raising it cannot help.
+        // Built directly rather than lowered — `abs` nested 3,001 deep is past the guard by one.
+        use crate::lambda::term::{abs, app, var};
+        let mut deep = var(0);
+        for _ in 0..=MAX_TERM_DEPTH {
+            deep = abs("x", deep);
+        }
+        // Applied to something so the reducer has a step to attempt at all; the guard fires first.
+        let mut depth = LambdaCursor::new(&app(deep, var(0)), MAX_REDUCTION_STEPS);
+        depth.by_ref().count();
+        assert_eq!(depth.status(), Some(Status::HitCap), "a term past MAX_TERM_DEPTH must be refused");
+        assert!(depth.depth_capped(), "the depth guard produced this HitCap, not the step cap");
+        depth.raise_cap(MAX_REDUCTION_STEPS);
+        assert_eq!(depth.status(), Some(Status::HitCap), "a depth HitCap stays latched — a budget cannot fix it");
+    }
+
+    /// A run that finished has no `HitCap` for either producer to own.
+    #[test]
+    fn a_normalized_run_is_not_depth_capped() {
+        let mut c = LambdaCursor::new(&term_of("1 + 2"), MAX_REDUCTION_STEPS);
+        c.by_ref().count();
+        assert_eq!(c.status(), Some(Status::Normalized));
+        assert!(!c.depth_capped());
     }
 
     #[test]

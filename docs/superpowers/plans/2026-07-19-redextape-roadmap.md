@@ -2761,3 +2761,93 @@ because `ast::Expr::Method` discards the name's span (a two-line parser change f
 `node_budget` and NOT by `MAX_LAMBDA_LOWER_DEPTH` (a one-line `500000` lowers to a λ term of depth
 500,003); and `Tape`'s window accessors are `pub(crate)`, so PR 3 needs a small core change before it
 can implement `tapeSlice`.
+
+#### PLAN 4'S CONSUMER SLICE, THE WASM SESSION — `crates/redextape-wasm` (2026-08-05, PR #13)
+
+Design: [`../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md`](../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md) §5.
+Plan: [`2026-08-05-wasm-session.md`](2026-08-05-wasm-session.md).
+
+**PR 3a of 3, and §10's landing order now has four PRs rather than three.** PR 3 split because the
+JavaScript half carries an entirely different toolchain and a registry-push side effect that deserves
+its own reviewable event. **PR 3b is `web/`, the pnpm migration, the `Dockerfile`/`ci.yml` web edits,
+and arming the `docker` push.** This PR adds no JavaScript and leaves the `web` and `docker` jobs
+dormant.
+
+**The crate is `cdylib` + `rlib`, and the second is a coverage requirement, not a convenience.**
+`wasm-bindgen-test` runs in a browser while `llvm-cov` instruments the native build, so any logic in
+the `#[wasm_bindgen]` shell is uncovered BY CONSTRUCTION. `session.rs` holds every branch and is
+natively tested; `lib.rs` is marshalling and one error conversion. Measured: **95.50% workspace lines,
+down from 95.85%, against a floor of 80** — `lib.rs` is 0% over 64 lines, which is the cost that
+design accepts, and `session.rs` is 95.7%. A material drop would have meant logic had leaked into the
+shell; 0.35 points did not.
+
+**FOUR THINGS CORE DID NOT EXPOSE, none of them in the spec** — each found while writing the plan:
+
+- **`Tape::slice(from, to)`**, plus `head_index`/`window` made `pub`. An external crate holding
+  `&[Tape]` could only call `snapshot`, whose O(tape) clone is what `TmState::window` was changed to
+  stop paying. `cells()` stays `pub(crate)`: a returned `Vec` shorter than `to - from` already tells a
+  caller the range ran off an end, so the contract needs no length accessor.
+- **`TmProgram.start`.** A renderer could not learn the entry state without building a `TmState`.
+- **`TmState::window` takes a `&SourceMap`** and resolves `source_node`. §6.2's dual-focus highlight
+  is the consumer that decided it. **This one survived where `LambdaState`'s did not, and the reason
+  is the whole distinction:** it is keyed by the state's printed NAME, and a name is not a coordinate
+  into a tree that reduction rewrites underneath it.
+- **`TmCursor::machine()`** — a FIFTH the plan did not anticipate. `state()` is only an index, and the
+  cursor's `machine` field was private, so `window` had no way to get from one to the other.
+- **`LambdaCursor::depth_capped()`** — a SIXTH, found by reviewing the branch rather than by writing
+  it. See below: without it the run status cannot be honest.
+
+**`raiseLambdaCap`/`raiseTmCap` SHIPPED AS API NOTHING COULD CORRECTLY DECIDE TO CALL, and the review
+that caught it is the point.** `stepLambda`/`stepTm` answer `false` for EVERY end condition —
+normalized/halted, hit-cap, and (λ) depth-refused — and nothing else exposed the difference:
+`lambdaStatus`/`tmStatus` described whether the LEG existed, not how the RUN ended. So a renderer
+could not tell a finished run from one that spent its budget, and "continue" is meaningful for exactly
+one of those. §3.3 justifies `raise_cap` existing by §6.4's "still running — hit 50k steps ...
+continue"; the data half of that affordance belonged in this PR and had been left out of it.
+
+`RunStatus` is `Running | Ended | Capped | DepthRefused`. **The fourth variant is not pedantry:** the
+λ cursor latches `HitCap` for the depth guard too, and raising the cap cannot make a term shallower —
+folding it into `Capped` would put the button on the one run that cannot continue, which is the defect
+`raise_cap`'s own guard fixed one layer in, reintroduced at the boundary. Telling them apart needed
+`depth_capped()` in core, because `status()` cannot.
+
+**ONE SERIALIZER, AND THAT WAS A FIX RATHER THAN A TIDY-UP.** `serde-wasm-bindgen` renders
+`Option::None` as `undefined`; the first cut special-cased the two top-level returns to `null` and left
+struct FIELDS on the default — so `lambdaStatus().run` would have been `undefined` while `lambdaAst()`
+was `null`, one boundary needing two rules in the renderer. `serialize_missing_as_null` everywhere.
+
+**THE PLAN'S SKETCH FOR READING `run_tm_described` WAS WRONG, and checking beat assuming.** It
+proposed `Err(TmRun::Overflow) => TmDecline::Overflow`. `lower_and_size` is that function's only
+fallible call and produces `LowerError` or `TooLarge` and nothing else — reaching `MAX_FIELD_WIDTH`
+and still overflowing returns **`Ok` with `run: TmRun::Overflow`** and a machine attached. The decline
+is read off `d.run` too, so it is two matches, not one. `Ran` and `HitCap` both yield a working
+cursor, which is why `HitCap` is deliberately not a `TmDecline`.
+
+**`compile` BUILDS THE MAP AT `MIN_FIELD_WIDTH` AND LETS THE RUN AUTO-FIT ITS OWN WIDTH.** Sound only
+because `lower_tm` derives state NAMES from the instruction stream rather than the field width — and
+the failure would have been silent, since `source_node` would read `None` everywhere, which is also
+what it honestly reads for scaffolding. Pinned by a test rather than trusted.
+
+**The commit split the plan asked for was not achievable.** It wanted the crate, the λ leg and the TM
+leg as three commits; the pre-commit hook runs clippy with `-D warnings`, and a `Session` whose fields
+no method reads yet is `dead_code`. The three are a unit or they are nothing.
+
+**Proven in a browser, not merely compiled.** 4 `wasm-bindgen-test` cases green under headless Chrome
+151, and `wasm-pack build --release --target web` produces a 572 KB module — Plan 4's own named
+testable outcome. **Every browser call goes through `Reflect`**, looking each method up on the
+prototype of the object `compile` returned: holding a `Session` as a Rust value would re-run the
+native tests in a browser and never touch the generated glue. Both sides pin the same figures —
+`let x = 40; x + 2` is 7 β-steps to Church 42 and 2,870 δ-steps on a 5-tape, 123-state machine fitted
+to width 64 — because "the values that come back are the ones a native run produces" is otherwise a
+hope rather than a claim.
+
+**Two deviations from §5.3 and §5.1, both stated at the code.** `serde` is a direct dependency (not a
+new edge — `serde-wasm-bindgen` already pulls it; named directly because a `derive` needs the crate in
+scope, and the alternative was `js_sys::Reflect` branching in the shell). And `raiseLambdaCap`/
+`raiseTmCap` take `u32` and widen, because wasm-bindgen maps `u64` to JS `bigint` and §5.1 writes
+`extra: number`; the raise is additive and saturating, so nothing is lost.
+
+**The gate's `wasm` kind moved its package into the rows.** It hardcoded `-p redextape-core --lib`,
+which cannot name a second crate without checking both in one invocation and reporting them as one
+leg — so the crate whose ONLY real target is wasm32 would have failed under the other crate's name.
+`wasm-pack test` stays out of `check-all.sh`: it needs a browser, and the local merge check should not.

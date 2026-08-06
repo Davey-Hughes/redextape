@@ -1,0 +1,32 @@
+[package]
+name = "redextape-wasm"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# `rlib` ALONGSIDE `cdylib` ON PURPOSE. `cdylib` is what wasm-pack links; `rlib` is what lets
+# `cargo test` compile `session.rs` natively, which is where every branch in this crate lives. Without
+# it the inner module could only be exercised in a browser, and `cargo llvm-cov` instruments the
+# native build — the whole crate would land in the coverage denominator uncovered.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+redextape-core = { path = "../redextape-core", features = ["serde"] }
+# NOT IN §5.3'S TABLE, and it is not a new edge in the graph either: `serde-wasm-bindgen` already
+# depends on it. It is named directly because `LambdaStatus`/`TmStatus` are declared in this crate and
+# a `derive` needs the crate in scope. The alternative was assembling both objects field by field
+# through `js_sys::Reflect` in `lib.rs`, which would move branching into the shell — the one thing
+# §5.2 says the shell must not have.
+serde = { version = "1", features = ["derive"] }
+wasm-bindgen = "0.2.126"
+serde-wasm-bindgen = "0.6.5"
+js-sys = "0.3.103"
+console_error_panic_hook = "0.1.7"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.76"

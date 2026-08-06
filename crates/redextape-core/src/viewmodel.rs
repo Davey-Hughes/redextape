@@ -17,6 +17,7 @@ use crate::analysis::TokenClass;
 use crate::core::NodeId;
 use crate::lambda::term::Node;
 use crate::lambda::{LambdaTerm, print_lambda_capped};
+use crate::sourcemap::SourceMap;
 use crate::span::Span;
 use crate::tm::machine::{Machine, Move, StateId, Symbol};
 use crate::trace::{LambdaCursor, TmCursor};
@@ -46,7 +47,12 @@ use crate::trace::{LambdaCursor, TmCursor};
 /// sometimes silently wrong tells a consumer nothing is wrong at all — the exact fallback
 /// `sourcemap.rs`'s module doc forbids ("THE MAP SAYS NOTHING WHERE THE LOWERING SAID NOTHING"),
 /// reintroduced one layer out. `render` no longer takes `map` or `redex`; they existed only to compute
-/// this field. `TmState.source_node` is untouched — it is honestly `None` today, and PR 3 decides it.
+/// this field.
+///
+/// `TmState.source_node` SURVIVED AND IS NOW RESOLVED, which is not an inconsistency: it is keyed by the
+/// current state's NAME, and a name is not a coordinate into a tree that reduction rewrites underneath
+/// it. That is the whole difference — the λ field was wrong because its coordinate system went stale
+/// after one step, and a state name never does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LambdaState {
@@ -80,11 +86,24 @@ pub struct TmProgram {
     pub alphabet: Vec<Symbol>,
     pub tapes: usize,
     pub width: usize,
+    /// The state the machine enters at step 0, as an index into `states`.
+    pub start: StateId,
 }
 
-/// `source_node` is `None` in this task, on purpose: as specced, `window` takes no `SourceMap`, so it
-/// has nothing to resolve `state`'s name against — `SourceMap::tm_owner` needs one. Widening the
-/// signature to accept a map is a call for whichever PR actually needs it, not this one.
+/// `source_node` IS THE CORE NODE THAT PRODUCED THE CURRENT STATE, resolved through the `SourceMap`
+/// `window` now takes. §6.2's dual-focus highlight is the consumer that decided it: it needs the Core
+/// node behind the state the machine is in, and `SourceMap::tm_owner` keys on the state's printed NAME,
+/// which is why a map has to reach `window` at all.
+///
+/// IT IS HONESTLY `None` FOR THREE KINDS OF STATE, and the map's own contract is the limit: machine
+/// scaffolding with no instruction behind it, `defunc`-minted constructs, and any state THIS lowering
+/// did not produce — including every state belonging to some other lowering of the same program.
+/// `tm_owner` has deliberately no fallback to a nearby or similarly-spelled state, so neither does
+/// this. Unlike the `source_node` that `LambdaState` had and lost, this one cannot be silently wrong
+/// about a state it does resolve: a name either was recorded by this lowering or was not.
+///
+/// A `StateId` past the end of `states` also yields `None` rather than panicking — `window` is a
+/// library path a renderer calls per step, and no index it could hold may abort the process.
 ///
 /// `heads` AND `window_start` ARE BOTH MATERIALIZED-TAPE COORDINATES, not window-relative ones:
 /// `heads[i]` is tape `i`'s head index against the tape as currently materialized
@@ -235,7 +254,7 @@ impl TmProgram {
         // `m.alphabet()`, NOT a re-derivation: `Machine::alphabet` already walks every rule's read and
         // write symbols into a sorted set, and duplicating that here is exactly the second copy this
         // codebase's conventions treat as a defect (see `sourcemap.rs`'s module doc on the same point).
-        TmProgram { states, alphabet: m.alphabet(), tapes: m.tapes, width }
+        TmProgram { states, alphabet: m.alphabet(), tapes: m.tapes, width, start: m.start }
     }
 }
 
@@ -247,8 +266,11 @@ impl TmState {
     /// step by a renderer, and `sim::DEFAULT_CAPS.cells` alone permits 5,000,000 cells TOTAL ACROSS
     /// EVERY TAPE — `TmCursor::next` sums `Tape::cells()` over all of them and compares that one total
     /// against the cap, not against each tape individually — so paying `snapshot`'s O(tape) cost here
-    /// is exactly what the module doc's `TmProgram`/`TmState` split exists to avoid. `source_node` is
-    /// left `None`; see the note on the struct.
+    /// is exactly what the module doc's `TmProgram`/`TmState` split exists to avoid.
+    ///
+    /// `map` RESOLVES `source_node` AND IS USED FOR NOTHING ELSE — one `BTreeMap` lookup on the current
+    /// state's name, which allocates nothing and so does not disturb the cost above. See the struct doc
+    /// for what it resolves and the three cases where it honestly answers `None`.
     ///
     /// CLAMPED AT BOTH ENDS OF WHAT THE TAPE HAS MATERIALIZED, not merely bounded in length: a head
     /// near the start of a tape has no `radius` cells to its left, and `Tape::window`'s own
@@ -263,7 +285,7 @@ impl TmState {
     /// left edge (and therefore the origin `left.len()` counts from) shifts with the head rather than
     /// staying fixed at the start of the run. `heads`/`window_start` are reported against the region as
     /// materialized at the moment of this call, which is well-defined, just not a fixed absolute origin.
-    pub fn window<M: Borrow<Machine>>(c: &TmCursor<M>, radius: usize) -> TmState {
+    pub fn window<M: Borrow<Machine>>(c: &TmCursor<M>, map: &SourceMap, radius: usize) -> TmState {
         let mut window = Vec::with_capacity(c.tapes().len());
         let mut heads = Vec::with_capacity(c.tapes().len());
         let mut window_start = Vec::with_capacity(c.tapes().len());
@@ -273,7 +295,10 @@ impl TmState {
             window_start.push(start);
             window.push(cells);
         }
-        TmState { state: c.state(), step: c.steps_taken(), heads, window_start, window, source_node: None }
+        let state = c.state();
+        // `get`, never `[]`: a `StateId` past the end must answer `None` rather than abort a renderer.
+        let source_node = c.machine().states.get(state as usize).and_then(|s| map.tm_owner(&s.name));
+        TmState { state, step: c.steps_taken(), heads, window_start, window, source_node }
     }
 }
 

@@ -8,6 +8,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use redextape_core::sourcemap::SourceMap;
 use redextape_core::viewmodel::{LambdaState, TmProgram, TmState};
 
 /// Counts bytes requested through the global allocator, so a test can measure what a call actually
@@ -131,7 +132,7 @@ fn the_window_is_bounded_by_its_radius_and_clamped_at_tape_ends() {
     cursor.by_ref().take(50).count();
 
     for radius in [0usize, 1, 8] {
-        let st = TmState::window(&cursor, radius);
+        let st = TmState::window(&cursor, &empty_map(), radius);
         assert_eq!(st.window.len(), machine.tapes, "one window per tape");
         for w in &st.window {
             assert!(w.len() <= 2 * radius + 1, "radius {radius} yielded {} cells", w.len());
@@ -174,7 +175,7 @@ fn the_window_costs_the_same_regardless_of_how_large_the_tape_has_grown() {
     // slice, just after paying to clone the whole tape first. It is a regression guard on the SHAPE of
     // the result; the allocation check below is what pins the COST.
     for cursor in [&small, &large] {
-        let st = TmState::window(cursor, 2);
+        let st = TmState::window(cursor, &empty_map(), 2);
         assert_eq!(st.window.len(), 1, "one window per tape");
         for w in &st.window {
             assert!(w.len() <= 5, "radius 2 must yield at most 5 cells, got {}", w.len());
@@ -191,12 +192,17 @@ fn the_window_costs_the_same_regardless_of_how_large_the_tape_has_grown() {
     // binary's `#[global_allocator]`, declared near the top of this file) rather than by timing --
     // this repository has recorded enough measurement mistakes already that a wall-clock assertion in
     // a test would be another one.
+    // Built BEFORE the first reading, not inside either window: whatever `SourceMap::default()` costs
+    // is not what this test measures, and charging it to `bytes_small` alone would make the two
+    // readings answer different questions.
+    let map = empty_map();
+
     let before_small = BYTES_ALLOCATED.load(Ordering::SeqCst);
-    let _ = TmState::window(&small, 2);
+    let _ = TmState::window(&small, &map, 2);
     let bytes_small = BYTES_ALLOCATED.load(Ordering::SeqCst) - before_small;
 
     let before_large = BYTES_ALLOCATED.load(Ordering::SeqCst);
-    let _ = TmState::window(&large, 2);
+    let _ = TmState::window(&large, &map, 2);
     let bytes_large = BYTES_ALLOCATED.load(Ordering::SeqCst) - before_large;
 
     // A bound, not `assert_eq!(bytes_small, bytes_large)`: `BYTES_ALLOCATED` is a process-wide
@@ -227,6 +233,90 @@ fn tm_program_projects_the_machine_and_agrees_with_its_alphabet() {
     assert_eq!(p.alphabet, machine.alphabet(), "the projection must not re-derive the alphabet");
 }
 
+/// `tapeSlice(tape, from, to)` needs a public operation in the coordinate space `TmState` defines.
+/// Before this, the only public accessor was `Tape::snapshot`, whose O(tape) clone is exactly what
+/// `TmState::window` was changed to stop paying — a scrolling renderer calling it per drag would
+/// reintroduce the cost one layer out.
+#[test]
+fn a_tape_can_be_sliced_in_the_same_coordinates_the_window_reports() {
+    let (machine, init) = tm_fixture("let x = 40; x + 2");
+    let mut c = redextape_core::trace::TmCursor::new(&machine, &init, tm_caps());
+    c.by_ref().take(50).count();
+
+    let st = TmState::window(&c, &empty_map(), 4);
+    let tape0 = &c.tapes()[0];
+
+    // The window is the slice its own coordinates name.
+    let via_slice = tape0.slice(st.window_start[0], st.window_start[0] + st.window[0].len());
+    assert_eq!(via_slice, st.window[0], "slice and window must agree in the same space");
+
+    // The head sits where the window says.
+    assert_eq!(tape0.head_index(), st.heads[0], "head_index is the coordinate window_start counts from");
+
+    // A slice spanning the whole tape agrees with `snapshot`, the one other materialization. This is
+    // what catches a missed reversal on the `right` stack: a window of radius 4 around a head sitting
+    // near a tape end can be short enough on one side that a transposition still produces the same
+    // cells, whereas the full extent cannot.
+    let (whole, head) = tape0.snapshot();
+    assert_eq!(tape0.slice(0, usize::MAX), whole, "a slice of everything is the snapshot");
+    assert_eq!(head, tape0.head_index(), "snapshot and head_index count in the same space");
+
+    // Every sub-range of a bounded band AROUND THE HEAD agrees with the same sub-range of `snapshot`,
+    // which pins the mapping cell by cell rather than only at the ends: `slice` has a distinct arm for
+    // the `left` stack, the head, and the (reversed) `right` stack, and a band straddling the head is
+    // what makes ranges that hit one arm, two, or all three all occur. Bounded rather than exhaustive
+    // over the whole tape because this fixture's REG bank is thousands of cells and the check is
+    // quadratic — 41 cells is enough to cover every arm and every boundary between them.
+    let lo = head.saturating_sub(20);
+    let hi = (head + 21).min(whole.len());
+    for from in lo..hi {
+        for to in from..=hi {
+            assert_eq!(tape0.slice(from, to), whole[from..to], "slice({from}, {to}) must match the snapshot");
+        }
+    }
+
+    // Out-of-range is clamped, not a panic.
+    assert!(tape0.slice(0, usize::MAX).len() >= st.window[0].len());
+    assert!(tape0.slice(usize::MAX, usize::MAX).is_empty(), "a start past the end yields nothing");
+    assert!(tape0.slice(5, 2).is_empty(), "an inverted range yields nothing rather than panicking");
+}
+
+/// `tmProgram()` is where a renderer learns the machine's shape, and the entry state is part of it.
+#[test]
+fn tm_program_reports_the_machines_start_state() {
+    let (machine, _) = tm_fixture("let x = 40; x + 2");
+    let p = TmProgram::of(&machine, 64);
+    assert_eq!(p.start, machine.start);
+    assert!(p.states.get(p.start as usize).is_some(), "the entry state must name a state that exists");
+}
+
+/// §6.2's dual-focus highlight needs the Core node the current TM state came from. The map resolves
+/// it by the state's printed NAME, which is why `window` needs the map — `tm_owner` takes a name.
+#[test]
+fn tm_state_resolves_its_source_node_through_the_map() {
+    let (program, core, map, machine, init) = tm_fixture_with_map("let x = 40; x + 2");
+    let _ = (&program, &core);
+    let mut c = redextape_core::trace::TmCursor::new(&machine, &init, tm_caps());
+
+    let mut saw_some = false;
+    for _ in 0..200 {
+        let st = TmState::window(&c, &map, 2);
+        if st.source_node.is_some() {
+            saw_some = true;
+            break;
+        }
+        if c.next().is_none() {
+            break;
+        }
+    }
+    assert!(saw_some, "at least one visited state should belong to a Core node");
+
+    // A map with no TM leg resolves nothing — the map says nothing where the lowering said nothing.
+    let mut c2 = redextape_core::trace::TmCursor::new(&machine, &init, tm_caps());
+    c2.by_ref().take(10).count();
+    assert_eq!(TmState::window(&c2, &empty_map(), 2).source_node, None);
+}
+
 #[test]
 fn the_ast_returns_none_over_budget_rather_than_a_partial_tree() {
     let (term, map) = lambda_fixture(&big_list_program());
@@ -254,7 +344,7 @@ fn every_view_model_round_trips_through_json() {
 
     let mut c = redextape_core::trace::TmCursor::new(&machine, &init, tm_caps());
     c.by_ref().take(20).count();
-    let ts = TmState::window(&c, 8);
+    let ts = TmState::window(&c, &empty_map(), 8);
     let back: TmState = serde_json::from_str(&serde_json::to_string(&ts).expect("serialize")).expect("deserialize");
     assert_eq!(ts, back);
 }
@@ -282,20 +372,48 @@ fn lambda_fixture(src: &str) -> (redextape_core::lambda::LambdaTerm, redextape_c
 /// lowering path: integration tests are separate crates and cannot import one another's helpers, so
 /// this four-line body is copied, not reinvented.
 fn tm_fixture(src: &str) -> (redextape_core::tm::Machine, Vec<Vec<redextape_core::tm::Symbol>>) {
+    let (_, _, _, m, init) = tm_fixture_with_map(src);
+    (m, init)
+}
+
+/// `tm_fixture` plus the `Program`, `Core` and `SourceMap` the same source produces.
+///
+/// THE MACHINE IS LOWERED FROM THE MAP'S OWN `Core`, WHICH IS WHAT MAKES THE RESOLUTION TEST A TEST.
+/// `SourceMap`'s TM leg keys on the PRINTED NAME of each state in the machine `lower_tm_mapped` built
+/// while the map was being built, and `tm_owner` has deliberately no fallback to a similarly-spelled
+/// state. Lowering a separately-desugared `Core` here would risk a machine whose names the map has no
+/// claim on, and `source_node` would then be `None` everywhere for a reason that has nothing to do
+/// with the code under test. `desugar` is `desugar_mapped(..).0`, so routing the plain `tm_fixture`
+/// through this one changes no existing fixture's `Core`.
+fn tm_fixture_with_map(
+    src: &str,
+) -> (
+    redextape_core::ast::Program,
+    redextape_core::core::Core,
+    SourceMap,
+    redextape_core::tm::Machine,
+    Vec<Vec<redextape_core::tm::Symbol>>,
+) {
     use redextape_core::tm::{Encoding, REG, TAPES, Unary, WORK, defunc, lower_asm, lower_tm, n_slots_of};
     let (p, ds) = redextape_core::parser::parse(src);
     assert!(ds.is_empty(), "parse errors in {src:?}: {ds:?}");
-    let core = redextape_core::desugar::desugar(&p.expect("fixture parses"));
+    let program = p.expect("fixture parses");
+    let enc = Unary::default();
+    let (core, map) = SourceMap::build_from_program(&program, &enc);
     let prog = match lower_asm(&core) {
         Ok(p) => p,
         Err(_) => lower_asm(&defunc(&core).expect("defunc")).expect("lower"),
     };
-    let enc = Unary::default();
     let m = lower_tm(&prog, &enc);
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots_of(&prog));
     init[WORK] = enc.init_work();
-    (m, init)
+    (program, core, map, m, init)
+}
+
+/// A map with no legs at all — what `TmState::window` must resolve nothing against.
+fn empty_map() -> SourceMap {
+    SourceMap::default()
 }
 
 /// Same default caps `trace_equivalence.rs` drives its cursor tests with.

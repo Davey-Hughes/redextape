@@ -73,8 +73,9 @@ LEGS=(
   "base|clippy|--workspace --all-targets"
   "base|test|--workspace"
   "base|test|-p redextape-core --features serde"
-  "base|wasm|"
-  "base|wasm|--features serde"
+  "base|wasm|-p redextape-core --lib"
+  "base|wasm|-p redextape-core --lib --features serde"
+  "base|wasm|-p redextape-wasm --lib"
   "base|build|-p redextape-native --no-default-features"
   "base|clippy|-p redextape-native --no-default-features --all-targets"
   "base|test|-p redextape-native --no-default-features"
@@ -239,10 +240,16 @@ do_leg() {
     probe)  ensure_llvm_prefix ;;
     wasmprobe) ensure_wasm_target ;;
     # Parameterized on cargo args, not a second kind: a `wasm` row is `cargo check --target
-    # wasm32-unknown-unknown -p redextape-core --lib` plus whatever the row appends, so `--features
-    # serde` builds exactly the wasm32+serde configuration PR 3 uses and `Cargo.toml`'s `serde`
-    # dependency comment cites — the one config the default-features-only wasm leg never built.
-    wasm)   ensure_wasm_target; run cargo check --target wasm32-unknown-unknown -p redextape-core --lib "$@" ;;
+    # wasm32-unknown-unknown` plus whatever the row supplies, so `--features serde` builds exactly the
+    # wasm32+serde configuration `Cargo.toml`'s `serde` dependency comment cites — the one config the
+    # default-features-only wasm leg never built.
+    #
+    # THE PACKAGE MOVED FROM HERE INTO THE ROWS when `redextape-wasm` arrived. It used to be hardcoded
+    # as `-p redextape-core --lib`, which cannot express a second crate: appending `-p redextape-wasm`
+    # to that would check both packages in one invocation and report them as one leg, so a crate whose
+    # ONLY real target is wasm32 would fail under the other crate's name. Each row names its own
+    # package now, which costs one repeated fragment per row and buys a leg per crate.
+    wasm)   ensure_wasm_target; run cargo check --target wasm32-unknown-unknown "$@" ;;
     *)      echo "error: unknown leg kind: $kind" >&2; exit 1 ;;
   esac
 }
