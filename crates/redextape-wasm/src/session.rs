@@ -14,7 +14,7 @@ use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::machine::Machine;
 use redextape_core::tm::{self, EncodingKind, Symbol, Tape, TmRun};
 use redextape_core::trace::{LambdaCursor, TmCursor};
-use redextape_core::viewmodel::{LambdaState, TermNode, TmProgram, TmState};
+use redextape_core::viewmodel::{LambdaState, TermTree, TmProgram, TmState};
 use redextape_core::{Diagnostic, Severity, Span, parser, typeck};
 
 /// Why the TM leg is absent. `TmRun` already distinguishes these and the UI must not flatten them:
@@ -440,9 +440,12 @@ impl Session {
         Ok(LambdaState::render(c, byte_budget))
     }
 
-    /// The term as a tree, or `None` when it exceeds `node_budget` — `None` rather than a partial
+    /// The term as a flat tree, or `None` when it exceeds `node_budget` — `None` rather than a partial
     /// tree, because a truncated AST is a lie about the term's shape.
-    pub fn lambda_ast(&self, node_budget: usize) -> Result<Option<TermNode>, SessionError> {
+    ///
+    /// The payload is an ARENA (`TermTree`), not a tree of boxes, so neither serializing it across the
+    /// boundary nor dropping it afterwards recurses. See `viewmodel::TermTree`.
+    pub fn lambda_ast(&self, node_budget: usize) -> Result<Option<TermTree>, SessionError> {
         let c = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
         Ok(LambdaState::ast(c, node_budget))
     }

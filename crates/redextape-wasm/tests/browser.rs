@@ -28,7 +28,7 @@
 // free helpers below. Stated per target, the same way `viewmodel_contract.rs` does.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use js_sys::{Array, Function, Reflect};
+use js_sys::{Array, Function, JSON, Object, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::*;
 
@@ -36,6 +36,14 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 fn get(obj: &JsValue, key: &str) -> JsValue {
     Reflect::get(obj, &JsValue::from_str(key)).unwrap_or_else(|_| panic!("no property {key}"))
+}
+
+/// Writes `msg` to the browser's console via `console.log`, so a measurement this file makes can be
+/// read back out of a headless run rather than only asserted on -- `wasm-pack test --headless` forwards
+/// the page's console to this process's own output.
+fn console_log(msg: &str) {
+    let console = get(&JsValue::from(js_sys::global()), "console");
+    call(&console, "log", &[JsValue::from_str(msg)]);
 }
 
 fn num(obj: &JsValue, key: &str) -> f64 {
@@ -58,6 +66,46 @@ fn compile(src: &str) -> (Array, JsValue) {
     let out = redextape_wasm::compile(src, "unary").expect("compile must not throw");
     let diagnostics: Array = get(&out, "diagnostics").unchecked_into();
     (diagnostics, get(&out, "session"))
+}
+
+/// The height of a `TermTree` arena (`ast`, a `lambdaAst` result), computed as a single linear pass
+/// over `nodes` rather than by recursing — this is the capability the flat, post-order arena exists to
+/// provide, and using it here is the same walk a real renderer would need to lay a term out without
+/// recursing in JavaScript. A nested `Box`-shaped payload would force that walk to recurse instead;
+/// this helper is a consumer-side demonstration that the arena shape avoids it.
+///
+/// Post-order guarantees `child_index < parent_index` for every child, so by the time index `i` is
+/// reached, `depth[child]` has already been computed for every child `i` can name: no worklist, no
+/// stack, no recursion, one forward pass filling a growing `Vec`. `depth[i]` is `0` for `Var`, `1 +
+/// depth[body]` for `Abs`, and `1 + max(depth[f], depth[a])` for `App`; the tree's height is the
+/// maximum over all of them (which is always `depth[root]`, since a node's depth already folds in
+/// every depth beneath it — the max is taken explicitly anyway so this makes no assumption about which
+/// index the root is).
+fn depth(ast: &JsValue) -> u32 {
+    let nodes: Array = get(ast, "nodes").unchecked_into();
+    let len = nodes.length();
+    let mut depths: Vec<u32> = Vec::with_capacity(len as usize);
+    for i in 0..len {
+        let node = nodes.get(i);
+        let var = get(&node, "Var");
+        let d = if !var.is_undefined() {
+            0
+        } else {
+            let abs = get(&node, "Abs");
+            if !abs.is_undefined() {
+                let tuple: Array = abs.unchecked_into();
+                let body = tuple.get(1).as_f64().expect("Abs body index marshals as a number") as usize;
+                1 + depths[body]
+            } else {
+                let app: Array = get(&node, "App").unchecked_into();
+                let f = app.get(0).as_f64().expect("App fn index marshals as a number") as usize;
+                let a = app.get(1).as_f64().expect("App arg index marshals as a number") as usize;
+                1 + depths[f].max(depths[a])
+            }
+        };
+        depths.push(d);
+    }
+    depths.into_iter().max().unwrap_or(0)
 }
 
 #[wasm_bindgen_test]
@@ -101,7 +149,64 @@ fn compile_step_and_read_both_legs() {
 
     let ast = call(&session, "lambdaAst", &[JsValue::from_f64(1_000_000.0)]);
     assert!(!ast.is_null(), "an unreachable node budget yields a tree");
-    // `None` must arrive as `null`, not `undefined` — §5.1 writes this `TermNode | null`.
+
+    // THE WIRE SHAPE, MEASURED RATHER THAN DESIGNED — PR 3b's `Decoded` lesson, applied before the
+    // fact this time. `TermTree` is a struct, so it crosses as an object with `nodes` and `root`;
+    // `TermNode` is an EXTERNALLY TAGGED enum, so each node is `{ Var: n }`, `{ Abs: [name, body] }`
+    // or `{ App: [f, a] }`. A consumer branches on which key is present — there is no `kind` field.
+    let nodes: Array = get(&ast, "nodes").unchecked_into();
+    assert!(nodes.length() > 0, "a term has at least one node");
+    assert_eq!(
+        num(&ast, "root"),
+        f64::from(nodes.length() - 1),
+        "post-order puts the root last, and `root` says so explicitly"
+    );
+
+    // The term here is Church 42 — `λf. λx. f (f ... x)` — so its root is an `Abs`.
+    let root_node = nodes.get(nodes.length() - 1);
+    let abs: Array = get(&root_node, "Abs").unchecked_into();
+    assert_eq!(abs.length(), 2, "`Abs(String, u32)` crosses as a two-element tuple");
+    assert!(abs.get(0).as_string().is_some(), "the binder name marshals as a string");
+    // THE LOAD-BEARING ASSERTION FOR `u32` OVER `usize`: an index must arrive as a JS number. A
+    // `usize` child would cross as a `bigint`, which `as_f64` cannot read and a renderer cannot index
+    // an array with.
+    assert!(abs.get(1).as_f64().is_some(), "the body index marshals as a number, not a bigint");
+
+    // `{Var:n}` and `{App:[f,a]}` ARE PUBLISHED AS MEASURED FACTS TOO (this file's own comment two
+    // blocks up), but until now only `Abs` was actually exercised above. Found by scanning the arena
+    // for a real occurrence of each rather than constructing one by hand: Church 42's body is an `App`
+    // spine of `f` applied to itself repeatedly, ending in `x`, so both variants exist in this tree.
+    let mut saw_var = false;
+    let mut saw_app = false;
+    for i in 0..nodes.length() {
+        let node = nodes.get(i);
+        let var = get(&node, "Var");
+        if !var.is_undefined() {
+            assert!(var.as_f64().is_some(), "node {i}: `Var(u32)` must cross as a bare number, got {var:?}");
+            saw_var = true;
+        }
+        let app = get(&node, "App");
+        if !app.is_undefined() {
+            let app_pair: Array = app.unchecked_into();
+            assert_eq!(app_pair.length(), 2, "node {i}: `App(u32, u32)` must cross as a two-element tuple");
+            assert!(
+                app_pair.get(0).as_f64().is_some(),
+                "node {i}: App's fn index must marshal as a number, not a bigint"
+            );
+            assert!(
+                app_pair.get(1).as_f64().is_some(),
+                "node {i}: App's arg index must marshal as a number, not a bigint"
+            );
+            saw_app = true;
+        }
+        if saw_var && saw_app {
+            break;
+        }
+    }
+    assert!(saw_var, "Church 42's arena has no Var node to assert {{Var:n}} against -- fixture assumption broke");
+    assert!(saw_app, "Church 42's arena has no App node to assert {{App:[f,a]}} against -- fixture assumption broke");
+
+    // `None` must arrive as `null`, not `undefined` — §5.1 writes this `TermTree | null`.
     let refused = call(&session, "lambdaAst", &[JsValue::from_f64(1.0)]);
     assert!(refused.is_null(), "a 1-node budget refuses, and refusal marshals as null");
     assert!(!refused.is_undefined(), "null, specifically — a renderer testing `=== null` must see it");
@@ -283,6 +388,241 @@ fn a_deep_but_legal_program_needs_the_raised_shadow_stack() {
     assert!(!session.is_null(), "and at 8 MiB it compiles instead of trapping");
     let lambda = call(&session, "lambdaStatus", &[]);
     assert_eq!(get(&lambda, "available"), JsValue::TRUE, "the λ lowering really recursed 600 deep");
+}
+
+/// THE DEPTH-TOLERANCE CASE, and it samples a REDUCED term rather than a compiled one — and, unlike
+/// the version this replaces, it MEASURES depth rather than only checking `lambdaAst` came back
+/// non-null. A non-null result is true regardless of how deep the sampled term was, since the node
+/// budget below is unreachable by construction; only reading the arena's actual height, via `depth`
+/// above, can tell a shallow sample from a deep one.
+///
+/// NOT A REGRESSION TEST, and the distinction is recorded rather than glossed: measured before the
+/// arena landed, the `Box`-shaped `TermNode` did not trap at any depth the guards admit on the 8 MiB
+/// shadow stack. There is no crash here to pin. What this is instead is a TRIPWIRE: a future change
+/// that reintroduces per-level recursion into `lambdaAst`'s marshaling, or that lowers the shadow
+/// stack, has nothing to trap on today — this case is what would first notice, by no longer being able
+/// to walk a term this deep without itself recursing into a stack it does not have.
+///
+/// MEASURED IN THIS RUN, IN HEADLESS CHROME, NOT ASSUMED FROM AN EARLIER ONE: fourteen samples at
+/// 100-step spacing (thirteen mid-reduction, the fourteenth the normal form) —
+/// `[607, 707, 807, 907, 1007, 1107, 1207, 1307, 1407, 1507, 1607, 1707, 1803, 1803]` — peak depth
+/// **1803**. The freshly compiled term alone is depth 607; sampling only that would pin a depth well
+/// under half of what this program actually reaches mid-reduction, which is why the loop steps rather
+/// than reading once. The assertion's threshold, 1,500, sits with real margin below the observed peak
+/// and well above the compile-time floor, so a pass means a mid-reduction depth was genuinely observed.
+///
+/// A GAP HONESTLY LEFT OPEN: 100-step sampling still discretizes a continuously changing depth, so the
+/// true peak between two adjacent samples could exceed any single one caught here. The two consecutive
+/// 1803s at the end suggest the depth had already leveled off near the normal form by then, and an
+/// earlier, coarser 300-step run of this same program recorded 1805 — close enough to this run's 1803
+/// to be consistent with a true peak in the low 1800s, but this test does not prove that number is the
+/// maximum, only that a depth in that neighborhood was reached.
+///
+/// THE HELPER ITSELF IS THE OTHER HALF OF THE POINT: `depth` is a consumer-side walk of the arena,
+/// computed with one linear pass and no recursion — the capability the flat, post-order shape exists to
+/// provide. A `Box`-shaped payload would force this exact walk to recurse in JavaScript instead.
+///
+/// THE BUDGET IS DELIBERATELY UNREACHABLE: `usize` is 32 bits on wasm32, so 4,000,000,000 is a node
+/// budget no term can exhaust. A `null` would mean the BUDGET refused rather than the depth being
+/// tolerated, and the case would pass for the wrong reason.
+#[wasm_bindgen_test]
+fn the_ast_tolerates_the_deepest_term_a_reduction_reaches() {
+    let elems = vec!["0"; 600].join(", ");
+    let (diagnostics, session) = compile(&format!("[{elems}]"));
+    assert_eq!(diagnostics.length(), 0, "a 600-deep cons spine is inside every front-end guard");
+    assert!(!session.is_null(), "and it compiles at 8 MiB");
+
+    // MEASURED, NOT THE BRIEF'S DRAFTED `2_000`: this program normalizes in exactly 1,200 β-steps
+    // (confirmed via `lambdaState`'s `step` field in a headless-Chrome run), so a 100-step chunk gives
+    // roughly a dozen samples across the run rather than four (this run took fourteen, see below) — a
+    // spacing dense enough that the earlier 300-step version, which sampled the same run in only four
+    // places, could straddle the depth peak entirely.
+    let mut chunks = 0;
+    let mut depths: Vec<u32> = Vec::new();
+    loop {
+        let ast = call(&session, "lambdaAst", &[JsValue::from_f64(4_000_000_000.0)]);
+        assert!(!ast.is_null(), "the arena crosses at chunk {chunks}");
+        depths.push(depth(&ast));
+        let status = call(&session, "runLambda", &[JsValue::from_f64(100.0)]);
+        chunks += 1;
+        assert!(chunks < 500, "this program normalizes well inside 500 chunks");
+        if status.as_string().as_deref() != Some("Running") {
+            break;
+        }
+    }
+
+    let ast = call(&session, "lambdaAst", &[JsValue::from_f64(4_000_000_000.0)]);
+    assert!(!ast.is_null(), "and on the normal form too");
+    depths.push(depth(&ast));
+    assert!(chunks > 1, "the loop must have actually stepped — one chunk means the run never ran");
+
+    // MEASURED IN THIS BROWSER, THIS RUN: fourteen samples (thirteen mid-reduction plus the normal
+    // form), `[607, 707, 807, 907, 1007, 1107, 1207, 1307, 1407, 1507, 1607, 1707, 1803, 1803]`, peak
+    // 1803. 1,500 is comfortably below that peak — a margin of roughly 300 — and comfortably above the
+    // 607 the compiled-but-unreduced term alone would give, so a passing run has actually observed a
+    // mid-reduction depth, not merely the term this program starts from.
+    let peak = depths.iter().copied().max().unwrap_or(0);
+    assert!(peak > 1_500, "peak sampled depth was {peak}, expected > 1500; samples were {depths:?}");
+}
+
+/// MEASURES V8's OWN LIMITS on a nested plain JS object, independent of `TermTree`/`TermNode`
+/// entirely. The design's load-bearing justification for this whole branch is a claim that was never
+/// run: *"a 3,000-deep nested object still traps a recursive JS walk or a `JSON.stringify`"*
+/// (`docs/superpowers/specs/2026-08-07-termnode-arena-design.md:37`). This project's own standard —
+/// applied to the Rust side just above, in `the_ast_tolerates_the_deepest_term_a_reduction_reaches` —
+/// is that a claim like this is not established until a program chosen to break it has actually been
+/// run. This test runs it, checking both the design's own quoted 3,000 and the smaller 1,805 this
+/// project's own reduction is independently measured to reach (a native run recorded in the roadmap;
+/// this file's own sampling above measured 1,803).
+///
+/// BUILT ITERATIVELY: `nested_object` wraps one plain object per level in a loop, never recursing to
+/// construct its own input — the fixture must not import the hazard it exists to measure.
+///
+/// MEASURED, HEADLESS CHROME, THIS RUN (Chrome via `wasm-pack test --headless --chrome`): at depth
+/// 1,805 AND at the design's own quoted depth of 3,000, `JSON.stringify` succeeds and the naive
+/// recursive walk also succeeds — **neither traps at either depth.** Bisecting further: `JSON.stringify`
+/// was not observed to fail at all, up through this test's own 1,000,000-depth safety cap (V8's
+/// stringifier does not appear to recurse one native call-stack frame per JS nesting level, unlike the
+/// walk below). The naive recursive walk has a real, reproducible boundary: it survives up to 15,000
+/// and fails by 15,031 (`RangeError: Maximum call stack size exceeded`) — more than 8x past 3,000, and
+/// more than 8x past the 1,805 this project's own programs actually reach.
+///
+/// VERDICT: the design's specific numeric claim does not hold on this stack. A 3,000-deep plain object
+/// traps NEITHER a naive recursive JS walk NOR `JSON.stringify` in headless Chrome — the walk's own
+/// boundary is roughly 5x deeper than 3,000, and `JSON.stringify` did not break within a cap more than
+/// 300x deeper. **This weakens this branch's stated justification** for the reason the design itself
+/// gives most weight to (§0's "now the load-bearing reason"). What remains true, and is worth keeping
+/// separate from the falsified number: a JS object CAN be built deep enough to overflow a naive
+/// recursive walk — the boundary is real, just at ~15,000 rather than 3,000 — and the arena's iterative
+/// `depth` helper above is what lets a consumer avoid ever reaching for that recursive walk at all. The
+/// insurance is real; it is insurance against a depth roughly 5x deeper than the design claimed, and
+/// `JSON.stringify` on this stack is not shown to be a hazard at any depth this project's own programs
+/// could plausibly produce.
+#[wasm_bindgen_test]
+fn v8_native_limits_on_a_nested_plain_js_object() {
+    /// Wraps `depth` plain objects around `null`, one key `"k"` per level: `{k:{k:{k:...null}}}}`.
+    /// ITERATIVE, deliberately: this fixture must not recurse to build the very input meant to measure
+    /// what recursion cannot survive.
+    fn nested_object(depth: u32) -> JsValue {
+        let mut acc = JsValue::NULL;
+        for _ in 0..depth {
+            let level = Object::new();
+            Reflect::set(&level, &JsValue::from_str("k"), &acc)
+                .unwrap_or_else(|e| panic!("Reflect::set failed while building a nested object: {e:?}"));
+            acc = level.into();
+        }
+        acc
+    }
+
+    /// `true` iff `JSON.stringify` completes on `v` without throwing.
+    fn stringify_survives(v: &JsValue) -> bool {
+        JSON::stringify(v).is_ok()
+    }
+
+    /// The one deliberately recursive function this file contains — see this test's own doc: it is
+    /// the thing under measurement, and it lives in JavaScript, not Rust (the module-wide iterative
+    /// rule binds Rust walks, not the JS program being measured). A named inner function DECLARATION,
+    /// not the anonymous outer function `Function::new_with_args` itself returns, so it has a name to
+    /// call recursively.
+    fn recursive_walker() -> Function {
+        Function::new_with_args(
+            "o",
+            "function walk(o) { \
+                 if (o === null || typeof o !== 'object') return 0; \
+                 return 1 + walk(o.k); \
+             } \
+             return walk(o);",
+        )
+    }
+
+    /// `true` iff `walker(v)` completes without throwing (a `RangeError: Maximum call stack size
+    /// exceeded` on a deep enough `v`).
+    fn walk_survives(walker: &Function, v: &JsValue) -> bool {
+        let args = Array::new();
+        args.push(v);
+        Reflect::apply(walker, &JsValue::UNDEFINED, &args).is_ok()
+    }
+
+    /// Coarse bisection, per this test's brief — exact-frame precision is not the point. `probe` is
+    /// assumed true-then-false as `n` grows (more nesting only costs more stack, never less): doubles
+    /// `hi` until `probe` fails or `cap` is hit, then narrows to within 50.
+    fn find_breakpoint(cap: u32, mut probe: impl FnMut(u32) -> bool) -> (u32, u32) {
+        let mut lo = 0u32;
+        let mut hi = 1_000u32.min(cap);
+        while probe(hi) {
+            lo = hi;
+            if hi >= cap {
+                return (lo, hi); // never broke within the safety cap
+            }
+            hi = hi.saturating_mul(2).min(cap);
+        }
+        while hi - lo > 50 {
+            let mid = lo + (hi - lo) / 2;
+            if probe(mid) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        (lo, hi)
+    }
+
+    let walker = recursive_walker();
+
+    // The two numbers this branch's own justification turns on: the design's own quoted depth, and
+    // the smaller depth this project's own reduction is independently measured to reach.
+    let designs_quoted_depth = 3_000u32;
+    let reachable = 1_805u32;
+    let stringify_at_quoted = stringify_survives(&nested_object(designs_quoted_depth));
+    let walk_at_quoted = walk_survives(&walker, &nested_object(designs_quoted_depth));
+    let stringify_at_reachable = stringify_survives(&nested_object(reachable));
+    let walk_at_reachable = walk_survives(&walker, &nested_object(reachable));
+
+    // Coarse bisection to find roughly where each actually breaks, independent of the two fixed
+    // depths above.
+    let cap = 1_000_000u32;
+    let (stringify_lo, stringify_hi) = find_breakpoint(cap, |n| stringify_survives(&nested_object(n)));
+    let (walk_lo, walk_hi) = find_breakpoint(cap, |n| walk_survives(&walker, &nested_object(n)));
+
+    console_log(&format!(
+        "FIX 2 measurement -- at depth {designs_quoted_depth} (the design's own quoted depth): \
+         stringify_ok={stringify_at_quoted} walk_ok={walk_at_quoted}. At depth {reachable} (this \
+         project's own reachable depth): stringify_ok={stringify_at_reachable} \
+         walk_ok={walk_at_reachable}. Bisected: stringify ok up to {stringify_lo}, fails by \
+         {stringify_hi} (cap {cap}); walk ok up to {walk_lo}, fails by {walk_hi} (cap {cap})."
+    ));
+
+    // THE LOAD-BEARING ASSERTIONS. First, the design's own quoted number: at depth 3,000, the claim
+    // says both operations trap. Measured, neither does.
+    assert!(
+        stringify_at_quoted,
+        "JSON.stringify trapped at depth {designs_quoted_depth}, the design's own quoted depth -- the \
+         claim would be correct after all"
+    );
+    assert!(
+        walk_at_quoted,
+        "the naive recursive walk trapped at depth {designs_quoted_depth}, the design's own quoted \
+         depth -- the claim would be correct after all"
+    );
+    // Second, the smaller depth this project's own programs are actually measured to reach -- the
+    // narrower and more directly relevant question.
+    assert!(stringify_at_reachable, "JSON.stringify trapped at depth {reachable}, the project's own reachable depth");
+    assert!(
+        walk_at_reachable,
+        "the naive recursive walk trapped at depth {reachable}, the project's own reachable depth"
+    );
+
+    // The walk's own measured boundary is real and reproducible: it must be found (not just "didn't
+    // break within the cap"), and it must sit comfortably above the design's own quoted depth -- which
+    // is the actual insurance the arena's iterative `depth` helper buys a consumer, now measured rather
+    // than assumed.
+    assert!(walk_hi <= cap, "the recursive walk never broke within the {cap}-depth safety cap");
+    assert!(
+        walk_lo > designs_quoted_depth,
+        "the recursive walk's measured survival boundary ({walk_lo}) does not clear the design's own \
+         quoted depth ({designs_quoted_depth}) -- the arena's iterative walk would no longer be buying \
+         real headroom over the hazard as described"
+    );
 }
 
 /// The two free exports, which take no session and must therefore be reachable as module-level

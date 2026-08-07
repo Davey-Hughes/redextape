@@ -260,8 +260,14 @@ pub struct TmState {            // per step — O(window), not O(tape)
     pub source_node: Option<NodeId>,
 }
 
-pub enum TermNode { Var(u32), Abs(String, Box<TermNode>), App(Box<TermNode>, Box<TermNode>) }
+pub struct TermTree { pub nodes: Vec<TermNode>, pub root: u32 }
+pub enum TermNode { Var(u32), Abs(String, u32), App(u32, u32) }
 ```
+
+> **CORRECTED 2026-08-07.** This section originally specified `Box` children. That gave the type two
+> recursive paths — a derived `Serialize` and a derived `Drop`, both linear in depth — on a value that
+> crosses the wasm boundary, where a trap does not unwind. See
+> [`2026-08-07-termnode-arena-design.md`](2026-08-07-termnode-arena-design.md).
 
 **`source_node` was removed from `LambdaState` in PR 2 — corrected here, not silently edited.** It
 shipped for one PR, computed by an `owning_node` helper from a caller-supplied redex `Path`. It was
@@ -278,10 +284,16 @@ named the same node, "let x = 40;"; `x + 2` was never named. That is worse than 
 
 ```rust
 impl LambdaState { pub fn render(c: &LambdaCursor, byte_budget: usize) -> LambdaState; } // corrected twice in PR 2 — see the note below
-impl LambdaState { pub fn ast(c: &LambdaCursor, node_budget: usize) -> Option<TermNode>; }
+impl LambdaState { pub fn ast(c: &LambdaCursor, node_budget: usize) -> Option<TermTree>; } // CORRECTED 2026-08-07 — see the note below
 impl TmProgram   { pub fn of(m: &Machine, width: usize) -> TmProgram; }
 impl TmState     { pub fn window<M: Borrow<Machine>>(c: &TmCursor<M>, radius: usize) -> TmState; }
 ```
+
+> **CORRECTED 2026-08-07.** This section originally specified `ast` returning `Option<TermNode>`, the
+> `Box`-shaped type §4.2 has since replaced with a flat arena. `LambdaState::ast` returns
+> `Option<TermTree>` now — the same correction §4.2 makes to the type itself and §5.1 makes to the
+> TypeScript signature that crosses it. See
+> [`2026-08-07-termnode-arena-design.md`](2026-08-07-termnode-arena-design.md).
 
 **Core never picks a window radius or a truncation threshold.** Those are renderer policy, and policy
 in a library is how it stops being reusable. The builders take the numbers.
@@ -420,7 +432,10 @@ class Session {
 
   stepLambda(): boolean
   lambdaState(byteBudget: number): LambdaState  // correct as written again — see the note below
-  lambdaAst(nodeBudget: number): TermNode | null
+  lambdaAst(nodeBudget: number): {  // CORRECTED 2026-08-07 — see the note below
+    nodes: ({ Var: number } | { Abs: [string, number] } | { App: [number, number] })[]
+    root: number
+  } | null
 
   tmProgram(): TmProgram
   stepTm(): boolean
@@ -433,6 +448,13 @@ class Session {
   sourceSpan(node: number): Span | null
 }
 ```
+
+**`lambdaAst`'s return type is corrected here, not left as drafted.** This section originally read
+`lambdaAst(nodeBudget: number): TermNode | null`, describing the recursive `Box`-shaped type §4.2 has
+since replaced with a flat arena. The shape above is the arena's, and it is measured rather than
+drafted — `serde-wasm-bindgen` renders the enum externally tagged, confirmed in a browser test before
+this correction was written. See
+[`2026-08-07-termnode-arena-design.md`](2026-08-07-termnode-arena-design.md) §7.3.
 
 The two legs step independently. **Synchronized stepping is v1.5** (§6.3, deferred for the
 order-mismatch reason in §13.1) and this API deliberately does not pretend otherwise.

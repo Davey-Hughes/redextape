@@ -22,8 +22,8 @@
 # CI one. See the `rust-scoped` job's header for what that leaves the job buying.
 #
 # THE DEFAULT IS ALWAYS TO RUN MORE. A path this script has not been taught escalates to
-# `check-all.sh --no-llvm`; it never becomes a skip. Permissive scoping — skipping instead of
-# escalating — is how a gate ends up covering less than its name claims.
+# `check-all.sh --no-llvm --no-browser`; it never becomes a skip. Permissive scoping — skipping
+# instead of escalating — is how a gate ends up covering less than its name claims.
 #
 # WHY binary() AND NOT rdeps() FOR TESTS: Cargo test and example targets are LEAVES — nothing in the
 # build graph depends on them — so a change confined to them provably cannot alter another target's
@@ -135,7 +135,11 @@ if [ -n "$force_full" ]; then
   echo
   echo "==> CANNOT SCOPE: '$force_full' is not a path this script knows how to bound."
   echo "    Escalating to the fast full tier. This is the fail-safe, not a failure."
-  run ./scripts/check-all.sh --no-llvm
+  # --no-browser TOO, and dropping it here would be a silent escalation in cost rather than in
+  # coverage. This is the CHEAP draft-PR path; the browser tier needs Chrome and wasm-pack, which
+  # this script has never required, so selecting it would make the fail-safe fail outright on a
+  # machine where the narrow check was fine. `rust-browser` in CI covers that tier.
+  run ./scripts/check-all.sh --no-llvm --no-browser
   exit 0
 fi
 

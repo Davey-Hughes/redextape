@@ -233,8 +233,11 @@ jobs:
             target
           key: cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-
-      - name: Feature matrix (non-LLVM configs)
-        run: ./scripts/check-all.sh --no-llvm
+      # BOTH opt-outs, not just --no-llvm. The browser tier joined the gate with the arena slice, and
+      # a bare --no-llvm now selects it — which would make this job the only one needing Chrome while
+      # `rust-browser` below already installs it. Same union-invariant split as LLVM, one tier wider.
+      - name: Feature matrix (non-LLVM, non-browser configs)
+        run: ./scripts/check-all.sh --no-llvm --no-browser
       # `llvm-cov nextest`, not `llvm-cov --all-targets`, for the same reason the gate above switched
       # runners. Measured on this tree before the swap: 373.7s -> 164.6s (2.27x).
       #
@@ -327,9 +330,37 @@ jobs:
         uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /var/cache/apt/archives
-          key: apt-llvm-22-${{ runner.os }}
+          # NO `runner.os` IN THE KEY, AND A restore-keys FALLBACK — corrected 2026-08-07 after this
+          # cache went from hitting to missing without its key being edited. `runner.os` is a
+          # CONSTANT in this repository (every job is `runs-on: docker`), so it discriminated nothing
+          # while adding a component the runner can change underneath us; when its value moved, the
+          # key moved with it and the previous cache became unreachable. These two apt caches were
+          # also the only ones in this file without `restore-keys`, so they were the only ones with
+          # no prefix fallback to soften exactly that. The bare prefix below still matches the older
+          # `apt-llvm-22-Linux` and `apt-llvm-22-` spellings, so the existing cache is recoverable
+          # rather than abandoned.
+          key: apt-llvm-22
+          restore-keys: apt-llvm-22
       - name: Install LLVM 22 (unconditional — apt skips re-downloading cached .debs, but always installs)
         run: |
+          # WITHOUT THIS THE CACHE STEP ABOVE SAVES AN EMPTY DIRECTORY. Debian/Ubuntu container
+          # images ship /etc/apt/apt.conf.d/docker-clean, whose DPkg::Post-Invoke deletes every .deb
+          # from /var/cache/apt/archives the moment install finishes, leaving the post-job save
+          # nothing to store.
+          #
+          # THIS IS NOT WHY THE CACHE MISSED, and the first version of this comment said it was.
+          # **Corrected 2026-08-07:** it claimed this cache had probably never worked. Observed, it
+          # had been hitting and then stopped without its key being edited — which docker-clean
+          # cannot explain, since it would have prevented every hit rather than ending a run of them.
+          # The miss is the key's, and is fixed at the cache step above.
+          #
+          # These two lines are still justified, on a distinction the wrong diagnosis skated over: A
+          # CACHE HIT DOES NOT MEAN THE CACHE HAD CONTENTS. An empty archive restores as a hit and
+          # saves no download at all, so "it was hitting" is consistent with it having been empty the
+          # whole time. This makes the archive actually non-empty; the key fix makes it findable.
+          # Whether the hits were previously carrying any .debs is still unmeasured.
+          rm -f /etc/apt/apt.conf.d/docker-clean
+          echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
           apt-get update && apt-get install -y --no-install-recommends lsb-release wget software-properties-common gnupg
           wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
@@ -372,6 +403,111 @@ jobs:
       - name: Optimization report (informational, never gating)
         run: cargo run --release --example opt_report -p redextape-native --features llvm
 
+  # THE BROWSER TIER, and it covers the one thing no other job in this workflow can reach.
+  #
+  # `rust`'s wasm legs prove the crates BUILD for wasm32. They cannot prove the boundary WORKS:
+  # `#[wasm_bindgen]`'s generated glue and `serde-wasm-bindgen`'s marshalling only execute in a
+  # browser, and `redextape-wasm` is deliberately structured so that every branch lives in
+  # `session.rs` and is tested natively — which means a wasm-bindgen or serde-wasm-bindgen bump can
+  # change what actually crosses the boundary with every other job in this file green. The wire shape
+  # `web/` will code against (`{"Var":n}`, `{"Abs":[name, idx]}`) is asserted here and nowhere else.
+  #
+  # NOT continue-on-error, for the same reason `rust-slow` is not: a job permitted to fail is not
+  # coverage. Its own cache key, like `rust-llvm`, so it does not evict the `rust` job's.
+  #
+  # `gate` REQUIRES THIS UNDER has_rust, NOT has_web, and that is permanent rather than provisional.
+  # The boundary under test belongs to `redextape-wasm`; `web/` is a CONSUMER of it. Tying the job to
+  # has_web would leave the boundary unguarded for exactly as long as it has no consumer — the window
+  # in which it is easiest to break unnoticed — and landing PR 3c would not change which crate owns
+  # the thing being tested. So this is not a gate to "update later" in that direction.
+  #
+  # WHAT WOULD LEGITIMATELY CHANGE IT IS COST, NOT CORRECTNESS. `has_rust` is `[ -f Cargo.toml ]`, so
+  # it is true on every run here — an auto-activate switch, not a filter — and this job therefore runs
+  # for changes that cannot possibly affect the boundary. The successor is the path-gated `detect`
+  # output already deferred in this file's `pull_request` comment above.
+  #
+  # WHEN THAT LANDS, THE OBVIOUS PATH SET IS WRONG AND WOULD GUT THIS JOB. Scoping it to
+  # `crates/redextape-wasm/**` misses what it primarily exists to catch: a wasm-bindgen or
+  # serde-wasm-bindgen bump changing what actually crosses, which shows up in **`Cargo.lock`** and
+  # nowhere else. `.cargo/config.toml` belongs in the set too — it carries the 8 MiB shadow-stack link
+  # arg the depth cases were calibrated against — as does `crates/redextape-core/**`, since the view
+  # models that cross the boundary are defined there rather than here.
+  #
+  # Caches /var/cache/apt/archives rather than the installed Chrome, and keeps `apt-get install`
+  # unconditional — the same reasoning `rust-llvm` documents above: a directory cache that skips the
+  # install would leave the shared libraries dpkg registers outside that directory missing on every
+  # run after the first.
+  rust-browser:
+    needs: detect
+    # Non-draft PRs, pushes and dispatches — matching the other full-tier jobs. A DRAFT PR gets
+    # `rust-scoped` instead.
+    if: >-
+      needs.detect.outputs.has_rust == 'true'
+      && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: docker
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust (respects rust-toolchain.toml) + the wasm32 target
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+          . "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup show
+          rustup target add wasm32-unknown-unknown
+      # NO cargo-nextest here, and that is deliberate rather than an omission: `--browser-only`
+      # selects no `test` legs, so check-all.sh does not demand the runner. `rust` and `rust-llvm`
+      # both install it because their tiers do have `test` rows.
+      - name: Install wasm-pack (the browser leg drives the boundary through it)
+        run: |
+          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
+            | tar xzf - --strip-components=1 -C /usr/local/bin --wildcards '*/wasm-pack'
+          wasm-pack --version
+      - name: Cache the Chrome apt archive (avoids re-downloading the .deb every run)
+        uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: /var/cache/apt/archives
+          # No `runner.os`, plus a restore-keys prefix — see the identical block in `rust-llvm` for
+          # why: it is constant here, and a key with a volatile component and no fallback is what
+          # turned that cache from a hit into a miss without anyone editing it.
+          key: apt-chrome
+          restore-keys: apt-chrome
+      # GOOGLE CHROME SPECIFICALLY, not chromium. wasm-pack fetches a chromedriver matched to Chrome,
+      # and this is also the browser the boundary's depth figures were measured against — a different
+      # engine would be a different measurement wearing the same test's name.
+      #
+      # `google-chrome-stable` is the binary name the .deb installs, and check-all.sh's
+      # `ensure_browser` probes that exact path: wasm-pack itself only looks for `google-chrome`,
+      # which is the naming trap the script exists to absorb.
+      - name: Install Google Chrome (unconditional — apt skips re-downloading a cached .deb)
+        run: |
+          # Keep the downloaded .debs so the cache step above has something to save — see the
+          # identical block in `rust-llvm` for why: the base image's docker-clean deletes them
+          # post-install, which makes the archive cache a permanent miss rather than a cold one.
+          rm -f /etc/apt/apt.conf.d/docker-clean
+          echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+          apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates
+          install -d -m 0755 /etc/apt/keyrings
+          wget -qO- https://dl.google.com/linux/linux_signing_key.pub \
+            | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+            > /etc/apt/sources.list.d/google-chrome.list
+          apt-get update && apt-get install -y --no-install-recommends google-chrome-stable
+          google-chrome-stable --version   # fail loudly here rather than inside wasm-pack
+      - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-browser-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-browser-
+      # Chrome runs as root in this container, which it refuses to do sandboxed, and the container's
+      # /dev/shm is too small for it. Both are handled by `crates/redextape-wasm/webdriver.json`
+      # (`goog:chromeOptions.args`), which wasm-bindgen-test reads from the crate root — so this step
+      # is the bare invocation, and the flags live with the crate they apply to rather than here.
+      - name: Browser tier (the wasm boundary, in headless Chrome)
+        run: ./scripts/check-all.sh --browser-only
+
   # THE ONE REQUIRED STATUS CHECK. Nothing else in this workflow should be one, and the reason is
   # measured rather than stylistic.
   #
@@ -393,7 +529,7 @@ jobs:
   #
   # See docs/superpowers/specs/2026-08-04-ci-scope-filters-design.md §4.4.
   gate:
-    needs: [detect, linear-history, rust, rust-slow, rust-llvm, web]
+    needs: [detect, linear-history, rust, rust-slow, rust-llvm, rust-browser, web]
     if: always()
     runs-on: docker
     steps:
@@ -404,13 +540,19 @@ jobs:
           R_RUST: ${{ needs.rust.result }}
           R_SLOW: ${{ needs.rust-slow.result }}
           R_LLVM: ${{ needs.rust-llvm.result }}
+          R_BROWSER: ${{ needs.rust-browser.result }}
+          # R_WEB was briefly DROPPED here when R_BROWSER was added — replaced rather than joined —
+          # and `set -u` turned the unbound reference on the echo below into a hard failure before
+          # any `require` ran. Left as a note because the failure mode is the good one: the gate went
+          # red and blocked the merge rather than quietly evaluating `web` as not-success, which is
+          # what an unset-but-tolerated variable would have done.
           R_WEB: ${{ needs.web.result }}
           HAS_RUST: ${{ needs.detect.outputs.has_rust }}
           HAS_WEB: ${{ needs.detect.outputs.has_web }}
         run: |
           set -eu
           echo "detect=$R_DETECT linear-history=$R_LINEAR has_rust=$HAS_RUST has_web=$HAS_WEB"
-          echo "rust=$R_RUST rust-slow=$R_SLOW rust-llvm=$R_LLVM web=$R_WEB"
+          echo "rust=$R_RUST rust-slow=$R_SLOW rust-llvm=$R_LLVM rust-browser=$R_BROWSER web=$R_WEB"
 
           fail=0
           require() {
@@ -432,6 +574,11 @@ jobs:
             require rust "$R_RUST"
             require rust-slow "$R_SLOW"
             require rust-llvm "$R_LLVM"
+            # Gated on has_rust rather than has_web on purpose: the browser tier tests the RUST
+            # crate's wasm boundary, which exists whether or not `web/` does. Tying it to has_web
+            # would leave the boundary ungated for exactly as long as it has no consumer — the
+            # window in which it is easiest to break unnoticed.
+            require rust-browser "$R_BROWSER"
           else
             echo "detect reports no Rust — the Rust tier is not required on this run"
           fi

@@ -126,12 +126,40 @@ pub struct TmState {
     pub source_node: Option<NodeId>,
 }
 
+/// A λ term as a flat arena, so that NOTHING DERIVED ON IT RECURSES.
+///
+/// The obvious shape — `Abs(String, Box<TermNode>)` — gives the type two recursive paths, and both
+/// are linear in DEPTH rather than node count: serde's derived `Serialize` descends one frame per
+/// level, and the compiler's `drop_in_place` walks the `Box` chain the same way. A wasm trap does not
+/// unwind, so neither returns an error — both poison the module, and the `Drop` path fires where no
+/// caller can see it. `LambdaTerm`, the type this is built FROM, carries a hand-written iterative
+/// destructor (`lambda/term.rs:482`) for exactly that hazard; indices are how this type avoids
+/// needing one.
+///
+/// `nodes` is in POST-ORDER — every child precedes its parent — because the walk that builds it
+/// completes children before parents. `root` is therefore always `nodes.len() - 1`, and is stored
+/// anyway so a consumer never encodes that convention.
+///
+/// `nodes` is never empty: a term has at least one node, and a zero budget refuses at the first one,
+/// so `root` always indexes a real element.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TermTree {
+    pub nodes: Vec<TermNode>,
+    pub root: u32,
+}
+
+/// One node of a [`TermTree`]. Children are indices into that tree's `nodes`, never owned subtrees.
+///
+/// `u32` rather than `usize` is a BOUNDARY decision, not a memory one: wasm-bindgen maps `u64` to a
+/// JavaScript `bigint`, and `Var`'s de Bruijn index is already `u32`, so the payload stays uniformly
+/// numeric. On wasm32 `usize` is 32 bits, which makes the two exactly as wide as `node_budget` there.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TermNode {
     Var(u32),
-    Abs(String, Box<TermNode>),
-    App(Box<TermNode>, Box<TermNode>),
+    Abs(String, u32),
+    App(u32, u32),
 }
 
 impl LambdaState {
@@ -141,12 +169,16 @@ impl LambdaState {
         LambdaState { text, spans, truncated, step: c.steps_taken() }
     }
 
-    /// The term as a tree, or `None` if it exceeds `node_budget`.
+    /// The term as a flat tree, or `None` if it exceeds `node_budget`. A second, independent cause
+    /// also yields `None`: the arena's own `u32` index space overflowing before the budget would have
+    /// refused first (see `emit`'s doc for why that is a refusal rather than a panic) -- a consumer
+    /// reading only this entry point could not otherwise tell the two apart.
     ///
     /// `None` RATHER THAN A PARTIAL TREE. Truncated text is visibly truncated; a truncated AST is a lie
-    /// about the term's shape. The count happens during the walk for the same reason the printer's
-    /// budget does — building the tree and then measuring it defeats the purpose.
-    pub fn ast(c: &LambdaCursor, node_budget: usize) -> Option<TermNode> {
+    /// about the term's shape, and a partial arena would be the same lie with an index on it. The count
+    /// happens during the walk for the same reason the printer's budget does — building the tree and
+    /// then measuring it defeats the purpose.
+    pub fn ast(c: &LambdaCursor, node_budget: usize) -> Option<TermTree> {
         let mut budget = node_budget;
         to_tree(c.term(), &mut budget)
     }
@@ -166,18 +198,23 @@ enum Work<'a> {
 /// recursive walk survives — the same hazard `term.rs`'s own `Drop` and `logical_sizes` are iterative
 /// to avoid.
 ///
+/// IT BUILDS AN ARENA RATHER THAN A TREE OF `Box`ES, and that is what extends the same protection to
+/// everything that happens to the RESULT. This walk was always safe; the derived `Serialize` and
+/// derived `Drop` on the value it returned were not. See [`TermTree`].
+///
 /// THE BUDGET IS CHECKED BEFORE EACH NODE IS COUNTED AND BUILT, so a term that would exceed it returns
 /// `None` at the node that overshoots rather than after the whole tree is built and measured — an
-/// early `return` here abandons `work` and `results` without finishing them, which is fine because
-/// nothing downstream reads either once this function has returned.
+/// early `return` here abandons `work`, `nodes` and `results` without finishing them, which is fine
+/// because nothing downstream reads any of them once this function has returned.
 ///
-/// A SHARED SUBTERM COSTS THE BUDGET ONCE PER OCCURRENCE, not once per allocation: `TermNode` is an
-/// owned, unshared tree, so a DAG node reached through two parents becomes two distinct `TermNode`s,
-/// and both must be paid for — exactly as `print_lambda_capped` pays per occurrence in the text it
-/// writes, not per underlying `Rc`.
-fn to_tree<'a>(t: &'a LambdaTerm, budget: &mut usize) -> Option<TermNode> {
+/// A SHARED SUBTERM COSTS THE BUDGET ONCE PER OCCURRENCE, not once per allocation: the arena is
+/// unshared, so a DAG node reached through two parents becomes two distinct entries, and both must be
+/// paid for — exactly as `print_lambda_capped` pays per occurrence in the text it writes, not per
+/// underlying `Rc`.
+fn to_tree<'a>(t: &'a LambdaTerm, budget: &mut usize) -> Option<TermTree> {
     let mut work: Vec<Work<'a>> = Vec::new();
-    let mut results: Vec<TermNode> = Vec::new();
+    let mut nodes: Vec<TermNode> = Vec::new();
+    let mut results: Vec<u32> = Vec::new();
     work.push(Work::Enter(t));
     while let Some(item) = work.pop() {
         match item {
@@ -187,7 +224,7 @@ fn to_tree<'a>(t: &'a LambdaTerm, budget: &mut usize) -> Option<TermNode> {
                 }
                 *budget -= 1;
                 match term.node() {
-                    Node::Var(i) => results.push(TermNode::Var(*i)),
+                    Node::Var(i) => emit(&mut nodes, &mut results, TermNode::Var(*i))?,
                     Node::Abs(name, body) => {
                         work.push(Work::Abs(name.to_string()));
                         work.push(Work::Enter(body));
@@ -200,21 +237,36 @@ fn to_tree<'a>(t: &'a LambdaTerm, budget: &mut usize) -> Option<TermNode> {
                 }
             }
             // `f` was pushed after `a` (see the `App` arm above), so it is popped from `work` — and
-            // therefore built — first. Its `TermNode` lands in `results` first too, with `a`'s pushed
-            // on top once `a` finishes: `results` is itself a stack, so `a` comes off it FIRST and
-            // `f` comes off LAST.
+            // therefore built — first. Its index lands in `results` first too, with `a`'s pushed on
+            // top once `a` finishes: `results` is itself a stack, so `a` comes off it FIRST and `f`
+            // comes off LAST.
             Work::App => {
                 let a = results.pop()?;
                 let f = results.pop()?;
-                results.push(TermNode::App(Box::new(f), Box::new(a)));
+                emit(&mut nodes, &mut results, TermNode::App(f, a))?;
             }
             Work::Abs(name) => {
                 let body = results.pop()?;
-                results.push(TermNode::Abs(name, Box::new(body)));
+                emit(&mut nodes, &mut results, TermNode::Abs(name, body))?;
             }
         }
     }
-    results.pop()
+    let root = results.pop()?;
+    Some(TermTree { nodes, root })
+}
+
+/// Append `n` to the arena and push the index it landed at onto `results`.
+///
+/// `None` WHEN THE INDEX WOULD NOT FIT `u32`, refusing through the channel that already means "no
+/// tree" rather than panicking — a panic under wasm aborts the module, and `unreachable!` is ruled
+/// out for the same reason. 2^32 entries is on the order of 100 GB at `size_of::<TermNode>()`, so
+/// this cannot occur; it is written as a branch rather than an assumption because a branch that
+/// claims to be total and is not is the defect this project has corrected twice.
+fn emit(nodes: &mut Vec<TermNode>, results: &mut Vec<u32>, n: TermNode) -> Option<()> {
+    let idx = u32::try_from(nodes.len()).ok()?;
+    nodes.push(n);
+    results.push(idx);
+    Some(())
 }
 
 fn move_text(m: Move) -> &'static str {
@@ -311,21 +363,36 @@ mod tests {
         // `App(Var(0), Var(1))` is the minimal discriminator: a transposed pop order builds
         // `App(Var(1), Var(0))` instead, a difference `is_some()` cannot see. Built directly with the
         // `lambda::term` constructors, not lowered from source, so the expected shape is unambiguous.
+        //
+        // THE ARENA IS ASSERTED IN FULL, INDICES AND ALL, not just its root. Post-order is what makes
+        // `root == nodes.len() - 1` true, and an implementation that emitted the right nodes in the
+        // wrong order would still satisfy a root-only assertion.
         use crate::lambda::term::{app, var};
 
         let flat = app(var(0), var(1));
         let flat_ast = LambdaState::ast(&LambdaCursor::new(&flat, 1_000), usize::MAX);
-        assert_eq!(flat_ast, Some(TermNode::App(Box::new(TermNode::Var(0)), Box::new(TermNode::Var(1)))));
+        assert_eq!(
+            flat_ast,
+            Some(TermTree { nodes: vec![TermNode::Var(0), TermNode::Var(1), TermNode::App(0, 1)], root: 2 })
+        );
 
         // Nested one level, so a fix that only gets the outermost `App` right cannot pass: the
         // function position is itself an `App`, and its two children must land in order too.
         let nested = app(app(var(0), var(1)), var(2));
         let nested_ast = LambdaState::ast(&LambdaCursor::new(&nested, 1_000), usize::MAX);
-        let expected = TermNode::App(
-            Box::new(TermNode::App(Box::new(TermNode::Var(0)), Box::new(TermNode::Var(1)))),
-            Box::new(TermNode::Var(2)),
+        assert_eq!(
+            nested_ast,
+            Some(TermTree {
+                nodes: vec![
+                    TermNode::Var(0),
+                    TermNode::Var(1),
+                    TermNode::App(0, 1),
+                    TermNode::Var(2),
+                    TermNode::App(2, 3),
+                ],
+                root: 4,
+            })
         );
-        assert_eq!(nested_ast, Some(expected));
     }
 
     #[test]

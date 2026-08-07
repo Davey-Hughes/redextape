@@ -50,6 +50,33 @@ else
   echo "==> rustup not found; skipping wasm32 target (scripts/check-all.sh's wasm leg will fail without it)" >&2
 fi
 
+# wasm-pack drives `scripts/check-all.sh`'s BROWSER tier, which hard-fails without it for the same
+# reason as the two above. That tier is what proves the wasm boundary actually works — the wasm32
+# rows only prove it builds — so a fresh clone should be able to run it.
+#
+# CHROME IS NOT INSTALLED HERE, and the asymmetry is deliberate. A test runner and a compilation
+# target are development tooling; a web browser is a system application, and silently installing one
+# is not a setup script's business. The gate names what it needs and how to skip it
+# (`--no-browser`), which is the honest division: this script removes the friction it owns.
+if command -v wasm-pack >/dev/null 2>&1; then
+  echo "==> wasm-pack already installed ($(wasm-pack --version | head -1))"
+elif command -v brew >/dev/null 2>&1; then
+  brew install wasm-pack
+  echo "==> wasm-pack installed (brew)"
+else
+  cargo install wasm-pack --locked
+  echo "==> wasm-pack installed (cargo install)"
+fi
+
+# The browser tier also needs a Chrome that wasm-pack can find. Reported, never installed — see above.
+if [ -n "${CHROME_PATH:-}" ] || command -v google-chrome >/dev/null 2>&1 \
+  || [ -x /usr/bin/google-chrome-stable ] || [ -x /usr/bin/chromium ] \
+  || [ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
+  echo "==> Chrome found (scripts/check-all.sh's browser tier can run)"
+else
+  echo "==> no Chrome found; scripts/check-all.sh's browser tier will fail — install Chrome, or pass --no-browser" >&2
+fi
+
 if command -v pre-commit >/dev/null 2>&1; then
   pre-commit install
   echo "==> pre-commit hooks installed (cargo fmt + clippy)"

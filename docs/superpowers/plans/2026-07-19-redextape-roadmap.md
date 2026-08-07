@@ -2765,6 +2765,15 @@ because `ast::Expr::Method` discards the name's span (a two-line parser change f
 500,003); and `Tape`'s window accessors are `pub(crate)`, so PR 3 needs a small core change before it
 can implement `tapeSlice`.
 
+> **CLOSED 2026-08-07** — the `TermNode` item above, specifically. `TermNode`'s children are now `u32`
+> indices into a flat `TermTree`, so the derived `Drop` no longer recurses at any depth; the
+> `node_budget`/`MAX_LAMBDA_LOWER_DEPTH` distinction above no longer applies, because there is no
+> depth-linear path left to bound. Measured, not merely closed by construction: the recursive shape
+> did not trap at any reachable depth on the shipped 8 MiB shadow stack either, so this was structural
+> insurance, not a crash fix. See
+> [`../specs/2026-08-07-termnode-arena-design.md`](../specs/2026-08-07-termnode-arena-design.md) §0, §2.
+> The other three items in this list are unaffected and remain open.
+
 #### PLAN 4'S CONSUMER SLICE, THE WASM SESSION — `crates/redextape-wasm` (2026-08-05, PR #13)
 
 Design: [`../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md`](../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md) §5.
@@ -2978,6 +2987,11 @@ recursive walk cannot be trusted at this depth — but serde's derived `Serializ
 for `compile` only, not for `lambdaAst`. Recorded, not fixed: PR 3c is the first slice where a human
 clicks through that method, and it is the one that must check it.
 
+> **CLOSED 2026-08-07 — structurally, not by a guard.** `TermNode`'s children are now `u32` indices
+> into a flat `TermTree`, so neither derived impl recurses at any depth and no depth constant was
+> added. Design:
+> [`../specs/2026-08-07-termnode-arena-design.md`](../specs/2026-08-07-termnode-arena-design.md).
+
 **THERE ARE TWO RECURSIVE PATHS ON `TermNode`, NOT ONE, AND THE PROJECT ALREADY PAID TO FIX THIS
 HAZARD ONE TYPE OVER.** Alongside the derived `Serialize` above, `TermNode` (`viewmodel.rs`,
 `Abs(String, Box<TermNode>)` / `App(Box<TermNode>, Box<TermNode>)`) has a **derived `Drop`**, which
@@ -2993,6 +3007,13 @@ an error — both poison the module**, and the `Drop` path can fire while unwind
 entirely. `LambdaTerm::depth` is an O(1) stored invariant, so a depth guard on the `lambdaAst`
 boundary is cheap and does not need a measurement to justify it. Measure both paths, or guard the
 entry point, before PR 3c ships a UI that calls `lambdaAst`.
+
+> **CLOSED 2026-08-07, both ways this paragraph named.** Neither path needed a depth guard, and neither
+> was left at "measure or guard": `TermNode`'s children are now `u32` indices into a flat `TermTree`,
+> so `Serialize` and `Drop` are both closed structurally, at no depth. Measured before the fix landed,
+> the hazard also did not reproduce on the shipped 8 MiB shadow stack at any depth the front-end guards
+> admit — so this was not, in the end, a crash fix. See
+> [`../specs/2026-08-07-termnode-arena-design.md`](../specs/2026-08-07-termnode-arena-design.md) §0, §2.
 
 **One shape was filed and then fixed before merge.** `Session.program: Option<TmProgram>` was `Some`
 exactly when `Session.tm` was `Ok` — both were set from one match arm in `compile` — so the two fields
@@ -3095,11 +3116,35 @@ iterative, and a 600-element list's λ term is thousands of nodes deep. Whether 
 not established here and is out of this task's scope. **PR 3c, the first slice where a human clicks
 through `lambdaAst` and the session's other post-compile methods, must check it.**
 
+> **CORRECTED 2026-08-07 — "thousands of nodes deep" conflated node COUNT with DEPTH, and the
+> conflation overstated the risk by an order of magnitude.** Measured: a 600-element list's λ term is
+> **8,403 nodes with a depth of 607** at compile time — depth, not count, is the quantity both
+> recursive paths are linear in. Under reduction the same program reaches depth **1,805** natively
+> (**1,803** measured in a browser, the gap being sampling discretization), and an ordinary recursive
+> `sum(100)` reaches **3,001**, which is `MAX_TERM_DEPTH` itself. The question this paragraph left
+> open is answered, and not the way it feared: `lambdaAst` was called repeatedly across both
+> reductions on the shipped 8 MiB shadow stack and returned a tree every time — the trap does not
+> reproduce. See
+> [`../specs/2026-08-07-termnode-arena-design.md`](../specs/2026-08-07-termnode-arena-design.md) §0,
+> §2.
+
+> **CLOSED 2026-08-07 — structurally, not by a guard.** `TermNode`'s children are now `u32` indices
+> into a flat `TermTree`, so neither derived impl recurses at any depth and no depth constant was
+> added. Design:
+> [`../specs/2026-08-07-termnode-arena-design.md`](../specs/2026-08-07-termnode-arena-design.md).
+
 **And `Serialize` is only one of the two recursive paths on that type** — `TermNode`'s `Drop` is
 derived and recurses on the same spine, so the tree can also trap while being freed, on a path no
 caller can see. The boundary-completion entry above carries the full argument, including why this is
 known-real rather than theoretical: `LambdaTerm`, the type `TermNode` is built from, already has a
 hand-written iterative destructor (`lambda/term.rs:482`) for precisely this hazard.
+
+> **CLOSED 2026-08-07, and "known-real" is the phrase this entry's own design spec retracts.** Measured
+> on the shipped 8 MiB shadow stack, the hazard this paragraph calls known-real did not reproduce at any
+> depth the front-end guards admit — see
+> [`../specs/2026-08-07-termnode-arena-design.md`](../specs/2026-08-07-termnode-arena-design.md) §0.
+> What survives is structural: `TermNode`'s children are now `u32` indices into a flat `TermTree`, so
+> neither `Serialize` nor `Drop` recurses, regardless of depth.
 
 **`MAX_PARSE_DEPTH` WAS ITSELF UNREACHABLE ON STOCK WASM — the guard trapped before it could fire.**
 A 400-deep paren nest refuses natively at **300 parens written** (299 is the deepest accepted — the
@@ -3119,3 +3164,129 @@ precisely why the crash depth itself is recorded in this prose and not asserted 
 before any backend runs". It is not: a list literal is flat in the AST and `MAX_PARSE_DEPTH` counts
 `parse_binary`/block nesting only, so 2,000 elements still parse and typecheck with **zero**
 diagnostics. The shipped test uses nested parens, which is what that guard bounds.
+
+#### THE TERMNODE ARENA LANDS — structural insurance and consumer safety, NOT a crash fix (2026-08-07)
+
+Design: [`../specs/2026-08-07-termnode-arena-design.md`](../specs/2026-08-07-termnode-arena-design.md).
+Plan: [`2026-08-07-termnode-arena.md`](2026-08-07-termnode-arena.md).
+
+**MEASURED FIRST, AND THE MEASUREMENT FALSIFIED THE SLICE'S OWN PREMISE.** The `Box`-shaped `TermNode`
+the two entries above left open was tested in headless Chrome on the shipped 8 MiB shadow stack and
+did **not** trap at any depth the front-end guards admit. **So this is not a crash fix**, and writing
+it as one would have been the exact defect this roadmap's own lesson names — a hazard claim is not
+established until a program chosen to break it has been run, and this one never had been. What
+survives is **one** narrow reason: the bound that held is a property of today's frame sizes — 8 MiB,
+Chrome 151, this serde version — not of the type, and nothing in the type system keeps it that way.
+
+**A SECOND REASON WAS ARGUED, CALLED LOAD-BEARING, AND THEN FALSIFIED BY MEASUREMENT TOO — the same
+defect twice on one branch, caught by the final whole-branch review rather than by the author.** The
+design's §0 claimed that no Rust-side measurement reaches the JavaScript consumer, where a deep
+nested object "still traps a recursive walk or `JSON.stringify`". Nobody had run that either. Measured
+in headless Chrome: **`JSON.stringify` never traps** — clean at 1,000,000 deep, because V8's
+implementation is not recursive — and **a naive recursive JS walk survives to ~15,000**, failing only
+by 15,031. Against a reachable depth of 1,805 that is an **8x margin** on the one operation that
+breaks at all, and no hazard on the one the claim named first.
+
+**The lesson is the one this file has now paid for twice in a single slice:** a hazard claim is
+exactly as unestablished as a cost claim until something built to break it has been run, and
+replacing a falsified claim with a second unmeasured one is the easiest possible way to repeat the
+error while appearing to have corrected it. The measurement cost one browser test.
+
+**THE VERDICT THAT SURVIVES BOTH FALSIFICATIONS IS NOT "THE REASONS WERE WRONG" — IT IS "NEITHER IS
+BINDING AT TODAY'S CAPS, AND ONE OF THOSE CAPS IS ALREADY BEING HIT."** Every threshold is now known:
+
+| what breaks | at what depth |
+| --- | --- |
+| `JSON.stringify` in a consumer | never — clean at 1,000,000 |
+| a naive recursive JS walk in a consumer | ~15,000 |
+| the Rust `Serialize`/`Drop` pair | **unlocated — known only to be > 2,100**, because the shape was replaced before the boundary was found |
+| **`MAX_TERM_DEPTH`, which bounds all of the above** | **3,000** |
+
+**`sum(100)` reaches 3,001. It hits the cap exactly, and it is a hundred-element sum, not adversarial
+input.** Depth grows roughly quadratically with input size on that shape, so a modestly larger program
+needs a multiple of 3,000 — meaning anyone who wants deeper or larger λ programs must raise that
+constant, and the pressure to do so exists now rather than hypothetically.
+
+**That is where this slice earns its place.** Raising `MAX_TERM_DEPTH` under the `Box` shape walks
+toward a Rust-side trap depth nobody has located, and far enough puts a consumer's recursive walk into
+range of ~15,000. Under the arena there is no such depth on either side, so raising the cap becomes a
+question about reduction cost alone instead of one that quietly re-opens a stack question at two
+layers. A third property, structural rather than measured: `Box` children cost one heap allocation per
+node — 42,623 for `big_list_program()` — against a single `Vec`. **No timing was measured and none is
+claimed**; the count is a fact about the shape.
+
+**What the slice is worth, at its true size:** an unbounded recursion removed from a boundary where a
+trap cannot unwind, for +227 bytes, no API surface change, and one type. Defensive today, load-bearing
+the moment `MAX_TERM_DEPTH` moves.
+
+**A GATE ON PR 3c, not a suggestion.** `lambdaAst` still has no consumer, and the design's §9.3
+(delete it outright) was a serious alternative that the final whole-branch review called the cleaner
+answer. **PR 3c is the first slice with a real renderer and MUST decide explicitly whether an arena is
+the shape that renderer wants.** If it is not, reopen §9.3 and delete the export rather than patching
+around it — an unused export that has now had two design slices spent on it is exactly the thing that
+accretes by inheritance when nobody is required to choose.
+
+**The number the two entries above got wrong, corrected in place there and restated here.** "Thousands
+of nodes deep" conflated node COUNT with DEPTH, and depth is the quantity both recursive paths are
+linear in, so the conflation overstated the risk by an order of magnitude. Measured: the 600-element
+list's λ term is **8,403 nodes with a depth of 607** at compile time. Under reduction the same program
+reaches depth **1,805** natively (**1,803** measured in-browser, the gap being sampling
+discretization), and an ordinary recursive `sum(100)` reaches **3,001**, which is `MAX_TERM_DEPTH`
+itself.
+
+**What shipped.** `TermNode`'s children became `u32` indices into a flat `TermTree { nodes:
+Vec<TermNode>, root: u32 }`, closing both recursive paths — derived `Serialize` and derived `Drop` —
+structurally rather than by a depth guard, and adding no new depth constant. `to_tree`'s worklist
+threads an arena alongside its existing stack of indices; the `Enter`/`Abs`/`App` marker protocol and
+the pop order are untouched, only the element type changed. `root` is stored rather than left implied
+by the walk's post-order, so a future change to the walk's ordering cannot silently invalidate it.
+
+**The wire shape, measured in a browser rather than designed** — PR 3b's `Decoded` lesson, applied
+before the fact this time: externally tagged, `{"Var":1}`, `{"Abs":["f",85]}`, `{"App":[f,a]}`. A
+child index arrives as a JS number, not a `bigint`, which is why arena indices are `u32` and not
+`usize` — a `usize` index would put `bigint` in every node of a payload that already carries a `u32`
+de Bruijn index on `Var`.
+
+**Two tests, and what each catches.** The structural test cross-checks `tree.nodes.len()` against
+`logical_size(&term)`, an independently implemented occurrence count: both **42,623** on
+`big_list_program()`, the 200-element list (`let xs = [0..200]; head(xs)`) — not the 600-element list,
+whose figures are given above (8,403 nodes, depth 607). The cross-check is what rules out a dedup
+regression a content-only comparison would miss. The
+depth-tolerance test steps a reduction in chunks, calling `lambdaAst` after each and reading the
+arena's own height with a consumer-side iterative walk — not a regression test, since nothing here
+found a depth to regress from, but a tripwire for a future change that reintroduces per-level
+recursion or lowers the shadow stack. It samples every 100 β-steps and observes depth climbing
+monotonically and plateauing — `607, 707, 807, ..., 1707, 1803, 1803` — and asserts the peak exceeds
+1,500.
+
+**Three alternatives, rejected.** A depth guard at the boundary would refuse terms that work —
+`sum(100)`-shaped programs render correctly today at depth 3,001 — and it never reaches the consumer,
+which is now the load-bearing hazard a Rust-side guard cannot touch. A hand-written iterative `Drop`
+on `TermNode`, mirroring `lambda/term.rs:482`, imports a tax the codebase already documented:
+`term.rs`'s own comment records that keeping a type free of `Drop` is what lets its fields be
+destructured by value, and adding `Drop` to a public view-model type consumers are meant to
+destructure imports that restriction deliberately — and it would close only one of the two paths
+regardless. Deleting `lambdaAst` and
+`TermNode` outright was the closest call — there is no v1 consumer, the λ pane is out of PR 3c's
+scope, and deleting removes the hazard outright — but was not taken because the capability is wanted
+and the cost of keeping it is now one small type change.
+
+**The gate.** `scripts/check-all.sh --no-llvm` green. `wasm-pack build --release --target web`
+succeeds at **605,193 bytes**, against PR 3b's 604,966 — **+227**. Browser suite **10/10**; core
+`viewmodel_contract` **10/10** default, **11/11** under `--features serde`. The per-file coverage row
+for `viewmodel.rs` — the file absorbing every decision here — moves from PR 3b's 98 lines / 100.00%
+to **113 lines / 100.00%**: the file gained `emit` and lost three `Box::new` calls, net +15 lines, and
+line coverage stayed exactly flat rather than falling, which is the direction this project's
+convention treats as the tell. Region coverage did fall, from 98.54% to 96.48% (3 missed of 205 → 8
+missed of 227) — stated rather than smoothed over — and the new misses are the `u32::try_from`
+overflow branch (§5 of the design: physically unreachable, since 2^32 nodes is on the order of 100 GB)
+together with the rewritten `to_tree` match arms, not logic that leaked in from elsewhere.
+
+**Two follow-ups, recorded here rather than left living only in the design spec.** First, the gap
+between depth ~2,100 and `MAX_TERM_DEPTH`'s 3,001 was never driven in a browser — it rests on frame
+arithmetic (8 MiB across 3,001 frames is ~2.8 KB each), not a run, and closing it is an estimated
+10-15 minutes of wall-clock that was deliberately not spent because it is predicted not to change the
+verdict (design §11.4). Second, `lambdaAst` still has no v1 consumer — PR 3c is the first slice that
+can say whether an arena is the shape a renderer actually wants, and if it is not, deleting `lambdaAst`
+and `TermNode` outright (§9.3, close but not taken here) should be reopened rather than patched around
+(design §11.1).

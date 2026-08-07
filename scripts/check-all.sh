@@ -5,15 +5,28 @@
 # The pre-commit hooks deliberately do NOT run it — they stay fast (fmt + clippy); this is the
 # before-a-merge check.
 #
-#   scripts/check-all.sh               # everything, including the LLVM configs
-#   scripts/check-all.sh --no-llvm     # skip LLVM (no toolchain installed)
-#   scripts/check-all.sh --llvm-only   # ONLY the LLVM configs — NOT a full gate on its own
-#   scripts/check-all.sh --list        # print the legs the mode selects; run nothing
+#   scripts/check-all.sh                  # everything: base, LLVM and browser configs
+#   scripts/check-all.sh --no-llvm        # skip LLVM (no toolchain installed)
+#   scripts/check-all.sh --no-browser     # skip the browser leg (no Chrome, or no time for it)
+#   scripts/check-all.sh --llvm-only      # ONLY the LLVM configs — NOT a full gate on its own
+#   scripts/check-all.sh --browser-only   # ONLY the browser leg — NOT a full gate on its own
+#   scripts/check-all.sh --list           # print the legs the mode selects; run nothing
 #
 # --llvm-only exists because CI's `rust-llvm` job invoked this script with no flag, and no flag is
 # `--no-llvm` PLUS the LLVM configs by construction — so that job recompiled every non-LLVM config
 # the `rust` job had already run, from a different cache key. See
 # docs/superpowers/specs/2026-08-04-ci-scope-filters-design.md §2.2.
+#
+# THE BROWSER TIER IS THE SAME SHAPE OF ANSWER TO THE SAME SHAPE OF PROBLEM, and it is worth saying
+# why it is a TIER rather than a separate script. `wasm-pack test` needs a browser, which not every
+# machine running this gate has — exactly the position LLVM was in. LLVM was not excluded for that;
+# it was given a tier and an opt-out. A separate `check-browser.sh` would sit OUTSIDE the union
+# invariant below, so "full gate" would quietly stop meaning full, and it would be a script nobody
+# runs. The browser leg covers what nothing else can: the wasm32 rows below check that the crates
+# BUILD for wasm32, while `#[wasm_bindgen]`'s generated glue and `serde-wasm-bindgen`'s marshalling
+# only execute in a browser. `session.rs` is natively tested precisely so logic lives outside that
+# shell — which means a wasm-bindgen or serde-wasm-bindgen bump can break the boundary with every
+# other leg green.
 #
 # This gate runs the FAST test tier only. The slow tier (exhaustive sweeps, marked
 # `#[ignore = "slow tier: ..."]`) has its own script and its own CI job: scripts/check-slow.sh.
@@ -21,29 +34,66 @@
 set -euo pipefail
 
 run() { echo; echo "==> $*"; "$@"; }
-usage() { echo "usage: scripts/check-all.sh [--no-llvm | --llvm-only] [--list]" >&2; exit 2; }
+usage() {
+  echo "usage: scripts/check-all.sh [--no-llvm] [--no-browser] [--llvm-only | --browser-only] [--list]" >&2
+  exit 2
+}
 
 # Parsed up front so a typo (`--no-llvmm`) fails immediately rather than silently falling through to
 # a full run — a flag that quietly does the opposite of what was asked is the same class of bug as a
 # gate that quietly covers less than it claims.
-mode=full
+#
+# THREE INDEPENDENT WANTS, NOT ONE `mode`, and the change is what a third tier forces. With two tiers
+# a single `mode` variable could name every reachable state; with three it cannot, because "skip LLVM
+# but keep the browser" and "skip both" are different runs and CI needs to ask for each. The `--no-*`
+# flags subtract, the `--x-only` flags select exactly one tier, and the conflicts below are rejected
+# rather than silently resolved.
 list_only=0
+only=""
+no_llvm=0
+no_browser=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --no-llvm)
-      [ "$mode" = full ] || [ "$mode" = base ] \
-        || { echo "error: --no-llvm and --llvm-only are exclusive" >&2; usage; }
-      mode=base; shift ;;
+    --no-llvm)    no_llvm=1; shift ;;
+    --no-browser) no_browser=1; shift ;;
     --llvm-only)
-      [ "$mode" = full ] || [ "$mode" = llvm ] \
-        || { echo "error: --no-llvm and --llvm-only are exclusive" >&2; usage; }
-      mode=llvm; shift ;;
+      [ -z "$only" ] || [ "$only" = llvm ] \
+        || { echo "error: --llvm-only and --browser-only are exclusive" >&2; usage; }
+      only=llvm; shift ;;
+    --browser-only)
+      [ -z "$only" ] || [ "$only" = browser ] \
+        || { echo "error: --llvm-only and --browser-only are exclusive" >&2; usage; }
+      only=browser; shift ;;
     --list)
       list_only=1; shift ;;
     *)
       echo "error: unknown argument: $1" >&2; usage ;;
   esac
 done
+
+# `--llvm-only --no-llvm` asks for a run whose only tier is one it also excludes: it would cover
+# nothing but the `both` rows and still exit 0, which is the "green run that covered nothing" defect
+# check_legs guards against one level down. Rejected rather than resolved in either direction.
+#
+# WRITTEN AS `if`, NOT `[ ... ] && { ... }`, and that is not a style preference. Under `set -e` a
+# bare `A && B` statement whose A is false makes the LIST's status 1 and aborts the script — so the
+# guard would kill every ordinary run, the one case it is supposed to wave through.
+if [ "$only" = llvm ] && [ "$no_llvm" -eq 1 ]; then
+  echo "error: --llvm-only and --no-llvm contradict each other" >&2; usage
+fi
+if [ "$only" = browser ] && [ "$no_browser" -eq 1 ]; then
+  echo "error: --browser-only and --no-browser contradict each other" >&2; usage
+fi
+
+case "$only" in
+  llvm)    want_base=0; want_llvm=1; want_browser=0 ;;
+  browser) want_base=0; want_llvm=0; want_browser=1 ;;
+  *)       want_base=1
+           want_llvm=1
+           want_browser=1
+           if [ "$no_llvm" -eq 1 ]; then want_llvm=0; fi
+           if [ "$no_browser" -eq 1 ]; then want_browser=0; fi ;;
+esac
 
 # THE LEG TABLE — the single source of truth for what this gate covers.
 #
@@ -84,6 +134,10 @@ LEGS=(
   "llvm|test|-p redextape-native --features llvm"
   "llvm|clippy|-p redextape-native --no-default-features --features llvm --all-targets"
   "llvm|test|-p redextape-native --no-default-features --features llvm"
+  # The browser tier is one leg, and the probe leads it for the same reason `llvm|probe|` leads the
+  # LLVM tier: a missing browser should fail in seconds, not after wasm-pack has built a module.
+  "browser|browserprobe|"
+  "browser|browser|crates/redextape-wasm"
 )
 
 # A row tagged with a tier no mode selects would vanish from every run while still LOOKING covered.
@@ -93,31 +147,34 @@ LEGS=(
 # NOT include that row finish green; the typo only fails when the other mode reaches the row, after
 # everything before it has already run. Validated against the same set do_leg dispatches on.
 check_legs() {
-  local row tier kind n_base=0 n_llvm=0
+  local row tier kind n_base=0 n_llvm=0 n_browser=0
   for row in "${LEGS[@]}"; do
     tier="${row%%|*}"; kind="${row#*|}"; kind="${kind%%|*}"
     case "$tier" in
       both) ;;
       base) n_base=$((n_base + 1)) ;;
       llvm) n_llvm=$((n_llvm + 1)) ;;
+      browser) n_browser=$((n_browser + 1)) ;;
       *) echo "error: leg tagged with unknown tier '$tier': $row" >&2; exit 1 ;;
     esac
     case "$kind" in
-      fmt|clippy|build|test|probe|wasmprobe|wasm) ;;
+      fmt|clippy|build|test|probe|wasmprobe|wasm|browserprobe|browser) ;;
       *) echo "error: leg tagged with unknown kind '$kind': $row" >&2; exit 1 ;;
     esac
   done
   [ "$n_base" -gt 0 ] || { echo "error: no base-tier legs — --no-llvm would cover nothing" >&2; exit 1; }
   [ "$n_llvm" -gt 0 ] || { echo "error: no llvm-tier legs — --llvm-only would cover nothing" >&2; exit 1; }
+  [ "$n_browser" -gt 0 ] || { echo "error: no browser-tier legs — --browser-only would cover nothing" >&2; exit 1; }
 }
 check_legs
 
 selects() {
   case "$1" in
-    both) return 0 ;;
-    base) [ "$mode" = full ] || [ "$mode" = base ] ;;
-    llvm) [ "$mode" = full ] || [ "$mode" = llvm ] ;;
-    *)    echo "error: leg tagged with unknown tier '$1'" >&2; exit 1 ;;
+    both)    return 0 ;;
+    base)    [ "$want_base" -eq 1 ] ;;
+    llvm)    [ "$want_llvm" -eq 1 ] ;;
+    browser) [ "$want_browser" -eq 1 ] ;;
+    *)       echo "error: leg tagged with unknown tier '$1'" >&2; exit 1 ;;
   esac
 }
 
@@ -139,7 +196,19 @@ fi
 # depending on what happens to be installed is a gate whose behaviour nobody can predict — and the
 # fallback would be the SLOW path, so the machine least likely to notice is the one that needed the
 # speed most.
-if ! cargo nextest --version >/dev/null 2>&1; then
+#
+# DEMANDED ONLY WHEN A `test` LEG IS ACTUALLY SELECTED, which `--browser-only` is the first mode to
+# make matter: its two legs run `wasm-pack`, never `cargo nextest`. An unconditional guard would
+# refuse a browser run on a machine that has Chrome and wasm-pack but no nextest — a precondition
+# demanded for work the run does not do, which is the same defect as `ensure_browser`'s Chrome-name
+# problem wearing different clothes. `--llvm-only` still needs it and still gets it: that tier has
+# `test` rows.
+needs_nextest=0
+for row in "${LEGS[@]}"; do
+  tier="${row%%|*}"; rest="${row#*|}"; kind="${rest%%|*}"
+  if selects "$tier" && [ "$kind" = test ]; then needs_nextest=1; break; fi
+done
+if [ "$needs_nextest" -eq 1 ] && ! cargo nextest --version >/dev/null 2>&1; then
   echo "error: cargo-nextest not found (the test runner this gate uses)." >&2
   echo "  install: cargo install cargo-nextest --locked   # or: brew install cargo-nextest" >&2
   echo "  scripts/setup-dev.sh installs it too." >&2
@@ -230,6 +299,59 @@ ensure_llvm_prefix() {
   echo "==> using LLVM at $LLVM_SYS_221_PREFIX"
 }
 
+# The browser leg runs `wasm-pack test --headless --chrome`, which needs two things this gate cannot
+# assume: wasm-pack, and a Chrome that wasm-pack can find.
+#
+# A HARD FAILURE, not a skip — the same rule `ensure_wasm_target` follows, and for a sharper reason
+# here. A browser leg that silently skips when Chrome is absent would report green on exactly the
+# machines where it covered nothing, and the boundary it guards (`#[wasm_bindgen]`'s generated glue,
+# `serde-wasm-bindgen`'s marshalling) is invisible to every other leg in this file. `--no-browser`
+# is how a machine without Chrome asks to skip it, and asking is the point: the flag leaves a record
+# in the invocation, an auto-skip leaves none.
+#
+# CHROME IS PROBED BY PATH BECAUSE THE NAME IS THE ACTUAL PROBLEM, and this cost real time twice
+# before it was written down. wasm-pack looks for `google-chrome` (or `$CHROME_PATH`); the Debian and
+# Arch packages both install the binary as `google-chrome-stable`, so a machine with Chrome fully
+# installed reports it as missing. Setting CHROME_PATH from the first binary that actually exists is
+# the fix, and doing it here rather than in a README is what stops the next person rediscovering it.
+#
+# chromedriver is deliberately NOT probed: wasm-pack downloads a matching one on first use, so
+# requiring it up front would fail on a machine where the leg would have worked.
+#
+# `crates/redextape-wasm/webdriver.json` CARRIES THE TWO FLAGS THIS LEG NEEDS IN A CONTAINER, and it
+# lives there because that is where wasm-bindgen-test looks (crate root, `goog:chromeOptions.args`).
+# `--no-sandbox` because CI containers run as root and Chrome refuses to sandbox as root;
+# `--disable-dev-shm-usage` because a container's default /dev/shm is too small and Chrome crashes
+# partway through instead of failing at startup. Both are no-ops for correctness locally, which is
+# why one file serves both. `headless` is NOT in that list: wasm-bindgen-test enables it by default,
+# and `--headless` on the wasm-pack command line is the separate switch that keeps it on.
+ensure_browser() {
+  if ! command -v wasm-pack >/dev/null 2>&1; then
+    echo "error: wasm-pack not found (the browser leg drives the wasm boundary through it)." >&2
+    echo "  install: cargo install wasm-pack --locked" >&2
+    echo "  or skip this tier: scripts/check-all.sh --no-browser" >&2
+    exit 1
+  fi
+  ensure_wasm_target
+  if [ -z "${CHROME_PATH:-}" ] && ! command -v google-chrome >/dev/null 2>&1; then
+    local c
+    for c in /usr/bin/google-chrome-stable /opt/google/chrome/google-chrome \
+             /usr/bin/chromium /usr/bin/chromium-browser \
+             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; do
+      if [ -x "$c" ]; then export CHROME_PATH="$c"; break; fi
+    done
+  fi
+  if [ -z "${CHROME_PATH:-}" ] && ! command -v google-chrome >/dev/null 2>&1; then
+    echo "error: no Chrome found, so the browser leg cannot run." >&2
+    echo "  wasm-pack looks for \`google-chrome\` or \$CHROME_PATH; the common packages install the" >&2
+    echo "  binary as \`google-chrome-stable\`, which is why this gate probes by path as well." >&2
+    echo "  set it explicitly: CHROME_PATH=/path/to/chrome scripts/check-all.sh" >&2
+    echo "  or skip this tier:  scripts/check-all.sh --no-browser" >&2
+    exit 1
+  fi
+  if [ -n "${CHROME_PATH:-}" ]; then echo "==> using Chrome at $CHROME_PATH"; fi
+}
+
 do_leg() {
   local kind="$1"; shift
   case "$kind" in
@@ -250,6 +372,12 @@ do_leg() {
     # ONLY real target is wasm32 would fail under the other crate's name. Each row names its own
     # package now, which costs one repeated fragment per row and buys a leg per crate.
     wasm)   ensure_wasm_target; run cargo check --target wasm32-unknown-unknown "$@" ;;
+    browserprobe) ensure_browser ;;
+    # NOT a `cargo` leg, and the only row in this table that is not: `wasm-pack test` takes a crate
+    # DIRECTORY, not cargo arguments, so the row supplies `crates/redextape-wasm` rather than a `-p`
+    # flag. `--headless` keeps it CI-shaped; `--chrome` picks the engine the boundary was measured
+    # against — Firefox and Safari would be different measurements, not the same one twice.
+    browser) ensure_browser; run wasm-pack test --headless --chrome "$@" ;;
     *)      echo "error: unknown leg kind: $kind" >&2; exit 1 ;;
   esac
 }
@@ -267,9 +395,16 @@ for row in "${LEGS[@]}"; do
   do_leg "$kind" ${leg_args[@]+"${leg_args[@]}"}
 done
 
+# NAMES WHAT WAS SKIPPED, NOT JUST WHAT PASSED. A partial run that signs off with an unqualified
+# "green" is how a tier gets dropped from CI and nobody notices for weeks — the same defect the union
+# invariant exists to make structurally impossible.
 echo
-case "$mode" in
-  full) echo "all configs green" ;;
-  base) echo "base configs green — the LLVM configs were SKIPPED (--no-llvm)" ;;
-  llvm) echo "llvm configs green — the base configs were SKIPPED (--llvm-only), so this is NOT a full gate" ;;
-esac
+skipped=""
+[ "$want_base" -eq 1 ]    || skipped="$skipped base"
+[ "$want_llvm" -eq 1 ]    || skipped="$skipped LLVM"
+[ "$want_browser" -eq 1 ] || skipped="$skipped browser"
+if [ -z "$skipped" ]; then
+  echo "all configs green — base, LLVM and browser"
+else
+  echo "green, but PARTIAL — these tiers were SKIPPED:$skipped. This is NOT a full gate on its own."
+fi

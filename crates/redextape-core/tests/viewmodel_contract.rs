@@ -9,7 +9,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use redextape_core::sourcemap::SourceMap;
-use redextape_core::viewmodel::{LambdaState, TmProgram, TmState};
+use redextape_core::viewmodel::{LambdaState, TermNode, TermTree, TmProgram, TmState};
 
 /// Counts bytes requested through the global allocator, so a test can measure what a call actually
 /// allocates instead of timing it. Scoped to this one integration test binary: each file under
@@ -326,6 +326,133 @@ fn the_ast_returns_none_over_budget_rather_than_a_partial_tree() {
     assert!(LambdaState::ast(&cursor, usize::MAX).is_some(), "an unreachable budget must succeed");
 }
 
+/// The arena denotes the same tree the term does, on a real lowered program rather than on a term
+/// built by hand. `big_list_program()` is 200 elements — first-order, no recursion, and a logical size
+/// the existing budget test above already drives with `usize::MAX`.
+#[test]
+fn the_arena_denotes_the_same_tree_the_term_does() {
+    let (term, _map) = lambda_fixture(&big_list_program());
+    let cursor = redextape_core::trace::LambdaCursor::new(&term, 1_000);
+    let tree = LambdaState::ast(&cursor, usize::MAX).expect("an unreachable budget must succeed");
+
+    if let Err(msg) = arena_matches_term(&tree, &term) {
+        panic!("the arena and the term disagree on shape: {msg}");
+    }
+    assert_eq!(
+        tree.root as usize,
+        tree.nodes.len() - 1,
+        "the walk builds post-order, so the root is the last node emitted"
+    );
+
+    // POST-ORDER IS A PUBLISHED CONTRACT (`viewmodel.rs`'s `TermTree` doc: "every child precedes its
+    // parent"), and nothing above pins it. An arena that emitted a FORWARD index into a structurally
+    // identical node would still pass the lockstep walk above, the root-is-last assertion above, and
+    // the `logical_size` cross-check below -- none of those look at whether a child's index is
+    // actually less than its own parent's, only at what the child eventually resolves to. Checked
+    // here, iteratively, over every node.
+    for (i, node) in tree.nodes.iter().enumerate() {
+        match node {
+            TermNode::Var(_) => {}
+            TermNode::Abs(_, body) => {
+                assert!(
+                    (*body as usize) < i,
+                    "node {i} is Abs(.., {body}): child {body} does not precede its parent at {i}"
+                );
+            }
+            TermNode::App(f, a) => {
+                assert!(
+                    (*f as usize) < i,
+                    "node {i} is App({f}, {a}): fn-child {f} does not precede its parent at {i}"
+                );
+                assert!(
+                    (*a as usize) < i,
+                    "node {i} is App({f}, {a}): arg-child {a} does not precede its parent at {i}"
+                );
+            }
+        }
+    }
+
+    // `arena_matches_term` compares content per occurrence, so an arena that DEDUPLICATED a shared
+    // subterm -- pointing two parents at one index -- would still pass every comparison above, since
+    // both occurrences are structurally identical by construction. Nothing above checks index
+    // uniqueness or the total count. `logical_size` is an independently written occurrence count for
+    // the same term (walks BOTH children of every `App`, one unit per occurrence, never per
+    // allocation -- see its doc in `crates/redextape-core/src/lambda/term.rs`), so cross-checking the
+    // arena's length against it catches a dedup regression that the walk above cannot.
+    assert_eq!(
+        tree.nodes.len() as u64,
+        redextape_core::lambda::term::logical_size(&term),
+        "arena node count must equal the term's logical (denoted) size -- a mismatch means the arena \
+         is not costing one entry per occurrence"
+    );
+}
+
+/// Walk the arena and the term in lockstep, ITERATIVELY, reporting exactly where they diverge.
+///
+/// A RECURSIVE REBUILD WOULD REINTRODUCE THE EXACT HAZARD THE ARENA REMOVES, inside the test that
+/// certifies its removal — and it would pass on every shallow program while failing on the one shape
+/// that matters. This is the obvious way to write this test and it is the wrong one.
+///
+/// Subterms are pushed as BORROWS of the root term, which outlives the walk, so a shared DAG node is
+/// visited once per occurrence — matching the arena, which holds one entry per occurrence.
+///
+/// Returns `Err` naming the arena index and both sides' shapes at the FIRST point of disagreement,
+/// rather than `bool`: a static "disagree on shape" message gives a maintainer nothing to act on when
+/// this fires on a real regression -- for instance the `App` pop-order transposition this file's own
+/// `to_tree` doc warns about, in `crates/redextape-core/src/viewmodel.rs`.
+fn arena_matches_term(tree: &TermTree, term: &redextape_core::lambda::term::LambdaTerm) -> Result<(), String> {
+    use redextape_core::lambda::term::Node;
+
+    // A one-line, non-recursive tag for a node on either side: the variant and any scalar payload,
+    // never the subterms -- a mismatch on a 200-node fixture must not try to print the other 199.
+    fn describe_term_node(n: &Node) -> String {
+        match n {
+            Node::Var(i) => format!("Var({i})"),
+            Node::Abs(name, _) => format!("Abs({name:?}, ..)"),
+            Node::App(_, _) => "App(.., ..)".to_string(),
+        }
+    }
+    fn describe_arena_node(n: &TermNode) -> String {
+        match n {
+            TermNode::Var(i) => format!("Var({i})"),
+            TermNode::Abs(name, _) => format!("Abs({name:?}, ..)"),
+            TermNode::App(_, _) => "App(.., ..)".to_string(),
+        }
+    }
+
+    let mut work: Vec<(u32, &redextape_core::lambda::term::LambdaTerm)> = vec![(tree.root, term)];
+    while let Some((idx, t)) = work.pop() {
+        let Some(node) = tree.nodes.get(idx as usize) else {
+            return Err(format!("arena index {idx} is out of range (the arena has {} nodes)", tree.nodes.len()));
+        };
+        match (node, t.node()) {
+            (TermNode::Var(i), Node::Var(j)) => {
+                if i != j {
+                    return Err(format!("node {idx}: arena has Var({i}), term has Var({j})"));
+                }
+            }
+            (TermNode::Abs(name, body), Node::Abs(n2, b2)) => {
+                if **name != **n2 {
+                    return Err(format!("node {idx}: arena has Abs({name:?}, ..), term has Abs({n2:?}, ..)"));
+                }
+                work.push((*body, b2));
+            }
+            (TermNode::App(f, a), Node::App(f2, a2)) => {
+                work.push((*f, f2));
+                work.push((*a, a2));
+            }
+            (arena_node, term_node) => {
+                return Err(format!(
+                    "node {idx}: arena has {}, term has {}",
+                    describe_arena_node(arena_node),
+                    describe_term_node(term_node)
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// §10.4's stated outcome: the view models serialize and round-trip. Feature-gated, because serde is
 /// optional and default-off — this test does not exist in a default build.
 #[cfg(feature = "serde")]
@@ -336,6 +463,13 @@ fn every_view_model_round_trips_through_json() {
     let ls = LambdaState::render(&cursor, usize::MAX);
     let back: LambdaState = serde_json::from_str(&serde_json::to_string(&ls).expect("serialize")).expect("deserialize");
     assert_eq!(ls, back);
+
+    // `TermTree` was not covered here before the arena, and the omission mattered: `serde_json`'s
+    // DESERIALIZER recurses per level too, so a `Box`-shaped `TermNode` had two recursive paths on the
+    // way out and a third on the way back in.
+    let tree = LambdaState::ast(&cursor, usize::MAX).expect("the fixture fits an unreachable budget");
+    let back: TermTree = serde_json::from_str(&serde_json::to_string(&tree).expect("serialize")).expect("deserialize");
+    assert_eq!(tree, back);
 
     let (machine, init) = tm_fixture("let x = 40; x + 2");
     let p = TmProgram::of(&machine, 64);
