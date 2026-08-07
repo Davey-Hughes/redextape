@@ -66,6 +66,18 @@ pub fn analyze(src: &str) -> Result<JsValue, JsValue> {
     to_value(&session::analyze(src))
 }
 
+/// `encodings()` -> every encoding name `compile` accepts, in `EncodingKind::ALL`'s declaration order.
+///
+/// EXPORTED RATHER THAN HARDCODED IN THE UI. A TypeScript array of names would be a second
+/// authoritative registry, which is precisely what `encoding_kinds!` exists to prevent — and worse
+/// than the Rust case it prevents, because not even the compiler is watching a list in another
+/// language. Generated from the same rows as `ALL`, `name` and `parse`, so a third encoding reaches
+/// the picker with no TypeScript edit.
+#[wasm_bindgen]
+pub fn encodings() -> Result<JsValue, JsValue> {
+    to_value(&EncodingKind::ALL.iter().map(|k| k.name()).collect::<Vec<_>>())
+}
+
 /// `session.rs`'s error type as a JS `Error`-shaped value. The ONE conversion every fallible method
 /// below shares, so no method invents its own wording and none of them can panic instead.
 fn err(e: session::SessionError) -> JsValue {

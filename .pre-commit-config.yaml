@@ -1,8 +1,10 @@
 # Local pre-commit hooks mirroring the CI gates (.forgejo/workflows/ci.yml). Install with:
 #   pre-commit install
-# Hooks only fire when matching files are staged: the Rust hooks now fire for real since the crates
-# exist; the web hooks stay dormant until web/ lands. Rust hooks run on *.rs; web hooks run on the
-# web/ sources.
+# Hooks only fire when matching files are staged. Rust hooks run on *.rs; web hooks run on the
+# web/ sources — both now fire for real, since crates/ and web/ both exist.
+# `web typecheck` needs `pkg/`, which is not checked in (see .gitignore). A fresh clone runs
+#   cd web && pnpm install && pnpm run build:wasm
+# once before committing any TypeScript.
 repos:
   - repo: local
     hooks:
@@ -20,13 +22,13 @@ repos:
         pass_filenames: false
       - id: biome-ci
         name: biome ci
-        entry: bash -c 'cd web && npx biome ci --error-on-warnings src'
+        entry: bash -c 'cd web && pnpm exec biome ci --error-on-warnings'
         language: system
         files: ^web/.*\.(js|ts|jsx|tsx|json|css)$
         pass_filenames: false
       - id: web-typecheck
         name: web typecheck
-        entry: bash -c 'cd web && npm run typecheck'
+        entry: bash -c 'cd web && pnpm run typecheck'
         language: system
         files: ^web/.*\.(ts|tsx)$
         pass_filenames: false

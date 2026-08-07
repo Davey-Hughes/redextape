@@ -1,0 +1,193 @@
+/* Design tokens. A foundation for Plan 5's panes, not a visual identity — §7 of the design spec. */
+:root {
+  /* The one line here that is not a token. It tells the browser to render UA-drawn widgets — the
+     encoding `<select>` is the only one in this slice — in the scheme the page is actually using.
+     Without it a dark page gets a light dropdown, because `prefers-color-scheme` below restyles our
+     own elements and cannot reach inside a native control. */
+  color-scheme: light dark;
+
+  --font-ui: ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+
+  --step-0: 0.9375rem;
+  --step-1: 1.0625rem;
+  --step-2: 1.375rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+  --radius: 6px;
+
+  --bg: #fbfbfa;
+  --bg-raised: #ffffff;
+  --fg: #1c1b1a;
+  --fg-dim: #6b6864;
+  --rule: #e2dfda;
+  --accent: #9a3412;
+
+  --tok-neutral: #6b6864;
+  --tok-keyword: #9a3412;
+  --tok-ident: #1c1b1a;
+  --tok-nat: #1d4ed8;
+  --tok-bool: #1d4ed8;
+  --tok-operator: #7c2d92;
+  --tok-punct: #8a8681;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17161a;
+    --bg-raised: #1e1d22;
+    --fg: #eceaf0;
+    --fg-dim: #9a9599;
+    --rule: #322f38;
+    --accent: #f0956a;
+
+    --tok-neutral: #9a9599;
+    --tok-keyword: #f0956a;
+    --tok-ident: #eceaf0;
+    --tok-nat: #86b6ff;
+    --tok-bool: #86b6ff;
+    --tok-operator: #d6a2f0;
+    --tok-punct: #6f6a74;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: var(--step-0) / 1.5 var(--font-ui);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.wordmark {
+  font-size: var(--step-1);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.encoding {
+  color: var(--fg-dim);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+main {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: calc(100dvh - 3rem);
+}
+
+.pane {
+  overflow: auto;
+}
+.results {
+  border-top: 1px solid var(--rule);
+  background: var(--bg-raised);
+  padding: var(--space-3);
+  font-family: var(--font-mono);
+  min-height: 12rem;
+}
+
+.results[data-state="running"] {
+  opacity: 0.55;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 4rem 7rem 1fr;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+.row .leg {
+  color: var(--accent);
+  font-weight: 600;
+}
+.row .label {
+  color: var(--fg-dim);
+}
+.row .value {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.note {
+  color: var(--fg-dim);
+  font-style: italic;
+}
+
+/* The source range a backend's refusal names — `sourceSpan(status.node)`, resolved in the worker. */
+.decline {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  border-radius: 2px;
+}
+
+/* Six reachable from `classify_source`. */
+.tok-keyword {
+  color: var(--tok-keyword);
+  font-weight: 600;
+}
+.tok-ident {
+  color: var(--tok-ident);
+}
+.tok-nat {
+  color: var(--tok-nat);
+}
+.tok-bool {
+  color: var(--tok-bool);
+}
+.tok-operator {
+  color: var(--tok-operator);
+}
+.tok-punct {
+  color: var(--tok-punct);
+}
+
+/* Eight the λ and asm/TM text forms produce. Styled now so Plan 5 does not ship invisible spans. */
+.tok-comment,
+.tok-binder,
+.tok-mnemonic,
+.tok-register,
+.tok-label,
+.tok-statename,
+.tok-tapesymbol,
+.tok-move {
+  color: var(--tok-neutral);
+}
+
+/* CodeMirror's own chrome.
+ *
+ * CM6 SHIPS A BASE THEME WITH LIGHT-MODE VALUES HARDCODED, and none of them answer
+ * `prefers-color-scheme` — a #f5f5f5 gutter, a #ddd divider, a pale-blue active line, and a BLACK
+ * caret. Styling only the `.tok-*` classes leaves all four in place, which on a dark page reads as a
+ * light strip down the left and, worse, a cursor you cannot see. These rules hand that chrome the
+ * same tokens as everything else, so it follows the scheme rather than fighting it.
+ *
+ * Measured before writing, not guessed: `.cm-gutters` computed to rgb(245,245,245) on
+ * rgb(23,22,26), and `.cm-content`'s caret-color to rgb(0,0,0). */
+.cm-editor .cm-gutters {
+  background: var(--bg);
+  color: var(--fg-dim);
+  border-right: 1px solid var(--rule);
+}
+
+.cm-editor .cm-activeLine {
+  background: color-mix(in oklab, var(--accent) 7%, transparent);
+}
+
+.cm-editor .cm-content {
+  caret-color: var(--fg);
+}

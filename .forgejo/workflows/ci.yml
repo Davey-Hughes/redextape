@@ -623,20 +623,26 @@ jobs:
           rustup target add wasm32-unknown-unknown
           curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
             | tar xzf - --strip-components=1 -C /usr/local/bin --wildcards '*/wasm-pack'
+      - name: Install pnpm
+        run: npm install -g pnpm@11.20.0
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: ~/.npm
-          key: npm-${{ hashFiles('web/package-lock.json') }}
-          restore-keys: npm-
-      - run: npm ci
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+      - run: pnpm install --frozen-lockfile
+      - name: Build the WASM package (its .d.ts is what typecheck resolves `../pkg` against)
+        run: pnpm run build:wasm
+      - name: Install the Chromium Playwright needs
+        run: pnpm exec playwright install --with-deps chromium
       - name: Lint + format check
-        run: npx biome ci
+        run: pnpm exec biome ci --error-on-warnings
       - name: Typecheck
-        run: npm run typecheck
+        run: pnpm run typecheck
       - name: Unit tests
-        run: npm test
-      - name: Build (invokes wasm-pack, then the bundler)
-        run: npm run build
+        run: pnpm test
+      - name: Build the app
+        run: pnpm run build:app
 
   # Build + push the static-site image — only after rust + web pass, never on a PR.
   docker:

@@ -5,10 +5,8 @@
 # process, no runtime data, no volumes. Three stages: compile the core crate to WASM, bundle the web
 # app, serve the output.
 #
-# NOTE: `crates/` now exists (redextape-core, redextape-native, ...), but not yet the two paths this
-# build actually needs, `crates/redextape-wasm` and `web/`. This Dockerfile is the intended build,
-# ready to activate once both land — CI only runs it then (see .forgejo/workflows/ci.yml's `web`
-# gate). Tool versions and the exact web build command are finalized at v1. See docs/ for the spec.
+# `crates/redextape-wasm` and `web/` both exist now, so this build is live: CI runs it on every push
+# to `main` (see .forgejo/workflows/ci.yml's `web` gate).
 
 ########################  1. WASM (Rust -> wasm32) → /app/pkg  #################################
 FROM rust:slim-bookworm AS wasm
@@ -26,15 +24,18 @@ RUN wasm-pack build crates/redextape-wasm --release --target web --out-dir /app/
 ########################  2. Web bundle (Vite) → /app/web/dist  ################################
 FROM node:26-slim AS web
 WORKDIR /app/web
-# Install deps against the lockfile first so this layer caches across source-only changes.
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
+# pnpm pinned explicitly rather than via corepack, which is not bundled in every node image.
+RUN npm install -g pnpm@11.20.0
+# Manifest + lockfile first so this layer caches across source-only changes.
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY web/ ./
-# The WASM package produced above, imported by the web app.
+# The WASM package produced above, imported by the web app as `../pkg`.
 COPY --from=wasm /app/pkg /app/pkg
 ARG COMMIT_HASH
 ENV COMMIT_HASH=$COMMIT_HASH
-RUN npm run build
+# `build:app`, not `build`: this stage has no Rust toolchain — stage 1 already produced /app/pkg.
+RUN pnpm run build:app
 
 ########################  3. Runtime (static nginx)  ##########################################
 FROM nginx:alpine AS runtime

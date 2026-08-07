@@ -14,6 +14,11 @@ dist/
 .vite/
 *.tsbuildinfo
 
+# Vitest browser-mode artifacts. Written only when a browser test FAILS, so they are absent on a
+# green tree and would otherwise be committed by whoever happens to run the suite after a red one.
+.vitest-attachments/
+**/__screenshots__/
+
 # Environment & secrets
 .env
 .env.*

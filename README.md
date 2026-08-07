@@ -12,10 +12,14 @@ computation — not a native run with a decorative overlay.
 
 ## Status
 
-**The compiler is built; the thing you watch it in is not.** The front end and three backends — λ,
-Turing machine, and native — all work, and each is checked against the others on every commit. What
-does not exist yet is the visualizer the project is *for*: no WASM package, no web app, no
-side-by-side panes, no CLI. Today the only way to see a run is `cargo run --example`.
+**The compiler is built, and the first slice of the thing you watch it in now exists.** The front end
+and three backends — λ, Turing machine, and native — all work, and each is checked against the others
+on every commit. `crates/redextape-wasm` compiles the compiler to WASM, and `web/` is a real app: one
+editable source pane with live syntax highlighting and lint diagnostics, and a results readout that
+runs the λ and TM legs side by side — the first thing in this project a human can click. What the
+visualizer the project is *for* still lacks: no side-by-side *editable* λ/TM panes, no click-linking
+between them, no detach-on-edit, no per-run caps affordance, no CLI. See "Development & CI" below to
+build and run it, or still `cargo run --example` for the raw backends without a browser.
 
 Design spec:
 [`docs/superpowers/specs/2026-07-19-tm-lambda-visualizer-design.md`](docs/superpowers/specs/2026-07-19-tm-lambda-visualizer-design.md).
@@ -120,9 +124,11 @@ as it diverges. Both are reachable only because control now returns from each β
 
 ### Not built yet
 
-- **WASM + web UI** — `crates/redextape-wasm` (cdylib) and `web/` (Vite + React + CodeMirror 6):
-  editable, runnable source / λ / TM panes, click-linking, detach-on-edit, per-run caps. None of it
-  exists. Roadmap Plans 4 (consumer slice) and 5.
+- **The full visualizer** — `crates/redextape-wasm` (cdylib) and `web/` (Vite + CodeMirror 6, no
+  framework) exist and ship a first slice (Roadmap Plan 4, PR 3c): one editable source pane, live
+  syntax highlighting and lint diagnostics, and a results readout running the λ and TM legs side by
+  side. Still missing: independently editable λ / TM panes, click-linking between them, detach-on-edit,
+  and the per-run caps affordance. Roadmap Plan 5.
 - **CLI** — `crates/redextape-cli`: `redextape fmt` / `lint`, plus subcommands to emit and run λ /
   TM artifacts. Roadmap Plan 6. `fmt` is blocked on a decision nobody has made yet — the lexer
   discards `//` comments, so a `print ∘ parse` formatter over that AST would delete every one.
@@ -147,15 +153,28 @@ are literally in the name. Alternates once in the running: *Turnstile*, *Betamax
   exists in the tree. **Live:** `linear-history` (unconditional), `rust` (fmt, clippy,
   `scripts/check-all.sh --no-llvm`, then `cargo llvm-cov nextest` against an 80% line floor),
   `rust-llvm` (installs LLVM 22, runs the full `scripts/check-all.sh`, then an informational
-  optimization report), and `rust-slow` (the exhaustive sweeps). **Still dormant:** `web` (biome,
-  typecheck, unit tests, build) and the `docker` build-and-push to `forge.daveynet.xyz`, both
-  waiting on `web/package.json`.
+  optimization report), `rust-slow` (the exhaustive sweeps), `rust-scoped` (the cheap path for a
+  change that touches one crate), `rust-browser` (the wasm boundary under headless Chrome), `gate`
+  (the required check — it fails loudly rather than letting a skipped tier pass quietly), and — now
+  that `web/package.json` has landed — `web` (biome, typecheck, both Vitest projects, build) and the
+  `docker` build-and-push to
+  `forge.daveynet.xyz`. **Every push to `main` now builds and pushes an image**; there is no way to
+  land `web/` changes without arming that job.
 - **Docker** — multi-stage `Dockerfile` (Rust→WASM → Vite bundle → nginx static image),
-  `docker-compose.yml` (with What's-Up-Docker auto-update labels), and `deploy/nginx.conf`. Not
-  buildable yet: stage 1 builds `crates/redextape-wasm` and stage 2 builds `web/`.
+  `docker-compose.yml` (with What's-Up-Docker auto-update labels), and `deploy/nginx.conf`. Buildable:
+  stage 1 builds `crates/redextape-wasm`, stage 2 builds `web/`.
 - **Toolchain** — `rust-toolchain.toml` (stable), `rustfmt.toml` (`max_width = 120`),
   `.pre-commit-config.yaml`. `scripts/setup-dev.sh` is the once-per-clone setup — it installs
   cargo-nextest, the pre-commit hooks, and the git config the conventions below depend on.
+- **Web toolchain** — `web/` is a pnpm project (`packageManager: pnpm@11.20.0` in
+  `web/package.json`), not npm. On a fresh clone, `wasm-pack` has not run yet, so the repo-root `pkg/`
+  directory it writes to (gitignored, imported from `web/src/` as `../pkg/redextape_wasm.js`) does not
+  exist — and `tsc` resolves that import against a `.d.ts` `wasm-pack` has not produced yet either. Run
+  once, in order, before anything else in `web/` works:
+
+      cd web && pnpm install && pnpm run build:wasm
+
+  Only after that will `pnpm run dev`, `pnpm run typecheck`, or `pnpm test` succeed.
 
 ## Checks
 
@@ -164,9 +183,15 @@ each of the four configurations: the default (`cranelift`), `--no-default-featur
 llvm`, and `--no-default-features --features llvm`. CI runs this same script. Pass `--no-llvm` to
 skip the LLVM configurations when no LLVM 22 toolchain is installed.
 
-That gate currently covers **719 tests** at default features (`redextape-core` 642,
-`redextape-native` 66, `redextape-native-rt` 11), and `--features llvm` takes `redextape-native` to
-104. Recount rather than trust those numbers: `cargo nextest list --workspace | wc -l`.
+That gate currently covers **828 tests** at default features (`redextape-core` 703,
+`redextape-wasm` 48, `redextape-native` 66, `redextape-native-rt` 11) — 3 are skipped, so 825 run —
+and `--features llvm` takes `redextape-native` to 104. Recount rather than trust those numbers:
+`cargo nextest list --workspace`.
+
+**Two tiers sit outside that count**, because neither runs under `cargo nextest`. The wasm boundary
+has **12** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
+`rust-browser` job. `web/` has **48** of its own across two Vitest projects — 38 in Node for the
+pure modules, 10 in real Chromium for the worker and the app end to end — run by CI's `web` job.
 
 The test runner is [`cargo-nextest`](https://nexte.st), not `cargo test`: `cargo test` runs the test
 binaries one at a time and only shares threads within a binary, which on this suite left 12 cores

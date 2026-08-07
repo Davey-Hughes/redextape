@@ -1,0 +1,32 @@
+{
+  "name": "redextape-web",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "scripts": {
+    "build:wasm": "wasm-pack build ../crates/redextape-wasm --release --target web --out-dir ../../pkg",
+    "build:wasm:dev": "wasm-pack build ../crates/redextape-wasm --dev --target web --out-dir ../../pkg",
+    "build:app": "vite build",
+    "build": "pnpm run build:wasm && pnpm run build:app",
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:node": "vitest run --project node",
+    "test:browser": "vitest run --project browser"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.7",
+    "@codemirror/commands": "6.10.4",
+    "@codemirror/lint": "6.9.7",
+    "@codemirror/state": "6.7.1",
+    "@codemirror/view": "6.43.8",
+    "@types/node": "26.1.2",
+    "@vitest/browser": "4.1.10",
+    "@vitest/browser-playwright": "4.1.10",
+    "playwright": "1.62.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.1",
+    "vitest": "4.1.10"
+  }
+}

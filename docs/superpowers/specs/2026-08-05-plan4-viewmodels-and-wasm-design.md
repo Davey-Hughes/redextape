@@ -513,10 +513,13 @@ Vite + TypeScript + CodeMirror 6, on **pnpm**. Versions checked against the regi
 
 | package | version |
 | --- | --- |
-| `vite` | 8.2.0 |
+| `vite` | 8.2.0 → **8.2.1** *(re-verified 2026-08-07)* |
 | `typescript` | 7.0.2 |
 | `@biomejs/biome` | 2.5.7 |
 | `vitest` | 4.1.10 |
+| `@vitest/browser` | 4.1.10 *(added 2026-08-07)* |
+| `@vitest/browser-playwright` | 4.1.10 *(added 2026-08-07 — see below)* |
+| `playwright` | 1.62.1 *(added 2026-08-07)* |
 | `@codemirror/state` | 6.7.1 |
 | `@codemirror/view` | 6.43.8 |
 | `@codemirror/commands` | 6.10.4 |

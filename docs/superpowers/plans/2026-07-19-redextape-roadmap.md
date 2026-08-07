@@ -3290,3 +3290,106 @@ verdict (design §11.4). Second, `lambdaAst` still has no v1 consumer — PR 3c 
 can say whether an arena is the shape a renderer actually wants, and if it is not, deleting `lambdaAst`
 and `TermNode` outright (§9.3, close but not taken here) should be reopened rather than patched around
 (design §11.1).
+
+#### PLAN 4'S CONSUMER SLICE CLOSES — `web/`, the first thing a human can click, and the five-PR landing order ends (2026-08-07, PR 3c)
+
+Design: [`../specs/2026-08-07-web-app-first-consumer-design.md`](../specs/2026-08-07-web-app-first-consumer-design.md).
+Plan: [`2026-08-07-web-app-first-consumer.md`](2026-08-07-web-app-first-consumer.md).
+
+**THE FIVE-PR LANDING ORDER IS COMPLETE, AND THIS WAS THE LAST OF IT.** The wasm32 gate, `viewmodel.rs`,
+`crates/redextape-wasm` (3a), the boundary completion (3b), and now the app (3c): `web/`, a pnpm
+project (`packageManager: pnpm@11.20.0`) built on Vite and CodeMirror 6 with no framework, wired to the
+boundary the four PRs before it built and did nothing but test. Eleven tasks; the ten that build it
+landed clean, none carrying a Critical or Important review finding, and this is the eleventh — the
+record. It is also the first slice in the project a human can click: one editable source pane with live
+syntax highlighting and lint diagnostics, and a results readout that runs the λ and TM legs side by
+side.
+
+**THE EIGHTH EXPORT.** The design's own count was seven — a web-only PR, no Rust change — until the
+picker was written and found nothing on the boundary named the valid encoding set. Hardcoding
+`["unary", "binary"]` in TypeScript would have reintroduced, one language over, exactly the drift
+`encoding_kinds!` exists to prevent: nothing in stable Rust compares a written-out list against the
+variant set, and a hand-written list in TypeScript is worse, because not even the compiler is watching.
+`encodings()` ships instead, generated from `EncodingKind::ALL`'s own rows, so a third encoding appears
+in the picker with no TypeScript edit. Cost: **+2,844 bytes** — see the gate below.
+
+**THREE AMBIGUITIES IN §6.3, RESOLVED RATHER THAN INTERPRETED SILENTLY.** §6.3 says "normal form" for
+both legs, and the TM leg has no text normal form — its end state is a set of tapes, and rendering
+tapes is Plan 5's job. Read literally, §6.3 would have this slice build a tape view it also says is out
+of scope; resolved instead as λ shows normal-form text while TM reports **fitted width, δ-step count
+and decoded value**, both showing status and reason when they decline. Second, `total_steps` is read
+against `tmValue()`, not against `run`: `run` reports where the cursor stands, and nothing in this
+slice steps the TM cursor, so `run` reads `"Running"` for a run `compile` already finished at compile
+time. `browser.rs` pins the pair directly — `total_steps == 2870` alongside `run == "Running"`
+(`crates/redextape-wasm/tests/browser.rs:720-724`) — so `tmValue()`, not the cursor, is what tells a
+reader whether 2,870 is a completed length or a count at which a cap was hit. Third, the capped wording
+does not name **which** cap: `TmCursor` caps on both the step budget and the live-cell budget, and
+`trace.rs` already says no test can tell the two apart, so a message naming a specific cap would be a
+guess presented as a fact.
+
+**THE BROWSER TIER PAID FOR ITSELF IMMEDIATELY, and this is the entry's most useful claim.** Two
+defects it caught were invisible to every unit test. First, `server.fs.allow: ['..']` does not survive
+into Vitest's browser mode — browser mode stands up a nested Vite server and rebuilds the allow-list
+against *that* server's root, so the relative entry resolves somewhere useless and the wasm fetch is
+refused with "outside of Vite serving allow list," while the identical config serves the same file
+correctly under a plain `vite dev`. Fixed with an absolute path. Second, the worker never replied at
+all for a λ-refusing program: `drive()` was called unconditionally, but `run_lambda` answers
+`Err(SessionError::LambdaAbsent)` when that leg declined, and the wasm binding raises it as a **thrown
+exception** — rejecting the async handler, so no reply was ever posted and the caller waited forever. A
+declined λ backend is a normal case this UI exists to report; it would have hung the results pane
+silently rather than showing a refusal. Fixed by guarding the drive on `lambdaStatus().available`. The
+three tests with a healthy λ leg all passed throughout, which is why it hid from anything short of a
+program the λ backend actually refuses.
+
+**THREE PLAN PREDICTIONS FALSIFIED BY MEASUREMENT.** The λ-refusing program's TM value is `'10'`, not
+the `'0'` the plan predicted — the TM leg reads `n` at call time, not capture time, which is exactly
+the ambiguity the λ backend refuses over; the two legs disagreeing there is the point of the program.
+That program's decline reason is `LowerError::Unsupported` ("the λ backend does not support unbound
+`n`"), not the `StatefulClosure` the plan assumed — this program's mutable capture resolves as an
+*unbound name* during lowering, not as a closure over a captured variable, and only the `Unsupported`
+branch fires for it. And `@vitest/browser-playwright` is a required dependency the plan never listed,
+because Vitest 4 split the Playwright driver out of `@vitest/browser`; `browser.provider` no longer
+takes the string `'playwright'`. Now pinned at `4.1.10` to match `vitest` in both version tables.
+
+**THE `lambdaAst` VERDICT IS DEFERRED, NOT ANSWERED.** Nothing in this slice calls it. The roadmap's
+PR #15 entry above expected this slice to say whether the arena `TermNode` became is the shape a
+renderer actually wants; it cannot, because §6.3's scope has no λ pane — the source pane and the
+plain-text results readout are the whole of it, and building a throwaway consumer purely to have an
+opinion would not have been evidence about a real one. The question travels to Plan 5 along with the
+deletion question the arena design's §9.3 came close to taking: if Plan 5's real renderer finds the
+arena is not the shape it wants, §9.3 should be reopened rather than patched around, not treated as
+settled by this slice's silence.
+
+**THE GATE.** `scripts/check-all.sh --no-llvm`: green, exit 0 — partial by design, since that flag
+skips the LLVM tier. Native test tiers: **825 passed** (3 skipped, workspace default), **700 passed**
+(3 skipped, `redextape-core --features serde`), **10 passed** (`redextape-native
+--no-default-features`). `wasm-pack test --headless --chrome crates/redextape-wasm`: **12/12** — the
+plan predicted 11/11 on an assumed 10-test baseline, but the real pre-existing baseline was 11, not 10;
+a stale count in the plan, not a defect. `web`: **48 tests across 8 files** — **38** in the node
+project, **10** in the real-Chromium browser project — `biome ci` clean over 20 files, `tsc --noEmit`
+clean. `pnpm run build` succeeds: `dist/` holds `redextape_wasm_bg.wasm` 608.03 kB (gzip 215.12 kB),
+`index.js` 315.42 kB (gzip 101.91 kB), `index.css` 2.32 kB, `session-worker.js` 7.10 kB. The wasm bundle
+itself is **608,037 bytes**, against PR #15's **605,193** — **+2,844**, which is `encodings()` and
+nothing else.
+
+**OPEN GAPS, STATED NOT SMOOTHED.** `compile()`'s wall-clock is still unmeasured (design §12 risk 1) —
+off the main thread it cannot block input, but a TM-heavy program still delays the results pane by an
+unknown amount with only a "running…" state to show for it, and it is now measurable for the first time
+because there is finally a UI to measure from. The worker's abandon path has no test — every test sends
+one request per worker, so supersession-mid-drive is unexercised; the client-side staleness guard is
+tested, the worker-side one is not. A transient two-session window exists during rapid supersession: a
+new request's `compile()` can run while an older, still-driving session has not yet reached its
+yield-triggered abandon check, so two `Session` handles are briefly live — not a leak, since both are
+freed on their own exit paths, and bounded at two in practice because `compile()` blocks the worker and
+the old handler cannot wake during it, but worth a look if peak memory during typing bursts ever
+matters. And `TokenClass` is hand-copied into TypeScript with nothing checking it against the Rust
+enum (design §12 risk 5) — `classify_source` reaches six of `TokenClass`'s fourteen variants today, and
+a variant added to `analysis::TokenClass` and not mirrored in the TypeScript copy arrives as an
+unstyled span rather than an error; the cheap close is a `tokenClasses()` export shaped like
+`encodings()`, deferred to whichever slice first needs it.
+
+**LANDING THIS ARMS THE `docker` JOB.** `ci.yml`'s `docker` job is conditioned on
+`github.event_name != 'pull_request'`, not on a tag, so every push to `main` now builds and pushes an
+image to `forge.daveynet.xyz`. The plan-4 design's §6.5 records this as intended and confirmed ahead of
+time; it is nonetheless the one irreversible effect of this merge, and the one thing about it worth
+naming plainly rather than discovering from a CI log after the fact.

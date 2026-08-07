@@ -29,6 +29,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use js_sys::{Array, Function, JSON, Object, Reflect};
+use redextape_core::tm::EncodingKind;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::*;
 
@@ -722,4 +723,35 @@ fn all_three_legs_agree_across_the_boundary() {
         Some("Running"),
         "and the cursor has not moved — total_steps is not about the cursor"
     );
+}
+
+/// The picker's list comes from the registry rather than from a hand-written TypeScript array.
+///
+/// THREE ASSERTIONS, NOT ONE: that the list is non-empty and names both shipped kinds, that every
+/// name it advertises is one `compile` actually accepts, and that the list is exactly
+/// `EncodingKind::ALL`'s names in declaration order. The second is what makes this a check on the
+/// `encoding_kinds!` registry rather than on a copy of it — a row added to the macro with a broken
+/// `parse` arm would pass the first and fail the second. But soundness alone is silent about a row the
+/// export drops: a hand-written `vec!["unary", "binary"]` would pass both of those checks forever. The
+/// third assertion is the completeness half — it fails the moment `EncodingKind::ALL` grows a kind that
+/// `encodings()` does not report, which is the exact drift this export exists to prevent.
+#[wasm_bindgen_test]
+fn encodings_lists_every_name_compile_accepts() {
+    let names: Array = redextape_wasm::encodings().expect("marshals").unchecked_into();
+    assert!(names.length() >= 2, "the registry ships at least unary and binary");
+
+    let mut seen: Vec<String> = Vec::new();
+    for i in 0..names.length() {
+        let name = names.get(i).as_string().expect("each encoding name marshals as a string");
+        assert!(
+            redextape_wasm::compile("let x = 40; x + 2", &name).is_ok(),
+            "`compile` rejected {name:?}, which `encodings()` advertises"
+        );
+        seen.push(name);
+    }
+    assert!(seen.iter().any(|n| n == "unary"), "got {seen:?}");
+    assert!(seen.iter().any(|n| n == "binary"), "got {seen:?}");
+
+    let expected: Vec<&str> = EncodingKind::ALL.iter().map(|k| k.name()).collect();
+    assert_eq!(seen, expected, "`encodings()` must list exactly `EncodingKind::ALL`, in declaration order");
 }
