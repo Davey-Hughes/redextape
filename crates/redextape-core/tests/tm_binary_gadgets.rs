@@ -44,7 +44,7 @@ fn run_gadget_raw(
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(slots);
     init[WORK] = enc.init_work();
-    let (tapes, final_state, status) = simulate_final(&m, &init, TM_DEFAULT_CAPS);
+    let (tapes, final_state, status, _) = simulate_final(&m, &init, TM_DEFAULT_CAPS);
     (tapes.iter().map(|t| t.snapshot().0).collect(), final_state, halt, overflow, status)
 }
 

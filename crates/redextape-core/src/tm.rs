@@ -129,17 +129,17 @@ pub fn run_tm(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> TmRun {
 /// its own purposes, setting only REG and never calling `init_work()` — harmless under `Unary`, where
 /// `init_work` returns empty regardless, but whether that omission is sound under `Binary` is a real
 /// open question, filed separately rather than answered here.
-fn attempt(prog: &Program, enc: &dyn Encoding, n_slots: u32, caps: TmCaps) -> (TmRun, Machine, Vec<Vec<Symbol>>) {
+fn attempt(prog: &Program, enc: &dyn Encoding, n_slots: u32, caps: TmCaps) -> (TmRun, Machine, Vec<Vec<Symbol>>, u64) {
     let (machine, overflow) = lower_tm_guarded(prog, enc);
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots);
     init[WORK] = enc.init_work();
-    let run = match simulate_final(&machine, &init, caps) {
-        (_, s, TmStatus::Halted) if s == overflow => TmRun::Overflow,
-        (tapes, _, TmStatus::Halted) => TmRun::Ran { tapes },
-        (_, _, TmStatus::HitCap) => TmRun::HitCap,
+    let (run, steps) = match simulate_final(&machine, &init, caps) {
+        (_, s, TmStatus::Halted, n) if s == overflow => (TmRun::Overflow, n),
+        (tapes, _, TmStatus::Halted, n) => (TmRun::Ran { tapes }, n),
+        (_, _, TmStatus::HitCap, n) => (TmRun::HitCap, n),
     };
-    (run, machine, init)
+    (run, machine, init, steps)
 }
 
 /// Lower `core`, then check ALL THREE of `lower_tm`'s layout refusals — `MAX_SLOTS` (an absurd register
@@ -212,6 +212,17 @@ pub struct DescribedRun {
     /// The recipe AND the literal initial tapes, captured from the configuration `simulate` was
     /// handed — not re-derived from the recipe, which is what makes the consistency check a check.
     pub header: TmHeader,
+    /// δ-steps taken by the run `run` describes.
+    ///
+    /// ON `DescribedRun` RATHER THAN ON `TmRun::Ran`, and the reason is not only that `Ran` is
+    /// destructured at 52 sites. `run_tm_described` answers `Err` for a program that never ran, so a
+    /// `DescribedRun` always describes a run that STARTED — including `HitCap` and `Overflow`, both
+    /// of which have step counts and would have nowhere to put them if the field hung off `Ran`.
+    ///
+    /// FOR `Overflow` THIS IS THE LAST ATTEMPT'S COUNT. The width search below doubles and retries,
+    /// so a program that overflows at width 8 and fits at 64 simulates four times; the count reported
+    /// belongs to the run whose outcome is reported.
+    pub steps: u64,
 }
 
 /// Lower, auto-fit the width, run — and return the machine and header that together form a complete
@@ -232,13 +243,13 @@ pub fn run_tm_described(core: &Core, kind: EncodingKind, result: Ty, caps: TmCap
     let mut width = MIN_FIELD_WIDTH;
     loop {
         let fitted = kind.at(width);
-        let (run, machine, init) = attempt(&prog, &*fitted, n_slots, caps);
+        let (run, machine, init, steps) = attempt(&prog, &*fitted, n_slots, caps);
         match run {
             TmRun::Overflow if width < MAX_FIELD_WIDTH => width = (width * 2).min(MAX_FIELD_WIDTH),
             run => {
                 let tapes = init.into_iter().enumerate().collect();
                 let header = TmHeader::new(kind, width, n_slots, result, tapes);
-                return Ok(DescribedRun { run, machine, header });
+                return Ok(DescribedRun { run, machine, header, steps });
             }
         }
     }
@@ -490,5 +501,30 @@ mod run_tm_tests {
     fn unary_starts_with_an_empty_work_tape() {
         assert_eq!(Unary::default().init_work(), Vec::<Symbol>::new());
         assert_eq!(Unary::at(4).init_work(), Vec::<Symbol>::new());
+    }
+
+    /// `DescribedRun.steps` is the δ-count of the run whose outcome `run` reports — the number a UI
+    /// shows as "2,870 steps" and uses as the denominator of a progress bar.
+    ///
+    /// PINNED AGAINST THE CURSOR, not against a literal alone. The same machine driven through a
+    /// `TmCursor` must reach the same total, because the product will read one number from the fitting
+    /// run and drive the other from the cursor, and two sources for one number is a drift hazard.
+    #[test]
+    fn described_run_reports_the_step_count_the_cursor_reaches() {
+        use crate::trace::TmCursor;
+
+        let (program, _) = crate::parser::parse("let x = 40; x + 2");
+        let program = program.expect("parses");
+        let ty = crate::typeck::result_type(&program).expect("typechecks");
+        let core = crate::desugar::desugar(&program);
+
+        let d = run_tm_described(&core, EncodingKind::Unary, ty, TM_DEFAULT_CAPS).expect("runs");
+        assert!(matches!(d.run, TmRun::Ran { .. }), "this program halts, got {:?}", d.run);
+        assert_eq!(d.steps, 2870, "the pinned δ-count for `let x = 40; x + 2` under Unary");
+
+        let init = d.header.init(d.machine.tapes);
+        let mut cursor = TmCursor::new(&d.machine, &init, TM_DEFAULT_CAPS);
+        while cursor.next().is_some() {}
+        assert_eq!(cursor.steps_taken(), d.steps, "the fitting run and the cursor must not drift");
     }
 }

@@ -49,6 +49,23 @@ pub fn compile(src: &str, encoding: &str) -> Result<JsValue, JsValue> {
     Ok(out.into())
 }
 
+/// `classifySource(src)` -> `[Span, TokenClass][]`.
+///
+/// NO SESSION, BY DESIGN. An editor highlights while a program is mid-edit and unparseable, so this
+/// path must not depend on anything a compile produces.
+#[wasm_bindgen(js_name = classifySource)]
+pub fn classify_source(src: &str) -> Result<JsValue, JsValue> {
+    to_value(&session::classify_source(src))
+}
+
+/// `analyze(src)` -> `Diagnostic[]`.
+///
+/// THE LINT PATH, and the reason it is not `compile`: see `session::analyze`.
+#[wasm_bindgen]
+pub fn analyze(src: &str) -> Result<JsValue, JsValue> {
+    to_value(&session::analyze(src))
+}
+
 /// `session.rs`'s error type as a JS `Error`-shaped value. The ONE conversion every fallible method
 /// below shares, so no method invents its own wording and none of them can panic instead.
 fn err(e: session::SessionError) -> JsValue {
@@ -102,6 +119,20 @@ impl Session {
         self.0.raise_lambda_cap(u64::from(extra)).map_err(err)
     }
 
+    #[wasm_bindgen(js_name = lambdaValue)]
+    pub fn lambda_value(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.lambda_value().map_err(err)?)
+    }
+
+    /// `u32` and widened, for the reason `raiseLambdaCap` above records: wasm-bindgen maps `u64` to
+    /// JS `bigint`, and §5.1 writes every count as `number`. A caller wanting a chunk larger than
+    /// 4.29e9 steps is asking for a freeze, not a chunk.
+    #[wasm_bindgen(js_name = runLambda)]
+    pub fn run_lambda(&mut self, budget: u32) -> Result<JsValue, JsValue> {
+        let st = self.0.run_lambda(u64::from(budget)).map_err(err)?;
+        to_value(&st)
+    }
+
     // --- the TM leg ---------------------------------------------------------------------------
 
     #[wasm_bindgen(js_name = tmStatus)]
@@ -136,6 +167,29 @@ impl Session {
     #[wasm_bindgen(js_name = raiseTmCap)]
     pub fn raise_tm_cap(&mut self, extra_steps: u32, extra_cells: u32) -> Result<(), JsValue> {
         self.0.raise_tm_cap(u64::from(extra_steps), u64::from(extra_cells)).map_err(err)
+    }
+
+    #[wasm_bindgen(js_name = tmValue)]
+    pub fn tm_value(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.tm_value().map_err(err)?)
+    }
+
+    // --- the reference leg --------------------------------------------------------------------
+
+    /// BLOCKS THE MAIN THREAD FOR UP TO 5,000,000 INTERPRETER STEPS, and cannot be chunked — see
+    /// `session::evaluate` for why `eval` has no resumable form. `evaluateWithBudget` is how a caller
+    /// bounds that.
+    #[wasm_bindgen]
+    pub fn evaluate(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.evaluate())
+    }
+
+    /// `evaluateWithBudget(budget)` -> `Decoded`, where an exhausted budget arrives as a `Fault`.
+    ///
+    /// `u32` and widened, for the reason `raiseLambdaCap` above records.
+    #[wasm_bindgen(js_name = evaluateWithBudget)]
+    pub fn evaluate_with_budget(&self, budget: u32) -> Result<JsValue, JsValue> {
+        to_value(&self.0.evaluate_with_budget(u64::from(budget)))
     }
 
     #[wasm_bindgen(js_name = sourceSpan)]

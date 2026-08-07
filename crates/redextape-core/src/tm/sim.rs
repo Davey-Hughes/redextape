@@ -211,7 +211,7 @@ fn run(
     mut record: Option<&mut Vec<Step>>,
     mut counts: Option<&mut Vec<u64>>,
     mut watch: Option<Watcher<'_>>,
-) -> (Vec<Tape>, StateId, Status) {
+) -> (Vec<Tape>, StateId, Status, u64) {
     let mut cursor = TmCursor::new(m, init, caps);
     loop {
         // The tapes BEFORE this step — `next` applies the rule in place, so they cannot be read
@@ -240,7 +240,8 @@ fn run(
             && !w(cursor.tapes())
         {
             let stopped_in = cursor.state();
-            return (cursor.into_tapes(), stopped_in, Status::Halted);
+            let steps = cursor.steps_taken();
+            return (cursor.into_tapes(), stopped_in, Status::Halted, steps);
         }
         if let Some(c) = counts.as_deref_mut()
             && let Some(slot) = c.get_mut(state as usize)
@@ -253,21 +254,27 @@ fn run(
         }
     }
     let final_state = cursor.state();
+    let steps = cursor.steps_taken();
     // `None` only if the loop broke on an event a `TmCursor` cannot emit; the run is over either way.
     let status = cursor.status().unwrap_or(Status::Halted);
-    (cursor.into_tapes(), final_state, status)
+    (cursor.into_tapes(), final_state, status, steps)
 }
 
 /// Simulate to a halt or a cap, without retaining the step trace.
 pub fn simulate(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<Tape>, Status) {
-    let (tapes, _final, status) = run(m, init, caps, None, None, None);
+    let (tapes, _final, status, _steps) = run(m, init, caps, None, None, None);
     (tapes, status)
 }
 
-/// Simulate to a halt or a cap, reporting the final state alongside the tapes. The state is what tells
-/// a caller *why* a machine halted — in particular whether it halted in the overflow-guard state that
-/// `lower_tm_guarded` hands back. `simulate` is exactly this with the state discarded.
-pub fn simulate_final(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<Tape>, StateId, Status) {
+/// Simulate to a halt or a cap, reporting the final state and the δ-count alongside the tapes. The
+/// state is what tells a caller *why* a machine halted — in particular whether it halted in the
+/// overflow-guard state that `lower_tm_guarded` hands back. `simulate` is exactly this with the state
+/// and the count discarded.
+///
+/// THE COUNT IS REPORTED HERE RATHER THAN BY A FIFTH WRAPPER, because it is a fact about the run
+/// that every caller could use and none could previously reach — `run` has always counted it to
+/// enforce the step cap.
+pub fn simulate_final(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<Tape>, StateId, Status, u64) {
     run(m, init, caps, None, None, None)
 }
 
@@ -282,13 +289,14 @@ pub fn simulate_watched(
     caps: Caps,
     watch: Watcher<'_>,
 ) -> (Vec<Tape>, StateId, Status) {
-    run(m, init, caps, None, None, Some(watch))
+    let (tapes, final_state, status, _steps) = run(m, init, caps, None, None, Some(watch));
+    (tapes, final_state, status)
 }
 
 /// Simulate, recording every step (before it is applied) for the scrubbable trace / view models.
 pub fn simulate_trace(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> Trace {
     let mut steps = Vec::new();
-    let (tapes, final_state, status) = run(m, init, caps, Some(&mut steps), None, None);
+    let (tapes, final_state, status, _steps) = run(m, init, caps, Some(&mut steps), None, None);
     let final_tapes = tapes.iter().map(Tape::snapshot).collect();
     Trace { steps, final_state, final_tapes, status }
 }
@@ -300,7 +308,7 @@ pub fn simulate_trace(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> Trace {
 /// allocates one `u64` per state, once.
 pub fn simulate_counts(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<u64>, Status) {
     let mut counts = vec![0u64; m.states.len()];
-    let (_tapes, _final, status) = run(m, init, caps, None, Some(&mut counts), None);
+    let (_tapes, _final, status, _steps) = run(m, init, caps, None, Some(&mut counts), None);
     (counts, status)
 }
 

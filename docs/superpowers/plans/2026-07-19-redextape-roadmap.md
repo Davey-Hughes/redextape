@@ -151,13 +151,16 @@ See the entry at the end of this file.
   can lower it", and anything deeper already failed elsewhere (interp faults, and the TM guards are
   stricter at 580) — but it is a real change, not a free one.
 
-  **Second, and still open: an 8 MiB-calibrated bound does not protect WASM.** The measurement behind
-  700 was taken on a native 8 MiB stack; WASM's is ~1 MB, where the crash arrives around **depth 180**.
-  So a browser build can still abort inside that window. This matters more than it looks, because Plan 4
-  exists specifically to feed the WASM/web target — the one place the guard does not yet reach. Closing
-  it properly needs a per-target bound (or a stack-probing check) rather than one constant, and the same
+  **Second: an 8 MiB-calibrated bound does not protect WASM.** The measurement behind 700 was taken on
+  a native 8 MiB stack; WASM's is ~1 MB, where the crash arrives around **depth 180**. So a browser
+  build can still abort inside that window. This matters more than it looks, because Plan 4 exists
+  specifically to feed the WASM/web target — the one place the guard does not yet reach. Closing it
+  properly needs a per-target bound (or a stack-probing check) rather than one constant, and the same
   gap applies to the sibling guards `MAX_EVAL_DEPTH`, `MAX_LOWER_DEPTH` and `MAX_DEFUNC_DEPTH`, all
-  calibrated the same way. **Decide it with the WASM slice**, where the target's real stack is known.
+  calibrated the same way. ~~**Decide it with the WASM slice**, where the target's real stack is
+  known.~~ **CLOSED 2026-08-06 (PR 3b), by raising the stack rather than by lowering the bounds — and
+  the "depth 180" above is wrong; measured, it is 256–260.** See the shadow-stack entry at the end of
+  this Plan 4 section.
 - **`Rc<LambdaTerm>` remains the λ performance fix**, not checkpoints. Evidence in the design doc §7.
   **It landed 2026-07-31, and what it measured corrects the 99 ms this entry quotes** — see the λ
   structural-sharing note at the end of this Plan 4 section.
@@ -2767,11 +2770,19 @@ can implement `tapeSlice`.
 Design: [`../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md`](../specs/2026-08-05-plan4-viewmodels-and-wasm-design.md) §5.
 Plan: [`2026-08-05-wasm-session.md`](2026-08-05-wasm-session.md).
 
-**PR 3a of 3, and §10's landing order now has four PRs rather than three.** PR 3 split because the
-JavaScript half carries an entirely different toolchain and a registry-push side effect that deserves
-its own reviewable event. **PR 3b is `web/`, the pnpm migration, the `Dockerfile`/`ci.yml` web edits,
-and arming the `docker` push.** This PR adds no JavaScript and leaves the `web` and `docker` jobs
-dormant.
+**PR 3a of 3, and §10's landing order had four PRs rather than three when this entry was written.**
+PR 3 split because the JavaScript half carries an entirely different toolchain and a registry-push
+side effect that deserves its own reviewable event. ~~**PR 3b is `web/`, the pnpm migration, the
+`Dockerfile`/`ci.yml` web edits, and arming the `docker` push.**~~ **CORRECTED 2026-08-07: that is not
+what PR 3b turned out to be.** The design spec
+([`../specs/2026-08-06-wasm-boundary-completion-design.md`](../specs/2026-08-06-wasm-boundary-completion-design.md),
+opening paragraphs) split PR 3b a second time — keeping the "3b" label for the boundary completion (`runLambda`,
+`Decoded`, the third leg, `TmStatus.total_steps`, the raised shadow stack; see the entries below) and
+moving `web/`, the pnpm migration, the `Dockerfile`/`ci.yml` edits and arming the `docker` push to a
+new PR 3c. **§10's landing order now has FIVE PRs, not four** — the wasm32 gate, `viewmodel.rs`,
+`crates/redextape-wasm` (3a), the boundary completion (3b), and the app (3c) — verified against the
+design spec's own §10 rather than assumed. This PR (#13, PR 3a) itself still adds no JavaScript and
+still leaves the `web` and `docker` jobs dormant.
 
 **The crate is `cdylib` + `rlib`, and the second is a coverage requirement, not a convenience.**
 `wasm-bindgen-test` runs in a browser while `llvm-cov` instruments the native build, so any logic in
@@ -2779,7 +2790,11 @@ the `#[wasm_bindgen]` shell is uncovered BY CONSTRUCTION. `session.rs` holds eve
 natively tested; `lib.rs` is marshalling and one error conversion. Measured: **95.50% workspace lines,
 down from 95.85%, against a floor of 80** — `lib.rs` is 0% over 64 lines, which is the cost that
 design accepts, and `session.rs` is 95.7%. A material drop would have meant logic had leaked into the
-shell; 0.35 points did not.
+shell; 0.35 points did not. **CORRECTED 2026-08-07: "95.50% workspace lines" mislabeled the column —
+95.50% was REGIONS, not lines.** The true figure this PR left the tree at is **96.04% lines / 95.53%
+regions**. The design spec's §8 coverage expectation carried the same mislabeled figure forward and is
+corrected at that site too; the boundary-completion entry below states the true figures from the start
+rather than repeating the error.
 
 **FOUR THINGS CORE DID NOT EXPOSE, none of them in the spec** — each found while writing the plan:
 
@@ -2851,3 +2866,256 @@ scope, and the alternative was `js_sys::Reflect` branching in the shell). And `r
 which cannot name a second crate without checking both in one invocation and reporting them as one
 leg — so the crate whose ONLY real target is wasm32 would have failed under the other crate's name.
 `wasm-pack test` stays out of `check-all.sh`: it needs a browser, and the local merge check should not.
+
+#### PLAN 4'S BOUNDARY COMPLETION — `runLambda`, `Decoded`, the third leg, and the count core already had (2026-08-06/07, PR 3b)
+
+Design: [`../specs/2026-08-06-wasm-boundary-completion-design.md`](../specs/2026-08-06-wasm-boundary-completion-design.md).
+Plan: [`2026-08-06-wasm-boundary-completion.md`](2026-08-06-wasm-boundary-completion.md).
+
+**PR 3b of the five-PR landing order** (see the correction on PR 3a's entry above): the wasm32 gate,
+`viewmodel.rs`, `crates/redextape-wasm` (3a), this slice, and the app (3c). Eight tasks, eight commits
+— the `dead_code` lesson PR 3a's entry recorded above is why this PR could split at all: each field
+lands in the same commit as the method that reads it, rather than as one undividable unit.
+
+**Two free exports, so linting never runs a backend.** `classifySource` and `analyze` close the two
+gaps the design's §2 found first, and the reason is a number, not a preference: the only route to any
+diagnostic before this slice was `compile()`, which lowers both backends **and runs the TM to a
+halt** — 344,999 δ-steps on the `map` demo. A source pane wired to `compile` for a red squiggle on
+every keystroke would have gone through that simulation on every keystroke. `classifySource` wraps
+`analysis::classify_source` (highlighting only — no diagnostics, because highlighting a broken file is
+when it matters most); `analyze` wraps `core::analyze` (parse + typecheck + desugar, no backend at
+all). Both were already `pub` in core, so exporting them cost no new derive and no new viewmodel type.
+
+**`runLambda(budget)` replaces the single-step-only boundary with a chunked one, built around a
+distinction that gets the affordance backwards if it is missed.** `MAX_REDUCTION_STEPS` is
+5,000,000, so `while (s.stepLambda()) {}` is up to five million boundary crossings on the main thread
+with no progress and no cancellation; chunked at, say, 50,000 steps, that is roughly 100 crossings
+with progress rendering and cancellation for free. **THE LOAD-BEARING DISTINCTION: a spent chunk
+budget is not a spent cap.** Exhausting `budget` leaves the run `Running`; only the cursor's own cap
+yields `Capped`. Backwards, this puts a continue button on a run that has merely paused for its chunk
+to end, and hides "continue" from the one run that can actually use it — the same shape of defect PR
+3a's own entry recorded above for `raiseLambdaCap`/`raiseTmCap` shipping as API nothing could
+correctly decide to call, reintroduced one layer out if this had gone the other way.
+
+**`Decoded`, and its wire shape had to be measured rather than designed.** Four states rather than
+`string | null`, for the reason `RunStatus` has four rather than three: `decode_lambda_ty` and
+`decode_tape_ty` both answer `Option<Value>`, and "the run has not finished" and "it finished and the
+result is not a recognizable encoding" are different facts a renderer must not flatten into one blank
+field. **CORRECTED 2026-08-07 at the design spec's §3, the seventh plan defect this branch corrected
+mid-flight:** the TypeScript the design drafted for `Decoded` — a normalized `{ kind, ... }` union —
+is not what crosses. `Decoded` is externally tagged and mixes unit and struct variants, so the real
+shape is `"Undecodable" | "Unfinished" | { Value: { text } } | { Fault: { message } }`; a consumer
+must branch on `typeof x === "string"` before indexing it. See the design spec for the measurement and
+the full correction, including why a comment in `tests/browser.rs` — which is what the plan's Task 8
+Step 2 told the implementer to fix it with — was not an adequate home for a falsified wire-format
+claim.
+
+**`evaluate()` puts the reference interpreter on the boundary as a third leg**, so a disagreement
+between the λ and TM backends is visible in the product and not only in CI's three-way oracle. §8 of
+the design moves that oracle to the layer the product reads, in
+`all_three_legs_agree_across_the_boundary`.
+
+**`lambdaValue()` and `tmValue()` decode a leg's answer into the same `Decoded`, and `tmValue()`'s
+defining property is what it does NOT do.** It does not re-run the machine. `compile` already ran the
+TM to a halt inside `run_tm_described`; driving the cursor again for the same answer would repeat the
+`map` demo's 344,999 steps. The result comes from the run `compile` already performed, kept rather
+than re-derived.
+
+**The `Session` grows five fields it needed all along** — `core`, `ty`, `final_tapes`, `kind`,
+`total_steps` — each kept because `compile` already built it and, before this slice, threw it away:
+`core: Core` for `evaluate`; `ty: Ty` for both decoders; `final_tapes`/`kind` for `tmValue`;
+`total_steps` for `TmStatus.total_steps`.
+
+**`TmStatus` grows `total_steps`, and `LambdaStatus` gets no counterpart — deliberately, not by
+oversight.** The TM's length is known at compile time because `compile` ran the machine to
+completion; λ's is not, because `compile` builds the cursor and never reduces. There is no honest
+number to put on `LambdaStatus` for the same field.
+
+**The number itself was always available in `redextape-core` and every layer above discarded it.**
+`sim::run` has counted δ-steps since before this slice, to enforce the step cap, and `simulate`,
+`simulate_final`, `simulate_watched`, `simulate_trace` — and every test and demo built on them —
+discarded the count rather than reporting it. It now rides on **`DescribedRun.steps`**: `run_tm_described`
+answers `Err` only for a program that never ran, so a `DescribedRun` always describes a run that
+started, `HitCap` and `Overflow` included, and both of those have step counts a field hung off
+`TmRun::Ran` would have had nowhere to put.
+
+**The gate.** Browser suite **9/9** in headless Chrome. `scripts/check-all.sh --no-llvm` green, all
+three wasm legs. `wasm-pack build --release --target web` succeeds at **604,966 bytes**. Coverage
+**95.98% lines / 95.48% regions**, measured on the final tree after the whole-branch review's fixes
+landed — the figure taken before them was 95.93% / 95.46%, and it went UP rather than down despite
+`lib.rs` gaining a seventh export, because the five tests those fixes added cover more than the new
+marshalling costs.
+
+**On that coverage figure, precision matters more than the arithmetic that looks like proof.** PR 3a's
+own entry above recorded the pre-slice baseline as "95.50% workspace lines" — **that was the REGIONS
+column, not lines**, corrected in place there; the true baseline this slice started from is **96.04%
+lines / 95.53% regions**. Reproducing that baseline to two decimal places after `lib.rs` roughly
+doubled would look like proof nothing leaked out of the marshalling shell — 95.98% and 96.04% are
+0.06 apart, 95.48% and 95.53% are 0.05 apart, both "a few tenths" as the design predicted. **That
+arithmetic is not the evidence, and it is not why nothing leaked.** It holds only because
+`session.rs`'s new lines happen to land near the pool average, which is coincidence, not a property
+under test. **The load-bearing number is the per-file row: `session.rs` absorbed every one of this
+slice's decisions and its own coverage ROSE rather than fell — it finishes at 96.19% lines / 97.50%
+regions, against a 92.26% baseline.** (Both columns are named deliberately: mislabelling one as the
+other is the exact error corrected twice in this file.) A shell that had absorbed logic it was not supposed to hold would
+show the opposite signature on that row — more lines and falling coverage on the file doing the
+marshalling. It shows the reverse; that is what "nothing leaked into `lib.rs`" actually rests on, not
+the workspace total.
+
+**A known gap handed to PR 3c, not closed here.** `evaluate()` runs with a 5,000,000-step default
+budget (`interp::DEFAULT_BUDGET`) in one uninterruptible call, and it is not cached — every call
+re-runs the interpreter from scratch. `interp::eval` is not resumable the way `LambdaCursor` is, so it
+cannot be chunked the way `runLambda` was. **The owner chose to expose a budgeted variant,
+`evaluateWithBudget`, rather than cache the result — so this slice ships SEVEN new exports, not the
+six the plan scoped.** Stated plainly, because a scope change that lands unremarked is exactly the
+defect class this section exists to prevent.
+
+**And the already-known `lambdaAst` question travels forward to PR 3c too, not answered here.** It
+returns a recursive `TermNode` that `to_value` serializes to JS. The WALK that builds that tree is
+deliberately iterative — an explicit worklist, no native recursion, precisely because a native
+recursive walk cannot be trusted at this depth — but serde's derived `Serialize` on the recursive
+`TermNode` enum is not iterative. So the shadow-stack headroom the entry below measured is established
+for `compile` only, not for `lambdaAst`. Recorded, not fixed: PR 3c is the first slice where a human
+clicks through that method, and it is the one that must check it.
+
+**THERE ARE TWO RECURSIVE PATHS ON `TermNode`, NOT ONE, AND THE PROJECT ALREADY PAID TO FIX THIS
+HAZARD ONE TYPE OVER.** Alongside the derived `Serialize` above, `TermNode` (`viewmodel.rs`,
+`Abs(String, Box<TermNode>)` / `App(Box<TermNode>, Box<TermNode>)`) has a **derived `Drop`**, which
+recurses on the same spine — so a tree deep enough to trap while serializing is also deep enough to
+trap while being freed, and the second one fires on a path no caller can see. This is not a
+theoretical worry: `LambdaTerm`, the type `TermNode` is BUILT FROM, carries a hand-written iterative
+destructor at `lambda/term.rs:482` for exactly this reason. The view-model type reintroduced the shape
+that destructor exists to defeat. PR 2's ledger recorded the `Drop` half at the time and it was not
+actioned; it is written here so it stops living only in a scratch file.
+
+Why it is worth closing rather than watching: a wasm trap has no unwinding, so **neither path returns
+an error — both poison the module**, and the `Drop` path can fire while unwinding from something else
+entirely. `LambdaTerm::depth` is an O(1) stored invariant, so a depth guard on the `lambdaAst`
+boundary is cheap and does not need a measurement to justify it. Measure both paths, or guard the
+entry point, before PR 3c ships a UI that calls `lambdaAst`.
+
+**One shape was filed and then fixed before merge.** `Session.program: Option<TmProgram>` was `Some`
+exactly when `Session.tm` was `Ok` — both were set from one match arm in `compile` — so the two fields
+encoded one fact twice and the type system could not say so. `tm_status` therefore had to match on the
+PAIR and handle a state that cannot occur, and it could not answer that state with `unreachable!()`,
+because a panic under wasm aborts the module. It fabricated a user-facing status instead, reading
+`"internal: a TM leg with no projected program"` — **an error message for a condition no input can
+produce, and therefore one no test could ever trigger or cover.** Separately, `tm_program` read
+availability from `program` while `tm_status` read it from `tm`: two sources for one fact, the same
+drift hazard `DescribedRun.steps` is cross-checked against a `TmCursor` to prevent.
+
+`tm: Result<(TmProgram, TmCursor<Rc<Machine>>), TmDecline>` deletes the `Option`, the impossible arm
+and the fabricated string together, and gives availability a single source. Four match arms become
+two. The pairing is what makes the bad state unrepresentable rather than merely unreached.
+
+It was PR 3a's shape rather than this slice's, and this slice first made it MORE visible without
+acting on it — `build_tm_leg` already returned the program and the cursor together and `compile`
+immediately split them apart again, so the code built them as one thing and then took them apart. The
+fix was to stop splitting. Behaviour is unchanged: all 48 crate tests passed unmodified, and the one
+test that needed an edit needed it to COMPILE (it read both fields) rather than to pass.
+
+#### THE WASM SHADOW STACK, MEASURED — and the depth guards were decorative, exactly as feared (2026-08-06, PR 3b)
+
+`.cargo/config.toml` now links wasm32 with `-C link-arg=-zstack-size=8388608`, target-scoped so native
+is untouched. **NOTHING IN `redextape-core` CHANGED, AND NO CONSTANT GAINED A
+`#[cfg(target_arch = "wasm32")]` VALUE.** Raising the stack to the size the bounds were calibrated
+against was enough; diverging the seven constants per target would have made the browser refuse
+programs the CLI accepts, and the measurement says it is not necessary.
+
+**The measurement, in headless Chrome 151, on a DEBUG build** — which is the conservative side, since
+release frames are smaller than the ones measured here. Two shapes, because one is not enough: a list
+literal is `Expr::List { items }`, FLAT in the AST, so it never reaches the parser or typechecker
+guards and only becomes deep after desugaring into a `cons`-`Apply` spine; a left-nested `+` chain is
+the shape `MAX_TYPE_DEPTH` actually bounds.
+
+| shape | stock 1 MiB shadow stack | shipped 8 MiB |
+| --- | --- | --- |
+| list literal, *n* elements | **255 returns, 260 aborts** | **no crash at any *n*** — 3,000 returns |
+| left-nested `+` chain, *n* operands | **250 returns, 300 aborts** | 1,498 returns (browser-measured); a native probe puts the guard's true boundary one operand higher — counting operands written, **1,499 returns, 1,500 is refused** by `MAX_TYPE_DEPTH` |
+
+**THE SHADOW STACK WAS BINDING, NOT THE ENGINE'S CALL-DEPTH LIMIT.** The crash depth moved — what
+aborted at 260 now returns at 3,000 — and the trap says the same thing twice over: every abort
+reported `RuntimeError: memory access out of bounds`, the shadow-stack pointer running off the end of
+linear memory, and never `Maximum call stack size exceeded`, which is what the engine limit raises. A
+module cannot set that second limit; it did not have to.
+
+**The roadmap's "the crash arrives around depth 180" was wrong, and it was never measured.** It is
+256–260 for the shape the native measurement used. Corrected at the original claim above rather than
+only here.
+
+**THERE IS NO POST-FLAG CRASH DEPTH, and that is the result rather than a gap in it.** At 8 MiB the
+guards refuse before the stack runs out: past 580 the TM lowering declines, past 700 the λ lowering
+declines, and at 1,500 the typechecker does (1,499 operands written is the deepest it accepts) — so no
+input **`compile`** accepts can be pushed deep enough to trap. Scoped to `compile` deliberately: see
+the note on the session's post-compile surface below the per-pass paragraph — this measurement never
+exercised it. The margin therefore had to be measured by bisecting the STACK SIZE against each worst
+case that IS reachable, rather than bisecting the depth against a fixed stack:
+
+| deepest input the guards admit | shadow stack it needs |
+| --- | --- |
+| 575-element list — the fattest LIST shape this bisection reached (TM lowers *and* the machine runs); NOT the fattest reachable shape overall — see below | > 2 MiB, ≤ 3 MiB |
+| 699-element list — `MAX_LAMBDA_LOWER_DEPTH` at its limit, TM already declined | > 2 MiB, ≤ 3 MiB |
+| 1,498-operand chain, one operand below `MAX_TYPE_DEPTH`'s true limit of 1,499 (native probe; see the shape table above) | > 1 MiB, ≤ 2 MiB |
+
+So the shapes actually bisected need 2–3 MiB of the 8 given, which the original entry reported as a
+**2.7x–4x margin**. **That arithmetic used the wrong worst case.** `lambda/lower.rs:36-38` records the
+project's own native calibration: the UNGUARDED lowering survived depth 1453 and overflowed by 1473 on
+its fattest reachable shape — a store-passing region's statement spine (the `let mut`/`while` path) —
+while a plain list spine, the shape bisected above, survived to ~1750. That is roughly **19% fatter
+frames per level** for the store-passing spine (1750/1473 ≈ 1.19), and this bisection never touched
+that shape directly. Scaling the 2–3 MiB figure by that factor gives the true worst-reachable-case
+need: roughly **2.4–3.6 MiB**, a **~2.2x–3.4x margin** — the figure a future reader should rely on,
+not 2.7x–4x. **The decision does not flip**: 2.2x still clears the rule's 2x floor, but it is
+materially thinner headroom than 4x for a future guard-raise to plan against. This is a scaled
+estimate, not a fresh measurement — bisecting the store-passing shape directly would cost many more
+minutes of browser time for a result that would not change the decision, so it was not run.
+
+Comparing that stack-size margin against the ~2.1x native DEPTH margin `MAX_LAMBDA_LOWER_DEPTH` was
+calibrated at (`lambda/lower.rs:39`) assumes STACK USE IS LINEAR IN DEPTH for this pass — true here,
+since lowering is a straight-line recursive walk with no growth in per-frame state as depth increases,
+but stated explicitly because it is the premise that makes a stack-size ratio and a depth ratio
+comparable at all.
+
+**A CRASH DEPTH IS PER-PASS, NOT PER-TARGET, and comparing the largest bound to one number would have
+given the wrong answer.** `MAX_TYPE_DEPTH` is 1,500 while the list shape's extrapolated 8 MiB crash is
+~2,050 — 0.73 of it, which fails a naive "every bound below half the crash" test. But those are
+different frames: typecheck's are thin enough that depth 1,499 fits in under 2 MiB (the chain actually
+bisected above used 1,498, one operand below the guard's true limit), while the lowering's are fat
+enough that depth 575 does not. `MAX_LAMBDA_LOWER_DEPTH`'s own doc already says this ("these frames
+differ in size from `lower_into`'s, so the number follows this module's own measurement"); the wasm
+answer obeys the same rule.
+
+**THIS MEASUREMENT ESTABLISHES THE INVARIANT FOR `compile` ONLY.** The session's post-compile surface
+is untested: `lambdaAst` returns a recursive `TermNode` (`viewmodel.rs:130-134`, `Var`/`Abs`/`App`)
+that `to_value` serializes to JS. The tree-building WALK is deliberately iterative
+(`viewmodel.rs:158-176`, explicit worklist, no native recursion) precisely because a native recursive
+walk cannot be trusted at this depth — but serde's derived `Serialize` on that recursive enum is not
+iterative, and a 600-element list's λ term is thousands of nodes deep. Whether that derived
+`Serialize` overflows the shadow stack before `LambdaState::ast`'s own `node_budget` truncates it is
+not established here and is out of this task's scope. **PR 3c, the first slice where a human clicks
+through `lambdaAst` and the session's other post-compile methods, must check it.**
+
+**And `Serialize` is only one of the two recursive paths on that type** — `TermNode`'s `Drop` is
+derived and recurses on the same spine, so the tree can also trap while being freed, on a path no
+caller can see. The boundary-completion entry above carries the full argument, including why this is
+known-real rather than theoretical: `LambdaTerm`, the type `TermNode` is built from, already has a
+hand-written iterative destructor (`lambda/term.rs:482`) for precisely this hazard.
+
+**`MAX_PARSE_DEPTH` WAS ITSELF UNREACHABLE ON STOCK WASM — the guard trapped before it could fire.**
+A 400-deep paren nest refuses natively at **300 parens written** (299 is the deepest accepted — the
+parser's own internal depth counter is a different quantity from a count of parens written, and first
+exceeds `MAX_PARSE_DEPTH` = 300 while parsing the 300th paren; do not read that counter as the token
+count). Run alone against a 1 MiB shadow stack it aborts the module instead. This is the sharpest
+evidence that the guards were decorative rather than merely tight, and it is now a committed test.
+
+**What ships is the safe side only,** three cases in `tests/browser.rs`: refusal at 400 nested parens,
+a clean compile at 200 elements, and a 600-element list that compiles at 8 MiB and aborts at 1 MiB.
+The last is the regression test for the link arg — verified by re-running the whole suite with the
+stock stack forced back on, where it traps and takes the rest of the file down with it, which is
+precisely why the crash depth itself is recorded in this prose and not asserted in the suite.
+
+**One plan claim the measurement falsified.** The task brief's own safe-side test proposed a
+400-ELEMENT LIST as the program "deeper than `MAX_PARSE_DEPTH` (300), so the front end refuses it
+before any backend runs". It is not: a list literal is flat in the AST and `MAX_PARSE_DEPTH` counts
+`parse_binary`/block nesting only, so 2,000 elements still parse and typecheck with **zero**
+diagnostics. The shipped test uses nested parens, which is what that guard bounds.

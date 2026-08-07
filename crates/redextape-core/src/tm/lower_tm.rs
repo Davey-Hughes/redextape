@@ -379,7 +379,7 @@ mod tests {
         let (m, overflow) = lower_tm_guarded(&program, &enc);
         let mut init = vec![Vec::new(); TAPES];
         init[REG] = enc.init_reg(n_slots_of(&program));
-        let (_, final_state, status) = simulate_final(&m, &init, CAPS);
+        let (_, final_state, status, _) = simulate_final(&m, &init, CAPS);
         status == Status::Halted && final_state == overflow
     }
 
@@ -455,7 +455,7 @@ mod tests {
         let (m, overflow) = lower_tm_guarded(&program, &enc);
         let mut init = vec![Vec::new(); TAPES];
         init[REG] = enc.init_reg(n_slots_of(&program));
-        let (_, final_state, status) = simulate_final(&m, &init, CAPS);
+        let (_, final_state, status, _) = simulate_final(&m, &init, CAPS);
         status == Status::Halted && final_state == overflow
     }
 

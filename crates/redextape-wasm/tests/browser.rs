@@ -8,6 +8,16 @@
 //! `compile` returns, looking each method up on its prototype, and calling it with `JsValue`
 //! arguments is the path a renderer actually takes, so it is the path under test.
 //!
+//! **WITH ONE EXCEPTION, AND IT IS NOT AN OVERSIGHT: THE FREE EXPORTS.** `the_free_exports_need_no
+//! _session` calls `classify_source`/`analyze` as plain Rust, because there is nothing to look them up
+//! ON — they are module-level functions rather than methods on a returned object, and
+//! `wasm-bindgen-test` hands a test no handle on the generated module's own export table. What those
+//! two calls still prove is the half that is reachable from here: that the functions link and run under
+//! wasm, and that `to_value` marshals their results. That their JS NAMES exist and are camelCase is
+//! closed from the other side instead: `wasm-pack build` emits `pkg/redextape_wasm.d.ts` — the file a
+//! renderer actually imports — and it declares every export this crate has, `classifySource` and
+//! `analyze` among them, as module-level functions under exactly those camelCase names. A missing or
+//! misspelled `js_name` cannot survive that; it simply is not something a test in this file can see.
 //! THE EXPECTED VALUES ARE PINNED IN `session.rs`'s NATIVE TESTS TOO, deliberately: "the values that
 //! come back are the ones a native run produces" is only a claim if both sides name the same numbers.
 //! `let x = 40; x + 2` reduces in 7 β-steps to Church 42 and runs 2,870 δ-steps on a 5-tape machine of
@@ -212,4 +222,164 @@ fn a_malformed_program_marshals_its_diagnostics() {
     // `Severity` is a fieldless enum: serde makes it the variant NAME, which is what a renderer
     // switches on.
     assert_eq!(get(&first, "severity").as_string().as_deref(), Some("Error"));
+}
+
+/// The depth guards must ANSWER rather than trap, on the one target where they were never calibrated.
+///
+/// **THIS TEST DELIBERATELY STAYS BELOW THE CRASH.** A wasm trap poisons the module for every later
+/// case in this file, so nothing here may cross the line — the crash depth itself was measured once
+/// by hand and is recorded in the roadmap, not asserted here.
+///
+/// NESTED PARENS RATHER THAN A LONG LIST LITERAL, and the difference is which guard is on trial.
+/// `MAX_PARSE_DEPTH` counts `parse_binary`/block nesting ONLY; a list literal is `Expr::List { items }`
+/// — flat in the AST — so 2,000 elements still parse and typecheck with zero diagnostics. Nesting is
+/// what the front end bounds: counting literal parens WRITTEN, 299 is the deepest accepted and 300 is
+/// the first depth refused. (The parser's own internal depth counter is a different quantity — it
+/// first exceeds `MAX_PARSE_DEPTH` = 300 while parsing the 300th paren — and should not be read as a
+/// count of parens written.)
+#[wasm_bindgen_test]
+fn a_deep_program_is_refused_rather_than_trapping() {
+    // Deeper than `MAX_PARSE_DEPTH` (300), so the front end refuses it before any backend runs.
+    let (diagnostics, session) = compile(&format!("{}0{}", "(".repeat(400), ")".repeat(400)));
+    assert!(diagnostics.length() > 0, "a program past the parse guard is refused, not trapped");
+    assert!(session.is_null(), "no session for a program that does not analyze");
+}
+
+/// Just under the guards, the whole pipeline runs in a browser — which is what says the guards are the
+/// thing stopping deep input, rather than the module dying a little further along.
+#[wasm_bindgen_test]
+fn a_program_just_under_the_guard_still_compiles() {
+    let elems = vec!["0"; 200].join(", ");
+    let (diagnostics, session) = compile(&format!("[{elems}]"));
+    assert_eq!(diagnostics.length(), 0, "200 elements is within every guard");
+    assert!(!session.is_null(), "and it compiles in a browser, not only natively");
+}
+
+/// THE REGRESSION TEST FOR THE LINK ARG. It exercises the deepest recursion any front-end guard
+/// admits — λ lowering at depth ~600 — rather than the parser's, which
+/// `a_deep_program_is_refused_rather_than_trapping` above already covers. A 600-element list desugars
+/// to a 600-deep `cons`-`Apply` spine, which `MAX_LAMBDA_LOWER_DEPTH` (700) admits — and on wasm32's
+/// stock 1 MiB shadow stack that ABORTED the module with `RuntimeError: memory access out of bounds`,
+/// measured. It returns here only because `.cargo/config.toml` links with `-zstack-size=8388608`.
+///
+/// **THE λ ASSERTION IS THE LOAD-BEARING ONE.** Without it this case would still pass if the lowering
+/// had DECLINED — no deep recursion, nothing exercised, a green test proving nothing. Only the λ leg
+/// is asserted because 600 is past `MAX_LOWER_DEPTH`/`MAX_DEFUNC_DEPTH` (580), so the TM leg declines
+/// and no machine runs — which is also why this case costs milliseconds rather than the ~12 seconds a
+/// 400-element list does.
+///
+/// STILL BELOW THE CRASH, and measured rather than assumed: past 580 the TM lowering refuses, so the
+/// deepest input any guard admits is a 699-element list, and bisecting the STACK SIZE (the depth
+/// cannot be pushed further — the guards refuse first) puts its requirement between 2 and 3 MiB of
+/// the 8 given — against the LIST spine specifically. `lambda/lower.rs:36-38` records a store-passing
+/// statement spine as ~19% fatter per level than that spine, so the true worst-reachable-case margin
+/// is roughly **2.2x–3.4x**, not the 2.7x–4x a straight read of this bisection would give (the
+/// decision is unaffected either way — see the roadmap entry for the full derivation).
+#[wasm_bindgen_test]
+fn a_deep_but_legal_program_needs_the_raised_shadow_stack() {
+    let elems = vec!["0"; 600].join(", ");
+    let (diagnostics, session) = compile(&format!("[{elems}]"));
+    assert_eq!(diagnostics.length(), 0, "a 600-deep cons spine is inside every front-end guard");
+    assert!(!session.is_null(), "and at 8 MiB it compiles instead of trapping");
+    let lambda = call(&session, "lambdaStatus", &[]);
+    assert_eq!(get(&lambda, "available"), JsValue::TRUE, "the λ lowering really recursed 600 deep");
+}
+
+/// The two free exports, which take no session and must therefore be reachable as module-level
+/// functions rather than as prototype methods.
+#[wasm_bindgen_test]
+fn the_free_exports_need_no_session() {
+    let spans: Array = redextape_wasm::classify_source("let x = 40; x + 2").expect("marshals").unchecked_into();
+    assert!(spans.length() > 0, "a clean program has tokens to highlight");
+    let first: Array = spans.get(0).unchecked_into();
+    assert_eq!(first.length(), 2, "each entry is a (Span, TokenClass) pair");
+
+    // Highlighting a broken file is when highlighting matters most.
+    let broken: Array = redextape_wasm::classify_source("let x = ;").expect("marshals").unchecked_into();
+    assert!(broken.length() > 0, "a file that does not analyze still has tokens");
+
+    let clean: Array = redextape_wasm::analyze("let x = 40; x + 2").expect("marshals").unchecked_into();
+    assert_eq!(clean.length(), 0, "a clean program has no diagnostics");
+    let errs: Array = redextape_wasm::analyze("let x = ;").expect("marshals").unchecked_into();
+    assert!(errs.length() > 0, "a parse error is reported");
+    assert_eq!(get(&errs.get(0), "severity").as_string().as_deref(), Some("Error"));
+}
+
+/// All three legs, through the glue, agreeing. `Decoded` is an externally tagged enum with struct
+/// variants — the shape most likely to be mangled by a serializer — so its tag and payload are both
+/// read rather than only its presence.
+#[wasm_bindgen_test]
+fn all_three_legs_agree_across_the_boundary() {
+    let (_, session) = compile("let x = 40; x + 2");
+
+    // Before the λ run, its value is `Unfinished`: a unit variant, which serde renders as a bare
+    // string rather than an object.
+    let before = call(&session, "lambdaValue", &[]);
+    assert_eq!(before.as_string().as_deref(), Some("Unfinished"), "got {before:?}");
+
+    // The chunked loop: three steps at a time, exactly as a renderer drives it.
+    let mut chunks = 0;
+    loop {
+        let st = call(&session, "runLambda", &[JsValue::from_f64(3.0)]);
+        chunks += 1;
+        assert!(chunks <= 100, "this program normalizes in 7 β-steps");
+        match st.as_string().as_deref() {
+            Some("Running") => continue,
+            Some("Ended") => break,
+            other => panic!("unexpected status {other:?}"),
+        }
+    }
+    assert_eq!(chunks, 3, "7 steps at 3 per chunk ends inside the third");
+
+    // `Value { text }` is a struct variant: serde renders it as `{ Value: { text: "42" } }`.
+    //
+    // MEASURED IN THIS BROWSER, NOT ASSUMED, because PR 3c's renderer reads exactly this. A probe run
+    // of `JSON.stringify` on `before` and on the three values below reported, verbatim:
+    //
+    // ```
+    // before    = "Unfinished"
+    // lambda    = {"Value":{"text":"42"}}
+    // tm        = {"Value":{"text":"42"}}
+    // reference = {"Value":{"text":"42"}}
+    // ```
+    //
+    // So `Decoded` is externally tagged with no envelope of its own: a unit variant IS the bare
+    // variant-name string, and a struct variant is a one-key object whose value is the fields. This is
+    // `serde-wasm-bindgen`'s documented behaviour and not an accident of `serialize_missing_as_null` —
+    // `ser.rs` renders unit variants as strings "for compatibility with serde-json" and wraps struct
+    // variants in a fresh `Object` keyed by the variant name.
+    let expected = |v: &JsValue| {
+        let inner = get(v, "Value");
+        assert!(inner.is_object(), "a decoded value is a tagged object, got {v:?}");
+        get(&inner, "text").as_string()
+    };
+    let lambda = call(&session, "lambdaValue", &[]);
+    let tm = call(&session, "tmValue", &[]);
+    let reference = call(&session, "evaluate", &[]);
+    assert_eq!(expected(&lambda).as_deref(), Some("42"), "λ");
+    assert_eq!(expected(&tm).as_deref(), Some("42"), "TM");
+    assert_eq!(expected(&reference).as_deref(), Some("42"), "reference");
+
+    // `evaluateWithBudget` is the one export a caller reaches for when it cannot afford `evaluate`'s
+    // five-million-step worst case, so BOTH of its outcomes are read here rather than only the happy
+    // one — a budget that finishes must answer exactly what `evaluate` answered, and a budget that does
+    // not must come back as a tagged `Fault` rather than as an abort or an empty value. Its `budget`
+    // takes a plain JS `number` like the two raises: passing one to a `u64` parameter throws
+    // `TypeError: Cannot convert 1000000 to a BigInt`, so this call succeeding IS that assertion.
+    let generous = call(&session, "evaluateWithBudget", &[JsValue::from_f64(1_000_000.0)]);
+    assert_eq!(expected(&generous).as_deref(), Some("42"), "a budget the program finishes inside");
+    let starved = call(&session, "evaluateWithBudget", &[JsValue::from_f64(1.0)]);
+    let fault = get(&starved, "Fault");
+    assert!(fault.is_object(), "a spent budget is a tagged Fault, got {starved:?}");
+    let message = get(&fault, "message").as_string().expect("a fault carries its message across");
+    assert!(message.contains("budget"), "the fault must name what ran out, got {message:?}");
+
+    // `tmValue` needed no stepping: the answer came from the run `compile` performed.
+    let tm_status = call(&session, "tmStatus", &[]);
+    assert_eq!(num(&tm_status, "total_steps"), 2870.0, "the whole run's length");
+    assert_eq!(
+        get(&tm_status, "run").as_string().as_deref(),
+        Some("Running"),
+        "and the cursor has not moved — total_steps is not about the cursor"
+    );
 }

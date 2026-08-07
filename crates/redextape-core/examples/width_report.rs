@@ -102,7 +102,7 @@ fn ended_in_guard(program: &Program, enc: &dyn Encoding) -> bool {
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots_of(program));
     init[WORK] = enc.init_work();
-    let (_, final_state, status) = simulate_final(&m, &init, TM_DEFAULT_CAPS);
+    let (_, final_state, status, _) = simulate_final(&m, &init, TM_DEFAULT_CAPS);
     status == TmStatus::Halted && final_state == overflow
 }
 

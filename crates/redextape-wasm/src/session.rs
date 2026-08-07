@@ -7,11 +7,12 @@
 
 use std::rc::Rc;
 
+use redextape_core::analysis::Classified;
 use redextape_core::core::NodeId;
 use redextape_core::lambda::{self, LowerError};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::machine::Machine;
-use redextape_core::tm::{self, EncodingKind, Symbol, TmRun};
+use redextape_core::tm::{self, EncodingKind, Symbol, Tape, TmRun};
 use redextape_core::trace::{LambdaCursor, TmCursor};
 use redextape_core::viewmodel::{LambdaState, TermNode, TmProgram, TmState};
 use redextape_core::{Diagnostic, Severity, Span, parser, typeck};
@@ -79,6 +80,44 @@ pub enum RunStatus {
     DepthRefused,
 }
 
+/// A leg's answer, or why there is not one.
+///
+/// **FOUR STATES RATHER THAN `Option<String>`, for the reason `RunStatus` has four rather than
+/// three.** `decode_lambda_ty` and `decode_tape_ty` both answer `Option<Value>`, and "the run has
+/// not finished" and "it finished and the result is not a recognizable encoding" are different facts
+/// about the program. A renderer that flattens them shows one blank field for two situations that
+/// call for different words.
+///
+/// **NOT EVERY PRODUCER REACHES EVERY STATE, and the asymmetry is real rather than incidental:**
+///
+/// | | `Value` | `Undecodable` | `Unfinished` | `Fault` |
+/// | --- | --- | --- | --- | --- |
+/// | `lambda_value` | ✅ | ✅ | the cursor has not reached `Ended` | — |
+/// | `tm_value` | ✅ | ✅ | a capped compile whose cursor has not since halted | — |
+/// | `evaluate` | ✅ | — | — | ✅ |
+///
+/// `tm_value`'s `Unfinished` is NOT λ-specific: `compile` gives both `Ran` and `HitCap` a working
+/// cursor, so a capped machine is a live session with no tapes to decode. It is also not permanent —
+/// a raised cap can drive that cursor to a halt, and `tm_value` decodes the configuration it stopped
+/// on. There is no state in which the TM leg reports `Ended` and `Unfinished` together.
+///
+/// **BOTH `Undecodable` MARKS ARE A FIXTURE, NOT AN ARGUMENT.**
+/// `a_function_valued_program_decodes_as_undecodable_on_both_legs` pins them against `|x| x + 1`,
+/// which types as `Fun([Nat], Nat)` — a type `decode_lambda_ty` and `decode_tape_ty` both bottom out
+/// on — and which BOTH backends nonetheless lower and run to an end. A ✅ in a reachability table that
+/// no test can demonstrate is a claim, and this one is not.
+///
+/// `text` IS `format_value` OUTPUT, AND `Value` ITSELF CANNOT CROSS. `Value::Closure { params, body:
+/// Rc<Core>, env: Env }` carries an environment and a Core subtree; it has no serde derive and should
+/// not acquire one. That is a property of the type, not a convenience.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Decoded {
+    Value { text: String },
+    Undecodable,
+    Unfinished,
+    Fault { message: String },
+}
+
 /// Whether the λ leg is there, why not when it is not, and how far its run has got.
 ///
 /// `reason` IS THE PAYLOAD, which is why both legs answer a struct rather than an `Option`. A UI that
@@ -100,7 +139,25 @@ pub struct TmStatus {
     pub available: bool,
     pub reason: String,
     pub width: Option<usize>,
+    /// Where the CURSOR stands.
     pub run: Option<RunStatus>,
+    /// How long the WHOLE run is, in δ-steps, from the run `compile` performed.
+    ///
+    /// **A DIFFERENT NUMBER ABOUT A DIFFERENT THING THAN `run`**, and both are needed: a renderer
+    /// showing "step 40 of 2,870" reads the cursor for the first and this for the second. It does not
+    /// move as the cursor advances, because it was never about the cursor.
+    ///
+    /// **FOR A `HitCap` RUN THIS IS THE CAP IT STOPPED AT, NOT THE LENGTH OF A COMPLETED RUN.** The
+    /// machine never reached a final configuration, so there is no length to report — only the budget
+    /// it exhausted. `raise_tm_cap` can then extend that budget and drive the cursor PAST this count,
+    /// so "step N of `total_steps`" can show N exceeding its own total after a cap raise. A consumer
+    /// rendering a progress bar must read `run` to know whether this field is a length or a floor
+    /// before trusting it as one.
+    ///
+    /// **`LambdaStatus` HAS NO COUNTERPART, and the asymmetry is real.** The TM's length is known at
+    /// compile time because `compile` already ran the machine; λ's is not, because `compile` builds
+    /// the cursor and never reduces. There is no honest number to put there.
+    pub total_steps: Option<u64>,
 }
 
 /// The result of `Session::compile`. `diagnostics` is non-empty for a program the front end objected
@@ -113,11 +170,111 @@ pub struct Compiled {
     pub session: Option<Session>,
 }
 
+/// Token spans for highlighting, with no session and no backend.
+///
+/// A THIN WRAPPER ON PURPOSE, and it earns its place by existing at all: `analysis::classify_source`
+/// is `pub` in core and had no boundary, so §6.2's "CodeMirror's headline feature is already
+/// delivered, in Rust" was true of the function and false of anything JavaScript could call.
+pub fn classify_source(src: &str) -> Classified {
+    redextape_core::analysis::classify_source(src)
+}
+
+/// Static diagnostics — parse and typecheck — with no backend and no session.
+///
+/// **SEPARATE FROM `compile` BECAUSE OF WHAT `compile` COSTS.** `compile` lowers both backends and
+/// runs the TM to a halt (`run_tm_described`), which is 344,999 δ-steps on the `map` demo. An editor
+/// linting on every keystroke cannot go through that path, and this is the one it goes through
+/// instead. `Analysis.core` is dropped: a `Core` has no boundary representation and no consumer here.
+pub fn analyze(src: &str) -> Vec<Diagnostic> {
+    redextape_core::analyze(src).diagnostics
+}
+
 pub struct Session {
+    /// KEPT RATHER THAN DROPPED, so `evaluate` needs no second front end. A free `evaluate(src)`
+    /// would re-run parse, typecheck and desugar — work `compile` has already done — purely to reach
+    /// a `Core` this struct could have held.
+    pub(crate) core: redextape_core::core::Core,
+    /// The program's top-level type, which BOTH decoders need — `decode_lambda_ty(nf, &ty)` and
+    /// `decode_tape_ty(&tapes, &ty, enc)`. `compile` computes it for `run_tm_described` and passed
+    /// it away; decoding is type-directed, so a session that discarded it could not decode anything.
+    pub(crate) ty: redextape_core::ty::Ty,
     pub(crate) lambda: Result<LambdaCursor, LowerError>,
-    pub(crate) tm: Result<TmCursor<Rc<Machine>>, TmDecline>,
-    pub(crate) program: Option<TmProgram>,
+    /// The TM leg: the projected program AND the cursor that walks it, TRAVELLING TOGETHER IN ONE
+    /// `Result` RATHER THAN IN TWO FIELDS.
+    ///
+    /// **THE PAIRING IS WHAT MAKES A CURSOR WITHOUT ITS PROGRAM UNREPRESENTABLE.** `build_tm_leg`
+    /// derives both from one machine and hands them back as a pair, so that combination was never a
+    /// state this code could REACH — only one the earlier shape, a `Result` beside an `Option`, could
+    /// SPELL. Spelling it was not free. `tm_status` had to match on both fields, and the arm for the
+    /// combination that cannot occur could not be an `unreachable!()` — a panic under wasm aborts the
+    /// module — so it fabricated a user-facing status instead: an error message describing a
+    /// situation no program can produce, untriggerable and therefore permanently uncovered.
+    ///
+    /// It also put TWO SOURCES UNDER ONE FACT. `tm_program` read availability off the `Option` while
+    /// `tm_status` read it off the `Result`, two encodings of one boolean that only the constructor
+    /// kept in step. One `Result` collapses both costs: the type now states what `compile` always
+    /// guaranteed.
+    ///
+    /// The projection is still built ONCE and cached — see `build_tm_leg`. Pairing changes where it
+    /// is stored, not how often it is computed.
+    pub(crate) tm: Result<(TmProgram, TmCursor<Rc<Machine>>), TmDecline>,
     pub(crate) map: SourceMap,
+    /// The halted run's final tapes, from `TmRun::Ran`. `None` for `HitCap` — a capped run never
+    /// reached a final configuration, which is what `tm_value` reports as `Unfinished` rather than
+    /// as `Undecodable`.
+    ///
+    /// **WRITTEN ONCE, BY `compile`, AND NEVER UPDATED.** A cap raised afterwards can carry the CURSOR
+    /// to a halt, and that halt is not recorded here; `tm_value` reads the cursor as a fallback for
+    /// exactly that case. Nothing else may treat this field as "has the run finished" — `tm_status().run`
+    /// is the only honest answer to that question.
+    pub(crate) final_tapes: Option<Vec<Tape>>,
+    /// The encoding the tapes were produced under. NO WIDTH IS KEPT ALONGSIDE IT: `TmRun::Ran`'s own
+    /// doc records that both encodings decode structurally, delimiter to delimiter, so any instance
+    /// decodes tapes produced at any width. There is therefore no second object that can disagree
+    /// with the first — the shape that once mis-attributed 1,049 of 1,374 spans.
+    pub(crate) kind: EncodingKind,
+    /// δ-steps the run `compile` performed took, from `DescribedRun.steps`. `None` when
+    /// `run_tm_described` answered `Err`, which is exactly the program that never ran a step.
+    ///
+    /// **`Some` HERE DOES NOT MEAN THE LEG IS AVAILABLE.** `Overflow` and `TooLarge` arrive inside an
+    /// `Ok`, carrying the real count of the attempt that produced them, and still decline the leg —
+    /// the runaway counter in `a_declined_tm_leg_reports_no_total_steps` reaches 740,183. `tm_status`
+    /// is where that is withheld: a declined leg reports `None` however this field reads, because a
+    /// length beside `available: false` describes a run the caller has no cursor to reach.
+    pub(crate) total_steps: Option<u64>,
+}
+
+/// The shared tail of `compile`'s two non-declining arms. `Ran` and `HitCap` build the same cursor
+/// and the same projected program; they differ only in whether a final configuration exists.
+///
+/// **THE FINAL TAPES ARE PAIRED ON AT THE CALL SITE RATHER THAN PASSED THROUGH HERE.** This function
+/// once took them as a third parameter and returned them untouched, purely to shape the return tuple —
+/// a parameter that could not affect the result, which reads as though it might. What the helper is
+/// actually for is that both arms build the leg identically, so the `match` in `compile` can stay
+/// exhaustive with no catch-all; that property is unaffected by where the tapes are attached.
+///
+/// `caps` IS THE BUDGET THE DESCRIBED RUN ALREADY SPENT, handed on so the cursor starts life with the
+/// same one. A cursor budgeted differently from the run whose outcome the session reports would stop
+/// somewhere that outcome never mentions.
+fn build_tm_leg(header: tm::TmHeader, machine: Machine, caps: tm::TmCaps) -> (TmProgram, TmCursor<Rc<Machine>>) {
+    let init = header.init(machine.tapes);
+    let width = header.width;
+    let machine = Rc::new(machine);
+    // `TmProgram` is projected ONCE, here, and cached — never per step. The `map` demo is 3,203 states
+    // over 344,999 steps; re-projecting per `tmState` is the cost the `TmProgram`/`TmState` split
+    // exists to avoid.
+    let program = TmProgram::of(&machine, width);
+    let cursor = TmCursor::new(Rc::clone(&machine), &init, caps);
+    (program, cursor)
+}
+
+/// The ONE place an interpreter run becomes a `Decoded`. `evaluate` and `evaluate_with_budget` differ
+/// only in the budget they pass, so they must not be able to differ in the shape they answer with.
+fn decoded_of(run: Result<redextape_core::value::Value, redextape_core::interp::RuntimeError>) -> Decoded {
+    match run {
+        Ok(v) => Decoded::Value { text: redextape_core::value::format_value(&v) },
+        Err(e) => Decoded::Fault { message: e.message },
+    }
 }
 
 impl Session {
@@ -132,6 +289,19 @@ impl Session {
     /// in core pins that the names line up at all, and `the_source_node_resolves_at_the_width_the_run_fitted`
     /// below pins that they still line up after the auto-fit has moved the width.
     pub fn compile(src: &str, kind: EncodingKind) -> Compiled {
+        Session::compile_with_caps(src, kind, tm::TM_DEFAULT_CAPS)
+    }
+
+    /// `compile` with the TM run's budget as a parameter rather than a constant.
+    ///
+    /// PRIVATE, AND EVERY PRODUCT CALLER PASSES `TM_DEFAULT_CAPS` — the boundary exposes no way to
+    /// choose. It is a parameter because `TM_DEFAULT_CAPS` is 5,000,000 δ-steps, so the `HitCap` arm
+    /// below is otherwise only reachable by simulating five million steps and then five million more
+    /// through the cursor to reach the same wall. A test that cannot afford that is a test that never
+    /// runs, and the arm it cannot reach is the one where `final_tapes` is `None` and every question
+    /// about a continued run is decided. With a budget of ten the same arm is reached in milliseconds,
+    /// by the same code, from the same source program.
+    fn compile_with_caps(src: &str, kind: EncodingKind, caps: tm::TmCaps) -> Compiled {
         let (program, mut diagnostics) = parser::parse(src);
         let Some(program) = program else {
             return Compiled { diagnostics, session: None };
@@ -161,7 +331,12 @@ impl Session {
         // is NOT an `Err` — reaching `MAX_FIELD_WIDTH` and still overflowing returns `Ok` with
         // `run: TmRun::Overflow` and a machine attached — so the decline for it is read off `d.run`,
         // which is why this is two matches and not one.
-        let tm = match tm::run_tm_described(&core, kind, ty, tm::TM_DEFAULT_CAPS) {
+        let described = tm::run_tm_described(&core, kind, ty.clone(), caps);
+        // Read off the `Ok` BEFORE the match consumes it, so every run that STARTED reports its own
+        // count — including `Overflow` and `TooLarge` arriving inside an `Ok`, which decline the leg
+        // and still ran. See the field's doc for where a declined leg's length is withheld.
+        let total_steps = described.as_ref().ok().map(|d| d.steps);
+        let tm = match described {
             Err(TmRun::TooLarge) => Err(TmDecline::TooLarge),
             Err(TmRun::LowerError(e)) => Err(TmDecline::Lower(format!("{e:?}"))),
             // `lower_and_size` produces no other `Err`, so this arm is unreachable today. It is a
@@ -175,26 +350,19 @@ impl Session {
                 // `Ran` and `HitCap` BOTH yield a working cursor, and that is the point of the split:
                 // a run that spent its budget is resumable through `raise_tm_cap`, so flattening it
                 // into a decline would throw away a session the user can still drive.
-                TmRun::Ran { .. } | TmRun::HitCap => {
-                    let init = d.header.init(d.machine.tapes);
-                    let width = d.header.width;
-                    let machine = Rc::new(d.machine);
-                    let program = TmProgram::of(&machine, width);
-                    let cursor = TmCursor::new(Rc::clone(&machine), &init, tm::TM_DEFAULT_CAPS);
-                    Ok((program, cursor))
-                }
+                TmRun::Ran { tapes } => Ok((build_tm_leg(d.header, d.machine, caps), Some(tapes))),
+                TmRun::HitCap => Ok((build_tm_leg(d.header, d.machine, caps), None)),
             },
         };
 
-        // `TmProgram` is projected ONCE, here, and cached — never per step. The `map` demo is 3,203
-        // states over 344,999 steps; re-projecting per `tmState` is the cost the `TmProgram`/`TmState`
-        // split exists to avoid.
-        let (program, tm) = match tm {
-            Ok((p, c)) => (Some(p), Ok(c)),
-            Err(d) => (None, Err(d)),
+        // The LEG stays paired; only the final tapes are split off, because they are genuinely a
+        // separate fact — `Ran` has them and `HitCap` does not, while both build the same leg.
+        let (tm, final_tapes) = match tm {
+            Ok((leg, t)) => (Ok(leg), t),
+            Err(d) => (Err(d), None),
         };
 
-        Compiled { diagnostics, session: Some(Session { lambda, tm, program, map }) }
+        Compiled { diagnostics, session: Some(Session { core, ty, kind, lambda, tm, map, final_tapes, total_steps }) }
     }
 
     // --- the λ leg ----------------------------------------------------------------------------
@@ -237,6 +405,34 @@ impl Session {
         Ok(c.next().is_some())
     }
 
+    /// Advance up to `budget` β-steps, then report how the run stands.
+    ///
+    /// **CHUNKED RATHER THAN RUN-TO-CAP, AND THAT IS A UI REQUIREMENT.** `MAX_REDUCTION_STEPS` is
+    /// 5,000,000; a single call that spends all of it blocks the browser's main thread with no
+    /// progress and no way to cancel. A caller loops on `Running` and yields between chunks, which
+    /// costs ~100 crossings at a 50,000-step chunk instead of five million.
+    ///
+    /// **A SPENT `budget` IS NOT A SPENT CAP.** Exhausting `budget` leaves the run `Running`; only
+    /// the cursor's own cap yields `Capped`. This is the same distinction `RunStatus` was introduced
+    /// for one layer in — folding them together would offer "continue" on a run that has merely
+    /// paused, and hide it from the one run that can actually take it.
+    ///
+    /// Returns `RunStatus` rather than `bool` for the reason `step_lambda`'s doc records: `false`
+    /// answers every end condition identically, and a renderer cannot act on that.
+    pub fn run_lambda(&mut self, budget: u64) -> Result<RunStatus, SessionError> {
+        let c = self.lambda.as_mut().map_err(|_| SessionError::LambdaAbsent)?;
+        for _ in 0..budget {
+            if c.next().is_none() {
+                break;
+            }
+        }
+        // `run` is `None` only for an absent leg, which the `?` above has already ruled out — so the
+        // fallback is unreachable today. It is a fallback rather than an unwrap because unwrapping is a
+        // panic and a panic under wasm aborts the module; if `lambda_status` ever grows a case that
+        // withholds `run` from a leg that is present, this reports "still running" instead of dying.
+        Ok(self.lambda_status().run.unwrap_or(RunStatus::Running))
+    }
+
     /// `LambdaState::render(cursor, byte_budget)` and nothing else — PR 2 removed the map and redex
     /// parameters along with the `source_node` field they existed to compute.
     pub fn lambda_state(&self, byte_budget: usize) -> Result<LambdaState, SessionError> {
@@ -259,6 +455,27 @@ impl Session {
         Ok(())
     }
 
+    /// The λ leg's answer, decoded against the program's type.
+    ///
+    /// `Unfinished` UNTIL THE RUN ENDS, and that is a check on `RunStatus` rather than on the shape
+    /// of the term. A term mid-reduction can happen to *look* like a Church numeral — a partially
+    /// reduced `40 + 2` passes through terms that decode — so decoding whatever the cursor currently
+    /// holds would report an answer that is not the program's.
+    ///
+    /// `Undecodable` IS A REAL OUTCOME, not a failure: a normal form of a type the decoder has no
+    /// encoding for is a fact about this pair of program and backend, and the UI should say so
+    /// rather than show an empty field.
+    pub fn lambda_value(&self) -> Result<Decoded, SessionError> {
+        let c = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
+        if self.lambda_status().run != Some(RunStatus::Ended) {
+            return Ok(Decoded::Unfinished);
+        }
+        Ok(match lambda::decode_lambda_ty(c.term(), &self.ty) {
+            Some(v) => Decoded::Value { text: redextape_core::value::format_value(&v) },
+            None => Decoded::Undecodable,
+        })
+    }
+
     /// Rebuild the λ cursor with a small cap, so a test has something to raise from. TEST-ONLY: there
     /// is no product reason to lower a budget, and `LambdaCursor` has no API for it — this restarts
     /// the run from the term the cursor currently holds, which is fine for a fresh session and would
@@ -274,8 +491,8 @@ impl Session {
     // --- the TM leg ---------------------------------------------------------------------------
 
     pub fn tm_status(&self) -> TmStatus {
-        match (&self.tm, &self.program) {
-            (Ok(c), Some(p)) => {
+        match &self.tm {
+            Ok((p, c)) => {
                 // No depth guard on this leg — the machine has no term to recurse over — so `HitCap`
                 // has one producer and `Capped` is unambiguous here in a way it is not for λ.
                 let run = match c.status() {
@@ -283,18 +500,15 @@ impl Session {
                     Some(tm::TmStatus::Halted) => RunStatus::Ended,
                     Some(tm::TmStatus::HitCap) => RunStatus::Capped,
                 };
-                TmStatus { available: true, reason: String::new(), width: Some(p.width), run: Some(run) }
+                TmStatus {
+                    available: true,
+                    reason: String::new(),
+                    width: Some(p.width),
+                    run: Some(run),
+                    total_steps: self.total_steps,
+                }
             }
-            // `program` is `Some` exactly when `tm` is `Ok` — both are set from the same match arm in
-            // `compile`. This arm cannot be reached, and reports rather than panics because a panic
-            // under wasm aborts the module.
-            (Ok(_), None) => TmStatus {
-                available: false,
-                reason: "internal: a TM leg with no projected program".to_string(),
-                width: None,
-                run: None,
-            },
-            (Err(d), _) => {
+            Err(d) => {
                 let reason = match d {
                     TmDecline::TooLarge => "the machine this program needs is too large to build".to_string(),
                     TmDecline::Overflow => {
@@ -302,26 +516,33 @@ impl Session {
                     }
                     TmDecline::Lower(what) => format!("the program could not be lowered: {what}"),
                 };
-                TmStatus { available: false, reason, width: None, run: None }
+                // `total_steps` is `None` here even when the field is `Some` — an `Overflow` decline
+                // arrives with a real δ-count for the attempt that overflowed, and there is no cursor
+                // for a caller to relate it to.
+                TmStatus { available: false, reason, width: None, run: None, total_steps: None }
             }
         }
     }
 
     /// The cached projection, cloned — never a re-walk. The `map` demo is 3,203 states over 344,999
     /// steps, and re-projecting per step is the cost the `TmProgram`/`TmState` split exists to avoid.
+    ///
+    /// AVAILABILITY IS READ OFF `tm`, the same place `tm_status` reads it, so the two cannot disagree
+    /// about whether this leg is there.
     pub fn tm_program(&self) -> Result<TmProgram, SessionError> {
-        self.program.clone().ok_or(SessionError::TmAbsent)
+        let (p, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        Ok(p.clone())
     }
 
     /// Advance one δ-step. `false` once the run has halted or hit a cap — `tm_status().run` says
     /// which, and is the only thing that can.
     pub fn step_tm(&mut self) -> Result<bool, SessionError> {
-        let c = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c) = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
         Ok(c.next().is_some())
     }
 
     pub fn tm_state(&self, radius: usize) -> Result<TmState, SessionError> {
-        let c = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
         Ok(TmState::window(c, &self.map, radius))
     }
 
@@ -331,7 +552,7 @@ impl Session {
     /// `get`, NEVER `[]`: an absent tape answers `Err` rather than indexing out of bounds. `from`/`to`
     /// need no such guard because `Tape::slice` clamps both.
     pub fn tape_slice(&self, tape: usize, from: usize, to: usize) -> Result<Vec<Symbol>, SessionError> {
-        let c = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
         let tapes = c.tapes();
         let t = tapes.get(tape).ok_or(SessionError::NoSuchTape { tape, tapes: tapes.len() })?;
         Ok(t.slice(from, to))
@@ -339,9 +560,96 @@ impl Session {
 
     /// Extend a capped run's budget. Additive and saturating, like the λ leg's.
     pub fn raise_tm_cap(&mut self, extra_steps: u64, extra_cells: u64) -> Result<(), SessionError> {
-        let c = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c) = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
         c.raise_cap(extra_steps, extra_cells);
         Ok(())
+    }
+
+    /// The TM leg's answer, decoded from the run `compile` already performed.
+    ///
+    /// **NO SECOND RUN.** `compile` calls `run_tm_described`, which simulates the machine to a halt;
+    /// driving the cursor for the same answer would simulate the `map` demo's 344,999 steps twice.
+    /// The cursor exists for WATCHING a run, which is Plan 5's job.
+    ///
+    /// **THE CURSOR IS THE FALLBACK, AND ONLY THE FALLBACK.** `final_tapes` is written once, by
+    /// `compile`, and a `HitCap` compile writes `None` — but `raise_tm_cap` then lets a caller drive
+    /// the cursor to a halt, at which point the session holds a final configuration that `final_tapes`
+    /// does not. Reading `final_tapes` alone answered `Unfinished` forever for exactly the run
+    /// `RunStatus::Capped` invites the caller to continue, so `tm_status().run` said `Ended` while this
+    /// said `Unfinished` and both were reporting on the same machine. The fallback decodes tapes the
+    /// cursor ALREADY HOLDS, so the "no second run" property above survives it intact.
+    ///
+    /// `Unfinished` therefore means there is no final configuration ANYWHERE — no halted run recorded
+    /// at compile time and a cursor that has not itself halted.
+    ///
+    /// **THE `HitCap` THAT PUTS IT THERE HAS TWO PRODUCERS, NOT ONE.** `TmCursor` caps on the step
+    /// budget and on the live-CELL budget, and `trace.rs` says outright that no test can tell those two
+    /// apart. Under the second, `total_steps` is the count reached when cells ran out — well below
+    /// `caps.steps` — so a reader must not take a capped run's length as evidence of which wall it hit.
+    pub fn tm_value(&self) -> Result<Decoded, SessionError> {
+        let (_, cursor) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let tapes: &[Tape] = match &self.final_tapes {
+            Some(t) => t,
+            None if cursor.status() == Some(tm::TmStatus::Halted) => cursor.tapes(),
+            None => return Ok(Decoded::Unfinished),
+        };
+        let enc = self.kind.at(tm::MIN_FIELD_WIDTH);
+        Ok(match tm::decode_tape_ty(tapes, &self.ty, &*enc) {
+            Some(v) => Decoded::Value { text: redextape_core::value::format_value(&v) },
+            None => Decoded::Undecodable,
+        })
+    }
+
+    // --- the reference leg --------------------------------------------------------------------
+
+    /// The reference interpreter's answer — the ground truth `three_way_oracle.rs` checks both
+    /// backends against, surfaced so a disagreement is visible in the product rather than only in CI.
+    ///
+    /// A METHOD RATHER THAN A FREE `evaluate(src)`, so the front end runs once. See the `core` field.
+    ///
+    /// `RunError::Static` IS STRUCTURALLY UNREACHABLE HERE: `compile` answers `session: None` for any
+    /// program with an error-severity diagnostic, so a `Session` existing at all means the static
+    /// half already passed. Only `RuntimeError` can arrive.
+    ///
+    /// **THIS BLOCKS ITS CALLER FOR ITS WHOLE WORST CASE, AND CANNOT BE CHUNKED.** `interp::eval` runs
+    /// at `DEFAULT_BUDGET` — 5,000,000 steps — inside one uninterruptible call. That is precisely the
+    /// cost `run_lambda`'s chunking exists to avoid, and its justification applies here word for word:
+    /// a five-million-step run in one call blocks the main thread with no progress and no cancellation.
+    /// It is not hypothetical. This branch's own TM-decline fixture,
+    /// `let mut n = 1; while n > 0 { n = n + 1; } n`, spends the entire budget inside one boundary call
+    /// before answering `Fault`.
+    ///
+    /// **`eval` IS NOT RESUMABLE, so there is no chunked version to write.** It is a recursive
+    /// tree-walker with no cursor, no saved continuation and no way to be stopped halfway and
+    /// re-entered — unlike `LambdaCursor`, which is why `run_lambda` could be chunked and this cannot.
+    /// A future reader should not go looking for the trick; the affordance is `evaluate_with_budget`,
+    /// which lets a caller choose how long a freeze it is willing to take.
+    ///
+    /// **NEITHER METHOD IS CACHED, and that is a known cost rather than an oversight.** Every call
+    /// re-runs the interpreter from the top, so a renderer that calls this twice pays twice. It is left
+    /// that way deliberately: a cache would have to be keyed by budget, since a `Fault` produced by
+    /// exhausting a small budget is not an answer about the program and must not be served to a caller
+    /// who asked for a larger one.
+    pub fn evaluate(&self) -> Decoded {
+        decoded_of(redextape_core::interp::eval(&self.core))
+    }
+
+    /// The reference interpreter's answer under a budget the CALLER chooses, instead of
+    /// `interp::DEFAULT_BUDGET`.
+    ///
+    /// **IT BOUNDS THE FREEZE, NOT THE ANSWER.** `evaluate` cannot be chunked — see its doc — so the
+    /// only thing a caller can control is how many steps it is willing to stop for. Everything else is
+    /// identical: same interpreter, same `Decoded`, and on any program that finishes inside the budget,
+    /// the same value `evaluate` gives.
+    ///
+    /// A BUDGET TOO SMALL IS NOT AN ERROR CONDITION. It arrives as `Fault { message }`, the same shape a
+    /// genuine runtime fault takes, with the message naming the budget it exceeded — so a caller
+    /// wanting to tell "it needs longer" from "it is wrong" reads the message. Flattening them would
+    /// have needed a fifth `Decoded` state for something the interpreter itself does not distinguish.
+    ///
+    /// NOT CACHED, exactly like `evaluate`, and for the reason recorded there.
+    pub fn evaluate_with_budget(&self, budget: u64) -> Decoded {
+        decoded_of(redextape_core::interp::eval_with_budget(&self.core, budget))
     }
 
     /// The source text a Core node came from. NOT a leg method — the map exists whenever a session
@@ -510,6 +818,126 @@ mod tests {
         assert!(s.lambda_state(usize::MAX).expect("λ available").step > stalled);
     }
 
+    /// THE LOAD-BEARING DISTINCTION OF THIS METHOD. A spent CHUNK budget leaves the run `Running`; only
+    /// the cursor's own cap yields `Capped`. Getting it backwards puts a "continue" affordance on a run
+    /// that has merely paused, and withholds it from the one run that can actually continue.
+    #[test]
+    fn a_spent_chunk_budget_is_running_not_capped() {
+        let c = Session::compile("let x = 40; x + 2", EncodingKind::Unary);
+        let mut s = c.session.expect("compiles");
+
+        // 3 of the 7 β-steps this program takes.
+        assert_eq!(s.run_lambda(3).expect("λ leg is present"), RunStatus::Running);
+        assert_eq!(s.lambda_state(1_000_000).expect("present").step, 3, "the chunk ran exactly its budget");
+
+        assert_eq!(s.run_lambda(3).expect("present"), RunStatus::Running);
+        assert_eq!(s.run_lambda(3).expect("present"), RunStatus::Ended, "the 7th step ends it mid-chunk");
+        assert_eq!(s.lambda_state(1_000_000).expect("present").step, 7);
+    }
+
+    /// A budget larger than the run reaches the end in one call, which is the shape a caller uses when it
+    /// does not care about progress.
+    #[test]
+    fn a_budget_larger_than_the_run_ends_it_in_one_call() {
+        let c = Session::compile("let x = 40; x + 2", EncodingKind::Unary);
+        let mut s = c.session.expect("compiles");
+        assert_eq!(s.run_lambda(1_000_000).expect("present"), RunStatus::Ended);
+        assert_eq!(s.lambda_state(1_000_000).expect("present").step, 7);
+    }
+
+    /// The cursor's OWN cap is what produces `Capped`, and it must not be confused with a chunk budget
+    /// that happens to be the same size.
+    #[test]
+    fn the_cursors_cap_yields_capped_not_running() {
+        let c = Session::compile("let x = 40; x + 2", EncodingKind::Unary);
+        let mut s = c.session.expect("compiles");
+        s.cap_lambda_at(3);
+        assert_eq!(s.run_lambda(1_000_000).expect("present"), RunStatus::Capped, "the CURSOR ran out, not the chunk");
+    }
+
+    /// A run that has already ended stays ended and takes no further steps, however large the budget.
+    #[test]
+    fn running_an_ended_cursor_is_a_no_op() {
+        let c = Session::compile("let x = 40; x + 2", EncodingKind::Unary);
+        let mut s = c.session.expect("compiles");
+        assert_eq!(s.run_lambda(1_000_000).expect("present"), RunStatus::Ended);
+        assert_eq!(s.run_lambda(1_000_000).expect("present"), RunStatus::Ended);
+        assert_eq!(s.lambda_state(1_000_000).expect("present").step, 7, "no step was taken after the end");
+    }
+
+    /// A zero budget is a legitimate call — a caller polling status without advancing — and must not be
+    /// mistaken for an ended run.
+    #[test]
+    fn a_zero_budget_advances_nothing_and_reports_running() {
+        let c = Session::compile("let x = 40; x + 2", EncodingKind::Unary);
+        let mut s = c.session.expect("compiles");
+        assert_eq!(s.run_lambda(0).expect("present"), RunStatus::Running);
+        assert_eq!(s.lambda_state(1_000_000).expect("present").step, 0);
+    }
+
+    /// **A DEPTH REFUSAL MUST SURVIVE `run_lambda` AS ITSELF, NEVER AS `Capped`.** The distinction was
+    /// asserted only through `step_lambda`, and `run_lambda` reaches its answer by a different route —
+    /// one `lambda_status()` read after the chunk rather than one per step — so a regression that folded
+    /// the two together here would have left that test green. `Capped` is the only status for which
+    /// "continue" is an honest offer, and this is the one run that provably cannot take it.
+    #[test]
+    fn run_lambda_reports_a_depth_refusal_as_itself_not_as_capped() {
+        // A Church numeral is a spine as deep as its value, so a literal above `reduce::MAX_TERM_DEPTH`
+        // (3,000) lowers to a term the reducer refuses to recurse over.
+        let mut s = Session::compile("let x = 5000; x + 1", EncodingKind::Unary).session.expect("compiles");
+        assert_eq!(
+            s.run_lambda(1_000_000).expect("λ leg present"),
+            RunStatus::DepthRefused,
+            "a term past MAX_TERM_DEPTH must not be reported as continuable"
+        );
+
+        // And raising the cap must not appear to have helped — extending a budget cannot make a term
+        // shallower. `LambdaCursor::raise_cap` refuses to clear the depth latch, and this is that
+        // guarantee re-checked at the boundary, through the method a renderer's run loop calls.
+        s.raise_lambda_cap(1_000_000).expect("λ available");
+        assert_eq!(s.run_lambda(1_000_000).expect("λ leg present"), RunStatus::DepthRefused);
+    }
+
+    /// **`Decoded::Undecodable` HAS A FIXTURE**, and until this test the two ✅ marks in `Decoded`'s own
+    /// reachability table rested on argument alone — the state was asserted nowhere, for either producer.
+    ///
+    /// The mechanism is a top-level type neither decoder has an encoding for. `decode_lambda_ty` answers
+    /// `None` for `Ty::Fun` and `Ty::Var` — "well-formed but not first-class values, exactly as
+    /// `ty::parse_ty` refuses them" — and `tm::decode_tape_ty` bottoms out the same way.
+    ///
+    /// `|x| x + 1` TYPES AS `Fun([Nat], Nat)` AND BOTH BACKENDS ACCEPT IT, which is what makes it a
+    /// fixture rather than a decline: the leg is available, the run reaches its end, and there is simply
+    /// nothing in the answer a decoder can read. The availability assertions are load-bearing — against
+    /// a program either backend refused, this test would pass while exercising nothing.
+    ///
+    /// **`Undecodable`, NOT `Unfinished`, AND THAT IS WHY THERE ARE FOUR STATES.** "the run has not
+    /// finished" and "it finished and the result is not a recognizable encoding" are different facts
+    /// about the program, and a UI that renders one blank field for both is wrong about one of them.
+    #[test]
+    fn a_function_valued_program_decodes_as_undecodable_on_both_legs() {
+        let mut s = Session::compile("|x| x + 1", EncodingKind::Unary).session.expect("compiles");
+        assert!(matches!(s.ty, redextape_core::ty::Ty::Fun(..)), "the fixture's top-level type is {:?}", s.ty);
+
+        assert!(s.lambda_status().available, "the λ backend lowers this — against a decline this proves nothing");
+        assert_eq!(
+            s.run_lambda(1_000_000).expect("λ leg present"),
+            RunStatus::Ended,
+            "and reduces it to a normal form"
+        );
+        assert_eq!(s.lambda_value(), Ok(Decoded::Undecodable), "a normal form of a function type decodes to nothing");
+
+        assert!(s.tm_status().available, "the TM backend lowers and runs it too");
+        assert_eq!(s.tm_value(), Ok(Decoded::Undecodable), "and its halted tapes decode to nothing either");
+    }
+
+    /// An absent λ leg throws rather than aborting, the same as every other λ method.
+    #[test]
+    fn run_lambda_on_an_absent_leg_is_an_error() {
+        let c = Session::compile(LAMBDA_DECLINES, EncodingKind::Unary);
+        let mut s = c.session.expect("the TM leg handles this program");
+        assert_eq!(s.run_lambda(10), Err(SessionError::LambdaAbsent));
+    }
+
     #[test]
     fn the_lambda_ast_refuses_a_budget_it_cannot_meet_and_answers_one_it_can() {
         let s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
@@ -613,6 +1041,196 @@ mod tests {
         assert_eq!(s.raise_lambda_cap(1), Err(SessionError::LambdaAbsent));
     }
 
+    /// `classify_source` must reach the boundary WITHOUT a session, and must classify a file that does
+    /// not analyze. Highlighting a broken file is when highlighting matters most, which is why
+    /// `analysis::classify_source` discards the lexer's diagnostics — they come back through `analyze`.
+    #[test]
+    fn classify_source_works_on_a_program_that_does_not_analyze() {
+        let spans = classify_source("let x = ;");
+        assert!(!spans.is_empty(), "a file with a parse error still has tokens to highlight");
+        let (span, _) = spans[0];
+        assert!(span.end > span.start, "spans are well-formed ranges");
+        assert_eq!(spans, redextape_core::analysis::classify_source("let x = ;"), "the boundary adds nothing");
+    }
+
+    /// `analyze` is the CHEAP diagnostics path, and its separation from `compile` is the whole point:
+    /// linting through `compile` would lower both backends and simulate a Turing machine to a halt on
+    /// every keystroke.
+    #[test]
+    fn analyze_reports_diagnostics_without_building_a_session() {
+        let clean = analyze("let x = 40; x + 2");
+        assert!(clean.is_empty(), "a clean program has no diagnostics, got {clean:?}");
+
+        let broken = analyze("let x = ;");
+        assert!(!broken.is_empty(), "a parse error must be reported");
+        assert!(broken.iter().any(|d| d.severity == Severity::Error));
+
+        assert_eq!(
+            broken,
+            Session::compile("let x = ;", EncodingKind::Unary).diagnostics,
+            "analyze and compile must not disagree about what is wrong with a program"
+        );
+    }
+
+    /// Church 42 decodes to 42, but only after the run reaches its end.
+    #[test]
+    fn lambda_value_decodes_the_normal_form() {
+        let c = Session::compile("let x = 40; x + 2", EncodingKind::Unary);
+        let mut s = c.session.expect("compiles");
+        assert_eq!(s.lambda_value(), Ok(Decoded::Unfinished), "nothing to decode before the run ends");
+        assert_eq!(s.run_lambda(1_000_000).expect("present"), RunStatus::Ended);
+        assert_eq!(s.lambda_value(), Ok(Decoded::Value { text: "42".to_string() }));
+    }
+
+    /// The λ answer must equal the reference answer. This is the three-way oracle's λ half, asserted at
+    /// the layer the product reads rather than at core's.
+    #[test]
+    fn the_lambda_leg_agrees_with_the_reference() {
+        for src in ["let x = 40; x + 2", "[1, 2, 3]", "true", "1 + 2 * 3"] {
+            let c = Session::compile(src, EncodingKind::Unary);
+            let mut s = c.session.unwrap_or_else(|| panic!("{src} compiles"));
+            assert_eq!(s.run_lambda(1_000_000).expect("λ leg present"), RunStatus::Ended, "{src}");
+            assert_eq!(s.lambda_value(), Ok(s.evaluate()), "{src}: the λ leg and the reference disagree");
+        }
+    }
+
+    /// A capped run is `Unfinished`, not `Undecodable` — it has a term, it is simply not a normal form.
+    #[test]
+    fn a_capped_lambda_run_is_unfinished() {
+        let c = Session::compile("let x = 40; x + 2", EncodingKind::Unary);
+        let mut s = c.session.expect("compiles");
+        s.cap_lambda_at(3);
+        assert_eq!(s.run_lambda(1_000_000).expect("present"), RunStatus::Capped);
+        assert_eq!(s.lambda_value(), Ok(Decoded::Unfinished));
+    }
+
+    /// An absent λ leg is an error, not a `Decoded` variant — "this program has no λ backend" is a fact
+    /// about the program, and flattening it into "no value" loses the reason.
+    #[test]
+    fn lambda_value_on_an_absent_leg_is_an_error() {
+        let c = Session::compile(LAMBDA_DECLINES, EncodingKind::Unary);
+        let s = c.session.expect("the TM leg handles this program");
+        assert_eq!(s.lambda_value(), Err(SessionError::LambdaAbsent));
+    }
+
+    /// The TM's answer comes from the run `compile` ALREADY performed. Driving the cursor for the same
+    /// answer would simulate the machine a second time.
+    #[test]
+    fn tm_value_decodes_the_run_compile_already_performed() {
+        let c = Session::compile("let x = 40; x + 2", EncodingKind::Unary);
+        let s = c.session.expect("compiles");
+        // No stepping: the cursor is still at 0 and the value is already known.
+        assert_eq!(s.tm_state(1).expect("present").step, 0);
+        assert_eq!(s.tm_value(), Ok(Decoded::Value { text: "42".to_string() }));
+    }
+
+    /// All three legs must agree. This is the three-way oracle asserted at the layer the product reads.
+    #[test]
+    fn all_three_legs_agree() {
+        for src in ["let x = 40; x + 2", "[1, 2, 3]", "true", "1 + 2 * 3"] {
+            let c = Session::compile(src, EncodingKind::Unary);
+            let mut s = c.session.unwrap_or_else(|| panic!("{src} compiles"));
+            assert_eq!(s.run_lambda(1_000_000).expect("λ leg present"), RunStatus::Ended, "{src}");
+            let reference = s.evaluate();
+            assert_eq!(s.lambda_value(), Ok(reference.clone()), "{src}: λ disagrees with the reference");
+            assert_eq!(s.tm_value(), Ok(reference), "{src}: TM disagrees with the reference");
+        }
+    }
+
+    /// `total_steps` describes the WHOLE run; `run` describes where the CURSOR is. A renderer showing
+    /// "step 40 of 2,870" reads both, and they are different numbers about different things.
+    #[test]
+    fn tm_status_reports_the_whole_runs_length_alongside_the_cursors_position() {
+        let c = Session::compile("let x = 40; x + 2", EncodingKind::Unary);
+        let mut s = c.session.expect("compiles");
+        assert_eq!(s.tm_status().total_steps, Some(2870), "the length of the whole run");
+        assert_eq!(s.tm_status().run, Some(RunStatus::Running), "the cursor has not moved");
+
+        let mut driven = 0;
+        while s.step_tm().expect("present") {
+            driven += 1;
+        }
+        assert_eq!(driven, 2870, "the cursor reaches the length the fitting run reported");
+        assert_eq!(s.tm_status().total_steps, Some(2870), "unchanged: it was never about the cursor");
+    }
+
+    /// A declined TM leg has no run, so no length.
+    ///
+    /// BOTH SHAPES OF DECLINE, because they reach the field by different routes and only one of them is
+    /// obvious. A `Lower` decline is an `Err` out of `run_tm_described`, so `total_steps` is genuinely
+    /// `None`; an `Overflow` decline arrives inside an `Ok` carrying the real δ-count of the attempt
+    /// that overflowed, and `tm_status` withholds it anyway. A status offering a length beside
+    /// `available: false` would be describing a run the caller has no cursor to reach.
+    #[test]
+    fn a_declined_tm_leg_reports_no_total_steps() {
+        let s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
+        assert!(s.tm_status().total_steps.is_some(), "an available leg has a length");
+
+        // `TooDeep` out of the TM lowering: the program never ran a step, so there is no count at all.
+        let src = format!("[{}]", (0..2048).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
+        let s = Session::compile(&src, EncodingKind::Unary).session.expect("a declined leg is still a session");
+        assert!(!s.tm_status().available, "2048 elements must still be above the TM lowering guard");
+        assert_eq!(s.total_steps, None, "a program that never ran has no δ-count");
+        assert_eq!(s.tm_status().total_steps, None);
+
+        // `Overflow`: the attempts DID run, and the field holds the last one's count.
+        let s = Session::compile("let mut n = 1; while n > 0 { n = n + 1; } n", EncodingKind::Unary)
+            .session
+            .expect("a declined leg is still a session");
+        assert!(!s.tm_status().available, "no width up to the ceiling fits an unbounded counter");
+        assert!(s.total_steps.is_some(), "the overflowing attempt ran, and its count is real");
+        assert_eq!(s.tm_status().total_steps, None, "but a declined leg still reports no length");
+    }
+
+    /// **`tmValue()` AND `tmStatus().run` MUST NOT CONTRADICT EACH OTHER**, and a raised cap is the one
+    /// place they could. `RunStatus::Capped` exists specifically so a renderer can offer "continue";
+    /// taking that offer used to produce a UI showing a halted machine with no answer, permanently,
+    /// because `final_tapes` is written once in `compile` and a capped compile writes `None`.
+    ///
+    /// THE SEQUENCE IS DRIVEN, NOT CONSTRUCTED. Every step here is one a renderer takes: step until the
+    /// cursor stops, read `run` to learn the run may continue, raise, step again, read the answer.
+    ///
+    /// `[1, 2, 3]` auto-fits to `MIN_FIELD_WIDTH`, so the machine this budget stops early is the same
+    /// machine an unbudgeted run would have built — the tapes it halts on decode at the width
+    /// `tm_value` decodes at, rather than at some wider one the fitting loop never got to try.
+    #[test]
+    fn a_raised_tm_cap_driven_to_a_halt_answers_what_the_status_claims() {
+        let caps = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
+        let mut s = Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, caps)
+            .session
+            .expect("a capped run yields a working session, which is the point of the HitCap arm");
+        assert!(s.final_tapes.is_none(), "a capped compile reached no final configuration to record");
+
+        while s.step_tm().expect("TM available") {}
+        assert_eq!(s.tm_status().run, Some(RunStatus::Capped), "a spent budget is Capped, not Ended");
+        assert_eq!(s.tm_value(), Ok(Decoded::Unfinished), "and there is genuinely nothing to decode yet");
+
+        // Taking the "continue" offer that `Capped` exists to make honest.
+        s.raise_tm_cap(1_000_000, 0).expect("TM available");
+        while s.step_tm().expect("TM available") {}
+
+        assert_eq!(s.tm_status().run, Some(RunStatus::Ended), "the raised cap carried the cursor to a halt");
+        assert_eq!(
+            s.tm_value(),
+            Ok(Decoded::Value { text: "[1, 2, 3]".to_string() }),
+            "the status says this machine halted, so the value must be the halted machine's"
+        );
+    }
+
+    /// An absent TM leg is an error, matching every other TM method.
+    ///
+    /// THE FIXTURE IS A PROGRAM THIS BACKEND ACTUALLY DECLINES, and the assertion above the one under
+    /// test is what keeps that true rather than an early return: a fixture that starts lowering must
+    /// FAIL this test, not pass it while proving nothing.
+    #[test]
+    fn tm_value_on_an_absent_leg_is_an_error() {
+        let s = Session::compile("let mut n = 1; while n > 0 { n = n + 1; } n", EncodingKind::Unary)
+            .session
+            .expect("a declined TM leg is still a session");
+        assert!(!s.tm_status().available, "the fixture must decline, or this test asserts nothing");
+        assert_eq!(s.tm_value(), Err(SessionError::TmAbsent));
+    }
+
     /// THE NUMBERS `tests/browser.rs` PINS, PINNED HERE TOO. That file asserts the values coming back
     /// across the wasm boundary are "the ones a native run produces", which is only a claim if a native
     /// run names the same ones. Both sides therefore hardcode this program's figures, and a change to
@@ -647,6 +1265,95 @@ mod tests {
         assert_eq!(text.matches("f (").count() + 1, 42, "Church 42 applies `f` 42 times, got {text:?}");
     }
 
+    /// The reference interpreter is the ground truth the three-way oracle checks both backends against.
+    /// Surfacing it means a disagreement is visible in the product, not only in CI.
+    #[test]
+    fn evaluate_answers_the_reference_value() {
+        let c = Session::compile("let x = 40; x + 2", EncodingKind::Unary);
+        let s = c.session.expect("compiles");
+        assert_eq!(s.evaluate(), Decoded::Value { text: "42".to_string() });
+    }
+
+    /// A list renders through `format_value`, which is what the product shows. `Value` itself cannot
+    /// cross: `Value::Closure` holds an `Env` and an `Rc<Core>`.
+    #[test]
+    fn evaluate_renders_a_list_through_format_value() {
+        let c = Session::compile("[1, 2, 3]", EncodingKind::Unary);
+        let s = c.session.expect("compiles");
+        assert_eq!(s.evaluate(), Decoded::Value { text: "[1, 2, 3]".to_string() });
+    }
+
+    /// `RunError::Runtime` is the one genuinely new failure shape this slice adds, and it must arrive as
+    /// a message rather than as an abort.
+    ///
+    /// THE MESSAGE IS MATCHED ON A SUBSTRING, not merely checked non-empty. Every runtime fault carries
+    /// a non-empty message — including "exceeded step budget" — so `!is_empty()` alone would stay green
+    /// if `head([])` ever started faulting for some other reason entirely, proving only that SOMETHING
+    /// went wrong. `head` is the word the intended fault names, and coupling to the full wording instead
+    /// would make this a change-detector. Same convention as `every_session_error_says_what_went_wrong`.
+    #[test]
+    fn a_runtime_fault_is_reported_as_a_fault_not_an_abort() {
+        let c = Session::compile("head([])", EncodingKind::Unary);
+        let s = c.session.expect("the program is well-typed; it faults at runtime");
+        match s.evaluate() {
+            Decoded::Fault { message } => {
+                assert!(message.contains("head"), "the fault must name what failed, got {message:?}");
+            }
+            other => panic!("expected a runtime fault, got {other:?}"),
+        }
+    }
+
+    /// A BUDGET SMALLER THAN THE PROGRAM NEEDS FAULTS RATHER THAN RUNNING ON. The fixture is this
+    /// branch's own runaway counter, which never terminates at all — so the only thing bounding
+    /// `evaluate` on it is `DEFAULT_BUDGET`'s five million steps, spent inside one uninterruptible call.
+    /// That is the freeze this method exists to let a caller bound.
+    #[test]
+    fn a_small_budget_faults_instead_of_running_long() {
+        let s = Session::compile("let mut n = 1; while n > 0 { n = n + 1; } n", EncodingKind::Unary)
+            .session
+            .expect("a declined TM leg is still a session");
+        match s.evaluate_with_budget(1_000) {
+            Decoded::Fault { message } => {
+                assert!(message.contains("budget"), "the fault must name what ran out, got {message:?}");
+            }
+            other => panic!("a nonterminating program under a 1,000-step budget must fault, got {other:?}"),
+        }
+    }
+
+    /// A budget the program finishes inside changes NOTHING — same value, and same fault for a program
+    /// that faults. That is what makes this a bound on the freeze rather than on the answer, and
+    /// `head([])` is in the list so the agreement covers `Fault` and not only `Value`.
+    #[test]
+    fn a_generous_budget_answers_exactly_what_evaluate_answers() {
+        for src in ["let x = 40; x + 2", "[1, 2, 3]", "true", "head([])"] {
+            let s = Session::compile(src, EncodingKind::Unary).session.unwrap_or_else(|| panic!("{src} compiles"));
+            assert_eq!(s.evaluate_with_budget(1_000_000), s.evaluate(), "{src}: the budget changed the answer");
+        }
+    }
+
+    /// `evaluate` reaches NEITHER middle state, and that asymmetry is the point of the reachability
+    /// table in the design's §3: `interp::eval` answers a `Value` or a `RuntimeError`, with no decoding
+    /// step to fail and no partial run to report.
+    #[test]
+    fn evaluate_never_answers_unfinished_or_undecodable() {
+        for src in ["let x = 40; x + 2", "[1, 2, 3]", "true", "head([])"] {
+            let c = Session::compile(src, EncodingKind::Unary);
+            let s = c.session.unwrap_or_else(|| panic!("{src} compiles"));
+            assert!(
+                !matches!(s.evaluate(), Decoded::Unfinished | Decoded::Undecodable),
+                "{src}: evaluate reached a state it has no producer for"
+            );
+        }
+    }
+
+    /// `RunError::Static` is unreachable from a Session method, and this is what makes that structural
+    /// rather than incidental: a session exists only for a program with no error-severity diagnostics.
+    #[test]
+    fn a_session_never_exists_for_a_program_with_static_errors() {
+        assert!(Session::compile("let x = ;", EncodingKind::Unary).session.is_none());
+        assert!(Session::compile("1 + true", EncodingKind::Unary).session.is_none());
+    }
+
     /// `compile` builds the map at `MIN_FIELD_WIDTH` and lets `run_tm_described` auto-fit the width the
     /// machine actually runs at, so the two can differ. That is only sound because `lower_tm` derives
     /// state NAMES from the instruction stream rather than the field width.
@@ -660,8 +1367,8 @@ mod tests {
         use redextape_core::viewmodel::TmState;
 
         let s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
-        let mut c = s.tm.expect("the TM leg runs this");
-        let fitted = s.program.expect("a TM leg has a program").width;
+        let (program, mut c) = s.tm.expect("the TM leg runs this");
+        let fitted = program.width;
 
         let mut saw_some = false;
         for _ in 0..200 {

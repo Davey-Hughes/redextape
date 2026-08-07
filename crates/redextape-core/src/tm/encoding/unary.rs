@@ -2052,7 +2052,7 @@ mod tests {
         assert!(m.validate().is_empty(), "{:?}", m.validate());
         let mut init = vec![Vec::new(); TAPES];
         init[REG] = enc.init_reg(2);
-        let (_, final_state, status) = crate::tm::sim::simulate_final(&m, &init, TM_DEFAULT_CAPS);
+        let (_, final_state, status, _) = crate::tm::sim::simulate_final(&m, &init, TM_DEFAULT_CAPS);
         status == Status::Halted && final_state == overflow
     }
 

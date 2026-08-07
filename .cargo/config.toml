@@ -7,3 +7,22 @@
 # stack is set by the OS/linker).
 [env]
 RUST_MIN_STACK = "33554432"  # 32 MiB
+
+# THE DEPTH GUARDS DO NOT REACH WASM WITHOUT THIS. Every bound in `redextape-core`
+# (`MAX_PARSE_DEPTH` 300, λ-syntax 256, `MAX_TYPE_DEPTH` 1500, `MAX_EVAL_DEPTH` 700,
+# `MAX_LAMBDA_LOWER_DEPTH` 700, `MAX_LOWER_DEPTH` 580, `MAX_DEFUNC_DEPTH` 580) was calibrated on a
+# native 8 MiB stack. wasm32's default linear-memory shadow stack is 1 MiB, where the crash was
+# MEASURED at depth 256-260 — below every one of them a `compile` can reach — so on that target the
+# guards never fired and the trap did. A wasm trap has no unwinding, so it poisons the module rather
+# than returning an error. `MAX_PARSE_DEPTH` was itself unreachable: a 400-deep paren nest, which the
+# parser refuses at 300 parens written (299 is the deepest accepted — the parser's own internal depth
+# counter is a different quantity and should not be read as that count), aborts the module at 1 MiB
+# instead of yielding the diagnostic.
+#
+# TARGET-SCOPED, so native builds are unaffected. An environment `RUSTFLAGS` would silently override
+# this and disarm it without failing anything; nothing in `.forgejo/` or `scripts/` sets one.
+#
+# This controls the SHADOW stack in linear memory, NOT the engine's own wasm call-depth limit, which
+# a module cannot set. The measurement recorded in the roadmap is what says whether it was enough.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=8388608"]
