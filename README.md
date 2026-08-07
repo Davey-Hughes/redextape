@@ -270,6 +270,17 @@ only on `forge.daveynet.xyz` — a dependency the git history alone did not prev
 reasoning is still not the price of a tidy graph; keeping it now depends on the forge as well as on
 git.
 
+`SQUASH_TEMPLATE.md` deliberately stops at its first line, and the blank line after it is
+load-bearing. Forgejo prefills the squash merge box with `GetSquashMergeCommitMessages()` **plus** the
+template's body, and with `PopulateSquashCommentWithCommitMessages` off — the default — the first of
+those already *is* the PR description. A body of `${PullRequestDescription}` therefore wrote it twice,
+which is what `#13`–`#16` carried until their messages were rewritten on 2026-08-07. Deleting the
+trailing blank line does not merely undo that: `expandDefaultMergeMessage` splits the template on its
+first newline and falls back to the *default* body when there is no second part, so a one-line file
+brings the `Reviewed-on:` trailer back. `MERGE_TEMPLATE.md` keeps `${PullRequestDescription}` because
+the non-squash prefill does not prepend the description — it is unreachable while the remote has merge
+commits disabled, and correct if they are ever re-enabled.
+
 Three layers keep this true, none of which trusts the other two:
 
 - `scripts/setup-dev.sh` (run once per clone) sets `merge.ff = only` and `pull.ff = only`, so a
