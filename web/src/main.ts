@@ -3,6 +3,7 @@ import { lintGutter } from '@codemirror/lint'
 import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import init, { analyze, classifySource, encodings } from '../../pkg/redextape_wasm.js'
+import { APPEARANCE_LABEL, applyAppearance, nextAppearance, readStored, STORAGE_KEY } from './appearance'
 import { showBanner, showWorkerError } from './banner'
 import { canRecordFurther, controlState } from './controls'
 import { declineMark, highlighting, setDecline, setSpans } from './highlight'
@@ -68,10 +69,50 @@ async function main(): Promise<EditorView> {
   const lambdaHost = document.querySelector<HTMLElement>('#lambda')
   const tmHost = document.querySelector<HTMLElement>('#tm')
   const picker = document.querySelector<HTMLSelectElement>('#encoding')
+  const appearanceButton = document.querySelector<HTMLButtonElement>('#appearance')
   const root = document.querySelector<HTMLElement>('main')
-  if (!results || !editorHost || !lambdaHost || !tmHost || !picker || !root) {
+  if (!results || !editorHost || !lambdaHost || !tmHost || !picker || !appearanceButton || !root) {
     throw new Error('the page is missing a mount point')
   }
+
+  // Wired BEFORE `init()`, unlike everything below it. The toggle has nothing to do with wasm — it
+  // reads and writes `localStorage` and flips an attribute on `<html>` — so it stays live even on the
+  // one failure path (`showBanner` below) that replaces `<main>` and leaves the header bar standing.
+  //
+  // `localStorage` ACCESS IS GUARDED, same as `index.html`'s inline script and for the same reason:
+  // it throws in some privacy modes. Unguarded here it would be worse than in that script, not the
+  // same — this runs before the `init()` try/catch below, so an uncaught throw would reject `ready`
+  // itself and blank the page before any banner could report why.
+  const readAppearanceStorage = (): string | null => {
+    try {
+      return localStorage.getItem(STORAGE_KEY)
+    } catch {
+      return null
+    }
+  }
+  const writeAppearanceStorage = (a: string): void => {
+    try {
+      localStorage.setItem(STORAGE_KEY, a)
+    } catch {
+      // Nothing to do — the toggle still works for the rest of this page load, it just will not
+      // survive a reload. The same tradeoff the inline script in `index.html` makes.
+    }
+  }
+
+  let appearance = readStored(readAppearanceStorage())
+  const relabelAppearance = () => {
+    const { glyph, label } = APPEARANCE_LABEL[appearance]
+    appearanceButton.textContent = glyph
+    appearanceButton.setAttribute('aria-label', label)
+  }
+  applyAppearance(document.documentElement, appearance)
+  relabelAppearance()
+  appearanceButton.addEventListener('click', () => {
+    appearance = nextAppearance(appearance)
+    applyAppearance(document.documentElement, appearance)
+    writeAppearanceStorage(appearance)
+    relabelAppearance()
+  })
 
   // THE ONE PLACE THE APP CAN FAIL TO START. `init()` fetches the wasm; a worker constructed against
   // a missing module fails the same way. PR 3c had no surface for either and the failure was a blank

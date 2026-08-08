@@ -1,8 +1,10 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { STORAGE_KEY } from '../../src/appearance'
 
 const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
+    <button type="button" id="appearance"></button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
   <main>
@@ -47,6 +49,9 @@ describe('the app, end to end', () => {
   // ONE MOUNT FOR THE FILE. ES module imports are cached, so `main()` runs once per page and Vitest
   // gives each test FILE its own page — mounting per test would silently reuse the first app.
   beforeAll(async () => {
+    // Cleared before `main.ts` ever reads it, so the appearance toggle's tests below start from a
+    // known `system` state regardless of what an earlier run in this browser context left behind.
+    localStorage.removeItem(STORAGE_KEY)
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
   })
@@ -189,6 +194,40 @@ describe('the app, end to end', () => {
     retype('let x = 40; x + 2')
     await until(() => resultsText().includes('β-steps'))
     expect(resultsText()).toContain('7 β-steps')
+  })
+
+  // NESTED, NOT A SIBLING `describe` — same reason `stepping` below is nested: the outer `beforeAll`
+  // mounted `main.ts` once for the file, and this test needs the REAL `#appearance` button that
+  // produced, not a second one from a fresh mount.
+  describe('appearance toggle', () => {
+    it('cycles data-theme and the aria-label through system, light, dark and back, and persists the choice', () => {
+      const button = document.querySelector<HTMLButtonElement>('#appearance')
+      expect(button).not.toBeNull()
+      if (!button) return
+
+      // `beforeAll` cleared `localStorage`'s appearance key before importing `main.ts`, so the
+      // button mounted reading `system` — no `data-theme` attribute, since `system` is its absence,
+      // not the literal string `"system"`.
+      expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
+      expect(button.getAttribute('aria-label')).toBe('appearance: system')
+
+      button.click()
+      expect(document.documentElement.getAttribute('data-theme')).toBe('light')
+      expect(button.getAttribute('aria-label')).toBe('appearance: light')
+      expect(localStorage.getItem(STORAGE_KEY)).toBe('light')
+
+      button.click()
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
+      expect(button.getAttribute('aria-label')).toBe('appearance: dark')
+      expect(localStorage.getItem(STORAGE_KEY)).toBe('dark')
+
+      // Back to system: the attribute is REMOVED, not set to `"system"` — the same fact
+      // `appearance.test.ts`'s node test checks directly, exercised here through the real button.
+      button.click()
+      expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
+      expect(button.getAttribute('aria-label')).toBe('appearance: system')
+      expect(localStorage.getItem(STORAGE_KEY)).toBe('system')
+    })
   })
 
   // NESTED, NOT A SIBLING `describe`. `beforeAll` above only runs for tests inside the describe it is

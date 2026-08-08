@@ -28,7 +28,12 @@ describe('token classes', () => {
     expect(missing).toEqual([])
   })
 
+  // Was `expect(css).toContain('prefers-color-scheme: dark')` — true under the old mechanism, a
+  // `@media (prefers-color-scheme: dark) { :root { ... } }` block duplicating every token's dark
+  // value. The theme-toggle refactor (`style.css`'s header comment) replaced that with one
+  // `light-dark()` call per token against `color-scheme`, so both schemes are still styled — the
+  // duplication this checks for is exactly what got removed, on purpose.
   it('styles both colour schemes', () => {
-    expect(css).toContain('prefers-color-scheme: dark')
+    expect(css).toContain('light-dark(')
   })
 })

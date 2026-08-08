@@ -1,9 +1,11 @@
 /* Design tokens. A foundation for Plan 5's panes, not a visual identity — §7 of the design spec. */
 :root {
-  /* The one line here that is not a token. It tells the browser to render UA-drawn widgets — the
-     encoding `<select>` is the only one in this slice — in the scheme the page is actually using.
-     Without it a dark page gets a light dropdown, because `prefers-color-scheme` below restyles our
-     own elements and cannot reach inside a native control. */
+  /* Not just a UA-drawn-widget hint anymore — the encoding `<select>` is still the only one in this
+     slice `prefers-color-scheme` cannot reach inside, and this is still what keeps a dark page from
+     getting a light dropdown, but every token below now resolves AGAINST this property via
+     `light-dark()`. It is the one switch: `system` (this default, tracking the OS), an explicit
+     `:root[data-theme="light"]`, or `:root[data-theme="dark"]` below all just set `color-scheme`
+     and every `light-dark()` value follows without a second copy of the palette. */
   color-scheme: light dark;
 
   --font-ui: ui-sans-serif, system-ui, sans-serif;
@@ -19,39 +21,32 @@
   --space-3: 1rem;
   --radius: 6px;
 
-  --bg: #fbfbfa;
-  --bg-raised: #ffffff;
-  --fg: #1c1b1a;
-  --fg-dim: #6b6864;
-  --rule: #e2dfda;
-  --accent: #9a3412;
+  --bg: light-dark(#fbfbfa, #17161a);
+  --bg-raised: light-dark(#ffffff, #1e1d22);
+  --fg: light-dark(#1c1b1a, #eceaf0);
+  --fg-dim: light-dark(#6b6864, #9a9599);
+  --rule: light-dark(#e2dfda, #322f38);
+  --accent: light-dark(#9a3412, #f0956a);
 
-  --tok-neutral: #6b6864;
-  --tok-keyword: #9a3412;
-  --tok-ident: #1c1b1a;
-  --tok-nat: #1d4ed8;
-  --tok-bool: #1d4ed8;
-  --tok-operator: #7c2d92;
-  --tok-punct: #8a8681;
+  --tok-neutral: light-dark(#6b6864, #9a9599);
+  --tok-keyword: light-dark(#9a3412, #f0956a);
+  --tok-ident: light-dark(#1c1b1a, #eceaf0);
+  --tok-nat: light-dark(#1d4ed8, #86b6ff);
+  --tok-bool: light-dark(#1d4ed8, #86b6ff);
+  --tok-operator: light-dark(#7c2d92, #d6a2f0);
+  --tok-punct: light-dark(#8a8681, #6f6a74);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #17161a;
-    --bg-raised: #1e1d22;
-    --fg: #eceaf0;
-    --fg-dim: #9a9599;
-    --rule: #322f38;
-    --accent: #f0956a;
-
-    --tok-neutral: #9a9599;
-    --tok-keyword: #f0956a;
-    --tok-ident: #eceaf0;
-    --tok-nat: #86b6ff;
-    --tok-bool: #86b6ff;
-    --tok-operator: #d6a2f0;
-    --tok-punct: #6f6a74;
-  }
+/* The explicit choices. `system` needs no rule at all — it is the absence of `data-theme`, which
+   leaves `:root`'s own `color-scheme: light dark` above in force and `light-dark()` tracking
+   `prefers-color-scheme` exactly as it did before this refactor. `appearance.ts`'s `applyAppearance`
+   removes the attribute for that case rather than setting it to the literal string `"system"`, so
+   there is nothing here to match against. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 * {
@@ -84,6 +79,18 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* Same treatment as `.controls button` below — one control in the header bar, not a new style. */
+#appearance {
+  font: inherit;
+  font-family: var(--font-mono);
+  padding: 0.15em 0.6em;
+  border-radius: var(--radius);
+  border: 1px solid var(--fg-dim);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
 
 .pane {

@@ -5,10 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>redextape</title>
     <link rel="stylesheet" href="/src/style.css" />
+    <script>
+      // Applies the stored appearance BEFORE first paint. `main.ts` does this too (`appearance.ts`'s
+      // `applyAppearance`, called from the module script), but a module script always runs after the
+      // page has already painted once — waiting for it would show the wrong theme for one frame on
+      // every load, then snap to the right one. This inline copy is deliberately tiny and duplicated
+      // rather than imported, since importing a module here would reintroduce exactly the delay it
+      // exists to avoid. `try/catch` because `localStorage` throws in some privacy modes, and a thrown
+      // error here must not block the rest of the page from loading.
+      try {
+        var v = localStorage.getItem('redextape.appearance')
+        if (v === 'light' || v === 'dark') document.documentElement.setAttribute('data-theme', v)
+      } catch {}
+    </script>
   </head>
   <body>
     <header class="bar">
       <span class="wordmark">redextape</span>
+      <button type="button" id="appearance"></button>
       <label class="encoding">
         encoding
         <select id="encoding"></select>

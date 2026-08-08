@@ -31,3 +31,9 @@ dist/
 
 # Agent worktrees
 /.claude/worktrees/
+
+# Playwright MCP session output — screenshots and page snapshots from browser-driving tools.
+# Never source; regenerated on demand and easily swept in by `git add -A`.
+.playwright-mcp/
+# ...and stray screenshots a browser tool wrote to a relative path outside it.
+redextape-*.png
