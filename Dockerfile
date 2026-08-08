@@ -42,5 +42,18 @@ FROM nginx:alpine AS runtime
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=web /app/web/dist /usr/share/nginx/html
 EXPOSE 80
+# `127.0.0.1`, NOT `localhost`, AND THAT IS THE WHOLE FIX. `nginx:alpine`'s `/etc/hosts` maps
+# `localhost` to both `127.0.0.1` and `::1`, busybox wget tries the v6 address, and the server block
+# below says `listen 80;` — IPv4 only. So the probe connected to nothing and every container built
+# from this file reported `unhealthy` while serving perfectly. Measured on a live deployment:
+# `wget -qO- http://127.0.0.1/` exits 0, `http://[::1]/` exits 1, `FailingStreak` 7.
+#
+# NO CI JOB CAN CATCH THIS, which is why it survived. The `docker` job builds and pushes the image
+# and never runs it, so a broken `HEALTHCHECK` passes a fully green pipeline. Changes here have to be
+# built AND started by hand before merging.
+#
+# Adding `listen [::]:80;` to `deploy/nginx.conf` would fix it from the other end and make the
+# container serve IPv6 generally. Not taken: it widens what the container binds to for a probe that
+# only ever needs to reach itself, and on a bridge network there is no v6 to serve.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=3s --retries=3 \
-  CMD wget -qO- http://localhost/ >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1
