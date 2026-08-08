@@ -10,8 +10,7 @@ services:
     restart: unless-stopped
     ports:
       - "8085:80" # host 8085 -> container 80. Point your reverse proxy here.
-    labels:
-      # What's-Up-Docker auto-updates (matches the home-server stack): watch the :latest tag and
-      # pull when CI publishes a new one.
-      wud.watch: "true"
-      wud.tag.include: "^latest$"
+    # NO AUTO-UPDATE LABELS HERE, DELIBERATELY. CI publishes `:latest` on every push to `main` and
+    # `:sha-<short>` on every build, so an image-update watcher has something to follow — but which
+    # watcher, and whether you want unattended pulls at all, is a property of the deployment rather
+    # than of this repo. Add whatever labels your own stack expects.

@@ -668,19 +668,20 @@ jobs:
       - name: Log in to the Forgejo registry
         run: echo "${{ secrets.REGISTRY_TOKEN }}" | docker login forge.daveynet.xyz -u "${{ secrets.REGISTRY_USER }}" --password-stdin
       # Build in an isolated docker-container builder, NOT the daemon's default driver, so CI never
-      # touches the host image store — otherwise a build would drag the local :latest tag onto the new
-      # image and What's-Up-Docker would miss the update. The named builder persists its BuildKit cache
-      # across runs; `buildx create` isn't idempotent, so drop any stale container by name first
-      # (`docker rm`, NOT `docker buildx rm`, which would also delete the cache volume).
+      # touches the host image store. Building on the default driver would tag the new image into the
+      # runner's own store, so the host's local `:latest` moves without anything being pulled — and any
+      # deployment watching that tag then sees no change to act on. The named builder persists its
+      # BuildKit cache across runs; `buildx create` isn't idempotent, so drop any stale container by
+      # name first (`docker rm`, NOT `docker buildx rm`, which would also delete the cache volume).
       #
-      # The name must stay unique per repo. ws-sim also builds on this runner, and both repos ran a
-      # builder called `wud-safe` — the `docker rm -f` below is unconditional, so whichever `docker`
+      # THE NAME MUST STAY UNIQUE PER REPO. ws-sim also builds on this runner, and both repos once ran
+      # a builder called `wud-safe` — the `docker rm -f` below is unconditional, so whichever `docker`
       # job started second would have destroyed the builder the first was mid-build in. That never
-      # fired only because this job is gated off until web/package.json lands.
+      # fired only because this job was gated off until web/package.json landed.
       - name: Set up an isolated buildx builder (keeps CI out of the host image store)
         run: |
-          docker rm -f buildx_buildkit_redextape-wud0 >/dev/null 2>&1 || true
-          docker buildx create --name redextape-wud --driver docker-container --use
+          docker rm -f buildx_buildkit_redextape-builder0 >/dev/null 2>&1 || true
+          docker buildx create --name redextape-builder --driver docker-container --use
       - name: Compute tags
         id: t
         env:                       # values via env, not inline ${{ }}, so a crafted ref name can't inject shell
@@ -697,7 +698,7 @@ jobs:
           esac
           echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
       # No registry cache export: Forgejo behind Cloudflare rejects large mode=max blobs (413). The
-      # persistent redextape-wud builder keeps a local BuildKit cache instead — warm across runs. provenance
+      # persistent redextape-builder keeps a local BuildKit cache instead — warm across runs. provenance
       # /sbom OFF so Forgejo registers a plain manifest. --push ships every tag in one pass.
       - name: Build & push
         env:
@@ -707,7 +708,7 @@ jobs:
           set -eu
           ARGS=""
           for t in $(echo "$TAGS" | tr ',' ' '); do ARGS="$ARGS -t $t"; done
-          docker buildx build --builder redextape-wud $ARGS \
+          docker buildx build --builder redextape-builder $ARGS \
             --build-arg COMMIT_HASH="$SHA" \
             --provenance=false --sbom=false \
             --push .

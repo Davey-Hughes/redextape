@@ -170,7 +170,7 @@ are literally in the name. Alternates once in the running: *Turnstile*, *Betamax
   `forge.daveynet.xyz`. **Every push to `main` now builds and pushes an image**; there is no way to
   land `web/` changes without arming that job.
 - **Docker** — multi-stage `Dockerfile` (Rust→WASM → Vite bundle → nginx static image),
-  `docker-compose.yml` (with What's-Up-Docker auto-update labels), and `deploy/nginx.conf`. Buildable:
+  `docker-compose.yml`, and `deploy/nginx.conf`. Buildable:
   stage 1 builds `crates/redextape-wasm`, stage 2 builds `web/`.
 - **Toolchain** — `rust-toolchain.toml` (stable), `rustfmt.toml` (`max_width = 120`),
   `.pre-commit-config.yaml`. `scripts/setup-dev.sh` is the once-per-clone setup — it installs
