@@ -755,3 +755,16 @@ fn encodings_lists_every_name_compile_accepts() {
     let expected: Vec<&str> = EncodingKind::ALL.iter().map(|k| k.name()).collect();
     assert_eq!(seen, expected, "`encodings()` must list exactly `EncodingKind::ALL`, in declaration order");
 }
+
+/// `tapeNames` crosses as an array of strings, and its length is the lowering's `TAPES`.
+///
+/// PINNED SEPARATELY FROM `tmProgram().tapes` ON PURPOSE. They agree for a compiled machine and are
+/// different facts — one is this compiler's convention, the other is the machine in hand — so a test
+/// that read only one would not notice the two coming apart.
+#[wasm_bindgen_test]
+fn tape_names_are_five_strings_in_tape_order() {
+    let names: Array = redextape_wasm::tape_names().expect("tapeNames returns Ok").unchecked_into();
+    assert_eq!(names.length(), 5, "the lowering emits five tapes");
+    assert_eq!(names.get(0).as_string().as_deref(), Some("REG"));
+    assert_eq!(names.get(4).as_string().as_deref(), Some("BOX"));
+}

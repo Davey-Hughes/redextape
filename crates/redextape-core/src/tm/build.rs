@@ -25,6 +25,18 @@ pub const STACK: usize = 2;
 pub const HEAP: usize = 3;
 pub const BOX: usize = 4;
 
+/// The lowering's tape layout as display names, indexed by the five constants above.
+///
+/// A RENDERER NEEDS THIS AND `TmProgram` DOES NOT CARRY IT. `TmProgram` reports `tapes: usize` and no
+/// names, so a five-row tape view either labels its rows from here or hardcodes five strings in
+/// whatever language it is written in — which is the drift `encodings()` was exported to prevent, one
+/// language further out.
+///
+/// IT DESCRIBES MACHINES THIS COMPILER PRODUCED, AND NOTHING ELSE. `Machine::tapes` is a runtime field
+/// and `parse_tm` accepts a hand-written machine declaring up to `MAX_TAPES` (64), so a consumer must
+/// label tape `i` positionally when `i >= TAPE_NAMES.len()` rather than assume every machine has five.
+pub const TAPE_NAMES: [&str; TAPES] = ["REG", "WORK", "STACK", "HEAP", "BOX"];
+
 /// Tape data symbols. `BLANK` (`_`) comes from `machine`. `MARK` (`1`) is the unary mark, one per unit
 /// of a value's count. `SEP` (`#`) delimits register fields.
 pub const MARK: Symbol = '1';
@@ -185,6 +197,19 @@ mod tests {
         let m = b.finish(start);
         assert!(!m.states[first as usize].accept, "overflow must NOT be an accept state");
         assert!(m.states[first as usize].rules.is_empty(), "overflow must be rule-less so it halts");
+    }
+
+    /// `TAPE_NAMES` is the display authority and the five constants are the code authority; nothing
+    /// but this test stops them drifting apart. Indexing by the constant rather than by a literal is
+    /// the whole point — a reordered array fails here rather than mislabelling a tape in the UI.
+    #[test]
+    fn tape_names_match_their_indices() {
+        assert_eq!(TAPE_NAMES.len(), TAPES);
+        assert_eq!(TAPE_NAMES[REG], "REG");
+        assert_eq!(TAPE_NAMES[WORK], "WORK");
+        assert_eq!(TAPE_NAMES[STACK], "STACK");
+        assert_eq!(TAPE_NAMES[HEAP], "HEAP");
+        assert_eq!(TAPE_NAMES[BOX], "BOX");
     }
 
     #[test]

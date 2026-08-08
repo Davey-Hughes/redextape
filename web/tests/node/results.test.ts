@@ -119,6 +119,29 @@ describe('resultRows — refusals', () => {
   })
 })
 
+// `onRun` posts `result` after a `budget` stop (the recording ring filled), and `lambdaStatus().run`
+// is still `Running` when it does — the old doc comment's "the worker only replies once the run ended"
+// is false for this case. `resultRows` must not call a term still `Running` a normal form, and must
+// say why recording stopped instead of staying silent (the old `runNote` default case).
+describe('resultRows — a run stopped by the recording budget, not by ending', () => {
+  const running: LambdaLeg = { ...lambdaOk, status: { ...lambdaOk.status, run: 'Running' } }
+
+  it('does not call the term a normal form', () => {
+    expect(find(resultRows(running, tmOk), 'λ', 'normal form')).toBeUndefined()
+  })
+
+  it('labels it "term so far" instead, still showing the text', () => {
+    expect(find(resultRows(running, tmOk), 'λ', 'term so far')?.value).toBe(okState.text)
+  })
+
+  it('explains that recording stopped, not that the run ended', () => {
+    const note = find(resultRows(running, tmOk), 'λ', 'run')?.value
+    expect(note).toBeTruthy()
+    expect(note).not.toMatch(/\bended\b/i)
+    expect(note).toContain('recording stopped')
+  })
+})
+
 describe('noSessionRows', () => {
   const err = (message: string): Diagnostic => ({ span: { start: 0, end: 1 }, severity: 'Error', message })
   const warn = (message: string): Diagnostic => ({ span: { start: 0, end: 1 }, severity: 'Warning', message })

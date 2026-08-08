@@ -23,8 +23,8 @@ pub use asm::{
 };
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
-    AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP, STACK, Slot, TAPES,
-    WORK, ZERO,
+    AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP, STACK, Slot,
+    TAPE_NAMES, TAPES, WORK, ZERO,
 };
 pub use decode::{decode_tape, decode_tape_ty};
 pub use defunc::{defunc, defunc_mapped};

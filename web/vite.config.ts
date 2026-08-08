@@ -47,7 +47,15 @@ export default defineConfig({
           include: ['tests/browser/**/*.test.ts'],
           browser: {
             enabled: true,
-            provider: playwright(),
+            provider: playwright({
+              // `frame-cost.test.ts` reads `performance.memory.usedJSHeapSize` to measure `SPAN_BYTES`
+              // for real. WITHOUT THIS FLAG the value is frozen at a stale sample for tens of seconds
+              // regardless of allocation — verified by allocating and dropping a 5M-element array under
+              // 45s of wall-clock with no change in the reading. WITH IT, the same experiment tracks
+              // allocation and collection within one read. Chromium-only and harmless to every other
+              // browser test, which don't touch `performance.memory`.
+              launchOptions: { args: ['--enable-precise-memory-info'] },
+            }),
             headless: true,
             instances: [{ browser: 'chromium' }],
           },

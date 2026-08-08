@@ -1,18 +1,27 @@
+import { n } from './format'
 import type { LambdaLeg, TmLeg } from './protocol'
 import type { Diagnostic, RunStatus } from './types'
 import { decodedText } from './types'
 
 export type Row = { leg: string; label: string; value: string; note?: string }
 
-const n = (x: number) => x.toLocaleString('en-US')
-
-/// How a λ run's end reads. `Running` produces no row — the worker only replies once the run ended.
-///
-/// `Capped` AND `DepthRefused` ARE WORDED DIFFERENTLY ON PURPOSE. Raising the cap helps the first and
-/// provably cannot help the second, and this slice ships no button — so the wording carries the whole
-/// distinction that `RunStatus` was split to preserve.
+/**
+ * How a λ run's end reads.
+ *
+ * `Running` PRODUCES A ROW, and did not used to: that was true of the old `drive()`, which replied
+ * once the run ended and never otherwise. `onRun` now posts `result` after a `budget` stop too — the
+ * recording ring filled before the cursor did — and `lambdaStatus().run` is still `Running` when it
+ * does. `lambdaRows` below must not call that term a normal form, and this must say why recording
+ * stopped rather than staying silent about it.
+ *
+ * `Capped` AND `DepthRefused` ARE WORDED DIFFERENTLY ON PURPOSE. Raising the cap helps the first and
+ * provably cannot help the second, and this slice ships no button — so the wording carries the whole
+ * distinction that `RunStatus` was split to preserve.
+ */
 function runNote(run: RunStatus | null): string | null {
   switch (run) {
+    case 'Running':
+      return 'recording stopped before the run did — the term below is not finished reducing'
     case 'Capped':
       return 'spent its step budget'
     case 'DepthRefused':
@@ -27,7 +36,11 @@ function lambdaRows(l: LambdaLeg): Row[] {
 
   const rows: Row[] = []
   if (l.state) {
-    const row: Row = { leg: 'λ', label: 'normal form', value: l.state.text }
+    // ONLY `Ended` EARNS THE NAME "normal form". `Running` here means recording stopped on the history
+    // budget, not that the term stopped reducing — labelling it a normal form next to "value: not
+    // finished" said two contradictory things with nothing explaining the gap between them.
+    const label = l.status.run === 'Ended' ? 'normal form' : 'term so far'
+    const row: Row = { leg: 'λ', label, value: l.state.text }
     // The text is SHOWN as well as marked. Unlike `lambdaAst`'s `None`, a truncated printed term is a
     // prefix of the real one rather than a lie about its shape, and the value is unaffected either way.
     if (l.state.truncated) row.note = '… truncated at 64 KiB'
@@ -73,9 +86,11 @@ export function resultRows(lambda: LambdaLeg, tm: TmLeg): Row[] {
   return [...lambdaRows(lambda), ...tmRows(tm)]
 }
 
-/// ONLY ERROR-SEVERITY DIAGNOSTICS ARE COUNTED. `analyze` returns warnings too, and only an error
-/// withholds the session — counting the whole array would report a number the user cannot reconcile
-/// with the markers in the gutter.
+/**
+ * ONLY ERROR-SEVERITY DIAGNOSTICS ARE COUNTED. `analyze` returns warnings too, and only an error
+ * withholds the session — counting the whole array would report a number the user cannot reconcile
+ * with the markers in the gutter.
+ */
 export function noSessionRows(diagnostics: Diagnostic[]): Row[] {
   const errors = diagnostics.filter((d) => d.severity === 'Error').length
   return [{ leg: '', label: '', value: `not compiled — ${n(errors)} ${errors === 1 ? 'error' : 'errors'}` }]

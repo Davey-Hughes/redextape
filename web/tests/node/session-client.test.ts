@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { RunReply, RunRequest } from '../../src/protocol'
+import type { LambdaLeg, RunReply, RunRequest, TmLeg } from '../../src/protocol'
 import type { ClientPort } from '../../src/session-client'
 import { SessionClient } from '../../src/session-client'
+import type { LambdaStatus, TmStatus } from '../../src/types'
 
 function fakePort() {
   const sent: RunRequest[] = []
@@ -68,5 +69,60 @@ describe('SessionClient', () => {
     new SessionClient(port, onReply)
     deliver(reply(0))
     expect(onReply).not.toHaveBeenCalled()
+  })
+})
+
+describe('SessionClient streaming', () => {
+  const LAMBDA_OK: LambdaStatus = { available: true, reason: '', node: null, run: 'Ended' }
+  const TM_OK: TmStatus = { available: true, reason: '', width: 4, run: 'Ended', total_steps: 1 }
+  const LEG_OK: LambdaLeg = { status: LAMBDA_OK, state: null, value: null, declinedSpan: null }
+  const TM_LEG_OK: TmLeg = { status: TM_OK, value: null }
+
+  it('delivers every reply for the current generation, not just the first', () => {
+    const seen: string[] = []
+    const { port, deliver } = fakePort()
+    const client = new SessionClient(port, (r) => seen.push(r.kind))
+    client.request('x', 'unary')
+    deliver({
+      kind: 'compiled',
+      gen: 1,
+      lambda: LAMBDA_OK,
+      tm: TM_OK,
+      declinedSpan: null,
+      tmProgram: null,
+      tapeNames: [],
+    })
+    deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: null })
+    deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: 'ended' })
+    deliver({ kind: 'result', gen: 1, lambda: LEG_OK, tm: TM_LEG_OK })
+    expect(seen).toEqual(['compiled', 'lambda-frames', 'lambda-frames', 'result'])
+  })
+
+  it('drops every reply from a superseded generation', () => {
+    const seen: string[] = []
+    const { port, deliver } = fakePort()
+    const client = new SessionClient(port, (r) => seen.push(r.kind))
+    client.request('x', 'unary')
+    client.request('y', 'unary')
+    deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: null })
+    deliver({ kind: 'lambda-frames', gen: 2, frames: [], done: null })
+    expect(seen).toEqual(['lambda-frames'])
+  })
+
+  it('extend addresses the current generation without advancing it', () => {
+    const { port, sent } = fakePort()
+    const client = new SessionClient(port, () => {})
+    client.request('x', 'unary')
+    client.extend('lambda')
+    expect(sent.at(-1)).toEqual({ kind: 'extend', gen: 1, leg: 'lambda' })
+    client.extend('tm')
+    expect(sent.at(-1)).toEqual({ kind: 'extend', gen: 1, leg: 'tm' })
+  })
+
+  it('ignores extend before any request', () => {
+    const { port, sent } = fakePort()
+    const client = new SessionClient(port, () => {})
+    client.extend('lambda')
+    expect(sent).toEqual([])
   })
 })

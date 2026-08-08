@@ -3393,3 +3393,115 @@ unstyled span rather than an error; the cheap close is a `tokenClasses()` export
 image to `forge.daveynet.xyz`. The plan-4 design's §6.5 records this as intended and confirmed ahead of
 time; it is nonetheless the one irreversible effect of this merge, and the one thing about it worth
 naming plainly rather than discovering from a CI log after the fact.
+
+#### PLAN 5 SPLITS INTO FIVE, AND 5a-i CLOSES — three panes, a scrubbable history, and two risks its own measurements closed (2026-08-08, PR 5a-i)
+
+Design: [`../specs/2026-08-07-plan5a-panes-and-history-design.md`](../specs/2026-08-07-plan5a-panes-and-history-design.md).
+Plan: [`2026-08-07-plan5a-i-panes-and-history.md`](2026-08-07-plan5a-i-panes-and-history.md).
+
+**PLAN 5 WAS NEVER ONE SLICE, AND SAYING SO WAS THE DESIGN'S FIRST JOB.** Surveying the roadmap's Plan
+5 bullet — panes, renderers, click-linking, dual-focus highlight, detach-on-edit, per-run caps — split
+it into 5a–5e, and one piece is blocked on a problem this project deliberately left open rather than
+solved. **5c needs a λ redex→source coordinate system that survives reduction, and none exists.** The
+TM half of §6.2's dual focus works today — `TmState.source_node`, resolved through
+`SourceMap::tm_owner` — but the λ half shipped once and was removed
+(`crates/redextape-core/src/viewmodel.rs:36-55`): `node_to_lambda` records paths root-relative into the
+*initial* lowered term, normal-order reduction contracts root redexes, and by step N > 1 the path
+indexes a structurally different tree. Measured on `let x = 40; x + 2`, all seven steps reported the
+same node, `let x = 40;`, and `x + 2` was never named — the field was removed rather than left `None`
+because a value that is sometimes silently wrong tells a consumer nothing is wrong at all. §6.2's dual
+focus is therefore half-buildable, and the missing half is research rather than renderer work. 5a is
+what was buildable now, and it is what this entry records; 5a-ii — the λ structural tree and the
+virtualized state table — is not in it.
+
+**THE DESIGN'S OWN FRAME-SIZE CLAIM WAS FALSIFIED BY THE PROBE WRITTEN TO CHECK IT.** §3.2's first
+draft reasoned from `LAMBDA_BYTE_BUDGET = 65,536` that "one λ frame can therefore be 64 KB" — wrong,
+because that budget bounds `text` and says nothing about `spans: Vec<(Span, TokenClass)>`, one entry
+per token. `examples/frame_cost_probe.rs`, run under a hard memory cap, found the largest frame at the
+web's own budget was **781,038 bytes** for `while4` — 12× the claimed figure — and that **spans are
+~95% of a frame, at every budget tried.** The fix moved the lever rather than the argument:
+**`FRAME_BYTES = 512`, two orders of magnitude below `LAMBDA_BYTE_BUDGET`'s 65,536 and measured
+10-31× faster to render and ~22× smaller** — `while4` 59.67→5.77 µs/step, `list60` 230.91→7.40 µs/step,
+frame bytes falling by 20-23× alongside. `LAMBDA_BYTE_BUDGET` stays at 65,536 for the one term a user
+reads; `FRAME_BYTES` is a separate, much smaller budget for the frames a history keeps.
+
+**`SPAN_BYTES` WAS MEASURED IN THE BROWSER, AND THE ANSWER REVERSED THE SUSPICION.** A review of the
+constant's own doc comment found its premise cutting the wrong way: it argued 80 was safely an
+over-estimate, but the real JS-object cost it reasoned from would *exceed* the 76-byte JSON figure it
+was rounded from — so 80 might **under**-report, the one failure mode the sizer exists to prevent.
+Measured rather than argued further: a differential in real Chromium
+(`web/tests/browser/frame-cost.test.ts`) that retains full frames against the same frames with `spans`
+dropped, alternating A/B/A/B/A/B so a monotonic drift cannot be blamed on whichever ran last, put it at
+**~52.8 bytes/span, reproducible within 0.2 bytes across five process runs — 80 was an over-estimate,
+not an under-estimate.** V8 interns the fourteen `TokenClass` string literals, which JSON rewrites in
+full every time it serializes one, so JSON overstates rather than understates. `SPAN_BYTES` is now
+**60**. Getting the reading at all needed `--enable-precise-memory-info` added to the Playwright launch
+options: without it `performance.memory` is frozen at a stale sample, verified by allocating and
+dropping a 5M-element array over 45 seconds of wall-clock with no change in the reading — Chromium-only,
+and no other browser test in this project reads `performance.memory`.
+
+**THE TM LEG'S CONSTRAINT IS STEP COUNT, NOT FRAME COST, WHICH INVERTS AN ASSUMPTION THE RECORDING LOOP
+WAS WRITTEN UNDER.** Per-TM-frame cost is negligible — 0.12–0.18 µs/step and ~300–800 bytes/frame,
+three orders of magnitude cheaper than the λ leg — but the runs are not: `map_fold` takes **266,863
+δ-steps** against **555 β-steps** on the λ leg for the same program, and `list60` takes 2,172,796
+δ-steps against 120. At ~410 bytes a frame that is 109 MB and 890 MB of TM history for two rows out of
+the demo suite, not adversarial programs written to defeat the design. `RECORD_BUDGET` is therefore
+**derived from `HISTORY_BYTES` rather than stated as a step figure** — a single step count would mean
+two different things on the two legs, so recording stops when the ring would evict its own first frame,
+and "recording stopped, history is full at step N" is what the UI says instead.
+
+**`compile()` IS 0.21–75.44 MS**, closing PR 3c's open risk 1 after two slices unmeasured: `list2`
+0.21 ms, `sample` 0.40 ms, `map_fold` 19.48 ms, `list60` 75.44 ms. Fast enough that PR 3c's §10
+terminate-on-supersede note stays resolved as rejected — its own condition for reconsidering it was
+`compile()` measured long enough that abandoning only at a chunk boundary is too coarse, and 75 ms is
+not.
+
+**THE BOUNDARY COST IS 0.063 MS/FRAME**, closing this design's own risk 3 — the one measurement §8
+left to a later slice, wondering whether `serde_wasm_bindgen` plus a structured clone per frame would
+land the spans-are-95%-of-a-frame result harder in JS objects than in JSON. It did not: measured in
+real Chromium (`web/tests/browser/frame-cost.test.ts`, Task 12), a boundary frame is **18,103
+bytes/frame** and costs 0.063 ms to cross, consistent with the Rust probe's 4-7 µs/step prediction plus
+per-span object-construction overhead. `HISTORY_BYTES` and `RECORD_CHUNK` need no revisiting on this
+evidence.
+
+**THE TWO-SESSION WINDOW CLOSED RATHER THAN WIDENED.** The design's §11 risk 4 predicted that keeping
+a `Session` alive across messages — needed so `[continue]` has something to resume — would lengthen
+PR 3c's transient two-session window from "until the next yield" to "until the next compile completes".
+It did the opposite: exactly one `Session` is live at a time and it is freed *before* the next compile
+runs, which makes the window PR 3c's review flagged **strictly zero rather than merely bounded**
+(`session-worker.ts`'s module doc).
+
+**THE NINTH EXPORT, `tapeNames()`.** Five unlabeled tape rows are unreadable, and hand-coding
+`["REG","WORK","STACK","HEAP","BOX"]` in TypeScript would reintroduce, one language over, exactly the
+drift `encodings()` was exported to prevent. `tapeNames()` returns `build.rs`'s own constants instead —
+and states its limit rather than hiding it: those names describe machines *this compiler* produced.
+`parse_tm` accepts a hand-written machine declaring any tape count up to `MAX_TAPES = 64`, and 5d will
+introduce exactly such machines, so a consumer must label tape *i* with `names[i]` when one exists and
+`tape i` otherwise — the export's doc says so rather than implying five names describe every machine.
+
+**WHAT THE REVIEWS ACTUALLY CAUGHT IS THIS SLICE'S MOST USEFUL CLAIM.** Nearly every Important finding
+across thirteen tasks was a defect in the **plan**, not the implementation — Task 2's own example test
+declared four shapes and asserted none of them; Task 4's plan shipped a `back()` that failed its own
+"clamps back at the oldest" test; Tasks 5/6/9 inherited three tests, verbatim from their briefs, that
+let a real mutant live. **Mutation testing repeatedly killed tests that looked adequate, including,
+twice, a replacement test written specifically to close an earlier gap:** Task 4's eviction test
+asserted the opposite branch from its name and let two trivial mutants survive; the *reviewer's own
+suggested replacement* also failed to kill one of them, because its chosen frame count made the correct
+decrement coincide with the mutant's forced value, and only a second rewrite — 4 frames, `seek(2)` —
+landed a decrement the mutant could be told apart from. **And the `▶`-at-frontier path turned out to be
+dead code:** `canForward` was `head < length - 1`, false exactly when the head sits at the frontier, so
+`pane-chrome.ts` rendered `▶` disabled at precisely the moment `main.ts`'s extend branch would have
+fired — the design says `▶` and `[continue]` are the same operation with different labels, and only
+`[continue]` worked until this was found and `▶` made live.
+
+**THE GATE.** `pnpm test`: **114** (node 81, browser 33). `wasm-pack test --headless --chrome
+crates/redextape-wasm`: **13/13**. `pkg/redextape_wasm_bg.wasm`: **608,481 bytes**, against PR #16's
+**608,037** — **+444**, which is `tapeNames()` and nothing else. `scripts/check-all.sh --no-llvm`
+green, `pre-commit run --all-files` green, `pnpm run build` succeeds.
+
+**WHAT 5a-ii STILL OWES.** The `lambdaAst` verdict PR #15 asked for and PR 3c could not supply — this
+slice built the text pane, not the tree, so whether the arena `TermNode` became is the shape a renderer
+wants is still open. And the virtualized state table: `crates/redextape-core/tests/fixtures/list_1_2.tm`
+is 146 states and 464 lines for the two-element list literal `[1, 2]`, unvirtualized that is thousands
+of DOM nodes rebuilt every step, and `virtual-list.ts` — fixed row height, offset arithmetic, no
+library — has not been written yet.

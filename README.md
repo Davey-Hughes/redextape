@@ -12,14 +12,20 @@ computation — not a native run with a decorative overlay.
 
 ## Status
 
-**The compiler is built, and the first slice of the thing you watch it in now exists.** The front end
+**The compiler is built, and the thing you watch it run in now has three panes.** The front end
 and three backends — λ, Turing machine, and native — all work, and each is checked against the others
-on every commit. `crates/redextape-wasm` compiles the compiler to WASM, and `web/` is a real app: one
-editable source pane with live syntax highlighting and lint diagnostics, and a results readout that
-runs the λ and TM legs side by side — the first thing in this project a human can click. What the
-visualizer the project is *for* still lacks: no side-by-side *editable* λ/TM panes, no click-linking
-between them, no detach-on-edit, no per-run caps affordance, no CLI. See "Development & CI" below to
-build and run it, or still `cargo run --example` for the raw backends without a browser.
+on every commit. `crates/redextape-wasm` compiles the compiler to WASM through **nine exports** — the
+ninth, `tapeNames()`, labels the five Turing-machine tape rows from the lowering's own constants
+(`build.rs`) rather than a hand-copied list, so it can only speak for machines this compiler produced.
+`web/` is a real app: a source pane with live syntax highlighting and lint diagnostics, a λ pane, and a
+Turing-machine pane showing all five tapes and a status line, side by side — the first thing in this
+project a human can click. **Both legs are steppable forward and backward** through a recorded,
+byte-budgeted history (◀ ▶ ⏵ ↺), with a caps affordance (`[continue]`) for a run that outgrows its
+recording budget before it outgrows its answer. What the visualizer the project is *for* still lacks:
+click-linking between the panes, dual-focus highlight while running, editable λ/TM panes with
+detach-on-edit, λ pane structural tree view, TM pane virtualized state table, and a CLI.
+See "Development & CI" below to build and run it, or still `cargo run --example` for the raw backends
+without a browser.
 
 Design spec:
 [`docs/superpowers/specs/2026-07-19-tm-lambda-visualizer-design.md`](docs/superpowers/specs/2026-07-19-tm-lambda-visualizer-design.md).
@@ -125,10 +131,13 @@ as it diverges. Both are reachable only because control now returns from each β
 ### Not built yet
 
 - **The full visualizer** — `crates/redextape-wasm` (cdylib) and `web/` (Vite + CodeMirror 6, no
-  framework) exist and ship a first slice (Roadmap Plan 4, PR 3c): one editable source pane, live
-  syntax highlighting and lint diagnostics, and a results readout running the λ and TM legs side by
-  side. Still missing: independently editable λ / TM panes, click-linking between them, detach-on-edit,
-  and the per-run caps affordance. Roadmap Plan 5.
+  framework) now ship three panes (Roadmap Plan 5a-i): an editable source pane with live syntax
+  highlighting and lint diagnostics, a λ pane, and a Turing-machine pane with all five tapes and a
+  status line, both legs independently steppable forward and backward through a recorded history with
+  a caps affordance for a run that exceeds it. Still missing: click-linking between the panes,
+  dual-focus highlight while running (blocked — see the roadmap's Plan 5 entry), editable λ / TM panes
+  with detach-on-edit and recompile-from-source, the λ pane's structural tree view, and the TM pane's
+  virtualized state table (the last two are Plan 5a-ii).
 - **CLI** — `crates/redextape-cli`: `redextape fmt` / `lint`, plus subcommands to emit and run λ /
   TM artifacts. Roadmap Plan 6. `fmt` is blocked on a decision nobody has made yet — the lexer
   discards `//` comments, so a `print ∘ parse` formatter over that AST would delete every one.

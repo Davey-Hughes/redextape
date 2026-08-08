@@ -78,6 +78,21 @@ pub fn encodings() -> Result<JsValue, JsValue> {
     to_value(&EncodingKind::ALL.iter().map(|k| k.name()).collect::<Vec<_>>())
 }
 
+/// The lowering's tape names, in tape order. The NINTH export.
+///
+/// EXPORTED RATHER THAN HARDCODED, for the reason `encodings()` gives one export up: a TypeScript
+/// array of names is a second authoritative registry that not even the compiler is watching. Five
+/// unlabeled tape rows are unreadable, so the UI needs names; this is where they come from.
+///
+/// A CONSUMER MUST NOT TREAT ITS LENGTH AS EVERY MACHINE'S TAPE COUNT. These name the tapes THIS
+/// compiler emits. `tmProgram().tapes` is the count for the machine in hand, and Plan 5d's
+/// hand-written machines may declare up to `MAX_TAPES`. Label tape `i` with `names[i]` when one
+/// exists and positionally otherwise — see `TAPE_NAMES`' own doc.
+#[wasm_bindgen(js_name = tapeNames)]
+pub fn tape_names() -> Result<JsValue, JsValue> {
+    to_value(&redextape_core::tm::TAPE_NAMES)
+}
+
 /// `session.rs`'s error type as a JS `Error`-shaped value. The ONE conversion every fallible method
 /// below shares, so no method invents its own wording and none of them can panic instead.
 fn err(e: session::SessionError) -> JsValue {
