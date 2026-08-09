@@ -1323,6 +1323,46 @@ What already exists, so the pass starts from the right baseline: the appearance 
 `<button type="button">` with an `aria-label` naming its current state, updated on every change
 (`main.ts`, PR #20). That is the whole of it.
 
+#### `settled()`'s invariant is false, and it is the root cause of the browser tier's flakes (raised 2026-08-08, PR 5a-ii)
+
+`web/tests/browser/app.test.ts`'s `settled(view, src)` is what ~20 browser tests use to mean "the
+program I just dispatched has run". Its doc claims: *"there is no stale `'idle'` left over from a
+previous test for this to resolve against by accident."* **Measured false**, and two separate flakes on
+PR 5a-ii traced to it — one in a test from 5a-i, one added by 5a-ii.
+
+**The mechanism, verified against the code rather than inferred.** `schedule` (`main.ts:304-308`) does
+set `results.dataset.state = 'running'` synchronously, which is the half the doc gets right. But it
+then defers the actual `client.request` by `DEBOUNCE_MS = 300`, and `request` is the **only** thing that
+increments `SessionClient.#gen` (`session-client.ts:33`) — which is the filter that drops replies from
+a superseded generation (`session-client.ts:28`). So for at least 300 ms after a dispatch, the previous
+generation's replies are still considered current, and its `result` sets the state back to `'idle'`.
+`until`'s 50 ms poll then samples in that window and `settled` returns against the **old** program.
+
+The window is far wider than 300 ms in practice, because a `setTimeout` competes with recording: each
+`lambda-frames`/`tm-frames` batch is 256 frames and every one triggers a full `draw()`, so during an
+extend the timer is starved for **seconds**. Measured timeline, dispatching a new program while the
+previous test's extend was still streaming:
+
+```
+2 ms      running | spacer 277200px   <- dispatch; `schedule` sets 'running' synchronously
+4679 ms   idle    | spacer 277200px   <- PREVIOUS generation's `result`; `settled` resolves HERE
+4710 ms   idle    | spacer 8112px     <- the new program's `compiled` finally lands
+```
+
+That 31 ms is where `restart returns to step 0 and forward walks out again` read `'not run'`, and where
+a state-table test read the previous program's geometry.
+
+**What is in the tree now is mitigation, not the fix.** Two call sites wait for a signal specific to
+their own program after `settled` returns. That works for those two and leaves the exposure for every
+other caller — including any test whose first assertion depends on `setProgram` having run.
+
+**The durable fix is in the helper**, and there are two shapes: bump the generation eagerly at dispatch
+so stale replies are filtered immediately (moving `#gen += 1` out of `request` and into `schedule`), or
+give `settled` a signal tied to the dispatched source rather than to a shared state flag. The first is
+smaller but touches the supersession machinery that PR 3c's review spent a slice getting right, so it
+wants its own measurement rather than a drive-by. **Not attempted on 5a-ii**: changing a helper 20 tests
+depend on, at the end of a 30-commit branch, is how a green suite becomes a mystery.
+
 #### Non-progress detection: a TM-only UI diagnostic, and NOT a guard (raised 2026-07-31)
 
 Raised while designing the λ logical-size guard, and recorded here rather than there because it is a
