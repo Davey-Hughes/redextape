@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:node": "vitest run --project node",
-    "test:browser": "vitest run --project browser"
+    "test:browser": "vitest run --project browser",
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
@@ -24,6 +25,7 @@
     "@types/node": "26.1.2",
     "@vitest/browser": "4.1.10",
     "@vitest/browser-playwright": "4.1.10",
+    "@vitest/coverage-v8": "4.1.10",
     "playwright": "1.62.1",
     "typescript": "7.0.2",
     "vite": "8.2.1",

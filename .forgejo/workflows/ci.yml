@@ -243,15 +243,30 @@ jobs:
       #
       # It is NOT bit-identical coverage and saying so would be the easy lie: lines went 95.55% ->
       # 95.52%, i.e. 1397 -> 1407 uncovered of 31417. The 10 lines are the target set — `--all-targets`
-      # instruments example targets, nextest's default does not. Both sit 15 points above the gate, so
-      # the swap is safe; the delta is recorded rather than rounded away so that a future drop toward 80
-      # is not misread as this change's fault.
+      # instruments example targets, nextest's default does not. Both sat 15 points above the gate
+      # when the gate was 80; against today's 90 the margin is ~5.5. The swap is still safe, and the
+      # delta is recorded rather than rounded away so that a future drop is not misread as this
+      # change's fault. (Updated 2026-08-09 with the floor — the "15 points" reading was true of 80
+      # and false the moment the floor moved.)
       #
       # Neither runner covers DOCTESTS: `--all-targets` excludes them and nextest cannot run them at
       # all. That is unchanged by the swap, and `cargo llvm-cov --doctests` is nightly-only. The
       # doctest in `ty::show` is EXECUTED by scripts/check-all.sh above, just not instrumented here.
+      #
+      # 90 IS CHOSEN, NOT DERIVED, and saying so is the point of this comment. Measured 2026-08-09:
+      # 95.64% lines (15905 lines, 694 missed). A floor at `floor(measured) - 1` would be 94; 90 was
+      # picked over that deliberately, to leave room for the workspace to take on hard-to-cover
+      # surface — a new backend, platform-conditional code — without a floor bump in every such PR.
+      #
+      # The five points of headroom are the same KIND of slack that let the previous floor sit at 80
+      # while the tree measured ~95, at half the size. That is a trade, not an oversight.
+      #
+      # The comment this replaces said `# tune the gate as the code grows`: an instruction with no
+      # owner and no trigger, which is exactly why fifteen points accumulated unremarked. What
+      # replaces it is a number with a date and a measurement beside it, so the next person to move
+      # it can see what it was chosen against.
       - name: Test + coverage
-        run: cargo llvm-cov nextest --workspace --fail-under-lines 80   # tune the gate as the code grows
+        run: cargo llvm-cov nextest --workspace --fail-under-lines 90
 
   # The SLOW test tier: exhaustive sweeps marked `#[ignore = "slow tier: ..."]`, which `cargo test`
   # skips by default. In its own job for the same reason as `rust-llvm` — a multi-minute sweep must
@@ -639,8 +654,15 @@ jobs:
         run: pnpm exec biome ci --error-on-warnings
       - name: Typecheck
         run: pnpm run typecheck
-      - name: Unit tests
-        run: pnpm test
+      # `test:coverage`, not `test` — this is the web coverage gate. Thresholds live in
+      # web/vite.config.ts beside the measurement that set them. NO SEPARATE JOB AND NO `gate` EDIT
+      # IS NEEDED: `gate` already lists `web` in `needs` and already requires it under has_web, so a
+      # threshold failure fails this job, which fails the required check. A separate coverage job
+      # would re-install Rust, wasm-pack and Chromium for a signal this job already carries, and
+      # would add a `require` line to `gate` that could be forgotten — which this file records
+      # having happened once, when R_WEB was dropped.
+      - name: Unit tests + coverage gate
+        run: pnpm run test:coverage
       - name: Build the app
         run: pnpm run build:app
 

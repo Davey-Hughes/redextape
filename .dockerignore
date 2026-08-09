@@ -4,6 +4,12 @@ target/
 node_modules/
 **/node_modules/
 web/dist/
+# Vitest coverage output. Same reason as web/dist/ above: build output, never an input. It is only
+# 600K, but `COPY web/ ./` (Dockerfile:32) means any local `pnpm run test:coverage` invalidates that
+# layer and every layer after it — including `pnpm run build:app`. CI is unaffected (fresh
+# checkout); this is for local builds, which is where the `docker` job's PR exemption means the
+# image actually gets exercised.
+web/coverage/
 pkg/
 
 # Docs, VCS, and local cruft aren't needed to build or run the static site.

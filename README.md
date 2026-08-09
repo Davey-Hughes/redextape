@@ -175,15 +175,15 @@ are literally in the name. Alternates once in the running: *Turnstile*, *Betamax
 
 - **Forgejo Actions** (`.forgejo/workflows/ci.yml`) — a `detect` job gates each build job on what
   exists in the tree. **Live:** `linear-history` (unconditional), `rust` (fmt, clippy,
-  `scripts/check-all.sh --no-llvm`, then `cargo llvm-cov nextest` against an 80% line floor),
+  `scripts/check-all.sh --no-llvm`, then `cargo llvm-cov nextest` against a 90% line floor),
   `rust-llvm` (installs LLVM 22, runs the full `scripts/check-all.sh`, then an informational
   optimization report), `rust-slow` (the exhaustive sweeps), `rust-scoped` (the cheap path for a
   change that touches one crate), `rust-browser` (the wasm boundary under headless Chrome), `gate`
   (the required check — it fails loudly rather than letting a skipped tier pass quietly), and — now
-  that `web/package.json` has landed — `web` (biome, typecheck, both Vitest projects, build) and the
-  `docker` build-and-push to
-  `forge.daveynet.xyz`. **Every push to `main` now builds and pushes an image**; there is no way to
-  land `web/` changes without arming that job.
+  that `web/package.json` has landed — `web` (biome, typecheck, both Vitest projects under a
+  coverage gate, build) and the `docker` build-and-push to `forge.daveynet.xyz`. **Every push to
+  `main` now builds and pushes an image**; there is no way to land `web/` changes without arming
+  that job.
 - **Docker** — multi-stage `Dockerfile` (Rust→WASM → Vite bundle → nginx static image),
   `docker-compose.yml`, and `deploy/nginx.conf`. Buildable:
   stage 1 builds `crates/redextape-wasm`, stage 2 builds `web/`.
@@ -207,15 +207,21 @@ each of the four configurations: the default (`cranelift`), `--no-default-featur
 llvm`, and `--no-default-features --features llvm`. CI runs this same script. Pass `--no-llvm` to
 skip the LLVM configurations when no LLVM 22 toolchain is installed.
 
-That gate currently covers **828 tests** at default features (`redextape-core` 703,
-`redextape-wasm` 48, `redextape-native` 66, `redextape-native-rt` 11) — 3 are skipped, so 825 run —
+That gate currently covers **841 tests** at default features (`redextape-core` 716,
+`redextape-wasm` 48, `redextape-native` 66, `redextape-native-rt` 11) — 3 are skipped, so 838 run —
 and `--features llvm` takes `redextape-native` to 104. Recount rather than trust those numbers:
 `cargo nextest list --workspace`.
 
 **Two tiers sit outside that count**, because neither runs under `cargo nextest`. The wasm boundary
-has **12** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
-`rust-browser` job. `web/` has **48** of its own across two Vitest projects — 38 in Node for the
-pure modules, 10 in real Chromium for the worker and the app end to end — run by CI's `web` job.
+has **15** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
+`rust-browser` job. `web/` has **246** of its own across two Vitest projects — 187 in Node for the
+pure modules, 59 in real Chromium for the worker and the app end to end — run by CI's `web` job
+under the coverage gate. Recount with `pnpm test`.
+
+All three numbers in the last two paragraphs were stale when measured on 2026-08-09, and the web one
+badly: it read **48** from PR 3c while the suite grew fivefold underneath it. That is what the
+recount instructions are for — a test count in prose has no mechanism keeping it honest, so treat
+every figure here as a claim with a date rather than a fact.
 
 The test runner is [`cargo-nextest`](https://nexte.st), not `cargo test`: `cargo test` runs the test
 binaries one at a time and only shares threads within a binary, which on this suite left 12 cores

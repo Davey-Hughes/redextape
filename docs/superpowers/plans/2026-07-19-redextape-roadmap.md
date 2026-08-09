@@ -24,8 +24,9 @@ Copied verbatim from the spec / existing repo config:
 - CI gates (`.forgejo/workflows/ci.yml`) that must stay green:
   - `cargo fmt --all --check`
   - `cargo clippy --workspace --all-targets -- -D warnings`
-  - `cargo llvm-cov --workspace --all-targets --fail-under-lines 80`
-  - Web job: `npx biome ci`, `npm run typecheck`, `npm test`, `npm run build`.
+  - `cargo llvm-cov nextest --workspace --fail-under-lines 90` *(was `--all-targets ... 80` — the
+    runner moved to nextest at the swap recorded below, and the floor rose 2026-08-09)*
+  - Web job: `pnpm exec biome ci`, `pnpm run typecheck`, `pnpm run test:coverage`, `pnpm run build:app`.
 - CI auto-activates on the presence of a **root `Cargo.toml`** and **`web/package.json`** — the
   workspace manifest must live at the repo root.
 - Planned crates: `redextape-core` (lib), `redextape-cli` (bin), `redextape-wasm` (cdylib),

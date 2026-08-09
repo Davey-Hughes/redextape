@@ -12,6 +12,7 @@
 node_modules/
 dist/
 .vite/
+coverage/
 *.tsbuildinfo
 
 # Vitest browser-mode artifacts. Written only when a browser test FAILS, so they are absent on a
