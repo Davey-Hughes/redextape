@@ -28,6 +28,15 @@
   --rule: light-dark(#e2dfda, #322f38);
   --accent: light-dark(#9a3412, #f0956a);
 
+  /* The construct a click linked (`.linked` below). A SEPARATE HUE FROM `--accent`, not a tint of it —
+     `.decline` already washes a span in `--accent` for a backend refusal, and `.cm-activeLine` washes
+     the current line in it too, so a link in the same hue would read as one of those instead of a
+     third, distinct kind of mark. Reuses `--tok-nat`/`--tok-bool`'s blue rather than adding a new
+     literal pair, mixed the same way `.decline` mixes `--accent` — toward `transparent` so it sits as a
+     wash over whatever the token colours already painted underneath. */
+  --link-bg: color-mix(in oklab, var(--tok-nat) 20%, transparent);
+  --link-edge: var(--tok-nat);
+
   --tok-neutral: light-dark(#6b6864, #9a9599);
   --tok-keyword: light-dark(#9a3412, #f0956a);
   --tok-ident: light-dark(#1c1b1a, #eceaf0);
@@ -368,6 +377,18 @@ main {
   opacity: 0.85;
 }
 
+/* A linked state block. Layered UNDER `.is-current` and `.is-firing` below, which are about the run
+   rather than about the selection — a row can legitimately be both, and equal specificity means
+   SOURCE ORDER decides which background shows: this rule has to come first so those two, declared
+   after it, are the ones that win. */
+.state-row.is-linked {
+  background: var(--link-bg);
+}
+
+.state-row {
+  cursor: pointer;
+}
+
 /* `--accent-soft` DOES NOT EXIST in the palette PR #20 landed — the variables are `--bg`,
    `--bg-raised`, `--fg`, `--fg-dim`, `--rule`, `--accent`, and the `--tok-*` set. Mixed from `--accent`
    rather than added to the palette: this is one feature's highlight, and PR #20's whole point was a
@@ -381,4 +402,25 @@ main {
   background: color-mix(in oklab, var(--accent) 24%, var(--bg));
   outline: 1px solid var(--accent);
   outline-offset: -1px;
+}
+
+/* The construct a click linked, echoed in the source pane. Distinct from `.decline`, which is a
+   backend refusal, and from the token colours, which say what a thing IS rather than what is selected. */
+.cm-editor .linked {
+  background: var(--link-bg);
+  box-shadow: inset 0 -2px 0 var(--link-edge);
+}
+
+.link-status {
+  min-height: 1.2em;
+  padding: 0.2em 0.4em;
+  font-size: 0.85em;
+  color: var(--fg-dim);
+}
+
+/* The linked subterm inside the λ window. Layered over the token colour rather than replacing it —
+   the class is added alongside `.tok-*`, so the text keeps its syntax colour and gains a ground. */
+.term .is-linked {
+  background: var(--link-bg);
+  box-shadow: inset 0 -2px 0 var(--link-edge);
 }

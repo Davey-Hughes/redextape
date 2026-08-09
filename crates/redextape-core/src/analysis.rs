@@ -44,6 +44,37 @@ pub enum TokenClass {
     Move,
 }
 
+/// Every `TokenClass` variant's name, in declaration order, so `names[c as usize] == name of c`.
+///
+/// EXPORTED SO THE TYPESCRIPT COPY CAN BE CHECKED RATHER THAN TRUSTED. `web/src/types.ts` holds the
+/// same list by hand, and until now nothing could verify it — the residual risk its own doc names is
+/// a variant added here and not mirrored there. That risk changes shape in Plan 5b: `LinkIndex` ships
+/// classes as a `Uint8Array` of discriminants, so a REORDERING (not just an addition) would silently
+/// mis-colour every span past the moved variant instead of producing an unrecognised string.
+///
+/// The list is written out rather than derived from a macro because the enum is written out too;
+/// a macro pairing the two would be a third thing to keep in step. The test below is what makes the
+/// pairing mechanical: it asserts the index of a variant at each end and in the middle, and pins the
+/// count, so an insertion anywhere fails rather than shifting the tail by one.
+pub fn token_class_names() -> &'static [&'static str] {
+    &[
+        "Ident",
+        "Nat",
+        "Bool",
+        "Keyword",
+        "Operator",
+        "Punct",
+        "Comment",
+        "Binder",
+        "Mnemonic",
+        "Register",
+        "Label",
+        "StateName",
+        "TapeSymbol",
+        "Move",
+    ]
+}
+
 pub type Classified = Vec<(Span, TokenClass)>;
 
 /// Append `text` to `out` and record the span it just occupied as `class`. The whole point of the
@@ -176,5 +207,40 @@ mod tests {
         // Lexing a program with an illegal character must not panic; whatever tokens survive classify.
         let _ = classify_source("let x = @@@;");
         let _ = classify_source("");
+    }
+
+    #[test]
+    fn token_class_names_is_indexed_by_discriminant() {
+        // EVERY VARIANT, AND THE INDEX IS THE DISCRIMINANT. `LinkIndex` ships span classes across the
+        // wasm boundary as a `Uint8Array` of these indices, so a name at the wrong index mis-colours
+        // silently rather than producing an unrecognised string.
+        //
+        // EVERY VARIANT IS NAMED, NOT THREE SPOT-CHECKS. Anchoring only the ends and the middle misses
+        // a TRANSPOSITION: swapping two variants between the anchors moves neither anchor's
+        // discriminant nor the count. And comparing `names` against a bare array literal would be
+        // worse — it pins one literal against another and never evaluates a discriminant at all, so an
+        // enum reordered without touching the literal would still pass. Writing `c as usize` beside
+        // each spelling is what makes this test about the enum.
+        let names = token_class_names();
+        let expected = [
+            (TokenClass::Ident, "Ident"),
+            (TokenClass::Nat, "Nat"),
+            (TokenClass::Bool, "Bool"),
+            (TokenClass::Keyword, "Keyword"),
+            (TokenClass::Operator, "Operator"),
+            (TokenClass::Punct, "Punct"),
+            (TokenClass::Comment, "Comment"),
+            (TokenClass::Binder, "Binder"),
+            (TokenClass::Mnemonic, "Mnemonic"),
+            (TokenClass::Register, "Register"),
+            (TokenClass::Label, "Label"),
+            (TokenClass::StateName, "StateName"),
+            (TokenClass::TapeSymbol, "TapeSymbol"),
+            (TokenClass::Move, "Move"),
+        ];
+        assert_eq!(names.len(), expected.len(), "a variant was added or removed without updating either list");
+        for (class, spelling) in expected {
+            assert_eq!(names[class as usize], spelling, "{spelling} is not at its own discriminant");
+        }
     }
 }

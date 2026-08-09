@@ -220,7 +220,12 @@ pub fn max_shared_logical_size(t: &LambdaTerm) -> u64 {
 }
 
 /// A direction into a `LambdaTerm`; a `Path` locates a subterm (e.g. the reduced redex).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// `Ord` is derived so a `Path` (`Vec<Dir>`) can key a `BTreeMap` — `print_lambda_linked` inverts a
+/// `NodeId -> Path` map into a path-keyed lookup while walking. The ordering it induces (`AppL < AppR
+/// < AbsBody`, declaration order) is otherwise arbitrary: nothing depends on how paths compare, only
+/// on equality-based lookup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Dir {
     AppL,
     AppR,

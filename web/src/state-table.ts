@@ -89,8 +89,54 @@ export function highlight(index: StateIndex, frame: TmState | null): { stateRow:
   return { stateRow, ruleRow: frame.rule === null ? -1 : stateRow + 1 + frame.rule }
 }
 
+/**
+ * Every row a link highlights: each linked state's header row and all of its rule rows.
+ *
+ * A SET RATHER THAN A RANGE, because a node's state block is not contiguous — `node_to_tm` collects
+ * whichever states a lowering emitted for one construct, and a lowering interleaves constructs. The
+ * set is built once per link, not per draw: `list60` is 35,715 states, so a per-row scan over the
+ * block would be O(visible x block) on every scroll.
+ *
+ * A STATE ID PAST THE END CONTRIBUTES NOTHING rather than a clamped row. `StateIndex.rowOfState`
+ * clamps to 0, which would silently light the first state — the same no-fallback rule `tm_owner`
+ * follows one layer in.
+ */
+export function linkedRows(index: StateIndex, states: number[]): Set<number> {
+  const out = new Set<number>()
+  for (const s of states) {
+    const start = index.rowOfState(s)
+    const header = index.row(start)
+    if (header === null || header.kind !== 'state' || header.id !== s) continue
+    out.add(start)
+    for (let i = start + 1; ; i += 1) {
+      const row = index.row(i)
+      if (row === null || row.kind !== 'rule' || row.stateId !== s) break
+      out.add(i)
+    }
+  }
+  return out
+}
+
 /** The table's row height in pixels. Must match `.state-row`'s height in `style.css`. */
 export const ROW_HEIGHT = 24
+
+/**
+ * Where to scroll so `row`'s MIDDLE sits at the viewport's middle, clamped into the document.
+ *
+ * PURE ARITHMETIC, DELIBERATELY PULLED OUT OF `Follow`. `TmPane.setLink`'s link-driven scroll wants the
+ * exact same centring `Follow.targetScrollTop` computes for its own following-driven scroll — the two
+ * already drifted once, when `setLink`'s copy was written without the `+ Math.floor(rowHeight / 2)` term
+ * this has, and centred a row's TOP edge where this centres its MIDDLE. Sharing the formula is what
+ * keeps a link scroll and a follow scroll agreeing on what "centred" means.
+ *
+ * NOT `Follow.targetScrollTop` ITSELF, because that also asks whether the table is following, and
+ * `setLink`'s scroll must NOT consult that — see its own doc for why a link click scrolls regardless of
+ * `Follow`'s state. `targetScrollTop` below is now a thin following-gated wrapper around this.
+ */
+export function centredScrollTop(row: number, rowHeight: number, viewportHeight: number, totalHeight: number): number {
+  const centred = row * rowHeight - Math.floor(viewportHeight / 2) + Math.floor(rowHeight / 2)
+  return Math.max(0, Math.min(centred, Math.max(0, totalHeight - viewportHeight)))
+}
 
 /**
  * How far an echoed `scroll` event may land from the position this code requested and still count as
@@ -151,7 +197,6 @@ export class Follow {
   /** Where to scroll so `stateRow` is centred, or `null` when not following. Clamped into the document. */
   targetScrollTop(stateRow: number, rowHeight: number, viewportHeight: number, totalHeight: number): number | null {
     if (!this.#following) return null
-    const centred = stateRow * rowHeight - Math.floor(viewportHeight / 2) + Math.floor(rowHeight / 2)
-    return Math.max(0, Math.min(centred, Math.max(0, totalHeight - viewportHeight)))
+    return centredScrollTop(stateRow, rowHeight, viewportHeight, totalHeight)
   }
 }

@@ -2,13 +2,17 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { lintGutter } from '@codemirror/lint'
 import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
-import init, { analyze, classifySource, encodings } from '../../pkg/redextape_wasm.js'
+import init, { analyze, classifySource, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
 import { APPEARANCE_LABEL, applyAppearance, nextAppearance, readStored, STORAGE_KEY } from './appearance'
 import { showBanner, showWorkerError } from './banner'
 import { canRecordFurther, controlState } from './controls'
-import { declineMark, highlighting, setDecline, setSpans } from './highlight'
+import { declineMark, highlighting, linkMark, setDecline, setLink, setSpans } from './highlight'
 import { History } from './history'
 import { LambdaPane } from './lambda-pane'
+import type { LambdaWindow } from './lambda-window'
+import { LINK_CONTEXT, lambdaWindow } from './lambda-window'
+import { type Link, LinkIndex } from './link'
+import { type LambdaLinkState, linkStatus } from './link-status'
 import { lintFromAnalyze } from './lint'
 import type { Leg, RecordEnd, RunReply } from './protocol'
 import { HISTORY_BYTES, lambdaFrameBytes, tmFrameBytes } from './protocol'
@@ -16,7 +20,8 @@ import type { Row } from './results'
 import { noSessionRows, resultRows } from './results'
 import { SessionClient } from './session-client'
 import { TmPane } from './tm-pane'
-import type { Classified, Diagnostic, LambdaState, LambdaStatus, TmState, TmStatus } from './types'
+import type { Classified, Diagnostic, LambdaState, LambdaStatus, Span, TmState, TmStatus } from './types'
+import { assertTokenClasses } from './types'
 
 const DEBOUNCE_MS = 300
 const SAMPLE = 'let x = 40; x + 2'
@@ -68,10 +73,11 @@ async function main(): Promise<EditorView> {
   const editorHost = document.querySelector<HTMLElement>('#editor')
   const lambdaHost = document.querySelector<HTMLElement>('#lambda')
   const tmHost = document.querySelector<HTMLElement>('#tm')
+  const linkStatusHost = document.querySelector<HTMLElement>('#link-status')
   const picker = document.querySelector<HTMLSelectElement>('#encoding')
   const appearanceButton = document.querySelector<HTMLButtonElement>('#appearance')
   const root = document.querySelector<HTMLElement>('main')
-  if (!results || !editorHost || !lambdaHost || !tmHost || !picker || !appearanceButton || !root) {
+  if (!results || !editorHost || !lambdaHost || !tmHost || !linkStatusHost || !picker || !appearanceButton || !root) {
     throw new Error('the page is missing a mount point')
   }
 
@@ -124,6 +130,9 @@ async function main(): Promise<EditorView> {
     throw e
   }
 
+  // Checked once, here, immediately after the module is live. See `assertTokenClasses`.
+  assertTokenClasses(tokenClasses() as string[])
+
   for (const name of encodings() as string[]) {
     const opt = document.createElement('option')
     opt.value = name
@@ -145,6 +154,18 @@ async function main(): Promise<EditorView> {
     done: null,
     timer: null,
   }
+
+  /**
+   * The current compile's link index, and the construct the user has linked.
+   *
+   * `linkable` IS NOT `index !== null`. An index is from the last compile, so the first keystroke
+   * after it shifts every source span it holds; linking is disabled from that keystroke until the
+   * next `compiled` lands. Resolving against a stale index is the silently-wrong answer this whole
+   * slice refuses elsewhere.
+   */
+  let index: LinkIndex | null = null
+  let linkable = false
+  let link: { node: number; origin: 'source' | 'lambda' | 'tm' } | null = null
 
   const draw = () => {
     lambdaPane.render(
@@ -175,6 +196,135 @@ async function main(): Promise<EditorView> {
         done: tm.done,
       }),
     )
+    // EVERY RE-RENDER REFRESHES THE STATUS LINE, NOT JUST THE PANES THEMSELVES. `drawLink` reads
+    // `lam.hist.currentStep` (via `lambdaLinkState`), and `back`/`forward`/`play`/`restart`/history
+    // scrubbing all route through this function without calling `drawLink` on their own — so it has to
+    // live here, at the END, to see the history mutation those callers already made before calling
+    // `draw()`. A copy anywhere earlier in this function would still be reading the PREVIOUS step.
+    //
+    // RESOLVED ONCE, HERE, AND SHARED BY BOTH CONSUMERS BELOW. `draw()` runs on every recorded frame
+    // during playback, and `index.linkFor` walks `#spanOf`/`#statesOf` over the wire's parallel
+    // arrays — not free. `drawLink` wants `states.length > 0` and the λ span (to tell `truncated` from
+    // `shown`); `lambdaLinkWindow` wants only the λ span. A separate `index.linkFor(link.node)` call in
+    // each would resolve the SAME node twice on every tick — exactly the double resolution an earlier
+    // fix pass on this branch removed from `drawLink` alone, before `lambdaLinkWindow` reintroduced the
+    // second call here.
+    const l: Link | null = linkable && link !== null && index !== null ? index.linkFor(link.node) : null
+    drawLink(l)
+    // SAME REASON AS `drawLink()` ABOVE, AND NOT ONLY IN `setLinkTo`: scrubbing the λ history must
+    // withdraw the window without a click, and every stepping control routes through `draw()` rather
+    // than through `setLinkTo`.
+    lambdaPane.renderLink(lambdaLinkWindow(l))
+  }
+
+  /**
+   * Which λ state the link is in — the three-way distinction `link-status.ts` exists to keep apart.
+   *
+   * ORDERED MOST-GLOBAL FIRST. A declined backend makes the other two questions meaningless, and a
+   * play head off step 0 makes truncation irrelevant, so asking in this order never reports a
+   * narrower reason than the true one.
+   *
+   * `lambdaSpan` IS PASSED IN RATHER THAN RE-DERIVED. The caller (`drawLink`) is itself handed the
+   * already-resolved `Link` that `draw()` computed once and shares with `lambdaLinkWindow` too — see
+   * `draw()`'s doc. Re-deriving it here would walk `#spanOf`/`#statesOf` over the wire's parallel
+   * arrays again, on every recorded frame during playback.
+   *
+   * AN ABSENT SPAN IS ONLY `'truncated'` WHEN `index.lambdaTruncated` SAYS SO. `lambdaSpan === null`
+   * is ambiguous by itself — it also fires for a node `LinkIndex.lambda_nodes` never carried a span
+   * for at all, which is not a byte-budget frontier — so reporting `'truncated'` unconditionally would
+   * be checkably false whenever the absence has some other cause. `'unmapped'` is the honest answer
+   * for that other case.
+   */
+  const lambdaLinkState = (lambdaSpan: Span | null): LambdaLinkState => {
+    if (index === null || index.lambdaText === '') return 'declined'
+    if (lam.hist.currentStep !== 0) return 'not-step-0'
+    if (lambdaSpan !== null) return 'shown'
+    return index.lambdaTruncated ? 'truncated' : 'unmapped'
+  }
+
+  /**
+   * Paint the link status line from `draw()`'s already-resolved link, or `null` when there is nothing
+   * to resolve.
+   *
+   * `l` IS A PARAMETER, NOT A CALL TO `index.linkFor` HERE — `draw()` resolves it once per tick and
+   * shares it with `lambdaLinkWindow` too; see `draw()`'s doc. `l === null` covers both "nothing is
+   * linked" and "linking is stale", but those still report DIFFERENT statuses (`none` vs `stale`), so
+   * `linkable` is consulted directly rather than folded into what made `l` null.
+   */
+  const drawLink = (l: Link | null) => {
+    if (!linkable) {
+      linkStatusHost.textContent = linkStatus({ state: 'stale' })
+      return
+    }
+    if (l === null) {
+      linkStatusHost.textContent = linkStatus({ state: 'none' })
+      return
+    }
+    linkStatusHost.textContent = linkStatus({
+      state: 'linked',
+      tm: l.states.length > 0,
+      lambda: lambdaLinkState(l.lambda),
+    })
+  }
+
+  /**
+   * The λ pane's link view, or `null` when there is nothing to show.
+   *
+   * GATED ON `lam.hist.currentStep === 0`, and ONLY on the λ leg's own head. `main.ts` holds two
+   * independent histories with two heads; the TM leg runs at wildly different step counts (the `map`
+   * demo is 344,999 δ-steps against a few hundred β-steps), so gating on a shared condition would make
+   * the λ link vanish almost immediately for reasons that have nothing to do with λ.
+   *
+   * `l` IS `draw()`'S RESOLUTION, PASSED IN — the same one `drawLink` got. A second
+   * `index.linkFor(link.node)` call here for the same node in the same tick is exactly the double
+   * resolution `draw()`'s doc describes fixing; `index` is still read directly below for `lambdaText`/
+   * `lambdaSpans`, which are not part of `Link` and were never duplicated.
+   */
+  const lambdaLinkWindow = (l: Link | null): LambdaWindow | null => {
+    if (l === null || index === null) return null
+    if (lam.hist.currentStep !== 0) return null
+    const span = l.lambda
+    if (span === null) return null
+    return lambdaWindow(index.lambdaText, index.lambdaSpans, span, LINK_CONTEXT)
+  }
+
+  /**
+   * Resolve a link and paint all three panes.
+   *
+   * `origin` DRIVES SCROLLING ONLY. A scroll-into-view triggered by the pane the user is already
+   * looking at moves the thing under their cursor, so the table scrolls for a source click and not
+   * for its own.
+   */
+  const setLinkTo = (node: number | null, origin: 'source' | 'lambda' | 'tm') => {
+    link = node === null ? null : { node, origin }
+    // ONE `linkFor` CALL, reused for both legs it drives here — see `drawLink`'s doc for why a second
+    // call on a path that runs per rendered frame during playback is not free.
+    const l = node === null || index === null ? null : index.linkFor(node)
+    view.dispatch({ effects: setLink.of(l?.source ?? null) })
+    // `draw()` NOW CALLS `drawLink()` itself, at its end — see that function's doc. `link` is already
+    // set above, so this single call sees the new value; a separate `drawLink()` call here would be
+    // the same read twice.
+    //
+    // CALLED BEFORE `tmPane.setLink`, NOT AFTER — ORDER IS LOAD-BEARING. `draw()` calls
+    // `tmPane.render(...)`, which runs `TmPane`'s `#drawTable` UNCONDITIONALLY on every call, following
+    // included. `TmPane.setLink`'s own scroll is a one-shot target `#drawTable` honours for exactly its
+    // next call (design §5.1) — so if `draw()` ran AFTER `tmPane.setLink`, its `#drawTable` pass would
+    // be the SECOND call since the target was armed, see nothing pending (already consumed), fall back
+    // to the follow target, and silently revert the link's scroll in the same synchronous turn the link
+    // itself ran in. Calling `draw()` first burns its `#drawTable` pass on the (soon-stale) previous
+    // link state — thrown away before the browser ever paints it — so `tmPane.setLink`'s own call is
+    // the LAST word and its one-shot target is still armed when it runs.
+    draw()
+    // `scrollTo` is `origin !== 'tm'`: a click that came from the table itself must not scroll the
+    // table it was just clicked in out from under the cursor; a click from source or λ should bring
+    // the state block into view.
+    tmPane.setLink(l?.states ?? [], origin !== 'tm')
+  }
+
+  /** Link at a byte offset into the source document, or clear if nothing contains it. */
+  const linkAtSourceOffset = (byteOffset: number) => {
+    if (!linkable || index === null) return
+    setLinkTo(index.nodeAtSource(byteOffset), 'source')
   }
 
   /**
@@ -216,6 +366,27 @@ async function main(): Promise<EditorView> {
       draw()
     },
     extend: () => client.extend(which),
+    // OMITTED ENTIRELY ON THE λ LEG, not set to `undefined` — `PaneEvents.linkState` is optional
+    // under `exactOptionalPropertyTypes`, which distinguishes "absent" from "present and undefined".
+    // The λ pane has no table to click.
+    ...(which === 'tm'
+      ? {
+          linkState: (stateId: number) => {
+            if (!linkable || index === null) return
+            setLinkTo(index.nodeForState(stateId), 'tm')
+          },
+        }
+      : {}),
+    // OMITTED ENTIRELY ON THE TM LEG, mirroring `linkState` above — `PaneEvents.linkLambda` is
+    // optional under `exactOptionalPropertyTypes`, and the TM pane has no λ window to click.
+    ...(which === 'lambda'
+      ? {
+          linkLambda: (byteOffset: number) => {
+            if (!linkable || index === null) return
+            setLinkTo(index.nodeAtLambda(byteOffset), 'lambda')
+          },
+        }
+      : {}),
   })
 
   const worker = new Worker(new URL('./session-worker.ts', import.meta.url), { type: 'module' })
@@ -252,13 +423,27 @@ async function main(): Promise<EditorView> {
         // under source that does not compile is the worst of both answers.
         resetLegs(null, null, 'not compiled')
         tmPane.setProgram(null, [])
-        view.dispatch({ effects: setDecline.of(null) })
+        index = null
+        linkable = false
+        link = null
+        view.dispatch({ effects: [setDecline.of(null), setLink.of(null)] })
+        // `draw()` calls `drawLink()` at its end now — see that function's doc.
         draw()
         return
       case 'compiled':
         resetLegs(reply.lambda, reply.tm)
         tmPane.setProgram(reply.tmProgram, reply.tapeNames)
-        view.dispatch({ effects: setDecline.of(reply.declinedSpan) })
+        index = reply.linkIndex === null ? null : new LinkIndex(reply.linkIndex)
+        linkable = index !== null
+        link = null
+        // `setLink.of(null)` HERE TOO, NOT ONLY `setDecline`. `linkMark` clears its own decoration on
+        // `docChanged`, which covers the ordinary typing path — but the `#encoding` picker's `change`
+        // listener below calls `schedule` with NO document edit at all, so a `compiled` reply from
+        // switching encodings can land with the `.linked` mark still painted from the PREVIOUS compile's
+        // index. `link` is already cleared above; this is what makes the source pane agree. Combined
+        // into one dispatch with `setDecline` so the two decorations never appear half-updated for a
+        // frame.
+        view.dispatch({ effects: [setDecline.of(reply.declinedSpan), setLink.of(null)] })
         draw()
         return
       case 'lambda-frames':
@@ -293,7 +478,10 @@ async function main(): Promise<EditorView> {
         // reason `no-session` above passes, since a `compile()` that threw never produced one.
         resetLegs(null, null, 'not compiled')
         tmPane.setProgram(null, [])
-        view.dispatch({ effects: setDecline.of(null) })
+        index = null
+        linkable = false
+        link = null
+        view.dispatch({ effects: [setDecline.of(null), setLink.of(null)] })
         showWorkerError(results, new Error(reply.message))
         draw()
         return
@@ -304,7 +492,11 @@ async function main(): Promise<EditorView> {
   const schedule = (src: string) => {
     clearTimeout(timer)
     results.dataset.state = 'running'
-    timer = setTimeout(() => client.request(src, picker.value), DEBOUNCE_MS)
+    // SUPERSEDE NOW, POST LATER. The generation is claimed synchronously so the previous run's
+    // replies stop being current at the instant of dispatch; `request` drops the post if another
+    // keystroke claimed a newer one during the debounce. See `SessionClient.supersede`.
+    const gen = client.supersede()
+    timer = setTimeout(() => client.request(gen, src, picker.value), DEBOUNCE_MS)
   }
 
   // The picker is otherwise inert: `schedule` only reads `picker.value` when a keystroke's update
@@ -322,6 +514,37 @@ async function main(): Promise<EditorView> {
         keymap.of([...defaultKeymap, ...historyKeymap]),
         highlighting,
         declineMark,
+        linkMark,
+        // AN EXPLICIT CLICK, NOT A CARET MOVE. Clicking an editor already means "place the caret", and
+        // linking on every arrow key would fire constantly while navigating — and, worse, would have
+        // to be airtight about the stale-index rule on every keystroke rather than only on clicks.
+        // `mouseup` rather than `mousedown`, so a drag that selects text does not also link.
+        EditorView.domEventHandlers({
+          mouseup: (event, v) => {
+            const pos = v.posAtCoords({ x: event.clientX, y: event.clientY })
+            if (pos === null) return false
+            // CodeMirror positions are UTF-16 indices; the index speaks bytes. `Buffer` is not
+            // available in a browser, so the conversion goes through the same `TextEncoder` the
+            // byte/UTF-16 split already forces everywhere else in this app.
+            linkAtSourceOffset(new TextEncoder().encode(v.state.doc.sliceString(0, pos)).length)
+            return false
+          },
+        }),
+        // The keyboard route to the same thing. `Mod-'` is unbound in `defaultKeymap` and in
+        // `historyKeymap`; verify that before changing it. Reachability without a mouse is the whole
+        // point — the roadmap defers the rest of accessibility to one pass at the end of Plan 5, but a
+        // mouse-only primary interaction would have to be retrofitted by that pass rather than
+        // adjusted.
+        keymap.of([
+          {
+            key: "Mod-'",
+            run: (v) => {
+              const pos = v.state.selection.main.head
+              linkAtSourceOffset(new TextEncoder().encode(v.state.doc.sliceString(0, pos)).length)
+              return true
+            },
+          },
+        ]),
         lintGutter(),
         lintFromAnalyze((src) => analyze(src) as Diagnostic[]),
         EditorView.updateListener.of((u) => {
@@ -330,6 +553,27 @@ async function main(): Promise<EditorView> {
           // Synchronous, in the same frame as the keystroke. This is the whole reason `classifySource`
           // is not behind the worker.
           u.view.dispatch({ effects: setSpans.of(classifySource(src) as Classified) })
+          // STALE FROM THIS KEYSTROKE UNTIL THE NEXT COMPILE. `linkMark` clears its own decoration on
+          // `docChanged`; this clears the state behind it, the status line, AND THE OTHER TWO PANES —
+          // design §6 case 4 requires all three cleared, not only the source echo. Before this, the λ
+          // window and the δ-table's `.is-linked` rows stayed painted from the PREVIOUS index until the
+          // next `compiled` reply landed — up to `DEBOUNCE_MS` plus a compile, seconds on a larger
+          // program — while the status line already said "linking resumes when this compiles".
+          //
+          // A SECOND `drawLink()`/`renderLink()`/`setLink()` CALL SITE, DELIBERATELY — none of this is
+          // redundant with `draw()`'s. Nothing here calls `draw()`: `lam.hist`/`tm.hist` have not
+          // changed, so repainting both panes on every keystroke would be pure waste. But all three
+          // panes still have to go stale THIS keystroke, not 300 ms from now when `schedule`'s debounce
+          // finally lands a `compiled`/`no-session` reply — so each gets its own direct, targeted call
+          // rather than waiting for `draw()` to earn one. Passed `null`/`[]` rather than resolving
+          // anything: `linkable` is already false on the line above, and every one of these reads that
+          // (`drawLink` directly; `renderLink`/`setLink` take the already-cleared view) before it would
+          // ever look at what is linked.
+          linkable = false
+          link = null
+          drawLink(null)
+          lambdaPane.renderLink(null)
+          tmPane.setLink([], false)
           schedule(src)
         }),
       ],

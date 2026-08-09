@@ -773,3 +773,108 @@ fn tape_names_are_five_strings_in_tape_order() {
     assert_eq!(names.get(0).as_string().as_deref(), Some("REG"));
     assert_eq!(names.get(4).as_string().as_deref(), Some("BOX"));
 }
+
+/// Task 6: `linkIndex(byteBudget)` must cross as one string, one boolean, and TEN TYPED ARRAYS — never
+/// as serde's arrays-of-objects. That trade is measured, not stylistic: `list60`'s index is 552 KB as
+/// objects against ~220 KB as typed arrays, and `prog200`'s is 1.9 MB against ~689 KB. A plain JS
+/// `Array` would still satisfy a naive length check, which is why every field below is checked with
+/// `is_instance_of` against its specific typed-array kind rather than merely for a `length`.
+#[wasm_bindgen_test]
+fn link_index_crosses_as_typed_arrays() {
+    let (diagnostics, session) = compile("let x = 40; x + 2");
+    assert_eq!(diagnostics.length(), 0, "a clean program has no diagnostics");
+    assert!(!session.is_null(), "a clean program has a session");
+
+    let index = call(&session, "linkIndex", &[JsValue::from_f64(65_536.0)]);
+
+    // A string, a bool, and ten typed arrays. If any leg came back as a plain Array, serde crept in.
+    assert!(get(&index, "lambdaText").as_string().is_some_and(|s| !s.is_empty()), "lambdaText must be text");
+    assert_eq!(get(&index, "lambdaTruncated"), JsValue::FALSE, "a small program fits the byte budget whole");
+    for k in [
+        "lambdaSpanStart",
+        "lambdaSpanEnd",
+        "lambdaNodeStart",
+        "lambdaNodeEnd",
+        "lambdaNodeId",
+        "sourceNodeStart",
+        "sourceNodeEnd",
+        "sourceNodeId",
+    ] {
+        let field = get(&index, k);
+        assert!(field.is_instance_of::<js_sys::Uint32Array>(), "{k} must be a Uint32Array, got {field:?}");
+    }
+    assert!(
+        get(&index, "lambdaSpanClass").is_instance_of::<js_sys::Uint8Array>(),
+        "lambdaSpanClass must be a Uint8Array"
+    );
+    assert!(get(&index, "tmOwner").is_instance_of::<js_sys::Int32Array>(), "tmOwner must be an Int32Array");
+
+    // The three legs must be internally consistent: every triad's three columns share one length, and
+    // `tmOwner`'s length is checked against a count obtained INDEPENDENTLY rather than merely positive
+    // -- a positivity check cannot catch an off-by-one in the `owner` loop's bound, but comparing
+    // against `tmProgram().states`, a different code path over the same machine, can.
+    let len = |k: &str| {
+        Reflect::get(&get(&index, k), &JsValue::from_str("length")).ok().and_then(|v| v.as_f64()).unwrap_or(-1.0)
+    };
+    assert_eq!(len("lambdaSpanStart"), len("lambdaSpanEnd"), "lambda span start/end columns must be the same length");
+    assert_eq!(
+        len("lambdaSpanStart"),
+        len("lambdaSpanClass"),
+        "lambda span start/class columns must be the same length"
+    );
+    assert_eq!(len("lambdaNodeStart"), len("lambdaNodeEnd"), "lambda node start/end columns must be the same length");
+    assert_eq!(len("lambdaNodeStart"), len("lambdaNodeId"), "lambda node span/id columns must be the same length");
+    assert_eq!(len("sourceNodeStart"), len("sourceNodeEnd"), "source node start/end columns must be the same length");
+    assert_eq!(len("sourceNodeStart"), len("sourceNodeId"), "source node span/id columns must be the same length");
+    assert!(len("sourceNodeStart") > 0.0, "this fixture has source nodes to link");
+
+    let program = call(&session, "tmProgram", &[]);
+    let states: Array = get(&program, "states").unchecked_into();
+    assert_eq!(
+        len("tmOwner"),
+        f64::from(states.length()),
+        "tmOwner must have exactly one entry per state tmProgram reports, obtained independently"
+    );
+}
+
+/// Task 6, Fix 2: `Session::link_index`'s own doc calls it "total over either absence" -- a declined λ
+/// backend must still cross as an empty λ leg rather than throwing, and the source/TM legs must be
+/// unaffected. `LinkIndex::build` already has native coverage for this in `redextape-core`, but nothing
+/// before this exercised the WIRING through the actual wasm export, which is where a `None`-handling
+/// mistake would bite a real caller.
+///
+/// THE FIXTURE IS FOUND, NOT GUESSED: the identical program `a_lambda_limitation_program_reports_a_tm_
+/// only_session` above already uses, which is `session.rs`'s own `LAMBDA_DECLINES` test constant (in
+/// turn copied from `three_way_oracle.rs`'s `LAMBDA_LIMITATION_DEMOS`) -- a closure over a captured `let
+/// mut` is a mutable capture, which the λ backend declines with `LowerError` rather than risk a silent
+/// miscompile, while the TM backend runs it.
+///
+/// `lambdaStatus().available` IS ASSERTED FALSE FIRST, deliberately: without it, this test would
+/// silently degrade into a duplicate of `link_index_crosses_as_typed_arrays` above the moment this
+/// program stopped declining, rather than failing loudly.
+#[wasm_bindgen_test]
+fn link_index_survives_a_declined_lambda_leg() {
+    let (diagnostics, session) = compile("let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)");
+    assert_eq!(diagnostics.length(), 0, "the program is well-formed; only the λ backend refuses it");
+    assert!(!session.is_null(), "a TM-only session is still a session");
+
+    let lambda = call(&session, "lambdaStatus", &[]);
+    assert_eq!(get(&lambda, "available"), JsValue::FALSE, "this fixture must actually decline the λ leg");
+
+    // `call` panics if `linkIndex` throws (see its own doc): a declined leg must return `Ok`, not
+    // poison the module, which is `lib.rs`'s stated first rule.
+    let index = call(&session, "linkIndex", &[JsValue::from_f64(65_536.0)]);
+
+    assert_eq!(get(&index, "lambdaText").as_string().as_deref(), Some(""), "a declined λ leg prints no text");
+    assert_eq!(get(&index, "lambdaTruncated"), JsValue::FALSE, "nothing was printed, so nothing was truncated");
+
+    let len = |k: &str| {
+        Reflect::get(&get(&index, k), &JsValue::from_str("length")).ok().and_then(|v| v.as_f64()).unwrap_or(-1.0)
+    };
+    for k in ["lambdaSpanStart", "lambdaSpanEnd", "lambdaSpanClass", "lambdaNodeStart", "lambdaNodeEnd", "lambdaNodeId"]
+    {
+        assert_eq!(len(k), 0.0, "{k} must be empty when the λ leg declined, got {}", len(k));
+    }
+    assert!(len("sourceNodeStart") > 0.0, "the source leg does not depend on the λ backend");
+    assert!(len("tmOwner") > 0.0, "the TM leg compiled fine and owns at least one state");
+}

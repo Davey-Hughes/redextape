@@ -16,7 +16,7 @@ use std::borrow::Borrow;
 use crate::analysis::TokenClass;
 use crate::core::NodeId;
 use crate::lambda::term::Node;
-use crate::lambda::{LambdaTerm, print_lambda_capped};
+use crate::lambda::{LambdaTerm, print_lambda_capped, print_lambda_linked};
 use crate::sourcemap::SourceMap;
 use crate::span::Span;
 use crate::tm::machine::{Machine, Move, StateId, Symbol};
@@ -379,6 +379,79 @@ impl TmState {
         let source_node = entry.and_then(|s| map.tm_owner(&s.name));
         let rule = entry.and_then(|s| s.rules.iter().position(|r| crate::tm::sim::rule_matches(&r.read, c.tapes())));
         TmState { state, step: c.steps_taken(), heads, window_start, window, source_node, rule }
+    }
+}
+
+/// Everything a renderer needs to link one construct across three panes, built ONCE PER COMPILE.
+///
+/// NOT A FRAME, AND THE DIFFERENCE IS THE WHOLE DESIGN. `LambdaState` is recorded per step at
+/// `FRAME_BYTES`; this is built once, at the readout's budget, for the INITIAL term only. That is
+/// what makes it affordable where `LambdaState::ast` was not: a per-step tree cost 850 MB against a
+/// 32 MB ring, and this costs one extra print per compile over a walk that was already happening.
+///
+/// **IT IS STEP-0 ONLY, AND THAT IS NOT A SHORTCUT.** `SourceMap::node_to_lambda` records paths
+/// root-relative into the initial lowered term; normal-order reduction contracts root redexes, so at
+/// step N > 1 a path indexes a structurally different tree. `LambdaState` had a `source_node` on that
+/// mistake and lost it — see this module's header. A consumer must not use `lambda_nodes` against any
+/// term but the one `lambda_text` holds.
+///
+/// **ONE STRUCT RATHER THAN THREE ACCESSORS**, because all three legs must come from ONE compile. Three
+/// would be three chances to hold one program's source index beside another program's lambda index;
+/// the `NodeId`s would resolve, most of them to the wrong construct, and nothing would notice. That is
+/// the failure `SourceMap` is shaped to remove by offering no `with_source` setter, applied at the
+/// boundary instead of inside the map.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct LinkIndex {
+    /// The INITIAL term, printed at the caller's budget.
+    pub lambda_text: String,
+    pub lambda_spans: Vec<(Span, TokenClass)>,
+    pub lambda_truncated: bool,
+    /// A node's span in `lambda_text`. ABSENT for a node whose subterm fell past the cut, never a
+    /// span clamped to it — see `print_lambda_linked`.
+    pub lambda_nodes: Vec<(Span, NodeId)>,
+    /// A node's span in the SOURCE text. Empty unless the map was built by `build_from_program`.
+    pub source_nodes: Vec<(Span, NodeId)>,
+    /// `tm_owner[state_id]` is the Core node that produced that state, or `-1`.
+    ///
+    /// **BUILT BY NAME, NOT BY FLATTENING `node_to_tm`.** `SourceMap::build_from_program` lowers at
+    /// `MIN_FIELD_WIDTH` only to record ownership, and `run_tm_described` re-lowers with its own
+    /// auto-fitted width — so `node_to_tm`'s `StateId`s index a different machine from the one
+    /// `TmProgram.states` indexes. The invariant that survives the width change is that `lower_tm`
+    /// derives state NAMES from the instruction stream, so the two lowerings agree on names. This is
+    /// the same resolution `TmState::window` performs per step, hoisted to once per compile.
+    ///
+    /// `-1` RATHER THAN `Option<NodeId>` because this crosses to JavaScript as an `Int32Array`, and a
+    /// dense typed array is the difference between 143 KB and 26,484 objects for `list60`. `NodeId` is
+    /// a `u32`, so `-1` cannot collide with a real node.
+    pub tm_owner: Vec<i32>,
+}
+
+impl LinkIndex {
+    /// Build all three legs from one compile.
+    ///
+    /// TOTAL OVER BOTH ABSENCES. A `None` term (the lambda backend declined this program) gives empty
+    /// lambda legs rather than failing, and a `None` program (the TM backend declined) gives an empty
+    /// `tm_owner`. `SourceMap::build` is already total over exactly these refusals, and the index must
+    /// not be the layer that stops being.
+    ///
+    /// `byte_budget` IS A PARAMETER because this file picks no numbers — see the module header. The
+    /// web app passes `LAMBDA_BYTE_BUDGET`.
+    pub fn build(
+        term: Option<&LambdaTerm>,
+        program: Option<&TmProgram>,
+        map: &SourceMap,
+        byte_budget: usize,
+    ) -> LinkIndex {
+        let (lambda_text, lambda_spans, lambda_truncated, lambda_nodes) = match term {
+            None => (String::new(), Vec::new(), false, Vec::new()),
+            Some(t) => print_lambda_linked(t, byte_budget, &map.node_to_lambda),
+        };
+        let source_nodes = map.node_to_source.iter().map(|(id, span)| (*span, *id)).collect();
+        let tm_owner = program
+            .map(|p| p.states.iter().map(|s| map.tm_owner(&s.name).map_or(-1, |n| n as i32)).collect())
+            .unwrap_or_default();
+        LinkIndex { lambda_text, lambda_spans, lambda_truncated, lambda_nodes, source_nodes, tm_owner }
     }
 }
 

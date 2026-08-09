@@ -1,3 +1,4 @@
+import type { LinkIndexWire } from './link'
 import type { Decoded, Diagnostic, LambdaState, LambdaStatus, Span, TmProgram, TmState, TmStatus } from './types'
 
 /**
@@ -150,6 +151,24 @@ export type RunReply =
       declinedSpan: Span | null
       tmProgram: TmProgram | null
       tapeNames: string[]
+      /**
+       * The link index for this compile.
+       *
+       * NULLABLE DEFENSIVELY, NOT REACHABLY. A session-less compile emits the `no-session` variant
+       * instead of `compiled`, so no producer sends `null` here today — `main.ts`'s
+       * `reply.linkIndex === null ? null : new LinkIndex(reply.linkIndex)` ternary has no live path to
+       * its `null` arm under the current worker. The type stays `| null` and the consumer keeps
+       * checking for it anyway: a wire contract that hard-coded today's producer behavior would drop
+       * the guard exactly where a future change to `compile` could reopen this path silently.
+       *
+       * RIDES `compiled` RATHER THAN GETTING ITS OWN MESSAGE, and eagerly rather than on first click.
+       * A separate lazy fetch would spare every compile the user never clicks into — but it costs a
+       * round trip into a worker measured starved for 4,679 ms during recording, and recording starts
+       * the instant this message is posted. See design §4.1.
+       *
+       * The ten typed arrays inside are TRANSFERRED, not cloned; see the worker's `postMessage`.
+       */
+      linkIndex: LinkIndexWire | null
     }
   | { kind: 'lambda-frames'; gen: number; frames: LambdaState[]; done: RecordEnd | null }
   | { kind: 'tm-frames'; gen: number; frames: TmState[]; done: RecordEnd | null }

@@ -78,6 +78,20 @@ pub fn encodings() -> Result<JsValue, JsValue> {
     to_value(&EncodingKind::ALL.iter().map(|k| k.name()).collect::<Vec<_>>())
 }
 
+/// `tokenClasses()` -> every `TokenClass` variant's name, in declaration order.
+///
+/// THE INDEX IS THE DISCRIMINANT, which is the whole reason this exists. `linkIndex` ships span
+/// classes as a `Uint8Array` of discriminants rather than as 48,332 interned strings, and a
+/// TypeScript array that disagreed about the order would mis-colour every span past the disagreement
+/// with nothing failing. `types.ts` asserts its own `TOKEN_CLASSES` against this at startup.
+///
+/// Same argument as `encodings()` one layer over: a list of names in another language is a second
+/// authoritative registry that not even the compiler is watching.
+#[wasm_bindgen(js_name = tokenClasses)]
+pub fn token_classes() -> Result<JsValue, JsValue> {
+    to_value(&redextape_core::analysis::token_class_names())
+}
+
 /// The lowering's tape names, in tape order. The NINTH export.
 ///
 /// EXPORTED RATHER THAN HARDCODED, for the reason `encodings()` gives one export up: a TypeScript
@@ -222,5 +236,67 @@ impl Session {
     #[wasm_bindgen(js_name = sourceSpan)]
     pub fn source_span(&self, node: u32) -> Result<JsValue, JsValue> {
         to_value(&self.0.source_span(node))
+    }
+
+    /// `linkIndex(byteBudget)` -> the columnar link index for this compile.
+    ///
+    /// COLUMNAR, BUILT BY HAND, NOT THROUGH SERDE. `serde_wasm_bindgen` would produce arrays of
+    /// objects, and the measurement says no: `list60`'s index is 552 KB that way against ~220 KB as
+    /// typed arrays, and `prog200`'s is 1.9 MB against ~689 KB. The app recompiles on every 300 ms
+    /// typing pause, so this crosses often. Typed arrays are also transferable, which a structured
+    /// clone of 48,332 objects is not.
+    ///
+    /// This is 5a-ii's row-index trade — one `Int32Array` rather than 127,881 row objects — applied
+    /// to all three legs at once.
+    #[wasm_bindgen(js_name = linkIndex)]
+    pub fn link_index(&self, byte_budget: usize) -> Result<JsValue, JsValue> {
+        let index = self.0.link_index(byte_budget);
+
+        let n_spans = index.lambda_spans.len();
+        let span_start = js_sys::Uint32Array::new_with_length(n_spans as u32);
+        let span_end = js_sys::Uint32Array::new_with_length(n_spans as u32);
+        let span_class = js_sys::Uint8Array::new_with_length(n_spans as u32);
+        for (i, (span, class)) in index.lambda_spans.iter().enumerate() {
+            let i = i as u32;
+            span_start.set_index(i, span.start as u32);
+            span_end.set_index(i, span.end as u32);
+            span_class.set_index(i, *class as u8);
+        }
+
+        let pairs = |v: &[(redextape_core::span::Span, u32)]| {
+            let start = js_sys::Uint32Array::new_with_length(v.len() as u32);
+            let end = js_sys::Uint32Array::new_with_length(v.len() as u32);
+            let id = js_sys::Uint32Array::new_with_length(v.len() as u32);
+            for (i, (span, node)) in v.iter().enumerate() {
+                let i = i as u32;
+                start.set_index(i, span.start as u32);
+                end.set_index(i, span.end as u32);
+                id.set_index(i, *node);
+            }
+            (start, end, id)
+        };
+        let (lam_start, lam_end, lam_id) = pairs(&index.lambda_nodes);
+        let (src_start, src_end, src_id) = pairs(&index.source_nodes);
+
+        let owner = js_sys::Int32Array::new_with_length(index.tm_owner.len() as u32);
+        for (i, o) in index.tm_owner.iter().enumerate() {
+            owner.set_index(i as u32, *o);
+        }
+
+        let out = js_sys::Object::new();
+        let set = |k: &str, v: &JsValue| js_sys::Reflect::set(&out, &JsValue::from_str(k), v);
+        set("lambdaText", &JsValue::from_str(&index.lambda_text))?;
+        set("lambdaTruncated", &JsValue::from_bool(index.lambda_truncated))?;
+        set("lambdaSpanStart", &span_start)?;
+        set("lambdaSpanEnd", &span_end)?;
+        set("lambdaSpanClass", &span_class)?;
+        set("lambdaNodeStart", &lam_start)?;
+        set("lambdaNodeEnd", &lam_end)?;
+        set("lambdaNodeId", &lam_id)?;
+        set("sourceNodeStart", &src_start)?;
+        set("sourceNodeEnd", &src_end)?;
+        set("sourceNodeId", &src_id)?;
+        set("tmOwner", &owner)?;
+        Ok(out.into())
     }
 }

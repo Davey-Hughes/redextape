@@ -1,7 +1,7 @@
 import type { ControlState } from './controls'
 import { n } from './format'
 import { controlStrip, type PaneEvents } from './pane-chrome'
-import { Follow, highlight, ROW_HEIGHT, StateIndex } from './state-table'
+import { centredScrollTop, Follow, highlight, linkedRows, ROW_HEIGHT, StateIndex } from './state-table'
 import { tapeRows } from './tape'
 import type { TmProgram, TmState } from './types'
 import { visibleWindow } from './virtual-list'
@@ -35,7 +35,15 @@ export class TmPane {
   #reattach: HTMLButtonElement
   #index: StateIndex | null = null
   #follow = new Follow()
+  #linked: Set<number> = new Set()
   #open = true
+  /**
+   * A one-shot scroll target `#drawTable` honours in preference to `Follow`'s own target, for exactly
+   * the next draw — see `setLink`'s doc and design §5.1. `null` when there is nothing pending.
+   */
+  #pendingScroll: number | null = null
+  /** The DOM index of `this.#rows.children[0]`, within `#index`. See `#drawTable`'s doc. */
+  #firstDrawn = 0
 
   constructor(host: HTMLElement, on: PaneEvents) {
     const title = document.createElement('h2')
@@ -100,6 +108,22 @@ export class TmPane {
       this.#drawTable()
     })
 
+    // CLICK A ROW, LIGHT ITS SOURCE. The table is 127,881 rows for `list60` and nothing in it says
+    // what any row is FOR; this is the answer to that. Delegated from the container rather than bound
+    // per row, because rows are recreated on every draw.
+    this.#rows.addEventListener('click', (event) => {
+      if (this.#index === null) return
+      const target = event.target
+      if (!(target instanceof HTMLElement)) return
+      const el = target.closest('.state-row')
+      if (!(el instanceof HTMLElement)) return
+      const i = [...this.#rows.children].indexOf(el)
+      if (i < 0) return
+      const row = this.#index.row(this.#firstDrawn + i)
+      if (row === null) return
+      on.linkState?.(row.kind === 'state' ? row.id : row.stateId)
+    })
+
     host.replaceChildren(
       title,
       this.#status,
@@ -119,6 +143,9 @@ export class TmPane {
     this.#program = p
     this.#names = names
     this.#index = p === null ? null : new StateIndex(p)
+    // A new compile invalidates every state id — the block a stale link named may no longer exist,
+    // or may now name something else entirely.
+    this.#linked = new Set()
     this.#follow.attach()
     // `onProgrammaticScroll` BEFORE the write, not after, and not omitted. Setting `scrollTop` fires a
     // `scroll` event; without a pending expectation `Follow` reads it as the user taking control and
@@ -128,6 +155,40 @@ export class TmPane {
     this.#follow.onProgrammaticScroll(0)
     this.#tableHost.scrollTop = 0
     this.#frame = null
+    this.#drawTable()
+  }
+
+  /**
+   * Highlight a link's state block, optionally scrolling to it.
+   *
+   * `scrollTo` IS FALSE WHEN THE CLICK CAME FROM THIS TABLE. Scrolling a list the user just clicked
+   * in moves the row out from under their cursor; the caller knows where the gesture came from and
+   * this does not have to guess.
+   *
+   * THE SCROLL DOES NOT TOUCH `Follow`'S OWN FLAG. Following is about the machine's current state, and
+   * a link is about a construct — reusing `Follow` here would make a link click silently reattach a
+   * table the user had deliberately detached, or detach one they had not. But `#drawTable`, called
+   * unconditionally below, recomputes ITS OWN follow target whenever `#follow.following` is true — so
+   * writing `scrollTop` here directly used to be reverted in the very same synchronous block the
+   * instant following was on, which is the default state on every fresh compile. Design §5.1: a link
+   * scroll is a direct user gesture and wins for exactly ONE draw; recording it as a one-shot pending
+   * target rather than writing it here is what lets `#drawTable` honour it over the follow target for
+   * that one draw without `Follow` itself ever being told the table stopped following.
+   */
+  setLink(states: number[], scrollTo: boolean): void {
+    this.#linked = this.#index === null ? new Set() : linkedRows(this.#index, states)
+    if (scrollTo && this.#index !== null && this.#open) {
+      const first = [...this.#linked].sort((a, b) => a - b)[0]
+      if (first !== undefined) {
+        // Shared with `Follow.targetScrollTop` via `centredScrollTop` — see that function's doc.
+        this.#pendingScroll = centredScrollTop(
+          first,
+          ROW_HEIGHT,
+          this.#tableHost.clientHeight,
+          this.#index.rowCount * ROW_HEIGHT,
+        )
+      }
+    }
     this.#drawTable()
   }
 
@@ -216,7 +277,19 @@ export class TmPane {
     // fails a test rather than silently costing O(rowCount) per frame.
     const viewportHeight = this.#tableHost.clientHeight
     const marks = highlight(this.#index, this.#frame)
-    if (marks !== null) {
+    // A PENDING LINK SCROLL WINS OVER THE FOLLOW TARGET FOR EXACTLY THIS DRAW, then is consumed —
+    // design §5.1. Read and cleared together so a link recorded during THIS call is what the very next
+    // draw honours, never twice: `Follow`'s `#expected` is armed ONCE below, by whichever branch runs,
+    // rather than by the pending write here and then again by the follow write that used to run
+    // unconditionally after it and silently revert it in the same synchronous block.
+    const pending = this.#pendingScroll
+    this.#pendingScroll = null
+    if (pending !== null) {
+      if (pending !== this.#tableHost.scrollTop) {
+        this.#follow.onProgrammaticScroll(pending)
+        this.#tableHost.scrollTop = pending
+      }
+    } else if (marks !== null) {
       const top = this.#follow.targetScrollTop(
         marks.stateRow,
         ROW_HEIGHT,
@@ -230,6 +303,10 @@ export class TmPane {
     }
 
     const w = visibleWindow(this.#index.rowCount, ROW_HEIGHT, viewportHeight, this.#tableHost.scrollTop, OVERSCAN)
+    // THE VIRTUALIZATION OFFSET THE CLICK HANDLER NEEDS. `this.#rows.children[i]`'s row number is
+    // `w.firstIndex + i`, not `i` — the rows array is windowed and `translateY`-offset, so recording
+    // anything else here lights a plausible-looking but wrong block the moment the table is scrolled.
+    this.#firstDrawn = w.firstIndex
     this.#rows.style.transform = `translateY(${w.offsetY}px)`
 
     const els: HTMLElement[] = []
@@ -251,6 +328,7 @@ export class TmPane {
       }
       if (marks !== null && i === marks.stateRow) el.classList.add('is-current')
       if (marks !== null && i === marks.ruleRow) el.classList.add('is-firing')
+      if (this.#linked.has(i)) el.classList.add('is-linked')
       els.push(el)
     }
     this.#rows.replaceChildren(...els)

@@ -1318,12 +1318,39 @@ rather than a note saying a11y is on the todo. Known outstanding, all observed r
    **none has a non-visual equivalent**, so none of it reaches a screen reader however it is drawn.
 5. **No focus-visible styling was ever specified**, so focus rings are whatever the UA draws over a
    palette that was designed without them in mind.
+6. **`#link-status` announces nothing** (added 2026-08-09, PR 5b). It is a live-updating line carrying
+   the answer to a user's click — including the common case, at 50–82% TM coverage, where the answer is
+   an absence — and it is a plain `<div>`, so a screen reader is never told it changed. It is the
+   strongest candidate on this list for `aria-live`, and unlike the rest it carries information that
+   exists *nowhere else on screen*.
+7. **Three more colour-carried states** (added 2026-08-09, PR 5b): `.linked` in the source pane,
+   `.state-row.is-linked` in the δ table, and `.term .is-linked` in the λ window. The first and third
+   add an inset underline so they are not colour *alone*; the second is a background only. All three
+   share item 4's real gap — **no non-visual equivalent** — and they compound it, because a link is a
+   correspondence *between* panes and nothing conveys that relationship except three simultaneous
+   highlights a screen reader cannot see.
 
 What already exists, so the pass starts from the right baseline: the appearance control is a real
 `<button type="button">` with an `aria-label` naming its current state, updated on every change
-(`main.ts`, PR #20). That is the whole of it.
+(`main.ts`, PR #20) — and, from PR 5b, `Mod-'` links at the caret, so the primary new interaction of
+that slice is reachable without a mouse. That is the whole of it.
 
-#### `settled()`'s invariant is false, and it is the root cause of the browser tier's flakes (raised 2026-08-08, PR 5a-ii)
+**5b deliberately added no other semantics**, per the decision above, and its `link-status` line is the
+one place where deferring is least comfortable: it is a control whose entire purpose is to report
+something the other panes cannot show.
+
+#### ~~`settled()`'s invariant is false, and it is the root cause of the browser tier's flakes~~ — FIXED (raised 2026-08-08, PR 5a-ii; closed 2026-08-09, PR 5b task 1)
+
+**Closed by the first of the two shapes below**, taken deliberately as task 1 of a fresh branch rather
+than as a drive-by: `SessionClient` gained `supersede()`, which claims the generation synchronously at
+dispatch, and `request(gen, …)` posts only if that generation is still current. The 300 ms window in
+which a superseded run's replies were still accepted no longer exists. The note below is kept for the
+measurement it records.
+
+One consequence went unnoticed until the whole-branch review and is now item 1 of 5b's residual list:
+`client.extend()` silently no-ops for the duration of the debounce, because the worker drops an extend
+for a generation it has not yet seen.
+
 
 `web/tests/browser/app.test.ts`'s `settled(view, src)` is what ~20 browser tests use to mean "the
 program I just dispatched has run". Its doc claims: *"there is no stale `'idle'` left over from a
@@ -1362,6 +1389,40 @@ give `settled` a signal tied to the dispatched source rather than to a shared st
 smaller but touches the supersession machinery that PR 3c's review spent a slice getting right, so it
 wants its own measurement rather than a drive-by. **Not attempted on 5a-ii**: changing a helper 20 tests
 depend on, at the end of a 30-commit branch, is how a green suite becomes a mystery.
+
+#### A large integer literal kills the wasm module, `MAX_TERM_DEPTH` cannot stop it, and the shadow stack is the wrong suspect (raised 2026-08-09, during PR 5b)
+
+**Typing `let x = 2690; x + 1` into the app destroys the session, unrecoverably.** This language lowers
+naturals to unary Church numerals, so the literal *is* the term depth. Measured in headless Chrome, the
+threshold is between **2680 (survives) and 2690 (crashes)**.
+
+The sequence: `RangeError: Maximum call stack size exceeded` inside the printer's
+`Printer::{node, write, parens}` recursion, and then every later call throws *"attempted to take
+ownership of Rust value while it was borrowed"* — a wasm-bindgen borrow guard left taken because a
+`&mut self` call aborted mid-flight. The page stays alive; the module is dead.
+
+**IT IS NOT 5b's, and this was checked rather than assumed.** `linkIndex(65536)` reproduces it, but so
+does `lambdaState(65536)` with `linkIndex` never invoked — and `session-worker.ts:298`'s `lambdaLeg` has
+called exactly that on every compile since `d999ec6`, two commits before 5b's first. The suspicion that
+5b's larger print budget newly reached the depth was arithmetically plausible and wrong: `FRAME_BYTES`
+is not the only big-budget print, and never was.
+
+**TWO CORRECTIONS TO WHAT THE TREE CURRENTLY DOCUMENTS, and they matter more than the bug.**
+
+1. **The shadow stack is the wrong suspect.** `reduce.rs:48` calls this a sizing problem — *"WASM
+   shadow-stack sizing is a Plan 4 follow-up"* — which implies `-zstack-size` would fix it. It would
+   not. The overflow is **V8's own call-stack limit** on the JS/wasm frame stack, not the linear-memory
+   shadow stack that flag sizes. Anyone who follows that note to its obvious remedy will spend the
+   effort and still crash.
+2. **`MAX_TERM_DEPTH = 3,000` is set ABOVE the reachable limit, so in wasm the guard is decorative.**
+   The crash lands at ~2,690, so the check can never fire before V8 kills the module. A guard that
+   cannot execute is worse than no guard, because the code reads as protected. Natively the same
+   program is fine in single-digit milliseconds — the constant was chosen against a native stack.
+
+**What would actually work**, unpriced and unimplemented: a guard on `LambdaTerm::depth()`, which is a
+cached field and therefore O(1), checked before either big-budget print, margined well under 2,690. It
+belongs with whatever revisits `MAX_TERM_DEPTH`, because picking one number without the other repeats
+this.
 
 #### Non-progress detection: a TM-only UI diagnostic, and NOT a guard (raised 2026-07-31)
 
@@ -3694,3 +3755,146 @@ mutation rather than by reading the test.
 crates/redextape-wasm`: **13/13**. `scripts/check-all.sh --no-llvm` green, reporting **PARTIAL** by
 design — the LLVM tier is skipped and the script says so rather than passing quietly. `pre-commit run
 --all-files` green.
+
+#### PLAN 5b CLOSES — three panes linked in three directions, and the demo program was too small to show the bug (2026-08-09, PR 5b)
+
+Design: [`../specs/2026-08-08-plan5b-click-linking-design.md`](../specs/2026-08-08-plan5b-click-linking-design.md).
+Plan: [`2026-08-08-plan5b-click-linking.md`](2026-08-08-plan5b-click-linking.md).
+
+§6.2 part 1 ships, in all three directions rather than the one it asks for: click a source construct and
+its λ subterm and TM state block light up; click a δ-table row or a λ token and the source construct
+lights up. `node_to_tm`, shipped 2026-07-30 and consumed by nothing but its own coverage tests since,
+gets its first real consumer.
+
+**THE ESTIMATE WAS WRONG IN ONE DIRECTION AND RIGHT IN TWO.** 5a's decomposition priced 5b as *"yes,
+small"*. The source and TM legs were: invert `node_to_source`, read `tm_owner`. The λ leg was not, and
+`viewmodel.rs`'s no-`redex` doc had already priced it — *"a redex is a `Path` INTO THE TERM, while
+highlighting it in `text` needs a byte SPAN, and correlating the two means the printer recording where a
+given path lands as it walks"*. That is `print_lambda_linked`, and the walker had to become a struct to
+get it: the four functions already carried seven arguments each, recording needs two more, and
+`too_many_arguments` denies at eight.
+
+**THE STEP-0 SCOPE IS WHAT MADE THE λ LEG AFFORDABLE AT ALL.** Paths are root-relative into the initial
+lowered term and reduction rewrites that tree, so the link is defined at step 0 and honestly absent
+after. That is not a limitation smuggled in; it is the boundary between 5b and 5c, and drawing it
+explicitly is what let a λ link ship. It also collapses the cost: the index is built once per COMPILE,
+not per step, which is why this does not repeat `lambdaAst`'s 850 MB against a 32 MB ring.
+
+**`tm_owner` CANNOT BE `node_to_tm` FLATTENED, and the app's own sample proves it.** `build_from_program`
+lowers at `MIN_FIELD_WIDTH` to record ownership; `run_tm_described` re-lowers with its own auto-fitted
+width. Those `StateId`s index different machines. The review supplied the mechanism the design had only
+asserted: `MIN_FIELD_WIDTH = 4` holds a maximum of 15, and `let x = 40; x + 2` computes 42, so the
+auto-fit is *forced* wider — which changes the bit-iteration structure of a digit-serial TM and so the
+state graph, while `lower_tm` still derives the same NAMES. Flattening would have been visibly wrong on
+the default program. Caught while writing the plan, before any code existed.
+
+**THE DEMO PROGRAM WAS TOO SMALL TO SHOW THE WORST BUG, AND SO WAS EVERY TEST.** `lambdaWindow` sliced
+UTF-8 byte offsets as UTF-16 string indices. `λ` is 2 bytes and 1 unit, so a clipped window's text was
+displaced right by the number of binders before its start while the spans stayed in byte space.
+Measured in real Chromium on `map_fold`: **75 of 257 source offsets produce a head-clipped window, 21 of
+those lit zero tokens, and the rest rendered mangled text.** It also fed `data-at`, so **λ→source clicks
+resolved to the wrong node whenever the head was clipped** — one of the three advertised directions was
+wrong. Three things hid it:
+
+1. **the function's own doc asserted the opposite** — *"does no slicing of its own that could split a
+   character"* — which is how it passed a task review that was reading the doc against the code;
+2. **`sample` is 238 bytes of λ text against a 240-byte context**, so it never clips. Every earlier
+   check passed for that reason, *including the eye check in a real browser*;
+3. **every fixture in `lambda-window.test.ts` was pure ASCII**, so byte and UTF-16 offsets coincided and
+   the axis was untested — on the one function of this slice whose input is GUARANTEED to contain `λ`.
+   `highlight.test.ts`'s new case deliberately uses `λf. λx. f x` and says so; this one did not.
+
+**FOURTEEN OF THE FIFTEEN OTHER DEFECTS WERE TESTS THAT PROVED NOTHING, NOT IMPLEMENTATIONS THAT WERE
+WRONG.** The pattern 5a-i and 5a-ii each recorded held for a third slice and is now the most reliable
+prediction available about where this project's defects live. A partial list, all caught before merge:
+a truncation test that would have passed against "never record a span" (its budget was smaller than the
+term's first binder prefix, so `hit` fired before any recursion and the assertion reduced to
+`0 < want.len()`); a variant test blind to a transposition of two middle enum variants — **and its
+proposed fix, comparing the name list against an array literal, would have been blind to the same thing,
+because neither operand evaluates a discriminant**; a documented tie-break rule with no test at all; a
+boundary test covering 3 of 10 array columns; and, on the feature's PRIMARY direction, **no test that a
+source click lights either of the two panes it is supposed to light** — the two tests believed to cover
+it checked only the source echo, and the one other `is-linked` reference filters those tokens out
+without asserting any exist.
+
+**THE ORACLE FOR SPAN FIDELITY WAS WRONG THREE TIMES, EACH SURFACING ONLY WHEN THE LAST WAS FIXED**, and
+all three are one mistake: assuming printing is context-free when it is context-dependent in three
+separate ways. Free identifiers never reach the printer, because `parse_atom` rejects them. `Var(i)`
+resolves against the binders ambient WHERE IT IS PRINTED, so the body of `\x. x` is `x` in context and
+`?0` extracted. And a subterm's ROLE decides its parentheses while an extracted reprint always prints at
+`Term`. What survives is a reprint oracle restricted to closed subterms with the role's parens
+*predicted* rather than tolerated, plus arm-ordering — which needs no reprinting and is the one that
+actually catches a swapped push.
+
+**TWO DESIGN GAPS, NOT CODE BUGS.** §6 case 4 says an edit clears all three panes; the implementation
+cleared the source pane only, leaving the λ window and δ rows painted for the whole debounce while the
+status line said linking had stopped. And §4.3 specified `origin`-driven scrolling without saying which
+authority wins when the table is already following the machine — so `setLink` wrote `scrollTop` and
+`#drawTable` overwrote it in the same synchronous block, and the block landed off-screen in the default
+state. §5.1 now states the rule: a link scroll is a direct gesture and wins for exactly one draw;
+following is not disturbed, because the user asked to see a construct once, not to stop watching the run.
+
+**MEASURED, AND RE-RUNNABLE.** `link_index_probe.rs` reproduces the design's §2 tables — λ-path coverage
+is 100% on every program, TM coverage 50–82%, `list60`'s step-0 term 9,851 bytes, the columnar index
+~220 KB against ~552 KB naive. Two of its columns had to be corrected first, and both were
+*definitional*: a column counting STATES with an owner is not §2.2's share of source-mapped NODES with a
+TM block, and serialising `LinkIndex` cannot reproduce the naive figure because its `tm_owner` is
+already the dense array the decision introduced. **A probe measuring an adjacent quantity is worse than
+no probe: it reads as corroboration.**
+
+**RETIRED HERE:** §11.6's `TokenClass` hand-copy drift, deferred by 5a-i and again by 5a-ii, closes as a
+class rather than a third instance — `tokenClasses()` plus a startup assertion. And `settled()`'s false
+invariant, which the previous slice declined to touch at the end of a 30-commit branch, was fixed as
+task 1 of this one: the generation is claimed at dispatch rather than 300 ms later, so a stale reply
+cannot resolve a wait against the previous program.
+
+**HANDED ON.** 5c still needs a λ redex→source coordinate system that survives reduction and nothing
+here builds one — but it inherits `print_lambda_linked`, which is the *other* half: given a coordinate
+system, turning it into a highlight is solved. 5d inherits a source pane that already distinguishes a
+linking click from a caret placement.
+
+**ONE PROCESS FINDING, SHARPER THAN 5a-ii'S AND WORTH KEEPING.** That slice recorded that parallel
+agents need disjoint *toolchains* rather than merely disjoint files, because `vitest`'s `-- <name>` does
+not scope which files run. The sharper rule this slice found: **they need disjoint COMPILE UNITS.** Two
+agents editing different files in the same Rust crate both run `cargo test -p <crate>`, and a transient
+compile error in one agent's file fails the other's test run for reasons it cannot diagnose — so it
+burns turns debugging a break it did not cause. In practice that left exactly three safe pairings across
+twelve tasks: a web task beside a Rust task, `redextape-core`'s examples beside `redextape-wasm` (different
+packages, therefore different compile units), and any review beside any implementation. Everything else
+serialised, and five of the twelve tasks serialised on `main.ts` alone.
+
+Two smaller ones with the same shape. `web/package.json` drives **pnpm**, and `test:node` /
+`test:browser` are `vitest run --project <name>` — which scopes by project even though it cannot scope
+by file, and is what keeps a node-tier agent off the slow browser tier. And the commit gate runs
+`biome ci --error-on-warnings`, so a task that deliberately leaves a binding unused for its successor to
+consume **cannot commit alone**; that is what collapsed tasks 8 and 9 into one commit, which is the
+project's existing convention for a split the gate makes infeasible.
+
+##### What 5b left open — three items, after seven of the whole-branch review's nine Minors were fixed
+
+Recorded here rather than in `.superpowers/sdd/progress.md`, which `git clean -fdx` destroys: a finding
+that survives only in scratch is a finding nobody will ever act on. **Everything not listed below was
+fixed before merge** — `indexToByte`'s doc narrowed to its real contract with the surrogate behaviour
+pinned by a test; length-1 and empty-text window cases; `lambdaLinkState`'s `declined` branch end to
+end; `LinkIndex`'s mixed-presence cases; `protocol.ts`'s and `session-client.ts`'s docs corrected
+without weakening either guard; the missing `assert_eq!` message.
+
+1. **`client.extend()` silently no-ops for the whole debounce.** `supersede()` advances `#gen` at
+   dispatch, but the worker's `onExtend` drops any request for a generation it has never seen — so for
+   ≥300 ms after any keystroke or encoding change, `▶`-at-the-frontier and `[continue]` do nothing.
+   **The click is correctly inert**: the run it would extend is about to be discarded by the imminent
+   compile. The defect is the *silence*, which makes the fix a control-visibility rule rather than a
+   messaging change — and the deferred-accessibility list above already owns that principle (*"a
+   control that provably cannot work should not be offered"*). It belongs with that pass; a second
+   mechanism here would be worse than the gap. Introduced by 5b's task 1, untested and undocumented
+   until now.
+2. **The λ pane still double-renders when a link is active.** The per-frame case was fixed — a guard
+   skips `renderLink`'s redraw when neither the old nor the new value exists, which is the playback
+   path. What survives is `draw()`'s `render()` then `renderLink(win)` when a link IS set, each running
+   `#redraw()` in full. That happens at step 0 on a click rather than per frame, so it is out of the hot
+   path, and removing it means merging the two into one `update(frame, controls, win)` — an API change
+   for waste nobody has measured. **That measurement is the prerequisite, not the refactor.**
+3. **`lambdaLinkState`'s `truncated` branch has no end-to-end test, and cannot get one today.** It needs
+   a λ term over `LAMBDA_BYTE_BUDGET` (65,536 bytes), which needs an integer literal past ~2,690 — and
+   that crashes the wasm module outright, per the entry above. Not deferred by choice. Whoever fixes
+   `MAX_TERM_DEPTH` unblocks this test as a side effect.

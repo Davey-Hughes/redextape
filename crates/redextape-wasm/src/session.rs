@@ -9,12 +9,12 @@ use std::rc::Rc;
 
 use redextape_core::analysis::Classified;
 use redextape_core::core::NodeId;
-use redextape_core::lambda::{self, LowerError};
+use redextape_core::lambda::{self, LambdaTerm, LowerError};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::machine::Machine;
 use redextape_core::tm::{self, EncodingKind, Symbol, Tape, TmRun};
 use redextape_core::trace::{LambdaCursor, TmCursor};
-use redextape_core::viewmodel::{LambdaState, TermTree, TmProgram, TmState};
+use redextape_core::viewmodel::{LambdaState, LinkIndex, TermTree, TmProgram, TmState};
 use redextape_core::{Diagnostic, Severity, Span, parser, typeck};
 
 /// Why the TM leg is absent. `TmRun` already distinguishes these and the UI must not flatten them:
@@ -199,6 +199,15 @@ pub struct Session {
     /// it away; decoding is type-directed, so a session that discarded it could not decode anything.
     pub(crate) ty: redextape_core::ty::Ty,
     pub(crate) lambda: Result<LambdaCursor, LowerError>,
+    /// The INITIAL lowered term, kept so `link_index` can print step 0 after the cursor has moved.
+    ///
+    /// ONE `Rc` BUMP, NOT A COPY. `LambdaTerm` is `Rc`-backed and persistent, so retaining the root
+    /// costs a refcount. The alternative is re-lowering inside `link_index`, which would do the whole
+    /// lowering again on a path the worker calls immediately after compile — and would risk answering
+    /// from a lowering that is not the one the cursor is walking.
+    ///
+    /// `None` exactly when `lambda` is `Err`: a backend that declined produced no term.
+    pub(crate) initial_lambda: Option<LambdaTerm>,
     /// The TM leg: the projected program AND the cursor that walks it, TRAVELLING TOGETHER IN ONE
     /// `Result` RATHER THAN IN TWO FIELDS.
     ///
@@ -324,7 +333,10 @@ impl Session {
         let enc = kind.at(tm::MIN_FIELD_WIDTH);
         let (core, map) = SourceMap::build_from_program(&program, &*enc);
 
-        let lambda = lambda::lower(&core).map(|t| LambdaCursor::new(&t, lambda::MAX_REDUCTION_STEPS));
+        let (lambda, initial_lambda) = match lambda::lower(&core) {
+            Ok(t) => (Ok(LambdaCursor::new(&t, lambda::MAX_REDUCTION_STEPS)), Some(t)),
+            Err(e) => (Err(e), None),
+        };
 
         // `run_tm_described` ERRS ONLY FOR A PROGRAM THAT NEVER RAN. Checked against `lower_and_size`,
         // its only fallible call: `Err` carries `LowerError` or `TooLarge` and nothing else. `Overflow`
@@ -362,7 +374,10 @@ impl Session {
             Err(d) => (Err(d), None),
         };
 
-        Compiled { diagnostics, session: Some(Session { core, ty, kind, lambda, tm, map, final_tapes, total_steps }) }
+        Compiled {
+            diagnostics,
+            session: Some(Session { core, ty, kind, lambda, initial_lambda, tm, map, final_tapes, total_steps }),
+        }
     }
 
     // --- the λ leg ----------------------------------------------------------------------------
@@ -660,6 +675,20 @@ impl Session {
     /// no fallback to a nearby node.
     pub fn source_span(&self, node: NodeId) -> Option<Span> {
         self.map.source_span(node)
+    }
+
+    /// Everything a renderer needs to link one construct across three panes, for THIS compile.
+    ///
+    /// BUILT ON DEMAND RATHER THAN CACHED, and called once per compile by the worker. Caching it
+    /// would pay the print for every program including the ones nobody clicks into, and the caller
+    /// already knows how often it wants one.
+    ///
+    /// INFALLIBLE. Both halves are optional and `LinkIndex::build` is total over either absence, so a
+    /// declined leg yields an empty leg rather than an error — the same shape `SourceMap::build`
+    /// already has. There is nothing here for a caller to handle.
+    pub fn link_index(&self, byte_budget: usize) -> LinkIndex {
+        let program = self.tm.as_ref().ok().map(|(p, _)| p);
+        LinkIndex::build(self.initial_lambda.as_ref(), program, &self.map, byte_budget)
     }
 }
 

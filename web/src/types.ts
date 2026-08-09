@@ -16,11 +16,11 @@ export type Span = { start: number; end: number }
  * they drift into agreement with each other, which is worse than disagreeing. Deriving means a name
  * missing from this array cannot be used anywhere in the app, and the compiler says so.
  *
- * It still cannot verify itself against the RUST enum; that copy is by hand and this file's header
- * says so. `encodings()` was exported precisely because that hand-copy was avoidable for encoding
- * names. It is not avoidable here without a second export, which §6.3's scope does not carry — so the
- * residual risk is a variant added to `analysis::TokenClass` and not mirrored here, which shows up as
- * an unstyled span rather than an error. Recorded in the design spec's §12.
+ * IT IS NOW CHECKED AGAINST THE RUST ENUM, which it was not through 5a. `tokenClasses()` returns the
+ * same names in the same declaration order, and `assertTokenClasses` below fails loudly at startup if
+ * the two disagree. That matters more from Plan 5b on than it did before: `LinkIndex` ships span
+ * classes as a `Uint8Array` of DISCRIMINANTS, so a reordering here mis-colours silently rather than
+ * producing an unrecognised string.
  */
 export const TOKEN_CLASSES = [
   'Ident',
@@ -127,4 +127,18 @@ export type TmState = {
    * NAMES WHAT HAPPENS NEXT, NOT WHAT PRODUCED THIS FRAME. See `viewmodel.rs`'s field doc.
    */
   rule: number | null
+}
+
+/**
+ * Fail loudly if the hand-written `TOKEN_CLASSES` has drifted from the Rust enum.
+ *
+ * AT STARTUP, NOT IN A TEST ONLY. A test can be skipped, a CI job can be scoped out, and the failure
+ * this guards is silent mis-colouring rather than a crash. Called once from `main.ts` after `init()`.
+ */
+export function assertTokenClasses(fromWasm: string[]): void {
+  const ours = TOKEN_CLASSES.join(',')
+  const theirs = fromWasm.join(',')
+  if (ours !== theirs) {
+    throw new Error(`TOKEN_CLASSES has drifted from the Rust enum:\n  ts:   ${ours}\n  rust: ${theirs}`)
+  }
 }

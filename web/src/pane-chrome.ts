@@ -6,6 +6,10 @@ export type PaneEvents = {
   play(): void
   restart(): void
   extend(): void
+  /** A state row was clicked. Absent on panes that have no table. */
+  linkState?: (stateId: number) => void
+  /** A token in the λ link window was clicked, at this byte offset into the full `lambdaText`. */
+  linkLambda?: (byteOffset: number) => void
 }
 
 function button(label: string, title: string, onClick: () => void): HTMLButtonElement {

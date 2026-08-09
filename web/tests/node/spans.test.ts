@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { byteToIndex, decorationRanges } from '../../src/spans'
+import { byteToIndex, decorationRanges, indexToByte } from '../../src/spans'
 import type { Classified } from '../../src/types'
 
 const at = (start: number, end: number, cls: Classified[number][1]): Classified[number] => [{ start, end }, cls]
@@ -160,5 +160,55 @@ describe('byteToIndex', () => {
     expect(byteLength).toBe(1 + 3 + 1) // 'a' + U+FFFD (3 bytes) + 'b'
     const map = byteToIndex(text)
     expect(Array.from(map)).toEqual([0, 1, 1, 1, 2, 3])
+  })
+})
+
+describe('indexToByte', () => {
+  it('round-trips with byteToIndex on a term with binders', () => {
+    // `λ` is 2 bytes and 1 UTF-16 unit, which is the case that makes this non-trivial.
+    const text = '(λx. λy. x y) z'
+    const fwd = byteToIndex(text)
+    const back = indexToByte(text)
+    for (let i = 0; i <= text.length; i += 1) {
+      expect(fwd[back[i] as number]).toBe(i)
+    }
+    expect(back[back.length - 1]).toBe(new TextEncoder().encode(text).length)
+  })
+
+  // A ROUND TRIP AGAINST `byteToIndex` IS NOT ENOUGH ON ITS OWN: a converter that made the same
+  // mistake in both directions (e.g. treating every character as 1 byte) would still round-trip. This
+  // pins `indexToByte` against byte offsets counted BY HAND for a real λ-printer term, independent of
+  // `byteToIndex`'s own implementation.
+  it('matches a hand-counted byte offset for every UTF-16 index of a λ term', () => {
+    // '(λx. λy. x y) z' — 15 UTF-16 units (λ is 1 unit each). Byte lengths: '(' 1, 'λ' 2, everything
+    // else ASCII at 1 byte. Cumulative byte offset at the START of each character:
+    //   ( λ x  .  _  λ  y  .  _  x  _  y  )  _  z  <end>
+    //   0 1 3  4  5  6  8  9 10 11 12 13 14 15 16  17
+    const text = '(λx. λy. x y) z'
+    expect(text.length).toBe(15)
+    const back = indexToByte(text)
+    expect([...back]).toEqual([0, 1, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17])
+  })
+
+  it('maps both units of a surrogate pair to the character start', () => {
+    const text = 'a\u{1F600}b'
+    const back = indexToByte(text)
+    expect([...back]).toEqual([0, 1, 1, 5, 6])
+  })
+
+  // THE ROUND TRIP ABOVE DOES NOT HOLD HERE, AND THIS PINS THE ACTUAL BEHAVIOUR RATHER THAN ASSERTING A
+  // ROUND TRIP THAT DOES NOT EXIST — see `indexToByte`'s doc. UTF-16 index 2 is the LOW half of
+  // `'a\u{1F600}b'`'s surrogate pair; `indexToByte` reports the astral character's own start byte for
+  // it (1, matching `byteToIndex`'s mid-character convention), but running that byte back through
+  // `byteToIndex` resolves to index 1 — the pair's HIGH half — not 2. Unreachable through the app's only
+  // caller (`lambda-pane.ts`'s `#redraw` only ever looks up a token's start byte, never a byte that
+  // lands mid-character), but a real fact about this function that a future change should have to break
+  // on purpose, visibly, rather than by accident.
+  it('does not round-trip a surrogate pair’s low half — pinned as-is, not asserted as a round trip', () => {
+    const text = 'a\u{1F600}b'
+    const fwd = byteToIndex(text)
+    const back = indexToByte(text)
+    expect(back[2]).toBe(1)
+    expect(fwd[back[2] as number]).toBe(1)
   })
 })

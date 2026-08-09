@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Follow, highlight, ROW_HEIGHT, StateIndex } from '../../src/state-table'
+import { centredScrollTop, Follow, highlight, linkedRows, ROW_HEIGHT, StateIndex } from '../../src/state-table'
 import type { RuleView, StateView, TmProgram, TmState } from '../../src/types'
 
 const rule = (next: number): RuleView => ({
@@ -124,6 +124,36 @@ describe('highlight', () => {
   })
 })
 
+describe('centredScrollTop', () => {
+  // Same numbers as `Follow`'s "centres the current row" test below, so the two are visibly answering
+  // the same question: row 100 of 24px, 240px viewport: centre puts its top at 2400 - 120 + 12 = 2292.
+  it('centres a row, not the top of a row', () => {
+    expect(centredScrollTop(100, 24, 240, 10_000)).toBe(2292)
+  })
+
+  // THE TERM `setLink` WAS MISSING. Without `+ Math.floor(rowHeight / 2)` this would be 2280 — the
+  // row's top edge at the viewport's centre, not the row's own centre. An odd row height makes the
+  // `Math.floor` in that term load-bearing too: 24 -> 12 exactly, 25 -> 12 (not 12.5).
+  it('the middle-of-row term is not the row height itself', () => {
+    expect(centredScrollTop(100, 24, 240, 10_000)).not.toBe(100 * 24 - 120)
+    expect(centredScrollTop(100, 25, 240, 10_000)).toBe(100 * 25 - 120 + 12)
+  })
+
+  it('clamps the target at both ends rather than scrolling out of the document', () => {
+    expect(centredScrollTop(0, 24, 240, 10_000)).toBe(0)
+    expect(centredScrollTop(416, 24, 240, 10_000)).toBe(10_000 - 240)
+  })
+
+  // A LINK SCROLL AND A FOLLOW SCROLL MUST AGREE. This is the property the two call sites drifted on
+  // once already — `TmPane.setLink` centred a row's top edge while `Follow.targetScrollTop` centred its
+  // middle, about 12px apart on the same gesture. Sharing this function is what makes them the same
+  // number now, checked here directly rather than only through each caller's own test.
+  it('agrees with a following `Follow.targetScrollTop` for the same row', () => {
+    const f = new Follow()
+    expect(f.targetScrollTop(250, 24, 300, 50_000)).toBe(centredScrollTop(250, 24, 300, 50_000))
+  })
+})
+
 describe('Follow', () => {
   it('follows by default and centres the current row', () => {
     const f = new Follow()
@@ -199,5 +229,28 @@ describe('Follow', () => {
     f.attach()
     expect(f.following).toBe(true)
     expect(f.targetScrollTop(100, 24, 240, 10_000)).toBe(2292)
+  })
+})
+
+describe('linkedRows', () => {
+  // s2's block (rows 5-7) is NOT contiguous with row 0 — s0's block (0-3) sits ahead of it and s1's
+  // single header row (4) sits between. A `linkedRows` that ignored `rowOfState` and always started
+  // scanning at row 0 would still pass a test that only ever linked s0.
+  it('covers each linked state header and every one of its rule rows', () => {
+    const i = new StateIndex(program())
+    expect([...linkedRows(i, [0])].sort((x, y) => x - y)).toEqual([0, 1, 2, 3])
+    expect([...linkedRows(i, [2])].sort((x, y) => x - y)).toEqual([5, 6, 7])
+    expect([...linkedRows(i, [0, 3])].sort((x, y) => x - y)).toEqual([0, 1, 2, 3, 8, 9])
+  })
+
+  it('is a single row for a state with no rules', () => {
+    const i = new StateIndex(program())
+    expect([...linkedRows(i, [1])]).toEqual([4])
+  })
+
+  it('is empty for no states, and ignores a state id past the end', () => {
+    const i = new StateIndex(program())
+    expect(linkedRows(i, []).size).toBe(0)
+    expect(linkedRows(i, [99]).size).toBe(0)
   })
 })

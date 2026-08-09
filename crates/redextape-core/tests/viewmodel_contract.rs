@@ -9,7 +9,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use redextape_core::sourcemap::SourceMap;
-use redextape_core::viewmodel::{LambdaState, TermNode, TermTree, TmProgram, TmState};
+use redextape_core::viewmodel::{LambdaState, LinkIndex, TermNode, TermTree, TmProgram, TmState};
 
 /// Counts bytes requested through the global allocator, so a test can measure what a call actually
 /// allocates instead of timing it. Scoped to this one integration test binary: each file under
@@ -599,4 +599,89 @@ fn rule_names_the_transition_the_next_step_actually_takes() {
         }
     }
     assert!(checked > 100, "fixture exercised only {checked} transitions; it must exercise the field");
+}
+
+#[test]
+fn link_index_resolves_tm_owners_by_name_at_the_width_the_run_fitted() {
+    // THE TRAP THIS PINS. `SourceMap::build_from_program` lowers at `MIN_FIELD_WIDTH` purely to record
+    // ownership; `run_tm_described` re-lowers and auto-fits a possibly different width. `node_to_tm`'s
+    // StateIds therefore index a DIFFERENT machine from `TmProgram.states`. Only names agree, so
+    // `tm_owner` must be built by name — the same resolution `TmState::window` performs per step.
+    let src = "let x = 40; x + 2";
+    let (program, diags) = redextape_core::parser::parse(src);
+    let program = program.expect("the sample must parse");
+    assert!(diags.is_empty(), "diagnostics: {diags:?}");
+    let ty = redextape_core::typeck::result_type(&program).expect("the sample must type");
+    let kind = redextape_core::tm::EncodingKind::Binary;
+    let enc = kind.at(redextape_core::tm::MIN_FIELD_WIDTH);
+    let (core, map) = SourceMap::build_from_program(&program, &*enc);
+
+    let described = redextape_core::tm::run_tm_described(&core, kind, ty, redextape_core::tm::TM_DEFAULT_CAPS)
+        .expect("the sample must lower");
+    let width = described.header.width;
+    let machine = std::rc::Rc::new(described.machine);
+    let tm_program = TmProgram::of(&machine, width);
+
+    let term = redextape_core::lambda::lower(&core).expect("the sample must lower to lambda");
+    let index = LinkIndex::build(Some(&term), Some(&tm_program), &map, 65_536);
+
+    assert_eq!(index.tm_owner.len(), tm_program.states.len(), "one slot per state, dense");
+    let mut owned = 0;
+    for (s, state) in tm_program.states.iter().enumerate() {
+        let expected = map.tm_owner(&state.name).map_or(-1, |n| n as i32);
+        assert_eq!(index.tm_owner[s], expected, "state {s} ({})", state.name);
+        if expected >= 0 {
+            owned += 1;
+        }
+    }
+    assert!(owned > 0, "the sample must have at least one owned state, or this test proves nothing");
+
+    // The lambda leg. The sample's every source-mapped node carries a path, and the term prints well
+    // inside the budget, so every one of them must have a span.
+    assert!(!index.lambda_truncated, "the sample must print whole at 65,536 bytes");
+    assert_eq!(index.lambda_nodes.len(), map.node_to_lambda.len());
+    assert_eq!(index.source_nodes.len(), map.node_to_source.len());
+    for (span, id) in &index.source_nodes {
+        assert_eq!(map.source_span(*id), Some(*span));
+    }
+}
+
+#[test]
+fn link_index_is_total_over_a_declined_leg() {
+    // Both halves are optional and neither absence may abort. A `None` term gives empty lambda legs;
+    // a `None` program gives an empty `tm_owner`. `SourceMap::build` already behaves this way over a
+    // backend that declines, and the index must not be the place that stops being total.
+    let map = SourceMap::default();
+    let index = LinkIndex::build(None, None, &map, 65_536);
+    assert_eq!(index.lambda_text, "");
+    assert!(index.lambda_spans.is_empty());
+    assert!(!index.lambda_truncated);
+    assert!(index.lambda_nodes.is_empty());
+    assert!(index.source_nodes.is_empty());
+    assert!(index.tm_owner.is_empty());
+}
+
+/// THE MIXED CASE THE TEST ABOVE CANNOT SEE: it only ever passes `None` for BOTH legs at once, which a
+/// refactor that joined the two matches inside `LinkIndex::build` behind one shared condition (e.g.
+/// "empty unless both are present") would still pass. `term` and `program` are matched independently
+/// there and share no condition — this pins the lambda-only half of that independence permanently.
+#[test]
+fn link_index_is_total_when_only_the_lambda_leg_is_present() {
+    let (term, map) = lambda_fixture("let x = 40; x + 2");
+    let index = LinkIndex::build(Some(&term), None, &map, 65_536);
+    assert!(!index.lambda_text.is_empty(), "a present term must still print, with no TM program at all");
+    assert!(!index.lambda_nodes.is_empty(), "a present term must still map nodes, with no TM program at all");
+    assert!(index.tm_owner.is_empty(), "no program means no owner array, not one fabricated to match");
+}
+
+/// THE OTHER HALF OF THE MIXED CASE above: a `TmProgram` with no λ term at all, standing in for a λ
+/// decline over a program the TM backend still accepted.
+#[test]
+fn link_index_is_total_when_only_the_tm_leg_is_present() {
+    let (_, _, map, machine, _) = tm_fixture_with_map("let x = 40; x + 2");
+    let tm_program = TmProgram::of(&machine, 64);
+    let index = LinkIndex::build(None, Some(&tm_program), &map, 65_536);
+    assert_eq!(index.lambda_text, "", "no term means no lambda text, not one fabricated to match");
+    assert!(index.lambda_nodes.is_empty());
+    assert!(!index.tm_owner.is_empty(), "a present program must still build an owner array, with no term at all");
 }

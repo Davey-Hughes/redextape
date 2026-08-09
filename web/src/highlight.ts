@@ -70,3 +70,43 @@ export const declineMark = StateField.define<DecorationSet>({
   },
   provide: (f) => EditorView.decorations.from(f),
 })
+
+/** The source range a link resolved to, or `null` to clear it. */
+export const setLink = StateEffect.define<Span | null>()
+
+/**
+ * The construct a click linked, echoed in the source pane.
+ *
+ * THE ECHO IS WHAT MAKES THE RESOLUTION POLICY LEGIBLE. A click resolves to the innermost node whose
+ * span contains it and never walks outward, so the user has to be able to see whether they hit the
+ * `x` or the statement containing it. Without this mark the other two panes would light up for a
+ * construct the user cannot identify.
+ *
+ * A THIRD FIELD RATHER THAN A BRANCH IN `declineMark`, for the reason that field states about
+ * `highlighting`: these change on different clocks. A decline changes when a compile comes back; a
+ * link changes on a click.
+ */
+export const linkMark = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    for (const e of tr.effects) {
+      if (!e.is(setLink)) continue
+      const span = e.value
+      if (!span) return Decoration.none
+      // Byte offsets, converted before clamping — the same contract as `setDecline` above, and the
+      // same reason: the map's last entry is the document's UTF-16 length, so clamping into the map
+      // already clamps into the document.
+      const map = byteToIndex(tr.state.doc.toString())
+      const from = byteIndexAt(map, span.start)
+      const to = byteIndexAt(map, span.end)
+      if (from >= to) return Decoration.none
+      return Decoration.set([Decoration.mark({ class: 'linked' }).range(from, to)])
+    }
+    // A DOCUMENT CHANGE CLEARS THE LINK RATHER THAN MAPPING IT. `declineMark` maps, because a decline
+    // is still true about the text it named until the next compile contradicts it. A link is a claim
+    // about the OTHER two panes, and those are showing the previous compile's term and table — so a
+    // mapped link would keep pointing at a highlight that no longer corresponds to anything.
+    return tr.docChanged ? Decoration.none : deco
+  },
+  provide: (f) => EditorView.decorations.from(f),
+})

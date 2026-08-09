@@ -13,6 +13,7 @@
  * 3c's review flagged strictly zero rather than merely bounded.
  */
 import init, { compile, tapeNames } from '../../pkg/redextape_wasm.js'
+import type { LinkIndexWire } from './link'
 import type { LambdaLeg, Leg, RecordEnd, RunReply, RunRequest, TmLeg } from './protocol'
 import {
   EXTEND_CELLS,
@@ -54,6 +55,7 @@ type Session = {
   raiseTmCap(extraSteps: number, extraCells: number): void
   tmValue(): Decoded
   sourceSpan(node: number): Span | null
+  linkIndex(byteBudget: number): LinkIndexWire
   free(): void
 }
 
@@ -67,7 +69,7 @@ type CompileResult = { diagnostics: Diagnostic[]; session: Session | null }
  */
 type WorkerScope = {
   addEventListener(type: 'message', handler: (e: MessageEvent<RunRequest>) => void): void
-  postMessage(message: RunReply): void
+  postMessage(message: RunReply, transfer?: Transferable[]): void
 }
 const ctx = self as unknown as WorkerScope
 
@@ -340,18 +342,38 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
 
   const lambda = session.lambdaStatus()
   const tm = session.tmStatus()
-  ctx.postMessage({
-    kind: 'compiled',
-    gen: req.gen,
-    lambda,
-    tm,
-    declinedSpan: declinedSourceSpan(session, lambda),
-    // GUARDED: `tmProgram` throws `TmAbsent` for a declined leg, and a thrown error inside this async
-    // handler rejects it with nothing catching — no reply, and a caller that waits forever. That is
-    // exactly the shape of the defect PR 3c's browser tier caught in `drive`.
-    tmProgram: tm.available ? session.tmProgram() : null,
-    tapeNames: tapeNames() as string[],
-  })
+  const index = session.linkIndex(LAMBDA_BYTE_BUDGET)
+  ctx.postMessage(
+    {
+      kind: 'compiled',
+      gen: req.gen,
+      lambda,
+      tm,
+      declinedSpan: declinedSourceSpan(session, lambda),
+      // GUARDED: `tmProgram` throws `TmAbsent` for a declined leg, and a thrown error inside this
+      // async handler rejects it with nothing catching — no reply, and a caller that waits forever.
+      // That is exactly the shape of the defect PR 3c's browser tier caught in `drive`.
+      tmProgram: tm.available ? session.tmProgram() : null,
+      tapeNames: tapeNames() as string[],
+      linkIndex: index,
+    },
+    // TRANSFERRED, NOT CLONED. `prog200`'s index is ~689 KB and the app rebuilds one on every 300 ms
+    // typing pause; a structured clone would copy all of it. The buffers are dead on this side the
+    // moment they are posted, which is correct — `index` is built fresh per compile and never re-read
+    // here. `lambdaText` is a string and is cloned as usual; strings are not transferable.
+    [
+      index.lambdaSpanStart.buffer,
+      index.lambdaSpanEnd.buffer,
+      index.lambdaSpanClass.buffer,
+      index.lambdaNodeStart.buffer,
+      index.lambdaNodeEnd.buffer,
+      index.lambdaNodeId.buffer,
+      index.sourceNodeStart.buffer,
+      index.sourceNodeEnd.buffer,
+      index.sourceNodeId.buffer,
+      index.tmOwner.buffer,
+    ],
+  )
 
   await recordLambda(req.gen, true)
   await recordTm(req.gen, true)

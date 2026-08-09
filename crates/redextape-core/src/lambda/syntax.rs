@@ -33,10 +33,13 @@
 //! that intends to DECODE a term to a value needs the type from its caller. See `encode.rs`'s module
 //! doc for the full statement.
 
+use std::collections::BTreeMap;
+
 use crate::analysis::push_span;
+use crate::core::NodeId;
 use crate::diagnostic::Diagnostic;
 use crate::lambda::reduce::MAX_TERM_DEPTH;
-use crate::lambda::term::{LambdaTerm, Node, abs, app, var};
+use crate::lambda::term::{Dir, LambdaTerm, Node, Path, abs, app, var};
 use crate::span::Span;
 
 /// Nesting-depth guard for the recursive-descent parser (mirrors the source parser). Tuned below
@@ -237,12 +240,9 @@ pub fn print_lambda(t: &LambdaTerm) -> String {
 /// less, so the advice does not soften for it: do not pass output from a call where `truncated` came
 /// back `true`, for either reason, to `parse_lambda`.
 pub fn print_lambda_capped(t: &LambdaTerm, byte_budget: usize) -> (String, crate::analysis::Classified, bool) {
-    let mut out = String::new();
-    let mut spans: crate::analysis::Classified = Vec::new();
-    let mut names: Vec<String> = Vec::new();
-    let mut hit = false;
-    write_term(t, &mut names, &mut out, &mut spans, byte_budget, &mut hit, 0);
-    (out, spans, hit)
+    let want: BTreeMap<NodeId, Path> = BTreeMap::new();
+    let (text, spans, hit, _) = print_lambda_linked(t, byte_budget, &want);
+    (text, spans, hit)
 }
 
 /// `print_lambda`, plus a class per span. Spans are pushed as text is appended, so offsets are exact by
@@ -256,135 +256,195 @@ pub fn print_lambda_mapped(t: &LambdaTerm) -> (String, crate::analysis::Classifi
     (text, spans)
 }
 
+/// `print_lambda_capped`, plus the byte span of every subterm the caller named by path.
+///
+/// WHAT THIS IS FOR. `SourceMap::node_to_lambda` locates a Core node's subterm as a `Path`, and
+/// highlighting it in printed text needs a byte `Span`. Nothing correlated the two until this
+/// function; `viewmodel.rs`'s no-`redex` doc is where that gap was priced. Plan 5b's click-linking is
+/// the consumer.
+///
+/// `want` IS KEYED BY `NodeId` AND INVERTED HERE, rather than taken pre-inverted, so a caller cannot
+/// get the inversion wrong. Two nodes may name the same path — a transparent wrapper lowers to the
+/// subterm it wraps — and the inversion keeps the FIRST by node id, which is the same rule
+/// `sourcemap::lambda_half` applies when two paths name one node.
+///
+/// **A NODE PAST THE TRUNCATION CUT RECORDS NOTHING**, rather than a span clamped to where the walk
+/// stopped. A clamped span would say "this subterm ends here", which is false; absence says "this
+/// subterm is not shown", which is true. The same rule holds for a node whose walk was interrupted by
+/// the DEPTH bail partway through a descendant: its own span would be incomplete, so it is not
+/// recorded either.
+///
+/// **A RECORDED SPAN INCLUDES THE NODE'S OWN PARENTHESES.** `parens` writes `(` before delegating, and
+/// the entry mark is taken outside it. Lighting `f x` but not the parens around it names a different
+/// subterm than the one at that path.
+///
+/// Cost is one walk, the walk that was already happening. `want` is `SourceMap::node_to_lambda`, which
+/// the demo corpus measures at 5-403 entries.
+pub fn print_lambda_linked(
+    t: &LambdaTerm,
+    byte_budget: usize,
+    want: &BTreeMap<NodeId, Path>,
+) -> (String, crate::analysis::Classified, bool, Vec<(Span, NodeId)>) {
+    let mut by_path: BTreeMap<&Path, NodeId> = BTreeMap::new();
+    for (id, path) in want {
+        by_path.entry(path).or_insert(*id);
+    }
+    let mut p = Printer {
+        names: Vec::new(),
+        out: String::new(),
+        spans: Vec::new(),
+        budget: byte_budget,
+        hit: false,
+        path: Path::new(),
+        want: &by_path,
+        nodes: Vec::new(),
+    };
+    p.node(t, 0, Role::Term);
+    (p.out, p.spans, p.hit, p.nodes)
+}
+
+/// Where a node sits in its parent, which is what decides whether it needs parentheses.
+#[derive(Clone, Copy)]
+enum Role {
+    /// The root, an `Abs` body, or the inside of a paren pair: never parenthesized by its position.
+    Term,
+    /// The function position of an application: an abstraction there needs parens.
+    AppFn,
+    /// An argument: abstractions and applications need parens.
+    Atom,
+}
+
+/// The printer's state, threaded as one receiver rather than as seven parameters.
+///
+/// A STRUCT BECAUSE THE PARAMETER LIST RAN OUT, and the shape is otherwise unchanged. The four walker
+/// functions already carried seven arguments each; recording spans needs two more (the current path,
+/// and somewhere to put the results) and `clippy::too_many_arguments` denies at eight. Every field
+/// here was already threaded through every call, unchanged or mutated in place, so collapsing them
+/// costs nothing but the receiver.
+struct Printer<'a> {
+    names: Vec<String>,
+    out: String,
+    spans: crate::analysis::Classified,
+    budget: usize,
+    hit: bool,
+    /// The path from the root to the node being written. Pushed and popped at exactly the three
+    /// points `Dir` names, and at no others — the dispatch hops in `node` are the SAME node.
+    path: Path,
+    want: &'a BTreeMap<&'a Path, NodeId>,
+    nodes: Vec<(Span, NodeId)>,
+}
+
 // `depth` counts `Abs`/`App` levels from the root (0 there), one native call apart from the true
-// recursion depth only by the fixed dispatch hops below — `write_app_fn`/`write_atom`/`parenthesized`
-// pass it through UNCHANGED when they delegate on the SAME node (a different function, not a deeper
-// term), and only `write_term`'s `Abs` and `App` arms increment it, matching exactly the unit
-// `LambdaTerm::depth` counts. Checked at the top of every one of these four functions, right next to the
-// budget check, so a term whose recursion the budget cannot bound (see the left-nested-spine paragraph
-// on `print_lambda_capped`'s doc) still stops well short of a native stack overflow.
-
-fn write_term(
-    t: &LambdaTerm,
-    names: &mut Vec<String>,
-    out: &mut String,
-    spans: &mut crate::analysis::Classified,
-    budget: usize,
-    hit: &mut bool,
-    depth: u32,
-) {
-    if out.len() >= budget || depth > MAX_TERM_DEPTH {
-        *hit = true;
-        return;
+// recursion depth only by the fixed dispatch hops below — `node` and `parens` pass it through
+// UNCHANGED when they delegate on the SAME node (a different method, not a deeper term), and only
+// `write`'s `Abs` and `App` arms increment it, matching exactly the unit `LambdaTerm::depth` counts.
+// Checked at the top of `node`, `write` and `parens`, right next to the budget check, so a term whose
+// recursion the budget cannot bound (see the left-nested-spine paragraph on `print_lambda_capped`'s
+// doc) still stops well short of a native stack overflow.
+impl Printer<'_> {
+    /// Write `t` in `role`, recording its span if the caller asked for this path.
+    ///
+    /// THE ONE RECORDING SITE. Every node reaches the printer through exactly one call here, so the
+    /// span recorded covers everything written for that subterm — including any parentheses `role`
+    /// causes. `parens` delegates to `write` rather than back to `node`, which is what stops a
+    /// parenthesized node being recorded twice, the second time without its parens.
+    fn node(&mut self, t: &LambdaTerm, depth: u32, role: Role) {
+        if self.out.len() >= self.budget || depth > MAX_TERM_DEPTH {
+            self.hit = true;
+            return;
+        }
+        let start = self.out.len();
+        match role {
+            Role::Term => self.write(t, depth),
+            Role::AppFn => match t.node() {
+                Node::Abs(..) => self.parens(t, depth),
+                _ => self.write(t, depth),
+            },
+            Role::Atom => match t.node() {
+                Node::Var(_) => self.write(t, depth),
+                _ => self.parens(t, depth),
+            },
+        }
+        if self.hit {
+            return;
+        }
+        if let Some(&id) = self.want.get(&self.path) {
+            self.nodes.push((Span::new(start, self.out.len()), id));
+        }
     }
-    use crate::analysis::TokenClass as C;
-    match t.node() {
-        Node::Var(i) => {
-            let idx = names.len().checked_sub(1 + *i as usize);
-            let name = idx.and_then(|k| names.get(k)).cloned().unwrap_or_else(|| format!("?{i}"));
-            push_span(out, spans, &name, C::Ident);
+
+    fn write(&mut self, t: &LambdaTerm, depth: u32) {
+        if self.out.len() >= self.budget || depth > MAX_TERM_DEPTH {
+            self.hit = true;
+            return;
         }
-        Node::Abs(hint, body) => {
-            let name = fresh(hint, names);
-            push_span(out, spans, "λ", C::Binder);
-            push_span(out, spans, &name, C::Binder);
-            // The binder's `.` is punctuation, classified like the `(` and `)` in `parenthesized` and
-            // like the TM printer's `:`/`,`/`->`. The space after it is whitespace and stays outside
-            // the span: §6 asks for coverage of everything EXCEPT whitespace.
-            push_span(out, spans, ".", C::Punct);
-            out.push(' ');
-            names.push(name);
-            write_term(body, names, out, spans, budget, hit, depth + 1);
-            names.pop();
-        }
-        Node::App(f, a) => {
-            write_app_fn(f, names, out, spans, budget, hit, depth + 1);
-            // Re-checked for the same reason `parenthesized` re-checks before its closing paren, and this is
-            // the LEFT-nested mirror of that case. `lower.rs`'s `Core::Apply` builds `term = app(term, la)` in
-            // a loop, so `f(a, b, c)` is `App(App(App(f,a),b),c)`; without this check every enclosing frame
-            // pushes its separator as the stack unwinds, and the overshoot the doc comment bounds at one
-            // binder prefix becomes one space PER ARGUMENT. Depth is deliberately NOT re-checked here, but
-            // "a depth bail below writes nothing" only holds a level past THIS frame's own depth + 1: `f`
-            // and `a` are both called at `depth + 1`, so a bail exactly AT that depth fires identically for
-            // both, and this frame still writes its separator space with no operand on either side. The
-            // effect is one stray space at the frontier bail site, not a correctness gap — `hit` is already
-            // set by whichever call bailed — so it is not a second thing worth guarding.
-            if out.len() >= budget {
-                *hit = true;
-                return;
+        use crate::analysis::TokenClass as C;
+        match t.node() {
+            Node::Var(i) => {
+                let idx = self.names.len().checked_sub(1 + *i as usize);
+                let name = idx.and_then(|k| self.names.get(k)).cloned().unwrap_or_else(|| format!("?{i}"));
+                push_span(&mut self.out, &mut self.spans, &name, C::Ident);
             }
-            out.push(' ');
-            write_atom(a, names, out, spans, budget, hit, depth + 1);
+            Node::Abs(hint, body) => {
+                let name = fresh(hint, &self.names);
+                push_span(&mut self.out, &mut self.spans, "\u{3bb}", C::Binder);
+                push_span(&mut self.out, &mut self.spans, &name, C::Binder);
+                // The binder's `.` is punctuation, classified like the `(` and `)` in `parens` and
+                // like the TM printer's `:`/`,`/`->`. The space after it is whitespace and stays
+                // outside the span: §6 asks for coverage of everything EXCEPT whitespace.
+                push_span(&mut self.out, &mut self.spans, ".", C::Punct);
+                self.out.push(' ');
+                self.names.push(name);
+                self.path.push(Dir::AbsBody);
+                self.node(body, depth + 1, Role::Term);
+                self.path.pop();
+                self.names.pop();
+            }
+            Node::App(f, a) => {
+                self.path.push(Dir::AppL);
+                self.node(f, depth + 1, Role::AppFn);
+                self.path.pop();
+                // Re-checked for the same reason `parens` re-checks before its closing paren, and this
+                // is the LEFT-nested mirror of that case. `lower.rs`'s `Core::Apply` builds
+                // `term = app(term, la)` in a loop, so `f(a, b, c)` is `App(App(App(f,a),b),c)`;
+                // without this check every enclosing frame pushes its separator as the stack unwinds,
+                // and the overshoot the doc comment bounds at one binder prefix becomes one space PER
+                // ARGUMENT. Depth is deliberately NOT re-checked here: `f` and `a` are both visited at
+                // `depth + 1`, so a bail exactly at that depth fires identically for both, and the
+                // effect is one stray space at the frontier bail site rather than a correctness gap —
+                // `hit` is already set by whichever call bailed.
+                if self.out.len() >= self.budget {
+                    self.hit = true;
+                    return;
+                }
+                self.out.push(' ');
+                self.path.push(Dir::AppR);
+                self.node(a, depth + 1, Role::Atom);
+                self.path.pop();
+            }
         }
     }
-}
 
-/// The function position of an application: an abstraction there needs parens.
-fn write_app_fn(
-    t: &LambdaTerm,
-    names: &mut Vec<String>,
-    out: &mut String,
-    spans: &mut crate::analysis::Classified,
-    budget: usize,
-    hit: &mut bool,
-    depth: u32,
-) {
-    if out.len() >= budget || depth > MAX_TERM_DEPTH {
-        *hit = true;
-        return;
+    fn parens(&mut self, t: &LambdaTerm, depth: u32) {
+        if self.out.len() >= self.budget || depth > MAX_TERM_DEPTH {
+            self.hit = true;
+            return;
+        }
+        use crate::analysis::TokenClass as C;
+        push_span(&mut self.out, &mut self.spans, "(", C::Punct);
+        self.write(t, depth);
+        // Re-checked, not assumed: without this, a budget that fired partway through `write` above
+        // would still be followed by an unconditional `)`, and every enclosing `parens` frame on the
+        // call stack would do the same as it unwound — turning "one binder prefix of overshoot" into
+        // one closing paren PER NESTING LEVEL for a right-nested term (exactly the application chains
+        // a Church numeral or a cons chain builds). This is what keeps the bound the doc comment
+        // states actually true.
+        if self.out.len() >= self.budget {
+            self.hit = true;
+            return;
+        }
+        push_span(&mut self.out, &mut self.spans, ")", C::Punct);
     }
-    match t.node() {
-        Node::Abs(..) => parenthesized(t, names, out, spans, budget, hit, depth),
-        _ => write_term(t, names, out, spans, budget, hit, depth),
-    }
-}
-
-/// An atom in argument position: abstractions and applications need parens.
-fn write_atom(
-    t: &LambdaTerm,
-    names: &mut Vec<String>,
-    out: &mut String,
-    spans: &mut crate::analysis::Classified,
-    budget: usize,
-    hit: &mut bool,
-    depth: u32,
-) {
-    if out.len() >= budget || depth > MAX_TERM_DEPTH {
-        *hit = true;
-        return;
-    }
-    match t.node() {
-        Node::Var(_) => write_term(t, names, out, spans, budget, hit, depth),
-        _ => parenthesized(t, names, out, spans, budget, hit, depth),
-    }
-}
-
-fn parenthesized(
-    t: &LambdaTerm,
-    names: &mut Vec<String>,
-    out: &mut String,
-    spans: &mut crate::analysis::Classified,
-    budget: usize,
-    hit: &mut bool,
-    depth: u32,
-) {
-    if out.len() >= budget || depth > MAX_TERM_DEPTH {
-        *hit = true;
-        return;
-    }
-    use crate::analysis::TokenClass as C;
-    push_span(out, spans, "(", C::Punct);
-    write_term(t, names, out, spans, budget, hit, depth);
-    // Re-checked, not assumed: without this, a budget that fired partway through `write_term` above
-    // would still be followed by an unconditional `)`, and every enclosing `parenthesized` frame on the
-    // call stack would do the same as it unwound — turning "one binder prefix of overshoot" into one
-    // closing paren PER NESTING LEVEL for a right-nested term (exactly the application chains a Church
-    // numeral or a cons chain builds). This is what keeps the bound the doc comment states actually true.
-    if out.len() >= budget {
-        *hit = true;
-        return;
-    }
-    push_span(out, spans, ")", C::Punct);
 }
 
 fn fresh(hint: &str, names: &[String]) -> String {
@@ -824,5 +884,240 @@ mod tests {
         }
         let (_, _, truncated) = print_lambda_capped(&t, usize::MAX);
         assert!(truncated, "a spine far past MAX_TERM_DEPTH must report truncated, not overflow the stack");
+    }
+
+    use std::collections::BTreeMap;
+
+    use crate::lambda::term::{Dir, Path};
+
+    /// Every path in `t`, paired with a synthetic `NodeId`, so a test can ask for the whole tree at
+    /// once. Ids are assigned in walk order and mean nothing beyond being distinct.
+    fn all_paths(t: &LambdaTerm) -> BTreeMap<u32, Path> {
+        fn walk(t: &LambdaTerm, at: &mut Path, out: &mut Vec<Path>) {
+            out.push(at.clone());
+            match t.node() {
+                Node::Var(_) => {}
+                Node::Abs(_, body) => {
+                    at.push(Dir::AbsBody);
+                    walk(body, at, out);
+                    at.pop();
+                }
+                Node::App(f, a) => {
+                    at.push(Dir::AppL);
+                    walk(f, at, out);
+                    at.pop();
+                    at.push(Dir::AppR);
+                    walk(a, at, out);
+                    at.pop();
+                }
+            }
+        }
+        let mut paths = Vec::new();
+        walk(t, &mut Path::new(), &mut paths);
+        paths.into_iter().enumerate().map(|(i, p)| (i as u32, p)).collect()
+    }
+
+    /// The subterm at `path`, or `None` if the path leaves the term.
+    fn at_path<'a>(t: &'a LambdaTerm, path: &[Dir]) -> Option<&'a LambdaTerm> {
+        let mut cur = t;
+        for d in path {
+            cur = match (d, cur.node()) {
+                (Dir::AbsBody, Node::Abs(_, body)) => body,
+                (Dir::AppL, Node::App(f, _)) => f,
+                (Dir::AppR, Node::App(_, a)) => a,
+                _ => return None,
+            };
+        }
+        Some(cur)
+    }
+
+    #[test]
+    fn an_empty_want_is_byte_identical_to_the_capped_printer() {
+        // ONE WALKER, NOT TWO — the same property `an_unreachable_budget_is_identical_to_the_uncapped
+        // _printer` pins one layer out. `print_lambda_capped` now delegates here, so a divergence
+        // would mean the recording path had quietly become a second printer.
+        for src in ["\\x. x", "\\z. (\\f. \\x. f (f x)) (\\y. y) z", "\\a. \\b. a b (a b)"] {
+            let t = parse_ok(src);
+            let want: BTreeMap<u32, Path> = BTreeMap::new();
+            for budget in [4, 16, 64, usize::MAX] {
+                let (a, sa, ha) = print_lambda_capped(&t, budget);
+                let (b, sb, hb, nodes) = print_lambda_linked(&t, budget, &want);
+                assert_eq!(a, b, "{src:?} at budget {budget}");
+                assert_eq!(sa, sb, "{src:?} spans at budget {budget}");
+                assert_eq!(ha, hb, "{src:?} truncated at budget {budget}");
+                assert!(nodes.is_empty(), "an empty want records nothing");
+            }
+        }
+    }
+
+    #[test]
+    fn a_closed_subterms_recorded_span_is_exactly_its_own_printing() {
+        // THE REPRINT ORACLE, AND WHY IT IS RESTRICTED TO CLOSED SUBTERMS. `Var(i)` is a de Bruijn
+        // index resolved against the binders ambient where it is PRINTED, so re-rooting a subterm that
+        // references an outer binder changes what it means: the body of `\x. x` prints `x` in context
+        // and `?0` standalone, `?0` being this printer's deliberate marker for an index with no binder.
+        // Comparing those would be testing de Bruijn semantics, not span recording. `maxfree() == 0` is
+        // exactly the condition under which extraction is meaning-preserving.
+        //
+        // THE FIXTURES ARE CHOSEN SO THE RESTRICTION IS NOT A GUTTING. An application of closed terms
+        // has closed subterms at the root, at both `App` arms, and at their arms in turn — which is
+        // precisely the structure a swapped `AppL`/`AppR` push would corrupt. `checked` pins the count
+        // so a future fixture edit cannot quietly reduce this to the trivial root case.
+        let mut checked = 0;
+        for (src, expect_closed) in
+            [("\\x. x", 1), ("(\\x. x) (\\y. y y)", 3), ("(\\f. \\x. f (f x)) (\\y. y) (\\z. z)", 5)]
+        {
+            let t = parse_ok(src);
+            let want = all_paths(&t);
+            let (text, _, truncated, nodes) = print_lambda_linked(&t, usize::MAX, &want);
+            assert!(!truncated, "{src:?} must print whole at an unreachable budget");
+            assert_eq!(nodes.len(), want.len(), "{src:?}: every path recorded when nothing truncates");
+
+            let mut closed_here = 0;
+            for (span, id) in &nodes {
+                let path = want.get(id).expect("recorded id must be one we asked for");
+                let sub = at_path(&t, path).expect("recorded path must resolve");
+                if sub.maxfree() != 0 {
+                    continue;
+                }
+                // CLOSED IS NECESSARY, NOT SUFFICIENT, and the second reason is nothing to do with de
+                // Bruijn. A subterm's ROLE in its parent decides its parentheses — `AppFn` wraps an
+                // `Abs`, `Atom` wraps anything but a `Var`, `Term` (the root, and every `AbsBody`
+                // slot) wraps nothing — and `print_lambda_mapped` always prints at `Term`, so it never
+                // adds positional parens. That is the same "a recorded span includes the node's own
+                // parentheses" contract `a_recorded_span_includes_the_nodes_own_parentheses` pins.
+                //
+                // THE ROLE IS PREDICTED, NOT TOLERATED. Accepting "the reprint, or the reprint in
+                // parens" would pass a node that should be wrapped and is not, and one that should not
+                // be and is — the exact `Role` dispatch this oracle exists to cover. The last step of
+                // the path and the subterm's own kind determine the answer, so this stays an equality.
+                let (base, _) = print_lambda_mapped(sub);
+                let wrapped = match path.last() {
+                    None | Some(Dir::AbsBody) => false,
+                    Some(Dir::AppL) => matches!(sub.node(), Node::Abs(..)),
+                    Some(Dir::AppR) => !matches!(sub.node(), Node::Var(_)),
+                };
+                let expected = if wrapped { format!("({base})") } else { base };
+                assert_eq!(&text[span.start..span.end], expected, "{src:?}: path {path:?}");
+                closed_here += 1;
+            }
+            assert_eq!(closed_here, expect_closed, "{src:?}: closed-subterm count changed");
+            checked += closed_here;
+        }
+        assert_eq!(checked, 9, "the oracle must not go vacuous");
+    }
+
+    #[test]
+    fn an_applications_arms_are_recorded_in_the_order_they_print() {
+        // THE ORACLE FOR EVERY OTHER SUBTERM, and the one that actually catches a swapped arm. It needs
+        // no reprinting, so it is unaffected by de Bruijn context: the function position is written
+        // before the argument, so `AppL`'s span must end at or before `AppR`'s begins, and both must
+        // sit strictly inside the parent's. Pushing `AppR` where `AppL` belongs makes the left child's
+        // span come back under the right child's path, and this inverts.
+        let mut arms = 0;
+        for src in ["\\z. (\\f. \\x. f (f x)) (\\y. y) z", "\\a. \\b. a b (a b)", "\\f. \\g. \\h. f (g h) (\\q. q q)"] {
+            let t = parse_ok(src);
+            let want = all_paths(&t);
+            let (_, _, _, nodes) = print_lambda_linked(&t, usize::MAX, &want);
+            let by_path: BTreeMap<&Path, Span> =
+                nodes.iter().map(|(s, id)| (want.get(id).expect("known id"), *s)).collect();
+            for (path, parent) in &by_path {
+                let mut l = (*path).clone();
+                l.push(Dir::AppL);
+                let mut r = (*path).clone();
+                r.push(Dir::AppR);
+                let (Some(ls), Some(rs)) = (by_path.get(&l), by_path.get(&r)) else { continue };
+                assert!(ls.end <= rs.start, "{src:?}: {path:?} arms out of order — {ls:?} then {rs:?}");
+                assert!(parent.start <= ls.start && rs.end <= parent.end, "{src:?}: {path:?} arms escape parent");
+                arms += 1;
+            }
+        }
+        assert!(arms >= 6, "only {arms} applications checked — the fixtures stopped exercising this");
+    }
+
+    #[test]
+    fn an_ancestors_span_contains_its_descendants() {
+        let t = parse_ok("\\z. (\\f. \\x. f (f x)) (\\y. y) z");
+        let want = all_paths(&t);
+        let (_, _, _, nodes) = print_lambda_linked(&t, usize::MAX, &want);
+        let by_id: BTreeMap<u32, Span> = nodes.iter().map(|(s, id)| (*id, *s)).collect();
+        for (outer, outer_path) in &want {
+            for (inner, inner_path) in &want {
+                if outer == inner || !inner_path.starts_with(outer_path) {
+                    continue;
+                }
+                let (o, i) = match (by_id.get(outer), by_id.get(inner)) {
+                    (Some(o), Some(i)) => (o, i),
+                    _ => continue,
+                };
+                assert!(
+                    o.start <= i.start && i.end <= o.end,
+                    "path {outer_path:?} {o:?} must contain {inner_path:?} {i:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_recorded_span_includes_the_nodes_own_parentheses() {
+        // `\y. y` in argument position prints as `(λy. y)`, and the highlight must cover the parens:
+        // lighting `λy. y` alone names a subterm that is not the one at that path.
+        let t = parse_ok("\\f. f (\\y. y)");
+        let mut want: BTreeMap<u32, Path> = BTreeMap::new();
+        want.insert(7, vec![Dir::AbsBody, Dir::AppR]);
+        let (text, _, _, nodes) = print_lambda_linked(&t, usize::MAX, &want);
+        assert_eq!(text, "\u{3bb}f. f (\u{3bb}y. y)");
+        let (span, id) = nodes.first().copied().expect("the argument must be recorded");
+        assert_eq!(id, 7);
+        assert_eq!(&text[span.start..span.end], "(\u{3bb}y. y)");
+    }
+
+    #[test]
+    fn a_node_past_the_cut_records_nothing_rather_than_a_clamped_span() {
+        // PINS AN EXACT, NAMED SHAPE — NOT A COUNT INEQUALITY. The original form asserted only
+        // `nodes.len() < want.len()`, which a "records nothing, ever" implementation (`nodes:
+        // Vec::new()` unconditionally) also satisfies, since `0 < want.len()` is vacuously true for
+        // any non-trivial term. Its per-node loop checked only `span.end <= text.len()`, which cannot
+        // tell "never recorded" from "recorded but clamped to the cut": a clamped span satisfies that
+        // bound BY CONSTRUCTION, since clamping means "trim the end to fit inside the text". So the old
+        // test passed unchanged against both bugs this doc paragraph rules out.
+        //
+        // This form instead picks a budget where the walk gets partway, and pins both halves by
+        // identity: the completed subterm is recorded with its EXACT span and text, and the cut
+        // subterm is ABSENT from `nodes` — not present with an end pinned to where the walk stopped.
+        // Budget 10 on `\f. f (\y. y)` was read out empirically (a temporary probe test printed the
+        // walk's output at budgets 0..=15 and was deleted once these numbers were confirmed): the walk
+        // produces exactly `"λf. f (λy. "` (13 bytes) and stops inside the inner `Abs`'s body write, so
+        // `Var f` at `[AbsBody, AppL]` finishes and is recorded, while `(\y. y)` at `[AbsBody, AppR]` —
+        // whose opening paren is written but whose own recording site never runs because `hit` is
+        // already set when its `node()` call returns — is cut and must not appear at all. A clamping
+        // implementation would instead record it as `(7, 13)`, i.e. `"(λy. "`.
+        let t = parse_ok("\\f. f (\\y. y)");
+        let want = all_paths(&t);
+        let (text, _, truncated, nodes) = print_lambda_linked(&t, 10, &want);
+        assert!(truncated, "budget 10 must truncate this term");
+        assert_eq!(text, "\u{3bb}f. f (\u{3bb}y. ", "budget 10's exact truncated text changed");
+        assert!(!nodes.is_empty(), "a walk that gets partway must record the part it completed");
+
+        let path_id =
+            |path: &Path| want.iter().find(|(_, p)| *p == path).map(|(id, _)| *id).expect("path must be in `want`");
+
+        let f_id = path_id(&vec![Dir::AbsBody, Dir::AppL]);
+        let (span, id) = nodes[0];
+        assert_eq!(id, f_id, "the one recorded node must be `f`, not some other path");
+        assert_eq!(span, Span::new(5, 6), "`f`'s span must be exactly where it was printed");
+        assert_eq!(&text[span.start..span.end], "f", "the recorded span must slice back to \"f\" itself");
+
+        // Checked BEFORE the exact-count assertion below: a clamping implementation still records
+        // `f` correctly (it is never cut) but ALSO records the cut `(\y. y)`, so the count check alone
+        // would catch that bug too — this assertion is what proves it is caught for the right reason,
+        // by naming the exact path that must be missing rather than just noticing the total is off.
+        let cut_id = path_id(&vec![Dir::AbsBody, Dir::AppR]);
+        assert!(
+            nodes.iter().all(|(_, id)| *id != cut_id),
+            "`(\\y. y)` was cut by the budget and must be ABSENT, not recorded with a span clamped to the cut"
+        );
+
+        assert_eq!(nodes.len(), 1, "exactly one path completes before budget 10 cuts this term");
     }
 }
