@@ -18,12 +18,20 @@ on every commit. `crates/redextape-wasm` compiles the compiler to WASM through *
 ninth, `tapeNames()`, labels the five Turing-machine tape rows from the lowering's own constants
 (`build.rs`) rather than a hand-copied list, so it can only speak for machines this compiler produced.
 `web/` is a real app: a source pane with live syntax highlighting and lint diagnostics, a λ pane, and a
-Turing-machine pane showing all five tapes and a status line, side by side — the first thing in this
-project a human can click. **Both legs are steppable forward and backward** through a recorded,
-byte-budgeted history (◀ ▶ ⏵ ↺), with a caps affordance (`[continue]`) for a run that outgrows its
-recording budget before it outgrows its answer. What the visualizer the project is *for* still lacks:
-click-linking between the panes, dual-focus highlight while running, editable λ/TM panes with
-detach-on-edit, λ pane structural tree view, TM pane virtualized state table, and a CLI.
+Turing-machine pane showing all five tapes, a status line, and — Plan 5a-ii — a virtualized δ-table
+beside them: current state and the rule about to fire highlighted, following the machine by default and
+a control to reattach it after a manual scroll detaches it, toggleable, and tested rendering only a
+viewport's worth of rows — 24 of `map_fold`'s 25,852 at CI's window size, counting the overscan —
+side by side, the first thing in this project a human can click. **Both legs are steppable
+forward and backward** through a recorded, byte-budgeted history (◀ ▶ ⏵ ↺), with a caps
+affordance (`[continue]`) for a run that outgrows its recording budget before it outgrows its answer.
+**The λ pane has no structural tree, and that is a decision, not a gap**: Plan 5a-ii measured one and cut
+it — a per-frame tree costs 850 MB against a 32 MB history ring, and most steps have no tree to draw at
+any budget that is still affordable
+(`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2). What the visualizer the
+project is *for* still lacks: click-linking between the panes, dual-focus highlight while running,
+editable λ/TM panes with detach-on-edit, the λ pane's structural tree (deliberately, see above), and a
+CLI.
 See "Development & CI" below to build and run it, or still `cargo run --example` for the raw backends
 without a browser.
 
@@ -131,13 +139,20 @@ as it diverges. Both are reachable only because control now returns from each β
 ### Not built yet
 
 - **The full visualizer** — `crates/redextape-wasm` (cdylib) and `web/` (Vite + CodeMirror 6, no
-  framework) now ship three panes (Roadmap Plan 5a-i): an editable source pane with live syntax
-  highlighting and lint diagnostics, a λ pane, and a Turing-machine pane with all five tapes and a
-  status line, both legs independently steppable forward and backward through a recorded history with
-  a caps affordance for a run that exceeds it. Still missing: click-linking between the panes,
-  dual-focus highlight while running (blocked — see the roadmap's Plan 5 entry), editable λ / TM panes
-  with detach-on-edit and recompile-from-source, the λ pane's structural tree view, and the TM pane's
-  virtualized state table (the last two are Plan 5a-ii).
+  framework) now ship three panes (Roadmap Plan 5a-i) plus a virtualized δ-table in the TM pane (Plan
+  5a-ii): an editable source pane with live syntax highlighting and lint diagnostics, a λ pane, and a
+  Turing-machine pane with all five tapes, a status line, and a state table that follows the machine,
+  highlights the current state and the rule about to fire, and renders only the rows on screen — tested
+  against a viewport-derived bound, which is 24 rows of `map_fold`'s 25,852 at CI's window size, and a
+  flat ceiling of 200 that a whole-table renderer would miss by two orders of magnitude — both legs
+  independently steppable forward and backward
+  through a recorded history with a caps affordance for a run that exceeds it. Still missing:
+  click-linking between the panes, dual-focus highlight while running (blocked — see the roadmap's Plan
+  5 entry), and editable λ / TM panes with detach-on-edit and recompile-from-source. **The λ pane's
+  structural tree is not one of these** — Plan 5a-ii measured it and cut it rather than leaving it
+  unscheduled: a per-frame tree costs 850 MB against `HISTORY_BYTES`' 32 MB ring, and most steps have no
+  tree to draw at any budget that is still affordable
+  (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2).
 - **CLI** — `crates/redextape-cli`: `redextape fmt` / `lint`, plus subcommands to emit and run λ /
   TM artifacts. Roadmap Plan 6. `fmt` is blocked on a decision nobody has made yet — the lexer
   discards `//` comments, so a `print ∘ parse` formatter over that AST would delete every one.

@@ -66,10 +66,35 @@ describe('wire shapes', () => {
     expect('window_start' in first).toBe(true)
     expect('source_node' in first).toBe(true)
     expect(first.source_node === null || typeof first.source_node === 'number').toBe(true)
+    // `rule` INDEXES `states[state].rules`, and a bare `typeof === 'number'` would pass on an index
+    // that points nowhere. Resolve it.
+    expect('rule' in first).toBe(true)
+    expect(first.rule === null || typeof first.rule === 'number').toBe(true)
+    if (first.rule !== null) {
+      const rules = program.states[first.state]?.rules ?? []
+      expect(first.rule).toBeLessThan(rules.length)
+      expect(rules[first.rule]).toBeDefined()
+    }
 
     session.stepTm()
     const second = session.tmState(40)
     expect(second.step).toBe(1)
+    // The same contract Task 1 pins in Rust, re-checked across the boundary: the rule named BEFORE a
+    // step is the transition that step takes. A serializer that dropped or shifted the field would
+    // satisfy every type check above and fail here.
+    const beforeStep = session.tmState(40)
+    if (beforeStep.rule !== null) {
+      // SOUND ONLY BECAUSE THIS RUN NEVER APPROACHES `TM_DEFAULT_CAPS`. `viewmodel.rs`'s doc on `rule`
+      // says plainly that `Some` does not promise the cursor will step — the step/cell caps are checked
+      // before the rule match, so at a spent cap this field can name a transition that never fires. `let
+      // x = 40; x + 2` halts in a couple thousand δ-steps, far short of the default caps, so `stepTm()`
+      // below always takes the named rule in practice. A fixture that grew toward the caps, or caps
+      // tightened below its step count, could make this branch's assumption false without `rule` itself
+      // being wrong.
+      const expected = program.states[beforeStep.state]?.rules[beforeStep.rule]?.next
+      session.stepTm()
+      expect(session.tmState(40).state).toBe(expected)
+    }
     // A cell is a one-character string — `Symbol` is `char` in Rust.
     for (const cell of second.window[0] ?? []) {
       expect(typeof cell).toBe('string')

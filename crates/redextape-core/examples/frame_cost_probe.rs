@@ -68,6 +68,14 @@ const BUDGET_SWEEP: &[usize] = &[512, 4_096, 16_384, 65_536];
 /// Tape window radii to sweep. The TM pane follows the head; the question is what a row costs.
 const RADIUS_SWEEP: &[usize] = &[10, 20, 40, 80];
 
+/// Candidate `LAMBDA_TREE_NODES` values, for §8's one remaining unmeasured constant.
+///
+/// The range is chosen from the one figure the design already has: this language lowers naturals to
+/// Church numerals, so `40` alone is ~83 nodes and `200` is ~403 (§4.3) — before anything else in the
+/// program. 1,024 is therefore near the floor of "can draw the app's own sample at all", and 524,288 is
+/// far past what a reader could look at, included so the refusal column has somewhere to bottom out.
+const NODE_BUDGET_SWEEP: &[usize] = &[1_024, 8_192, 65_536, 524_288];
+
 /// Per-program recording ceiling. NOT `MAX_REDUCTION_STEPS` (5,000,000): this probe measures a
 /// per-step cost, and a few thousand steps establishes it. A program that hits this is reported as
 /// hitting it, never silently truncated.
@@ -125,6 +133,13 @@ fn programs() -> Vec<(String, String)> {
     // falsified the logical-size guard. These two are far below that and still the largest terms here.
     v.push(("list20".to_string(), list20));
     v.push(("list60".to_string(), list60));
+    // Added for section F, and it defeats a DIFFERENT bound from the three above. Those attack frame
+    // SIZE with a large term; a per-frame tree history is bounded by size x STEP COUNT, and every
+    // program above runs in the hundreds of β-steps at most. `while4` is the same shape at n=4.
+    v.push((
+        "while40".to_string(),
+        "let mut n = 40; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc".to_string(),
+    ));
     v
 }
 
@@ -296,6 +311,98 @@ fn record_tm(c: &mut TmCursor<Rc<Machine>>, map: &SourceMap, radius: usize) -> L
     Legs { steps, step_total, render_total, max_bytes, sum_bytes, max_json, sum_json, truncated_at: None, stopped }
 }
 
+/// One λ leg's per-step `lambdaAst` measurement.
+///
+/// Separate from [`Legs`] because the question is different. `Legs` asks what a frame costs; this asks
+/// whether a frame can be BUILT at all, so `refused` is a first-class column rather than an error path.
+struct AstLegs {
+    steps: u64,
+    ast_total: Duration,
+    /// Steps where `ast` returned `None` — the node budget refusing, or the arena's `u32` index space
+    /// overflowing first. `LambdaState::ast`'s own doc says a consumer cannot tell the two apart, so
+    /// neither does this column.
+    refused: u64,
+    first_refused_at: Option<u64>,
+    max_nodes: usize,
+    sum_nodes: usize,
+    max_json: Option<usize>,
+    sum_json: Option<usize>,
+    stopped: &'static str,
+}
+
+/// Step-and-build-a-tree, exactly as a per-frame tree recorder would: `next()`, then `ast()` on the
+/// state that step produced.
+///
+/// **TREES ARE DROPPED EACH ITERATION AND NEVER ACCUMULATED.** Retaining one per step is the shape this
+/// file's module doc records as having taken 60 GiB, and the question here is a PER-STEP cost, which a
+/// proxy answers without paying it. What a whole history would cost is arithmetic on `sum_json`, and
+/// arithmetic does not need to be allocated to be believed.
+fn record_ast(c: &mut LambdaCursor, node_budget: usize) -> AstLegs {
+    let mut ast_total = Duration::ZERO;
+    let (mut max_nodes, mut sum_nodes) = (0usize, 0usize);
+    let (mut max_json, mut sum_json) = (Some(0usize), Some(0usize));
+    let (mut refused, mut first_refused_at) = (0u64, None);
+    let mut steps = 0u64;
+    let stopped = loop {
+        if c.next().is_none() {
+            break "ended";
+        }
+        steps += 1;
+
+        let t = Instant::now();
+        let tree = LambdaState::ast(c, node_budget);
+        ast_total += t.elapsed();
+
+        match tree {
+            None => {
+                refused += 1;
+                if first_refused_at.is_none() {
+                    first_refused_at = Some(steps);
+                }
+            }
+            Some(tree) => {
+                max_nodes = max_nodes.max(tree.nodes.len());
+                sum_nodes += tree.nodes.len();
+                if let (Some(m), Some(s), Some(j)) = (max_json.as_mut(), sum_json.as_mut(), json_len(&tree)) {
+                    *m = (*m).max(j);
+                    *s += j;
+                } else {
+                    max_json = None;
+                    sum_json = None;
+                }
+            }
+        }
+
+        if steps >= STEP_LIMIT {
+            break "step-limit";
+        }
+    };
+    AstLegs { steps, ast_total, refused, first_refused_at, max_nodes, sum_nodes, max_json, sum_json, stopped }
+}
+
+/// `hist_MB` is the decision column: what recording ONE TREE PER FRAME would cost for this program at
+/// this budget, over the steps actually run. Compare it against §3.2's ~10 KB text frame.
+fn ast_report(legs: &AstLegs) -> String {
+    let n = legs.steps.max(1) as f64;
+    let built = legs.steps.saturating_sub(legs.refused).max(1) as usize;
+    format!(
+        "{:>7} {:>10.2} {:>9} {:>9.1} {:>10} {:>10} {:>9} {:>9} {:>9.1}  {}",
+        legs.steps,
+        us(legs.ast_total) / n,
+        legs.refused,
+        100.0 * legs.refused as f64 / n,
+        legs.max_nodes,
+        legs.sum_nodes / built,
+        opt_b(legs.max_json),
+        opt_b(legs.sum_json.map(|s| s / built)),
+        legs.sum_json.map_or(f64::NAN, |s| s as f64 / 1e6),
+        legs.stopped,
+    )
+}
+
+const AST_HDR: &str =
+    "  steps    ast_us/  refused  refused%  max_nodes  avg_nodes  max_json  avg_json   hist_MB  stopped";
+
 fn report(legs: &Legs) -> String {
     let n = legs.steps.max(1) as f64;
     let ratio = if legs.step_total.is_zero() {
@@ -323,17 +430,34 @@ fn section_compile(progs: &[(String, String)]) {
     head("A — compile() wall-clock (PR 3c open risk 1, unmeasured for two slices)");
     line("  This is the whole pipeline INCLUDING the TM run, which `compile` performs eagerly.");
     line("");
-    line(&format!("{:<12} {:>12} {:>12} {:>12}  {}", "program", "compile_ms", "tm_steps", "lambda", "tm"));
+    line("  `states`/`rules` size 5a-ii's virtualized table, whose only measured point was the");
+    line("  `list_1_2.tm` fixture: 146 states and 309 rules for `[1, 2]`. `rows` is what the table");
+    line("  flattens to — one per state plus one per rule — and is what `rowHeight` and `overscan`");
+    line("  have to be chosen against.");
+    line("");
+    line(&format!(
+        "{:<12} {:>12} {:>12} {:>8} {:>8} {:>8} {:>12}  {}",
+        "program", "compile_ms", "tm_steps", "states", "rules", "rows", "lambda", "tm"
+    ));
     for (name, src) in progs {
         let Some(c) = compile(src, EncodingKind::Unary) else {
-            line(&format!("{name:<12} {:>12} {:>12} {:>12}  {}", "-", "-", "no-session", "no-session"));
+            line(&format!(
+                "{name:<12} {:>12} {:>12} {:>8} {:>8} {:>8} {:>12}  {}",
+                "-", "-", "-", "-", "-", "no-session", "no-session"
+            ));
             continue;
         };
+        let (states, rules) = c.tm.as_ref().map_or((None, None), |(p, _)| {
+            (Some(p.states.len()), Some(p.states.iter().map(|s| s.rules.len()).sum::<usize>()))
+        });
         line(&format!(
-            "{:<12} {:>12.2} {:>12} {:>12}  {}",
+            "{:<12} {:>12.2} {:>12} {:>8} {:>8} {:>8} {:>12}  {}",
             name,
             c.compile_time.as_secs_f64() * 1e3,
             c.tm_total_steps.map_or_else(|| "-".to_string(), |s| s.to_string()),
+            opt_b(states),
+            opt_b(rules),
+            opt_b(states.zip(rules).map(|(s, r)| s + r)),
             c.lambda_decline.as_deref().unwrap_or("ok"),
             c.tm_decline.as_deref().unwrap_or("ok"),
         ));
@@ -407,6 +531,29 @@ fn section_radius(progs: &[(String, String)]) {
     }
 }
 
+fn section_ast(progs: &[(String, String)]) {
+    head("F — lambdaAst: LAMBDA_TREE_NODES, §8's one remaining unmeasured constant (5a-ii)");
+    line("  `refused` is the column that decides the feature, not `ast_us`. A tree that refuses is a");
+    line("  pane saying \"too large to draw\" (§4.3), so refused% at a budget is the fraction of steps");
+    line("  where the structural view has nothing to show.");
+    line("  `hist_MB` is what recording one tree per frame would cost over the steps run — compare it");
+    line("  against §3.2's ~10 KB text frame and against HISTORY_BYTES' 32 MB per leg.");
+    line("  avg_nodes and avg_json average over the steps that BUILT a tree, not over all steps.");
+    line("");
+    line(&format!("{:<12}{:>9}{AST_HDR}", "program", "budget"));
+    for (name, src) in progs {
+        for &b in NODE_BUDGET_SWEEP {
+            let Some(mut c) = compile(src, EncodingKind::Unary) else { continue };
+            let Some(cur) = c.lambda.as_mut() else { continue };
+            let legs = record_ast(cur, b);
+            line(&format!("{:<12}{:>9}{}", name, b, ast_report(&legs)));
+            if let Some(at) = legs.first_refused_at {
+                line(&format!("{:<12}{:>9}   first refused at step {at}", "", ""));
+            }
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let want = |name: &str| args.is_empty() || args.iter().any(|a| a == name);
@@ -435,5 +582,8 @@ fn main() {
     }
     if want("e") {
         section_radius(&progs);
+    }
+    if want("f") {
+        section_ast(&progs);
     }
 }

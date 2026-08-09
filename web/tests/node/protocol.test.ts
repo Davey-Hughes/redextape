@@ -16,6 +16,7 @@ const tm = (tapes: number, cells: number): TmState => ({
   window_start: Array.from({ length: tapes }, () => 0),
   window: Array.from({ length: tapes }, () => Array.from({ length: cells }, () => '_')),
   source_node: null,
+  rule: null,
 })
 
 describe('frame sizers', () => {

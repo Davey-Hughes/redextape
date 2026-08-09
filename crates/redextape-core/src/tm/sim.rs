@@ -174,8 +174,10 @@ pub struct Trace {
     pub status: Status,
 }
 
-/// The rule matcher, kept here beside `Tape` because it reads the zipper's private head. `trace::TmCursor`
-/// is its only caller, and since `run` is written over that cursor it is the crate's only δ-matcher.
+/// The rule matcher, kept here beside `Tape` because it reads the zipper's private head. It has two
+/// callers — `trace::TmCursor::next` and `viewmodel.rs`'s `TmState::window`, which resolves the rule
+/// about to fire for the UI — and since `run` is written over `TmCursor` it is the crate's only
+/// δ-matcher; `viewmodel.rs` calling it directly rather than re-deriving it is what keeps that true.
 pub(crate) fn rule_matches(read: &[Option<Symbol>], tapes: &[Tape]) -> bool {
     read.len() == tapes.len()
         && read.iter().zip(tapes).all(|(pat, t)| match pat {
@@ -184,7 +186,9 @@ pub(crate) fn rule_matches(read: &[Option<Symbol>], tapes: &[Tape]) -> bool {
         })
 }
 
-/// A rule's writes and head moves, here for the same reason as `rule_matches` and with the same one caller.
+/// A rule's writes and head moves, here for the same reason as `rule_matches`. Unlike it, this has a
+/// single caller — `trace::TmCursor::next`. Nothing outside the cursor applies a rule, because nothing
+/// outside the cursor owns tapes to apply it to.
 pub(crate) fn apply(rule: &Rule, tapes: &mut [Tape]) {
     for (i, t) in tapes.iter_mut().enumerate() {
         if let Some(s) = rule.write[i] {

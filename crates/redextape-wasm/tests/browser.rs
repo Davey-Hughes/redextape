@@ -236,6 +236,11 @@ fn compile_step_and_read_both_legs() {
     let tape0: Array = window.get(0).unchecked_into();
     assert!(tape0.length() <= 7, "radius 3 yields at most 7 cells, got {}", tape0.length());
 
+    // `rule` crosses as a number or null, never as a bigint — the failure `TermNode`'s `u32` note was
+    // guarding against, checked here rather than assumed because `usize` is what this field uses.
+    let rule = get(&tm_state, "rule");
+    assert!(rule.is_null() || rule.as_f64().is_some(), "rule must be a number or null, got {rule:?}");
+
     // `tapeSlice` must speak the coordinates `tmState` reported, across the boundary as well as in
     // Rust — the property the whole `window_start`/`heads` coordinate space exists for.
     let starts: Array = get(&tm_state, "window_start").unchecked_into();

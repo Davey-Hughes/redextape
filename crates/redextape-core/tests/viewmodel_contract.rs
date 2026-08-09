@@ -554,3 +554,49 @@ fn empty_map() -> SourceMap {
 fn tm_caps() -> redextape_core::tm::TmCaps {
     redextape_core::tm::TM_DEFAULT_CAPS
 }
+
+/// `TmState.rule` NAMES WHAT HAPPENS NEXT, and this ties it to the simulator rather than to a second
+/// reading of the matcher. `window` is built AFTER a step, so its tapes and its `state` are post-step
+/// and the rule it reports is the transition the following step will take.
+///
+/// Both directions are asserted, because only one of them is the interesting failure: `Some` must
+/// predict the next state, and `None` must mean the machine is genuinely stuck. A field that answered
+/// `None` everywhere would pass a one-directional test while silently disabling the whole feature.
+#[test]
+fn rule_names_the_transition_the_next_step_actually_takes() {
+    let (machine, init) = tm_fixture("let x = 40; x + 2");
+    let mut cursor = redextape_core::trace::TmCursor::new(&machine, &init, tm_caps());
+
+    let mut checked = 0usize;
+    loop {
+        let before = TmState::window(&cursor, &empty_map(), 2);
+        match before.rule {
+            Some(idx) => {
+                let state = &machine.states[before.state as usize];
+                let expected = state.rules[idx].next;
+                // THIS ASSERTION IS SOUND ONLY BECAUSE THE FIXTURE STAYS WELL UNDER `TM_DEFAULT_CAPS`.
+                // `viewmodel.rs`'s doc on `rule` is explicit that `Some` does not promise `next()` will
+                // step: `TmCursor::next` checks the step/cell caps BEFORE matching a rule, so at a spent
+                // cap this field can name a transition the very next call will refuse with `HitCap`
+                // instead of taking. `tm_caps()` here is `TM_DEFAULT_CAPS` and this program halts in a
+                // few thousand steps, nowhere near it, so that leg of the field's contract never gets a
+                // chance to fire. Tightening the caps, or growing the fixture to approach them, would
+                // make this `assert!` fail while `rule`'s own doc is still correct — not a regression in
+                // the field, a fixture that has outgrown the bound it was implicitly relying on.
+                assert!(cursor.next().is_some(), "a rule matched but the cursor would not advance");
+                let after = TmState::window(&cursor, &empty_map(), 2);
+                assert_eq!(
+                    after.state, expected,
+                    "step {}: rule {idx} of `{}` says next = {expected}, machine went to {}",
+                    before.step, state.name, after.state
+                );
+                checked += 1;
+            }
+            None => {
+                assert!(cursor.next().is_none(), "no rule matched but the machine stepped anyway");
+                break;
+            }
+        }
+    }
+    assert!(checked > 100, "fixture exercised only {checked} transitions; it must exercise the field");
+}

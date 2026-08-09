@@ -1285,6 +1285,44 @@ was extracted before the correction existed. The two together are the same rule 
   see linked highlights, edit a derived pane → detached badge). `npm run build` green (activates
   the CI `web` + `docker` jobs).
 
+#### Accessibility is deferred to one pass at the end of Plan 5, deliberately (raised 2026-08-08, PR 5a-ii)
+
+**The decision, so it is not mistaken for an oversight:** no accessibility work happens per-slice while
+the pane set is still changing shape. 5b adds click-linking and dual-focus highlight, 5d makes the λ and
+TM panes editable with detach-on-edit — each of which adds, removes or re-purposes controls. Semantics
+written now would be rewritten twice and end up a patchwork of three slices' habits. One pass, once the
+controls settle, produces something coherent.
+
+**The risk of deferring is that it silently never happens**, which is why this is a list with instances
+rather than a note saying a11y is on the todo. Known outstanding, all observed rather than guessed:
+
+1. **A control that hides itself on click strands the keyboard.** Measured on `tm-pane.ts`'s reattach:
+   after a click, `document.activeElement` is `<body>`. `pane-chrome.ts`'s `[continue]` shares the
+   **added and removed, never disabled** idiom and the same hazard, but not unconditionally — its
+   handler is an async worker round trip, and `controls.ts` keeps the button when a run hits `budget`
+   again, so it survives its own click in the common case. The idiom is right and should survive — a
+   control that provably cannot work should not be offered, which is why `raise_cap`'s refusal of
+   `depth_capped` means no button rather than a grey one — so the fix is to move focus deliberately,
+   not to start disabling things.
+2. **The δ-table toggle relabels itself** (`hide δ` / `show δ`) with nothing announcing that the table's
+   state changed. Same shape as the appearance button, which PR #20 solved with an `aria-label` naming
+   the current state; nothing else in `web/` has been given the same treatment.
+3. **A virtualized table is unreachable by assistive tech, and this is a design question rather than a
+   patch.** Only the ~24 rows in view exist in the DOM out of up to 127,881, so the rows a screen reader
+   can reach are exactly the rows that happen to be scrolled into view. `aria-rowcount`/`aria-rowindex`
+   over a `role="grid"` is the standard answer and it has to be designed against the row *index*
+   (§3.2's prefix sum) rather than the rendered window.
+4. **State is carried visually only** in three places — `.state-row.is-current`, `.state-row.is-firing`
+   and `.cell.head`. Only the first is colour *alone*: `is-firing` adds an outline and the head cell
+   turns `.cell`'s transparent border visible and bolds it. What all three share is the real gap —
+   **none has a non-visual equivalent**, so none of it reaches a screen reader however it is drawn.
+5. **No focus-visible styling was ever specified**, so focus rings are whatever the UA draws over a
+   palette that was designed without them in mind.
+
+What already exists, so the pass starts from the right baseline: the appearance control is a real
+`<button type="button">` with an `aria-label` naming its current state, updated on every change
+(`main.ts`, PR #20). That is the whole of it.
+
 #### Non-progress detection: a TM-only UI diagnostic, and NOT a guard (raised 2026-07-31)
 
 Raised while designing the λ logical-size guard, and recorded here rather than there because it is a
@@ -3505,3 +3543,114 @@ wants is still open. And the virtualized state table: `crates/redextape-core/tes
 is 146 states and 464 lines for the two-element list literal `[1, 2]`, unvirtualized that is thousands
 of DOM nodes rebuilt every step, and `virtual-list.ts` — fixed row height, offset arithmetic, no
 library — has not been written yet.
+
+#### PLAN 5a-ii CLOSES — the λ tree is cut, the state table ships, and a corpus chosen to be representative could not falsify either bound (2026-08-08, PR 5a-ii)
+
+Design: [`../specs/2026-08-08-plan5a-ii-state-table-design.md`](../specs/2026-08-08-plan5a-ii-state-table-design.md).
+Plan: [`2026-08-08-plan5a-ii-state-table.md`](2026-08-08-plan5a-ii-state-table.md).
+
+**THE λ TREE IS CUT.** `lambdaAst` as a per-frame or per-step export costs **850 MB against a 32 MB
+ring** at `LAMBDA_TREE_NODES = 65,536` — 731.65 µs/step against the text frame's 5.77 µs at
+`FRAME_BYTES = 512`, 127× the per-step cost of the thing already being recorded — and a frontier-only
+tree, built for the newest step alone, does not rescue it: **84.0% of steps refuse to build one at all
+at 65,536 nodes, and still 70.8% refuse at 524,288.** The two levers that could fix this move against
+each other instead: raising the budget cuts refusals but raises per-step cost superlinearly (15.71 →
+102.18 → 731.65 → 4,941.62 µs/step across 1,024 → 8,192 → 65,536 → 524,288 nodes) while the trees that
+do build reach hundreds of thousands of nodes, not a thing a person reads. The reason the fix that saved
+5a-i's `FRAME_BYTES` — a much smaller budget for history than for the readout — does not transfer here
+is the transferable lesson: **text truncates, trees refuse.** `print_lambda_capped` short-circuits to a
+visibly-truncated string at any budget; `LambdaState::ast` returns `None` rather than a partial tree, on
+the deliberate and unquestioned ground that a truncated AST is a lie about the term's shape. A small
+budget therefore buys the text pane speed and memory together, and buys the tree pane only *absence* —
+`FRAME_BYTES`' lever does not exist for a node budget.
+
+**THE ARENA'S §9.3 DELETION QUESTION REOPENS**, on narrow grounds the design is careful to isolate:
+`TermTree` is a fine shape — flat, index-addressed, non-recursive on every derived path, exactly what it
+was built for — **with no consumer, not a wrong one.** What fails is `lambdaAst` as an export, on cost
+and availability that an arena-vs-boxed-tree choice would not change; a `Box`-based tree at the same node
+counts would be worse on both axes, plus the sharing trap the arena exists to avoid.
+
+**THE `[1, 2]` FIXTURE WAS 0.4% OF THE REAL SCALE.** The panes-and-history design sized the state table
+from one number, `list_1_2.tm`'s 455 rows — the smallest program in the corpus but one. Measured across
+all ten, `list60` is **127,881 rows, 281× the fixture.** 127,881 row objects would be 12–25 MB of
+main-thread duplication for a list of which ~40 are ever on screen, and **the row array became a row
+index because of it**: one prefix-sum `Int32Array`, 135 KB for `list60` rather than 127,881 objects, row
+identity resolved by binary search rather than lookup.
+
+**§2.1'S LESSON LANDED TWICE IN ONE DAY, ON TWO DIFFERENT QUANTITIES.** A corpus chosen to be
+representative could not falsify either bound, because both bounds looked affordable to a corpus built to
+attack a *different* quantity: the nine-program suite runs a few hundred β-steps at most, so it never
+stressed a per-frame tree, which is bounded by frame size × step count; and its smallest-but-one program
+was quoted as the state table's scale for the same reason — nobody had asked the corpus for its largest.
+**Both fell to the first program written to attack the bound that actually existed** — `while40`,
+`while4` with `n = 40` for `n = 4`, an ordinary counting loop rather than an adversarial one, for the
+tree; and, for the table, no new program at all, just the states/rules columns the probe already carried,
+extended to count rows and read off against `list60`.
+
+**THE BROWSER TIER HAD NEVER LOADED THE APP'S STYLESHEET.** `index.html` is the only reference to
+`style.css` in the project, and Vitest's browser mode serves its own tester HTML, so every browser test
+since the tier existed — back through 5a-i — ran against a completely unstyled DOM. Cosmetic for every
+earlier pane; not for this one, where `max-height: 40vh` is the **only** thing bounding the scroll
+container. Without it the box laid out at its full content height — **measured at 271,968px for 11,332
+rows** — so every `#drawTable()` rendered every row and the first test to exercise the table at scale
+timed out. Fixed at the tier where it happened (`tests/browser/setup.ts`), not papered over with a
+TypeScript-side clamp: an untested defence encoding a CSS rule in TypeScript would silently mis-render
+the day the rule changed, and the browser tier now asserts the container is bounded, so the gap fails a
+test rather than turning every other assertion into a test of a fallback.
+
+**EVERY TASK FOUND A DEFECT IN THE PLAN, AND ESSENTIALLY NONE IN THE IMPLEMENTATIONS** — 5a-i's finding
+repeats, harder. The pre-flight scan alone found four before any code was written: two CSS custom
+properties that do not exist (`--mono`, `--accent-soft`), a `flex: 1 1 auto` on a table whose parent is
+not a flex column — so it would have laid out at its full 3,069,144px — and three test helpers named in
+a brief that `app.test.ts` does not have. Then: a reference implementation that failed its own test
+(`first` clamped at the bottom and not the top, giving `firstIndex: 416` on a 20-row list), a wrong
+expected value beside it, a stale test-count baseline, an unkillable mutant, two defects in a class
+whose entire purpose was preventing that class, a `setProgram` that would have detached the table on
+every compile, and three browser assertions that would have passed for the wrong reason. Each is a
+commit on this branch. Two are worth carrying on their own. **A mutant that was mathematically
+unkillable:** a task brief specified `i <= start` as a mutation its tests must kill, but the index's
+binary search guarantees `start <= i` as an unconditional precondition at that comparison, which makes
+`i <= start` logically identical to `i === start` — no reachable input tells the two branches apart,
+traced by hand before the empirical run confirmed zero failures. **And a browser assertion that was a
+tautology, comparing a variable against itself:** a brief captured a parked scroll position *after*
+dispatching the scroll event that would trigger a re-centre, against a step click that never awaited its
+own async worker round trip — so nothing wrote to the value being compared, between the capture and the
+assertion, at all. The comparison passed on a broken-detach mutant regardless of whether detaching
+worked.
+
+**AND THE WHOLE-BRANCH REVIEW FOUND A DESIGN REQUIREMENT THAT NO TASK HAD CARRIED.** §3.7 and §4 of this
+slice's design both mandate a control that reattaches the table after a manual scroll detaches it. The
+implementation plan carried it into none of its eight tasks, and the plan's own self-review nevertheless
+claimed *"§3.7 (follow) → Task 5"*. What shipped up to that point had `Follow.attach()` with exactly one
+caller — the compile path — so **one scroll detached the table for the rest of the run**, the current row
+not merely scrolled out of view but absent from the DOM, recoverable only by editing the source and
+throwing away the history you were watching. A node test named `it('reattaches on demand')` passed the
+whole time, against an API path no UI could reach. **A green test for a method nobody calls is the
+shape a missing feature takes when the plan's checklist is the thing being checked.**
+
+**TWO ABSENT TESTS ARE WHY IT SURVIVED, AND BOTH FAILED THE SAME WAY: THEY ASSERTED ONLY THE NEGATIVE.**
+Disabling the follow-scroll write outright — deleting the feature from the app — left the suite green,
+because the one test covering following asserted that a *detached* table does not move, which a table
+that never moves satisfies perfectly. And `ROW_HEIGHT` against `.state-row`'s CSS height went unguarded
+exactly as the CSS comment beside it predicted: 24 against 31 also passed, because the browser test
+computed its expected row count *from the same constant*, so the mismatch cancelled itself out. **A test
+that derives its expectation from the value under test cannot fail.**
+
+**THE RE-REVIEW THEN FOUND A DETACH WITH NO USER GESTURE IN IT AT ALL.** `#drawTable` writes `scrollTop`
+and the browser delivers that write's `scroll` event at the next rendering update rather than
+synchronously — so hiding the table in between lands the echo on a `display: none` box, where
+`scrollTop` reads back 0, further from the expected position than any tolerance can absorb. Step, hide
+δ, show δ, and the table silently follows nothing. It had hidden behind two green toggle tests because
+both use `let x = 40; x + 2`, whose follow target is ~122px: the restored offset happens to show the
+current row anyway, so the detach was invisible to the assertion. **THE FIRST TEST WRITTEN FOR IT PASSED
+WITHOUT THE FIX** — it stepped, hid, and awaited two animation frames, but whether an echo is in flight
+at the instant of the hide depends on whether that step moved the follow target, which depends on the
+program. Rewritten to dispatch the event where the mechanism needs it rather than hoping the timing
+lines up; removing the guard now fails it and nothing else. That makes three times in two slices that a
+test written specifically to close a gap did not close it, and each was caught only by running the
+mutation rather than by reading the test.
+
+**THE GATE.** `pnpm test`: **189** (node 140, browser 49). `wasm-pack test --headless --chrome
+crates/redextape-wasm`: **13/13**. `scripts/check-all.sh --no-llvm` green, reporting **PARTIAL** by
+design — the LLVM tier is skipped and the script says so rather than passing quietly. `pre-commit run
+--all-files` green.

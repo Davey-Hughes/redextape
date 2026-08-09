@@ -120,4 +120,11 @@ export type TmState = {
   window_start: number[]
   window: string[][]
   source_node: number | null
+  /**
+   * The index into `tmProgram().states[state].rules` of the rule ABOUT TO FIRE, or `null` when nothing
+   * matches — at an accept state, at `halt`, or at a stuck configuration.
+   *
+   * NAMES WHAT HAPPENS NEXT, NOT WHAT PRODUCED THIS FRAME. See `viewmodel.rs`'s field doc.
+   */
+  rule: number | null
 }

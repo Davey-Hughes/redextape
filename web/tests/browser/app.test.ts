@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { STORAGE_KEY } from '../../src/appearance'
+import { OVERSCAN, ROW_HEIGHT } from '../../src/tm-pane'
 
 const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
@@ -381,10 +382,276 @@ describe('the app, end to end', () => {
 
     it('restart returns to step 0 and forward walks out again', async () => {
       await settled(view, 'let x = 40; x + 2')
+      // `settled` resolves on the RESULTS pane going idle, which is not the same event as the λ pane
+      // holding frames — so this read `'not run'` and failed roughly one run in six, from before this
+      // slice. Same root cause as the state-table test below, found while chasing that one.
+      await until(() => !stepText('lambda').includes('not run'))
       click('lambda', '↺')
       expect(stepText('lambda')).toContain('step 0')
       click('lambda', '▶')
       expect(stepText('lambda')).toContain('step 1')
+    })
+
+    // NOT `[1, 2]`. Its 455 rows would render acceptably unvirtualized, so it cannot demonstrate the
+    // one property this table exists for. `map_fold` is 25,852 rows (design §3.1).
+    const BIG = `fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }
+fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }
+fn add(a, b) { a + b }
+fn add1(x) { x + 1 }
+fold([3, 1, 2].map(add1), 0, add)`
+
+    const table = () => document.querySelector('#tm .state-table') as HTMLElement
+    const spacer = () => document.querySelector('#tm .state-spacer') as HTMLElement
+    /** `BIG`'s whole table, and the readiness signal for it: unique to this program among the fixtures. */
+    const BIG_SPACER = `${25_852 * ROW_HEIGHT}px`
+
+    it('renders only the visible rows, not the whole machine', async () => {
+      await settled(view, BIG)
+      // `settled` resolves on the RESULTS pane going idle, which is not the same event as THIS
+      // program's table being on screen. Observed flaking 2 runs in 10, and fast — under 210 ms
+      // against a normal ~1 s — the signature of asserting before the table is ready.
+      //
+      // WAITING FOR `.state-row` TO BE NON-EMPTY DOES NOT FIX IT, and that was the first attempt: the
+      // previous test leaves its own rows in the DOM, so the wait is satisfied instantly by a stale
+      // table and the geometry below is read against the wrong program. The readiness signal has to
+      // be specific to `BIG` — its spacer is exactly 25,852 rows x ROW_HEIGHT.
+      await until(() => spacer().style.height === BIG_SPACER)
+      const rows = document.querySelectorAll('#tm .state-row')
+      // THE SCROLL CONTAINER MUST ACTUALLY BE BOUNDED, and this asserts it rather than assuming it.
+      // `.state-table`'s `max-height: 40vh` is what bounds it, and Vitest serves its own tester HTML —
+      // `tests/browser/setup.ts` is what gets `style.css` onto that page. If that setup ever breaks, the
+      // box lays out at its full content height (measured: 271,968px for 11,332 rows), nothing bounds
+      // `#drawTable`'s window computation, and every draw during recording renders every row. THERE IS
+      // NO CLAMP IN `TmPane` TO FALL BACK ON — it was deleted a commit before this comment was first
+      // written, on the grounds that untested defence encoding a CSS rule in TypeScript is worse than
+      // the gap it papers over. So the failure is not an assertion below reading the wrong number: it is
+      // `await settled(view, BIG)` above never resolving, because recording 25,852 rows' worth of frames
+      // through a renderer that redraws all of them every step does not finish inside `until`'s 30s
+      // budget, and the whole test times out before reaching the expectations that follow.
+      // THIS is the bounded-container assertion. Two others used to sit here and both were drained by
+      // the `until` above: once the spacer is pinned to `BIG_SPACER`, asserting it exceeds 100,000 is a
+      // tautology, and `clientHeight * 10 < spacer` only restates `clientHeight < 62,044`, which this
+      // line already beats by a wide margin.
+      expect(table().clientHeight).toBeLessThan(window.innerHeight)
+      const bound = Math.ceil(table().clientHeight / ROW_HEIGHT) + 1 + 2 * OVERSCAN
+      expect(rows.length).toBeLessThanOrEqual(bound)
+      // The property, stated as the thing it is: far fewer rows than the machine has. `map_fold` is
+      // 25,852, so a renderer that drew them all would fail this by two orders of magnitude.
+      expect(rows.length).toBeLessThan(200)
+      // `ROW_HEIGHT` and `.state-row`'s CSS `height` are two numbers with nothing tying them together —
+      // `bound` above is computed from the same constant this asserts, so a mismatch between the two
+      // would self-cancel there. Measure a real row instead of trusting the constant.
+      const first = rows[0]
+      expect(first).toBeDefined()
+      expect(first?.getBoundingClientRect().height).toBe(ROW_HEIGHT)
+    })
+
+    it('highlights the current state and outlines the rule about to fire', async () => {
+      await settled(view, 'let x = 40; x + 2')
+      // By the time `settled` resolves, the TM leg is fully recorded and its head sits at the
+      // frontier, which is `halt` — `frame.rule` is `null` there (`types.ts`'s doc: "at an accept
+      // state, at `halt`, or at a stuck configuration"), so `is-firing` would be empty at this exact
+      // frame. `◀` once steps back to the frame whose rule fires INTO halt, which is where a rule is
+      // actually about to fire.
+      click('tm', '◀')
+      expect(document.querySelectorAll('#tm .state-row.is-current').length).toBe(1)
+      expect(document.querySelectorAll('#tm .state-row.is-firing').length).toBe(1)
+    })
+
+    it('moves the highlight as the machine steps', async () => {
+      await settled(view, 'let x = 40; x + 2')
+      // Same frontier fact as above: `▶` is a no-op here (`main.ts`'s `forward`, mirroring the λ
+      // leg's already-tested "does nothing at the frontier of a run that already ended"), so stepping
+      // must go backward to move at all.
+      const before = document.querySelector('#tm .state-row.is-current')?.textContent
+      // Several steps, not one: a machine can re-enter the same state, so a single ◀ proves nothing.
+      for (let i = 0; i < 8; i += 1) click('tm', '◀')
+      expect(document.querySelector('#tm .state-row.is-current')?.textContent).not.toBe(before)
+    })
+
+    // NOTHING ELSE IN THIS SUITE EXERCISES THE POSITIVE CASE. `stops following once the user scrolls`
+    // below only proves `scrollTop` stays put after a detach — a table that never follows at all would
+    // satisfy it just as well. `BIG` is the fixture that can show the difference: `setProgram` parks
+    // `scrollTop` at 0, and by the time recording settles the frontier's row is far enough down
+    // `map_fold`'s 25,852 rows that only an actual write moves it, and only an actual write keeps
+    // `.is-current` inside the rendered window at all.
+    it('follows the machine into view with no user scroll at all', async () => {
+      await settled(view, BIG)
+      expect(table().scrollTop).toBeGreaterThan(0)
+      expect(document.querySelector('#tm .state-row.is-current')).not.toBeNull()
+    })
+
+    it('stops following once the user scrolls', async () => {
+      await settled(view, BIG)
+      // `▶` at this frontier would be `client.extend()` — an async worker round trip — and asserting
+      // right after the click loop with no `await` would pass whether or not detach worked, since no
+      // redraw happens before the assertion runs. `◀` moves the head and redraws synchronously
+      // (`main.ts`'s `back` calls `leg.hist.back()` then `draw()` with no worker involved), so it is
+      // the one that actually exercises whether a detached table still gets re-centred.
+      table().scrollTop = 0
+      table().dispatchEvent(new Event('scroll'))
+      for (let i = 0; i < 5; i += 1) click('tm', '◀')
+      // Literal 0, NOT a `parked` variable read after the dispatch: the scroll handler re-centres
+      // synchronously inside that same dispatch when detach fails, so a value captured post-dispatch
+      // would already reflect the bug and make this comparison pass vacuously either way.
+      expect(table().scrollTop).toBe(0)
+    })
+
+    // THE REATTACH CONTROL ITSELF. Design §3.7/§4 mandated it and nothing built it into the plan's
+    // tasks; `follow` above proves detach happens but never proves there is any way back short of a
+    // recompile. ADDED AND REMOVED, NEVER DISABLED (`pane-chrome.ts`'s idiom for the continue button):
+    // present only while detached, and clicking it must redraw immediately rather than wait for a step.
+    it('reattaches through its own control, which exists only while detached', async () => {
+      await settled(view, BIG)
+      const reattach = document.querySelector('#tm .table-reattach') as HTMLButtonElement
+      expect(reattach).not.toBeNull()
+      expect(reattach.hidden).toBe(true)
+      const followedTop = table().scrollTop
+
+      table().scrollTop = 0
+      table().dispatchEvent(new Event('scroll'))
+      expect(reattach.hidden).toBe(false)
+
+      reattach.click()
+      // No step happened, so a working reattach recomputes the same target it had before detaching —
+      // this asserts the redraw is synchronous with the click, not merely that following resumed.
+      expect(table().scrollTop).toBe(followedTop)
+      expect(reattach.hidden).toBe(true)
+    })
+
+    // A SCROLL EVENT ARRIVING WHILE THE TABLE IS HIDDEN MUST NOT DETACH IT.
+    //
+    // `#drawTable` writes `scrollTop`, and the browser delivers that write's `scroll` event at the next
+    // rendering update rather than synchronously. Hiding the table in between lands the echo on a
+    // `display: none` box, where `scrollTop` reads back 0 — further from the expected position than any
+    // tolerance — so the table detached with no user gesture at all and the highlighted row left the
+    // DOM. Reproduced 5/5 in Chromium by stepping, hiding, then showing.
+    //
+    // THE EVENT IS DISPATCHED RATHER THAN AWAITED, deliberately. A version of this test that stepped
+    // and hid and waited two animation frames passed against the bug — whether a real echo is in flight
+    // at the moment of the hide depends on whether that step moved the follow target at all, which
+    // depends on the program. Dispatching puts the event where the mechanism needs it, so the test
+    // fails whenever the guard is removed instead of whenever the timing happens to line up.
+    it('ignores a scroll that arrives while the table is hidden', async () => {
+      await settled(view, BIG)
+      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
+      const reattach = document.querySelector('#tm .table-reattach') as HTMLButtonElement
+      expect(reattach.hidden).toBe(true)
+
+      toggle.click()
+      table().dispatchEvent(new Event('scroll'))
+      toggle.click()
+
+      expect(reattach.hidden).toBe(true)
+      expect(document.querySelector('#tm .state-row.is-current')).not.toBeNull()
+    })
+
+    // THE CONTROL GOES AWAY WITH THE THING IT CONTROLS. `#reattach.hidden` is maintained inside
+    // `#drawTable`, which the toggle calls only when REOPENING — so hiding a detached table left a
+    // live "follow" button with nothing under it, offering to reposition something not on screen.
+    // That is the idiom's own rule broken (`pane-chrome.ts`: a control is present only when it does
+    // something), and the `|| !this.#open` term added for it could never fire, because the one place
+    // that reads it does not run on the way down.
+    it('takes the reattach control away with the table it belongs to', async () => {
+      await settled(view, BIG)
+      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
+      const reattach = document.querySelector('#tm .table-reattach') as HTMLButtonElement
+
+      table().scrollTop = 0
+      table().dispatchEvent(new Event('scroll'))
+      expect(reattach.hidden).toBe(false)
+
+      toggle.click()
+      expect(reattach.hidden).toBe(true)
+      toggle.click()
+      // Reopening restores it, because hiding the table is not a decision to start following again.
+      expect(reattach.hidden).toBe(false)
+    })
+
+    // A HIDE MUST NOT POISON THE ECHO EXPECTATION. Drawing while hidden reads `clientHeight` 0, so
+    // `targetScrollTop` returns the UNCENTRED position — exactly `floor(viewportHeight / 2)` below the
+    // real one — and records it as the scroll `Follow` should expect. The write itself is a no-op on a
+    // non-rendered box, but `#expected` sticks; and on reopen the correct target equals the restored
+    // `scrollTop`, so the write is skipped and `#expected` is never corrected. A real user scroll
+    // landing within the tolerance of that stale value is then absorbed as an echo, the table does not
+    // detach, and the next frame yanks the view back — the trap design §3.7 already names, reached by a
+    // zero-viewport movement rather than a clamped one.
+    it('still detaches on a user scroll after the table has been hidden and shown', async () => {
+      await settled(view, BIG)
+      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
+      const reattach = document.querySelector('#tm .table-reattach') as HTMLButtonElement
+      expect(reattach.hidden).toBe(true)
+
+      // The poisoned value, computed the way the bug computes it rather than hardcoded.
+      const poisoned = table().scrollTop + Math.floor(table().clientHeight / 2)
+      toggle.click()
+      toggle.click()
+
+      table().scrollTop = poisoned
+      table().dispatchEvent(new Event('scroll'))
+      expect(reattach.hidden).toBe(false)
+    })
+
+    // THE SCROLL RANGE MUST SURVIVE A COMPILE THAT HAPPENS WHILE THE TABLE IS CLOSED, and this is a
+    // plain user sequence: hide δ, edit the program, show δ.
+    //
+    // `#drawTable` writes `scrollTop` BEFORE it writes the spacer height, and a `scrollTop` write
+    // CLAMPS to the current scroll height. So a spacer left at the previous program's size silently
+    // truncates the reopen write: coming from `let x = 40; x + 2` (8,112px) into `map_fold`
+    // (620,448px), a request for 161,786 was clamped to 7,755 — the current row not on screen, and
+    // then the echo arriving against an unclamped expectation detached the table with no user gesture
+    // at all. From a program that declined the TM leg the spacer is 0px, the write clamps to 0, and no
+    // scroll event fires at all: parked at row 0, still nominally following, no reattach offered.
+    it('keeps the scroll range honest across a compile with the table hidden', async () => {
+      await settled(view, 'let x = 40; x + 2')
+      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
+      const reattach = document.querySelector('#tm .table-reattach') as HTMLButtonElement
+
+      toggle.click()
+      await settled(view, BIG)
+      toggle.click()
+      await until(() => spacer().style.height === BIG_SPACER)
+
+      // The echo lands a frame or two after the reopen write, so give it time to do its damage.
+      await new Promise((r) => setTimeout(r, 150))
+      expect(document.querySelector('#tm .state-row.is-current')).not.toBeNull()
+      expect(reattach.hidden).toBe(true)
+    })
+
+    it('hides and shows the table without losing the play head', async () => {
+      await settled(view, 'let x = 40; x + 2')
+      for (let i = 0; i < 4; i += 1) click('tm', '◀')
+      const step = stepText('tm')
+      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
+      toggle.click()
+      expect(table().hidden).toBe(true)
+      toggle.click()
+      expect(stepText('tm')).toBe(step)
+    })
+
+    it('shows no table for a program that declines the TM leg', async () => {
+      // §11.9's known one-leg program: `200` under unary overflows the TM leg and leaves λ steppable.
+      await settled(view, 'let x = 200; x + 1')
+      expect(document.querySelectorAll('#tm .state-row').length).toBe(0)
+      // A row count of zero alone would also be satisfied by the app failing to render at all, or by
+      // `#tm` not existing. Pin that the page IS alive and the OTHER leg did compile, so this test
+      // fails for a missing table rather than for a missing app.
+      expect(document.querySelector('#tm .state-table')).not.toBeNull()
+      expect(paneText('lambda')).not.toBe('')
+    })
+
+    // The toggle must not disturb the table's own state either — a reopen that lost the highlight
+    // would leave the play head intact and still be wrong, which `stepText` alone cannot see.
+    it('keeps the highlight across a hide and show', async () => {
+      await settled(view, 'let x = 40; x + 2')
+      click('tm', '◀')
+      const current = document.querySelector('#tm .state-row.is-current')?.textContent
+      expect(current).toBeDefined()
+      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
+      toggle.click()
+      toggle.click()
+      expect(document.querySelector('#tm .state-row.is-current')?.textContent).toBe(current)
+      expect(document.querySelectorAll('#tm .state-row.is-firing').length).toBe(1)
     })
   })
 })

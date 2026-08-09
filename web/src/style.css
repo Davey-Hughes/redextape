@@ -304,3 +304,81 @@ main {
   font-family: var(--font-mono);
   font-size: var(--step--1);
 }
+
+.table-toggle {
+  font-size: var(--step--1);
+  margin-block-start: var(--space-2);
+}
+
+/* ADDED AND REMOVED, NEVER DISABLED (`pane-chrome.ts`'s comment for the continue button) — present
+   only while `Follow` is detached, via `hidden` rather than `disabled`, so it sits beside `.table-toggle`
+   with the same treatment. */
+.table-reattach {
+  font-size: var(--step--1);
+  margin-block-start: var(--space-2);
+  margin-inline-start: var(--space-2);
+}
+
+/* `.pane` is `overflow: auto` and NOT a flex column (style.css:96-98), so the table cannot size itself
+   with `flex: 1 1 auto` — it needs an explicit bound or it grows to its full 3,069,144px. */
+.state-table {
+  overflow-y: auto;
+  max-height: 40vh;
+  margin-block-start: var(--space-2);
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+}
+
+.state-spacer {
+  position: relative;
+}
+
+.state-rows {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  will-change: transform;
+}
+
+/* MUST equal ROW_HEIGHT in state-table.ts. virtual-list.ts's offset arithmetic assumes it exactly, and
+   a mismatch drifts the rows out from under the scrollbar without any test noticing. `tm-pane.ts`
+   re-exports the constant; it does not define it. */
+.state-row {
+  height: 24px;
+  line-height: 24px;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-inline: 0.5rem;
+}
+
+.state-row.is-state {
+  font-weight: 600;
+}
+
+.state-row.is-accept::after {
+  content: " · accept";
+  opacity: 0.6;
+  font-weight: 400;
+}
+
+.state-row.is-rule {
+  padding-inline-start: 1.5rem;
+  opacity: 0.85;
+}
+
+/* `--accent-soft` DOES NOT EXIST in the palette PR #20 landed — the variables are `--bg`,
+   `--bg-raised`, `--fg`, `--fg-dim`, `--rule`, `--accent`, and the `--tok-*` set. Mixed from `--accent`
+   rather than added to the palette: this is one feature's highlight, and PR #20's whole point was a
+   palette that does not say everything twice. Both operands are `light-dark()`, so the mix is
+   theme-aware without a second declaration. */
+.state-row.is-current {
+  background: color-mix(in oklab, var(--accent) 14%, var(--bg));
+}
+
+.state-row.is-firing {
+  background: color-mix(in oklab, var(--accent) 24%, var(--bg));
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}

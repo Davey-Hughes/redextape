@@ -164,8 +164,9 @@ impl Iterator for LambdaCursor {
 /// contrast the step cap and the live-cell cap are genuinely interchangeable: both return `HitCap` with
 /// no side effect on either path, so no test can tell them apart and none should pretend to.
 ///
-/// `rule_matches` and `apply` stay in `sim` because they read `Tape`'s private zipper; this is their only
-/// caller.
+/// `rule_matches` and `apply` stay in `sim` because they read `Tape`'s private zipper. This is `apply`'s
+/// only caller; `rule_matches` has a second, `viewmodel.rs`'s `TmState::window`, which resolves the rule
+/// about to fire for the UI rather than to advance the machine.
 pub struct TmCursor<M> {
     machine: M,
     tapes: Vec<Tape>,

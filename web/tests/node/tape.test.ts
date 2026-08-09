@@ -11,6 +11,7 @@ const state = (over: Partial<TmState> = {}): TmState => ({
   window_start: [3],
   window: [['a', 'b', 'c', 'd', 'e']],
   source_node: null,
+  rule: null,
   ...over,
 })
 

@@ -45,6 +45,11 @@ export default defineConfig({
         test: {
           name: 'browser',
           include: ['tests/browser/**/*.test.ts'],
+          // Vitest serves its own tester HTML, so this project's `index.html` — and therefore its
+          // `<link>` to `style.css` — never reaches the page. See `tests/browser/setup.ts`: without it
+          // the state table's `max-height: 40vh` never applies and the browser tier measures a
+          // different geometry than the app ships.
+          setupFiles: ['tests/browser/setup.ts'],
           browser: {
             enabled: true,
             provider: playwright({

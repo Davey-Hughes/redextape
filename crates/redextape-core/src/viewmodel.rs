@@ -124,6 +124,32 @@ pub struct TmState {
     pub window_start: Vec<usize>,
     pub window: Vec<Vec<Symbol>>,
     pub source_node: Option<NodeId>,
+    /// The index into `states[state].rules` of the rule ABOUT TO FIRE, or `None` when nothing matches.
+    ///
+    /// IT NAMES WHAT HAPPENS NEXT, NOT WHAT PRODUCED THIS STATE. `window` is called after a step, so
+    /// the tapes it reads and the `state` beside this field are both post-step; the first rule matching
+    /// those tapes is what the FOLLOWING step will take. `None` — at an accept state, at `halt`, or at a
+    /// genuinely stuck configuration — is a real answer about why a run stopped, not a missing one.
+    ///
+    /// `Some` DOES NOT PROMISE THE CURSOR WILL STEP, and the ordering that makes this true is one
+    /// module over: `TmCursor::next` reads the step and cell caps BEFORE it matches a rule
+    /// (`trace.rs`), returning `HitCap` without consulting δ at all. So at a spent cap this field names
+    /// a transition the very next `next()` will not take.
+    ///
+    /// THAT IS DELIBERATE, AND ANSWERING `None` THERE WOULD BE WORSE. A cap is raiseable —
+    /// `raise_cap` exists and `[continue]` is wired to it — so a run sitting at one is PAUSED, not
+    /// stuck, and the rule this field names is exactly what fires once the cap moves. Reporting `None`
+    /// would make a paused run indistinguishable from a halted one, which is the conflation
+    /// `RecordEnd`'s four outcomes exist to prevent one layer up (`web/src/protocol.ts`: "conflating
+    /// any two of them is the trap"). Whether the cursor may step is `status()`'s question, and a
+    /// consumer that needs both asks both.
+    ///
+    /// RESOLVED BY `sim::rule_matches`, THE CRATE'S ONLY δ-MATCHER, rather than re-derived. A consumer
+    /// could compute this from `window`, `heads` and `window_start`, which the frame already carries —
+    /// and that consumer would be a second copy of first-match-wins-with-wildcards in a language whose
+    /// compiler cannot see this one. `usize` rather than `u32` to match `heads` and `window_start`
+    /// beside it; on wasm32 they are the same width and cross as plain numbers.
+    pub rule: Option<usize>,
 }
 
 /// A λ term as a flat arena, so that NOTHING DERIVED ON IT RECURSES.
@@ -349,8 +375,10 @@ impl TmState {
         }
         let state = c.state();
         // `get`, never `[]`: a `StateId` past the end must answer `None` rather than abort a renderer.
-        let source_node = c.machine().states.get(state as usize).and_then(|s| map.tm_owner(&s.name));
-        TmState { state, step: c.steps_taken(), heads, window_start, window, source_node }
+        let entry = c.machine().states.get(state as usize);
+        let source_node = entry.and_then(|s| map.tm_owner(&s.name));
+        let rule = entry.and_then(|s| s.rules.iter().position(|r| crate::tm::sim::rule_matches(&r.read, c.tapes())));
+        TmState { state, step: c.steps_taken(), heads, window_start, window, source_node, rule }
     }
 }
 
