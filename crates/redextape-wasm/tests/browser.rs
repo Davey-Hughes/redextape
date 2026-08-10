@@ -160,17 +160,20 @@ fn compile_step_and_read_both_legs() {
     assert_ne!(owner, JsValue::NULL, "Owner::None is a variant name, not Option::None -- it must not be null");
     assert_eq!(owner.as_string().as_deref(), Some("None"), "a fieldless enum variant crosses as its bare name");
 
-    // `redex` at the normal form: `Some(path)`, never `None`, because SOME step produced this frame.
-    // A `Vec<Dir>` is an externally-tagged enum's array-of-bare-names, the same representation
-    // `TermNode`'s own enum arms use elsewhere in this file (`{Var:n}` etc. use the struct-variant
-    // form; `Dir` is fieldless, so it takes the *unit*-variant form: the string itself).
-    let redex: Array = get(&state, "redex").unchecked_into();
-    assert!(redex.length() > 0, "the step that produced the normal form took a real path to get there");
-    let last = redex.get(redex.length() - 1).as_string().expect("a Dir entry marshals as a string");
-    assert!(
-        ["AppL", "AppR", "AbsBody"].contains(&last.as_str()),
-        "a Dir must cross as one of its own variant names, got {last:?}"
-    );
+    // `redex_span` at the normal form: `Some(span)`, because SOME step produced this frame and this
+    // program's print does not truncate (`cut` is null, asserted above). It crosses as a `Span` object,
+    // not as the `Path` behind it — see the next assertion.
+    let redex_span = get(&state, "redex_span");
+    assert_ne!(redex_span, JsValue::NULL, "the step that produced the normal form has a locatable contractum");
+    assert!(num(&redex_span, "end") > num(&redex_span, "start"), "a recorded span is non-empty, got {redex_span:?}");
+
+    // AND THE PATH ITSELF IS ABSENT, WHICH IS A DECISION AND NOT AN OVERSIGHT. `LambdaState.redex` is
+    // `serde(skip)`ped (see its own doc): the span above is resolved Rust-side by the walk that already
+    // prints `text`, and the ~9.3-element `Vec<Dir>` behind it had no JS reader while still costing the
+    // history ring. UN-SKIPPING IT FOR THE TREE VIEW MUST FAIL HERE FIRST — that is the point of pinning
+    // absence rather than deleting the assertion. Restoring the field means restoring `types.ts`'s
+    // `redex` and `protocol.ts`'s `PATH_ENTRY_BYTES` term with it, and this is what says so.
+    assert!(get(&state, "redex").is_undefined(), "the redex path is skipped on the wire; only `redex_span` crosses");
 
     let ast = call(&session, "lambdaAst", &[JsValue::from_f64(1_000_000.0)]);
     assert!(!ast.is_null(), "an unreachable node budget yields a tree");
@@ -307,6 +310,11 @@ fn compile_step_and_read_both_legs() {
 ///   * step 2 owner={"Within":2} redex=["AppL"]
 ///   * step 3 owner={"Exact":2} redex=[]
 ///
+/// THE `redex` COLUMN IS RUST-SIDE ONLY and is shown because it is what EXPLAINS the owner column, not
+/// because this test can read it: `LambdaState.redex` is `serde(skip)`ped (see its own doc), so what
+/// crosses is the already-resolved `redex_span`. `crates/redextape-core/tests/lambda_provenance.rs`
+/// owns the paths natively; this test owns the marshaling.
+///
 /// which tells the same story `lambda_provenance.rs::lowering_tags_each_core_construct_at_its_own_
 /// root` proves natively: the `Let` tags its own root App, so the FIRST β-step (contracting the whole
 /// term) reports `Exact` with an EMPTY path — the redex IS the term, not something inside it. The
@@ -322,12 +330,12 @@ fn compile_step_and_read_both_legs() {
 /// nothing to do with marshaling. What crosses the boundary and what this test owns is the SHAPE: which
 /// key is present, and that its value is a number.
 #[wasm_bindgen_test]
-fn lambda_state_owner_and_redex_take_every_shape_across_a_real_reduction() {
+fn lambda_state_owner_takes_every_shape_across_a_real_reduction() {
     let (_, session) = compile("let x = 40; x + 2");
 
     let s0 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
     assert_eq!(get(&s0, "owner").as_string().as_deref(), Some("None"), "no step taken yet, no owner claim");
-    assert_eq!(get(&s0, "redex"), JsValue::NULL, "no step taken yet, no redex path");
+    assert_eq!(get(&s0, "redex_span"), JsValue::NULL, "no step taken yet, nothing to locate");
 
     assert_eq!(call(&session, "stepLambda", &[]), JsValue::TRUE, "step 1 must succeed");
     let s1 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
@@ -339,9 +347,12 @@ fn lambda_state_owner_and_redex_take_every_shape_across_a_real_reduction() {
     );
     let exact1 = get(&owner1, "Exact");
     assert!(exact1.as_f64().is_some(), "step 1's redex is the Let's own tagged App: Exact, got owner={owner1:?}");
-    let redex1: Array = get(&s1, "redex").unchecked_into();
-    assert_ne!(get(&s1, "redex"), JsValue::NULL, "an empty path is `[]`, not `null` -- they are different wire values");
-    assert_eq!(redex1.length(), 0, "the first redex is the whole term: an empty path");
+    // The first redex is the whole term (an empty path, Rust-side), so its span is the whole print —
+    // the case where "no redex" and "the redex is everything" could most easily be confused for each
+    // other on the wire, since one crosses as `null` and the other as a span starting at 0.
+    let span1 = get(&s1, "redex_span");
+    assert_ne!(span1, JsValue::NULL, "a step has been taken; the contractum is locatable");
+    assert_eq!(num(&span1, "start"), 0.0, "the first redex is the whole term, so its span starts at 0");
 
     assert_eq!(call(&session, "stepLambda", &[]), JsValue::TRUE, "step 2 must succeed");
     let s2 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
@@ -352,9 +363,6 @@ fn lambda_state_owner_and_redex_take_every_shape_across_a_real_reduction() {
         within2.as_f64().is_some(),
         "step 2's redex sits under a tagged ancestor without its own tag: Within, got owner={owner2:?}"
     );
-    let redex2: Array = get(&s2, "redex").unchecked_into();
-    assert_eq!(redex2.length(), 1, "step 2's redex is one level into the reduct");
-    assert_eq!(redex2.get(0).as_string().as_deref(), Some("AppL"), "a Dir crosses as its bare variant name");
 
     assert_eq!(call(&session, "stepLambda", &[]), JsValue::TRUE, "step 3 must succeed");
     let s3 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);

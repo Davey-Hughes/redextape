@@ -42,12 +42,14 @@ const SRC = 'let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n 
  * array length, string data and object-shape overhead are present in BOTH runs and cancel out of the
  * differential.
  *
- * NOT ONLY `spans` DIFFERS, AND THE OVER-ATTRIBUTION IS MEASURED RATHER THAN WAVED AT. `redex`,
- * `redex_span` and `owner` are dropped here too, so the differential charges them to spans as well.
- * Measured 2026-08-10 against a third arm that keeps all three and drops only `spans`: 74.08
- * bytes/span with them dropped against 73.63 with them kept — 0.45 bytes, 0.6% of the figure, on a
- * constant that is then rounded up. Dropping them is what keeps this arm a plain object literal with
- * no `LambdaState` shape behind it; paying 0.6% for that is the trade.
+ * NOT ONLY `spans` DIFFERS, AND THE OVER-ATTRIBUTION IS MEASURED RATHER THAN WAVED AT. `redex_span`
+ * and `owner` are dropped here too, so the differential charges them to spans as well. Measured
+ * 2026-08-10 against a third arm that keeps them and drops only `spans`: 74.08 bytes/span with them
+ * dropped against 73.63 with them kept — 0.45 bytes, 0.6% of the figure, on a constant that is then
+ * rounded up. Dropping them is what keeps this arm a plain object literal with no `LambdaState` shape
+ * behind it; paying 0.6% for that is the trade. (That measurement predates `LambdaState.redex` leaving
+ * the wire and so also charged the redex path to spans; removing a term the slim arm never had can only
+ * have moved the figure DOWN, which is the safe direction for a constant that is rounded up.)
  */
 type SlimFrame = { step: number; text: string; cut: Cut | null }
 

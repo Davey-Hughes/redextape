@@ -80,6 +80,20 @@ pub struct LambdaState {
     /// once and the field stays honest either way, because the path never leaves the frame it is
     /// resolved against; the consequence is only that a consumer painting it is showing WHAT THE STEP
     /// JUST PRODUCED, not what the step was about to contract.
+    ///
+    /// **NOT ON THE WIRE — `serde(skip)`, UNTIL THE TREE VIEW READS IT.** It has no JS consumer today:
+    /// the λ pane paints from `redex_span`, and shipping the path as well put a ~9.3-element array of
+    /// `Dir` strings on every frame that nothing read and that `lambdaFrameBytes` then charged against
+    /// `HISTORY_BYTES`, evicting the ring earlier for dead weight. `reduce.rs`'s `reduce_trace` refuses
+    /// to widen `Step` for exactly that reason ("a field with no reader"); the same rule applies here.
+    ///
+    /// **IT STAYS ON THE RUST TYPE RATHER THAN BEING DELETED**, because `redex_span` cannot replace it
+    /// for a STRUCTURAL consumer: a byte span is a coordinate into `text`, and `LambdaState::tree`'s
+    /// `TermTree` has no text to index into. The planned tree view needs the path itself. Skipping is
+    /// what makes that a wire decision that can be reversed by deleting one attribute, rather than a
+    /// deletion that has to be re-derived. `Option<Path>` is `Default`, so the `Deserialize` half of the
+    /// derive is well-formed even though nothing in this tree deserializes a `LambdaState`.
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub redex: Option<Path>,
     /// `redex`'s byte span in `text`, ABOVE — I.E. IN THIS FRAME'S OWN TEXT. `None` when there is no
     /// redex to locate (step 0, same as `redex` itself) OR when `redex`'s subterm fell outside what

@@ -3,7 +3,6 @@ import {
   FRAME_OVERHEAD_BYTES,
   lambdaFrameBytes,
   OWNER_BYTES,
-  PATH_ENTRY_BYTES,
   REDEX_SPAN_BYTES,
   SPAN_BYTES,
   tmFrameBytes,
@@ -15,7 +14,6 @@ const lam = (text: string, spans: number): LambdaState => ({
   spans: Array.from({ length: spans }, (_, i) => [{ start: i, end: i + 1 }, 'Ident'] as const) as LambdaState['spans'],
   cut: null,
   step: 0,
-  redex: null,
   redex_span: null,
   owner: 'None',
 })
@@ -63,23 +61,7 @@ describe('frame sizers', () => {
 })
 
 describe('lambdaFrameBytes', () => {
-  const base: LambdaState = { text: 'ab', spans: [], cut: null, step: 1, redex: null, redex_span: null, owner: 'None' }
-
-  it('charges for the redex path, or the ring under-reports', () => {
-    const withPath: LambdaState = { ...base, redex: ['AppL', 'AppR', 'AbsBody'] }
-    expect(lambdaFrameBytes(withPath)).toBeGreaterThan(lambdaFrameBytes(base))
-  })
-
-  // Stronger than the sibling test above: a flat "some path present" surcharge would also pass a
-  // bare `toBeGreaterThan` check. Pinning the delta to `PATH_ENTRY_BYTES` per entry, and checking it
-  // doubles when the path doubles, is what catches a charge that does not scale with path length —
-  // exactly the kind of miss `SPAN_BYTES`'s sibling test above already guards against for spans.
-  it('charges PATH_ENTRY_BYTES per entry, not a flat per-path surcharge', () => {
-    const path3: LambdaState = { ...base, redex: ['AppL', 'AppR', 'AbsBody'] }
-    const path6: LambdaState = { ...base, redex: ['AppL', 'AppR', 'AbsBody', 'AppL', 'AppR', 'AbsBody'] }
-    expect(lambdaFrameBytes(path3) - lambdaFrameBytes(base)).toBe(3 * PATH_ENTRY_BYTES)
-    expect(lambdaFrameBytes(path6) - lambdaFrameBytes(path3)).toBe(3 * PATH_ENTRY_BYTES)
-  })
+  const base: LambdaState = { text: 'ab', spans: [], cut: null, step: 1, redex_span: null, owner: 'None' }
 
   // This alone cannot tell OWNER_BYTES from a dropped term: the surcharge is flat, so both sides move
   // together and a missing `+ OWNER_BYTES` would still pass. See the computed-total test below for
@@ -90,7 +72,9 @@ describe('lambdaFrameBytes', () => {
     expect(lambdaFrameBytes(exact)).toBe(lambdaFrameBytes(within))
   })
 
-  // The mirror of the redex-path test above, for the SPAN that path resolves to. `redex_span` shipped
+  // THE ONLY REDEX TERM IN THE SUM. The `Path` behind this span is not on the wire (`types.ts`'s
+  // `redex_span` doc, and `LambdaState.redex`'s `serde(skip)`), so there is no per-entry term to charge
+  // and no sibling test for one. `redex_span` shipped
   // with no term in `lambdaFrameBytes` at all, and the computed-total test below could not catch that:
   // its reference formula listed the same terms the implementation did, so it agreed with a sum that
   // was missing one. Charged only when there IS a span — most frames early in a run have none.
@@ -123,10 +107,9 @@ describe('lambdaFrameBytes', () => {
       spans: [],
       cut: null,
       step: 1,
-      redex: ['AppL', 'AppR'],
       redex_span: { start: 0, end: 2 },
       owner: { Exact: 3 },
     }
-    expect(lambdaFrameBytes(f)).toBe(FRAME_OVERHEAD_BYTES + 2 + 2 * PATH_ENTRY_BYTES + REDEX_SPAN_BYTES + OWNER_BYTES)
+    expect(lambdaFrameBytes(f)).toBe(FRAME_OVERHEAD_BYTES + 2 + REDEX_SPAN_BYTES + OWNER_BYTES)
   })
 })

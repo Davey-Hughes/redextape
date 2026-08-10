@@ -182,6 +182,27 @@ async function main(): Promise<EditorView> {
         done: lam.done,
       }),
     )
+    // THE TM LEG'S OWN RUNNING FOCUS — `TmState.source_node`, NOT `lam.hist.current?.owner` below.
+    // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2): "TM: TmState.source_node,
+    // resolved through SourceMap::tm_owner ... none; shipped 2026-07-30." Each pane reports what ITS
+    // OWN leg is doing right now — the two clocks never synchronize (§0: `map_fold` is 555 β-steps
+    // against 266,863 δ-steps), so feeding the δ-table from the λ leg's owner would show it whatever
+    // the OTHER model was doing, not its own. `sourceNodeOwner` wraps the already-resolved node id as
+    // an `Owner` so it goes through the same `runningFocus` every other leg does.
+    //
+    // RESOLVED AND HANDED OVER BEFORE `tmPane.render`, NOT AFTER — ONE `#drawTable` PER FRAME, NOT TWO.
+    // `render` draws unconditionally and `TmPane.setFocus` is a pure setter (see its doc), so this
+    // order lets the one draw paint both layers. Reversed, the render pass would build every row
+    // against the PREVIOUS frame's focus and a second pass would immediately rebuild them — ~40
+    // elements created and discarded on every recorded frame of playback, which is a larger per-frame
+    // cost than the duplicate `index.linkFor` the comment below refuses. Nothing here reads anything
+    // `render` writes: `runningFocus` wants `linkable`/`index`/`tm.hist`, none of which it touches.
+    const tmFocus =
+      linkable && index !== null ? runningFocus(index, sourceNodeOwner(tm.hist.current?.source_node ?? null)) : null
+    const tmFocusLink: Link | null = tmFocus !== null && index !== null ? index.linkFor(tmFocus.node) : null
+    // NO SCROLL ARGUMENT — `TmPane.setFocus`'s own doc says why: the running focus is not a gesture,
+    // and scrolling to it on every δ-step would fight `Follow`'s own scroll for the CURRENT row.
+    tmPane.setFocus(tmFocusLink?.states ?? [])
     tmPane.render(
       tm.hist.current ?? null,
       controlState({
@@ -237,23 +258,10 @@ async function main(): Promise<EditorView> {
       const claim = isCoincident(link, focus) ? 'coincident' : focus.claim
       view.dispatch({ effects: setFocus.of({ span: focusLink.source, claim }) })
     }
-    // THE TM LEG'S OWN RUNNING FOCUS — `TmState.source_node`, NOT `lam.hist.current?.owner` above.
-    // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2): "TM: TmState.source_node,
-    // resolved through SourceMap::tm_owner ... none; shipped 2026-07-30." Each pane reports what ITS
-    // OWN leg is doing right now — the two clocks never synchronize (§0: `map_fold` is 555 β-steps
-    // against 266,863 δ-steps), so feeding the δ-table from the λ leg's owner would show it whatever
-    // the OTHER model was doing, not its own. `sourceNodeOwner` wraps the already-resolved node id as
-    // an `Owner` so it goes through the same `runningFocus` every other leg does.
-    const tmFocus =
-      linkable && index !== null ? runningFocus(index, sourceNodeOwner(tm.hist.current?.source_node ?? null)) : null
-    const tmFocusLink: Link | null = tmFocus !== null && index !== null ? index.linkFor(tmFocus.node) : null
-    // NO SCROLL ARGUMENT — `TmPane.setFocus`'s own doc says why: the running focus is not a gesture,
-    // and scrolling to it on every δ-step would fight `Follow`'s own scroll for the CURRENT row.
-    tmPane.setFocus(tmFocusLink?.states ?? [])
-    // `drawLink` NOW RUNS HERE, AFTER BOTH FOCI ARE RESOLVED, NOT AT THE TOP OF THIS FUNCTION —
-    // `link-status.ts`'s SECOND job needs `tmFocus` to answer whether it coincides with the pin, and
-    // that answer does not exist until this line. Still "at the end" in the sense the original comment
-    // meant: everything above it is a `history`/`index` read, nothing below reads `drawLink`'s output.
+    // `drawLink` NOW RUNS HERE, AT THE END, NOT AT THE TOP OF THIS FUNCTION — `link-status.ts`'s
+    // SECOND job needs `tmFocus` (resolved above `tmPane.render`) to answer whether it coincides with
+    // the pin. Still "at the end" in the sense the original comment meant: everything above it is a
+    // `history`/`index` read, nothing below reads `drawLink`'s output.
     drawLink(l, isCoincident(link, tmFocus))
   }
 
@@ -623,12 +631,17 @@ async function main(): Promise<EditorView> {
           // the previous program's focused rows would stay painted until the next `compiled` reply.
           // `focusMark` (the CodeMirror decoration) needs no matching call — it clears itself on
           // `docChanged`, same as `linkMark`.
+          //
+          // AND IT RUNS BEFORE `setLink`, WHICH IS THE ONE THAT DRAWS. `setFocus` is a pure setter (its
+          // own doc says why); `setLink` is what calls `#drawTable`, so it has to be the LAST of the two
+          // or the cleared focus would not reach the DOM until some later draw. Same rule `draw()`
+          // follows by putting its own `setFocus` ahead of `tmPane.render`.
           linkable = false
           link = null
           drawLink(null, false)
           lambdaPane.renderLink(null)
-          tmPane.setLink([], false)
           tmPane.setFocus([])
+          tmPane.setLink([], false)
           schedule(src)
         }),
       ],

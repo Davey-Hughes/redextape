@@ -210,10 +210,24 @@ export class TmPane {
    * `Follow`'s own scroll for the CURRENT row, which already runs unconditionally in `#drawTable`. The
    * caller passes `states: number[]`, already resolved through `LinkIndex.linkFor` — this class never
    * imports `LinkIndex`, matching `setLink`'s own boundary.
+   *
+   * **A PURE SETTER — IT DOES NOT DRAW, AND THAT ASYMMETRY WITH `setLink` IS THE POINT.** `setLink` has
+   * to draw because a click reaches it with no `render` behind it. This one is only ever called on a
+   * path where a `#drawTable` is already about to run for another reason, and calling it here too made
+   * that TWO full table rebuilds per rendered frame: `main.ts`'s `draw()` runs `render(...)` — which
+   * draws unconditionally — on every recorded frame during playback, so the first pass built ~40 rows
+   * against the PREVIOUS frame's `#focused` and threw them away microseconds later. Both callers order
+   * themselves so a draw follows: `draw()` calls this BEFORE `render(...)`, and the keystroke handler
+   * calls it before `setLink([], false)`. Move either call after its draw and the focus silently lags
+   * one frame.
+   *
+   * THAT ORDERING IS GATED, NOT MERELY DOCUMENTED. `running-focus.test.ts`'s `lights the δ-table block
+   * the machine is running inside` fails under exactly that mutation — verified by moving `draw()`'s
+   * call below `tmPane.render(...)` and rerunning: the table reports the PREVIOUS frame's focus (`[]`
+   * where `['pc4']` is expected at step 2,869), and nothing else in the suite moves.
    */
   setFocus(states: number[]): void {
     this.#focused = this.#index === null ? new Set() : focusedRows(this.#index, states)
-    this.#drawTable()
   }
 
   render(frame: TmState | null, controls: ControlState): void {

@@ -8,7 +8,6 @@ const okState: LambdaState = {
   spans: [],
   cut: null,
   step: 7,
-  redex: null,
   redex_span: null,
   owner: 'None',
 }

@@ -80,16 +80,6 @@ export const RECORD_CHUNK = 256
 export const SPAN_BYTES = 80
 
 /**
- * One `Dir` in a redex path: an interned string literal, so the retained cost is a reference.
- *
- * Not separately measured — `SPAN_BYTES` was measured because spans dominate a frame (~95% of it);
- * a redex path is mean 9.3 and max 30 entries (`reduce_step`'s doc) against that, so a per-entry
- * estimate here costs at most a few hundred bytes against a ~10 KB frame. The sizer's job is to not
- * under-report the ring, not to be precise about a term this small.
- */
-export const PATH_ENTRY_BYTES = 8
-
-/**
  * One `redex_span`: a `Span` object, `{ start, end }`, and charged only by a frame that has one.
  *
  * MEASURED, not estimated, by the same forced-collection differential `SPAN_BYTES` is (2026-08-10):
@@ -97,8 +87,8 @@ export const PATH_ENTRY_BYTES = 8
  * costs 35.1 bytes per NON-NULL span — the 264 of `while4`'s 471 frames that carry one. 40 is that
  * rounded up, the same way `SPAN_BYTES` rounds up its own measurement.
  *
- * THIS OVERLAPS `SPAN_BYTES`, DELIBERATELY. `SPAN_BYTES`'s own differential drops `redex`/`redex_span`/
- * `owner` from its slim arm too (see `frame-cost.test.ts`'s `SlimFrame` comment), so its 74.08
+ * THIS OVERLAPS `SPAN_BYTES`, DELIBERATELY. `SPAN_BYTES`'s own differential drops `redex_span`/`owner`
+ * from its slim arm too (see `frame-cost.test.ts`'s `SlimFrame` comment), so its 74.08
  * bytes/span already carries ~0.45 bytes/span of this object's cost — about 127 B/frame at 282
  * spans/frame — and `lambdaFrameBytes` charges this constant again on top, ≈130 B/frame for the same
  * object. Both directions over-report, so the double-charge is safe: ~1% of a ~13 KB frame, left as is
@@ -111,7 +101,10 @@ export const PATH_ENTRY_BYTES = 8
  *
  * A FRAME WITHOUT ONE IS CHARGED NOTHING, which is most frames near the start of a run: step 0 has no
  * redex at all, and a redex past the truncation cut records no span (see `LambdaState.redex_span`).
- * `PATH_ENTRY_BYTES` treats a null `redex` the same way.
+ *
+ * THE REDEX **PATH** IS NOT CHARGED AT ALL, because it is not on the wire — `LambdaState.redex` is
+ * `serde(skip)`ped until the tree view reads it (see that field's own doc). A `PATH_ENTRY_BYTES` term
+ * lived here and charged ~74 B/frame for an array the app never received; it comes back with the field.
  */
 export const REDEX_SPAN_BYTES = 40
 
@@ -161,7 +154,6 @@ export function lambdaFrameBytes(f: LambdaState): number {
     FRAME_OVERHEAD_BYTES +
     f.text.length +
     f.spans.length * SPAN_BYTES +
-    (f.redex?.length ?? 0) * PATH_ENTRY_BYTES +
     (f.redex_span === null ? 0 : REDEX_SPAN_BYTES) +
     OWNER_BYTES
   )

@@ -85,19 +85,24 @@ export type LambdaState = {
   spans: Classified
   cut: Cut | null
   step: number
-  redex: string[] | null
   /**
-   * `redex`'s byte span IN `text`, ABOVE — i.e. in THIS frame's own text. `null` when there is no
-   * redex (step 0, same as `redex` itself) or its subterm fell past the truncation cut (see `Cut`) —
-   * never a span clamped to where the print stopped.
+   * The byte span IN `text`, ABOVE — i.e. in THIS frame's own text — of the redex this frame's own step
+   * contracted. `null` when there is no redex (step 0) or its subterm fell past the truncation cut (see
+   * `Cut`) — never a span clamped to where the print stopped.
+   *
+   * THE PATH BEHIND IT IS NOT ON THE WIRE. `LambdaState.redex` exists on the Rust type and is
+   * `serde(skip)`ped there (see its own doc): the span is resolved on the Rust side, by the same walk
+   * that prints `text`, and only the span crosses. A structural consumer — the planned `TermTree` view,
+   * which has no text to index into — is what would bring the path across; a renderer of `text` does not
+   * need it.
    *
    * RESOLVED AGAINST THE TERM THIS FRAME HOLDS, which is what makes it trustworthy where 5b's deleted
    * `node_to_lambda`-derived `source_node` was not: that field's span was fixed once, against the
    * INITIAL term, and went stale the moment reduction contracted a root redex. `redex_span` is computed
-   * fresh every frame from `redex`'s own path walked against `text`'s own print, so it never outlives
-   * the frame it was computed for.
+   * fresh every frame, from the redex path walked against `text`'s own print, so it never outlives the
+   * frame it was computed for.
    *
-   * NAMED FOR THE REDEX, BUT WHAT IT COVERS IS THE CONTRACTUM. `redex` is the path to the redex `App`
+   * NAMED FOR THE REDEX, BUT WHAT IT COVERS IS THE CONTRACTUM. The path behind it named the redex `App`
    * as it stood in the PRE-step term; β consumed that `App` and its `Abs`, so the subterm standing at
    * that path in THIS frame's term — the text this span covers — is the contractum the step PRODUCED.
    * A renderer painting it is showing "what just changed", not "what is about to be contracted".
