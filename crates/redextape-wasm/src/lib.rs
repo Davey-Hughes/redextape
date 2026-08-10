@@ -286,7 +286,14 @@ impl Session {
         let out = js_sys::Object::new();
         let set = |k: &str, v: &JsValue| js_sys::Reflect::set(&out, &JsValue::from_str(k), v);
         set("lambdaText", &JsValue::from_str(&index.lambda_text))?;
-        set("lambdaTruncated", &JsValue::from_bool(index.lambda_truncated))?;
+        set(
+            "lambdaCut",
+            &match index.lambda_cut {
+                None => JsValue::NULL,
+                Some(redextape_core::lambda::Cut::Bytes) => JsValue::from_str("Bytes"),
+                Some(redextape_core::lambda::Cut::Depth) => JsValue::from_str("Depth"),
+            },
+        )?;
         set("lambdaSpanStart", &span_start)?;
         set("lambdaSpanEnd", &span_end)?;
         set("lambdaSpanClass", &span_class)?;

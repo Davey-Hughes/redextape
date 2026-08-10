@@ -193,7 +193,7 @@ pub fn print_lambda(t: &LambdaTerm) -> String {
     print_lambda_mapped(t).0
 }
 
-/// `print_lambda_mapped`, bounded. Returns the text, its spans, and whether the budget fired.
+/// `print_lambda_mapped`, bounded. Returns the text, its spans, and which limit cut the walk, if any.
 ///
 /// THE BUDGET IS ENFORCED DURING THE WALK, WHICH IS THE ENTIRE POINT. Truncating the string this
 /// function returns would be useless: `write_term` recurses over the term's LOGICAL size, and the
@@ -222,9 +222,8 @@ pub fn print_lambda(t: &LambdaTerm) -> String {
 /// the budget ever gets a chance to look at `out`. A `depth` counter threaded alongside `budget` through
 /// `write_term`, `write_app_fn`, `write_atom` and `parenthesized` — incremented once per `Abs`/`App`
 /// level, checked at the top of each function next to the budget check — catches this independently:
-/// past `lambda::reduce::MAX_TERM_DEPTH`, the walk stops and sets `hit` the same way the budget does. So
-/// `truncated` means "bounded, for either reason" — a caller cannot tell from the bool alone which limit
-/// fired, only that the walk did not run away.
+/// past the caller's `depth_cap`, the walk stops and records `Cut::Depth` the same way the budget
+/// records `Cut::Bytes`. See [`Cut`]'s doc for why a caller needs to tell the two apart, and can.
 ///
 /// The cut is not byte-exact for the same reason: the check happens between pushes (or, for the binder
 /// prefix, between push-groups), so whatever was in progress finishes. Cutting mid-token would split a
@@ -237,12 +236,16 @@ pub fn print_lambda(t: &LambdaTerm) -> String {
 /// malformed — an unclosed paren — and fails to reparse loudly. A DEPTH-truncated string can come out
 /// well-formed: syntactically valid λ text that reparses successfully into a DIFFERENT, shorter term
 /// than the one this call actually printed, silently. That is more dangerous than the budget case, not
-/// less, so the advice does not soften for it: do not pass output from a call where `truncated` came
-/// back `true`, for either reason, to `parse_lambda`.
-pub fn print_lambda_capped(t: &LambdaTerm, byte_budget: usize) -> (String, crate::analysis::Classified, bool) {
+/// less, so the advice does not soften for it: do not pass output from a call where `cut` came back
+/// `Some`, for either reason, to `parse_lambda`.
+pub fn print_lambda_capped(
+    t: &LambdaTerm,
+    byte_budget: usize,
+    depth_cap: u32,
+) -> (String, crate::analysis::Classified, Option<Cut>) {
     let want: BTreeMap<NodeId, Path> = BTreeMap::new();
-    let (text, spans, hit, _) = print_lambda_linked(t, byte_budget, &want);
-    (text, spans, hit)
+    let (text, spans, cut, _) = print_lambda_linked(t, byte_budget, depth_cap, &want);
+    (text, spans, cut)
 }
 
 /// `print_lambda`, plus a class per span. Spans are pushed as text is appended, so offsets are exact by
@@ -252,7 +255,7 @@ pub fn print_lambda_capped(t: &LambdaTerm, byte_budget: usize) -> (String, crate
 /// nothing here that can drift from the capped path — the property `an_unreachable_budget_is_identical
 /// _to_the_uncapped_printer` pins.
 pub fn print_lambda_mapped(t: &LambdaTerm) -> (String, crate::analysis::Classified) {
-    let (text, spans, _) = print_lambda_capped(t, usize::MAX);
+    let (text, spans, _) = print_lambda_capped(t, usize::MAX, MAX_TERM_DEPTH);
     (text, spans)
 }
 
@@ -283,8 +286,9 @@ pub fn print_lambda_mapped(t: &LambdaTerm) -> (String, crate::analysis::Classifi
 pub fn print_lambda_linked(
     t: &LambdaTerm,
     byte_budget: usize,
+    depth_cap: u32,
     want: &BTreeMap<NodeId, Path>,
-) -> (String, crate::analysis::Classified, bool, Vec<(Span, NodeId)>) {
+) -> (String, crate::analysis::Classified, Option<Cut>, Vec<(Span, NodeId)>) {
     let mut by_path: BTreeMap<&Path, NodeId> = BTreeMap::new();
     for (id, path) in want {
         by_path.entry(path).or_insert(*id);
@@ -294,13 +298,14 @@ pub fn print_lambda_linked(
         out: String::new(),
         spans: Vec::new(),
         budget: byte_budget,
-        hit: false,
+        depth_cap,
+        cut: None,
         path: Path::new(),
         want: &by_path,
         nodes: Vec::new(),
     };
     p.node(t, 0, Role::Term);
-    (p.out, p.spans, p.hit, p.nodes)
+    (p.out, p.spans, p.cut, p.nodes)
 }
 
 /// Where a node sits in its parent, which is what decides whether it needs parentheses.
@@ -312,6 +317,21 @@ enum Role {
     AppFn,
     /// An argument: abstractions and applications need parens.
     Atom,
+}
+
+/// Why a bounded print stopped early. `None` means it ran to completion.
+///
+/// **THE TWO ARE NOT INTERCHANGEABLE, WHICH IS WHY THIS IS NOT A BOOL.** Only the byte re-check gates
+/// a `parens` frame's closing paren, so a `Bytes` cut is reliably malformed — an unclosed paren — and
+/// fails to reparse loudly. On a `Depth` cut every enclosing `parens` frame closes its `)` as the
+/// stack unwinds, so the text can come out WELL-FORMED: valid λ text that reparses into a different,
+/// shorter term than the one printed. That is the more dangerous of the two, and a caller that cannot
+/// tell them apart cannot defend against it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Cut {
+    Bytes,
+    Depth,
 }
 
 /// The printer's state, threaded as one receiver rather than as seven parameters.
@@ -326,7 +346,12 @@ struct Printer<'a> {
     out: String,
     spans: crate::analysis::Classified,
     budget: usize,
-    hit: bool,
+    /// The deepest `Abs`/`App` level this walk may reach. **The caller's number, not
+    /// `MAX_TERM_DEPTH`** — that constant bounds the REDUCER's recursion against a native stack, and
+    /// a printer running on a browser engine's call stack needs a different, smaller one. See
+    /// `redextape_wasm::session::MAX_PRINT_DEPTH`.
+    depth_cap: u32,
+    cut: Option<Cut>,
     /// The path from the root to the node being written. Pushed and popped at exactly the three
     /// points `Dir` names, and at no others — the dispatch hops in `node` are the SAME node.
     path: Path,
@@ -342,6 +367,27 @@ struct Printer<'a> {
 // recursion the budget cannot bound (see the left-nested-spine paragraph on `print_lambda_capped`'s
 // doc) still stops well short of a native stack overflow.
 impl Printer<'_> {
+    /// FIRST CAUSE WINS — see `when_both_limits_fire_the_byte_cause_is_the_one_reported`.
+    fn set_cut(&mut self, c: Cut) {
+        if self.cut.is_none() {
+            self.cut = Some(c);
+        }
+    }
+
+    /// The one bail site's condition, in one place so the three walkers cannot drift apart. Bytes is
+    /// tested first, which is what makes `Bytes` the answer when both would fire.
+    fn bail(&mut self, depth: u32) -> bool {
+        if self.out.len() >= self.budget {
+            self.set_cut(Cut::Bytes);
+            return true;
+        }
+        if depth > self.depth_cap {
+            self.set_cut(Cut::Depth);
+            return true;
+        }
+        false
+    }
+
     /// Write `t` in `role`, recording its span if the caller asked for this path.
     ///
     /// THE ONE RECORDING SITE. Every node reaches the printer through exactly one call here, so the
@@ -349,8 +395,7 @@ impl Printer<'_> {
     /// causes. `parens` delegates to `write` rather than back to `node`, which is what stops a
     /// parenthesized node being recorded twice, the second time without its parens.
     fn node(&mut self, t: &LambdaTerm, depth: u32, role: Role) {
-        if self.out.len() >= self.budget || depth > MAX_TERM_DEPTH {
-            self.hit = true;
+        if self.bail(depth) {
             return;
         }
         let start = self.out.len();
@@ -365,7 +410,7 @@ impl Printer<'_> {
                 _ => self.parens(t, depth),
             },
         }
-        if self.hit {
+        if self.cut.is_some() {
             return;
         }
         if let Some(&id) = self.want.get(&self.path) {
@@ -374,8 +419,7 @@ impl Printer<'_> {
     }
 
     fn write(&mut self, t: &LambdaTerm, depth: u32) {
-        if self.out.len() >= self.budget || depth > MAX_TERM_DEPTH {
-            self.hit = true;
+        if self.bail(depth) {
             return;
         }
         use crate::analysis::TokenClass as C;
@@ -412,9 +456,9 @@ impl Printer<'_> {
                 // ARGUMENT. Depth is deliberately NOT re-checked here: `f` and `a` are both visited at
                 // `depth + 1`, so a bail exactly at that depth fires identically for both, and the
                 // effect is one stray space at the frontier bail site rather than a correctness gap —
-                // `hit` is already set by whichever call bailed.
+                // `cut` is already set by whichever call bailed.
                 if self.out.len() >= self.budget {
-                    self.hit = true;
+                    self.set_cut(Cut::Bytes);
                     return;
                 }
                 self.out.push(' ');
@@ -426,8 +470,7 @@ impl Printer<'_> {
     }
 
     fn parens(&mut self, t: &LambdaTerm, depth: u32) {
-        if self.out.len() >= self.budget || depth > MAX_TERM_DEPTH {
-            self.hit = true;
+        if self.bail(depth) {
             return;
         }
         use crate::analysis::TokenClass as C;
@@ -440,7 +483,7 @@ impl Printer<'_> {
         // a Church numeral or a cons chain builds). This is what keeps the bound the doc comment
         // states actually true.
         if self.out.len() >= self.budget {
-            self.hit = true;
+            self.set_cut(Cut::Bytes);
             return;
         }
         push_span(&mut self.out, &mut self.spans, ")", C::Punct);
@@ -716,6 +759,27 @@ mod tests {
         }
     }
 
+    /// The depth bound is the CALLER'S, not `MAX_TERM_DEPTH`. Driving it at 3 rather than at 3,000 is
+    /// the whole reason it became a parameter: the branch is reachable without building a term deep
+    /// enough to be a hazard in its own right.
+    #[test]
+    fn the_depth_cap_is_the_callers_number() {
+        use crate::desugar::desugar;
+        use crate::lambda::lower::lower;
+        use crate::parser::parse;
+
+        let (program, ds) = parse("10");
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let t = lower(&desugar(&program.expect("parsed"))).expect("a numeral lowers");
+
+        let (_, _, uncapped) = print_lambda_capped(&t, usize::MAX, MAX_TERM_DEPTH);
+        assert!(uncapped.is_none(), "an unreachable budget and an unreachable depth must not report truncation");
+
+        let (shallow, _, capped) = print_lambda_capped(&t, usize::MAX, 3);
+        assert_eq!(capped, Some(Cut::Depth), "a depth cap of 3 must fire on a term deeper than 3");
+        assert!(!shallow.is_empty(), "the walk still writes what it reached before bailing");
+    }
+
     #[test]
     fn capped_printing_stops_at_the_budget_and_says_so() {
         use crate::desugar::desugar;
@@ -732,11 +796,11 @@ mod tests {
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         let t = lower(&desugar(&program.expect("parsed"))).expect("first-order demo lowers");
 
-        let (full, _, full_truncated) = print_lambda_capped(&t, usize::MAX);
-        assert!(!full_truncated, "an unreachable budget must not report truncation");
+        let (full, _, full_truncated) = print_lambda_capped(&t, usize::MAX, MAX_TERM_DEPTH);
+        assert!(full_truncated.is_none(), "an unreachable budget must not report truncation");
 
-        let (short, spans, truncated) = print_lambda_capped(&t, 64);
-        assert!(truncated, "a 64-byte budget on a term printing {} bytes must fire", full.len());
+        let (short, spans, truncated) = print_lambda_capped(&t, 64, MAX_TERM_DEPTH);
+        assert_eq!(truncated, Some(Cut::Bytes), "a 64-byte budget on a term printing {} bytes must fire", full.len());
         assert!(short.len() < full.len(), "the capped output must be shorter than the full one");
         assert!(spans.iter().all(|(s, _)| s.end <= short.len()), "spans must stay inside the text");
     }
@@ -758,8 +822,8 @@ mod tests {
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         let t = lower(&desugar(&program.expect("parsed"))).expect("large numeral lowers");
 
-        let (short, _, truncated) = print_lambda_capped(&t, 128);
-        assert!(truncated);
+        let (short, _, truncated) = print_lambda_capped(&t, 128, MAX_TERM_DEPTH);
+        assert_eq!(truncated, Some(Cut::Bytes));
         // Overshoot is bounded by one binder prefix, not by the term's size — and in this region every
         // write is one byte behind its own check, so the fixed implementation lands at or very near
         // exactly 128 bytes. A wider tolerance here would let the `parenthesized` re-check regress
@@ -788,16 +852,16 @@ mod tests {
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         let t = lower(&desugar(&program.expect("parsed"))).expect("small list demo lowers");
 
-        let (full, _, full_truncated) = print_lambda_capped(&t, usize::MAX);
-        assert!(!full_truncated, "an unreachable budget must not report truncation");
+        let (full, _, full_truncated) = print_lambda_capped(&t, usize::MAX, MAX_TERM_DEPTH);
+        assert!(full_truncated.is_none(), "an unreachable budget must not report truncation");
         let exact = full.len();
 
-        let (at_budget, _, truncated) = print_lambda_capped(&t, exact);
-        assert!(!truncated, "a complete {exact}-byte printing at a {exact}-byte budget is not truncated");
+        let (at_budget, _, truncated) = print_lambda_capped(&t, exact, MAX_TERM_DEPTH);
+        assert!(truncated.is_none(), "a complete {exact}-byte printing at a {exact}-byte budget is not truncated");
         assert_eq!(at_budget, full, "and it must be the whole output");
 
-        let (_under, _, truncated_under) = print_lambda_capped(&t, exact - 1);
-        assert!(truncated_under, "one byte less must truncate");
+        let (_under, _, truncated_under) = print_lambda_capped(&t, exact - 1, MAX_TERM_DEPTH);
+        assert_eq!(truncated_under, Some(Cut::Bytes), "one byte less must truncate");
     }
 
     /// No printed byte moves. At a budget larger than the term, capped printing is byte-identical to
@@ -816,8 +880,8 @@ mod tests {
             let Some(program) = program else { continue };
             let Ok(t) = lower(&desugar(&program)) else { continue };
             let (want_text, want_spans) = print_lambda_mapped(&t);
-            let (got_text, got_spans, truncated) = print_lambda_capped(&t, usize::MAX);
-            assert!(!truncated, "{src:?}");
+            let (got_text, got_spans, truncated) = print_lambda_capped(&t, usize::MAX, MAX_TERM_DEPTH);
+            assert!(truncated.is_none(), "{src:?}");
             assert_eq!(got_text, want_text, "{src:?}: text moved");
             assert_eq!(got_spans, want_spans, "{src:?}: spans moved");
         }
@@ -847,8 +911,8 @@ mod tests {
         // eight `App` frames. Before the fix, each frame pushed its separator unconditionally: one extra
         // byte PER ARGUMENT (8 extra bytes, double the budget). After the fix, no frame writes past the
         // point the budget fired.
-        let (short, _, truncated) = print_lambda_capped(&t, 8);
-        assert!(truncated);
+        let (short, _, truncated) = print_lambda_capped(&t, 8, MAX_TERM_DEPTH);
+        assert_eq!(truncated, Some(Cut::Bytes));
         // Pins the exact landing point, not just its length: a change to the lowering that moved where
         // the walk bails would pass the two bound checks below vacuously without this.
         assert_eq!(short, "(λf. f ", "the fixture's exact truncated output moved: {short:?}");
@@ -882,8 +946,12 @@ mod tests {
         for _ in 0..(MAX_TERM_DEPTH as usize * 10) {
             t = app(t, var(0));
         }
-        let (_, _, truncated) = print_lambda_capped(&t, usize::MAX);
-        assert!(truncated, "a spine far past MAX_TERM_DEPTH must report truncated, not overflow the stack");
+        let (_, _, truncated) = print_lambda_capped(&t, usize::MAX, MAX_TERM_DEPTH);
+        assert_eq!(
+            truncated,
+            Some(Cut::Depth),
+            "a spine far past MAX_TERM_DEPTH must report a depth cut, not overflow the stack"
+        );
     }
 
     use std::collections::BTreeMap;
@@ -940,8 +1008,8 @@ mod tests {
             let t = parse_ok(src);
             let want: BTreeMap<u32, Path> = BTreeMap::new();
             for budget in [4, 16, 64, usize::MAX] {
-                let (a, sa, ha) = print_lambda_capped(&t, budget);
-                let (b, sb, hb, nodes) = print_lambda_linked(&t, budget, &want);
+                let (a, sa, ha) = print_lambda_capped(&t, budget, MAX_TERM_DEPTH);
+                let (b, sb, hb, nodes) = print_lambda_linked(&t, budget, MAX_TERM_DEPTH, &want);
                 assert_eq!(a, b, "{src:?} at budget {budget}");
                 assert_eq!(sa, sb, "{src:?} spans at budget {budget}");
                 assert_eq!(ha, hb, "{src:?} truncated at budget {budget}");
@@ -969,8 +1037,8 @@ mod tests {
         {
             let t = parse_ok(src);
             let want = all_paths(&t);
-            let (text, _, truncated, nodes) = print_lambda_linked(&t, usize::MAX, &want);
-            assert!(!truncated, "{src:?} must print whole at an unreachable budget");
+            let (text, _, truncated, nodes) = print_lambda_linked(&t, usize::MAX, MAX_TERM_DEPTH, &want);
+            assert!(truncated.is_none(), "{src:?} must print whole at an unreachable budget");
             assert_eq!(nodes.len(), want.len(), "{src:?}: every path recorded when nothing truncates");
 
             let mut closed_here = 0;
@@ -1018,7 +1086,7 @@ mod tests {
         for src in ["\\z. (\\f. \\x. f (f x)) (\\y. y) z", "\\a. \\b. a b (a b)", "\\f. \\g. \\h. f (g h) (\\q. q q)"] {
             let t = parse_ok(src);
             let want = all_paths(&t);
-            let (_, _, _, nodes) = print_lambda_linked(&t, usize::MAX, &want);
+            let (_, _, _, nodes) = print_lambda_linked(&t, usize::MAX, MAX_TERM_DEPTH, &want);
             let by_path: BTreeMap<&Path, Span> =
                 nodes.iter().map(|(s, id)| (want.get(id).expect("known id"), *s)).collect();
             for (path, parent) in &by_path {
@@ -1039,7 +1107,7 @@ mod tests {
     fn an_ancestors_span_contains_its_descendants() {
         let t = parse_ok("\\z. (\\f. \\x. f (f x)) (\\y. y) z");
         let want = all_paths(&t);
-        let (_, _, _, nodes) = print_lambda_linked(&t, usize::MAX, &want);
+        let (_, _, _, nodes) = print_lambda_linked(&t, usize::MAX, MAX_TERM_DEPTH, &want);
         let by_id: BTreeMap<u32, Span> = nodes.iter().map(|(s, id)| (*id, *s)).collect();
         for (outer, outer_path) in &want {
             for (inner, inner_path) in &want {
@@ -1065,7 +1133,7 @@ mod tests {
         let t = parse_ok("\\f. f (\\y. y)");
         let mut want: BTreeMap<u32, Path> = BTreeMap::new();
         want.insert(7, vec![Dir::AbsBody, Dir::AppR]);
-        let (text, _, _, nodes) = print_lambda_linked(&t, usize::MAX, &want);
+        let (text, _, _, nodes) = print_lambda_linked(&t, usize::MAX, MAX_TERM_DEPTH, &want);
         assert_eq!(text, "\u{3bb}f. f (\u{3bb}y. y)");
         let (span, id) = nodes.first().copied().expect("the argument must be recorded");
         assert_eq!(id, 7);
@@ -1089,13 +1157,13 @@ mod tests {
         // walk's output at budgets 0..=15 and was deleted once these numbers were confirmed): the walk
         // produces exactly `"λf. f (λy. "` (13 bytes) and stops inside the inner `Abs`'s body write, so
         // `Var f` at `[AbsBody, AppL]` finishes and is recorded, while `(\y. y)` at `[AbsBody, AppR]` —
-        // whose opening paren is written but whose own recording site never runs because `hit` is
+        // whose opening paren is written but whose own recording site never runs because `cut` is
         // already set when its `node()` call returns — is cut and must not appear at all. A clamping
         // implementation would instead record it as `(7, 13)`, i.e. `"(λy. "`.
         let t = parse_ok("\\f. f (\\y. y)");
         let want = all_paths(&t);
-        let (text, _, truncated, nodes) = print_lambda_linked(&t, 10, &want);
-        assert!(truncated, "budget 10 must truncate this term");
+        let (text, _, truncated, nodes) = print_lambda_linked(&t, 10, MAX_TERM_DEPTH, &want);
+        assert_eq!(truncated, Some(Cut::Bytes), "budget 10 must truncate this term");
         assert_eq!(text, "\u{3bb}f. f (\u{3bb}y. ", "budget 10's exact truncated text changed");
         assert!(!nodes.is_empty(), "a walk that gets partway must record the part it completed");
 
@@ -1119,5 +1187,57 @@ mod tests {
         );
 
         assert_eq!(nodes.len(), 1, "exactly one path completes before budget 10 cuts this term");
+    }
+
+    /// The two producers of a cut are different kinds of object, so a caller must be able to tell them
+    /// apart. Only the BYTE cut is reliably malformed (`parens` re-checks bytes before its closing paren
+    /// and does not re-check depth); a DEPTH cut can come out well-formed and reparse into a different,
+    /// shorter term. `trace.rs`'s `depth_capped` draws exactly this distinction for `HitCap`.
+    #[test]
+    fn a_cut_names_the_limit_that_fired() {
+        use crate::desugar::desugar;
+        use crate::lambda::lower::lower;
+        use crate::parser::parse;
+
+        let (program, ds) = parse("10");
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let t = lower(&desugar(&program.expect("parsed"))).expect("a numeral lowers");
+
+        let (_, _, none) = print_lambda_capped(&t, usize::MAX, MAX_TERM_DEPTH);
+        assert_eq!(none, None, "a walk that ran to completion was not cut");
+
+        let (_, _, by_depth) = print_lambda_capped(&t, usize::MAX, 3);
+        assert_eq!(by_depth, Some(Cut::Depth), "an unreachable byte budget leaves depth as the only cause");
+
+        let (_, _, by_bytes) = print_lambda_capped(&t, 8, MAX_TERM_DEPTH);
+        assert_eq!(by_bytes, Some(Cut::Bytes), "an unreachable depth cap leaves bytes as the only cause");
+    }
+
+    /// FIRST CAUSE WINS, which is only observable when both limits fire at the SAME `bail()` call —
+    /// not merely reachable somewhere in the same print. The walk continues at siblings after a bail,
+    /// so without the rule the reported cause would be whichever subtree bailed LAST; that is a
+    /// different property from precedence at one site, and does not pin the order `bail` checks in.
+    ///
+    /// The numbers are chosen so both conditions are true at the one deciding call. `church(10)`'s two
+    /// `Abs` prefixes write `"λf. λx. "` — 10 bytes — before the walk reaches the application chain, so
+    /// the `bail(depth)` call guarding that chain's root sees `depth == 2` and `out.len() == 10`. Budget
+    /// 8 makes `out.len() >= budget` true there (`10 >= 8`), and depth cap 1 makes `depth > depth_cap`
+    /// true there too (`2 > 1`) — both at that identical call, not one at an earlier bail and the other
+    /// at a later one. (Depth cap 3, used previously, made only the byte condition true at that call —
+    /// the test passed but did not exercise precedence, only walk order.) `bail` tests bytes before
+    /// depth, so bytes is the answer.
+    #[test]
+    fn when_both_limits_fire_the_byte_cause_is_the_one_reported() {
+        use crate::desugar::desugar;
+        use crate::lambda::lower::lower;
+        use crate::parser::parse;
+
+        let (program, ds) = parse("10");
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        let t = lower(&desugar(&program.expect("parsed"))).expect("a numeral lowers");
+
+        // Both true at the same bail() call: see the doc comment above for the byte/depth trace.
+        let (_, _, both) = print_lambda_capped(&t, 8, 1);
+        assert_eq!(both, Some(Cut::Bytes), "bytes is tested before depth at the same bail site");
     }
 }

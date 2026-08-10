@@ -1,8 +1,8 @@
-import type { Classified, Span } from './types'
+import type { Classified, Cut, Span } from './types'
 import { TOKEN_CLASSES } from './types'
 
 /**
- * `linkIndex(byteBudget)`'s wire shape: one string, one boolean, and ten typed arrays.
+ * `linkIndex(byteBudget)`'s wire shape: one string, one nullable cut, and ten typed arrays.
  *
  * COLUMNAR BECAUSE THE OBJECT FORM DOES NOT FIT. `list60` is 552 KB as arrays of objects against
  * ~220 KB this way, and `prog200` is 1.9 MB against ~689 KB — and the app rebuilds this on every
@@ -10,7 +10,7 @@ import { TOKEN_CLASSES } from './types'
  */
 export type LinkIndexWire = {
   lambdaText: string
-  lambdaTruncated: boolean
+  lambdaCut: Cut | null
   lambdaSpanStart: Uint32Array
   lambdaSpanEnd: Uint32Array
   lambdaSpanClass: Uint8Array
@@ -69,7 +69,7 @@ function innermost(start: Uint32Array, end: Uint32Array, byteOffset: number): nu
  */
 export class LinkIndex {
   readonly lambdaText: string
-  readonly lambdaTruncated: boolean
+  readonly lambdaCut: Cut | null
 
   #w: LinkIndexWire
   /** `node -> its ascending state ids`, derived on first ask and cached. */
@@ -80,7 +80,7 @@ export class LinkIndex {
   constructor(wire: LinkIndexWire) {
     this.#w = wire
     this.lambdaText = wire.lambdaText
-    this.lambdaTruncated = wire.lambdaTruncated
+    this.lambdaCut = wire.lambdaCut
   }
 
   /**

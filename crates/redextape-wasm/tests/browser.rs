@@ -136,7 +136,7 @@ fn compile_step_and_read_both_legs() {
 
     let state = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
     assert_eq!(num(&state, "step"), 7.0);
-    assert_eq!(get(&state, "truncated"), JsValue::FALSE);
+    assert_eq!(get(&state, "cut"), JsValue::NULL, "a small program's print completes without truncation");
     let text = get(&state, "text").as_string().expect("text marshals as a string");
     assert!(text.starts_with("λf. λx. f "), "the normal form is Church 42, got {text:?}");
     assert_eq!(text.matches("f (").count() + 1, 42, "Church 42 applies `f` 42 times, got {text:?}");
@@ -787,9 +787,10 @@ fn link_index_crosses_as_typed_arrays() {
 
     let index = call(&session, "linkIndex", &[JsValue::from_f64(65_536.0)]);
 
-    // A string, a bool, and ten typed arrays. If any leg came back as a plain Array, serde crept in.
+    // A string, a nullable cut string, and ten typed arrays. If any leg came back as a plain Array,
+    // serde crept in.
     assert!(get(&index, "lambdaText").as_string().is_some_and(|s| !s.is_empty()), "lambdaText must be text");
-    assert_eq!(get(&index, "lambdaTruncated"), JsValue::FALSE, "a small program fits the byte budget whole");
+    assert_eq!(get(&index, "lambdaCut"), JsValue::NULL, "a small program fits the byte budget whole");
     for k in [
         "lambdaSpanStart",
         "lambdaSpanEnd",
@@ -866,7 +867,7 @@ fn link_index_survives_a_declined_lambda_leg() {
     let index = call(&session, "linkIndex", &[JsValue::from_f64(65_536.0)]);
 
     assert_eq!(get(&index, "lambdaText").as_string().as_deref(), Some(""), "a declined λ leg prints no text");
-    assert_eq!(get(&index, "lambdaTruncated"), JsValue::FALSE, "nothing was printed, so nothing was truncated");
+    assert_eq!(get(&index, "lambdaCut"), JsValue::NULL, "nothing was printed, so nothing was cut");
 
     let len = |k: &str| {
         Reflect::get(&get(&index, k), &JsValue::from_str("length")).ok().and_then(|v| v.as_f64()).unwrap_or(-1.0)
@@ -877,4 +878,27 @@ fn link_index_survives_a_declined_lambda_leg() {
     }
     assert!(len("sourceNodeStart") > 0.0, "the source leg does not depend on the λ backend");
     assert!(len("tmOwner") > 0.0, "the TM leg compiled fine and owns at least one state");
+}
+
+/// n=2,900 rather than the investigation's 2,690, because THIS test runs on the page thread, whose
+/// ceiling is term depth 2,833. At 2,690 it would pass with or without the cap and pin nothing; at
+/// 2,900 the uncapped walk exhausts the page stack, so the assertion bites where the test actually
+/// runs. The worker-thread cases live in `web/tests/browser/depth-cap.test.ts` — `wasm_bindgen_test`
+/// runs on the page, and `run_in_dedicated_worker` would re-home every test in this file to buy two.
+#[wasm_bindgen_test]
+fn a_term_past_the_print_cap_is_bounded_rather_than_fatal() {
+    let (_, session) = compile("let x = 2900; x + 1");
+    assert!(!session.is_null(), "a large literal still compiles");
+
+    let index = call(&session, "linkIndex", &[JsValue::from_f64(65_536.0)]);
+    assert_eq!(
+        get(&index, "lambdaCut").as_string().as_deref(),
+        Some("Depth"),
+        "a term deeper than MAX_PRINT_DEPTH must report a depth cut, not walk to its own depth"
+    );
+
+    // A call AFTER the one under test. If the first had aborted mid-flight, wasm-bindgen's
+    // reentrancy borrow would still be held and this would throw "already borrowed" forever.
+    let again = call(&session, "linkIndex", &[JsValue::from_f64(65_536.0)]);
+    assert!(!again.is_null(), "the session survives its own bounded print");
 }

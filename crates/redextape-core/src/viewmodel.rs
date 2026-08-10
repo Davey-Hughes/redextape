@@ -16,7 +16,7 @@ use std::borrow::Borrow;
 use crate::analysis::TokenClass;
 use crate::core::NodeId;
 use crate::lambda::term::Node;
-use crate::lambda::{LambdaTerm, print_lambda_capped, print_lambda_linked};
+use crate::lambda::{Cut, LambdaTerm, print_lambda_capped, print_lambda_linked};
 use crate::sourcemap::SourceMap;
 use crate::span::Span;
 use crate::tm::machine::{Machine, Move, StateId, Symbol};
@@ -58,7 +58,7 @@ use crate::trace::{LambdaCursor, TmCursor};
 pub struct LambdaState {
     pub text: String,
     pub spans: Vec<(Span, TokenClass)>,
-    pub truncated: bool,
+    pub cut: Option<Cut>,
     pub step: u64,
 }
 
@@ -189,10 +189,10 @@ pub enum TermNode {
 }
 
 impl LambdaState {
-    /// Render the term the cursor currently holds, bounded by `byte_budget`.
-    pub fn render(c: &LambdaCursor, byte_budget: usize) -> LambdaState {
-        let (text, spans, truncated) = print_lambda_capped(c.term(), byte_budget);
-        LambdaState { text, spans, truncated, step: c.steps_taken() }
+    /// Render the term the cursor currently holds, bounded by `byte_budget` and `depth_cap`.
+    pub fn render(c: &LambdaCursor, byte_budget: usize, depth_cap: u32) -> LambdaState {
+        let (text, spans, cut) = print_lambda_capped(c.term(), byte_budget, depth_cap);
+        LambdaState { text, spans, cut, step: c.steps_taken() }
     }
 
     /// The term as a flat tree, or `None` if it exceeds `node_budget`. A second, independent cause
@@ -406,7 +406,10 @@ pub struct LinkIndex {
     /// The INITIAL term, printed at the caller's budget.
     pub lambda_text: String,
     pub lambda_spans: Vec<(Span, TokenClass)>,
-    pub lambda_truncated: bool,
+    /// Which limit cut `lambda_text`, or `None`. **Renamed from `lambda_truncated` rather than
+    /// retyped**: leaving the name would let `if (index.lambdaTruncated)` keep compiling while
+    /// silently meaning something new.
+    pub lambda_cut: Option<Cut>,
     /// A node's span in `lambda_text`. ABSENT for a node whose subterm fell past the cut, never a
     /// span clamped to it — see `print_lambda_linked`.
     pub lambda_nodes: Vec<(Span, NodeId)>,
@@ -435,23 +438,25 @@ impl LinkIndex {
     /// `tm_owner`. `SourceMap::build` is already total over exactly these refusals, and the index must
     /// not be the layer that stops being.
     ///
-    /// `byte_budget` IS A PARAMETER because this file picks no numbers — see the module header. The
-    /// web app passes `LAMBDA_BYTE_BUDGET`.
+    /// `byte_budget` AND `depth_cap` ARE PARAMETERS because this file picks no numbers — see the
+    /// module header. The web app passes `LAMBDA_BYTE_BUDGET`; the wasm boundary passes
+    /// `MAX_PRINT_DEPTH`, which is a fact about an engine call stack rather than renderer policy.
     pub fn build(
         term: Option<&LambdaTerm>,
         program: Option<&TmProgram>,
         map: &SourceMap,
         byte_budget: usize,
+        depth_cap: u32,
     ) -> LinkIndex {
-        let (lambda_text, lambda_spans, lambda_truncated, lambda_nodes) = match term {
-            None => (String::new(), Vec::new(), false, Vec::new()),
-            Some(t) => print_lambda_linked(t, byte_budget, &map.node_to_lambda),
+        let (lambda_text, lambda_spans, lambda_cut, lambda_nodes) = match term {
+            None => (String::new(), Vec::new(), None, Vec::new()),
+            Some(t) => print_lambda_linked(t, byte_budget, depth_cap, &map.node_to_lambda),
         };
         let source_nodes = map.node_to_source.iter().map(|(id, span)| (*span, *id)).collect();
         let tm_owner = program
             .map(|p| p.states.iter().map(|s| map.tm_owner(&s.name).map_or(-1, |n| n as i32)).collect())
             .unwrap_or_default();
-        LinkIndex { lambda_text, lambda_spans, lambda_truncated, lambda_nodes, source_nodes, tm_owner }
+        LinkIndex { lambda_text, lambda_spans, lambda_cut, lambda_nodes, source_nodes, tm_owner }
     }
 }
 

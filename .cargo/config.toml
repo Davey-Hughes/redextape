@@ -23,6 +23,11 @@ RUST_MIN_STACK = "33554432"  # 32 MiB
 # this and disarm it without failing anything; nothing in `.forgejo/` or `scripts/` sets one.
 #
 # This controls the SHADOW stack in linear memory, NOT the engine's own wasm call-depth limit, which
-# a module cannot set. The measurement recorded in the roadmap is what says whether it was enough.
+# a module cannot set. THE SHADOW STACK WAS NEVER THE BINDING CONSTRAINT, and the measurement now
+# exists: the printer exhausted V8's engine call stack at term depth 2,833 on a page thread and, on a
+# worker's FIRST deep print, 1,930 in a Web Worker (2026-08-09, playwright/chromium, release wasm) — a
+# worker's ceiling drops after that first print; see `redextape_wasm::session::MAX_PRINT_DEPTH`'s doc
+# for the steady-state figure. Raising this number cannot move either figure. The printer is bounded
+# by `redextape_wasm::session::MAX_PRINT_DEPTH` instead.
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "link-arg=-zstack-size=8388608"]

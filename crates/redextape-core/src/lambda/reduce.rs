@@ -45,8 +45,13 @@ pub const MAX_REDUCTION_STEPS: u64 = 5_000_000;
 /// recurse once per term node, so a value whose Church/Scott encoding is very deep (a large `Nat` or
 /// a long list) would otherwise overflow the native stack instead of failing cleanly. Once a term
 /// exceeds this depth the reducer returns `HitCap` instead of calling `reduce_step` on it. Effective
-/// only when the running thread's stack is large enough (WASM shadow-stack sizing is a Plan 4
-/// follow-up).
+/// only when the running thread's stack is large enough. **THE WASM SHADOW STACK IS NOT
+/// THE RELEVANT STACK, and `-zstack-size` cannot help** — on that target the printer exhausted V8's
+/// own engine call stack, which no module can size, at term depth 1,930 in a Web Worker on its FIRST
+/// deep print (measured 2026-08-09; a worker's ceiling drops after that print — see
+/// `redextape_wasm::session::MAX_PRINT_DEPTH`'s doc for the steady-state figure). This constant no
+/// longer bounds the printer for that reason; see `redextape_wasm::session::MAX_PRINT_DEPTH`. What
+/// remains here is the REDUCER's bound, which is what it was written for.
 pub const MAX_TERM_DEPTH: u32 = 3_000;
 
 /// True if the tree `t` denotes is deeper than `limit`. **O(1) since 2026-08-01** — `LambdaTerm::depth`

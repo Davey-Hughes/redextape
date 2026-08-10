@@ -17,9 +17,11 @@ function ellipsis(): HTMLElement {
  * The λ pane: the term as text, syntax-coloured by the same token classes the source pane uses.
  *
  * TRUNCATION IS SHOWN, NOT HIDDEN. `frame_cost_probe` measured a history frame's budget at 512
- * bytes, two orders below the readout's, so most non-trivial terms WILL truncate here — and a
- * truncated printed term is a prefix of the real one rather than a lie about its shape, which is why
- * showing it beats hiding it. `results.ts` still prints the full normal form at 64 KiB.
+ * bytes, two orders below the readout's, so most non-trivial terms WILL truncate here. A BYTE cut's
+ * text is a prefix of the real term; a DEPTH cut's is not — see `results.ts`'s note on `Cut` for why —
+ * but showing either beats hiding it, which is why both are marked the same way here (`… truncated` /
+ * `… too deep`) rather than one being suppressed. `results.ts` still prints the full normal form at
+ * 64 KiB.
  */
 export class LambdaPane {
   #text: HTMLElement
@@ -139,10 +141,10 @@ export class LambdaPane {
       at = r.to
     }
     if (at < frame.text.length) out.push(document.createTextNode(frame.text.slice(at)))
-    if (frame.truncated) {
+    if (frame.cut !== null) {
       const more = document.createElement('span')
       more.className = 'truncated'
-      more.textContent = ' … truncated'
+      more.textContent = frame.cut === 'Depth' ? ' … too deep' : ' … truncated'
       out.push(more)
     }
     this.#text.replaceChildren(...out)

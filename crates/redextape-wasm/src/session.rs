@@ -17,6 +17,47 @@ use redextape_core::trace::{LambdaCursor, TmCursor};
 use redextape_core::viewmodel::{LambdaState, LinkIndex, TermTree, TmProgram, TmState};
 use redextape_core::{Diagnostic, Severity, Span, parser, typeck};
 
+/// The deepest term any print through the session may walk — the two big-budget prints
+/// (`lambda_state`, `link_index`) and the per-frame `lambdaState(FRAME_BYTES)` path alike.
+///
+/// **1,000, BELOW A MEASURED STEADY-STATE CEILING THAT LIES SOMEWHERE IN [1400, 1497).** That
+/// ceiling is the term depth at which a Web Worker's V8 call stack dies mid-print ONCE THE WORKER
+/// HAS ALREADY PRINTED A DEEP TERM BEFORE. It is not the same quantity as 1,930, which this constant
+/// used to be justified against: 1,930 was measured with a fresh worker per sample, so every sample
+/// was that worker's FIRST print — and a worker's ceiling is not fixed. It drops after the first deep
+/// print, measured 2026-08-09 by driving one worker through repeated prints at fixed depths: at term
+/// depth 1,497, two prints in a row held but by the fourth or fifth it failed with a stack overflow,
+/// every time; at term depth 1,400 and below, the SAME worker held for 60 prints straight with no
+/// further degradation observed. Those are the endpoints actually sampled — nothing between them was
+/// tested, so no single number inside [1400, 1497) is itself a measured ceiling, only the bracket is.
+/// That bracket is what governs an app a user keeps typing into, and 1,930 a number that was never a
+/// bound on that.
+///
+/// **THE DEGRADATION DOES NOT ERODE BELOW 1,400 WITHIN 60 PRINTS, AND THAT IS WHAT MAKES A CAP A REAL
+/// FIX RATHER THAN A SMALLER GUESS.** The data is five depths across four rep-counts, topping out at
+/// 60 repeated prints in one worker — enough to show the ceiling drops from ~1,930 toward the
+/// [1400, 1497) bracket without eroding further across that run, but not enough to tell "falls once
+/// then holds" apart from "asymptotes somewhere above 1,400", and not a worker's lifetime — a user
+/// typing for an hour issues far more than 60 prints. A cap set below 1,400 is a margin good for at
+/// least the 60 prints measured, not one stated to be good for the life of the worker.
+///
+/// **IT IS NOT `MAX_TERM_DEPTH`, AND THE DIFFERENCE IS THE BUG THIS FIXES.** That constant is 3,000
+/// and bounds the REDUCER against a native 8 MiB stack. The printer borrowed it, and 3,000 sits above
+/// every browser ceiling measured — so the guard could not fire, and past 3,000 it fires at 3,000
+/// frames, which is already past the cliff. There is no input size at which the old arrangement saved
+/// the module.
+///
+/// **IT DOES NOT LIVE BESIDE `LAMBDA_BYTE_BUDGET` in `web/src/protocol.ts`, deliberately.** A byte
+/// budget is renderer taste — how much text a pane will hold — and getting it wrong makes a pane
+/// ugly. This is a fact about an engine call stack no module can size, and getting it wrong poisons
+/// the wasm module. A number a UI author can adjust without a browser measurement is a number that
+/// drifts back over the cliff.
+///
+/// **NO `cfg`.** This crate builds `rlib` as well as `cdylib` so `session.rs` compiles natively for
+/// tests, so this is the wasm boundary's policy on whichever target the test runs — and the native
+/// tests then exercise the same number the browser does.
+pub const MAX_PRINT_DEPTH: u32 = 1_000;
+
 /// Why the TM leg is absent. `TmRun` already distinguishes these and the UI must not flatten them:
 /// `TooLarge` means lowering REFUSED and the program never ran a step; `Overflow` means a value does
 /// not fit the encoding at any width up to the ceiling; `Lower` means it could not be lowered at all.
@@ -448,11 +489,11 @@ impl Session {
         Ok(self.lambda_status().run.unwrap_or(RunStatus::Running))
     }
 
-    /// `LambdaState::render(cursor, byte_budget)` and nothing else — PR 2 removed the map and redex
+    /// `LambdaState::render(cursor, byte_budget, depth_cap)` and nothing else — PR 2 removed the map and redex
     /// parameters along with the `source_node` field they existed to compute.
     pub fn lambda_state(&self, byte_budget: usize) -> Result<LambdaState, SessionError> {
         let c = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
-        Ok(LambdaState::render(c, byte_budget))
+        Ok(LambdaState::render(c, byte_budget, MAX_PRINT_DEPTH))
     }
 
     /// The term as a flat tree, or `None` when it exceeds `node_budget` — `None` rather than a partial
@@ -688,7 +729,7 @@ impl Session {
     /// already has. There is nothing here for a caller to handle.
     pub fn link_index(&self, byte_budget: usize) -> LinkIndex {
         let program = self.tm.as_ref().ok().map(|(p, _)| p);
-        LinkIndex::build(self.initial_lambda.as_ref(), program, &self.map, byte_budget)
+        LinkIndex::build(self.initial_lambda.as_ref(), program, &self.map, byte_budget, MAX_PRINT_DEPTH)
     }
 }
 
@@ -787,6 +828,24 @@ mod tests {
             Some(RunStatus::DepthRefused),
             "and raising the cap must not appear to have helped"
         );
+    }
+
+    /// A literal past the print cap must yield a BOUNDED print rather than an unbounded walk. Natively
+    /// there is stack enough for either, so this pins the cap's arithmetic, not its safety — the
+    /// browser tests in Task 5 are what pin the safety.
+    #[test]
+    fn a_literal_past_the_print_cap_prints_bounded() {
+        let src = format!("let x = {}; x + 1", MAX_PRINT_DEPTH + 200);
+        let c = Session::compile(&src, EncodingKind::Unary);
+        let s = c.session.expect("a large literal still compiles");
+        let st = s.lambda_state(65_536).expect("λ leg present");
+        // Depth, not bytes: this term prints small (well under the 65,536-byte budget) and is cut only
+        // because it is deeper than `MAX_PRINT_DEPTH` — the exact case `Cut` exists to name.
+        assert_eq!(st.cut, Some(lambda::Cut::Depth), "a term deeper than MAX_PRINT_DEPTH must report a depth cut");
+
+        let shallow = Session::compile("let x = 40; x + 1", EncodingKind::Unary).session.expect("compiles");
+        let ok = shallow.lambda_state(65_536).expect("λ leg present");
+        assert!(ok.cut.is_none(), "a shallow term must still print whole");
     }
 
     #[test]

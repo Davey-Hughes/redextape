@@ -3,7 +3,7 @@ import type { LambdaLeg, TmLeg } from '../../src/protocol'
 import { noSessionRows, resultRows } from '../../src/results'
 import type { Diagnostic } from '../../src/types'
 
-const okState = { text: 'λf. λx. f (f x)', spans: [], truncated: false, step: 7 }
+const okState = { text: 'λf. λx. f (f x)', spans: [], cut: null, step: 7 }
 
 const lambdaOk: LambdaLeg = {
   status: { available: true, reason: '', node: null, run: 'Ended' },
@@ -36,12 +36,24 @@ describe('resultRows — the happy path', () => {
   })
 })
 
-describe('resultRows — truncation', () => {
+describe('resultRows — a cut names its cause', () => {
   it('shows the text AND says it was cut, rather than choosing one', () => {
-    const rows = resultRows({ ...lambdaOk, state: { ...okState, truncated: true } }, tmOk)
+    const rows = resultRows({ ...lambdaOk, state: { ...okState, cut: 'Bytes' } }, tmOk)
     const row = find(rows, 'λ', 'normal form')
     expect(row?.value).toBe('λf. λx. f (f x)')
     expect(row?.note).toBe('… truncated at 64 KiB')
+  })
+
+  // The depth case is not a prefix of the real term — `parens` closes every open paren as the stack
+  // unwinds, so the text can be well-formed λ that reparses into a DIFFERENT, shorter term. Saying
+  // "truncated at 64 KiB" about a 6 KB term would be false twice over.
+  it('names depth separately, because that text is not a prefix', () => {
+    const rows = resultRows({ ...lambdaOk, state: { ...okState, cut: 'Depth' } }, tmOk)
+    expect(find(rows, 'λ', 'normal form')?.note).toBe('… too deep to show in full')
+  })
+
+  it('says nothing when the walk ran to completion', () => {
+    expect(find(resultRows(lambdaOk, tmOk), 'λ', 'normal form')?.note).toBeUndefined()
   })
 })
 

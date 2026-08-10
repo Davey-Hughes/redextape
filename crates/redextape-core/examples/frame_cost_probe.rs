@@ -249,10 +249,10 @@ fn record_lambda(c: &mut LambdaCursor, byte_budget: usize) -> Legs {
         steps += 1;
 
         let t = Instant::now();
-        let st = LambdaState::render(c, byte_budget);
+        let st = LambdaState::render(c, byte_budget, redextape_core::lambda::reduce::MAX_TERM_DEPTH);
         render_total += t.elapsed();
 
-        if st.truncated && truncated_at.is_none() {
+        if st.cut.is_some() && truncated_at.is_none() {
             truncated_at = Some(steps);
         }
         max_bytes = max_bytes.max(st.text.len());

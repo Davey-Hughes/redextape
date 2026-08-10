@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import init, { compile } from '../../../pkg/redextape_wasm.js'
 import { FRAME_BYTES, lambdaFrameBytes, SPAN_BYTES } from '../../src/protocol'
-import type { LambdaState } from '../../src/types'
+import type { Cut, LambdaState } from '../../src/types'
 
 /**
  * `SPAN_BYTES` in `protocol.ts` used to be an estimate — ~76 bytes/span AS JSON, rounded up. The real
@@ -31,11 +31,11 @@ type MemoryPerformance = Performance & { memory?: { usedJSHeapSize: number } }
 const SRC = 'let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc'
 
 /**
- * The frames dropped from the slimmed run: same frame, `spans` removed. `step`/`text`/`truncated`
+ * The frames dropped from the slimmed run: same frame, `spans` removed. `step`/`text`/`cut`
  * stay, so array length, string data and object-shape overhead are present in BOTH runs and cancel
  * out of the differential — only `spans` differs.
  */
-type SlimFrame = { step: number; text: string; truncated: boolean }
+type SlimFrame = { step: number; text: string; cut: Cut | null }
 
 /**
  * Steps a fresh session to completion AT `FRAME_BYTES` — the budget frames actually render at, not
@@ -94,7 +94,7 @@ describe('frame cost', () => {
       totalSpansA = a.totalSpans
 
       const beforeB = heapNow()
-      const b = stepAll<SlimFrame>((st) => ({ step: st.step, text: st.text, truncated: st.truncated }))
+      const b = stepAll<SlimFrame>((st) => ({ step: st.step, text: st.text, cut: st.cut }))
       const afterB = heapNow()
       retainedSlim.push(b.frames)
       readingsB.push(afterB - beforeB)

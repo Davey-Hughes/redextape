@@ -109,7 +109,28 @@ function dropLive(): void {
   // NULLED BEFORE FREED, in that order. A suspended loop that wakes between the two must see `null`
   // rather than a freed handle.
   live = null
-  held?.session.free()
+  // `free()` ITSELF MUST NOT BE ALLOWED TO THROW PAST THIS FUNCTION. Nulling `live` above already
+  // does this function's whole job; a handle that cannot be freed is already unusable to every
+  // caller, and the process-lifetime leak of one wasm session is bounded, not the kind of thing
+  // worth trading for a throw here.
+  //
+  // THIS IS DEFENCE-IN-DEPTH, against a mechanism observed (2026-08-09) turning a thrown session
+  // call into permanent silence: a `&self` wasm call that aborts mid-flight (a stack overflow, at
+  // the time) leaves wasm-bindgen's reentrancy borrow taken, so `free()` on that same session throws
+  // "attempted to take ownership of Rust value while it was borrowed" — and this function used to
+  // call `free()` unguarded. The message handler's `catch` block (below) calls `dropLive()` first
+  // thing on ANY thrown session call, specifically so a poisoned session cannot stay live; an
+  // unguarded `free()` there threw a second time, before the `worker-error` postMessage on the next
+  // line ever ran, and the client heard nothing — the exact silence that handler's own comment says
+  // must not happen. See `MAX_PRINT_DEPTH` in `session.rs` for the mechanism that used to reach this;
+  // that cap now keeps ordinary input from poisoning a session at all, which is what makes this path
+  // untested rather than merely defensive — there is no longer an honest way to make `free()` throw
+  // through normal input, and this function must still not amplify the next mechanism that does.
+  try {
+    held?.session.free()
+  } catch {
+    /* See the comment above: a session that cannot be freed is already unusable. */
+  }
 }
 
 /**

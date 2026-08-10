@@ -164,7 +164,13 @@ fn build(name: &str, src: &str) -> Option<Row> {
         Err(_) => None,
     };
     let term = lambda::lower(&core).ok();
-    let index = LinkIndex::build(term.as_ref(), tm_program.as_ref(), &map, WEB_BYTE_BUDGET);
+    let index = LinkIndex::build(
+        term.as_ref(),
+        tm_program.as_ref(),
+        &map,
+        WEB_BYTE_BUDGET,
+        redextape_core::lambda::reduce::MAX_TERM_DEPTH,
+    );
 
     // Columnar, exactly as `linkIndex` ships it: text + 3 span/id arrays x 2 legs + one owner array.
     let columnar_b = index.lambda_text.len()
@@ -184,7 +190,7 @@ fn build(name: &str, src: &str) -> Option<Row> {
         name: name.to_string(),
         src_b: src.len(),
         step0_b: index.lambda_text.len(),
-        truncated: index.lambda_truncated,
+        truncated: index.lambda_cut.is_some(),
         lam_spans: index.lambda_spans.len(),
         states: index.tm_owner.len(),
         src_nodes: src_n,

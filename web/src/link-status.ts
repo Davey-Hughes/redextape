@@ -12,14 +12,15 @@
 export type LambdaLinkState =
   /** Shown: the play head is at step 0, the term reaches this construct, and the backend lowered it. */
   | 'shown'
-  /** The λ text hit its byte budget before reaching this construct. */
+  /** The λ text stopped before reaching this construct — either the byte budget or the depth cap fired first. */
   | 'truncated'
   /**
    * The construct has no recorded λ position at all — DIFFERENT FROM `'truncated'`, which is a
-   * definite frontier ("past byte N") this is not. `LinkIndex.lambdaTruncated` is what tells the two
-   * apart; before this variant existed, an absent span was ASSUMED to mean truncation regardless of
-   * that flag, which reported a frontier that was not there whenever the true cause was something
-   * else (e.g. `LinkIndex.lambda_nodes` dropped the containing subterm for a reason other than the cut).
+   * definite frontier (a byte or depth cut the walk actually hit) this is not. `LinkIndex.lambdaCut`
+   * is what tells the two apart; before this variant existed, an absent span was ASSUMED to mean
+   * truncation regardless of that flag, which reported a frontier that was not there whenever the
+   * true cause was something else (e.g. `LinkIndex.lambda_nodes` dropped the containing subterm for a
+   * reason other than the cut).
    */
   | 'unmapped'
   /** The λ leg's play head has moved off step 0, where the path coordinates stop meaning anything. */

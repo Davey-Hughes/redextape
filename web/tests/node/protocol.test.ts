@@ -5,7 +5,7 @@ import type { LambdaState, TmState } from '../../src/types'
 const lam = (text: string, spans: number): LambdaState => ({
   text,
   spans: Array.from({ length: spans }, (_, i) => [{ start: i, end: i + 1 }, 'Ident'] as const) as LambdaState['spans'],
-  truncated: false,
+  cut: null,
   step: 0,
 })
 

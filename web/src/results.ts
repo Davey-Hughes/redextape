@@ -41,9 +41,12 @@ function lambdaRows(l: LambdaLeg): Row[] {
     // finished" said two contradictory things with nothing explaining the gap between them.
     const label = l.status.run === 'Ended' ? 'normal form' : 'term so far'
     const row: Row = { leg: 'λ', label, value: l.state.text }
-    // The text is SHOWN as well as marked. Unlike `lambdaAst`'s `None`, a truncated printed term is a
-    // prefix of the real one rather than a lie about its shape, and the value is unaffected either way.
-    if (l.state.truncated) row.note = '… truncated at 64 KiB'
+    // The text is SHOWN as well as marked. A BYTE cut is a prefix of the real term, so showing it is
+    // honest. A DEPTH cut is not — `parens` closes every open paren as the stack unwinds, so the text
+    // can be well-formed λ that reparses into a DIFFERENT, shorter term — which is why the two say
+    // different things rather than sharing one word.
+    if (l.state.cut === 'Bytes') row.note = '… truncated at 64 KiB'
+    if (l.state.cut === 'Depth') row.note = '… too deep to show in full'
     rows.push(row)
     rows.push({ leg: 'λ', label: 'steps', value: `${n(l.state.step)} β-steps` })
   }

@@ -1330,6 +1330,14 @@ rather than a note saying a11y is on the todo. Known outstanding, all observed r
    share item 4's real gap — **no non-visual equivalent** — and they compound it, because a link is a
    correspondence *between* panes and nothing conveys that relationship except three simultaneous
    highlights a screen reader cannot see.
+8. **`client.extend()` silently no-ops for the whole debounce** (moved from 5b's open-items list,
+   2026-08-09, print-depth-cap). `supersede()` advances `#gen` at dispatch, but the worker's
+   `onExtend` drops any request for a generation it has never seen — so for ≥300 ms after any
+   keystroke or encoding change, `▶`-at-the-frontier and `[continue]` do nothing. **The click is
+   correctly inert**: the run it would extend is about to be discarded by the imminent compile. The
+   defect is the *silence*, and item 1's principle applies directly — a control that provably cannot
+   work should not be offered — so the fix is a control-visibility rule, moving focus/labelling
+   deliberately, not a second messaging mechanism, which would be worse than the gap.
 
 What already exists, so the pass starts from the right baseline: the appearance control is a real
 `<button type="button">` with an `aria-label` naming its current state, updated on every change
@@ -1391,7 +1399,18 @@ smaller but touches the supersession machinery that PR 3c's review spent a slice
 wants its own measurement rather than a drive-by. **Not attempted on 5a-ii**: changing a helper 20 tests
 depend on, at the end of a 30-commit branch, is how a green suite becomes a mystery.
 
-#### A large integer literal kills the wasm module, `MAX_TERM_DEPTH` cannot stop it, and the shadow stack is the wrong suspect (raised 2026-08-09, during PR 5b)
+#### ~~A large integer literal kills the wasm module, `MAX_TERM_DEPTH` cannot stop it, and the shadow stack is the wrong suspect~~ — FIXED (raised 2026-08-09, during PR 5b; closed 2026-08-09, print-depth-cap)
+
+~~**Closed below, by a depth cap the printer checks itself** — sized at 1,500 against the worker
+thread's measured 1,930-frame ceiling, not the page thread's 2,833 or the reducer's `MAX_TERM_DEPTH`
+below.~~ **CORRECTED 2026-08-09, same branch, before merge** — 1,930 was itself a FIRST-PRINT ceiling
+(a fresh worker per bisection sample), not a bound on the worker the app actually keeps running. The
+cap that shipped is **1,000**, against a measured worker STEADY-STATE ceiling that lies somewhere in
+**[1400, 1497)** — the endpoints actually sampled, not a single measured point; see the closing entry's
+own correction, below, for the full chain and the bounded-degradation measurement that
+makes 1,000 a real fix rather than a smaller guess. The reproduction and the shadow-stack correction in
+this entry are kept for the record they establish; only the margin this entry itself proposed needed
+correcting, at its end.
 
 **Typing `let x = 2690; x + 1` into the app destroys the session, unrecoverably.** This language lowers
 naturals to unary Church numerals, so the literal *is* the term depth. Measured in headless Chrome, the
@@ -1424,6 +1443,16 @@ is not the only big-budget print, and never was.
 cached field and therefore O(1), checked before either big-budget print, margined well under 2,690. It
 belongs with whatever revisits `MAX_TERM_DEPTH`, because picking one number without the other repeats
 this.
+
+**And this entry's own proposed margin would have been wrong too.** The investigation behind this entry
+(`wasm-depth-investigation.md`, scratch — `.superpowers/sdd/` does not survive `git clean -fdx`, which
+is why its number never made it into the paragraph above) named the guard as *"margined well under the
+measured ~2,690 crash line (e.g. 2,000, matching this project's own convention of leaving real margin
+below a measured boundary rather than hugging it)."* **2,000 is above 1,930** — the worker ceiling the
+closing entry at the end of this Plan's log measured, which is the thread `session-worker.ts` actually
+prints on. Shipping 2,000 would have produced a second guard that cannot fire, by the exact route
+`MAX_TERM_DEPTH = 3,000` got there: one measurement, taken somewhere convenient, generalized without
+checking which thread the app actually runs on.
 
 #### Non-progress detection: a TM-only UI diagnostic, and NOT a guard (raised 2026-07-31)
 
@@ -3880,22 +3909,227 @@ pinned by a test; length-1 and empty-text window cases; `lambdaLinkState`'s `dec
 end; `LinkIndex`'s mixed-presence cases; `protocol.ts`'s and `session-client.ts`'s docs corrected
 without weakening either guard; the missing `assert_eq!` message.
 
-1. **`client.extend()` silently no-ops for the whole debounce.** `supersede()` advances `#gen` at
-   dispatch, but the worker's `onExtend` drops any request for a generation it has never seen — so for
-   ≥300 ms after any keystroke or encoding change, `▶`-at-the-frontier and `[continue]` do nothing.
-   **The click is correctly inert**: the run it would extend is about to be discarded by the imminent
-   compile. The defect is the *silence*, which makes the fix a control-visibility rule rather than a
-   messaging change — and the deferred-accessibility list above already owns that principle (*"a
-   control that provably cannot work should not be offered"*). It belongs with that pass; a second
-   mechanism here would be worse than the gap. Introduced by 5b's task 1, untested and undocumented
-   until now.
+1. ~~**`client.extend()` silently no-ops for the whole debounce.**~~ **MOVED 2026-08-09,
+   print-depth-cap** — to the deferred-accessibility list above, item 8, which is where its principle
+   already lived (*"a control that provably cannot work should not be offered"*). Introduced by 5b's
+   task 1, untested and undocumented until now; not a defect this list should carry twice.
 2. **The λ pane still double-renders when a link is active.** The per-frame case was fixed — a guard
    skips `renderLink`'s redraw when neither the old nor the new value exists, which is the playback
    path. What survives is `draw()`'s `render()` then `renderLink(win)` when a link IS set, each running
    `#redraw()` in full. That happens at step 0 on a click rather than per frame, so it is out of the hot
    path, and removing it means merging the two into one `update(frame, controls, win)` — an API change
    for waste nobody has measured. **That measurement is the prerequisite, not the refactor.**
-3. **`lambdaLinkState`'s `truncated` branch has no end-to-end test, and cannot get one today.** It needs
-   a λ term over `LAMBDA_BYTE_BUDGET` (65,536 bytes), which needs an integer literal past ~2,690 — and
-   that crashes the wasm module outright, per the entry above. Not deferred by choice. Whoever fixes
-   `MAX_TERM_DEPTH` unblocks this test as a side effect.
+3. ~~**`lambdaLinkState`'s `truncated` branch has no end-to-end test, and cannot get one today.**~~
+   **CLOSED 2026-08-09, print-depth-cap** — reached by a DEPTH cut, so the prediction held: fixing
+   `MAX_TERM_DEPTH`'s wasm exposure did unblock this test as a side effect, though not for free. The
+   first attempt burned 12 minutes producing nothing; driving the real app found the window is narrow:
+
+   | program | settles? | note |
+   | --- | --- | --- |
+   | `let x = 200; x + 1` | 354 ms | TM declines, tapes=0 |
+   | `let x = 1500; x` | **354 ms** | 1 β-step, depth cut — this is the one |
+   | `let x = 1500; x + 1` | **no, >45 s** | ~1,500 history frames recorded |
+   | `let x = 1600; x` | **no, >45 s** | ~~a cliff sits between 1500 and 1600~~ **WRONG — see below** |
+   | `let xs = [0..k]; head(xs)`, k≈700+ | n/a | λ lowering refuses (`TooDeep`) → `'declined'`, never `'truncated'` |
+   | same, k≤600 | 360 ms | every construct still has a span; no cut |
+
+   ~~**The literal cannot simply be raised** — the test sits one step under the cliff between 1500 and
+   1600, not comfortably below it.~~ **THERE WAS NO CLIFF — corrected 2026-08-09, same branch, before
+   merge.** This table is the same error as the one the closing entry below root-causes: one ordering
+   of samples, generalized into a claim about magnitude. Alternating the same programs rather than
+   bisecting a literal shows it: shallow (warm-up) 354 ms, deep #1 (1500) 352 ms, shallow again 353 ms,
+   deep #2 (1500, the IDENTICAL program) does not settle within 30,000 ms, shallow after deep #2
+   353 ms, deep #3 (1500, same again) does not settle within 30,000 ms. Shallow programs always work;
+   the FIRST deep program in a worker settles and every deep program after it — including a repeat of
+   that exact program — does not settle within the observed window. Nothing special happens at 1600.
+   See the closing entry's root-cause correction for the mechanism (a worker's STEADY-STATE stack
+   ceiling, not a magnitude threshold on the literal) and the fix. **The play head is checked before
+   truncation**, so a click after the run has advanced reports `'not-step-0'` and never reaches the
+   branch; the test restarts to step 0 first. And the list-literal route — a byte cut, available all
+   along — never works: λ lowering refuses before the print reaches 64 KiB at every k that would need
+   it. Test: `web/tests/browser/link-truncated.test.ts`, in its own file rather than one more case in
+   `app.test.ts` — see the entry at the end of this Plan's log for why.
+
+#### THE PRINT CAP LANDS, AND THE CEILING NOBODY HAD MEASURED (2026-08-09) — cap and hang both corrected same day, same branch, before merge; see below
+
+Design: [`../specs/2026-08-09-print-depth-cap-design.md`](../specs/2026-08-09-print-depth-cap-design.md).
+Plan: [`2026-08-09-print-depth-cap.md`](2026-08-09-print-depth-cap.md).
+
+Closes the entry earlier in this Plan, *"A large integer literal kills the wasm module…"*. **Typing
+`let x = 2690; x + 1` destroyed the browser session, unrecoverably**: the printer walked to the term's
+own depth, V8's call stack gave out mid-walk, and because this target builds with `panic = "abort"` the
+wasm-bindgen reentrancy borrow it held was never released — every later call on that session then threw
+"already borrowed" forever. The guard on record, `MAX_TERM_DEPTH` (3,000), is the *reducer's* constant,
+calibrated on a native 8 MiB stack; every browser ceiling sits below it, so it could never fire.
+
+**EVERY FIGURE ON RECORD BEFORE THIS SLICE WAS MEASURED ON THE WRONG THREAD.**
+
+| context | last surviving term depth | passes | measured |
+| --- | --- | --- | --- |
+| page thread, Chrome (wasm-pack) | ~2,690 | bisected once | 2026-08-09, investigation |
+| page thread, Chromium (playwright) | **2,833** | 5/5, spread 0 | 2026-08-09, this slice |
+| **worker thread, Chromium (playwright)** | **1,930** | 3/3, spread 0 | 2026-08-09, this slice |
+
+**The worker's stack is 31.9% smaller than the page's, and the worker is where the app prints.**
+`session-worker.ts` calls `lambdaState(LAMBDA_BYTE_BUDGET)` on every compile (`:298`) and
+`linkIndex(LAMBDA_BYTE_BUDGET)` right after `compile` (`:345`) — both on the worker thread. Every figure
+recorded before today, including the ~2,690 the crash entry earlier in this Plan bisected, was taken on
+a page thread, so every figure recorded before today describes a stack the app never uses.
+
+**This falsifies the mitigation the investigation behind that entry recommended, not just the guard it
+was replacing.** That investigation (scratch, never tracked — `.superpowers/sdd/` does not survive
+`git clean -fdx`) named a guard on `LambdaTerm::depth()`, "margined well under the measured ~2,690 crash
+line (e.g. 2,000, matching this project's own convention of leaving real margin below a measured
+boundary rather than hugging it)." **2,000 is above 1,930.** Shipping it would have produced a second
+guard that cannot fire — the same defect as `MAX_TERM_DEPTH = 3,000`, arrived at by the same route: one
+measurement, taken somewhere convenient, generalized without checking which thread the app actually runs
+on.
+
+**Three further facts, each closing off an alternative before the cap was sized:**
+
+1. **The old guard does not merely fail to fire — it fires too late, by construction.** Past
+   `MAX_TERM_DEPTH` the walk still runs to 3,000 frames, already ~170 past the 2,833 page-thread cliff.
+   Measured: n=3,001, 4,000 and 6,000 all overflow. There was no input size at which that guard saved
+   the module.
+2. **The byte budget had 5.9x headroom at the cliff and structurally could not be the protection.** At
+   n=2,780 — the last comfortable point on the page thread — the term prints whole, `truncated: false`,
+   at 11,185 bytes against a 65,536-byte budget. Lowering `LAMBDA_BYTE_BUDGET` to bound depth instead
+   would have to cut it by roughly 83%, destroying the feature the budget exists for.
+3. **Reduction is not co-exposed, and this was checked rather than assumed.** `runLambda(10_000)` returns
+   cleanly at every n from 1,000 to 6,000, including 2,900–2,999 where both prints die. The one shape
+   that grows under reduction (`let xs = [0..k]; head(xs)`, which the roadmap elsewhere measures going
+   depth 607 → 1,805) reaches `Ended` with both prints clean at k=200/400/600; k=800/900/950 are refused
+   by λ lowering outright, before either printer runs. The λ backend's own limit fences this program
+   family off from the print ceiling.
+
+**The worker figure was corroborated by an orthogonal route before anything was built on it**, because
+the cap rests entirely on it and it came from a harness written the same day. Plain-JS recursion depth
+in the same browser: page median **15,462** frames, worker median **6,159** — ratio **0.398**, against
+wasm's **0.681**. The absolute ratios differ — frame sizes and per-thread overhead are not the same
+quantity — but both sit far below 1.0, so a worker's smaller stack is a property of the platform rather
+than of the probe. **The same check found the one caveat worth carrying:** JS page depth swung 23%
+across three back-to-back runs (11,946 → 15,598) while the wasm boundary measured spread 0 across three
+passes — all inside one browser session. The wasm boundary's stability is therefore established *within*
+a session, not across them.
+
+~~**The cap: 1,500 — 22% below the measured worker ceiling of 1,930.** Chrome and Chromium differ by
+~5% on the page thread (2,690 vs 2,833), so the margin absorbs engine-to-engine variation the
+measurement has not seen; 1,500 survives an engine ~20% less generous than the one measured.~~
+**LOWERED TO 1,000, same branch, before merge.** 1,930 turned out to be a first-print ceiling, not a
+bound on the worker the app keeps running — see this entry's own correction, below, for the real
+justification and the shipped value. The bool this replaced
+could not say which limit fired, and the two are not the same kind of object: a byte cut is reliably
+malformed — an unclosed paren, fails to reparse loudly — while a depth cut can come out well-formed,
+valid λ text that reparses into a shorter term than the one printed. `LambdaState.truncated: bool` is now
+`LambdaState.cut: Option<Cut>` on the wire, and `LinkIndex.lambda_truncated` is `lambda_cut`, carrying
+`'Bytes' | 'Depth'` rather than collapsing both into one flag.
+
+~~**WHAT THIS SLICE ACTUALLY TRADED: an unrecoverable crash became an unbounded wait, and that is not the
+same as fixed.**~~ **WRONG MECHANISM — see this entry's own root-cause chain, below.** It was not a wait:
+the session was poisoned by the same kind of overflow the crash entry above describes, and what looked
+like waiting was a suppressed error report that never reached the client. The cap stops the printer from
+killing the wasm module, but a program only modestly deeper than the cap now leaves the session with no
+error, no recovery and no user-visible signal. Driving the real app:
+
+| program | outcome |
+| --- | --- |
+| `let x = 1500; x` | ~~settles in 354 ms~~ **FIRST-PRINT ONLY — see the root-cause chain below; not a property of this program at large.** |
+| `let x = 1500; x + 1` | does not settle within the observed window (>45 s) |
+| `let x = 1600; x` | does not settle within the observed window (>45 s) |
+| `let x = 1800; x + 1` | does not settle within the observed window; independently reproduced by a second probe |
+
+**Two things stated carefully, because the distinction was not resolved.** Whether this is a true
+non-terminating hang or merely a very slow run **is not established** — both probes stopped waiting
+rather than proving non-termination, which is why the table says "does not settle within the observed
+window" rather than "hangs forever": this roadmap has a documented history of an unmeasured claim being
+repeated in a new costume, and this would be one. And **the cost is the silence, not the slowness** —
+the λ leg records roughly one history frame per β-step, so the work grows quadratically with the
+literal, and the UI reports nothing while it happens. This is a real improvement — ~~the session survives
+and the module is not poisoned~~ **WRONG — see below: the session was poisoned, the same way the crash
+entry above describes** — but it is not a complete fix, and it should not be read as one. The natural
+follow-up is progress reporting or a wall-clock budget on the λ leg; neither is in this slice.
+~~Left open.~~ **RESOLVED 2026-08-09, same branch, before merge — root-caused and fixed. Chain below.**
+
+**THE HANG, ROOT-CAUSED — CHAIN, EACH LINK MEASURED.**
+
+1. **The cap exceeded the STEADY-STATE ceiling, not the first-print one.** 1,500 was sized against
+   1,930 — but 1,930 was measured with a fresh worker per bisection sample, so every sample was that
+   worker's FIRST deep print. Driving one worker through repeated prints at fixed depths shows the
+   ceiling drops after the first deep print and lies somewhere in **[1400, 1497)** — the endpoints
+   actually sampled below, not a single measured point:
+
+   | reps | n=1497 | n=1400 | n=1200 | n=1000 | n=700 |
+   | --- | --- | --- | --- | --- | --- |
+   | 2 | ok | ok | ok | ok | ok |
+   | 5 | fail@5 | ok | ok | ok | ok |
+   | 20 | fail@4 | ok | ok | ok | ok |
+   | 60 | fail@4 | ok | ok | ok | ok |
+
+   **The degradation is BOUNDED** — the ceiling falls once and then holds, rather than eroding without
+   limit — which is what makes a cap set below it a real fix rather than a smaller guess.
+2. The overflow aborts a `&self` call mid-flight; wasm-bindgen's reentrancy borrow on that session
+   stays taken, poisoning it.
+3. `dropLive()` (`session-worker.ts:112`) called `held?.session.free()` UNGUARDED. On a poisoned
+   session that throws "attempted to take ownership of Rust value while it was borrowed".
+4. `onRun` calls `dropLive()` first (`:313`), specifically so a poisoned session cannot stay live. The
+   throw reaches the handler's `catch` at `:427` — and **the catch's OWN `dropLive()` at `:441` throws
+   again, escaping before the `worker-error` postMessage on the next line.** The handler's own comment
+   says "a thrown session call must not become silence"; this was exactly that.
+5. The client never heard anything. Confirmed at the boundary: `OUT run gen=4`, then 20 s of silence —
+   no `compiled`, no `result`, no `worker-error`.
+
+**Two fixes.** (A) `dropLive()` no longer lets `free()` throw past it — nulling `live` already does the
+function's whole job, and this makes ANY future session-poisoning recoverable rather than silent; the
+app already handles `worker-error`. (B) `MAX_PRINT_DEPTH` lowered from 1,500 to **1,000**, below the
+measured steady-state bracket of [1400, 1497). (A) is the more fundamental fix; (B) alone would have left
+the silence mechanism armed for the next thing that poisons a session.
+
+**The false cliff, corrected.** The settling table earlier in this Plan (5b's closed open item 3) and
+the table just above both read a "cliff sits between 1500 and 1600" into these measurements; that
+reading was wrong. Alternating the same programs rather than bisecting a literal — shallow (warm-up)
+354 ms, deep #1 (1500) 352 ms, shallow again 353 ms, deep #2 (1500, the SAME program) does not settle
+within 30,000 ms, shallow after deep #2 353 ms, deep #3 (1500, same again) does not settle within
+30,000 ms — shows the FIRST deep program in a worker settles and every deep program after it leaves the
+UI hanging, including a repeat of the identical program that just settled. **"Hangs" is defensible for
+the UI** — no reply ever reaches the client, which is what `dropLive()`'s second throw establishes in
+the chain above — **but not for the λ run itself**: see the next paragraph for why that remains open.
+Shallow programs always work. Nothing special happens at 1600; the earlier table's "cliff" note was one
+ordering of samples, generalized — the same class of error this roadmap has paid for repeatedly.
+
+**Not established, still:** whether the non-settling programs above are truly non-terminating or merely
+very slow. Neither probe — the original nor this one — proved non-termination; both stopped waiting.
+"Does not settle within the observed window" remains the honest description.
+
+**Folded in, per its being a finding that would otherwise die in scratch:** *all 8 uncovered web
+functions live in 3 files* — **function** coverage `banner.ts` 75%, `lambda-pane.ts` 83.33%, `main.ts`
+82.35%; every other file is 100%. (Not to be confused with `banner.ts`'s 64.28% on a different metric,
+which is by design — `showBanner` is split from `bannerText` so the wording is node-testable and the DOM
+write is not.) Since `functions` is the tightest of the four floors — three new untested entries trip
+it, against 10 for branches and 14 for statements — those three files are the only sources of headroom,
+and `main.ts` is app wiring. This is what a future PR will hit when `functions` trips.
+
+**Two things execution found that the design could not.**
+
+- **A wire rename passes every LOCAL gate and fails only in CI.** The `Cut` rename updated three
+  `linkIndex` assertions in `crates/redextape-wasm/tests/browser.rs` and missed the `lambdaState` one,
+  which reads the wire by string key so no compiler check exists. The pre-commit hook runs
+  `cargo clippy --all-targets`, which neither compiles nor runs the wasm-pack browser tier; `cargo test
+  --workspace` does not either. CI's `rust-browser` job does, so it would have failed on push rather
+  than merged — the gap is the local feedback loop, not the merge gate. Found only when a later change
+  touched the same file and, via `git stash`, was shown to fail independent of that change too.
+- **The truncated branch's sibling test could not simply join the suite its `'declined'` sibling already
+  lives in.** `web/tests/browser/app.test.ts` runs ~40 tests against one long-lived page and worker, and
+  the deep program this test needs degrades badly there, against a fresh page and worker settling
+  quickly — established with a control, a trivial program at the identical suite position, which
+  settled fine. **THIS DOES NOT PIN THE CAUSE TO THE TERM ITSELF, and reading it that way is the same
+  error this entry's own root-cause chain (above) corrects:** which literal settles depends on run order
+  within a worker, because a worker's print stack ceiling degrades after its first deep print, not
+  because some programs are inherently degradation-prone. That is still why the new test lives in its
+  own file — the isolation is needed either way — and it is worth recording as an observation about the
+  app, not only about the test.
+
+**What stays unmeasured, stated rather than smoothed over.** Non-Chromium engines and the dev wasm build
+were not measured — SpiderMonkey and JSC have different limits, and debug frames are larger, so
+`build:wasm:dev` has a lower ceiling than 1,000's basis. And the steady-state bracket of [1400, 1497) —
+like the 1,930 first-print figure it corrected — is one machine's Chromium, measured only at the depths in
+the bounded-degradation table above; worker stack sizes are not specified by any standard.

@@ -8,6 +8,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use redextape_core::lambda::reduce::MAX_TERM_DEPTH;
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::viewmodel::{LambdaState, LinkIndex, TermNode, TermTree, TmProgram, TmState};
 
@@ -49,16 +50,16 @@ fn the_byte_budget_is_honoured_and_truncation_is_reported_exactly() {
     let (term, _map) = lambda_fixture(&big_list_program());
     let mut cursor = redextape_core::trace::LambdaCursor::new(&term, 1_000);
 
-    let generous = LambdaState::render(&cursor, usize::MAX);
-    assert!(!generous.truncated);
+    let generous = LambdaState::render(&cursor, usize::MAX, MAX_TERM_DEPTH);
+    assert!(generous.cut.is_none());
 
-    let tight = LambdaState::render(&cursor, 64);
-    assert!(tight.truncated, "a 64-byte budget must fire on a term printing {} bytes", generous.text.len());
+    let tight = LambdaState::render(&cursor, 64, MAX_TERM_DEPTH);
+    assert!(tight.cut.is_some(), "a 64-byte budget must fire on a term printing {} bytes", generous.text.len());
     assert!(tight.text.len() < generous.text.len());
     assert!(tight.spans.iter().all(|(s, _)| s.end <= tight.text.len()), "spans must stay in the text");
 
     cursor.next();
-    let stepped = LambdaState::render(&cursor, usize::MAX);
+    let stepped = LambdaState::render(&cursor, usize::MAX, MAX_TERM_DEPTH);
     assert_eq!(stepped.step, 1, "step must track the cursor");
 }
 
@@ -460,7 +461,7 @@ fn arena_matches_term(tree: &TermTree, term: &redextape_core::lambda::term::Lamb
 fn every_view_model_round_trips_through_json() {
     let (term, _map) = lambda_fixture("let x = 40; x + 2");
     let cursor = redextape_core::trace::LambdaCursor::new(&term, 1_000);
-    let ls = LambdaState::render(&cursor, usize::MAX);
+    let ls = LambdaState::render(&cursor, usize::MAX, MAX_TERM_DEPTH);
     let back: LambdaState = serde_json::from_str(&serde_json::to_string(&ls).expect("serialize")).expect("deserialize");
     assert_eq!(ls, back);
 
@@ -623,7 +624,7 @@ fn link_index_resolves_tm_owners_by_name_at_the_width_the_run_fitted() {
     let tm_program = TmProgram::of(&machine, width);
 
     let term = redextape_core::lambda::lower(&core).expect("the sample must lower to lambda");
-    let index = LinkIndex::build(Some(&term), Some(&tm_program), &map, 65_536);
+    let index = LinkIndex::build(Some(&term), Some(&tm_program), &map, 65_536, MAX_TERM_DEPTH);
 
     assert_eq!(index.tm_owner.len(), tm_program.states.len(), "one slot per state, dense");
     let mut owned = 0;
@@ -638,7 +639,7 @@ fn link_index_resolves_tm_owners_by_name_at_the_width_the_run_fitted() {
 
     // The lambda leg. The sample's every source-mapped node carries a path, and the term prints well
     // inside the budget, so every one of them must have a span.
-    assert!(!index.lambda_truncated, "the sample must print whole at 65,536 bytes");
+    assert!(index.lambda_cut.is_none(), "the sample must print whole at 65,536 bytes");
     assert_eq!(index.lambda_nodes.len(), map.node_to_lambda.len());
     assert_eq!(index.source_nodes.len(), map.node_to_source.len());
     for (span, id) in &index.source_nodes {
@@ -652,10 +653,10 @@ fn link_index_is_total_over_a_declined_leg() {
     // a `None` program gives an empty `tm_owner`. `SourceMap::build` already behaves this way over a
     // backend that declines, and the index must not be the place that stops being total.
     let map = SourceMap::default();
-    let index = LinkIndex::build(None, None, &map, 65_536);
+    let index = LinkIndex::build(None, None, &map, 65_536, MAX_TERM_DEPTH);
     assert_eq!(index.lambda_text, "");
     assert!(index.lambda_spans.is_empty());
-    assert!(!index.lambda_truncated);
+    assert!(index.lambda_cut.is_none());
     assert!(index.lambda_nodes.is_empty());
     assert!(index.source_nodes.is_empty());
     assert!(index.tm_owner.is_empty());
@@ -668,7 +669,7 @@ fn link_index_is_total_over_a_declined_leg() {
 #[test]
 fn link_index_is_total_when_only_the_lambda_leg_is_present() {
     let (term, map) = lambda_fixture("let x = 40; x + 2");
-    let index = LinkIndex::build(Some(&term), None, &map, 65_536);
+    let index = LinkIndex::build(Some(&term), None, &map, 65_536, MAX_TERM_DEPTH);
     assert!(!index.lambda_text.is_empty(), "a present term must still print, with no TM program at all");
     assert!(!index.lambda_nodes.is_empty(), "a present term must still map nodes, with no TM program at all");
     assert!(index.tm_owner.is_empty(), "no program means no owner array, not one fabricated to match");
@@ -680,7 +681,7 @@ fn link_index_is_total_when_only_the_lambda_leg_is_present() {
 fn link_index_is_total_when_only_the_tm_leg_is_present() {
     let (_, _, map, machine, _) = tm_fixture_with_map("let x = 40; x + 2");
     let tm_program = TmProgram::of(&machine, 64);
-    let index = LinkIndex::build(None, Some(&tm_program), &map, 65_536);
+    let index = LinkIndex::build(None, Some(&tm_program), &map, 65_536, MAX_TERM_DEPTH);
     assert_eq!(index.lambda_text, "", "no term means no lambda text, not one fabricated to match");
     assert!(index.lambda_nodes.is_empty());
     assert!(!index.tm_owner.is_empty(), "a present program must still build an owner array, with no term at all");

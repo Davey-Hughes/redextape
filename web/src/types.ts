@@ -65,7 +65,9 @@ export type TmStatus = {
   total_steps: number | null
 }
 
-export type LambdaState = { text: string; spans: Classified; truncated: boolean; step: number }
+export type Cut = 'Bytes' | 'Depth'
+
+export type LambdaState = { text: string; spans: Classified; cut: Cut | null; step: number }
 
 /**
  * A decoded answer as one line of display text.

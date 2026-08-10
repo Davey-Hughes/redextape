@@ -229,7 +229,7 @@ async function main(): Promise<EditorView> {
    * `draw()`'s doc. Re-deriving it here would walk `#spanOf`/`#statesOf` over the wire's parallel
    * arrays again, on every recorded frame during playback.
    *
-   * AN ABSENT SPAN IS ONLY `'truncated'` WHEN `index.lambdaTruncated` SAYS SO. `lambdaSpan === null`
+   * AN ABSENT SPAN IS ONLY `'truncated'` WHEN `index.lambdaCut` SAYS SO. `lambdaSpan === null`
    * is ambiguous by itself — it also fires for a node `LinkIndex.lambda_nodes` never carried a span
    * for at all, which is not a byte-budget frontier — so reporting `'truncated'` unconditionally would
    * be checkably false whenever the absence has some other cause. `'unmapped'` is the honest answer
@@ -239,7 +239,7 @@ async function main(): Promise<EditorView> {
     if (index === null || index.lambdaText === '') return 'declined'
     if (lam.hist.currentStep !== 0) return 'not-step-0'
     if (lambdaSpan !== null) return 'shown'
-    return index.lambdaTruncated ? 'truncated' : 'unmapped'
+    return index.lambdaCut !== null ? 'truncated' : 'unmapped'
   }
 
   /**

@@ -8,7 +8,7 @@ import { LinkIndex, type LinkIndexWire } from '../../src/link'
 function wire(over: Partial<LinkIndexWire> = {}): LinkIndexWire {
   return {
     lambdaText: '(λx. x) y',
-    lambdaTruncated: false,
+    lambdaCut: null,
     lambdaSpanStart: new Uint32Array([0, 1, 3, 5, 7, 9]),
     lambdaSpanEnd: new Uint32Array([1, 3, 4, 6, 8, 10]),
     lambdaSpanClass: new Uint8Array([5, 7, 7, 0, 5, 0]),
@@ -112,7 +112,7 @@ describe('LinkIndex.linkFor', () => {
   it('a node whose lambda subterm fell past the cut has a source span and no lambda span', () => {
     const ix = new LinkIndex(
       wire({
-        lambdaTruncated: true,
+        lambdaCut: 'Bytes',
         lambdaNodeStart: new Uint32Array([0]),
         lambdaNodeEnd: new Uint32Array([10]),
         lambdaNodeId: new Uint32Array([100]),
