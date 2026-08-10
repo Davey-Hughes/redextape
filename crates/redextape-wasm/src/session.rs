@@ -490,7 +490,9 @@ impl Session {
     }
 
     /// `LambdaState::render(cursor, byte_budget, depth_cap)` and nothing else — PR 2 removed the map and redex
-    /// parameters along with the `source_node` field they existed to compute.
+    /// PARAMETERS along with the `source_node` field they existed to compute. Still three arguments today: the
+    /// `redex`/`redex_span`/`owner` fields 5c added to the returned `LambdaState` are all read off the cursor
+    /// inside `render`, so nothing had to come back in here.
     pub fn lambda_state(&self, byte_budget: usize) -> Result<LambdaState, SessionError> {
         let c = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
         Ok(LambdaState::render(c, byte_budget, MAX_PRINT_DEPTH))

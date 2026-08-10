@@ -218,7 +218,7 @@ fn physical(t: &LambdaTerm) -> usize {
         match n.node() {
             Node::Var(_) => {}
             Node::Abs(_, b) => stack.push(b),
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 stack.push(f);
                 stack.push(a);
             }
@@ -243,7 +243,7 @@ fn depth(t: &LambdaTerm) -> u32 {
             match n.node() {
                 Node::Var(_) => {}
                 Node::Abs(_, b) => stack.push((b, false)),
-                Node::App(f, a) => {
+                Node::App(f, a, _) => {
                     stack.push((f, false));
                     stack.push((a, false));
                 }
@@ -253,7 +253,7 @@ fn depth(t: &LambdaTerm) -> u32 {
         let d = match n.node() {
             Node::Var(_) => 0,
             Node::Abs(_, b) => 1 + memo.get(&b.alloc_id()).copied().unwrap_or(0),
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 1 + memo.get(&f.alloc_id()).copied().unwrap_or(0).max(memo.get(&a.alloc_id()).copied().unwrap_or(0))
             }
         };
@@ -275,7 +275,7 @@ fn depth_exceeds(t: &LambdaTerm, limit: u32) -> bool {
         match node.node() {
             Node::Var(_) => {}
             Node::Abs(_, b) => stack.push((b, d + 1)),
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 stack.push((f, d + 1));
                 stack.push((a, d + 1));
             }

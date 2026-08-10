@@ -603,7 +603,7 @@ fn path_stats(term: &LambdaTerm) -> Option<PathStats> {
     let mut run = 0u64;
     let mut root_run = 0u64;
     for e in LambdaCursor::new(term, MAX_REDUCTION_STEPS) {
-        let StepEvent::Beta { redex } = e else { continue };
+        let StepEvent::Beta { redex, .. } = e else { continue };
         s.steps += 1;
         s.sum_len += redex.len() as u64;
         s.max_len = s.max_len.max(redex.len());

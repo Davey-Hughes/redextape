@@ -123,13 +123,31 @@ export default defineConfig({
           browser: {
             enabled: true,
             provider: playwright({
-              // `frame-cost.test.ts` reads `performance.memory.usedJSHeapSize` to measure `SPAN_BYTES`
-              // for real. WITHOUT THIS FLAG the value is frozen at a stale sample for tens of seconds
-              // regardless of allocation — verified by allocating and dropping a 5M-element array under
-              // 45s of wall-clock with no change in the reading. WITH IT, the same experiment tracks
-              // allocation and collection within one read. Chromium-only and harmless to every other
-              // browser test, which don't touch `performance.memory`.
-              launchOptions: { args: ['--enable-precise-memory-info'] },
+              // TWO FLAGS, AND `frame-cost.test.ts` NEEDS BOTH — one to make the reading move at all,
+              // the other to make it mean something. Chromium-only, and harmless to every other browser
+              // test, which touch neither `performance.memory` nor `gc`.
+              //
+              // `--enable-precise-memory-info` — `frame-cost.test.ts` reads
+              // `performance.memory.usedJSHeapSize` to measure `SPAN_BYTES` for real. WITHOUT IT the
+              // value is frozen at a stale sample for tens of seconds regardless of allocation —
+              // verified by allocating and dropping a 5M-element array under 45s of wall-clock with no
+              // change in the reading, and again on 2026-08-10 by deleting this flag and watching every
+              // heap delta in that test come back as exactly 0. WITH IT, the same experiment tracks
+              // allocation and collection within one read.
+              //
+              // `--js-flags=--expose-gc` — exposes `globalThis.gc()`, a full synchronous collection.
+              // WITHOUT IT the heap delta across a window is "bytes allocated MINUS whatever the
+              // collector happened to do in that window", which is a schedule, not a size: measured
+              // 2026-08-10, the same test on the same build reported 51.9, 74.6 and 91.4 bytes/span
+              // purely by varying V8's GC flags. That variation has no fixed sign or bound — a "nothing
+              // collected" model predicts ~-0.1 bytes/span, but observed failures ran 40-55x that
+              // (-3.955, -4.192, -5.746, and separately +91.4 from a run where a large collection
+              // landed inside one window) — see `frame-cost.test.ts` for the full, correctly-paired
+              // numbers; it is partial collection landing asymmetrically between the two windows, not
+              // "nothing collected", and it has no guaranteed sign.
+              // WITH IT that test collects before every reading, so each delta is retained heap, and
+              // the result is reproducible to the byte across browser restarts.
+              launchOptions: { args: ['--enable-precise-memory-info', '--js-flags=--expose-gc'] },
             }),
             headless: true,
             instances: [{ browser: 'chromium' }],

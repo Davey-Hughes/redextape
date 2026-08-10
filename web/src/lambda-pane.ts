@@ -129,13 +129,34 @@ export class LambdaPane {
     // rather than two. `λ` is 2 bytes and 1 UTF-16 code unit, so the conversion is not optional here:
     // it fires on every term with a binder, not only on non-ASCII source.
     const ranges = decorationRanges(frame.spans, frame.text)
+    // THE REDEX THIS FRAME'S OWN STEP CONTRACTED, resolved through the SAME byte-to-UTF-16 map as
+    // `ranges` above — and the range it produces stands on the CONTRACTUM, not on the redex: the path
+    // behind `redex_span` named the redex `App` in the PRE-step term, β consumed it, and what occupies
+    // that path in the term this frame prints is the subterm the step produced (see `types.ts`'s
+    // `redex_span` doc). So `.is-redex` marks up "what just changed", which is what the pane wants.
+    // `frame.redex_span` is bytes, exactly like `frame.spans`, so converting it any other way (or not
+    // at all) is the identical mistake `decorationRanges` exists to rule out here.
+    // Built only when there is a span to convert: most frames at step 0 or past the truncation cut
+    // carry `null`, and `byteToIndex` walking the text for nothing would be wasted on every one of them.
+    let redexFrom = -1
+    let redexTo = -1
+    if (frame.redex_span !== null) {
+      const map = byteToIndex(frame.text)
+      redexFrom = byteIndexAt(map, frame.redex_span.start)
+      redexTo = byteIndexAt(map, frame.redex_span.end)
+    }
     const out: Node[] = []
     let at = 0
     for (const r of ranges) {
       if (r.from < at) continue
       if (r.from > at) out.push(document.createTextNode(frame.text.slice(at, r.from)))
       const el = document.createElement('span')
-      el.className = r.className
+      // FLAT, NOT NESTED — the same reason `renderLink`'s `is-linked` is flat: every token inside the
+      // redex also carries `is-redex`, rather than a wrapper element that would have to handle a token
+      // straddling the redex's edges. `redexTo > redexFrom` guards the degenerate `redexFrom === redexTo`
+      // case the same way `decorationRanges` itself does for a zero-width span.
+      el.className =
+        redexTo > redexFrom && r.from >= redexFrom && r.to <= redexTo ? `${r.className} is-redex` : r.className
       el.textContent = frame.text.slice(r.from, r.to)
       out.push(el)
       at = r.to

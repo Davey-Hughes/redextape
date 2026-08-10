@@ -385,6 +385,23 @@ main {
   background: var(--link-bg);
 }
 
+/* The RUNNING FOCUS on the delta table: the state header `state-table.ts`'s `focusedRows` marks for
+   whichever construct `TmState.source_node` names as the CURRENT δ-step's own (`main.ts`'s `draw()`).
+   SAME HUE AS `.is-focus-exact`/`.term .is-redex` (`--tok-operator`) — all three panes' "what the
+   current step is working on" read as one system rather than three independently invented ones.
+
+   LAYERED BETWEEN `.is-linked` AND `.is-current`/`.is-firing` BELOW, same reasoning as the comment on
+   `.is-linked` above: a row can legitimately be linked, focused, AND the machine's own current row all
+   at once, and equal specificity means source order decides which background shows. `.is-current`/
+   `.is-firing` — the run's literal position — must still win, so they stay declared after this.
+
+   COLOUR-ONLY, same wash-and-edge shape as `.linked`/`.is-focus-exact`/`.is-focus-coincident` — a
+   FOURTH instance of the shape already on the deferred-a11y list from Task 9, not a new one. */
+.state-row.is-focus {
+  background: color-mix(in oklab, var(--tok-operator) 22%, var(--bg));
+  box-shadow: inset 0 -2px 0 var(--tok-operator);
+}
+
 .state-row {
   cursor: pointer;
 }
@@ -411,6 +428,54 @@ main {
   box-shadow: inset 0 -2px 0 var(--link-edge);
 }
 
+/* The RUNNING FOCUS: which source construct the CURRENT β-step belongs to — a SECOND LAYER, painted
+   independently of `.linked` above (5b's pin; see `main.ts`'s `draw()` and `highlight.ts`'s
+   `focusMark` doc). Both can be on screen at once, on different spans or, via `.is-focus-coincident`
+   below, the same one.
+
+   A THIRD HUE, not `--accent` (already `.decline`) or `--tok-nat` (already `.linked`/`--link-edge`):
+   mixed from `--tok-operator`, matching how `--link-bg`/`--link-edge` were themselves mixed from an
+   existing token colour rather than a new one — `--accent-soft`'s comment above records that PR #20
+   fixed the palette, and this does not reopen it. Both operands are `light-dark()`, so every rule
+   below is theme-aware without a second declaration for `:root[data-theme="dark"]`.
+
+   `Exact` and `Within` are different claims (`types.ts`'s `Owner` doc) and must read that way:
+   `Exact` gets the same solid wash-plus-edge treatment as `.linked`; `Within` is deliberately
+   WEAKER — a fainter wash, no edge. Task 8's M2 measured how much of a program a `Within` span
+   typically covers, against a threshold fixed before any number existed — the verdict (only one of
+   nine corpus programs crossed it) is recorded at the top of `link.ts`, which is why `Within` still
+   earns a highlight here rather than a status line. */
+.cm-editor .is-focus-exact {
+  background: color-mix(in oklab, var(--tok-operator) 22%, transparent);
+  box-shadow: inset 0 -2px 0 var(--tok-operator);
+}
+.cm-editor .is-focus-within {
+  background: color-mix(in oklab, var(--tok-operator) 10%, transparent);
+}
+
+/* The one coincidence the app exists to show: the pin (`.linked`) and the running focus naming the
+   SAME construct. Not two independently-coloured highlights stacked on one span — its own blended
+   hue, focus purple mixed with the pin's blue, so this reads as ONE distinct signal ("the run just
+   reached what you pinned") rather than two washes competing for the same pixels.
+
+   CORRECTED 2026-08-10, PR 5c's eyeball gate — the OUTCOME above holds; the MECHANISM sentence did
+   not. They ARE two highlights stacked on one span: CodeMirror renders two same-range mark
+   decorations from two independent `StateField`s as two NESTED elements rather than one element
+   carrying both classes, and the running focus is the OUTER of the two —
+   `<span class="is-focus-coincident"><span class="linked">…</span></span>`, dumped from the rendered
+   line in real Chromium and pinned by `running-focus.test.ts`. So `--focus-coincident-hue` below is
+   NOT what a reader sees on the underline: `.linked`'s own opaque `--link-edge` occupies the same
+   2 px band on the inner element and paints over it. What the blend does reach is the BACKGROUND,
+   which composites under `.linked`'s 20% wash — and that composite is what was judged by eye, in
+   both themes: distinctly more saturated than `.linked` alone and readable as one band, not as a
+   muddy overlap. What the two never do is stack THREE ways — `main.ts` substitutes `'coincident'`
+   for the claim, so `.is-focus-exact`/`.is-focus-within` are absent here. */
+.cm-editor .is-focus-coincident {
+  --focus-coincident-hue: color-mix(in oklab, var(--tok-operator) 55%, var(--tok-nat) 45%);
+  background: color-mix(in oklab, var(--focus-coincident-hue) 34%, transparent);
+  box-shadow: inset 0 -2px 0 var(--focus-coincident-hue);
+}
+
 .link-status {
   min-height: 1.2em;
   padding: 0.2em 0.4em;
@@ -423,4 +488,19 @@ main {
 .term .is-linked {
   background: var(--link-bg);
   box-shadow: inset 0 -2px 0 var(--link-edge);
+}
+
+/* The redex THIS FRAME'S OWN STEP CONTRACTED, in the λ pane's FRAME view (not the link window above,
+   which is a different coordinate system — see `lambda-pane.ts`'s `#redraw`). Same hue as `.is-focus-
+   exact` (`--tok-operator`): both are "what the current step just did", one in the source pane and one
+   here, and sharing a colour reads as one running-focus system across the two panes rather than two
+   independently-invented ones.
+
+   THE CLASS IS NAMED FOR THE REDEX AND THE TEXT UNDER IT IS THE CONTRACTUM. `redex_span` is the
+   REDEX'S path resolved against this frame's POST-step term (see `types.ts`'s field doc), and β
+   consumed the redex `App` — so what actually lights up here is the subterm the step PRODUCED. That is
+   why the hue matches `.is-focus-exact` rather than sitting apart: both say "what just changed". */
+.term .is-redex {
+  background: color-mix(in oklab, var(--tok-operator) 22%, transparent);
+  box-shadow: inset 0 -2px 0 var(--tok-operator);
 }

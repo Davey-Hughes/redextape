@@ -171,15 +171,21 @@ contract for scrubbing past the eviction point depends on it.
 
 **Considered and not taken: a compact span encoding.** Flat `[start, end, classIdx]` triples would be
 ~12 bytes per span against JSON's ~76, cutting a 512-byte-budget frame from ~10 KB to ~1.5 KB. It needs
-a second `lambdaState` shape in Rust and it is not needed: at ~10 KB a frame, a 32 MB ring holds ~3,200
-frames, which is more scrubbing than any of the measured programs produces. Recorded so the next reader
-knows the lever exists.
+a second `lambdaState` shape in Rust and it is not needed: at ~10 KB a frame, a 32 MB ring holds
+~~3,200 frames~~, which is more scrubbing than any of the measured programs produces. Recorded so the
+next reader knows the lever exists. **CORRECTED 2026-08-10 — `SPAN_BYTES` moved 60 → 80 (see the
+correction on §8 below and the roadmap's `SPAN_BYTES` entry), so a frame is larger and the ring holds
+fewer: roughly 2,400 frames, not 3,200.**
 
 **Every byte figure in this section is a JSON size from this Rust probe, not retained JS heap** — a
-later browser measurement (Task 12/13) found the real retained cost is ~52.8 bytes/span against this
+later browser measurement (Task 12/13) found the real retained cost is ~~52.8 bytes/span~~ against this
 section's own ~76-byte JSON estimate, because V8 interns the fourteen `TokenClass` string literals that
 JSON rewrites in full each time; the "~95% of a frame is spans" conclusion survives, but the absolute
-figures above do not say which unit they are in, and now this sentence does.
+figures above do not say which unit they are in, and now this sentence does. **CORRECTED 2026-08-10 —
+that 52.8 reading was taken without forcing a collection first, so it measured a GC schedule rather than
+retained size; the real figure is 74.08 bytes/span (`SPAN_BYTES` is 80, not 60). The five-run
+reproducibility that made 52.8 look solid was real — all five runs shared the same defect — see the
+roadmap's `SPAN_BYTES` entry for the full correction and why reproducibility does not imply validity.**
 
 ### 3.3 Streaming, and where history lives
 
@@ -439,10 +445,12 @@ calibration, and three written to defeat the bound — `num200`, `list20`, `list
 roadmap's standing lesson is that a representative corpus cannot falsify.
 
 **Every byte figure below is the JSON size this Rust probe measured, not retained JS heap** — a later
-browser measurement (Task 12/13) found the real retained cost per span is ~52.8 bytes against the
+browser measurement (Task 12/13) found the real retained cost per span is ~~52.8 bytes~~ against the
 ~76-byte JSON estimate elsewhere in this document, because V8 interns the fourteen `TokenClass` string
 literals that JSON rewrites in full, so the figures below overstate what a browser actually retains
 even though the proportion they establish — §3.2's "~95% of a frame is spans" — still holds.
+**CORRECTED 2026-08-10 — see §3.2's correction: that reading did not force a collection first and
+measured a GC schedule, not retained size. The real figure is 74.08 bytes/span, `SPAN_BYTES` is 80.**
 
 ### What it found
 

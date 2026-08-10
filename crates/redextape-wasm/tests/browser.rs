@@ -148,6 +148,30 @@ fn compile_step_and_read_both_legs() {
     let first: Array = spans.get(0).unchecked_into();
     assert_eq!(first.length(), 2, "each span entry is a (Span, TokenClass) pair");
 
+    // `owner` AT A NON-ZERO STEP, DELIBERATELY: at step 0 a `None`-shaped bug and a correct answer
+    // are indistinguishable (both are the literal `"None"`), which is why `lambda_state_owner_and_
+    // redex_take_every_shape_across_a_real_reduction` below exercises `Exact`/`Within` at steps 1-3
+    // instead. What THIS assertion is for is different: it is the one place in this file that reaches
+    // the NORMAL FORM (step 7, after all 7 β-steps), where `owner` is genuinely `Owner::None` again —
+    // most of Church 42 is arithmetic machinery no source construct owns. The risk this guards is
+    // `Owner::None` (a fieldless enum VARIANT) crossing as, or being mistaken in TypeScript for, JS
+    // `null` — the confusion the brief calls out by name. It must be the STRING `"None"`, not `null`.
+    let owner = get(&state, "owner");
+    assert_ne!(owner, JsValue::NULL, "Owner::None is a variant name, not Option::None -- it must not be null");
+    assert_eq!(owner.as_string().as_deref(), Some("None"), "a fieldless enum variant crosses as its bare name");
+
+    // `redex` at the normal form: `Some(path)`, never `None`, because SOME step produced this frame.
+    // A `Vec<Dir>` is an externally-tagged enum's array-of-bare-names, the same representation
+    // `TermNode`'s own enum arms use elsewhere in this file (`{Var:n}` etc. use the struct-variant
+    // form; `Dir` is fieldless, so it takes the *unit*-variant form: the string itself).
+    let redex: Array = get(&state, "redex").unchecked_into();
+    assert!(redex.length() > 0, "the step that produced the normal form took a real path to get there");
+    let last = redex.get(redex.length() - 1).as_string().expect("a Dir entry marshals as a string");
+    assert!(
+        ["AppL", "AppR", "AbsBody"].contains(&last.as_str()),
+        "a Dir must cross as one of its own variant names, got {last:?}"
+    );
+
     let ast = call(&session, "lambdaAst", &[JsValue::from_f64(1_000_000.0)]);
     assert!(!ast.is_null(), "an unreachable node budget yields a tree");
 
@@ -271,6 +295,133 @@ fn compile_step_and_read_both_legs() {
     args.push(&JsValue::from_f64(0.0));
     args.push(&JsValue::from_f64(10.0));
     assert!(Reflect::apply(&f, &session, &args).is_err(), "an absent tape throws rather than aborting");
+}
+
+/// `owner` and `redex` at step 7 (the previous test) prove `Owner::None` and a long real path cross
+/// intact, but that read alone never exercises `Exact`, `Within`, or the empty-path case (`redex` at
+/// the root) — a bug that mis-marshaled every non-`None` variant, or collapsed `[]` into `null`, could
+/// still leave step 7 looking right. This walks the first three β-steps of `let x = 40; x + 2`
+/// instead, MEASURED IN A HEADLESS-CHROME RUN rather than assumed:
+///
+///   * step 1 owner={"Exact":4} redex=[]
+///   * step 2 owner={"Within":2} redex=["AppL"]
+///   * step 3 owner={"Exact":2} redex=[]
+///
+/// which tells the same story `lambda_provenance.rs::lowering_tags_each_core_construct_at_its_own_
+/// root` proves natively: the `Let` tags its own root App, so the FIRST β-step (contracting the whole
+/// term) reports `Exact` with an EMPTY path — the redex IS the term, not something inside it. The
+/// SECOND step lands on Church-arithmetic machinery under the (already-substituted) `x + 2` construct
+/// without being that construct's own App, so it reports `Within` one level in. The THIRD step
+/// contracts the `BinOp`'s own App directly, `Exact` again — proving the wire does not freeze on the
+/// first `Exact` it ever emits.
+///
+/// THE NODE IDS (4, 2) ARE DELIBERATELY NOT ASSERTED. `lambda_provenance.rs` already pins that the
+/// `Let` and the `BinOp` each get their own id, read dynamically off the parsed `Core` rather than
+/// hardcoded — asserting a literal 4 or 2 here would coincidentally re-check the parser's id
+/// assignment order, which is not this test's job and would break this test for a reason that has
+/// nothing to do with marshaling. What crosses the boundary and what this test owns is the SHAPE: which
+/// key is present, and that its value is a number.
+#[wasm_bindgen_test]
+fn lambda_state_owner_and_redex_take_every_shape_across_a_real_reduction() {
+    let (_, session) = compile("let x = 40; x + 2");
+
+    let s0 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
+    assert_eq!(get(&s0, "owner").as_string().as_deref(), Some("None"), "no step taken yet, no owner claim");
+    assert_eq!(get(&s0, "redex"), JsValue::NULL, "no step taken yet, no redex path");
+
+    assert_eq!(call(&session, "stepLambda", &[]), JsValue::TRUE, "step 1 must succeed");
+    let s1 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
+    let owner1 = get(&s1, "owner");
+    assert_eq!(
+        owner1.js_typeof().as_string().as_deref(),
+        Some("object"),
+        "Exact/Within cross as objects, not strings, got {owner1:?}"
+    );
+    let exact1 = get(&owner1, "Exact");
+    assert!(exact1.as_f64().is_some(), "step 1's redex is the Let's own tagged App: Exact, got owner={owner1:?}");
+    let redex1: Array = get(&s1, "redex").unchecked_into();
+    assert_ne!(get(&s1, "redex"), JsValue::NULL, "an empty path is `[]`, not `null` -- they are different wire values");
+    assert_eq!(redex1.length(), 0, "the first redex is the whole term: an empty path");
+
+    assert_eq!(call(&session, "stepLambda", &[]), JsValue::TRUE, "step 2 must succeed");
+    let s2 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
+    let owner2 = get(&s2, "owner");
+    assert_eq!(owner2.js_typeof().as_string().as_deref(), Some("object"), "got {owner2:?}");
+    let within2 = get(&owner2, "Within");
+    assert!(
+        within2.as_f64().is_some(),
+        "step 2's redex sits under a tagged ancestor without its own tag: Within, got owner={owner2:?}"
+    );
+    let redex2: Array = get(&s2, "redex").unchecked_into();
+    assert_eq!(redex2.length(), 1, "step 2's redex is one level into the reduct");
+    assert_eq!(redex2.get(0).as_string().as_deref(), Some("AppL"), "a Dir crosses as its bare variant name");
+
+    assert_eq!(call(&session, "stepLambda", &[]), JsValue::TRUE, "step 3 must succeed");
+    let s3 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
+    let owner3 = get(&s3, "owner");
+    assert_eq!(owner3.js_typeof().as_string().as_deref(), Some("object"), "got {owner3:?}");
+    let exact3 = get(&owner3, "Exact");
+    assert!(
+        exact3.as_f64().is_some(),
+        "step 3's redex is the BinOp's own tagged App: Exact again, got owner={owner3:?}"
+    );
+    assert_ne!(
+        exact1.as_f64(),
+        exact3.as_f64(),
+        "the Let and the BinOp are different source constructs with different ids"
+    );
+}
+
+/// `redex_span` IS THE GATE `crates/redextape-core/tests/viewmodel_contract.rs` CANNOT COVER: the wire
+/// key. Task 7's own lesson (this file's module doc) is that neither `cargo clippy --all-targets` nor
+/// `cargo test --workspace` compiles or runs this tier, so a broken rename here — `redexSpan` instead
+/// of the `redex_span` serde actually emits, matching `total_steps`'s own precedent — would merge
+/// silently without this test.
+///
+/// **THE BYTE/TEXT-LENGTH CHECK IS A REAL CROSSING CHECK, NOT A RUST-SIDE ONE REPEATED.** `text` comes
+/// back through `as_string()`, which reconstructs a Rust `String` from the JS (UTF-16) value —
+/// `text.len()` is therefore the UTF-8 BYTE length of whatever actually crossed the boundary, and
+/// comparing `redex_span`'s `end` against it exercises the same crossing `lambdaState`'s `text`,
+/// `spans` and `redex` fields go through, not a re-assertion of what the native tests already cover.
+#[wasm_bindgen_test]
+fn lambda_state_carries_the_redex_span_in_its_own_frame() {
+    let (_, session) = compile("let x = 40; x + 2");
+
+    let s0 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
+    assert_eq!(get(&s0, "redex_span"), JsValue::NULL, "step 0 precedes any contraction, so there is no span");
+
+    assert_eq!(call(&session, "stepLambda", &[]), JsValue::TRUE, "step 1 must succeed");
+    let s1 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
+    let span1 = get(&s1, "redex_span");
+    assert_ne!(span1, JsValue::NULL, "a frame after a step must locate the redex it contracted");
+    assert_eq!(span1.js_typeof().as_string().as_deref(), Some("object"), "a `Span` crosses as an object");
+    let start1 = num(&span1, "start");
+    let end1 = num(&span1, "end");
+    let text1 = get(&s1, "text").as_string().expect("text marshals as a string");
+    assert!(start1 <= end1, "a span must not be inverted, got {start1}..{end1}");
+    assert!(
+        end1 as usize <= text1.len(),
+        "the span must index THIS frame's own text (byte length {}), got end={end1}",
+        text1.len()
+    );
+    assert_eq!(start1, 0.0, "step 1's redex is the Let's own tagged App, a ROOT path: its span starts at byte 0");
+
+    // Step 2's redex is INTERIOR (`redex2` above is `["AppL"]`, not `[]`), so its span need not start
+    // at 0 — the same distinction the native `redex_span_pinpoints_a_bound_occurrence_under_a_binder`
+    // test exercises, checked here for the one thing only a real crossing can break: the key survives.
+    assert_eq!(call(&session, "stepLambda", &[]), JsValue::TRUE, "step 2 must succeed");
+    let s2 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
+    let span2 = get(&s2, "redex_span");
+    assert_ne!(span2, JsValue::NULL, "step 2 also contracted a real redex");
+    let start2 = num(&span2, "start");
+    let end2 = num(&span2, "end");
+    let text2 = get(&s2, "text").as_string().expect("text marshals as a string");
+    assert!(start2 <= end2, "a span must not be inverted, got {start2}..{end2}");
+    assert!(
+        end2 as usize <= text2.len(),
+        "the span must index THIS frame's own text (byte length {}), got end={end2}",
+        text2.len()
+    );
 }
 
 #[wasm_bindgen_test]

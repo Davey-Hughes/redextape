@@ -35,7 +35,8 @@
 //! thunking `head`/`tail`'s nil branch retires (3), and switching to Z retires (2). Until all three are
 //! retired, none of them may be assumed.
 
-use crate::lambda::term::{Dir, LambdaTerm, Node, Path, abs, app, beta};
+use crate::core::NodeId;
+use crate::lambda::term::{Dir, LambdaTerm, Node, Path, abs, app_tagged_for_rebuild, beta};
 
 /// Default reduction step cap. High enough for the demo suite, low enough to fail fast instead of
 /// hanging. Mirrors the interpreter's `DEFAULT_BUDGET` philosophy.
@@ -176,33 +177,106 @@ pub struct Trace {
     pub status: Status,
 }
 
-/// Perform one leftmost-outermost β-step. Returns the reduced term and the path to the redex, or
-/// `None` if `t` is already in normal form.
-pub fn reduce_step(t: &LambdaTerm) -> Option<(LambdaTerm, Path)> {
+/// Which source construct a β-step belongs to.
+///
+/// **THREE STATES, NOT TWO, AND THAT IS THE DECISION THIS SLICE TURNS ON.** `Exact` and `Within` are
+/// different claims — *this step IS that construct* against *this step is somewhere inside it* — and a
+/// consumer given one flag cannot tell them apart. 5b's design refused the containment shape outright
+/// on the TM leg (*"'nearest enclosing linkable node' frequently means highlight the entire program,
+/// which is worse than reporting nothing"*), and it was right to for a single-signal consumer.
+/// Distinguishing them here is the same move that replaced `truncated: bool` with `cut: Option<Cut>`:
+/// two different kinds of object must not collapse into one.
+///
+/// **`Within` IS A CLAIM ABOUT THE REDUCT'S STRUCTURE, NOT THE LOWERING'S.** After N substitutions the
+/// innermost tagged `App` enclosing the redex is a node of the reduct. That is a true statement and a
+/// DIFFERENT relation from the one `node_to_lambda` expressed; a consumer must not read it as "this
+/// construct is being evaluated now".
+///
+/// **`None` IS COMMON AND CORRECT.** `encode.rs` mints every Church/Scott combinator untagged, so
+/// reducing `40 + 2` is overwhelmingly work inside `plus` and two numerals — code with no source
+/// construct at all. There is no repair for that and none should be attempted.
+///
+/// **TWO MORE THINGS THIS CANNOT SAY, stated here because a consumer will otherwise assume it can.**
+///
+/// It names a construct, NOT A LOCATION. Substitution copies: `subst` returns `s.clone()` per
+/// occurrence, and N occurrences share one allocation. So one construct's nodes exist at many
+/// positions in the reduct at once. *"The construct being worked on is X"* is honest; *"and X is
+/// here"* is not, because X is now everywhere the substitution put it.
+///
+/// It cannot tell an iteration from its predecessor. `Core::LetRec` copies the tagged body on every
+/// unrolling, so all forty iterations of a forty-iteration loop report the same `NodeId`. That is
+/// *correct* and it is *not what someone watching a loop wants*. An iteration counter is a different
+/// feature and is deliberately not here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Owner {
+    /// The contracted `App` carried this construct's own tag.
+    Exact(NodeId),
+    /// It did not; this is the innermost enclosing construct that did.
+    Within(NodeId),
+    /// Neither the redex nor any ancestor on the path carried a tag.
+    None,
+}
+
+impl Owner {
+    /// The `NodeId` under either claim, for a consumer that only needs to know WHICH construct.
+    /// A consumer that renders the two differently must match on the variant instead.
+    pub fn node(&self) -> Option<NodeId> {
+        match self {
+            Owner::Exact(id) | Owner::Within(id) => Some(*id),
+            Owner::None => None,
+        }
+    }
+}
+
+/// Perform one leftmost-outermost β-step. Returns the reduced term, the path to the redex, and the
+/// source construct the step belongs to, or `None` if `t` is already in normal form.
+///
+/// **THE OWNER IS HARVESTED FROM A DESCENT THAT ALREADY HAPPENS.** This function walks root→redex
+/// regardless; carrying "the innermost tagged node passed so far" down that walk costs one
+/// `Option<NodeId>` copy per level, on a path measured at mean 9.3 and max 30. There is no second
+/// traversal and no allocation.
+pub fn reduce_step(t: &LambdaTerm) -> Option<(LambdaTerm, Path, Owner)> {
+    reduce_step_go(t, None)
+}
+
+/// `enclosing` is the innermost tag on the path from the root to `t`, EXCLUDING `t` itself — so the
+/// root-redex arm can prefer the redex's own tag without the two being confused.
+fn reduce_step_go(t: &LambdaTerm, enclosing: Option<NodeId>) -> Option<(LambdaTerm, Path, Owner)> {
     // Redex at the root: (\. body) arg
-    if let Node::App(f, a) = t.node()
+    if let Node::App(f, a, owner) = t.node()
         && let Node::Abs(_, body) = f.node()
     {
-        return Some((beta(body, a), Vec::new()));
+        let who = match (owner, enclosing) {
+            (Some(id), _) => Owner::Exact(*id),
+            (None, Some(id)) => Owner::Within(id),
+            (None, None) => Owner::None,
+        };
+        return Some((beta(body, a), Vec::new(), who));
     }
     match t.node() {
-        Node::App(f, a) => {
+        Node::App(f, a, owner) => {
+            // Descending THROUGH a tagged App makes it the innermost enclosing tag for everything
+            // below. `or` and not `or_else`-with-swapped-operands: the node we are passing through is
+            // nearer than anything above it.
+            let inner = (*owner).or(enclosing);
             // Try the function side first (leftmost), then the argument. Both `clone`s below are
             // refcount bumps; under `Box` they deep-copied the untouched sibling at every level of
             // the path, which is the cost this representation exists to remove.
-            if let Some((f2, mut path)) = reduce_step(f) {
+            if let Some((f2, mut path, who)) = reduce_step_go(f, inner) {
                 path.insert(0, Dir::AppL);
-                Some((app(f2, a.clone()), path))
-            } else if let Some((a2, mut path)) = reduce_step(a) {
+                Some((app_tagged_for_rebuild(f2, a.clone(), *owner), path, who))
+            } else if let Some((a2, mut path, who)) = reduce_step_go(a, inner) {
                 path.insert(0, Dir::AppR);
-                Some((app(f.clone(), a2), path))
+                Some((app_tagged_for_rebuild(f.clone(), a2, *owner), path, who))
             } else {
                 None
             }
         }
-        Node::Abs(n, b) => reduce_step(b).map(|(b2, mut path)| {
+        // An `Abs` carries no tag, so `enclosing` passes through untouched.
+        Node::Abs(n, b) => reduce_step_go(b, enclosing).map(|(b2, mut path, who)| {
             path.insert(0, Dir::AbsBody);
-            (abs(std::rc::Rc::clone(n), b2), path)
+            (abs(std::rc::Rc::clone(n), b2), path, who)
         }),
         Node::Var(_) => None,
     }
@@ -233,7 +307,12 @@ pub fn reduce_trace(t: &LambdaTerm, cap: u64) -> Trace {
         // The term BEFORE this step — `next` replaces it, so it cannot be read afterwards.
         let before = cursor.term().clone();
         match cursor.next() {
-            Some(crate::trace::StepEvent::Beta { redex }) => steps.push(Step { term: before, redex }),
+            // The owner is deliberately dropped here, and the binding is named rather than elided so
+            // that stays a decision rather than an oversight. `Step` is the materialized-history API;
+            // design §3.5 puts the owner on the EVENT and on `LambdaState`, and the live-highlight
+            // consumer reads `LambdaCursor::last_owner`, which is why that accessor exists. Widening
+            // `Step` too would add a field with no reader.
+            Some(crate::trace::StepEvent::Beta { redex, owner: _ }) => steps.push(Step { term: before, redex }),
             // Unreachable in practice: a `LambdaCursor` only ever emits `Beta`. Stopping here returns a
             // well-formed partial trace if that ever changes, rather than panicking on a library path.
             Some(_) => break,
@@ -371,7 +450,7 @@ mod tests {
     fn non_trivial_redex_path() {
         // free_var (\x. (\z. z) w): the leftmost-outermost redex is under the argument's Abs body.
         let t = app(var(1), abs("x", app(abs("z", var(0)), var(2))));
-        let (_, path) = reduce_step(&t).expect("a redex exists");
+        let (_, path, _owner) = reduce_step(&t).expect("a redex exists");
         assert_eq!(path, vec![Dir::AppR, Dir::AbsBody]);
     }
 }

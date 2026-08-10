@@ -6,12 +6,12 @@ import init, { analyze, classifySource, encodings, tokenClasses } from '../../pk
 import { APPEARANCE_LABEL, applyAppearance, nextAppearance, readStored, STORAGE_KEY } from './appearance'
 import { showBanner, showWorkerError } from './banner'
 import { canRecordFurther, controlState } from './controls'
-import { declineMark, highlighting, linkMark, setDecline, setLink, setSpans } from './highlight'
+import { declineMark, focusMark, highlighting, linkMark, setDecline, setFocus, setLink, setSpans } from './highlight'
 import { History } from './history'
 import { LambdaPane } from './lambda-pane'
 import type { LambdaWindow } from './lambda-window'
 import { LINK_CONTEXT, lambdaWindow } from './lambda-window'
-import { type Link, LinkIndex } from './link'
+import { isCoincident, type Link, LinkIndex, type Pin, runningFocus, sourceNodeOwner } from './link'
 import { type LambdaLinkState, linkStatus } from './link-status'
 import { lintFromAnalyze } from './lint'
 import type { Leg, RecordEnd, RunReply } from './protocol'
@@ -165,7 +165,7 @@ async function main(): Promise<EditorView> {
    */
   let index: LinkIndex | null = null
   let linkable = false
-  let link: { node: number; origin: 'source' | 'lambda' | 'tm' } | null = null
+  let link: Pin | null = null
 
   const draw = () => {
     lambdaPane.render(
@@ -198,9 +198,10 @@ async function main(): Promise<EditorView> {
     )
     // EVERY RE-RENDER REFRESHES THE STATUS LINE, NOT JUST THE PANES THEMSELVES. `drawLink` reads
     // `lam.hist.currentStep` (via `lambdaLinkState`), and `back`/`forward`/`play`/`restart`/history
-    // scrubbing all route through this function without calling `drawLink` on their own — so it has to
-    // live here, at the END, to see the history mutation those callers already made before calling
-    // `draw()`. A copy anywhere earlier in this function would still be reading the PREVIOUS step.
+    // scrubbing all route through this function without calling `drawLink` on their own — so its call,
+    // now at the true end of this function (see the comment there), has to run AFTER the history
+    // mutation those callers already made before calling `draw()`. A copy anywhere earlier in this
+    // function would still be reading the PREVIOUS step.
     //
     // RESOLVED ONCE, HERE, AND SHARED BY BOTH CONSUMERS BELOW. `draw()` runs on every recorded frame
     // during playback, and `index.linkFor` walks `#spanOf`/`#statesOf` over the wire's parallel
@@ -210,11 +211,50 @@ async function main(): Promise<EditorView> {
     // fix pass on this branch removed from `drawLink` alone, before `lambdaLinkWindow` reintroduced the
     // second call here.
     const l: Link | null = linkable && link !== null && index !== null ? index.linkFor(link.node) : null
-    drawLink(l)
-    // SAME REASON AS `drawLink()` ABOVE, AND NOT ONLY IN `setLinkTo`: scrubbing the λ history must
+    // SAME REASON AS `drawLink()` BELOW, AND NOT ONLY IN `setLinkTo`: scrubbing the λ history must
     // withdraw the window without a click, and every stepping control routes through `draw()` rather
     // than through `setLinkTo`.
     lambdaPane.renderLink(lambdaLinkWindow(l))
+    // THE RUNNING FOCUS: a SECOND, INDEPENDENT layer from `l`/`link` above, computed here rather than
+    // fed by `l` — `link` is the pin a click set, `focus` is the marker that moves every β-step, and
+    // `runningFocus` deliberately knows nothing about `link` (see its own doc). GATED ON `linkable`,
+    // NOT ONLY `index !== null` — the same distinction `linkAtSourceOffset` already draws: `index` can
+    // be non-null and still stale (see `linkable`'s own doc above), and `runningFocus` only ever sees
+    // `null` for the case where `index` itself is null.
+    const focus = linkable && index !== null ? runningFocus(index, lam.hist.current?.owner ?? 'None') : null
+    // ONE MORE `linkFor` CALL, ACCEPTED RATHER THAN AVOIDED — `runningFocus` already resolved (and
+    // discarded) a span internally just to answer "does the index carry this node"; see its own doc for
+    // why its return type carries no span for a caller that only wants the claim. This walk is over the
+    // same small index `l` above already walks per frame, not the `frame_cost_probe`-scale cost that
+    // motivated resolving `l` exactly once and sharing it.
+    const focusLink: Link | null = focus !== null && index !== null ? index.linkFor(focus.node) : null
+    if (focus === null || focusLink === null || focusLink.source === null) {
+      view.dispatch({ effects: setFocus.of(null) })
+    } else {
+      // THE ONE COINCIDENCE THIS APP EXISTS TO SHOW: the pin and the running focus naming the SAME
+      // node. Not two overlapping highlights on one span — its own class (`.is-focus-coincident`,
+      // `style.css`), so a user reads "the run just reached what you pinned" as one signal.
+      const claim = isCoincident(link, focus) ? 'coincident' : focus.claim
+      view.dispatch({ effects: setFocus.of({ span: focusLink.source, claim }) })
+    }
+    // THE TM LEG'S OWN RUNNING FOCUS — `TmState.source_node`, NOT `lam.hist.current?.owner` above.
+    // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2): "TM: TmState.source_node,
+    // resolved through SourceMap::tm_owner ... none; shipped 2026-07-30." Each pane reports what ITS
+    // OWN leg is doing right now — the two clocks never synchronize (§0: `map_fold` is 555 β-steps
+    // against 266,863 δ-steps), so feeding the δ-table from the λ leg's owner would show it whatever
+    // the OTHER model was doing, not its own. `sourceNodeOwner` wraps the already-resolved node id as
+    // an `Owner` so it goes through the same `runningFocus` every other leg does.
+    const tmFocus =
+      linkable && index !== null ? runningFocus(index, sourceNodeOwner(tm.hist.current?.source_node ?? null)) : null
+    const tmFocusLink: Link | null = tmFocus !== null && index !== null ? index.linkFor(tmFocus.node) : null
+    // NO SCROLL ARGUMENT — `TmPane.setFocus`'s own doc says why: the running focus is not a gesture,
+    // and scrolling to it on every δ-step would fight `Follow`'s own scroll for the CURRENT row.
+    tmPane.setFocus(tmFocusLink?.states ?? [])
+    // `drawLink` NOW RUNS HERE, AFTER BOTH FOCI ARE RESOLVED, NOT AT THE TOP OF THIS FUNCTION —
+    // `link-status.ts`'s SECOND job needs `tmFocus` to answer whether it coincides with the pin, and
+    // that answer does not exist until this line. Still "at the end" in the sense the original comment
+    // meant: everything above it is a `history`/`index` read, nothing below reads `drawLink`'s output.
+    drawLink(l, isCoincident(link, tmFocus))
   }
 
   /**
@@ -250,8 +290,13 @@ async function main(): Promise<EditorView> {
    * shares it with `lambdaLinkWindow` too; see `draw()`'s doc. `l === null` covers both "nothing is
    * linked" and "linking is stale", but those still report DIFFERENT statuses (`none` vs `stale`), so
    * `linkable` is consulted directly rather than folded into what made `l` null.
+   *
+   * `focusCoincident` IS A PARAMETER TOO, for the same reason: `draw()` already resolved the TM leg's
+   * running focus against `link` (`isCoincident`) once, and re-deriving it here would need `tmFocus`
+   * threaded in anyway — passing the boolean it produces is the smaller surface. Meaningless when
+   * `l === null` (nothing is pinned to coincide with) or `!linkable` (both return before reading it).
    */
-  const drawLink = (l: Link | null) => {
+  const drawLink = (l: Link | null, focusCoincident: boolean) => {
     if (!linkable) {
       linkStatusHost.textContent = linkStatus({ state: 'stale' })
       return
@@ -264,6 +309,7 @@ async function main(): Promise<EditorView> {
       state: 'linked',
       tm: l.states.length > 0,
       lambda: lambdaLinkState(l.lambda),
+      focus: focusCoincident,
     })
   }
 
@@ -515,6 +561,7 @@ async function main(): Promise<EditorView> {
         highlighting,
         declineMark,
         linkMark,
+        focusMark,
         // AN EXPLICIT CLICK, NOT A CARET MOVE. Clicking an editor already means "place the caret", and
         // linking on every arrow key would fire constantly while navigating — and, worse, would have
         // to be airtight about the stale-index rule on every keystroke rather than only on clicks.
@@ -565,15 +612,23 @@ async function main(): Promise<EditorView> {
           // changed, so repainting both panes on every keystroke would be pure waste. But all three
           // panes still have to go stale THIS keystroke, not 300 ms from now when `schedule`'s debounce
           // finally lands a `compiled`/`no-session` reply — so each gets its own direct, targeted call
-          // rather than waiting for `draw()` to earn one. Passed `null`/`[]` rather than resolving
-          // anything: `linkable` is already false on the line above, and every one of these reads that
-          // (`drawLink` directly; `renderLink`/`setLink` take the already-cleared view) before it would
-          // ever look at what is linked.
+          // rather than waiting for `draw()` to earn one. Passed `null`/`[]`/`false` rather than
+          // resolving anything: `linkable` is already false on the line above, and every one of these
+          // reads that (`drawLink` directly; `renderLink`/`setLink`/`setFocus` take the already-cleared
+          // view) before it would ever look at what is linked or focused.
+          //
+          // `tmPane.setFocus([])` TOO, NOT ONLY `setLink` — the running focus is the δ-table's own
+          // second highlight layer (`TmPane`'s own doc) and goes stale on this same keystroke, for the
+          // same reason `.is-linked` does: `tm.hist` is untouched by a keystroke, so without this call
+          // the previous program's focused rows would stay painted until the next `compiled` reply.
+          // `focusMark` (the CodeMirror decoration) needs no matching call — it clears itself on
+          // `docChanged`, same as `linkMark`.
           linkable = false
           link = null
-          drawLink(null)
+          drawLink(null, false)
           lambdaPane.renderLink(null)
           tmPane.setLink([], false)
+          tmPane.setFocus([])
           schedule(src)
         }),
       ],

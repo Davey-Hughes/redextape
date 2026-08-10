@@ -52,27 +52,82 @@ export const RECORD_CHUNK = 256
  * One `(Span, TokenClass)` entry's cost, MEASURED IN THE UNITS IT IS SPENT IN: retained JS heap
  * bytes, not JSON.
  *
- * `frame-cost.test.ts` measured it in a real Chromium with a heap differential — the only way to
- * isolate one entry's cost from array overhead, string data and GC timing. Two runs step the same
- * program (`while4`, ~470 β-steps, 132,882 spans total) identically at `FRAME_BYTES`: run A pushes
- * every full `LambdaState` into a kept-alive array, run B pushes the same frames with `spans` dropped.
- * `(meanA - meanB) / totalSpans`, over three alternating A/B pairs, landed at ~52.8-52.9 bytes/span
- * across repeated runs. 60 is that figure rounded up.
+ * `frame-cost.test.ts` measures it in a real Chromium with a heap differential — the only way to
+ * isolate one entry's cost from array overhead and string data. Two runs step the same program
+ * (`while4`, ~470 β-steps, 132,882 spans total) identically at `FRAME_BYTES`: run A pushes every full
+ * `LambdaState` into a kept-alive array, run B pushes the same frames with `spans` dropped.
+ * `(meanA - meanB) / totalSpans`, over three alternating A/B pairs after one discarded warm-up pair,
+ * lands at 74.08289058462897 — that value TO THE BYTE across browser restarts, because every reading
+ * is taken after a forced collection and so measures retained heap rather than a GC schedule. 80 is
+ * that figure rounded up.
  *
- * THE OLD 80 WAS AN OVER-ESTIMATE, NOT AN UNDER-ESTIMATE — the direction nobody knew until this
- * measurement. It came from ~76 bytes per span AS JSON, and JSON overstates the retained cost here:
- * `TokenClass` is one of only 14 string values, and V8 interns repeated string literals, so 132,882
- * entries share a handful of string objects instead of paying for one each. JSON has no such sharing
- * — it re-writes the literal in full on every entry — so the JSON figure counts bytes the retained
- * object never pays for.
+ * IT WAS 60, AND 60 UNDER-REPORTED THE RING BY ~19% (corrected 2026-08-10). That figure came from
+ * this same test before it collected the heap before each reading. `usedJSHeapSize` counts live
+ * objects AND garbage not yet collected, so an uncollected delta is "bytes allocated minus whatever
+ * the collector happened to do in that window" — a schedule as much as a size. The SAME build
+ * reported 51.9, 74.6 and 91.4 bytes/span purely by varying V8's GC flags, and in the regime where
+ * nothing was collected inside the spans-dropped window it reported a NEGATIVE figure. 51.9 was the
+ * reading 60 was rounded up from: low, not noisy, and low is the direction that matters, because a
+ * sizer that under-reports lets the ring hold more than `HISTORY_BYTES` says it does.
+ *
+ * THE OLD JSON ESTIMATE WAS ~76, AND IT WAS CLOSER THAN THE ARGUMENT AGAINST IT. That argument is
+ * still true as far as it goes: `TokenClass` is one of only 14 string values and V8 interns repeated
+ * string literals, so 132,882 entries share a handful of string objects instead of paying for one
+ * each, where JSON re-writes the literal in full every time. The sharing is real; it is just smaller
+ * than the structural cost of the pair around it — a two-element array with its backing store,
+ * wrapping a two-field `Span` object.
  */
-export const SPAN_BYTES = 60
+export const SPAN_BYTES = 80
+
+/**
+ * One `Dir` in a redex path: an interned string literal, so the retained cost is a reference.
+ *
+ * Not separately measured — `SPAN_BYTES` was measured because spans dominate a frame (~95% of it);
+ * a redex path is mean 9.3 and max 30 entries (`reduce_step`'s doc) against that, so a per-entry
+ * estimate here costs at most a few hundred bytes against a ~10 KB frame. The sizer's job is to not
+ * under-report the ring, not to be precise about a term this small.
+ */
+export const PATH_ENTRY_BYTES = 8
+
+/**
+ * One `redex_span`: a `Span` object, `{ start, end }`, and charged only by a frame that has one.
+ *
+ * MEASURED, not estimated, by the same forced-collection differential `SPAN_BYTES` is (2026-08-10):
+ * a run retaining `redex_span` alongside `step`/`text`/`cut` against one retaining only those three
+ * costs 35.1 bytes per NON-NULL span — the 264 of `while4`'s 471 frames that carry one. 40 is that
+ * rounded up, the same way `SPAN_BYTES` rounds up its own measurement.
+ *
+ * THIS OVERLAPS `SPAN_BYTES`, DELIBERATELY. `SPAN_BYTES`'s own differential drops `redex`/`redex_span`/
+ * `owner` from its slim arm too (see `frame-cost.test.ts`'s `SlimFrame` comment), so its 74.08
+ * bytes/span already carries ~0.45 bytes/span of this object's cost — about 127 B/frame at 282
+ * spans/frame — and `lambdaFrameBytes` charges this constant again on top, ≈130 B/frame for the same
+ * object. Both directions over-report, so the double-charge is safe: ~1% of a ~13 KB frame, left as is
+ * rather than reconciled.
+ *
+ * 35 AGAINST `OWNER_BYTES`'s 16 IS NOT AN INCONSISTENCY BETWEEN THEM. This term was measured and that
+ * one is a documented estimate; a two-field object cannot really cost half what a one-field object
+ * does, so if anything the figure here says `OWNER_BYTES` is the low one. Left alone regardless —
+ * that is one value per frame against a frame's ~10 KB, and re-tuning it is not this term's errand.
+ *
+ * A FRAME WITHOUT ONE IS CHARGED NOTHING, which is most frames near the start of a run: step 0 has no
+ * redex at all, and a redex past the truncation cut records no span (see `LambdaState.redex_span`).
+ * `PATH_ENTRY_BYTES` treats a null `redex` the same way.
+ */
+export const REDEX_SPAN_BYTES = 40
+
+/**
+ * One `Owner`: a small tagged object (`{ Exact: number }` / `{ Within: number }`), or the interned
+ * `'None'` string literal. All three cost the same under `serde-wasm-bindgen`'s externally-tagged
+ * representation — one JS value, tagged or not — so this is a single flat constant rather than a
+ * per-variant one. Rounded up from a bare number's retained cost to cover the wrapping object.
+ */
+export const OWNER_BYTES = 16
 
 /**
  * Per-frame fixed overhead: the object header and its scalar fields, before any text or cells.
  * Approximate and small — it exists so a frame is never sized at zero, not to be precise.
  */
-const FRAME_OVERHEAD_BYTES = 64
+export const FRAME_OVERHEAD_BYTES = 64
 
 /**
  * What one `[continue]` buys. Additive and saturating on the Rust side, so a caller wanting more
@@ -102,7 +157,14 @@ export type RecordEnd = 'ended' | 'capped' | 'depth-refused' | 'budget'
  * why the design's first draft was wrong about a frame's maximum size by a factor of twelve.
  */
 export function lambdaFrameBytes(f: LambdaState): number {
-  return FRAME_OVERHEAD_BYTES + f.text.length + f.spans.length * SPAN_BYTES
+  return (
+    FRAME_OVERHEAD_BYTES +
+    f.text.length +
+    f.spans.length * SPAN_BYTES +
+    (f.redex?.length ?? 0) * PATH_ENTRY_BYTES +
+    (f.redex_span === null ? 0 : REDEX_SPAN_BYTES) +
+    OWNER_BYTES
+  )
 }
 
 /** A TM frame's size in bytes. Cells dominate; the two index arrays are `heads` and `window_start`, one number per tape. */

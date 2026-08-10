@@ -473,6 +473,57 @@ describe('the app, end to end', () => {
       expect(stepText('lambda')).toContain('step 7')
     })
 
+    // THE LAYER 5b's WORST BUG LIVED IN, ON THE ONE FEATURE THAT HAD NO TEST HERE. `lambda-pane.ts`'s
+    // `#redraw` converts `frame.redex_span` — BYTE offsets, like every span crossing the wasm boundary
+    // — through `byteToIndex`/`byteIndexAt` before deciding which tokens get `is-redex`. Nothing
+    // exercised that conversion: the node tier cannot (it has no DOM), the Rust tier stops at the
+    // span's value, and the sibling `is-linked` path is the only one this file was checking.
+    //
+    // THE FIXTURE IS CHOSEN SO THE TWO READINGS DISAGREE, which most would not. At step 6 of this
+    // program the frame text is `λf. λx. f (f ( … ((λx0. f (f x0)) x)) … )` and the redex span is bytes
+    // [130, 146]. Two `λ` (in `λf.` and `λx.`) precede byte 130 and a third precedes byte 146, and `λ`
+    // is 2 bytes but 1 UTF-16 code unit — so the correct UTF-16 range is [128, 143] and the span sits
+    // AFTER binders rather than at the root, which is what makes the displacement possible at all.
+    // Converted, the lit text is `(λx0. f (f x0))` — the subterm standing at the redex's path in THIS
+    // frame's term, parens included. That is an `Abs`, so it is plainly not the redex itself: the path
+    // named a redex `App` in the PRE-step term and β replaced it with this, its CONTRACTUM. See
+    // `types.ts`'s `redex_span` doc; the conversion under test is the same either way.
+    // Sliced as UTF-16 without converting, [130, 146] reads `x0. f (f x0)) x)` — a window shifted off
+    // the front of the subterm and past its end, lighting a different token set entirely. A root-path
+    // span (`[]`, byte 0) or an ASCII-only fixture would score both readings identical and prove
+    // nothing; this one cannot.
+    it('paints its own redex by converting the byte span, not by slicing it as UTF-16', async () => {
+      await settled(view, 'let x = 40; x + 2')
+      // `settled` resolves on the RESULTS pane, which is not the same event as the λ pane holding
+      // frames — the same race the restart test above documents.
+      await until(() => !stepText('lambda').includes('not run'))
+      expect(stepText('lambda')).toContain('step 7')
+
+      // Step 6, one back from the frontier. Synchronous, like the stepping test above: `#redraw` runs
+      // in the click handler, so an `await` here would be waiting for nothing.
+      click('lambda', '◀')
+      expect(stepText('lambda')).toContain('step 6')
+
+      const lit = [...document.querySelectorAll('#lambda .term .is-redex')]
+      // Non-empty first, and separately: a `join('')` over an empty list is `''`, which would compare
+      // equal to nothing useful and hide a feature that paints no token at all.
+      expect(lit.length).toBeGreaterThan(0)
+      // Whitespace between tokens is a text node rather than part of any token's span, so the joined
+      // token text is the subterm with its spaces squeezed out.
+      expect(lit.map((e) => e.textContent).join('')).toBe('(λx0.f(fx0))')
+      // The redex starts at its own opening paren and the binder is inside it — the two facts a
+      // displaced window loses first.
+      expect(lit[0]?.textContent).toBe('(')
+      expect(lit.some((e) => e.classList.contains('tok-binder'))).toBe(true)
+
+      // Step 0 has no redex at all (`LambdaState.redex_span` is `null` there), so nothing may be lit.
+      // Without this the assertions above would also pass against a pane that painted `is-redex` on
+      // every token of every frame.
+      click('lambda', '↺')
+      expect(stepText('lambda')).toContain('step 0')
+      expect(document.querySelector('#lambda .term .is-redex')).toBeNull()
+    })
+
     it('shows five labelled tape rows with the head inside the window', async () => {
       await settled(view, 'let x = 40; x + 2')
       const labels = [...document.querySelectorAll('#tm .tape-label')].map((e) => e.textContent)

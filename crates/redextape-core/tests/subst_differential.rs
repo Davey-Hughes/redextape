@@ -72,7 +72,7 @@ fn subst_naive(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> LambdaTerm {
         Node::Var(k) if *k == j => s.clone(),
         Node::Var(k) => var(*k),
         Node::Abs(n, b) => abs(Rc::clone(n), subst_naive(j + 1, &shift(1, 0, s), b)),
-        Node::App(f, a) => app(subst_naive(j, s, f), subst_naive(j, s, a)),
+        Node::App(f, a, _) => app(subst_naive(j, s, f), subst_naive(j, s, a)),
     }
 }
 
@@ -104,7 +104,7 @@ fn subst_at(j: u32, lift: u32, s: &LambdaTerm, t: &LambdaTerm) -> LambdaTerm {
         }
         Node::Var(k) => var(*k),
         Node::Abs(n, b) => abs(Rc::clone(n), subst_at(j + 1, lift + 1, s, b)),
-        Node::App(f, a) => app(subst_at(j, lift, s, f), subst_at(j, lift, s, a)),
+        Node::App(f, a, _) => app(subst_at(j, lift, s, f), subst_at(j, lift, s, a)),
     }
 }
 
@@ -383,7 +383,7 @@ fn beta_fusion_inherits_every_allocation_the_three_pass_form_did_and_allocates_n
         match t.node() {
             Node::Var(_) => {}
             Node::Abs(_, b) => alloc_ids(b, out),
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 alloc_ids(f, out);
                 alloc_ids(a, out);
             }

@@ -1,7 +1,7 @@
 import type { ControlState } from './controls'
 import { n } from './format'
 import { controlStrip, type PaneEvents } from './pane-chrome'
-import { centredScrollTop, Follow, highlight, linkedRows, ROW_HEIGHT, StateIndex } from './state-table'
+import { centredScrollTop, Follow, focusedRows, highlight, linkedRows, ROW_HEIGHT, StateIndex } from './state-table'
 import { tapeRows } from './tape'
 import type { TmProgram, TmState } from './types'
 import { visibleWindow } from './virtual-list'
@@ -36,6 +36,13 @@ export class TmPane {
   #index: StateIndex | null = null
   #follow = new Follow()
   #linked: Set<number> = new Set()
+  /**
+   * The running focus's own rows — a SECOND, INDEPENDENT layer from `#linked` above, mirroring the
+   * source pane's "pin and focus are different objects, both may be on screen" split (design §4.3).
+   * `#linked` moves on a click; this moves every δ-step. See `setFocus`'s own doc for why it never
+   * drives a scroll the way `setLink` can.
+   */
+  #focused: Set<number> = new Set()
   #open = true
   /**
    * A one-shot scroll target `#drawTable` honours in preference to `Follow`'s own target, for exactly
@@ -146,6 +153,7 @@ export class TmPane {
     // A new compile invalidates every state id — the block a stale link named may no longer exist,
     // or may now name something else entirely.
     this.#linked = new Set()
+    this.#focused = new Set()
     this.#follow.attach()
     // `onProgrammaticScroll` BEFORE the write, not after, and not omitted. Setting `scrollTop` fires a
     // `scroll` event; without a pending expectation `Follow` reads it as the user taking control and
@@ -189,6 +197,22 @@ export class TmPane {
         )
       }
     }
+    this.#drawTable()
+  }
+
+  /**
+   * Highlight the running focus's own block: the state header (never the rules — `focusedRows`'s own
+   * doc says why) of every state `states` names.
+   *
+   * NO `scrollTo`, UNLIKE `setLink`. A link's scroll is a direct user gesture that earns exactly one
+   * draw's override of the follow target (`setLink`'s own doc, design §5.1); the running focus moves on
+   * its own, every δ-step, with no gesture behind it — scrolling to it every time it moved would fight
+   * `Follow`'s own scroll for the CURRENT row, which already runs unconditionally in `#drawTable`. The
+   * caller passes `states: number[]`, already resolved through `LinkIndex.linkFor` — this class never
+   * imports `LinkIndex`, matching `setLink`'s own boundary.
+   */
+  setFocus(states: number[]): void {
+    this.#focused = this.#index === null ? new Set() : focusedRows(this.#index, states)
     this.#drawTable()
   }
 
@@ -329,6 +353,7 @@ export class TmPane {
       if (marks !== null && i === marks.stateRow) el.classList.add('is-current')
       if (marks !== null && i === marks.ruleRow) el.classList.add('is-firing')
       if (this.#linked.has(i)) el.classList.add('is-linked')
+      if (this.#focused.has(i)) el.classList.add('is-focus')
       els.push(el)
     }
     this.#rows.replaceChildren(...els)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LinkIndex, type LinkIndexWire } from '../../src/link'
+import { isCoincident, LinkIndex, type LinkIndexWire, runningFocus, sourceNodeOwner } from '../../src/link'
 
 /**
  * A hand-built index. Source spans are deliberately NESTED — `[0,17)` contains `[4,5)` and `[12,17)` —
@@ -138,5 +138,85 @@ describe('LinkIndex.lambdaSpans', () => {
   it('caches the rehydrated array rather than rebuilding it on every read', () => {
     const ix = new LinkIndex(wire())
     expect(ix.lambdaSpans).toBe(ix.lambdaSpans)
+  })
+})
+
+describe('runningFocus', () => {
+  it('resolves an Exact owner to its node, tagged as an exact claim', () => {
+    const ix = new LinkIndex(wire())
+    expect(runningFocus(ix, { Exact: 100 })).toEqual({ node: 100, claim: 'exact' })
+  })
+
+  it('resolves a Within owner to the same node under a WEAKER claim', () => {
+    const ix = new LinkIndex(wire())
+    expect(runningFocus(ix, { Within: 101 })).toEqual({ node: 101, claim: 'within' })
+  })
+
+  it('is null for None', () => {
+    const ix = new LinkIndex(wire())
+    expect(runningFocus(ix, 'None')).toBeNull()
+  })
+
+  it('is null when the index is stale, exactly as a click would be', () => {
+    // Same rule main.ts already applies to `linkable`: an index from the last compile has stale
+    // spans, and resolving against it is the silently-wrong answer this project refuses elsewhere.
+    expect(runningFocus(null, { Exact: 100 })).toBeNull()
+  })
+
+  it('is null when the owner names a node the index does not carry', () => {
+    const ix = new LinkIndex(wire())
+    expect(runningFocus(ix, { Exact: 999999 })).toBeNull()
+  })
+})
+
+describe('isCoincident', () => {
+  it('reports coincidence when the pin and the focus name one node', () => {
+    expect(isCoincident({ node: 3, origin: 'source' }, { node: 3, claim: 'exact' })).toBe(true)
+  })
+
+  it('does not report coincidence when they name different nodes', () => {
+    expect(isCoincident({ node: 3, origin: 'source' }, { node: 4, claim: 'exact' })).toBe(false)
+  })
+
+  it('does not report coincidence when only the pin is set', () => {
+    expect(isCoincident({ node: 3, origin: 'source' }, null)).toBe(false)
+  })
+
+  it('does not report coincidence when only the focus is set', () => {
+    expect(isCoincident(null, { node: 3, claim: 'exact' })).toBe(false)
+  })
+
+  // A NAIVE `pin?.node === focus?.node` REWRITE PASSES EVERY TEST ABOVE AND FAILS THIS ONE: both sides
+  // read `undefined` when both are null, and `undefined === undefined` is `true` — reporting
+  // coincidence between nothing and nothing. The explicit `!== null` guards on both sides are what this
+  // test pins.
+  it('does not report coincidence when neither is set', () => {
+    expect(isCoincident(null, null)).toBe(false)
+  })
+
+  it('reports coincidence for a Within claim too, since the pin IS inside it', () => {
+    // A weaker claim is still a true one about the pinned construct. The renderer draws the pair
+    // differently by reading `claim`; coincidence itself does not depend on which claim it is.
+    expect(isCoincident({ node: 3, origin: 'source' }, { node: 3, claim: 'within' })).toBe(true)
+  })
+})
+
+describe('sourceNodeOwner', () => {
+  it('wraps a resolved node as an Exact owner', () => {
+    expect(sourceNodeOwner(7)).toEqual({ Exact: 7 })
+  })
+
+  it('is None for a state the lowering did not tag', () => {
+    expect(sourceNodeOwner(null)).toBe('None')
+  })
+
+  // THE ONE THING `sourceNodeOwner` MUST NEVER PRODUCE: `Within`. A rewrite that "helpfully" wrapped
+  // every non-null id the same way still passes the two tests above (they check the Exact/None shape,
+  // not which key populated it) — this test discriminates the "no Within on this leg" property by
+  // round-tripping through `runningFocus`, which switches on `'Exact' in owner`: if `sourceNodeOwner`
+  // ever keyed its value under `Within` instead, this would report `claim: 'within'` and fail.
+  it('feeds runningFocus as an Exact claim, never Within', () => {
+    const ix = new LinkIndex(wire())
+    expect(runningFocus(ix, sourceNodeOwner(100))).toEqual({ node: 100, claim: 'exact' })
   })
 })

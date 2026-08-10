@@ -66,7 +66,7 @@ fn walk(t: &LambdaTerm, nodes: &mut u64, seen: &mut HashSet<usize>) {
         match n.node() {
             Node::Var(_) => {}
             Node::Abs(_, b) => stack.push(b),
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 stack.push(f);
                 stack.push(a);
             }

@@ -24,16 +24,30 @@ type Session = {
 type MemoryPerformance = Performance & { memory?: { usedJSHeapSize: number } }
 
 /**
- * Picked to produce many spans over many steps, so the per-span signal is large relative to GC and
- * array-quantization noise: 470 β-steps at ~130 spans/frame is ~61,000 spans total, which at any
- * plausible per-span cost is megabytes — comfortably above the noise floor of a single heap reading.
+ * `globalThis.gc`, put there by `--js-flags=--expose-gc` in `vite.config.ts`. Not in TS's DOM lib for
+ * the same reason `performance.memory` is not: it does not exist in a browser nobody launched with
+ * that flag, and this file is the only place in the tree that wants it.
+ */
+type GlobalWithGc = typeof globalThis & { gc?: () => void }
+
+/**
+ * Picked to produce many spans over many steps, so the per-span signal is large relative to array
+ * quantization: 470 β-steps at ~283 spans/frame is 132,882 spans total, which at any plausible
+ * per-span cost is megabytes — comfortably above the noise floor of a single heap reading.
  */
 const SRC = 'let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc'
 
 /**
- * The frames dropped from the slimmed run: same frame, `spans` removed. `step`/`text`/`cut`
- * stay, so array length, string data and object-shape overhead are present in BOTH runs and cancel
- * out of the differential — only `spans` differs.
+ * The frames dropped from the slimmed run: same frame, `spans` removed. `step`/`text`/`cut` stay, so
+ * array length, string data and object-shape overhead are present in BOTH runs and cancel out of the
+ * differential.
+ *
+ * NOT ONLY `spans` DIFFERS, AND THE OVER-ATTRIBUTION IS MEASURED RATHER THAN WAVED AT. `redex`,
+ * `redex_span` and `owner` are dropped here too, so the differential charges them to spans as well.
+ * Measured 2026-08-10 against a third arm that keeps all three and drops only `spans`: 74.08
+ * bytes/span with them dropped against 73.63 with them kept — 0.45 bytes, 0.6% of the figure, on a
+ * constant that is then rounded up. Dropping them is what keeps this arm a plain object literal with
+ * no `LambdaState` shape behind it; paying 0.6% for that is the trade.
  */
 type SlimFrame = { step: number; text: string; cut: Cut | null }
 
@@ -72,6 +86,33 @@ describe('frame cost', () => {
       throw new Error('BLOCKED: performance.memory.usedJSHeapSize reads 0 — cannot measure heap size')
     }
 
+    // THE READINGS ARE TAKEN AFTER A FULL COLLECTION, AND THAT IS WHAT MAKES THEM A SIZE RATHER THAN A
+    // SCHEDULE. `usedJSHeapSize` counts live objects AND garbage the collector has not got to yet, so
+    // an uncollected delta across a window is "bytes allocated minus whatever the collector happened
+    // to do meanwhile". Both arms allocate the same ~11 MB per round; the whole signal is that arm B's
+    // spans become garbage and arm A's do not — which only shows up if the collector runs INSIDE the
+    // arm-B window. It is not obliged to.
+    //
+    // WHEN IT DOES NOT, THE DIFFERENTIAL CAN GO EITHER WAY — this is schedule luck, not a fixed sign.
+    // A "nothing collected in either window" model predicts a small, one-directional effect: arm B
+    // allocates everything arm A does and then the slim frames on top, so the differential would be
+    // -(arm B's slim frames) ≈ -13,607 B / 132,882 spans ≈ -0.1 bytes/span. Observed failures ran
+    // 40-55x that magnitude and did not agree on sign. Three runs read -3.955, -4.192 and -5.746
+    // bytes/span (500-760 KB of asymmetry) — negative, as the naive model predicts, but far too large
+    // for it. A fourth run, paired correctly, does not even agree on sign: 2026-08-10 under
+    // `--js-flags=--min-semi-space-size=64` recorded A = [11,339,541, 11,030,920, 11,032,092] and
+    // B = [11,058,932, 11,045,332, -25,166,368] (a large collection landing inside arm B's third
+    // window) — mean(A) - mean(B) over those matched triples is +91.4 bytes/span, not negative. The
+    // same build measured 51.9, 74.6 and 91.4 bytes/span purely by varying V8's GC flags. None of this
+    // is "nothing collected" — it is PARTIAL collection landing asymmetrically between the two windows,
+    // a regime the model above does not bound and that carries no guaranteed sign. Collecting first
+    // removes the variable: every reading below is retained heap, and the figure reproduces TO THE BYTE
+    // across browser restarts (9,857,539 for arm A, twice, in the calibration run).
+    const collect = (globalThis as GlobalWithGc).gc
+    if (typeof collect !== 'function') {
+      throw new Error('BLOCKED: globalThis.gc is unavailable — launch Chromium with --js-flags=--expose-gc')
+    }
+
     // Run A: full `LambdaState`, spans included. Run B: the same frames with `spans` dropped. Three of
     // each, ALTERNATING A,B,A,B,A,B — a monotonic drift from unrelated allocation would otherwise be
     // attributed to whichever run went last rather than showing up as noise in both.
@@ -85,20 +126,39 @@ describe('frame cost', () => {
     let totalSpansA = 0
     let totalSpansB = 0
 
-    for (let round = 0; round < 3; round++) {
-      const beforeA = heapNow()
+    const roundA = (): number => {
+      collect()
+      const before = heapNow()
       const a = stepAll<LambdaState>((st) => st)
-      const afterA = heapNow()
+      collect()
+      const after = heapNow()
       retainedFull.push(a.frames)
-      readingsA.push(afterA - beforeA)
       totalSpansA = a.totalSpans
-
-      const beforeB = heapNow()
+      return after - before
+    }
+    const roundB = (): number => {
+      collect()
+      const before = heapNow()
       const b = stepAll<SlimFrame>((st) => ({ step: st.step, text: st.text, cut: st.cut }))
-      const afterB = heapNow()
+      collect()
+      const after = heapNow()
       retainedSlim.push(b.frames)
-      readingsB.push(afterB - beforeB)
       totalSpansB = b.totalSpans
+      return after - before
+    }
+
+    // ONE DISCARDED PAIR FIRST, and it is not superstition: the first pair pays one-time costs the
+    // steady state does not, and it reads 1.5 bytes/span high because of them (75.66 against 74.08,
+    // 74.12, 74.08, 74.08 for the four rounds after it — measured 2026-08-10). Its frames are RETAINED
+    // rather than dropped, because that is what puts the heap in the state the measured rounds then
+    // hold constant; a warm-up whose output is collected would leave the first measured round paying
+    // exactly the costs this one exists to absorb.
+    roundA()
+    roundB()
+
+    for (let round = 0; round < 3; round++) {
+      readingsA.push(roundA())
+      readingsB.push(roundB())
     }
 
     // Keep every retained array alive PAST the heap readings above — asserting on `.length` here
@@ -125,6 +185,19 @@ describe('frame cost', () => {
     // not this assertion, is what `SPAN_BYTES` in `protocol.ts` is set from.
     expect(bytesPerSpan).toBeGreaterThan(16)
     expect(bytesPerSpan).toBeLessThan(2000)
+
+    // THE ONE DIRECTION WITH A CONSEQUENCE, AND IT IS GATED RATHER THAN LEFT TO THE CONSOLE. The two
+    // bounds above are symmetric sanity; this one is not. `SPAN_BYTES` is what `lambdaFrameBytes`
+    // charges the ring per span, so a real cost ABOVE it means the sizer UNDER-reports and the ring
+    // retains more than `HISTORY_BYTES` claims — the failure `protocol.ts`'s "IT WAS 60, AND 60
+    // UNDER-REPORTED THE RING BY ~19%" records as having actually happened. Over-reporting merely
+    // evicts early, which is why there is no matching floor at `SPAN_BYTES`.
+    //
+    // NO MORE MACHINE-FRAGILE THAN THE BOUNDS ABOVE. `SPAN_BYTES` is 80 against a measurement of
+    // 74.08289058462897, reproducible to the byte across browser restarts under the two Chromium
+    // flags `vite.config.ts` sets — an ~8% margin, wider than either the reproducibility of the
+    // reading or the rounding that produced the constant.
+    expect(bytesPerSpan).toBeLessThanOrEqual(SPAN_BYTES)
   })
 })
 

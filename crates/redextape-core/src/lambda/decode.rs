@@ -79,8 +79,8 @@ fn decode_list_ty(nf: &LambdaTerm, elem: &Ty) -> Option<Value> {
         let Node::Abs(_, body) = outer.node() else { return None };
         match body.node() {
             Node::Var(1) => break, // nil
-            Node::App(ca, t_term) => {
-                let Node::App(c, h_term) = ca.node() else { return None };
+            Node::App(ca, t_term, _) => {
+                let Node::App(c, h_term, _) = ca.node() else { return None };
                 if !matches!(c.node(), Node::Var(0)) {
                     return None;
                 }
@@ -106,7 +106,7 @@ fn decode_church(t: &LambdaTerm) -> Option<u64> {
     loop {
         match body.node() {
             Node::Var(0) => return Some(count), // reached x
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 // must be `f (…)` where f is Var(1)
                 if !matches!(f.node(), Node::Var(1)) {
                     return None;
@@ -145,9 +145,9 @@ fn decode_nil(t: &LambdaTerm) -> Option<Value> {
 fn decode_cons(t: &LambdaTerm, exp_h: &Value, exp_t: &Value) -> Option<Value> {
     let Node::Abs(_, outer) = t.node() else { return None };
     let Node::Abs(_, body) = outer.node() else { return None };
-    let Node::App(ca, t_term) = body.node() else { return None };
+    let Node::App(ca, t_term, _) = body.node() else { return None };
     // ca must be `c H`, i.e. App(Var(0), H)
-    let Node::App(c, h_term) = ca.node() else { return None };
+    let Node::App(c, h_term, _) = ca.node() else { return None };
     if !matches!(c.node(), Node::Var(0)) {
         return None;
     }

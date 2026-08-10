@@ -31,7 +31,30 @@ export type LambdaLinkState =
 export type LinkStatus =
   | { state: 'none' }
   | { state: 'stale' }
-  | { state: 'linked'; tm: boolean; lambda: LambdaLinkState }
+  | {
+      state: 'linked'
+      tm: boolean
+      lambda: LambdaLinkState
+      /**
+       * Whether the TM leg's running focus — the construct its CURRENT δ-step belongs to,
+       * `TmState.source_node` — names this SAME pinned construct right now (`link.ts`'s
+       * `isCoincident`). "The moment the app exists to show" (design §4.3), and worth a word here
+       * because THE δ-TABLE HAS NO VISUAL SIGNAL FOR IT AT ALL. `.state-row.is-focus` landing on an
+       * already-`.is-linked` row does not blend with it and does not combine into a third class the
+       * way the source pane's `.is-focus-coincident` does: both rules set `background` at equal
+       * specificity, `.is-focus` is declared second in `style.css`, and `.is-linked` sets no other
+       * property — so the focus wash REPLACES the pin's outright and a pinned-and-focused row is
+       * pixel-identical to a focused-only one. `TmPane.setFocus` never scrolls either, so the row can
+       * be off-screen entirely. THIS LINE IS THEREFORE THE WHOLE COINCIDENCE SIGNAL ON THE TM LEG, not
+       * a caption on a highlight the user can already see — which is more weight than a status line
+       * usually carries, and the reason to think twice before dropping it.
+       *
+       * `#link-status` IS A PLAIN `<div>` THAT ANNOUNCES NOTHING TO A SCREEN READER. This is its
+       * SECOND live-updating job (the pin's own answer above was its first) — both are deferred to
+       * this project's accessibility pass rather than fixed here; see the roadmap's deferred-a11y list.
+       */
+      focus: boolean
+    }
 
 const LAMBDA_TEXT: Record<LambdaLinkState, string> = {
   shown: '',
@@ -46,6 +69,10 @@ export function linkStatus(s: LinkStatus): string {
   if (s.state === 'none') return ''
   if (s.state === 'stale') return 'linking resumes when this compiles'
   const parts: string[] = []
+  // REPORTED FIRST, AHEAD OF EITHER ABSENCE BELOW — coincidence is live, present-tense news ("the run
+  // just reached what you pinned"), not a reason something is missing, and it is the state this whole
+  // slice exists to surface.
+  if (s.focus) parts.push('the machine is here right now')
   if (!s.tm) parts.push('this construct emits no machine states')
   const lambda = LAMBDA_TEXT[s.lambda]
   if (lambda !== '') parts.push(lambda)

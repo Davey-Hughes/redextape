@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import type { LambdaLeg, TmLeg } from '../../src/protocol'
 import { noSessionRows, resultRows } from '../../src/results'
-import type { Diagnostic } from '../../src/types'
+import type { Diagnostic, LambdaState } from '../../src/types'
 
-const okState = { text: 'λf. λx. f (f x)', spans: [], cut: null, step: 7 }
+const okState: LambdaState = {
+  text: 'λf. λx. f (f x)',
+  spans: [],
+  cut: null,
+  step: 7,
+  redex: null,
+  redex_span: null,
+  owner: 'None',
+}
 
 const lambdaOk: LambdaLeg = {
   status: { available: true, reason: '', node: null, run: 'Ended' },

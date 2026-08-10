@@ -92,7 +92,7 @@ fn physical_size(t: &LambdaTerm) -> u64 {
         match n.node() {
             Node::Var(_) => {}
             Node::Abs(_, b) => stack.push(b),
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 stack.push(f);
                 stack.push(a);
             }

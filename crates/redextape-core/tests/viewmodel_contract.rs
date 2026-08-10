@@ -87,14 +87,14 @@ fn a_later_steps_redex_path_is_not_a_coordinate_into_the_initial_term() {
     let (term, _map) = lambda_fixture("let x = 40; x + 2");
     let mut cursor = redextape_core::trace::LambdaCursor::new(&term, 1_000);
 
-    let Some(redextape_core::trace::StepEvent::Beta { redex: first_redex }) = cursor.next() else {
+    let Some(redextape_core::trace::StepEvent::Beta { redex: first_redex, .. }) = cursor.next() else {
         panic!("this program takes at least one beta step");
     };
     assert!(walk(&term, &first_redex).is_some(), "the first step's own redex must index the initial term");
 
     let mut redex = first_redex;
     for step in 2..=4 {
-        let Some(redextape_core::trace::StepEvent::Beta { redex: next }) = cursor.next() else {
+        let Some(redextape_core::trace::StepEvent::Beta { redex: next, .. }) = cursor.next() else {
             panic!("this program takes at least {step} beta steps");
         };
         redex = next;
@@ -118,8 +118,8 @@ fn walk(term: &redextape_core::lambda::LambdaTerm, path: &[redextape_core::lambd
     for dir in path {
         cur = match (dir, cur.node()) {
             (Dir::AbsBody, Node::Abs(_, body)) => body,
-            (Dir::AppL, Node::App(f, _)) => f,
-            (Dir::AppR, Node::App(_, a)) => a,
+            (Dir::AppL, Node::App(f, _, _)) => f,
+            (Dir::AppR, Node::App(_, a, _)) => a,
             _ => return None,
         };
     }
@@ -410,7 +410,7 @@ fn arena_matches_term(tree: &TermTree, term: &redextape_core::lambda::term::Lamb
         match n {
             Node::Var(i) => format!("Var({i})"),
             Node::Abs(name, _) => format!("Abs({name:?}, ..)"),
-            Node::App(_, _) => "App(.., ..)".to_string(),
+            Node::App(_, _, _) => "App(.., ..)".to_string(),
         }
     }
     fn describe_arena_node(n: &TermNode) -> String {
@@ -438,7 +438,7 @@ fn arena_matches_term(tree: &TermTree, term: &redextape_core::lambda::term::Lamb
                 }
                 work.push((*body, b2));
             }
-            (TermNode::App(f, a), Node::App(f2, a2)) => {
+            (TermNode::App(f, a), Node::App(f2, a2, _)) => {
                 work.push((*f, f2));
                 work.push((*a, a2));
             }
@@ -685,4 +685,292 @@ fn link_index_is_total_when_only_the_tm_leg_is_present() {
     assert_eq!(index.lambda_text, "", "no term means no lambda text, not one fabricated to match");
     assert!(index.lambda_nodes.is_empty());
     assert!(!index.tm_owner.is_empty(), "a present program must still build an owner array, with no term at all");
+}
+
+#[test]
+fn a_rendered_frame_carries_the_step_that_produced_it() {
+    let (program, _) = redextape_core::parser::parse("let x = 40; x + 2");
+    let program = program.expect("parsed");
+    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
+    let (core, _map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
+    let term = redextape_core::lambda::lower(&core).expect("lowers");
+    let mut c = redextape_core::trace::LambdaCursor::new(&term, 1000);
+
+    let at_zero = redextape_core::viewmodel::LambdaState::render(&c, 65536, 1000);
+    assert_eq!(at_zero.step, 0);
+    assert!(at_zero.redex.is_none(), "step 0 precedes any contraction");
+    assert_eq!(at_zero.owner, redextape_core::lambda::reduce::Owner::None);
+
+    c.next().expect("at least one step");
+    let after = redextape_core::viewmodel::LambdaState::render(&c, 65536, 1000);
+    assert_eq!(after.step, 1);
+    assert!(after.redex.is_some(), "a frame after a step must name the redex it contracted");
+    // Pins `render`'s owner forwarding: step 0's `Owner::None` (asserted above) is also what a
+    // hardcoded `owner: Owner::None` would produce, so that assertion alone cannot tell forwarding
+    // from a stub. This step's owner is `Exact(4)` on this fixture — anything but `None` — so
+    // comparing against the cursor's own `last_owner()` genuinely fails under a hardcode.
+    assert_eq!(after.owner, c.last_owner(), "render must forward the cursor's owner, not fabricate one");
+}
+
+/// The case `node_to_lambda` could never answer, and the reason it was deleted:
+/// `viewmodel_contract.rs` already pins that all seven steps of this program reported `let x = 40;`
+/// and `x + 2` was never named. At least one step must now name `x + 2`.
+#[test]
+fn some_step_of_the_sample_program_names_the_addition() {
+    let (program, _) = redextape_core::parser::parse("let x = 40; x + 2");
+    let program = program.expect("parsed");
+    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
+    let (core, map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
+    let term = redextape_core::lambda::lower(&core).expect("lowers");
+
+    let plus_span = {
+        let mut found = None;
+        let mut c = redextape_core::trace::LambdaCursor::new(&term, 5_000);
+        while c.next().is_some() {
+            if let Some(id) = c.last_owner().node()
+                && let Some(span) = map.source_span(id)
+                && &"let x = 40; x + 2"[span.start..span.end] == "x + 2"
+            {
+                found = Some(span);
+                break;
+            }
+        }
+        found
+    };
+    assert!(plus_span.is_some(), "no step ever named `x + 2` — the defect node_to_lambda was deleted for");
+}
+
+/// Spec §8.6. A `Within` answer must name a construct that genuinely CONTAINS an `Exact` answer's,
+/// or "innermost enclosing" is not what the harvest computes.
+///
+/// NOT THE SLICE'S CANONICAL `let x = 40; x + 2` — DELIBERATELY. That fixture has only two tagged
+/// constructs (`Let` and one `BinOp`), and every `Within` answer it produces is immediately followed,
+/// in the very next step, by an `Exact` answer of the SAME id — "the same descent" collapsing to a
+/// same-id self-match. A prior version of this test asserted only span containment (ids ignored) and
+/// still passed against that fixture with a wrong-but-real hardcoded `Owner::Within` (verified by
+/// injecting `Owner::Within(4)` in place of the computed id in `reduce_step_go` and rerunning: still
+/// green), because id 4 was independently a valid `Exact` answer elsewhere in the same trace. With only
+/// two tagged constructs, any id the harvest could report — right or wrong — coincides with one of the
+/// two `Exact` ids, so a span-only check cannot tell "the innermost enclosing tag" from "some tag that
+/// happens to appear somewhere in this trace".
+///
+/// `let x = 1; x + (2 + 3)` nests a second `BinOp` inside the first's argument, giving three distinct
+/// tagged constructs — `Let`, the outer `+`, the inner `+` — with the outer `+`'s source span strictly
+/// containing the inner `+`'s. The trace produces `Within(outer)` while the outer `+`'s own
+/// (not-yet-contracted) App is the innermost tagged ancestor of an untagged redex, and separately
+/// `Exact(inner)` once the inner `+`'s own App is itself contracted: two DIFFERENT ids, one properly
+/// inside the other, which `let x = 40; x + 2` had no way to produce. Proven below, not just argued by
+/// fixture selection: rebuilding the same hardcoded-`Within` regression against THIS fixture makes the
+/// strengthened assertion below fail (the id-blind one above it still passes, by the same self-match
+/// loophole).
+#[test]
+fn a_within_span_strictly_contains_an_exact_span_from_the_same_descent() {
+    let (program, _) = redextape_core::parser::parse("let x = 1; x + (2 + 3)");
+    let program = program.expect("parsed");
+    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
+    let (core, map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
+    let term = redextape_core::lambda::lower(&core).expect("lowers");
+
+    // Carries the owning id alongside the span, unlike the version this replaces — the id is what lets
+    // the strengthened check below tell a genuine cross-construct containment from a same-id self-match.
+    let mut exact: Vec<(u32, redextape_core::span::Span)> = Vec::new();
+    let mut within: Vec<(u32, redextape_core::span::Span)> = Vec::new();
+    let mut c = redextape_core::trace::LambdaCursor::new(&term, 5_000);
+    while c.next().is_some() {
+        match c.last_owner() {
+            redextape_core::lambda::reduce::Owner::Exact(id) => {
+                if let Some(s) = map.source_span(id) {
+                    exact.push((id, s));
+                }
+            }
+            redextape_core::lambda::reduce::Owner::Within(id) => {
+                if let Some(s) = map.source_span(id) {
+                    within.push((id, s));
+                }
+            }
+            redextape_core::lambda::reduce::Owner::None => {}
+        }
+    }
+
+    assert!(!exact.is_empty(), "no Exact answer on the sample program");
+    assert!(
+        !within.is_empty(),
+        "no Within answer on the sample program — the fixture no longer exercises the enclosing case"
+    );
+
+    // Baseline sanity, kept from the version this replaces: every Within span must contain SOME Exact
+    // span (self allowed). A Within naming a span disjoint from every Exact answer is obviously broken,
+    // even though (see the doc above) this alone cannot catch a wrong-but-real owner.
+    for (_, w) in &within {
+        assert!(
+            exact.iter().any(|(_, e)| w.start <= e.start && e.end <= w.end),
+            "a Within span at {w:?} contains no Exact span at all — the enclosing relation is wrong"
+        );
+    }
+
+    // THE PROPERTY THE OLD FIXTURE COULD NOT EXERCISE: at least one Within answer must STRICTLY contain
+    // an Exact answer belonging to a DIFFERENT construct — not merely itself under a later step. This
+    // checks that a `Within` answer strictly contains a DIFFERENT construct's `Exact` answer somewhere
+    // in the trace; it is existential over the whole trace, not a per-step innermost-ness check, so it
+    // does NOT rule out an outermost-enclosing regression on a fixture (like this one) where the outer
+    // construct's span also happens to strictly contain the inner one's. It is, however, what a
+    // hardcoded wrong owner cannot satisfy by accident the way it can satisfy the id-blind check above.
+    let genuine_cross_containment = within.iter().any(|(w_id, w)| {
+        exact.iter().any(|(e_id, e)| {
+            e_id != w_id && w.start <= e.start && e.end <= w.end && (w.start < e.start || e.end < w.end)
+        })
+    });
+    assert!(
+        genuine_cross_containment,
+        "no Within answer strictly contains a DIFFERENT construct's Exact answer — this fixture does not \
+         exercise 'innermost enclosing' as distinct from a same-id self-match"
+    );
+}
+
+/// Task 10, Step 1's own failing test. `f.redex_span` is left unconstrained when it is `None` —
+/// weak on its own (a version of `render` that never populates the field would still pass this) — so
+/// `a_frame_locates_its_own_redex_at_the_exact_span_the_walk_recorded` immediately below pins the
+/// dimension this one does not: that the field is actually populated, and with the right bytes.
+#[test]
+fn a_frame_locates_its_own_redex_in_its_own_text() {
+    use redextape_core::lambda::term::{abs, app_owned, var};
+
+    let t = app_owned(abs("x", var(0)), var(3), 7);
+    let mut c = redextape_core::trace::LambdaCursor::new(&t, 100);
+    c.next().expect("one step");
+    let f = redextape_core::viewmodel::LambdaState::render(&c, 65536, 1000);
+    // The span must index THIS frame's text, not the previous one's.
+    if let Some(span) = f.redex_span {
+        assert!(span.end <= f.text.len(), "the redex span must index this frame's own text");
+    }
+}
+
+/// A UTF-8 case, because 5b's worst bug was byte offsets sliced as UTF-16 indices and every fixture
+/// that could have caught it was pure ASCII — on the one function whose input is GUARANTEED to
+/// contain `λ`.
+///
+/// LIKE THE TEST ABOVE, THE CHAR-BOUNDARY CHECKS ARE GATED ON `Some` — kept as specified so this test
+/// still runs under a `render` that never populates the field. `redex_span_pinpoints_a_bound_occurrence_
+/// under_a_binder` below is what makes `Some` itself part of what is checked, on a fixture built for
+/// exactly this: a redex whose span sits AFTER a printed `λ` binder, so a byte/UTF-16 conflation
+/// anywhere in the pipeline that feeds this span would put it at the wrong offset rather than merely
+/// off by a fixed amount at the very start of the string.
+#[test]
+fn the_redex_span_is_in_bytes_over_text_containing_lambdas() {
+    use redextape_core::lambda::term::{abs, app, app_owned, var};
+
+    let t = app_owned(abs("f", abs("x", app(var(1), var(0)))), abs("y", var(0)), 1);
+    let mut c = redextape_core::trace::LambdaCursor::new(&t, 100);
+    c.next().expect("one step");
+    let f = redextape_core::viewmodel::LambdaState::render(&c, 65536, 1000);
+    assert!(f.text.contains('λ'), "this fixture must exercise multi-byte characters");
+    if let Some(span) = f.redex_span {
+        assert!(f.text.is_char_boundary(span.start), "span.start split a character");
+        assert!(f.text.is_char_boundary(span.end), "span.end split a character");
+    }
+}
+
+/// THE DIMENSION THE BRIEF'S OWN TEST CANNOT SEE: that `redex_span` is actually populated, not merely
+/// well-formed when present. A `render` that always leaves the field `None` — the exact regression
+/// `viewmodel.rs`'s former `NO redex FIELD, DELIBERATELY` header warns against reintroducing one field
+/// over — passes `a_frame_locates_its_own_redex_in_its_own_text` above outright (its assertion is
+/// inside an `if let Some`) while failing this one.
+///
+/// The redex is the whole term here (`app_owned`'s own root), so the recorded span must be the ENTIRE
+/// printed text — measured via a scratch probe against this exact fixture (`?3`, span `0..2`) before
+/// being hard-coded here, rather than assumed.
+///
+/// AND THE TEXT IT COVERS IS THE CONTRACTUM, NOT THE REDEX, which is worth naming because the field's
+/// name does not: the redex was `(λx. x) ?3`, the path to it was the root, and `?3` is what the step
+/// PRODUCED at that root. `redex_span` is a redex's PATH resolved against the POST-step term (see the
+/// field's own doc), so on every frame the highlighted text is the step's result.
+#[test]
+fn a_frame_locates_its_own_redex_at_the_exact_span_the_walk_recorded() {
+    use redextape_core::lambda::term::{abs, app_owned, var};
+
+    let t = app_owned(abs("x", var(0)), var(3), 7);
+    let mut c = redextape_core::trace::LambdaCursor::new(&t, 100);
+    c.next().expect("one step");
+    let f = redextape_core::viewmodel::LambdaState::render(&c, 65536, 1000);
+    assert_eq!(f.text, "?3", "pins the fixture itself, so a future edit to it is visible here too");
+    assert_eq!(
+        f.redex_span,
+        Some(redextape_core::span::Span::new(0, f.text.len())),
+        "the redex was the whole term (a root path), so its contractum is the whole printed text"
+    );
+}
+
+/// THE STRONGEST VERSION OF THE UTF-8 CASE: an INTERIOR redex (path `[AbsBody]`, not the trivial root
+/// path `[]` every other test in this file uses), whose span sits AFTER a printed `λ` binder in this
+/// frame's own text — `λx. x`, where the second `x` (byte 5..6) is what step 2 of
+/// `(λf. λx. f x) (λy. y)` LEFT BEHIND: the redex at `[AbsBody]` was `(λy. y) x`, and `x` is its
+/// contractum. (`λx. x` is a normal form; nothing further contracts here. `redex_span` is a redex's
+/// PATH resolved against the POST-step term, so the text it covers is always the step's result — see
+/// the field's own doc.) A root-path span always starts at byte 0, which cannot distinguish a correct
+/// byte offset from a UTF-16 code-unit count that happens to agree at zero; this fixture can, because
+/// the printer has already written a 2-byte, 1-UTF-16-unit `λ` before the span starts; a byte/UTF-16
+/// conflation anywhere in the pipeline that produced this span would land it one unit short of byte 5
+/// (or clip a character while trying). Measured via the same scratch-probe
+/// discipline as the test above, over TWO real β-steps of this exact fixture, before being hard-coded.
+#[test]
+fn redex_span_pinpoints_a_bound_occurrence_under_a_binder() {
+    use redextape_core::lambda::term::{abs, app, app_owned, var};
+
+    let t = app_owned(abs("f", abs("x", app(var(1), var(0)))), abs("y", var(0)), 1);
+    let mut c = redextape_core::trace::LambdaCursor::new(&t, 100);
+    c.next().expect("step 1: contracts the whole term (a root redex, uninteresting for this test)");
+    let ev2 = c.next().expect("step 2: contracts the redex under the binder");
+    assert_eq!(
+        ev2,
+        redextape_core::trace::StepEvent::Beta {
+            redex: vec![redextape_core::lambda::Dir::AbsBody],
+            owner: redextape_core::lambda::reduce::Owner::None,
+        },
+        "pins the fixture's own shape, so a future edit to it is visible here too"
+    );
+    let f = redextape_core::viewmodel::LambdaState::render(&c, 65536, 1000);
+    assert_eq!(f.text, "λx. x", "pins the fixture itself, so a future edit to it is visible here too");
+    let span = f.redex_span.expect("an interior redex within budget and depth must resolve to a span");
+    assert!(f.text.is_char_boundary(span.start), "span.start split a character");
+    assert!(f.text.is_char_boundary(span.end), "span.end split a character");
+    assert_eq!(&f.text[span.start..span.end], "x", "the span must name the bound occurrence, not the λ before it");
+    assert_eq!(
+        span,
+        redextape_core::span::Span::new(5, 6),
+        "byte 5, not UTF-16 index 5 -- they coincide here only because there is exactly one multi-byte character ahead of the span, and only for the START -- see the doc above"
+    );
+}
+
+/// `redex_span` MUST NOT REPORT A SPAN PAST THE TRUNCATION CUT. `print_lambda_linked`'s own contract
+/// ("A NODE PAST THE TRUNCATION CUT RECORDS NOTHING") is exactly what a caller needs here: a frame
+/// budget of 512 bytes (`FRAME_BYTES`, `web/src/protocol.ts`) truncates most non-trivial terms, and a
+/// `redex_span` clamped to the cut point instead of dropped would tell a renderer "the redex ends
+/// here", which is false — the walk never reached it. Measured directly: at `byte_budget = 64` on
+/// `big_list_program()`'s first step, the redex is the WHOLE term (a root path, like the tests above),
+/// so if this field ever clamped instead of dropping, it would report `Some(Span { start: 0, end: 64
+/// })` here rather than `None`, which is what makes this fixture a real discriminator and not a
+/// vacuous truth.
+#[test]
+fn redex_span_is_none_when_the_step_it_names_falls_past_the_truncation_cut() {
+    let (term, _map) = lambda_fixture(&big_list_program());
+    let mut cursor = redextape_core::trace::LambdaCursor::new(&term, 1_000);
+    cursor.next().expect("this program takes at least one step");
+
+    let f = redextape_core::viewmodel::LambdaState::render(&cursor, 64, MAX_TERM_DEPTH);
+    assert!(f.cut.is_some(), "a 64-byte budget must truncate this fixture");
+    assert!(f.redex_span.is_none(), "a redex past the cut must not report a clamped or stale span");
+}
+
+/// `redex_span` MUST NOT BE HARDCODED `Some`, EITHER — the mirror image of the truncation test above,
+/// and the same dimension `a_rendered_frame_carries_the_step_that_produced_it` already checks for
+/// `redex` itself. Step 0 precedes any contraction, so there is nothing for a genuine implementation to
+/// name; a stub that always reports SOME span regardless of the cursor's own state would still pass
+/// every other test in this file (none of them render step 0), and only this one would catch it.
+#[test]
+fn redex_span_is_none_before_any_step() {
+    let (term, _map) = lambda_fixture("let x = 40; x + 2");
+    let c = redextape_core::trace::LambdaCursor::new(&term, 1_000);
+    let f = redextape_core::viewmodel::LambdaState::render(&c, 65536, MAX_TERM_DEPTH);
+    assert_eq!(f.step, 0);
+    assert!(f.redex_span.is_none(), "step 0 precedes any contraction; there is no redex to locate");
 }

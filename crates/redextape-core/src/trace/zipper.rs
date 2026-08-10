@@ -10,18 +10,19 @@
 //! the top frame is `AppL(arg)` — reached by descending one level *past* the `App` into its function
 //! side. So the `App` node itself is never constructed on the way down: whether it is a redex follows
 //! from the frame tag and the focus node, and reducing it is `beta(body, arg)` directly. Moving to a
-//! sibling is a handle swap. But `advance` allocates one node — via `app(...)` or `abs(...)` — per
-//! level it climbs past an exhausted subtree, because it needs the parent as a term to continue the
-//! search from. `Rc::new` is called by `beta`, by `term()`, and by that climb in `advance`, nowhere
-//! else in this file.
+//! sibling is a handle swap. But `advance` allocates one node — via `app_tagged_for_rebuild(...)` or
+//! `abs(...)` — per level it climbs past an exhausted subtree, because it needs the parent as a term to
+//! continue the search from. `Rc::new` is called by `beta`, by `term()`, and by that climb in
+//! `advance`, nowhere else in this file.
 //!
 //! Full record: `docs/superpowers/specs/2026-08-02-lambda-reduction-context-zipper-design.md`.
 
 use std::rc::Rc;
 
+use crate::core::NodeId;
 use crate::lambda::Status;
-use crate::lambda::reduce::MAX_TERM_DEPTH;
-use crate::lambda::term::{Dir, LambdaTerm, Node, Path, abs, app, beta};
+use crate::lambda::reduce::{MAX_TERM_DEPTH, Owner};
+use crate::lambda::term::{Dir, LambdaTerm, Node, Path, abs, app_tagged_for_rebuild, beta};
 use crate::trace::StepEvent;
 
 /// One level of reduction context: where the focus sits in its parent, plus the sibling the parent
@@ -30,9 +31,16 @@ use crate::trace::StepEvent;
 /// `saved_depth` is this frame's contribution to the O(1) whole-term depth accounting — see
 /// `ZipperCursor::root_depth`. It is the `(add, floor)` pair in force *before* this frame was pushed,
 /// restored on pop, because `max` is not invertible.
+///
+/// `owner` is the provenance tag of the `App` the frame decomposed. **It is stored here because the
+/// `App` itself is never rebuilt on the reduction path** (see `reduce_here`), so at the moment a step is
+/// reported there is no node left to read it from. It is also what every rebuild on the climb
+/// (`term`, `advance`) hands back to `app_tagged_for_rebuild`: a rebuild through plain `app` would drop
+/// provenance on the zipper path only, which `PartialEq` cannot see because it ignores the tag.
+/// `AbsBody` decomposed an `Abs`, which carries no tag, so it has no such field.
 enum Frame {
-    AppL { arg: LambdaTerm, saved_depth: (u32, u32) },
-    AppR { fun: LambdaTerm, saved_depth: (u32, u32) },
+    AppL { arg: LambdaTerm, saved_depth: (u32, u32), owner: Option<NodeId> },
+    AppR { fun: LambdaTerm, saved_depth: (u32, u32), owner: Option<NodeId> },
     AbsBody { name: Rc<str>, saved_depth: (u32, u32) },
 }
 
@@ -50,6 +58,18 @@ impl Frame {
             Frame::AppL { saved_depth, .. } | Frame::AppR { saved_depth, .. } | Frame::AbsBody { saved_depth, .. } => {
                 *saved_depth
             }
+        }
+    }
+
+    /// The tag of the `App` this frame decomposed, or `None` for `AbsBody`, which decomposed an `Abs`.
+    ///
+    /// `None` from an `AbsBody` frame and `None` from an untagged `App` frame are deliberately the same
+    /// answer: `reduce_step_go`'s descent also passes `enclosing` through an `Abs` untouched, so a
+    /// binder neither contributes a tag nor hides the ones above it.
+    fn owner(&self) -> Option<NodeId> {
+        match self {
+            Frame::AppL { owner, .. } | Frame::AppR { owner, .. } => *owner,
+            Frame::AbsBody { .. } => None,
         }
     }
 }
@@ -105,12 +125,19 @@ impl ZipperCursor {
     /// The whole term, rebuilt from the context stack. **On demand, never maintained** — maintaining
     /// it eagerly is precisely the cost this cursor exists to remove, so a caller that invokes this
     /// every step (as `reduce_trace` does by contract) gets no benefit from the zipper at all.
+    ///
+    /// **THE REBUILD IS TAG-CARRYING, AND NOTHING IN THE EQUIVALENCE GATE CAN SEE THAT.**
+    /// `LambdaTerm`'s `PartialEq` ignores an `App`'s owner, so rebuilding through plain `app` here would
+    /// return a term that compares equal to `LambdaCursor`'s while having silently lost every tag on the
+    /// context spine — including in `reduce_to_normal_form`'s result, which is this method's shipped
+    /// caller. `tests/lambda_provenance.rs`'s
+    /// `the_zippers_normal_form_keeps_the_tags_the_plain_loop_keeps` is what does see it.
     pub fn term(&self) -> LambdaTerm {
         let mut t = self.focus.clone();
         for f in self.stack.iter().rev() {
             t = match f {
-                Frame::AppL { arg, .. } => app(t, arg.clone()),
-                Frame::AppR { fun, .. } => app(fun.clone(), t),
+                Frame::AppL { arg, owner, .. } => app_tagged_for_rebuild(t, arg.clone(), *owner),
+                Frame::AppR { fun, owner, .. } => app_tagged_for_rebuild(fun.clone(), t, *owner),
                 Frame::AbsBody { name, .. } => abs(Rc::clone(name), t),
             };
         }
@@ -186,24 +213,26 @@ impl ZipperCursor {
         enum Move {
             Stop,
             UnderBinder(Rc<str>, LambdaTerm),
-            IntoFunction(LambdaTerm, LambdaTerm),
+            IntoFunction(LambdaTerm, LambdaTerm, Option<NodeId>),
         }
         loop {
             let mv = match self.focus.node() {
                 Node::Var(_) => Move::Stop,
                 Node::Abs(n, b) => Move::UnderBinder(Rc::clone(n), b.clone()),
-                Node::App(f, a) => Move::IntoFunction(f.clone(), a.clone()),
+                Node::App(f, a, owner) => Move::IntoFunction(f.clone(), a.clone(), *owner),
             };
             match mv {
                 Move::Stop => return false,
                 Move::UnderBinder(name, body) => {
                     self.push(|saved_depth| Frame::AbsBody { name, saved_depth }, 0, body);
                 }
-                Move::IntoFunction(fun, arg) => {
+                Move::IntoFunction(fun, arg, owner) => {
                     let sib = arg.depth();
                     // Descend PAST the App into its function side. If `fun` is an `Abs` the invariant
-                    // now holds and this App is the redex; if not, the search continues below it.
-                    self.push(|saved_depth| Frame::AppL { arg, saved_depth }, sib, fun);
+                    // now holds and this App is the redex; if not, the search continues below it. The
+                    // App's tag rides the frame from here: this is the one place it is read off a node,
+                    // and after this the node is either contracted away or rebuilt from the frame.
+                    self.push(|saved_depth| Frame::AppL { arg, saved_depth, owner }, sib, fun);
                     if matches!(self.focus.node(), Node::Abs(..)) {
                         return true;
                     }
@@ -222,18 +251,23 @@ impl ZipperCursor {
                 // the focus swap, so this must not also do it — an earlier draft used
                 // `std::mem::replace` here and then read `self.focus` inside the `push` call, which
                 // both double-moved and failed to borrow-check.
-                Frame::AppL { arg, .. } => {
+                //
+                // The `AppR` frame decomposes THE SAME `App` node the popped `AppL` did — only the
+                // side the focus sits on changes — so it inherits that frame's tag rather than
+                // re-reading one from anywhere.
+                Frame::AppL { arg, owner, .. } => {
                     let fun = self.focus.clone();
                     let sib = fun.depth();
-                    self.push(|saved_depth| Frame::AppR { fun, saved_depth }, sib, arg);
+                    self.push(|saved_depth| Frame::AppR { fun, saved_depth, owner }, sib, arg);
                     return true;
                 }
                 // Both children searched, or a binder body was: keep climbing. This DOES rebuild the
-                // parent term — via `app`/`abs`, one allocation per level — because the search needs
-                // the parent as a term to decide where to go next (into `AppR`'s sibling, or up again).
-                Frame::AppR { fun, .. } => {
+                // parent term — one allocation per level — because the search needs the parent as a
+                // term to decide where to go next (into `AppR`'s sibling, or up again). Tag-carrying,
+                // for `term()`'s reason: `app` here would compare equal and be silently untagged.
+                Frame::AppR { fun, owner, .. } => {
                     self.climbs += 1;
-                    self.focus = app(fun, self.focus.clone());
+                    self.focus = app_tagged_for_rebuild(fun, self.focus.clone(), owner);
                 }
                 Frame::AbsBody { name, .. } => {
                     self.climbs += 1;
@@ -333,17 +367,42 @@ impl ZipperCursor {
     /// Reduce the redex the invariant points at, in place. **The `App` node is never built:** the
     /// focus is `Abs(_, body)` and the popped frame holds `arg`, which is everything `beta` needs.
     /// Returns the path to the redex `App` — the stack path *after* popping, since the `App` sits one
-    /// level above the function side the invariant descends to.
-    fn reduce_here(&mut self) -> Path {
+    /// level above the function side the invariant descends to — and the construct the step belongs to.
+    ///
+    /// **THE TAG COMES OFF THE POPPED FRAME, BECAUSE THE `App` IT BELONGED TO IS NEVER RECONSTRUCTED.**
+    /// That is the whole reason `Frame::AppL` carries one. `reduce_step_go` reads the same tag straight
+    /// off the node it is about to contract; there is no such node here.
+    ///
+    /// **THE ENCLOSING TAG IS READ AFTER THE POP, SO THE SCAN EXPRESSES THE RELATION RATHER THAN
+    /// COINCIDING WITH IT.** `reduce_step_go`'s `enclosing` is the innermost tag STRICTLY ABOVE the
+    /// redex, and after the pop the redex's own frame is gone, so a reverse walk of what remains is
+    /// exactly that. **Scanning before the pop was measured and is observationally identical today** —
+    /// the redex's own frame answers `Some` only when the redex is tagged, and then the `(Some(id), _)`
+    /// arm below takes `Exact` without consulting `enclosing` at all; when it is untagged it answers
+    /// `None` and `find_map` skips it either way. It is written this way regardless because the
+    /// equivalence is a consequence of `Exact` outranking `Within` in one `match` two lines down, not of
+    /// anything about the stack: reorder those arms and the pre-pop version starts reporting
+    /// `Within(self)`, which is not a claim this type can make.
+    ///
+    /// The scan is a reverse walk of the context stack rather than a descent because a stack is what is
+    /// available here — same relation, different route, which is exactly what
+    /// `tests/zipper_equivalence.rs` exists to hold equal.
+    fn reduce_here(&mut self) -> (Path, Owner) {
         let Node::Abs(_, body) = self.focus.node() else {
             unreachable!("the seek invariant guarantees an Abs focus");
         };
         let body = body.clone();
-        let Some(Frame::AppL { arg, .. }) = self.pop() else {
+        let Some(Frame::AppL { arg, owner, .. }) = self.pop() else {
             unreachable!("the seek invariant guarantees an AppL top frame");
         };
+        let enclosing = self.stack.iter().rev().find_map(Frame::owner);
+        let who = match (owner, enclosing) {
+            (Some(id), _) => Owner::Exact(id),
+            (None, Some(id)) => Owner::Within(id),
+            (None, None) => Owner::None,
+        };
         self.focus = beta(&body, &arg);
-        self.path()
+        (self.path(), who)
     }
 }
 
@@ -372,9 +431,9 @@ impl Iterator for ZipperCursor {
             self.status = Some(Status::Normalized);
             return None;
         }
-        let redex = self.reduce_here();
+        let (redex, owner) = self.reduce_here();
         self.steps += 1;
-        Some(StepEvent::Beta { redex })
+        Some(StepEvent::Beta { redex, owner })
     }
 }
 
@@ -382,17 +441,22 @@ impl Iterator for ZipperCursor {
 mod tests {
     use super::*;
     use crate::lambda::MAX_REDUCTION_STEPS;
-    use crate::lambda::term::{abs, app, var};
+    use crate::lambda::term::{abs, app, app_owned, var};
 
+    /// The fixture is TAGGED on purpose: the redex `App` carries 11 and sits under a tagged outer `App`
+    /// (5) whose function side is a bare `Var`, so the outer one is not itself a redex. The expected
+    /// owner is `Exact(11)` rather than `Owner::None` — an untagged fixture would compare `None` against
+    /// `None` and hold nothing about the tag at all.
     #[test]
     fn one_beta_step_matches_the_reducer_and_reports_the_app_path() {
         use crate::lambda::reduce::reduce_step;
-        let t = abs("z", app(abs("x", var(0)), var(1)));
-        let (expected_term, expected_path) = reduce_step(&t).expect("the term has a redex");
+        let t = app_owned(var(9), abs("z", app_owned(abs("x", var(0)), var(1), 11)), 5);
+        let (expected_term, expected_path, expected_owner) = reduce_step(&t).expect("the term has a redex");
+        assert_eq!(expected_owner, Owner::Exact(11), "the fixture must exercise a real tag, not Owner::None");
 
         let mut z = ZipperCursor::new(&t, MAX_REDUCTION_STEPS);
         let ev = z.next().expect("one step");
-        assert_eq!(ev, StepEvent::Beta { redex: expected_path });
+        assert_eq!(ev, StepEvent::Beta { redex: expected_path, owner: expected_owner });
         assert_eq!(z.term(), expected_term, "the zipper's term must equal the reducer's");
         assert_eq!(z.steps_taken(), 1);
     }

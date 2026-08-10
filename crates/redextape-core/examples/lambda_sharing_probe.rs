@@ -347,7 +347,7 @@ fn intern_term(t: &LambdaTerm, iv: &mut Interner) -> u64 {
                 match n.node() {
                     Node::Var(_) => {}
                     Node::Abs(_, b) => stack.push(Visit::Down(b)),
-                    Node::App(f, a) => {
+                    Node::App(f, a, _) => {
                         stack.push(Visit::Down(f));
                         stack.push(Visit::Down(a));
                     }
@@ -358,7 +358,7 @@ fn intern_term(t: &LambdaTerm, iv: &mut Interner) -> u64 {
                 let key = match n.node() {
                     Node::Var(i) => Key::Var(*i),
                     Node::Abs(_, b) => Key::Abs(by_addr[&std::ptr::from_ref(b)]),
-                    Node::App(f, a) => Key::App(by_addr[&std::ptr::from_ref(f)], by_addr[&std::ptr::from_ref(a)]),
+                    Node::App(f, a, _) => Key::App(by_addr[&std::ptr::from_ref(f)], by_addr[&std::ptr::from_ref(a)]),
                 };
                 let id = iv.intern(key);
                 by_addr.insert(std::ptr::from_ref(n), id);
@@ -377,7 +377,7 @@ fn size_of(t: &LambdaTerm) -> u64 {
         match node.node() {
             Node::Var(_) => {}
             Node::Abs(_, b) => stack.push(b),
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 stack.push(f);
                 stack.push(a);
             }
@@ -431,7 +431,7 @@ fn shift_allocs(cutoff: u32, t: &LambdaTerm) -> u64 {
     match t.node() {
         Node::Var(_) => 1,
         Node::Abs(_, b) => 1 + shift_allocs(cutoff + 1, b),
-        Node::App(f, a) => 1 + shift_allocs(cutoff, f) + shift_allocs(cutoff, a),
+        Node::App(f, a, _) => 1 + shift_allocs(cutoff, f) + shift_allocs(cutoff, a),
     }
 }
 
@@ -451,7 +451,7 @@ fn subst_allocs(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64) {
             let (spine, shifts) = subst_allocs(j + 1, &lifted, b);
             (1 + spine, re + shifts)
         }
-        Node::App(f, a) => {
+        Node::App(f, a, _) => {
             let (sp1, sh1) = subst_allocs(j, s, f);
             let (sp2, sh2) = subst_allocs(j, s, a);
             (1 + sp1 + sp2, sh1 + sh2)
@@ -478,7 +478,7 @@ fn subst_allocs_lifted(j: u32, lift: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u6
             let (spine, shifts) = subst_allocs_lifted(j + 1, lift + 1, s, b);
             (1 + spine, shifts)
         }
-        Node::App(f, a) => {
+        Node::App(f, a, _) => {
             let (sp1, sh1) = subst_allocs_lifted(j, lift, s, f);
             let (sp2, sh2) = subst_allocs_lifted(j, lift, s, a);
             (1 + sp1 + sp2, sh1 + sh2)
@@ -517,7 +517,7 @@ fn beta_allocs_fused(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64, u64) 
             let (spine, shifts, fv) = beta_allocs_fused(j + 1, &lifted, b);
             (1 + spine, re + shifts, fv)
         }
-        Node::App(f, a) => {
+        Node::App(f, a, _) => {
             let (sp1, sh1, fv1) = beta_allocs_fused(j, s, f);
             let (sp2, sh2, fv2) = beta_allocs_fused(j, s, a);
             (1 + sp1 + sp2, sh1 + sh2, fv1 + fv2)
@@ -684,8 +684,8 @@ fn redex_at<'a>(t: &'a LambdaTerm, path: &[Dir]) -> Option<(&'a LambdaTerm, u64)
     let mut scan = 0u64;
     for d in path {
         cur = match (d, cur.node()) {
-            (Dir::AppL, Node::App(f, _)) => f,
-            (Dir::AppR, Node::App(f, a)) => {
+            (Dir::AppL, Node::App(f, _, _)) => f,
+            (Dir::AppR, Node::App(f, a, _)) => {
                 scan += size_of(f);
                 a
             }
@@ -710,7 +710,7 @@ fn count_occurrences(body: &LambdaTerm, j: u32) -> u64 {
                 }
             }
             Node::Abs(_, b) => stack.push((b, k + 1)),
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 stack.push((f, k));
                 stack.push((a, k));
             }
@@ -730,7 +730,7 @@ fn count_abs(body: &LambdaTerm) -> u64 {
                 n += 1;
                 stack.push(b);
             }
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 stack.push(f);
                 stack.push(a);
             }
@@ -749,7 +749,7 @@ fn account(trace: &Trace) -> Work {
             w.malformed += 1;
             continue;
         };
-        let Node::App(f, arg) = redex.node() else {
+        let Node::App(f, arg, _) = redex.node() else {
             w.malformed += 1;
             continue;
         };
@@ -1790,7 +1790,7 @@ fn collect_subterms<'a>(t: &'a LambdaTerm, out: &mut Vec<&'a LambdaTerm>) {
         match n.node() {
             Node::Var(_) => {}
             Node::Abs(_, b) => stack.push(b),
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 stack.push(f);
                 stack.push(a);
             }

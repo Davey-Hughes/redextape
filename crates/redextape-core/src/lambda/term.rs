@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use crate::core::NodeId;
+
 /// A lambda-term. One `Rc` per node; `.node()` reaches the variant.
 ///
 /// Two `u32`s ride alongside the pointer, both maintained as CONSTRUCTION-TIME INVARIANTS by `var` /
@@ -53,9 +55,63 @@ pub enum Node {
     /// step by `reduce_trace`. `abs` takes `impl Into<Rc<str>>`, which accepts `&str` and `String`
     /// alike, so no call site changed.
     Abs(Rc<str>, LambdaTerm),
-    /// Application.
+    /// Application, with the source construct it was lowered from.
+    ///
+    /// **THE TAG IS INHERITED, NEVER RECOMPUTED.** Reduction creates no node ex nihilo — every
+    /// constructor call on the reduction path rebuilds a node corresponding to exactly one input node
+    /// (design §2.1 tabulates all ten sites) — so a tag written once at lowering remains well-defined
+    /// after any number of β-steps. That is the whole difference from `node_to_lambda`, whose paths
+    /// were *positional* and went stale after one contraction.
+    ///
+    /// **IT COSTS NOTHING — ON A 64-BIT HOST.** `Option<NodeId>` here leaves `size_of::<Node>()`
+    /// unchanged from what it would be without the tag, because the compiler packs it into the
+    /// discriminant word's padding there — measured, and pinned by the `const _` below. That specific
+    /// packing does NOT hold on wasm32 (also measured: `Option<NodeId>` costs 4 real bytes there, see
+    /// the `const _`'s doc), so "costs nothing" is a 64-bit-host claim, not a universal one. Putting the
+    /// tag on the `LambdaTerm` handle instead, which the two existing `u32`s suggest by analogy, costs
+    /// 16 bytes per node and 8 per handle on a 64-bit host — worse on every target measured so far.
+    App(LambdaTerm, LambdaTerm, Option<NodeId>),
+}
+
+/// The shape `Node` would have WITHOUT the provenance tag. Exists only so the assertion below can
+/// state the property the design actually measured — that the tag is free — rather than a magic
+/// number. `#[cfg]`-gated alongside that assertion: see its doc for why the comparison this type
+/// exists for is not portable across targets.
+#[cfg(target_pointer_width = "64")]
+#[allow(dead_code, reason = "constructed nowhere; exists only to be measured by the assertion below")]
+enum NodeUntagged {
+    Var(u32),
+    Abs(Rc<str>, LambdaTerm),
     App(LambdaTerm, LambdaTerm),
 }
+
+/// **THE TAG MUST STAY FREE — ON A 64-BIT HOST.** `Option<NodeId>` on `App` was measured (design §2.2)
+/// to pack into the discriminant word's padding there, leaving `Node` exactly the size it would be
+/// without the tag at all (`NodeUntagged`, above, built for exactly this comparison rather than a
+/// literal byte count). That packing is NOT free on wasm32, which `redextape-wasm` compiles this crate
+/// to for the browser app: a bare `u32` field costs 4 bytes there (4-byte pointer alignment leaves no
+/// padding to absorb it, unlike the 8-byte alignment a 64-bit host's pointer fields impose), so
+/// `Option<NodeId>` genuinely grows `App` by 4 bytes on that target — measured `Node` 32 bytes vs.
+/// `NodeUntagged` 28. The assertion is therefore gated to the one case design §2.2 actually measured
+/// and the only one it can honestly promise, rather than asserting a cross-target equality that does
+/// not hold and would make every wasm32 build fail.
+///
+/// This mirror-equality assertion alone is WEAKER than the flat `== 40` it replaced: it proves the tag
+/// is free RELATIVE to `NodeUntagged`, but `NodeUntagged` moves in lockstep with `Node` — a field added
+/// anywhere on `LambdaTerm` (the handle both types embed) grows both equally, and this assertion would
+/// stay green straight through it. The absolute-size assertion below is what still catches that: it
+/// pins `Node` itself, the property the flat `40` originally existed for (`Node` is a type "prone to
+/// 375x logical blow-up" under structural sharing, so any unplanned growth compounds). Together: one
+/// assertion for "the tag is free", one for "`Node` has not grown at all" — both host-only, because
+/// wasm32's 4-byte pointers make every figure here different from the 64-bit numbers pinned below.
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<Node>() == std::mem::size_of::<NodeUntagged>());
+
+/// See the doc above: this is the second, independent guarantee — `Node` itself has not grown, not just
+/// that the tag is free relative to a comparison type that would grow right alongside it. 64-bit-host
+/// only, like its sibling.
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<Node>() == 40);
 
 impl LambdaTerm {
     /// The variant. Deliberately a method rather than a `Deref` impl: the indirection stays visible
@@ -63,6 +119,18 @@ impl LambdaTerm {
     /// literally.
     pub fn node(&self) -> &Node {
         &self.0
+    }
+
+    /// The source construct this node was lowered from, if it is a tagged `App`.
+    ///
+    /// `None` for `Var`, `Abs`, and any `App` that no source construct owns — which is most of them in
+    /// a real program, because `encode.rs` mints every combinator untagged. See design §5.1: `None` is
+    /// the correct answer there, not a gap.
+    pub fn owner(&self) -> Option<NodeId> {
+        match self.node() {
+            Node::App(_, _, owner) => *owner,
+            Node::Var(_) | Node::Abs(_, _) => None,
+        }
     }
 
     /// Allocation identity. Two terms sharing this ARE the same allocation WHILE BOTH ARE ALIVE, which
@@ -144,7 +212,7 @@ fn logical_sizes(t: &LambdaTerm) -> HashMap<usize, u64> {
             match node.node() {
                 Node::Var(_) => {}
                 Node::Abs(_, b) => stack.push((b, false)),
-                Node::App(f, a) => {
+                Node::App(f, a, _) => {
                     stack.push((f, false));
                     stack.push((a, false));
                 }
@@ -158,7 +226,7 @@ fn logical_sizes(t: &LambdaTerm) -> HashMap<usize, u64> {
         let size = match node.node() {
             Node::Var(_) => 1,
             Node::Abs(_, b) => 1u64.saturating_add(child_size(b)),
-            Node::App(f, a) => 1u64.saturating_add(child_size(f)).saturating_add(child_size(a)),
+            Node::App(f, a, _) => 1u64.saturating_add(child_size(f)).saturating_add(child_size(a)),
         };
         sizes.insert(id, size);
     }
@@ -207,7 +275,7 @@ pub fn max_shared_logical_size(t: &LambdaTerm) -> u64 {
                 *indeg.entry(b.alloc_id()).or_insert(0) += 1;
                 stack.push(b);
             }
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 *indeg.entry(f.alloc_id()).or_insert(0) += 1;
                 *indeg.entry(a.alloc_id()).or_insert(0) += 1;
                 stack.push(f);
@@ -226,6 +294,7 @@ pub fn max_shared_logical_size(t: &LambdaTerm) -> u64 {
 /// < AbsBody`, declaration order) is otherwise arbitrary: nothing depends on how paths compare, only
 /// on equality-based lookup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Dir {
     AppL,
     AppR,
@@ -250,10 +319,36 @@ pub fn abs(name: impl Into<Rc<str>>, body: LambdaTerm) -> LambdaTerm {
 }
 
 pub fn app(f: LambdaTerm, a: LambdaTerm) -> LambdaTerm {
+    app_tagged(f, a, None)
+}
+
+/// `app`, carrying the Core node this application was lowered from.
+///
+/// Used only by `lower.rs`, and only at the sites where the `App` being built IS a Core node's own
+/// root. `encode.rs` deliberately does not call this: a Church numeral's internal applications belong
+/// to no source construct, and tagging them with the numeral's own id would claim they do.
+pub fn app_owned(f: LambdaTerm, a: LambdaTerm, owner: NodeId) -> LambdaTerm {
+    app_tagged(f, a, Some(owner))
+}
+
+/// Rebuild an `App` carrying a tag that is already in hand. **This is the spine-rebuild constructor**,
+/// used by `reduce_step` where `app_tagged`'s privacy does not reach; `shift`/`subst`/`beta_go` use
+/// `app_tagged` directly because they live in this module.
+pub fn app_tagged_for_rebuild(f: LambdaTerm, a: LambdaTerm, owner: Option<NodeId>) -> LambdaTerm {
+    app_tagged(f, a, owner)
+}
+
+/// The shared body. Private, because a caller passing `None` explicitly should call `app`, and the
+/// two public constructors exist so the call sites read as tagged or untagged at a glance.
+///
+/// **ALSO THE PROPAGATION CONSTRUCTOR.** `shift`, `subst` and `beta_go` call this with the tag of the
+/// node they are rebuilding, which is what makes the tag survive β. A rebuild that called `app`
+/// instead would silently drop provenance on exactly the path this design exists to follow.
+fn app_tagged(f: LambdaTerm, a: LambdaTerm, owner: Option<NodeId>) -> LambdaTerm {
     let maxfree = f.maxfree().max(a.maxfree());
     // The DEEPER child, not the sum: depth is the longest path, not a size.
     let depth = f.depth().max(a.depth()).saturating_add(1);
-    LambdaTerm(Rc::new(Node::App(f, a)), maxfree, depth)
+    LambdaTerm(Rc::new(Node::App(f, a, owner)), maxfree, depth)
 }
 
 /// Shift the free variables of `t` (those with index >= `cutoff`) by `d`.
@@ -313,7 +408,7 @@ pub fn shift(d: i64, cutoff: u32, t: &LambdaTerm) -> LambdaTerm {
             var(shifted as u32)
         }
         Node::Abs(n, b) => abs(Rc::clone(n), shift(d, cutoff + 1, b)),
-        Node::App(f, a) => app(shift(d, cutoff, f), shift(d, cutoff, a)),
+        Node::App(f, a, owner) => app_tagged(shift(d, cutoff, f), shift(d, cutoff, a), *owner),
     }
 }
 
@@ -347,7 +442,7 @@ pub fn subst(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> LambdaTerm {
             }
         }
         Node::Abs(n, b) => abs(Rc::clone(n), subst(j + 1, &shift(1, 0, s), b)),
-        Node::App(f, a) => app(subst(j, s, f), subst(j, s, a)),
+        Node::App(f, a, owner) => app_tagged(subst(j, s, f), subst(j, s, a), *owner),
     }
 }
 
@@ -426,7 +521,7 @@ fn beta_go(t: &LambdaTerm, j: u32, s: &LambdaTerm) -> LambdaTerm {
             }
         }
         Node::Abs(n, b) => abs(Rc::clone(n), beta_go(b, j + 1, &shift(1, 0, s))),
-        Node::App(f, a) => app(beta_go(f, j, s), beta_go(a, j, s)),
+        Node::App(f, a, owner) => app_tagged(beta_go(f, j, s), beta_go(a, j, s), *owner),
     }
 }
 
@@ -449,7 +544,7 @@ impl PartialEq for LambdaTerm {
         match (self.node(), other.node()) {
             (Node::Var(a), Node::Var(b)) => a == b,
             (Node::Abs(_, a), Node::Abs(_, b)) => a == b, // name hint ignored
-            (Node::App(f1, a1), Node::App(f2, a2)) => f1 == f2 && a1 == a2,
+            (Node::App(f1, a1, _), Node::App(f2, a2, _)) => f1 == f2 && a1 == a2, // owner ignored
             _ => false,
         }
     }
@@ -500,7 +595,7 @@ impl Drop for LambdaTerm {
         if let Some(root) = Rc::get_mut(&mut self.0) {
             match root {
                 Node::Abs(_, b) => stack.push(std::mem::replace(b, blank.clone())),
-                Node::App(f, a) => {
+                Node::App(f, a, _) => {
                     stack.push(std::mem::replace(f, blank.clone()));
                     stack.push(std::mem::replace(a, blank.clone()));
                 }
@@ -516,7 +611,7 @@ impl Drop for LambdaTerm {
             if let Some(node) = Rc::into_inner(rc) {
                 match node {
                     Node::Abs(_, b) => stack.push(b),
-                    Node::App(f, a) => {
+                    Node::App(f, a, _) => {
                         stack.push(f);
                         stack.push(a);
                     }
@@ -530,6 +625,19 @@ impl Drop for LambdaTerm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_is_untagged_and_app_owned_carries_its_node() {
+        let plain = app(abs("x", var(0)), var(0));
+        assert_eq!(plain.owner(), None, "`app` must not invent a provenance tag");
+
+        let tagged = app_owned(abs("x", var(0)), var(0), 7);
+        assert_eq!(tagged.owner(), Some(7), "`app_owned` must carry the NodeId it was given");
+
+        // A non-App node has no owner and must not pretend otherwise.
+        assert_eq!(var(0).owner(), None);
+        assert_eq!(abs("x", var(0)).owner(), None);
+    }
 
     #[test]
     fn alpha_equality_ignores_name_hints() {
@@ -657,8 +765,8 @@ mod tests {
         let redex = app(abs("x", var(0)), var(7));
         let t = app(redex, sibling.clone());
 
-        let (next, _path) = reduce_step(&t).expect("a redex exists");
-        let Node::App(_, inherited) = next.node() else { panic!("expected an App at the root") };
+        let (next, _path, _owner) = reduce_step(&t).expect("a redex exists");
+        let Node::App(_, inherited, _) = next.node() else { panic!("expected an App at the root") };
         assert_eq!(
             inherited.alloc_id(),
             sibling.alloc_id(),
@@ -691,9 +799,9 @@ mod tests {
 
         // (\x. x x) arg — two occurrences of index 0, both at binder depth 0.
         let t = app(abs("x", app(var(0), var(0))), arg.clone());
-        let (next, _path) = reduce_step(&t).expect("a redex exists");
+        let (next, _path, _owner) = reduce_step(&t).expect("a redex exists");
 
-        let Node::App(l, r) = next.node() else { panic!("expected an App at the root") };
+        let Node::App(l, r, _) = next.node() else { panic!("expected an App at the root") };
         assert_eq!(
             l.alloc_id(),
             r.alloc_id(),
@@ -720,10 +828,10 @@ mod tests {
         // allocation, and that allocation must NOT be `arg`. Three passes fail this because the closing
         // `shift(-1, 1, ·)` descends into each occurrence separately and rebuilds each.
         let deep = app(abs("x", abs("y", app(var(1), var(1)))), arg.clone());
-        let (next_deep, _path) = reduce_step(&deep).expect("a redex exists");
+        let (next_deep, _path, _owner) = reduce_step(&deep).expect("a redex exists");
 
         let Node::Abs(_, inner) = next_deep.node() else { panic!("expected an Abs at the root") };
-        let Node::App(dl, dr) = inner.node() else { panic!("expected an App under the binder") };
+        let Node::App(dl, dr, _) = inner.node() else { panic!("expected an App under the binder") };
         assert_eq!(
             dl.alloc_id(),
             dr.alloc_id(),
@@ -758,7 +866,7 @@ mod tests {
             match t.node() {
                 Node::Var(_) => {}
                 Node::Abs(_, b) => alloc_ids(b, out),
-                Node::App(f, a) => {
+                Node::App(f, a, _) => {
                     alloc_ids(f, out);
                     alloc_ids(a, out);
                 }
@@ -843,7 +951,7 @@ mod tests {
             match n.node() {
                 Node::Var(_) => {}
                 Node::Abs(_, b) => stack.push(b),
-                Node::App(f, a) => {
+                Node::App(f, a, _) => {
                     stack.push(f);
                     stack.push(a);
                 }
@@ -922,7 +1030,7 @@ mod tests {
             match n.node() {
                 Node::Var(_) => {}
                 Node::Abs(_, b) => stack.push(b),
-                Node::App(f, a) => {
+                Node::App(f, a, _) => {
                     stack.push(f);
                     stack.push(a);
                 }

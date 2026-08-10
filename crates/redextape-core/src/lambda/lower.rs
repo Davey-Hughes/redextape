@@ -4,7 +4,7 @@
 
 use crate::core::{Core, NodeId};
 use crate::lambda::encode;
-use crate::lambda::term::{Dir, LambdaTerm, Path, abs, app, shift, var};
+use crate::lambda::term::{Dir, LambdaTerm, Path, abs, app, app_owned, shift, var};
 
 /// Scope sentinel for a store binder introduced by store-passing. `$` is not a legal identifier
 /// character, so this can never collide with a user variable (reads resolve to the innermost one).
@@ -304,7 +304,7 @@ fn lower_expr(
             let mb = origins.mark();
             let lb = lower_expr(b, scope, ctx, origins)?;
             origins.wrap(mb, Dir::AppR);
-            Ok(app(app(encode::binop(*op), la), lb))
+            Ok(app_owned(app(encode::binop(*op), la), lb, core.id()))
         }
         Core::If(_, c, t, e) => {
             let mc = origins.mark();
@@ -317,7 +317,7 @@ fn lower_expr(
             let me = origins.mark();
             let le = lower_expr(e, scope, ctx, origins)?;
             origins.wrap(me, Dir::AppR);
-            Ok(app(app(lc, lt), le)) // Scott bool selects the branch
+            Ok(app_owned(app(lc, lt), le, core.id())) // Scott bool selects the branch
         }
         // Closures always take the functional path: the stateful-closure guard guarantees a closure
         // in a region captures only immutable values, so no store context crosses the boundary.
@@ -325,13 +325,19 @@ fn lower_expr(
         Core::Apply(_, f, args) => {
             let mf = origins.mark();
             let mut term = lower_expr(f, scope, ctx, origins)?;
-            for a in args {
+            // Only the LAST application built here is this node's own root — the one `Ok(term)`
+            // returns. Earlier ones are the (curried) spine leading up to it, not the construct
+            // itself, so they stay untagged. A zero-arg call (`f()`) never enters the loop, so
+            // `term` is just whatever `f` lowered to and nothing here is tagged: there is no App
+            // that is this node's root to tag.
+            let last = args.len().saturating_sub(1);
+            for (i, a) in args.iter().enumerate() {
                 // Everything lowered so far becomes the function side of one more application.
                 origins.wrap(mf, Dir::AppL);
                 let ma = origins.mark();
                 let la = lower_expr(a, scope, ctx, origins)?;
                 origins.wrap(ma, Dir::AppR);
-                term = app(term, la);
+                term = if i == last { app_owned(term, la, core.id()) } else { app(term, la) };
             }
             Ok(term)
         }
@@ -346,7 +352,7 @@ fn lower_expr(
             let lb = lb?;
             origins.wrap(mb, Dir::AbsBody);
             origins.wrap(mb, Dir::AppL);
-            Ok(app(abs(name.clone(), lb), lv))
+            Ok(app_owned(abs(name.clone(), lb), lv, core.id()))
         }
         Core::LetRec { name, value, body, .. } => {
             // (\name. body) (fix (\name. value))
@@ -362,7 +368,7 @@ fn lower_expr(
             let lbody = lbody?;
             origins.wrap(mb, Dir::AbsBody);
             origins.wrap(mb, Dir::AppL);
-            Ok(app(abs(name.clone(), lbody), recval))
+            Ok(app_owned(abs(name.clone(), lbody), recval, core.id()))
         }
         // A tail-less block's discarded carrier: any closed value (never observed by the oracle).
         Core::Unit(_) => Ok(encode::church(0)),
@@ -1055,8 +1061,8 @@ mod tests {
         let mut cur = t;
         for d in path {
             cur = match (d, cur.node()) {
-                (Dir::AppL, Node::App(f, _)) => f,
-                (Dir::AppR, Node::App(_, a)) => a,
+                (Dir::AppL, Node::App(f, _, _)) => f,
+                (Dir::AppR, Node::App(_, a, _)) => a,
                 (Dir::AbsBody, Node::Abs(_, b)) => b,
                 _ => return None,
             };

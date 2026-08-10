@@ -110,3 +110,53 @@ export const linkMark = StateField.define<DecorationSet>({
   },
   provide: (f) => EditorView.decorations.from(f),
 })
+
+/**
+ * The source span the running focus names, tagged with which class to paint, or `null` to clear it.
+ * `'coincident'` is not one of `runningFocus`'s two claims (`link.ts`) — it is what `main.ts`'s
+ * `draw()` substitutes when the focus names the same node as the pin (`link`), so the two states get
+ * one combined look instead of two independently-coloured marks stacked on the same span.
+ */
+export const setFocus = StateEffect.define<{ span: Span; claim: 'exact' | 'within' | 'coincident' } | null>()
+
+const FOCUS_CLASS: Record<'exact' | 'within' | 'coincident', string> = {
+  exact: 'is-focus-exact',
+  within: 'is-focus-within',
+  coincident: 'is-focus-coincident',
+}
+
+/**
+ * The construct the CURRENT β-step belongs to, painted as a SECOND LAYER beside `linkMark`'s pin.
+ *
+ * A FOURTH FIELD, ON A FOURTH CLOCK — `highlighting` moves on every keystroke, `declineMark` on every
+ * compile, `linkMark` on every click; this one moves on every β-step, which is why it is not folded
+ * into any of the three rather than repeating their own "different clocks, different fields" reasoning
+ * for a fourth time.
+ *
+ * INDEPENDENT OF `linkMark`, NOT GATED ON IT. 5b's own precedent: a direct gesture (a click) does not
+ * stop the run, so this field keeps updating on every `draw()` call whether or not a pin is set —
+ * suppressing it while a pin is active would turn the highlight off exactly when it is most wanted,
+ * when a construct is pinned and the user is waiting for the run to reach it. Both `.linked` and
+ * `.is-focus-*` can be painted at once, on different spans or — via `'coincident'` above — the same one.
+ */
+export const focusMark = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    for (const e of tr.effects) {
+      if (!e.is(setFocus)) continue
+      const value = e.value
+      if (!value) return Decoration.none
+      // Same byte-offset contract as `linkMark`/`setDecline` above.
+      const map = byteToIndex(tr.state.doc.toString())
+      const from = byteIndexAt(map, value.span.start)
+      const to = byteIndexAt(map, value.span.end)
+      if (from >= to) return Decoration.none
+      return Decoration.set([Decoration.mark({ class: FOCUS_CLASS[value.claim] }).range(from, to)])
+    }
+    // SAME RULE AS `linkMark`, same reason: this span is a claim tied to the CURRENT λ frame, which a
+    // document edit invalidates immediately (well before the next compile lands) — mapping it through
+    // the edit would keep it pointing at text that no longer corresponds to the frame it named.
+    return tr.docChanged ? Decoration.none : deco
+  },
+  provide: (f) => EditorView.decorations.from(f),
+})

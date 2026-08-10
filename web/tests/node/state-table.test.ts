@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { centredScrollTop, Follow, highlight, linkedRows, ROW_HEIGHT, StateIndex } from '../../src/state-table'
+import {
+  centredScrollTop,
+  Follow,
+  focusedRows,
+  highlight,
+  linkedRows,
+  ROW_HEIGHT,
+  StateIndex,
+} from '../../src/state-table'
 import type { RuleView, StateView, TmProgram, TmState } from '../../src/types'
 
 const rule = (next: number): RuleView => ({
@@ -252,5 +260,40 @@ describe('linkedRows', () => {
     const i = new StateIndex(program())
     expect(linkedRows(i, []).size).toBe(0)
     expect(linkedRows(i, [99]).size).toBe(0)
+  })
+})
+
+describe('focusedRows', () => {
+  // THE DISCRIMINATING TEST. If `focusedRows` regressed to reuse `linkedRows`'s full-block logic
+  // verbatim, this still passes for s1 (below, a zero-rule state where header-only and full-block
+  // coincide) but fails here: s0's block is rows 0-3, and a full-block answer would be
+  // `[0, 1, 2, 3]`, not `[0]`.
+  it('marks only the state header of a multi-rule block, not its rules', () => {
+    const i = new StateIndex(program())
+    expect([...focusedRows(i, [0])]).toEqual([0])
+    expect([...focusedRows(i, [2])]).toEqual([5])
+  })
+
+  it('marks the header of a zero-rule state, same row linkedRows would cover', () => {
+    const i = new StateIndex(program())
+    expect([...focusedRows(i, [1])]).toEqual([4])
+  })
+
+  it('marks each header of several disjoint states, not just the first', () => {
+    const i = new StateIndex(program())
+    expect([...focusedRows(i, [0, 3])].sort((x, y) => x - y)).toEqual([0, 8])
+  })
+
+  // THE COMMON CASE, MEASURED AT 50-82% TM COVERAGE (`link-status.ts`'s own doc) — a focus naming a
+  // node with no TM block arrives here as an empty `states` array, not an edge case to special-case
+  // away. An empty `Set` is the correct, unremarkable answer.
+  it('marks no row when the focus names a node with no TM block', () => {
+    const i = new StateIndex(program())
+    expect(focusedRows(i, []).size).toBe(0)
+  })
+
+  it('ignores a state id past the end rather than throwing or marking row 0', () => {
+    const i = new StateIndex(program())
+    expect(focusedRows(i, [99]).size).toBe(0)
   })
 })

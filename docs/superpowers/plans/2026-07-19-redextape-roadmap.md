@@ -1324,12 +1324,38 @@ rather than a note saying a11y is on the todo. Known outstanding, all observed r
    an absence — and it is a plain `<div>`, so a screen reader is never told it changed. It is the
    strongest candidate on this list for `aria-live`, and unlike the rest it carries information that
    exists *nowhere else on screen*.
+
+   **AGGRAVATED 2026-08-10, PR 5c.** The same unannounced `<div>` now carries a **second**
+   live-updating job: alongside the pin's answer it reports the *running focus* — which construct the
+   λ reducer is working on, changing every step rather than on a click. So the one control on this
+   list whose entire purpose is to report something the panes cannot show now reports two such things,
+   and announces neither.
 7. **Three more colour-carried states** (added 2026-08-09, PR 5b): `.linked` in the source pane,
    `.state-row.is-linked` in the δ table, and `.term .is-linked` in the λ window. The first and third
    add an inset underline so they are not colour *alone*; the second is a background only. All three
    share item 4's real gap — **no non-visual equivalent** — and they compound it, because a link is a
    correspondence *between* panes and nothing conveys that relationship except three simultaneous
    highlights a screen reader cannot see.
+
+   **THREE MORE AGAIN, 2026-08-10, PR 5c — and this time the hue is the ONLY discriminator.**
+   `.is-focus-exact` and `.is-focus-coincident` in the source pane and `.state-row.is-focus` in the δ
+   table share an **identical** wash-plus-`inset 0 -2px 0` shape with `.linked` and differ from it, and
+   from each other, by hue alone. Only `.is-focus-within` carries a non-colour cue (it drops the edge),
+   and that one is doing real work: `Exact` and `Within` are *different claims* — *this step IS that
+   construct* versus *it happened somewhere inside it* — so a reader who cannot see the difference is
+   told the stronger claim in both cases.
+
+   **The case that matters most is the one with no cue at all: coincidence.** When the pinned construct
+   is the one being worked on right now, that agreement is the thing the app exists to show, and it is
+   currently conveyed by a third hue and nothing else.
+
+   **Recorded here rather than only in a code comment, because the previous two slices did the
+   opposite and this list is why.** 5c's design obligated these entries ("inherits a fourth and fifth
+   colour-carried state… belongs on that list the moment this lands"); PR 5c's own tasks wrote them
+   into `style.css` and `link-status.ts` doc comments and into task reports that `git clean -fdx`
+   destroys, and one report described the debt as *"already on this list"* when it was on no list at
+   all. **That is exactly the silent-never-happens failure the preamble to this list names** — caught
+   by review, not by the process that was supposed to prevent it.
 8. **`client.extend()` silently no-ops for the whole debounce** (moved from 5b's open-items list,
    2026-08-09, print-depth-cap). `supersede()` advances `#gen` at dispatch, but the worker's
    `onExtend` drops any request for a generation it has never seen — so for ≥300 ms after any
@@ -1347,6 +1373,84 @@ that slice is reachable without a mouse. That is the whole of it.
 **5b deliberately added no other semantics**, per the decision above, and its `link-status` line is the
 one place where deferring is least comfortable: it is a control whose entire purpose is to report
 something the other panes cannot show.
+
+#### 5d SPLITS IN TWO, AND ITS SESSION MODEL IS DECIDED AHEAD OF ITS SLICE — 5c RESEQUENCED IN FRONT OF IT (2026-08-10, brainstorm, no code)
+
+Recorded here rather than left in a brainstorm transcript, for the reason this Plan's log has now given
+twice: a finding that survives only in scratch is a finding nobody will ever act on. **Nothing below is
+built.** It is a decision set, taken in a design conversation that was then deliberately interrupted.
+
+**WHY IT WAS INTERRUPTED, WHICH IS THE MOST IMPORTANT LINE HERE.** 5d was surveyed as the next slice
+because it is the last *buildable* Plan 5 work and because the deferred-accessibility pass above is
+gated on its controls settling. Designing it surfaced the better question: the app's three panes are
+synchronized **structurally** — `NodeId` through `SourceMap` (`core.rs:1`, `sourcemap.rs:1`), which is
+what 5b's click-linking consumes — and **not temporally at all**. Verified rather than assumed:
+`main.ts:146` and `main.ts:152` build two independent `History` objects with two independent play heads,
+and `events(leg, which)` (`main.ts:350`) gives every transport control exactly one leg. There is no
+coupled step anywhere, and there could not be a shared head as currently built — `map_fold` is 555
+β-steps against 266,863 δ-steps, so "step 41" names two unrelated moments. The running correspondence
+is §6.2 part 2, which is **5c**, and 5c is therefore taken first. 5d's decisions below survive the
+resequencing unchanged.
+
+**Not to be confused with §6.3, and the distinction should be stated before 5c ships rather than
+discovered from it.** 5c gives each pane a live answer to "what construct am I working on now",
+independently. §6.3's reference-clock stepping — one logical step = one source construct, both views
+fast-forwarding together — stays deferred to v1.5 on its own recorded obstruction: normal-order λ
+reduction can visit constructs in a different order than strict evaluation, so "fast-forward λ to
+construct X" is not always well-defined. After 5c the panes report; they do not march in lockstep.
+
+**THE SPLIT.** 5d-i is the session model, against today's three fixed pane slots each gaining a binding
+selector. 5d-ii is the pane multiplexer — add/remove panes, layout, persistence. The same reasoning that
+split 5a: two independent subsystems in one spec means the layout engine has to be settled before a
+single session-from-λ-text exists.
+
+**THE DECISIONS, each with the thing that forced it:**
+
+1. **Three sessions, and a pane binds to a `(session, leg)` pair** rather than to a fixed leg. The source
+   session offers source/λ/TM; a λ scratchpad offers only λ. The renderer follows the leg, so two panes
+   can show two different λ sessions side by side — which is what the binding model was chosen for.
+2. **Three types at the wasm boundary, not one with `Option` fields**: `Session` unchanged, plus
+   `LambdaScratch` (a `LambdaCursor`, nothing else) and `TmScratch` (`TmProgram` + `TmCursor` +
+   `TmHeader`). Neither scratch carries a `ty` or a `SourceMap`, so `lambdaValue`/`tmValue` (decoding is
+   type-directed) and `linkIndex` are not merely unavailable — they do not exist on those types.
+   `session.rs:252-270` already argues this case against itself: it pairs `TmProgram` with its cursor in
+   one `Result` precisely so a cursor without its program is unreachable rather than declined, and
+   records that the looser shape forced a fabricated, permanently uncovered user-facing status for a
+   state no program could produce.
+3. **One worker per session.** `session-worker.ts` keeps its one-live-session invariant untouched; the
+   pool goes in `session-client.ts`. The argument is not tidiness but the two findings the print-depth-cap
+   slice paid for: a stack overflow leaves a wasm-bindgen borrow taken and poisons the session
+   permanently, and a worker's print-stack ceiling *drops after its first deep print* and stays down
+   (bracket [1400, 1497), which is why `MAX_PRINT_DEPTH` is 1,000). One worker holding three sessions
+   shares both damages; separate workers keep them local, and `terminate` + respawn resets both.
+4. **`HISTORY_BYTES` IS ALREADY PER LEG** (`protocol.ts:33`, "The ring's cap, PER LEG";
+   `session-worker.ts:97` keeps a `{lambda, tm}` allowance), so today's single session already holds
+   2 x 32 MB = 64 MB and three sessions is **four legs = 128 MB — 2x today, not 3x**. The policy is one
+   knob (bytes per leg) plus one boolean (drop-history-on-unfocus), its default chosen by a probe rather
+   than argued, reusing `frame-cost.test.ts`'s `--enable-precise-memory-info` harness. **No user-facing
+   config** until a measurement shows the policies produce experiences worth choosing between — three
+   modes would triple the wording of "recording stopped, history is full at step N" for a switch nobody
+   has evidence anyone needs.
+5. **Detach is a fork, and scratchpads are singletons.** Editing a source-derived λ view creates the
+   `LambdaScratch` seeded with that pane's text and rebinds *that pane* to it; the source session is
+   untouched and keeps running, which is the whole reason for three sessions. A second edit to another
+   source-derived λ view rebinds to the existing scratch rather than making a second one.
+   Recompile-from-source **terminates** the scratch's worker and rebinds its panes back — deliberately
+   the same mechanism as poison recovery, so there are not two.
+6. **A headerless hand-written machine runs from blank tapes at `MIN_FIELD_WIDTH`, and the pane says so.**
+   `parse_tm_full` returns `Option<TmHeader>` and `None` is explicitly not an error, but `header.init`
+   and `TmProgram::of` both need one. With no header there is no input to encode and no type to encode
+   it against, so a `TmScratch` is for watching a machine move, not for computing a value. Tape labelling
+   needs no new decision: 5a-i's `tapeNames()` rule — `names[i]` where one exists, `tape i` otherwise —
+   was written for exactly the hand-written machines this slice introduces.
+
+**THE ONE THING 5d-i OWES THAT IS NOT ON ITS FEATURE LIST.** A scratch session has no `SourceMap` and
+therefore cannot participate in the sync anchor at all — that is what detached *means*. So 5d-i creates
+the first way to sit in front of three panes that do not correspond to one another, and if detachment is
+subtle the demonstration degrades without saying so. Detachment has to be loud. This is the same standard
+that deleted `node_to_lambda` rather than let it answer a sometimes-wrong node, and the same principle as
+item 1 of the accessibility list above: a thing that provably cannot work should not be presented as
+though it might.
 
 #### ~~`settled()`'s invariant is false, and it is the root cause of the browser tier's flakes~~ — FIXED (raised 2026-08-08, PR 5a-ii; closed 2026-08-09, PR 5b task 1)
 
@@ -3601,13 +3705,25 @@ was rounded from — so 80 might **under**-report, the one failure mode the size
 Measured rather than argued further: a differential in real Chromium
 (`web/tests/browser/frame-cost.test.ts`) that retains full frames against the same frames with `spans`
 dropped, alternating A/B/A/B/A/B so a monotonic drift cannot be blamed on whichever ran last, put it at
-**~52.8 bytes/span, reproducible within 0.2 bytes across five process runs — 80 was an over-estimate,
-not an under-estimate.** V8 interns the fourteen `TokenClass` string literals, which JSON rewrites in
+~~**~52.8 bytes/span, reproducible within 0.2 bytes across five process runs — 80 was an over-estimate,
+not an under-estimate.**~~ V8 interns the fourteen `TokenClass` string literals, which JSON rewrites in
 full every time it serializes one, so JSON overstates rather than understates. `SPAN_BYTES` is now
-**60**. Getting the reading at all needed `--enable-precise-memory-info` added to the Playwright launch
-options: without it `performance.memory` is frozen at a stale sample, verified by allocating and
+~~**60**~~. Getting the reading at all needed `--enable-precise-memory-info` added to the Playwright
+launch options: without it `performance.memory` is frozen at a stale sample, verified by allocating and
 dropping a 5M-element array over 45 seconds of wall-clock with no change in the reading — Chromium-only,
 and no other browser test in this project reads `performance.memory`.
+
+**CORRECTED 2026-08-10 — the reproducibility claim was TRUE and the figure was still wrong.** The
+~52.8 reading came from `usedJSHeapSize` sampled without forcing a collection first, so all five runs
+measured a GC schedule, not retained size — and they agreed within 0.2 bytes *because* all five shared
+that same defect. **Reproducibility was mistaken for validity.** Forcing `gc()` before every heap
+sample (both `frame-cost.test.ts` and `vite.config.ts` now do this) gives **74.08 bytes/span,
+reproducible TO THE BYTE across three browser restarts**, and `SPAN_BYTES` is **80**, not 60 — the
+figure this entry originally corrected it away from. The check that would have caught this without any
+re-measurement: the retained object graph per `(Span, TokenClass)` entry — an outer array slot, a
+two-element `JSArray`, its backing store, and a two-field `Span` object — cannot come under roughly 60
+bytes on any plausible V8 layout with pointer compression. 52.8 was below that structural floor; it was
+impossible, not merely low. 74.08 sits just above it with ordinary slack.
 
 **THE TM LEG'S CONSTRAINT IS STEP COUNT, NOT FRAME COST, WHICH INVERTS AN ASSUMPTION THE RECORDING LOOP
 WAS WRITTEN UNDER.** Per-TM-frame cost is negligible — 0.12–0.18 µs/step and ~300–800 bytes/frame,
@@ -4133,3 +4249,169 @@ were not measured — SpiderMonkey and JSC have different limits, and debug fram
 `build:wasm:dev` has a lower ceiling than 1,000's basis. And the steady-state bracket of [1400, 1497) —
 like the 1,930 first-print figure it corrected — is one machine's Chromium, measured only at the depths in
 the bounded-degradation table above; worker stack sizes are not specified by any standard.
+
+#### PLAN 5c CLOSES — a tag that survives β-reduction, and the one question this project has no measurement for (2026-08-10, PR 5c)
+
+Design: [`../specs/2026-08-10-plan5c-dual-focus-design.md`](../specs/2026-08-10-plan5c-dual-focus-design.md).
+Plan: [`2026-08-10-plan5c-dual-focus.md`](2026-08-10-plan5c-dual-focus.md).
+
+§6.2 part 2 ships. A provenance tag on `Node::App`, written at lowering, inherited by every rebuild on
+the reduction path (reduction creates no node ex nihilo — §2.1, and the whole design rests on it),
+harvested during the descent `reduce_step` already makes, delivered as `StepEvent::Beta { redex, owner }`
+and per-frame `LambdaState` fields, and rendered as a second highlight layer beside 5b's clicked pin.
+5b's link is a **pin**; this is a **marker that moves every β-step**, and they are different objects that
+may both be on screen at once.
+
+**THE HEADLINE RESULT IS THE CASE `viewmodel_contract.rs` HAD PINNED AS IMPOSSIBLE.** On
+`let x = 40; x + 2`, step 2 names `x + 2` via `Within` and step 3 names it via `Exact` — the answer that
+had been unavailable since `node_to_lambda` was deleted for being always-wrong. It is reachable now
+because the mechanism is different in kind: not a coordinate into a term that reduction rewrites, but a
+tag the rewrite carries.
+
+**M1 AND M2, re-run and confirmed by the controller under the cgroup cap** (`owner_probe.rs`, driving
+`LambdaCursor` and never `reduce_trace`, `MemoryMax=2G MemorySwapMax=0`):
+
+| program | steps | Exact | Within | None | Exact% | M2 median | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| sample | 7 | 2 | 1 | 4 | 28.6% | 29.4% | ok |
+| list2 | 4 | 2 | 2 | 0 | 50.0% | 16.7% | ok |
+| while4 | 470 | 19 | 19 | 432 | 4.0% | 6.5% | ok |
+| sum5 | 626 | 54 | 402 | 170 | 8.6% | **65.0%** | **degenerate** |
+| countdown4 | 474 | 21 | 22 | 431 | 4.4% | 5.2% | ok |
+| map_fold | 555 | 158 | 325 | 72 | 28.5% | 26.5% | ok |
+| num200 | 7 | 2 | 1 | 4 | 28.6% | 27.8% | ok |
+| list20 | 40 | 20 | 20 | 0 | 50.0% | 2.8% | ok |
+| list60 | 120 | 60 | 60 | 0 | 50.0% | 0.9% | ok |
+
+**One of nine crossed the line, so `Within` renders as a highlight.** The threshold — median `Within`
+span over 60% of program length on *more than one* corpus program — was fixed in the design before any
+number existed, and is not renegotiated now that one landed at 65.0%. `sum5` degenerates for a reason
+worth naming: `Core::LetRec` re-tags the identical `If` body on each of the recursion's five
+unrollings, so all 402 of its `Within` steps resolve to the **same** span. That is §5.3's "recursion is
+indistinguishable from itself" showing up as a width, not a whole-program fallback.
+
+**M1 IS REPORTED RATHER THAN GATING, AND THAT IS THE PAYOFF FOR THREE STATES.** On `sum5`, 8.6% `Exact`
+against 64.2% `Within`. Under a single-signal design those 402 `Within` steps would have been
+indistinguishable from the 54 real ones — 65%-wide spans presented as though they named the construct.
+Refusing to collapse the two claims is what let a low tagged rate be *information the renderer handles*
+instead of a fatal number.
+
+**`Let`'S SOURCE-MAP SPAN IS WHY `Within` DOES NOT DEGENERATE THE WAY THE TM LEG'S ANCESTOR WALK DOES.**
+It covers only the binding syntax — `"let x = 40;"`, not the whole let-expression — so the enclosing
+tagged node a `Within` step reports is rarely the program root. 5b refused a "nearest enclosing linkable
+node" fallback on the TM leg precisely because the walk from a transparent `let` goes Let → Seq → root;
+this slice gets the enclosing answer without that, because the enclosure it reports is structural in the
+*reduct* (§5.4) rather than an outward walk over the lowering.
+
+##### The eyeball gate — not a measurement, not optional, and it came back MIXED
+
+The design fixed this in advance: *"legibility — whether `Within`'s answer is meaningful rather than
+merely present — is only decidable by watching the running app"*, and M2 measures span **width**, which
+proxies degeneration and not legibility. Run against the real app (`pnpm dev`, real Chromium) on
+`while4` and `map_fold`. **Two questions were asked and they got different answers**, so both are
+recorded rather than averaged into one verdict.
+
+**`Within` IS MEANINGFUL, NOT NOISE — the fallback does not trigger.** On `while4` it names `n > 0`,
+`n - 1` and `acc + 1`: the loop's own test and its two body updates, and the identical span the `Exact`
+step one frame later names. On `map_fold` its widest answer — `if is_empty(xs) { nil } else {
+cons(f(head(xs)), map(tail(xs), f)) }`, 26% of the program — lights as **one line's if-expression**,
+bounded and readable as *"the run is inside `map`"*. Neither program ever washed the whole program, and
+`Within` was visibly weaker than `Exact` in both themes without being invisible. Task 8's verdict rule
+(fall back to a status line if `Within` reads as noise) therefore does **not** fire, and the M2 gate that
+was fixed in advance did not trip either. `Within` stays a highlight.
+
+**`while4` AT 92% DARK READS AS HONEST WHEN STEPPED AND AS ABSENT WHEN PLAYED, and the second half is a
+real limitation.** Measured in the running app rather than reasoned about — the same 432 of 470 `None`
+steps M1 reports, timed on the wall clock during a real `⏵` playback at `PLAY_MS` = 120 ms:
+
+| | `while4` | `map_fold` |
+| --- | --- | --- |
+| frames with a focus lit (step 0 included, so one more frame than steps) | 38 of 471 (8.1%) | 483 of 556 (87%) |
+| distinct constructs named over the run | 3 (6 readings) | 21 (35 readings) |
+| median dwell of one lit reading | 120 ms | 120 ms |
+| lit stretch (a `Within`+`Exact` pair on one span) | ~240 ms | ~120 ms |
+| dark stretch between them | median 1.56 s, **max 6.6 s timed** (58 frames ≈ 7.0 s is the longest in a full step-by-step walk) | median ~0.5 s |
+| share of WALL-CLOCK time with anything lit | **7%** | ~87% |
+
+So `while4` gives a quarter-second flash after up to six and a half seconds of nothing, nineteen times
+across a ~56 s playback. **A first-time viewer watching that play would reasonably conclude the source
+pane is not working.** Stepping or scrubbing it — `▶`, `◀`, the history the previous slices built — makes
+every one of the nineteen answers readable at the reader's own pace, and each is correct. The honest
+statement is that **on loop-heavy programs the source pane's running focus is a stepping feature, not a
+playback feature.**
+
+**IT DOES NOT READ AS BROKEN, AND THAT RESTS ON A MEASUREMENT RATHER THAN ON CHARITY.** Walking all 470
+frames and checking each of the 432 dark ones: **252 of them (58%) still show a lit `.is-redex` in the λ
+pane, and every one of the remaining 180 rewrote the λ term's text — zero dark frames had both no redex
+and text identical to the previous frame.** The step readout climbs throughout. The app is never still.
+What is quiet is one layer of one pane, and it is quiet because *no construct owns that step* — which is
+§5.1, stated in the design before any of this was built. **The three-state design
+is what makes the silence honest instead of a lie**: the alternative is naming a construct that is not
+responsible.
+
+**THE FALLBACK THE DESIGN OFFERS WOULD NOT HAVE HELPED, WHICH IS WHY IT WAS NOT REACHED FOR.** Rendering
+`Within` as a status line instead of a highlight addresses `Within` *degenerating*; `while4`'s darkness
+is about `None` being *frequent*, and a status line that says nothing 92% of the time is equally dark.
+Applying a fallback whose trigger did not fire, to a problem it does not address, would be the
+worse-than-no-verdict outcome this gate exists to avoid.
+
+**`map_fold` HAS THE OPPOSITE PROBLEM AND IT IS ALSO REAL.** 35 distinct readings, changing on roughly
+every other frame; at `⏵` speed the median lit reading is on screen for 120 ms and **73% of lit readings
+are shown for under 200 ms**. Read as a list the sequence is a legible trace of the program — `fn map` →
+`fn fold` → `fn add` → `fn add1` → `fold(…)` → `is_empty(xs)` → `[3, 1, 2].map(add1)` → … — but on screen
+at 8 fps it is a strobe. Neither program is legible *at playback speed*; both are legible *stepped*. That
+is one finding, not two, and `PLAY_MS` was not touched to chase it — nothing here measured what a slower
+playback would cost or fix.
+
+**COINCIDENCE, SETTLED BY SCREENSHOT BECAUSE NOTHING ELSE COULD SETTLE IT.** Task 9's review could not
+tell from the diff whether CodeMirror gives two same-range mark decorations from two independent
+`StateField`s one element carrying both classes or two nested elements — and `getComputedStyle` proves
+only that a class applied. Dumped from the rendered line in real Chromium: **two nested elements, the
+running focus OUTSIDE**, `<span class="is-focus-coincident"><span class="linked">…</span></span>`.
+`linkMark` is declared before `focusMark` and lands inside. **The consequence is that
+`--focus-coincident-hue` never reaches the underline**: `.linked`'s opaque `--link-edge` occupies the
+same `inset 0 -2px 0` band on the inner element and paints over it. The blend does reach the background,
+which composites under `.linked`'s 20% wash — and judged by eye in **both** themes, that composite is
+distinctly more saturated than `.linked` alone and reads as **one band, not a muddy overlap**. So the
+outcome the design wanted holds; the mechanism sentence in `style.css` claiming these are "not two
+independently-coloured highlights stacked on one span" was false and is corrected in place there rather
+than rewritten. The structure is now pinned by `running-focus.test.ts`, so a CodeMirror upgrade that
+reverses the nesting fails a test instead of silently changing what the app's central signal looks like.
+
+##### What this slice could not establish
+
+**The obvious follow-up, unexamined and deliberately out of scope: `While` and `Assign` are never
+tagged.** `lower.rs` tags `Apply`/`Let`/`LetRec`/`BinOp`/`If` and nothing else, which is exactly why
+loop-heavy programs report ~92% `None` — `while4` at 4.0% `Exact` and `countdown4` at 4.4% are the same
+fact twice. **Whether those constructs even have a taggable root `App` was not investigated**, and
+guessing would be the kind of unmeasured cost claim this log has already paid for. It is the single
+highest-value thing a follow-up could look at, and it is not a defect in what shipped.
+
+**Legibility at playback speed is now a measured problem with no attempted fix.** `PLAY_MS` = 120 ms was
+inherited from 5a and nothing here measured whether a slower rate, a dwell-and-decay, or a step-to-next-
+tagged-step control would help or merely make runs longer.
+
+**Non-Chromium engines were not looked at**, same caveat this log already carries for the print cap, and
+neither theme was checked against a contrast standard — only against each other, by eye.
+
+Two things this entry deliberately does **not** restate, because they are already written up where they
+belong and duplicating them is the drift this log keeps catching: the `SPAN_BYTES` 60 → 80 correction,
+corrected in place earlier in this Plan and in the 5a design doc; and 5c's accessibility debt, which is
+items 6 and 7 of the deferred-a11y list above — five colour-carried states where hue is the only
+discriminator, and `#link-status`'s unannounced second job.
+
+**TESTS.** The browser tier is `web/tests/browser/running-focus.test.ts`, in its own file rather than
+cases in `app.test.ts` — the same isolation `link-truncated.test.ts` needed and for the same reason,
+recorded twice already in this Plan: that suite runs ~40 tests against one long-lived page and worker,
+and a worker's print stack ceiling degrades after its first deep print. Six cases: the focus walks
+construct to construct as the play head advances; it walks the whole owner sequence in order during one
+`⏵` playback; a scrub backwards shows the answer that was true at that step rather than the one at the
+frontier; pin and focus coexist on different constructs with neither clearing the other; they combine
+into one mark when they name the same construct; and a program whose every β-step is untagged shows no
+focus and raises no error. **The playback case was written twice.** The first version sampled the DOM on
+a 5 ms poll and asserted set membership — and survived *every* mutation tried against the file,
+including collapsing `Within` into `Exact` and never clearing the mark, because an assertion tolerant
+enough never to flake was tolerant enough to accept a wrong sequence. Replaced with a `MutationObserver`
+asserting the exact ordered sequence, which kills both. **That is 5a-i/5a-ii/5b's "the defect is in the
+test, not the implementation" pattern for a fourth slice, found this time by the author rather than by
+review.**

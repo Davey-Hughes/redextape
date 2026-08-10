@@ -234,7 +234,7 @@ fn physical(t: &LambdaTerm) -> usize {
         match n.node() {
             Node::Var(_) => {}
             Node::Abs(_, b) => stack.push(b),
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 stack.push(f);
                 stack.push(a);
             }
@@ -264,7 +264,7 @@ fn logical_abs_count(t: &LambdaTerm) -> u64 {
             match node.node() {
                 Node::Var(_) => {}
                 Node::Abs(_, b) => stack.push((b, false)),
-                Node::App(f, a) => {
+                Node::App(f, a, _) => {
                     stack.push((f, false));
                     stack.push((a, false));
                 }
@@ -275,7 +275,7 @@ fn logical_abs_count(t: &LambdaTerm) -> u64 {
         let n = match node.node() {
             Node::Var(_) => 0,
             Node::Abs(_, b) => 1u64.saturating_add(child(b)),
-            Node::App(f, a) => child(f).saturating_add(child(a)),
+            Node::App(f, a, _) => child(f).saturating_add(child(a)),
         };
         counts.insert(id, n);
     }
@@ -408,7 +408,7 @@ fn source() {
             let (phys_in, log_in) = (physical(&t), logical_size(&t));
             // The redex the first step will reduce is the root; its argument is the FIRST list.
             let (abs_body, arg_logical) = match t.node() {
-                Node::App(f, a) => match f.node() {
+                Node::App(f, a, _) => match f.node() {
                     Node::Abs(_, b) => (logical_abs_count(b), logical_size(a)),
                     _ => (0, 0),
                 },
@@ -465,7 +465,7 @@ fn lets_ramp() {
         let Some(t) = lower_src(&src) else { continue };
         let shared = max_shared_logical_size(&t);
         let (abs_body, arg_logical) = match t.node() {
-            Node::App(f, a) => match f.node() {
+            Node::App(f, a, _) => match f.node() {
                 Node::Abs(_, b) => (logical_abs_count(b), logical_size(a)),
                 _ => (0, 0),
             },
@@ -541,7 +541,7 @@ fn ceiling(v: u64) {
     let src_len = two_lists_flat_src(n, v).len();
     let shared = max_shared_logical_size(&t);
     let (abs_body, arg_logical) = match t.node() {
-        Node::App(f, a) => match f.node() {
+        Node::App(f, a, _) => match f.node() {
             Node::Abs(_, b) => (logical_abs_count(b), logical_size(a)),
             _ => (0, 0),
         },

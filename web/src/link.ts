@@ -1,5 +1,16 @@
-import type { Classified, Cut, Span } from './types'
-import { TOKEN_CLASSES } from './types'
+// M2 VERDICT, decided against a threshold the design fixed BEFORE any number existed: if the median
+// `Within` span exceeded 60% of program length on MORE THAN ONE corpus program, `Within` would render
+// as a status line rather than a highlight (see `types.ts`'s `Owner` doc for what `Within` claims).
+// Task 8 measured it with `crates/redextape-core/examples/owner_probe.rs` — full M1/M2 tables in the
+// `PLAN 5c CLOSES` entry of `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`, which carries
+// the whole nine-program table. Only `sum5` crossed it: median 65.0% (every one of its 402 `Within`
+// steps resolved to the SAME span — `Core::LetRec` re-tags the identical `If` body on each of the
+// recursion's five unrollings, not a whole-program fallback). The next-highest median across the other
+// eight programs was 29.4% — nowhere close. One program crossing is not "more than one", so
+// the gate did not trip: `WITHIN` RENDERS AS A HIGHLIGHT, same as `Exact`, just visibly weaker — see
+// `main.ts`'s `draw()` for the wiring and `style.css`'s `.is-focus-within` for the weaker treatment.
+import type { Classified, Cut, Owner, Span } from './types'
+import { ownerNode, TOKEN_CLASSES } from './types'
 
 /**
  * `linkIndex(byteBudget)`'s wire shape: one string, one nullable cut, and ten typed arrays.
@@ -166,4 +177,71 @@ export class LinkIndex {
     this.#states.set(node, out)
     return out
   }
+}
+
+/** `runningFocus`'s return shape, named so `isCoincident` and callers can share it rather than re-typing it. */
+export type Focus = { node: number; claim: 'exact' | 'within' }
+
+/** The construct a click set — `main.ts`'s own `link` state, named so `isCoincident` can share the shape. */
+export type Pin = { node: number; origin: 'source' | 'lambda' | 'tm' }
+
+/**
+ * The source construct the CURRENT β-step belongs to — the source pane's running focus — as a node
+ * id and which claim it is, or `null` when `owner` names nothing or the index does not carry it.
+ *
+ * A MARKER, NOT A PIN. `owner` moves every β-step; `link` (the pin a click sets, `main.ts`'s own
+ * state) only moves on a click. They are different objects and this function knows nothing about
+ * `link` at all — `main.ts`'s `draw()` is where the two are compared, for the one coincidence worth
+ * its own treatment. See `types.ts`'s `Owner` doc for why `Exact` and `Within` stay two claims rather
+ * than collapsing to one.
+ *
+ * NULL AGAINST A STALE `index`, exactly as a click is — `index` is `null` between a keystroke and the
+ * next compile's `LinkIndex`, and resolving `owner`'s node id against spans from a program that no
+ * longer exists is the silently-wrong answer this project refuses everywhere else. `index` can also be
+ * non-null and still stale (the first keystroke after a compile shifts every span it holds without
+ * clearing it) — `main.ts`'s `linkable` flag is what catches THAT case, and the caller must consult it
+ * before calling in, the same way `linkAtSourceOffset` already does for clicks.
+ */
+export function runningFocus(index: LinkIndex | null, owner: Owner): Focus | null {
+  if (index === null || owner === 'None') return null
+  const node = ownerNode(owner)
+  if (node === null) return null
+  // The existence check IS a `linkFor` call — `#w`'s columnar arrays are private to the class, so a
+  // free function outside it has no cheaper way to ask "does this index carry this node" than the
+  // same walk `linkFor` already does. `main.ts` calls `linkFor` again for the resolved span; see its
+  // `draw()` for why that second call is accepted rather than folded in here — this function's return
+  // shape is fixed to `{ node, claim }`, with no span, so a caller that only wants to KNOW the claim
+  // (not paint it) never pays for a span it does not need.
+  if (index.linkFor(node).source === null) return null
+  return { node, claim: 'Exact' in owner ? 'exact' : 'within' }
+}
+
+/**
+ * `TmState.source_node` as an `Owner`, for feeding `runningFocus` — always `Exact`, never `Within`.
+ *
+ * THE TM LEG HAS NO `Within` CONCEPT. `Owner`'s three states describe what the λ leg's descent
+ * inherits — "the deepest tagged node passed so far" (design §3.4) — and `source_node` is not that
+ * kind of answer at all: it is `SourceMap::tm_owner`'s already-resolved fact about the state this exact
+ * configuration is in, computed once at lowering rather than accumulated over a walk. A TM state either
+ * was emitted for a construct or it was not; there is no "somewhere inside it" for a machine state to
+ * report, so the ambiguity `Within` exists to carry never arises on this leg.
+ */
+export function sourceNodeOwner(sourceNode: number | null): Owner {
+  return sourceNode === null ? 'None' : { Exact: sourceNode }
+}
+
+/**
+ * Whether the pin (a click, `main.ts`'s own `link`) and the running focus name the same construct —
+ * "the moment the app exists to show" (`2026-08-10-plan5c-dual-focus-design.md` §4.3), given its own
+ * treatment rather than left as two independently-coloured highlights landing on one span by accident.
+ *
+ * TRUE FOR A `Within` FOCUS TOO, DELIBERATELY. A weaker claim is still a true one about the pinned
+ * construct: `Within` says the current step is happening SOMEWHERE INSIDE the pinned node, which is
+ * still "the run is inside what you pinned" — not nothing. The renderer is the one place that reads
+ * `claim` to draw `Exact` and `Within` differently (`main.ts`'s `draw()`, `style.css`'s
+ * `.is-focus-exact`/`.is-focus-within`); coincidence itself asks a narrower question — do the two name
+ * ONE node — and answering that does not require knowing which claim got there.
+ */
+export function isCoincident(pin: Pin | null, focus: Focus | null): boolean {
+  return pin !== null && focus !== null && pin.node === focus.node
 }

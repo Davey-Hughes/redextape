@@ -67,7 +67,54 @@ export type TmStatus = {
 
 export type Cut = 'Bytes' | 'Depth'
 
-export type LambdaState = { text: string; spans: Classified; cut: Cut | null; step: number }
+/**
+ * Which source construct a β-step belongs to.
+ *
+ * Three states rather than two, and the renderer must keep them apart: `Exact` says this step IS that
+ * construct, `Within` says only that it happened somewhere inside it. Collapsing them would re-adopt
+ * the shape 5b refused on the TM leg, where "nearest enclosing linkable node" frequently means
+ * "highlight the entire program".
+ *
+ * `'None'` is common and correct — most of a λ term is Church/Scott encoding, which belongs to no
+ * source construct at all.
+ */
+export type Owner = 'None' | { Exact: number } | { Within: number }
+
+export type LambdaState = {
+  text: string
+  spans: Classified
+  cut: Cut | null
+  step: number
+  redex: string[] | null
+  /**
+   * `redex`'s byte span IN `text`, ABOVE — i.e. in THIS frame's own text. `null` when there is no
+   * redex (step 0, same as `redex` itself) or its subterm fell past the truncation cut (see `Cut`) —
+   * never a span clamped to where the print stopped.
+   *
+   * RESOLVED AGAINST THE TERM THIS FRAME HOLDS, which is what makes it trustworthy where 5b's deleted
+   * `node_to_lambda`-derived `source_node` was not: that field's span was fixed once, against the
+   * INITIAL term, and went stale the moment reduction contracted a root redex. `redex_span` is computed
+   * fresh every frame from `redex`'s own path walked against `text`'s own print, so it never outlives
+   * the frame it was computed for.
+   *
+   * NAMED FOR THE REDEX, BUT WHAT IT COVERS IS THE CONTRACTUM. `redex` is the path to the redex `App`
+   * as it stood in the PRE-step term; β consumed that `App` and its `Abs`, so the subterm standing at
+   * that path in THIS frame's term — the text this span covers — is the contractum the step PRODUCED.
+   * A renderer painting it is showing "what just changed", not "what is about to be contracted".
+   *
+   * BYTES, LIKE EVERY OTHER SPAN ON THIS TYPE — convert through `spans.ts`'s `byteToIndex`/`byteIndexAt`
+   * before indexing into a JS string. `lambda-pane.ts`'s frame view is the one place this crosses into a
+   * DOM range; see its `#redraw` for where that conversion happens.
+   */
+  redex_span: Span | null
+  owner: Owner
+}
+
+/** The `NodeId` under either claim, or `null`. A consumer that renders the two claims differently must match on the variant instead of calling this. */
+export function ownerNode(o: Owner): number | null {
+  if (o === 'None') return null
+  return 'Exact' in o ? o.Exact : o.Within
+}
 
 /**
  * A decoded answer as one line of display text.

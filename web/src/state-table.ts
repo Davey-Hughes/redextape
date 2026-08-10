@@ -117,6 +117,33 @@ export function linkedRows(index: StateIndex, states: number[]): Set<number> {
   return out
 }
 
+/**
+ * Which rows the RUNNING FOCUS marks: the state HEADER of each state in `states`, and none of its
+ * rules.
+ *
+ * HEADERS ONLY, UNLIKE `linkedRows`'S FULL BLOCK — this is the one place the two diverge. The pin is a
+ * click, a deliberate "look here" that earns the full block, rules included, because a user asked to
+ * inspect it. The running focus moves every δ-step instead — `main.ts`'s `PLAY_MS` plays back at up to
+ * 8 fps — and repainting dozens of rule rows on every frame is a flicker nobody asked for. The header
+ * alone answers "which construct is the machine working on right now" without competing for attention
+ * with `highlight()`'s `is-current`/`is-firing`, which already marks the single row the machine is
+ * literally sitting on.
+ *
+ * EMPTY IS THE COMMON CASE, NOT AN EDGE ONE. Measured, the TM leg's coverage runs 50-82% of
+ * source-mapped nodes — see `link-status.ts`'s own doc on the absence being routine — so a focus naming
+ * a node with no TM block arrives here as `states: []`, and an empty `Set` is the unremarkable, correct
+ * answer for it, exactly as `linkedRows` already gives the pin.
+ */
+export function focusedRows(index: StateIndex, states: number[]): Set<number> {
+  const out = new Set<number>()
+  for (const s of states) {
+    const row = index.rowOfState(s)
+    const header = index.row(row)
+    if (header !== null && header.kind === 'state' && header.id === s) out.add(row)
+  }
+  return out
+}
+
 /** The table's row height in pixels. Must match `.state-row`'s height in `style.css`. */
 export const ROW_HEIGHT = 24
 

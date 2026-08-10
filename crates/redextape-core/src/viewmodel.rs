@@ -12,11 +12,13 @@
 //! `trace.rs` refuse to materialize tapes per step (3,488 bytes/step, 592.9 MB for `sum(5)`).
 
 use std::borrow::Borrow;
+use std::collections::BTreeMap;
 
 use crate::analysis::TokenClass;
 use crate::core::NodeId;
+use crate::lambda::reduce::Owner;
 use crate::lambda::term::Node;
-use crate::lambda::{Cut, LambdaTerm, print_lambda_capped, print_lambda_linked};
+use crate::lambda::{Cut, LambdaTerm, Path, print_lambda_linked};
 use crate::sourcemap::SourceMap;
 use crate::span::Span;
 use crate::tm::machine::{Machine, Move, StateId, Symbol};
@@ -53,6 +55,11 @@ use crate::trace::{LambdaCursor, TmCursor};
 /// current state's NAME, and a name is not a coordinate into a tree that reduction rewrites underneath
 /// it. That is the whole difference — the λ field was wrong because its coordinate system went stale
 /// after one step, and a state name never does.
+///
+/// **AND THE λ SIDE NOW HAS ONE AGAIN, BY A DIFFERENT MECHANISM.** `owner` is not a coordinate into a
+/// tree that reduction rewrites — it is a tag inherited by every rebuild, so it does not go stale after
+/// one step the way `node_to_lambda`'s paths did. `redex` IS a path, and is honest precisely because it
+/// is scoped to the frame that carries it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LambdaState {
@@ -60,6 +67,43 @@ pub struct LambdaState {
     pub spans: Vec<(Span, TokenClass)>,
     pub cut: Option<Cut>,
     pub step: u64,
+    /// The redex contracted by the step that produced this frame; `None` at step 0.
+    ///
+    /// A `Path` INTO THE TERM THIS FRAME HOLDS, which is exactly `print_lambda_linked`'s contract —
+    /// and exactly what `node_to_lambda` was not. The distinction is the whole slice: this path is
+    /// resolved against the term it was taken from, never against a later one.
+    ///
+    /// **NAMED FOR THE REDEX; WHAT STANDS AT IT IS THE CONTRACTUM.** `LambdaCursor::next` records this
+    /// path against the PRE-step term, where it did name the redex `App` — but `beta` then consumed
+    /// that `App` and its `Abs`, so the subterm sitting at this path in THIS frame's (post-step) term
+    /// is the CONTRACTUM that step produced, not the redex it consumed. Both statements are true at
+    /// once and the field stays honest either way, because the path never leaves the frame it is
+    /// resolved against; the consequence is only that a consumer painting it is showing WHAT THE STEP
+    /// JUST PRODUCED, not what the step was about to contract.
+    pub redex: Option<Path>,
+    /// `redex`'s byte span in `text`, ABOVE — I.E. IN THIS FRAME'S OWN TEXT. `None` when there is no
+    /// redex to locate (step 0, same as `redex` itself) OR when `redex`'s subterm fell outside what
+    /// `text` actually shows — cut by `byte_budget` or `depth_cap` before the walk reached it. See
+    /// `print_lambda_linked`'s "A NODE PAST THE TRUNCATION CUT RECORDS NOTHING": a clamped span would
+    /// claim a boundary the print never reached, which is false, so absence is the honest answer, the
+    /// same rule `redex_span` inherits rather than reinvents.
+    ///
+    /// **RESOLVED AGAINST THE TERM THIS FRAME HOLDS — `print_lambda_linked`'s ACTUAL CONTRACT, AND
+    /// PRECISELY WHAT `node_to_lambda` WAS NOT.** `redex`'s own doc, immediately above, draws this
+    /// line for the PATH; this field closes it for the SPAN a renderer actually needs to paint. A
+    /// `node_to_lambda` span was fixed once, against the INITIAL term, and went stale the instant
+    /// reduction contracted a root redex — the exact staleness that killed the old `source_node` field
+    /// (see this struct's header comment). `redex_span` cannot go stale that way: `render` computes it
+    /// FRESH every frame, by handing `redex`'s own path to the SAME walk that prints `text` for THIS
+    /// frame — never a path recorded once and later resolved against a term it was not taken from.
+    ///
+    /// **AND SO IT COVERS THE CONTRACTUM, NOT THE REDEX** — the same distinction `redex`'s own doc
+    /// draws for the PATH, cashed here as printed bytes: the text under this span is the subterm the
+    /// step PRODUCED, because the redex `App` this path was recorded against no longer exists in the
+    /// term being printed.
+    pub redex_span: Option<Span>,
+    /// The source construct the step belonged to.
+    pub owner: Owner,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -190,9 +234,47 @@ pub enum TermNode {
 
 impl LambdaState {
     /// Render the term the cursor currently holds, bounded by `byte_budget` and `depth_cap`.
+    ///
+    /// **NO SECOND WALK.** `print_lambda_capped` is ALREADY `print_lambda_linked` called with an empty
+    /// `want` (see that function's one-line body); the recording a non-empty `want` triggers lives at
+    /// `Printer::node`, the single site every subterm passes through regardless of whether `want` has
+    /// anything in it. Calling `print_lambda_linked` here directly, with `c.last_redex()` as `want`,
+    /// rides the walk this call was already paying for — it does not add one. That matters because the
+    /// record loop calls this once per β-step (`FRAME_BYTES`, measured at 555 steps on `map_fold`); a
+    /// design that printed twice here would pay for the second print that many times over.
+    ///
+    /// **NO SECOND WALK IS NOT THE SAME AS FREE.** Measured with `frame_cost_probe` before and after,
+    /// same machine, section D (`FRAME_BYTES = 512`): render cost rose **+20% to +75%** per step —
+    /// `map_fold` 3.92 → 5.74 µs, `while4` 4.41 → 5.46, `sample` 3.31 → 5.81 — while the β-step itself
+    /// was unchanged (`while4` 0.46 → 0.46). Two things this doc's argument does not mention pay for
+    /// that: the `want` map is allocated and dropped per call, and `Printer::node`'s
+    /// `want.get(&self.path)` compares a `Vec<Dir>` where the empty-`want` path was a null check, so it
+    /// scales with path length. Microseconds in absolute terms, and the record loop's budget is bytes
+    /// rather than time — but the figure belongs next to the claim rather than inferred from it.
+    ///
+    /// **THE SENTINEL KEY IS ARBITRARY AND NEVER LEAVES THIS FUNCTION.** `print_lambda_linked` inverts
+    /// `want` BY PATH (see its own doc) and hands back whichever id named the matching path; nothing
+    /// downstream reads the id for anything else. `want` here never holds more than the one entry
+    /// `last_redex()` supplies, so no real `NodeId` this call's caller might be tracking can collide
+    /// with it — the id is discarded the moment `redex_span` is pulled back out.
     pub fn render(c: &LambdaCursor, byte_budget: usize, depth_cap: u32) -> LambdaState {
-        let (text, spans, cut) = print_lambda_capped(c.term(), byte_budget, depth_cap);
-        LambdaState { text, spans, cut, step: c.steps_taken() }
+        let mut want: BTreeMap<NodeId, Path> = BTreeMap::new();
+        if let Some(redex) = c.last_redex() {
+            want.insert(0, redex.clone());
+        }
+        let (text, spans, cut, nodes) = print_lambda_linked(c.term(), byte_budget, depth_cap, &want);
+        // At most one entry can ever match: `want` above never holds more than the one path, so this is
+        // "the span for that path, if the walk reached it" rather than a search over several candidates.
+        let redex_span = nodes.into_iter().find_map(|(span, id)| (id == 0).then_some(span));
+        LambdaState {
+            text,
+            spans,
+            cut,
+            step: c.steps_taken(),
+            redex: c.last_redex().cloned(),
+            redex_span,
+            owner: c.last_owner(),
+        }
     }
 
     /// The term as a flat tree, or `None` if it exceeds `node_budget`. A second, independent cause
@@ -255,7 +337,7 @@ fn to_tree<'a>(t: &'a LambdaTerm, budget: &mut usize) -> Option<TermTree> {
                         work.push(Work::Abs(name.to_string()));
                         work.push(Work::Enter(body));
                     }
-                    Node::App(f, a) => {
+                    Node::App(f, a, _) => {
                         work.push(Work::App);
                         work.push(Work::Enter(a));
                         work.push(Work::Enter(f));

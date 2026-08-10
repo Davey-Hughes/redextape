@@ -13,7 +13,7 @@
 //! than optimized: `Path` is what the reducer already produces, and an inline-capacity alternative
 //! would need a dependency core is not allowed.
 
-use crate::lambda::reduce::{MAX_TERM_DEPTH, depth_exceeds, reduce_step};
+use crate::lambda::reduce::{MAX_TERM_DEPTH, Owner, depth_exceeds, reduce_step};
 use crate::lambda::{LambdaTerm, Path, Status};
 use crate::tm::machine::{Machine, StateId, Symbol};
 use crate::tm::sim::{Caps as TmCaps, Status as TmStatus, Tape, apply, rule_matches};
@@ -25,9 +25,15 @@ pub use zipper::ZipperCursor;
 
 /// One step of either backend. `Delta`'s `state` is the state BEFORE the transition, matching the
 /// convention `sim::Step` and `lambda::reduce::Step` already use.
+///
+/// **`Beta::owner` IS PART OF THE EVENT, NOT A QUESTION ASKABLE AFTERWARDS.** The redex `App` and its
+/// `Abs` are consumed by the contraction, so nothing about the term a consumer holds after the step can
+/// recover which construct the step belonged to. It has to ride the event. That also makes it the
+/// quantity `tests/zipper_equivalence.rs` holds the two β-loops equal on, since that gate compares whole
+/// `StepEvent`s — see `ZipperCursor::reduce_here` for why the zipper computes it by a different route.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StepEvent {
-    Beta { redex: Path },
+    Beta { redex: Path, owner: Owner },
     Delta { state: StateId, rule: u32 },
 }
 
@@ -42,11 +48,38 @@ pub struct LambdaCursor {
     /// Set only when the DEPTH GUARD, not the step cap, produced the current `HitCap` — the two
     /// producers `raise_cap`'s doc distinguishes. See `raise_cap` for why this matters.
     depth_capped: bool,
+    /// The last step's redex path and owner.
+    ///
+    /// **CAPTURED AT THE STEP BECAUSE THE NODE IS GONE AFTERWARDS.** `beta` consumes the redex `App`
+    /// and its `Abs`, so no question asked of `current` after the fact can recover either. This is a
+    /// hard constraint on the delivery shape, not a caching convenience — see design §3.5.
+    last_redex: Option<Path>,
+    last_owner: Owner,
 }
 
 impl LambdaCursor {
     pub fn new(t: &LambdaTerm, cap: u64) -> LambdaCursor {
-        LambdaCursor { current: t.clone(), steps: 0, cap, status: None, depth_capped: false }
+        LambdaCursor {
+            current: t.clone(),
+            steps: 0,
+            cap,
+            status: None,
+            depth_capped: false,
+            last_redex: None,
+            last_owner: Owner::None,
+        }
+    }
+
+    /// The path to the redex contracted by the most recent step, or `None` before any step.
+    pub fn last_redex(&self) -> Option<&Path> {
+        self.last_redex.as_ref()
+    }
+
+    /// The source construct the most recent step belonged to. `Owner::None` before any step, which is
+    /// the same answer as "the step belonged to no construct" — indistinguishable, and correctly so:
+    /// a frame at step 0 has no step to attribute.
+    pub fn last_owner(&self) -> Owner {
+        self.last_owner
     }
 
     /// The term as of the last emitted event (the initial term before the first `next`).
@@ -127,10 +160,12 @@ impl Iterator for LambdaCursor {
             return None;
         }
         match reduce_step(&self.current) {
-            Some((next, redex)) => {
+            Some((next, redex, owner)) => {
                 self.current = next;
                 self.steps += 1;
-                Some(StepEvent::Beta { redex })
+                self.last_redex = Some(redex.clone());
+                self.last_owner = owner;
+                Some(StepEvent::Beta { redex, owner })
             }
             None => {
                 self.status = Some(Status::Normalized);
@@ -361,7 +396,7 @@ mod tests {
                 reduce_trace(&t, MAX_REDUCTION_STEPS).steps.iter().map(|s| s.redex.clone()).collect();
             let got: Vec<_> = LambdaCursor::new(&t, MAX_REDUCTION_STEPS)
                 .map(|e| match e {
-                    StepEvent::Beta { redex } => redex,
+                    StepEvent::Beta { redex, .. } => redex,
                     other => panic!("lambda cursor emitted a non-Beta event: {other:?}"),
                 })
                 .collect();
@@ -450,7 +485,7 @@ mod tests {
                 StepEvent::Delta { .. } => "TmCursor",
             }
         }
-        assert_eq!(producer(&StepEvent::Beta { redex: Vec::new() }), "LambdaCursor");
+        assert_eq!(producer(&StepEvent::Beta { redex: Vec::new(), owner: Owner::None }), "LambdaCursor");
         assert_eq!(producer(&StepEvent::Delta { state: 0, rule: 0 }), "TmCursor");
     }
 }

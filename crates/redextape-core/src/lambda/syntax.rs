@@ -444,7 +444,7 @@ impl Printer<'_> {
                 self.path.pop();
                 self.names.pop();
             }
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 self.path.push(Dir::AppL);
                 self.node(f, depth + 1, Role::AppFn);
                 self.path.pop();
@@ -970,7 +970,7 @@ mod tests {
                     walk(body, at, out);
                     at.pop();
                 }
-                Node::App(f, a) => {
+                Node::App(f, a, _) => {
                     at.push(Dir::AppL);
                     walk(f, at, out);
                     at.pop();
@@ -991,8 +991,8 @@ mod tests {
         for d in path {
             cur = match (d, cur.node()) {
                 (Dir::AbsBody, Node::Abs(_, body)) => body,
-                (Dir::AppL, Node::App(f, _)) => f,
-                (Dir::AppR, Node::App(_, a)) => a,
+                (Dir::AppL, Node::App(f, _, _)) => f,
+                (Dir::AppR, Node::App(_, a, _)) => a,
                 _ => return None,
             };
         }

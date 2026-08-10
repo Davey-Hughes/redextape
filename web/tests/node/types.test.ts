@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Decoded } from '../../src/types'
-import { assertTokenClasses, decodedText, TOKEN_CLASSES } from '../../src/types'
+import { assertTokenClasses, decodedText, ownerNode, TOKEN_CLASSES } from '../../src/types'
 
 describe('Decoded', () => {
   it('reads a struct variant as a one-key object', () => {
@@ -15,6 +15,19 @@ describe('Decoded', () => {
 
   it('reads a fault as a tagged object carrying its message', () => {
     expect(decodedText({ Fault: { message: 'budget exhausted' } })).toBe('fault: budget exhausted')
+  })
+})
+
+describe('ownerNode', () => {
+  it('reads the node out of either claim', () => {
+    // 7 and 5 are deliberately distinct: an implementation that read the wrong field (e.g. always
+    // `Exact` regardless of which key is present) would fail one of these two, not silently agree.
+    expect(ownerNode({ Exact: 7 })).toBe(7)
+    expect(ownerNode({ Within: 5 })).toBe(5)
+  })
+
+  it('is null for None, which is a common and correct answer', () => {
+    expect(ownerNode('None')).toBeNull()
   })
 })
 

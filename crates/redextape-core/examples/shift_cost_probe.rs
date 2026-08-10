@@ -268,7 +268,7 @@ fn analyze_term(t: &LambdaTerm) -> HashMap<usize, (u64, u32)> {
             match node.node() {
                 Node::Var(_) => {}
                 Node::Abs(_, b) => stack.push((b, false)),
-                Node::App(f, a) => {
+                Node::App(f, a, _) => {
                     stack.push((f, false));
                     stack.push((a, false));
                 }
@@ -283,7 +283,7 @@ fn analyze_term(t: &LambdaTerm) -> HashMap<usize, (u64, u32)> {
                 // A free index inside the body is one binder further out here; index 0 was bound.
                 (bs.saturating_add(1), bf.saturating_sub(1))
             }
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 let (fs, ff) = get(f);
                 let (as_, af) = get(a);
                 (fs.saturating_add(as_).saturating_add(1), ff.max(af))
@@ -306,7 +306,7 @@ fn physical_ids(t: &LambdaTerm) -> Vec<usize> {
         match n.node() {
             Node::Var(_) => {}
             Node::Abs(_, b) => stack.push(b),
-            Node::App(f, a) => {
+            Node::App(f, a, _) => {
                 stack.push(f);
                 stack.push(a);
             }
@@ -346,7 +346,7 @@ fn shift_cost_guarded(
     let c = match t.node() {
         Node::Var(_) => 1,
         Node::Abs(_, b) => 1 + shift_cost_guarded(b, cutoff + 1, info, memo),
-        Node::App(f, a) => 1 + shift_cost_guarded(f, cutoff, info, memo) + shift_cost_guarded(a, cutoff, info, memo),
+        Node::App(f, a, _) => 1 + shift_cost_guarded(f, cutoff, info, memo) + shift_cost_guarded(a, cutoff, info, memo),
     };
     memo.insert((t.alloc_id(), cutoff), c);
     c
@@ -370,7 +370,7 @@ fn shift_allocs(cutoff: u32, t: &LambdaTerm) -> u64 {
     match t.node() {
         Node::Var(_) => 1,
         Node::Abs(_, b) => 1 + shift_allocs(cutoff + 1, b),
-        Node::App(f, a) => 1 + shift_allocs(cutoff, f) + shift_allocs(cutoff, a),
+        Node::App(f, a, _) => 1 + shift_allocs(cutoff, f) + shift_allocs(cutoff, a),
     }
 }
 
@@ -380,13 +380,13 @@ fn redex_at<'a>(t: &'a LambdaTerm, path: &[Dir]) -> Option<(&'a LambdaTerm, &'a 
     let mut cur = t;
     for d in path {
         cur = match (d, cur.node()) {
-            (Dir::AppL, Node::App(f, _)) => f,
-            (Dir::AppR, Node::App(_, a)) => a,
+            (Dir::AppL, Node::App(f, _, _)) => f,
+            (Dir::AppR, Node::App(_, a, _)) => a,
             (Dir::AbsBody, Node::Abs(_, b)) => b,
             _ => return None,
         };
     }
-    let Node::App(f, arg) = cur.node() else { return None };
+    let Node::App(f, arg, _) = cur.node() else { return None };
     let Node::Abs(_, body) = f.node() else { return None };
     Some((body, arg))
 }
@@ -415,7 +415,7 @@ fn subst_allocs_today(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64) {
             let (spine, shifts) = subst_allocs_today(j + 1, &lifted, b);
             (1 + spine, re + shifts)
         }
-        Node::App(f, a) => {
+        Node::App(f, a, _) => {
             let (sp1, sh1) = subst_allocs_today(j, s, f);
             let (sp2, sh2) = subst_allocs_today(j, s, a);
             (1 + sp1 + sp2, sh1 + sh2)
@@ -443,7 +443,7 @@ fn subst_allocs_lifted(j: u32, lift: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u6
             let (spine, shifts) = subst_allocs_lifted(j + 1, lift + 1, s, b);
             (1 + spine, shifts)
         }
-        Node::App(f, a) => {
+        Node::App(f, a, _) => {
             let (sp1, sh1) = subst_allocs_lifted(j, lift, s, f);
             let (sp2, sh2) = subst_allocs_lifted(j, lift, s, a);
             (1 + sp1 + sp2, sh1 + sh2)
@@ -482,7 +482,7 @@ fn beta_allocs_fused(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64, u64) 
             let (spine, shifts, fv) = beta_allocs_fused(j + 1, &lifted, b);
             (1 + spine, re + shifts, fv)
         }
-        Node::App(f, a) => {
+        Node::App(f, a, _) => {
             let (sp1, sh1, fv1) = beta_allocs_fused(j, s, f);
             let (sp2, sh2, fv2) = beta_allocs_fused(j, s, a);
             (1 + sp1 + sp2, sh1 + sh2, fv1 + fv2)
@@ -606,7 +606,7 @@ fn census_run(t: &LambdaTerm, cap: u64) -> (SubstCensus, Option<redextape_core::
     loop {
         let before = cursor.term().clone();
         match cursor.next() {
-            Some(redextape_core::trace::StepEvent::Beta { redex }) => census.observe(&before, &redex),
+            Some(redextape_core::trace::StepEvent::Beta { redex, .. }) => census.observe(&before, &redex),
             Some(_) => unreachable!("the λ cursor emits only Beta"),
             None => break,
         }
