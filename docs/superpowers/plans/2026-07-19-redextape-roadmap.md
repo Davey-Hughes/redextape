@@ -4415,3 +4415,222 @@ enough never to flake was tolerant enough to accept a wrong sequence. Replaced w
 asserting the exact ordered sequence, which kills both. **That is 5a-i/5a-ii/5b's "the defect is in the
 test, not the implementation" pattern for a fourth slice, found this time by the author rather than by
 review.**
+
+#### REGION-PATH TAGGING CLOSES — five sites in the store-passing path, a pre-registered threshold MISSED and shipped anyway, and a headroom hypothesis that was wrong (2026-08-10, PR #28)
+
+Design: [`../specs/2026-08-10-region-path-tagging-design.md`](../specs/2026-08-10-region-path-tagging-design.md).
+Plan: [`2026-08-10-region-path-tagging.md`](2026-08-10-region-path-tagging.md).
+
+5c's entry named this the single highest-value follow-up and left one question open — *whether those
+constructs even have a taggable root `App` was not investigated*. Five of them do, and they carry tags
+now: **both region `Let` arms, `Seq`, the region `If`, and the loop's own root `App` built by
+`build_while`.** Five `app` → `app_owned` substitutions in `lower_region_body` and `build_while`, each
+using the `NodeId` its own arm already binds; `build_while` gaining that id is the slice's only signature
+change. `Owner`, `reduce_step_go`, `ZipperCursor`, `LambdaState` and the wire are untouched — `app_owned`
+is the constructor the five functional sites already used and the tag-survives-β machinery is
+construct-agnostic. So a β-step inside an imperative program can now name the source construct it belongs
+to, where before the whole store-passing spine reported `None`.
+
+**Two constructs are deliberately NOT tagged, and both are decisions rather than deferrals.** `Assign`
+lowers to a rebuilt store — `\sel. sel s0 … s(k-1)`, an `Abs` — so its root has nowhere to hang a tag, and
+synthesising one would mean inventing an `App` that reduction then steps through, contradicting the
+premise the whole coordinate system rests on (*the tag is inherited, never recomputed*) and costing a
+β-step per assignment. The **region entry `App`** stays untagged because `lower_region` and
+`lower_region_body` are called with the *same* node: tagging both would put one `NodeId` on two distinct
+`App`s and break the invariant `region_constructs_tag_their_own_roots_without_duplicating` pins, and would
+also start tagging a term that `a_while_in_value_position_carries_no_tag` requires stay untagged because
+it never runs. (`lowering_tags_each_core_construct_at_its_own_root` does not catch this: its fixture
+never enters `lower_region`.) An assignment's value expression is already tagged through `lower_expr`
+anyway, and once `Seq` carries a tag the store
+rebuild sits inside it and reports `Within(Seq)`.
+
+##### M1 — the tagged rate, before and after
+
+Instrument unchanged: `owner_probe`, driving `LambdaCursor` and never `reduce_trace`, under the cgroup cap
+(`MemoryMax=2G MemorySwapMax=0`). Run and confirmed by the controller.
+
+| program | steps | tagged before | tagged after | ratio | pre-registered | verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| `while4` | 470 | 8.09% (38/470) | **15.53%** (73/470) | 1.92x | ≥16.2% | **MISSED by 0.67 pp** |
+| `countdown4` | 474 | 9.07% (43/474) | **16.24%** (77/474) | 1.79x | ≥18.2% | **MISSED by 1.96 pp** |
+
+**`Exact` alone nearly tripled** — `while4` 4.0% → 10.9%, `countdown4` 4.4% → 11.0% — but the tagged
+*rate* did not double: the tagging converted only 35 and 34 steps out of ~470 from `None`. **The region
+path was not where the `None` steps mostly were.** The recursive family did not move at all: `sum5`'s
+`None` stayed 170 and `map_fold`'s 72, identical to 5c's table above.
+
+##### THE PRE-REGISTERED THRESHOLD WAS MISSED, AND THE SLICE SHIPPED ANYWAY
+
+Stated in exactly those terms because any softer wording would misrepresent the record. The threshold —
+*the tagged rate on `while4` and `countdown4` must at least double* — was fixed in the design before any
+number existed, with the design's own justification that "the point of writing it down in advance is that
+it cannot be adjusted to whatever the run happens to produce", and the plan's Global Constraints repeated
+it as not renegotiable. It bound. The measurement came in **0.67 and 1.96 percentage points short**, and
+the plan's own instruction on that branch was *do not adjust the threshold; stop and report* — which is
+what happened: Task 5 halted, the numbers went to the human, and the conditional rendering task was never
+started.
+
+**The threshold was not renegotiated, retroactively reinterpreted, or quietly retired. The decision to
+ship anyway was taken explicitly by the human, with the shortfall on the table, after the headroom probe
+below had established what the shortfall was made of.** That ordering is the whole point: what changed the
+decision was new information about *why* the number fell short, not a new opinion about what the number
+should have been. **A threshold that gets quietly retired the first time it binds was never a threshold** —
+so this one is recorded as binding, as missed, and as overridden by a named decision.
+
+##### M2 — one of nine, unchanged, so width-aware rendering did NOT run
+
+| program | M2 median before | M2 median after | `Within` p90 before | `Within` p90 after | verdict |
+| --- | --- | --- | --- | --- | --- |
+| `while4` | 6.5% | 6.5% | 9.1% | **53.2%** | ok |
+| `countdown4` | 5.2% | 5.2% | 13.4% | **42.3%** | ok |
+| `sum5` | 65.0% | 65.0% | — | **65.0%** | **degenerate**, as before |
+
+**THE FULL NINE-PROGRAM TABLE AFTER, so the next slice inherits numbers rather than two rows.** Run and
+confirmed by the controller under the cap; `sum5`'s p90 and max are both 65.0%, which is why its median
+is unmoved — every one of its 402 `Within` steps still resolves to the same span.
+
+| program | steps | Exact | Within | None | Exact% | M2 median | p90 | max | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `sample` | 7 | 2 | 1 | 4 | 28.6% | 29.4% | 29.4% | 29.4% | ok |
+| `list2` | 4 | 2 | 2 | 0 | 50.0% | 16.7% | 16.7% | 16.7% | ok |
+| `while4` | 470 | 51 | 22 | 397 | 10.9% | 6.5% | **53.2%** | 53.2% | ok |
+| `sum5` | 626 | 54 | 402 | 170 | 8.6% | **65.0%** | 65.0% | 65.0% | **degenerate** |
+| `countdown4` | 474 | 52 | 25 | 397 | 11.0% | 5.2% | **42.3%** | 42.3% | ok |
+| `map_fold` | 555 | 158 | 325 | 72 | 28.5% | 26.5% | 26.5% | 26.5% | ok |
+| `num200` | 7 | 2 | 1 | 4 | 28.6% | 27.8% | 27.8% | 27.8% | ok |
+| `list20` | 40 | 20 | 20 | 0 | 50.0% | 2.8% | 2.8% | 2.8% | ok |
+| `list60` | 120 | 60 | 60 | 0 | 50.0% | 0.9% | 0.9% | 0.9% | ok |
+
+**Only the two loop programs moved.** Every other row is identical to 5c's recorded table — which is the
+expected result, since the five sites this slice added are all on the store-passing path and the seven
+non-loop programs never enter it.
+
+**Exactly one of nine crosses 60%, the same one and at the same width**, so the gate's rule — two or more
+and the conditional width-aware rendering task runs before merge — did not fire, and Task 6 did not run.
+The slice is lowering plus tests, and `web/` is untouched.
+
+**But the loop-wide spans DID appear where the design predicted them, above the median only.** `while4`'s
+`Within` p90 moved 9.1% → 53.2% and `countdown4`'s 13.4% → 42.3%, while both medians sat exactly where they
+were. That is the `While` tag enclosing its whole body, showing up in the tail of the distribution and not
+yet in the middle of it. **Worth recording because it is a loaded gun for the next slice:** anything that
+widens `Within` further — a contractum inheriting its redex's tag, most obviously — pushes those medians
+toward the line that a p90 has already crossed, and then §3's width-aware rendering becomes live work
+rather than a skipped task.
+
+##### THE HEADROOM PROBE, AND THE FACT THAT ITS HYPOTHESIS WAS WRONG
+
+**This is the most valuable thing the slice produced, and it exists only because the threshold was missed.**
+The controller's hypothesis for the remaining `None` steps was *structural*: a tag is consumed when its own
+`App` is contracted, so coverage decays over a long run and by the end there is nothing left to attribute —
+on that story the shortfall is a ceiling and there is no more to get. Measured instead of assumed, with a
+new probe, `crates/redextape-core/examples/none_probe.rs`, run under the same cap and reproduced
+independently by the controller. It splits every `None` step by how many tagged `App`s are still alive
+anywhere in the term entering that step:
+
+| program | `None` steps | zero tags left (consumed) | ≥1 tag alive (headroom) |
+| --- | --- | --- | --- |
+| `while4` | 397 | 15 (3.8%) | **382 (96.2%)** |
+| `countdown4` | 397 | 15 (3.8%) | **382 (96.2%)** |
+| `sum5` | 170 | 2 (1.2%) | 168 (98.8%) |
+| `map_fold` | 72 | 8 (11.1%) | 64 (88.9%) |
+
+**Consumption is real but explains 3.8% of them.** It is confined to a ~15-step end-of-run tail —
+`while4`'s last non-`None` step is 455 of 470 — and the other **96.2% happen mid-run with tagged `App`s
+alive elsewhere in the term. The redex simply is not inside them.**
+
+**The tagged-`App` count is NONMONOTONIC, which falsifies a pure decay model outright.** `while4` runs
+9 → 12 → 13 → 15 → 0 across step percentiles: *rising* through three quarters of the run before collapsing
+at the end, because loop-body duplication under substitution copies tagged subterms. The probe's
+monotonicity column reads `false` for all four programs. Tags are not a budget being spent down.
+
+**CONCLUSION, AND IT IS THE THING A FUTURE SLICE SHOULD START FROM: this slice did not hit a structural
+ceiling.** The remaining gap is about tag *placement and mechanism*, not about those steps being
+unattributable in principle. Chasing it is therefore **not** more `app_owned` sites in `lower.rs` — the
+five App-rooted region constructs are now all tagged and the sixth candidate is excluded for a reason that
+does not expire. It is plausibly a question about the *reduction* side instead: **whether a contractum
+should inherit its redex's tag**, so that the machinery a β-step lands in is named by the construct that
+built it. That would be a change to the propagation rule 5c fixed, with its own design, its own threshold
+and its own risk of widening `Within` past the M2 line the p90 above is already approaching.
+
+##### What this slice could not establish
+
+**Whether `Assign`'s untaggability costs anything observable.** The argument that it does not — the value
+expression is tagged by `lower_expr`, the store rebuild reports `Within(Seq)` — is structural reasoning, not
+a measurement. Nothing here counted how many of `while4`'s steps are store rebuilds, or checked that
+`Within(Seq)` is the answer a reader wants when the assignment is what is running.
+
+**Whether the improvement is visible at playback speed. No eyeball gate ran at all.** The only gate that
+would have put this in front of a human was inside the conditional rendering task, and that task was gated
+off by M2. 5c measured `while4` at 7% of wall-clock time with anything lit and called the running focus a
+stepping feature rather than a playback feature on loop-heavy programs; this slice roughly doubles the
+tagged rate and **nobody has looked at whether that reads as better, or merely as differently sparse**.
+`PLAY_MS` was not touched and playback legibility remains 5c's open follow-up, untouched by this one.
+
+**Non-Chromium engines were not looked at** — the same caveat this log already carries for the print cap
+and for 5c — and no part of this slice ran in a browser at all.
+
+**The 96.2% names a quantity, not a mechanism.** The probe establishes that tagged `App`s are alive while
+the redex sits outside them; it does not establish **why** the redex sits outside them, which subterms
+those live tags are on, or how many of the 382 a contractum-inherits rule would actually convert. The
+next slice's first job is to answer that, not to assume the figure is a promise.
+
+##### Two structural facts found on the way, and worth carrying forward
+
+**The crate's strongest gate had never executed an imperative program.** All six curated shapes in
+`zipper_equivalence.rs::curated_shapes_agree_step_for_step` were purely functional — arithmetic, let chain,
+conditional, recursion, list, higher-order — and `arb_expr_over` emits only `+`, monus `-`, `>`, `==` and
+`if` over integer leaves. So the gate that holds `LambdaCursor` and `ZipperCursor` equal on whole
+`StepEvent`s, `owner` field included, **had never run a `while`, a `let mut` or an assignment**. That
+matters beyond coverage arithmetic: the zipper derives `Owner` from a reverse scan of its context stack
+where the reducer carries it down a descent, and `build_while`'s `fix`-based spine is deeper and differently
+shaped than anything those six produce — precisely where two routes to one answer can diverge. Closed this
+slice, before the tagging landed, so the gate was already watching when it did.
+
+**`Core::While` at `Pos::Value` is unreachable from any parsed program, and the repo already knew.** `while`
+desugars unconditionally under a `Core::Seq` whose `first` always lowers at `Pos::Store`, so no source
+program can place a `While` in value position; `lower_region_body`'s `in_position(loop_term, Pos::Value)`
+arm is reachable only through hand-built `Core`. **Record this as known-dead-from-source, not as a defect
+this slice introduced:** the identical fact is already documented for the sibling `Assign` branch in
+`lower.rs`, beside `forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths`, with a
+hand-built-`Core` test of its own. `core` is a `pub mod` and `lower` takes `&Core`, so the branch is a
+public-API contract rather than a hypothetical, and the value-position test was rewritten to build the
+`Core` directly — established precedent, not an invention.
+
+**TESTS.** Two files, both `redextape-core`. `lambda_provenance.rs` gains six cases: the region
+constructs tag their own roots without duplicating any `NodeId` (the guard that notices if the region entry
+ever becomes a sixth site), the immutable region `let` is tagged at its own root (its own case, because no
+pre-existing fixture had one and reverting that arm alone left the whole file green), the region `If`'s tag
+sits on its **outer** application, the `While`'s tag likewise, a `While`'s tag resolves to the loop's own
+source text and not the whole program — the fact the entire `Within` non-degeneracy argument rests on for
+loops, the same assertion 5c added for `Let`'s span — and a value-position `While` carries no tag.
+`zipper_equivalence.rs` gains the loop shape as a curated case plus a census assertion that names each
+construct's own `NodeId` rather than counting events, and a separate `Within` anchor on the `While` id so a
+dropped *context scan* fails distinctly from a dropped *own tag*. Propagation needed nothing new: the
+`shift`/`subst`/`beta_go` tests and
+`a_full_reduction_never_produces_a_tag_that_was_not_in_the_source_term` are construct-agnostic and the new
+tags inherit that coverage. `none_probe.rs` stays a probe, run manually under the cap, exactly as
+`owner_probe` does.
+
+**THE REVIEW RECORD, WHICH IS NOT CLEAN.** Four review rounds; **three of the four tasks needed a fix pass**;
+no Critical findings and eight Important ones. Production `lower.rs` was correct first time in every task
+and confirmed so by mutation — **every single fix was test adequacy.** And the recurring defect class this
+log has now tracked across two slices — *an assertion that cannot observe the dimension its property lives
+in* — **appeared again, this time authored into the plan itself.** The plan specified
+`assert!(loop_census.tagged() > 0)` **and** named reverting `Seq`'s tag as the proof that it bites; it does
+not, because four other arms still tag, and with all five region sites reverted that fixture still reports
+`tagged() = 38`. The suggested fallback (`within > 0`) is worse — `within` does not move under that
+mutation at all. **The plan prescribed both an assertion and the mutation meant to prove it works, and
+never checked that the one detects the other.** The implementer's first replacement, a floor `exact > 30`,
+was then over-fitted to the one named mutation: reverting `Seq` fails it, but reverting
+`Let { mutable: true }` (49) and reverting `build_while`'s own root (50) both pass — **it did not guard the
+tag the immediately preceding commit had added.** The mechanism nobody had checked until review measured
+it: 19 of the 22 `Exact` events surviving a partial revert come from `lower_expr`'s `BinOp` arm, the
+*functional* path, and only 3 of 22 are region — a count between 22 and 51 mostly measures whether `BinOp`
+is still tagged. The shipped form anchors on `NodeId` identity, the same move this slice already had to
+make twice. Four of this plan's sketches failed contact with the real code (an unparseable `if` fixture, a
+recursive walker through a walker documented as "must never call itself", its duplicate one task later, and
+an unreachable value-position fixture); the previous slice recorded two of five, so the rate did not
+improve. All of it is written up in that plan's own "Plan defects found during execution" section, kept
+rather than silently corrected. **The transferable rule: an assertion prescribed by a plan is not evidence
+that the assertion works. Every acceptance step should name a mutation AND state the expected failure, so
+that writing one forces checking the other.**

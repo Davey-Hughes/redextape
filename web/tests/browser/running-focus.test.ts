@@ -49,22 +49,56 @@ const SAMPLE = 'let x = 40; x + 2'
 const PLUS = SAMPLE.indexOf('+')
 
 /**
- * A program whose every β-step reports `Owner::None`.
+ * A program most of whose β-steps report `Owner::None` — but, since region-path tagging landed, no
+ * longer ALL of them. This fixture used to be fully untagged (`exact=0 within=0 none=5`, `lower.rs`
+ * tagging `Apply`/`Let`/`LetRec`/`BinOp`/`If` and never `While`/`Assign`/`Seq`/the region `Let` arms);
+ * that is the same reason `while4` used to report `None` on 432 of its 470 steps (task 8's M1). Region-
+ * path tagging (2026-08-10) added five region tagging sites — both `Let` arms, `Seq`, the region `If`,
+ * and `While`'s own root `App` — and this program's desugaring cannot avoid two of them: `let mut n = 1`
+ * is a `Let{mutable: true}` node, and `desugar.rs`'s `Stmt::Assign` arm unconditionally wraps the
+ * assignment in a `Core::Seq` (`desugar.rs:129-140`) — there is no statement position that skips it.
+ * `Assign` itself is STILL never tagged (`lower.rs:655-669` returns the rebuilt store untagged), but the
+ * `Seq` wrapping it is, and `desugar.rs:136,138` mints that `Seq`'s span from the same `Stmt::Assign`
+ * span, so its tag reads on screen as if `n = 2;` itself were the named construct.
  *
- * MEASURED THE SAME WAY AS `SAMPLE`: 5 β-steps, `exact=0 within=0 none=5`. `lower.rs` tags
- * `Apply`/`Let`/`LetRec`/`BinOp`/`If` and never `While`/`Assign`, and this program is a `let mut`
- * binding, an assignment and a variable read — no tagging site anywhere in it. That is the same
- * reason `while4` reports `None` on 432 of its 470 steps (task 8's M1); this is that case in a form
- * small enough to walk to the end.
+ * MEASURED, NOT ASSUMED, THE SAME WAY AS `SAMPLE`: driving `trace::LambdaCursor` over this source
+ * (`cargo run --example`-style, against a throwaway probe, cross-checked against the running app)
+ * gives, node id and all:
  *
- * IF `lower.rs` EVER TAGS `Assign`, THIS TEST GOES RED and that is the correct signal, not a flake —
- * the fixture's whole property is "no construct owns any of these steps", and a new tagging site
- * changes that fact rather than breaking the assertion about it.
+ * ```text
+ *   step 1   None                        the region's own `(\store. …) initial_store` wrapper — scaffolding
+ *                                         `lower_region` builds and deliberately never tags — contracting first
+ *   step 2   Exact  id 5  "let mut n = 1;"   the `Let{mutable: true}` node's own App
+ *   step 3   Exact  id 3  "n = 2;"           the `Seq` wrapping the assignment (desugar shares its span with
+ *                                             the `Assign` statement it wraps — see above)
+ *   step 4   None                        final-store projection machinery — no source construct owns it
+ *   step 5   None                        same
+ * ```
+ *
+ * A FULLY untagged program is no longer constructible from source syntax at all, not just unlucky for
+ * this fixture. `x = e` parses only as `Stmt::Assign` (`parser.rs:97` special-cases `Ident '='` at
+ * statement position; assignment is never a tail `Expr`), and every `Stmt::Assign`/`Stmt::While`/non-tail
+ * `Stmt::Expr` desugars inside a `Core::Seq` (`desugar.rs:129-160`) — so there is no source route to a
+ * bare, `Seq`-free `Assign` (only `lower.rs`'s own
+ * `forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths` test reaches that shape,
+ * and only by constructing `Core` directly, bypassing the parser and desugarer). `owner_probe.rs`'s
+ * nine-program corpus agrees at scale: the roadmap's "THE FULL NINE-PROGRAM TABLE AFTER" entry
+ * (`docs/superpowers/plans/2026-07-19-redextape-roadmap.md`) shows every one of the nine rows with
+ * `Exact > 0` post-slice — even `while4` and `countdown4`, which used to sit almost entirely in `None`.
+ *
+ * SO THIS FIXTURE NOW CARRIES BOTH HALVES OF WHAT THIS FILE NEEDS, and neither the exact-value steps nor
+ * the `None` steps below are decorative:
+ *   - steps 2-3 pin the tagging this slice added, the same way `SAMPLE`'s steps pin the pre-existing
+ *     sites, so a regression that stops `Let{mutable: true}`/`Seq` from tagging goes red here too, and
+ *   - steps 1, 4 and 5 are what remain of the ORIGINAL property this test was written for: §5.1's "most
+ *     β-steps have no source construct" must still show nothing and never throw on the way to deciding
+ *     that, exactly where `while4` spends 92% of its own run.
  */
-const UNTAGGED = 'let mut n = 1; n = 2; n'
+const SPARSELY_TAGGED = 'let mut n = 1; n = 2; n'
 
 let view: EditorView
-/** Uncaught errors and rejections seen since the page mounted — see the `UNTAGGED` test's use of it. */
+/** Uncaught errors and rejections seen since the page mounted — see the `SPARSELY_TAGGED` test's use of
+ * it. */
 const pageErrors: string[] = []
 
 async function until(predicate: () => boolean, timeoutMs = 30_000): Promise<void> {
@@ -409,21 +443,34 @@ describe('the running focus', () => {
   // `'None'` before it ever touches the index, so the failure this guards against is not a bad span —
   // it is a `draw()` that throws on the way to deciding there is nothing to draw, which would take the
   // pane with it on every one of the 432 `None` steps `while4` reports.
-  it('shows no focus at all, and no error, on a program whose every step is untagged', async () => {
-    await settledAtZero(UNTAGGED)
+  //
+  // NO LONGER "EVERY STEP", SINCE REGION-PATH TAGGING — see `SPARSELY_TAGGED`'s own doc for the full
+  // account, and for why a fixture with a genuinely untagged EVERY step is no longer constructible from
+  // this language's source syntax at all. Steps 1, 4 and 5 are still `None` and still carry the original
+  // guarantee; steps 2 and 3 are asserted to their exact measured values rather than skipped, so a
+  // regression in the tagging this slice added — silently reverting to `None`, or naming the wrong
+  // construct — goes red here too, in the same fixture, rather than needing a second one.
+  it('clears the focus on this program’s untagged steps, and never errors on the tagged ones either', async () => {
+    await settledAtZero(SPARSELY_TAGGED)
     const before = pageErrors.length
     expect(resultsText(), 'the program still runs to an answer').toContain('β-steps')
 
+    // MEASURED, NOT ASSUMED — see `SPARSELY_TAGGED`'s doc for how, and for the mechanism behind each
+    // entry. A test tolerant enough to accept blanks at every step (the property this test used to
+    // assert) would no longer notice `draw()` throwing on a TAGGED step, since two of these five no
+    // longer are one; pinning all five keeps that mutation caught rather than only the `None` half.
+    const expected = ['', 'exact:let mut n = 1;', 'exact:n = 2;', '', '']
     for (let i = 1; i <= 5; i += 1) {
       click('▶')
       expect(stepText()).toContain(`step ${i}`)
-      expect(focusReading(), `step ${i} of an untagged program`).toBe('')
+      expect(focusReading(), `step ${i} of ${JSON.stringify(SPARSELY_TAGGED)}`).toBe(expected[i - 1])
     }
     // Walked to the end, not stopped short of it: 5 β-steps is this program's whole run.
     expect(stepText()).toContain('step 5 of 5')
     expect(pageErrors.slice(before), 'no uncaught error or rejection while walking it').toEqual([])
 
-    // The λ pane is still rendering frames, so "no focus" is an answer rather than a dead pane.
+    // The λ pane is still rendering frames throughout, on both the tagged and the untagged steps, so
+    // neither "no focus" nor "a focus" is a dead pane.
     expect(document.querySelector('#lambda .term')?.textContent).not.toBe('')
   }, 30_000)
 })

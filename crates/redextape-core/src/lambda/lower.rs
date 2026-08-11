@@ -608,7 +608,7 @@ fn lower_region_body(
             let cont = cont?;
             origins.wrap(mc, Dir::AbsBody);
             origins.wrap(mc, Dir::AppL);
-            Ok(app(abs(STORE, cont), new_store))
+            Ok(app_owned(abs(STORE, cont), new_store, *id))
         }
         // A non-mutable `let` inside a region is a value binder over the continuation; the functional
         // path handles it with `ctx` threaded (so reads in its body still project). If `name` shadows
@@ -634,7 +634,7 @@ fn lower_region_body(
             let lb = lb?;
             origins.wrap(mb, Dir::AbsBody);
             origins.wrap(mb, Dir::AppL);
-            Ok(app(abs(name.clone(), lb), lv))
+            Ok(app_owned(abs(name.clone(), lb), lv, *id))
         }
         // Thread the store: run `first` for its effect on the store, then continue with `then`.
         Core::Seq(id, first, then) => {
@@ -649,7 +649,7 @@ fn lower_region_body(
             let cont = cont?;
             origins.wrap(mc, Dir::AbsBody);
             origins.wrap(mc, Dir::AppL);
-            Ok(app(abs(STORE, cont), first_store))
+            Ok(app_owned(abs(STORE, cont), first_store, *id))
         }
         // `m = e` produces a new store with slot `m` replaced.
         Core::Assign(id, name, value) => {
@@ -671,7 +671,7 @@ fn lower_region_body(
         Core::While(id, cond, body) => {
             origins.at_root(*id);
             let ml = origins.mark();
-            let loop_term = build_while(cond, body, scope, ctx, origins)?;
+            let loop_term = build_while(*id, cond, body, scope, ctx, origins)?;
             if matches!(pos, Pos::Value) {
                 origins.forget(ml); // `in_position` discards the loop, and with it its subterms
             }
@@ -690,7 +690,7 @@ fn lower_region_body(
             let me = origins.mark();
             let le = lower_region_body(e, scope, ctx, pos, origins)?;
             origins.wrap(me, Dir::AppR);
-            Ok(app(app(lc, lt), le))
+            Ok(app_owned(app(lc, lt), le, *id))
         }
         // A tail-less carrier: yield the current store (in store position) or a closed value.
         Core::Unit(id) => {
@@ -725,6 +725,7 @@ fn in_position(store: LambdaTerm, pos: Pos) -> LambdaTerm {
 /// `fix (\loop. \s. (cond@s) (loop (body@s)) s) store` — the Scott bool `cond@s` selects
 /// `loop (body@s)` (continue with the updated store) when true, else `s` (the final store).
 fn build_while(
+    id: NodeId,
     cond: &Core,
     body: &Core,
     scope: &mut Vec<String>,
@@ -758,7 +759,11 @@ fn build_while(
     // (cond@s) (loop (body@s)) s
     let iter = app(app(cond_term?, app(loop_var?, body_store?)), store_var?);
     let g = abs(LOOP, abs(STORE, iter));
-    Ok(app(app(fix(), g), s_init))
+    // THE LOOP'S OWN ROOT. `(fix g)` is the inner application and belongs to no source construct;
+    // applying it to the initial store is the node the `while` IS. Tagged here rather than at the
+    // `Core::While` arm because the arm never sees this App — `in_position` either passes it through
+    // or discards it wholesale.
+    Ok(app_owned(app(fix(), g), s_init, id))
 }
 
 /// The ordered mutable variables of a region (first-assignment / first-`let mut` order) and the set

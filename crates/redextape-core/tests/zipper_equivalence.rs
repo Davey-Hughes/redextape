@@ -11,8 +11,11 @@
 //! reads it off the popped frame and scans the context stack), so holding them equal is worth as much
 //! as holding their redex paths equal — but only over terms that carry tags. Over untagged terms both
 //! sides say `Owner::None` and the comparison passes while proving nothing. The terms here are lowered
-//! from source and `lower.rs` tags `BinOp` and `If`, the only constructs `arb_expr_over` emits;
-//! the census assertions below hold that fact rather than assume it.
+//! from source. The generated half (the proptest below) is covered by `lower.rs` tagging `BinOp` and
+//! `If`, the only constructs `arb_expr_over` emits. The curated half additionally runs a region-path
+//! loop shape whose tags come from five other `lower.rs` arms entirely — `Let { mutable: true }` (both
+//! arms), `Seq`, the region `If`, and `build_while`'s own root — none of which the generator can ever
+//! produce. The census assertions below hold both halves of that fact rather than assume it.
 //!
 //! Proptest rather than the 46-program corpus, deliberately. `FIRST_ORDER_DEMOS` lives in a test
 //! target and has been hand-copied five times with a sync test holding the copies together; a sixth
@@ -24,7 +27,10 @@
 // so the exemption is stated per target — same idiom as `lambda_sharing.rs`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::collections::BTreeSet;
+
 use proptest::prelude::*;
+use redextape_core::core::{Core, NodeId};
 use redextape_core::desugar::desugar;
 use redextape_core::lambda::reduce::Owner;
 use redextape_core::lambda::term::{abs, app, var};
@@ -33,12 +39,37 @@ use redextape_core::parser::parse;
 use redextape_core::trace::{LambdaCursor, StepEvent, ZipperCursor};
 use redextape_test_support::arb_expr_over;
 
-fn term_of(src: &str) -> Option<LambdaTerm> {
+/// The desugared `Core` a source string lowers from, kept separate from `term_of` so a caller can
+/// walk `Core` for a construct's own `NodeId` (`ids_where`, below) without re-parsing — the same
+/// split `lambda_provenance.rs` uses (`SourceMap::build_from_program` then a separate `lower` call).
+fn core_of(src: &str) -> Option<Core> {
     let (prog, ds) = parse(src);
     if !ds.is_empty() {
         return None;
     }
-    lower(&desugar(&prog?)).ok()
+    Some(desugar(&prog?))
+}
+
+fn term_of(src: &str) -> Option<LambdaTerm> {
+    lower(&core_of(src)?).ok()
+}
+
+/// The `NodeId` of every `Core` node satisfying `pred`, over the whole tree. Iterative with an
+/// explicit worklist, and it MUST stay that way: `Core::for_each_child`'s doc (`core.rs:84-89`) states
+/// that a long statement spine can be tens of thousands of nodes deep and that recursive traversal of
+/// it "aborts the process with an uncatchable stack overflow", and that `for_each_child` "must never
+/// call itself" for exactly that reason — a recursive caller here would defeat the point. Mirrors
+/// `find_id` in `lambda_provenance.rs`, generalized to collect every match instead of the first.
+fn ids_where(core: &Core, pred: &dyn Fn(&Core) -> bool) -> BTreeSet<NodeId> {
+    let mut out = BTreeSet::new();
+    let mut stack = vec![core];
+    while let Some(n) = stack.pop() {
+        if pred(n) {
+            out.insert(n.id());
+        }
+        n.for_each_child(&mut |c| stack.push(c));
+    }
+    out
 }
 
 /// **NOT `MAX_REDUCTION_STEPS`, and not because the generated programs need it.** `arb_expr_over`
@@ -61,26 +92,49 @@ const EQUIV_CAP: u64 = 10_000;
 /// test code — but *only* if the terms under test carry provenance tags at all. Over untagged terms
 /// every event on both sides is `Owner::None`, the comparison is trivially satisfied, and the strongest
 /// gate in the crate would silently prove nothing about the newest field in the type it compares. The
-/// terms here are LOWERED from source, and `lower.rs` tags `BinOp` and `If` — the two constructs
-/// `arb_expr_over` generates — at their own root `App`, so they are tagged in the way real programs are.
-/// The assertions below are what hold that true rather than assumed.
+/// terms here are LOWERED from source. The generated programs are tagged by `lower.rs`'s `BinOp` and
+/// `If` arms — the two constructs `arb_expr_over` generates — at their own root `App`, so they are
+/// tagged in the way real programs are. The curated shapes below go further: the region-path loop shape
+/// is tagged by five other `lower.rs` arms on the store-passing path (`Let { mutable: true }`, `Seq`,
+/// the region `If`, `build_while`'s own root) that no generated program ever reaches. The assertions
+/// below are what hold that true rather than assumed.
 ///
 /// Measured 2026-08-10: the six curated programs emit 115 `Exact`, 522 `Within` and 228 `None`, and the
 /// smallest program the generator can produce that steps at all — `(0 + 0)` — emits 1, 1 and 4. So the
 /// gate does see the field; these assertions are what will say so if lowering ever stops tagging.
+///
+/// `exact_ids` and `within_ids` exist because a bare count cannot name what it counted. A floor like
+/// `exact > 30` stays green as long as the SUM across every tagged construct clears it, whichever
+/// construct actually supplied the tags — so it goes blind the moment one construct loses its tag as
+/// long as the others keep the total up. Measured 2026-08-10: reverting `Let { mutable: true }`'s own
+/// tag (`lower.rs:611`) or `build_while`'s root tag (`lower.rs:766`) individually still left `exact` at
+/// 49 and 50 respectively, both comfortably above such a floor. Recording each event's own `NodeId` is
+/// what lets an assertion be about ONE construct rather than the sum of all of them.
 #[derive(Default, Debug)]
 struct OwnerCensus {
     exact: usize,
     within: usize,
     none: usize,
+    /// The `NodeId` of every construct that was the contracted redex's OWN tag (`Owner::Exact`) in
+    /// this run — a set, not a count, so a caller can check one construct's presence directly.
+    exact_ids: BTreeSet<NodeId>,
+    /// The `NodeId` of every construct reached instead by `ZipperCursor`'s reverse context-stack scan
+    /// (`Owner::Within`) — the innermost enclosing tag, not the redex's own.
+    within_ids: BTreeSet<NodeId>,
 }
 
 impl OwnerCensus {
     fn observe(&mut self, events: &[StepEvent]) {
         for e in events {
             match e {
-                StepEvent::Beta { owner: Owner::Exact(_), .. } => self.exact += 1,
-                StepEvent::Beta { owner: Owner::Within(_), .. } => self.within += 1,
+                StepEvent::Beta { owner: Owner::Exact(id), .. } => {
+                    self.exact += 1;
+                    self.exact_ids.insert(*id);
+                }
+                StepEvent::Beta { owner: Owner::Within(id), .. } => {
+                    self.within += 1;
+                    self.within_ids.insert(*id);
+                }
                 StepEvent::Beta { owner: Owner::None, .. } => self.none += 1,
                 StepEvent::Delta { .. } => panic!("a lambda cursor emitted a Delta event"),
             }
@@ -91,6 +145,8 @@ impl OwnerCensus {
         self.exact += other.exact;
         self.within += other.within;
         self.none += other.none;
+        self.exact_ids.extend(other.exact_ids);
+        self.within_ids.extend(other.within_ids);
     }
 
     fn total(&self) -> usize {
@@ -165,12 +221,113 @@ fn curated_shapes_agree_step_for_step() {
     }
 
     // **THE HALF OF THIS GATE THAT WOULD OTHERWISE BE ASSUMED.** See `OwnerCensus`. Both tagged
-    // variants must actually occur across these six programs, because the two mistakes worth catching
-    // produce different symptoms: dropping the redex's own tag turns `Exact` into `Within` or `None`,
-    // and dropping the context scan turns `Within` into `None`. A gate that only ever saw `None` on
-    // both sides would pass against either.
-    assert!(census.exact > 0, "no curated shape produced Owner::Exact; the owner comparison is vacuous: {census:?}");
-    assert!(census.within > 0, "no curated shape produced Owner::Within; the owner comparison is vacuous: {census:?}");
+    // variants must actually occur across these six curated shapes, because the two mistakes worth
+    // catching produce different symptoms: dropping the redex's own tag turns `Exact` into `Within` or
+    // `None`, and dropping the context scan turns `Within` into `None`. A gate that only ever saw
+    // `None` on both sides would pass against either.
+    //
+    // **ASSERTED HERE, BEFORE THE REGION-PATH LOOP CENSUS BELOW IS MERGED IN — NOT AFTER.** The
+    // per-construct assertions below (`ids_where` plus `loop_census.exact_ids`/`within_ids`) already
+    // require the loop shape to produce both `Exact` and `Within` on its own. If these two asserts ran
+    // after `census.merge(loop_census)` instead, that stronger per-construct guard would make them
+    // unfalsifiable: reverting every `lower_expr` tagging site (`BinOp`, `If`, the `Apply` spine,
+    // `Let`, `LetRec`) — i.e. exactly the state that would make "the owner comparison is vacuous"
+    // true — leaves hundreds of region-path `Exact`/`Within` events in the merged total, so both
+    // asserts would stay green while the six functional shapes above tagged nothing at all.
+    assert!(
+        census.exact > 0,
+        "none of the six curated shapes produced Owner::Exact; the owner comparison is vacuous: {census:?}"
+    );
+    assert!(
+        census.within > 0,
+        "none of the six curated shapes produced Owner::Within; the owner comparison is vacuous: {census:?}"
+    );
+
+    // THE REGION PATH, WHICH NOTHING IN THIS FILE REACHED BEFORE. The six shapes above are all
+    // functional, and `arb_expr_over` emits only `+`, monus `-`, `>`, `==` and `if` over integer
+    // leaves — so `while`, `let mut` and assignment were never executed by the strongest gate in the
+    // crate. That matters beyond coverage arithmetic: `ZipperCursor` derives `Owner` from a reverse
+    // scan of its context stack where `reduce_step_go` carries it down a descent, and `build_while`'s
+    // `fix`-based spine is deeper and differently shaped than anything the six above produce. Two
+    // routes to one answer diverge, if they diverge at all, exactly there.
+    //
+    // BOUND SEPARATELY RATHER THAN ADDED TO `cases` because Task 4 asserts this shape's own census:
+    // merged into the total, a region path reporting `None` for every step would hide behind the
+    // hundreds of `Exact`/`Within` the functional shapes already supply.
+    let loop_src = "let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc";
+    let loop_core = core_of(loop_src).expect("the loop shape must parse and desugar");
+    let loop_t = lower(&loop_core).unwrap_or_else(|_| panic!("the loop shape must lower"));
+    let loop_census = assert_cursors_agree(&loop_t, "mutation and a loop");
+
+    // THE REGION PATH'S OWN CENSUS, ASSERTED ALONE. Merged into the total it would be invisible: the
+    // six functional shapes already supply hundreds of `Exact` and `Within`, so a region path that
+    // reported `None` for every step would leave `census.exact > 0` and `census.within > 0` green.
+    //
+    // **WHAT THIS FIXTURE ACTUALLY CONTAINS, AND WHERE ITS SURVIVING `Exact` EVENTS ACTUALLY COME
+    // FROM.** An earlier version of this assertion was `exact > 30`, justified by a comment claiming
+    // `let mut`, `while`'s own root `App` (`build_while`) "and region `if` each tag independently of
+    // `Seq`". Both halves of that claim were wrong. There is no `Core::If` anywhere in this fixture —
+    // it has no `if` at all, only `Let { mutable: true }` (twice), the `Seq` joining the loop to its
+    // continuation, and the `While` itself. And measured directly: reverting only `Seq`'s own tag
+    // (`lower.rs:652`) drops `exact` from 51 to 22 — but 19 of those 22 SURVIVING `Exact` events come
+    // from `lower_expr`'s `BinOp` arm (the functional path this fixture's `acc + 1`, `n - 1` and
+    // `n > 0` also go through), not from any region construct at all; only 3 of 22 are region-path
+    // `Exact` events. A floor between 22 and 51 mostly measures whether `BinOp` is still tagged, which
+    // no revert here ever touches — and reverting `Let { mutable: true }` or `build_while`'s own root
+    // tag individually left `exact` at 49 and 50, both comfortably clear of a floor that also has to
+    // sit below 51. A count cannot distinguish "the construct I care about lost its tag" from "an
+    // unrelated construct is still tagged"; only naming each construct's own `NodeId` and checking it
+    // directly can. `ids_where` plus the loop below do that instead, one construct at a time.
+    for (what, pred) in [
+        ("while", &(|c: &Core| matches!(c, Core::While(..))) as &dyn Fn(&Core) -> bool),
+        ("let mut", &|c: &Core| matches!(c, Core::Let { mutable: true, .. })),
+        ("statement sequence", &|c: &Core| matches!(c, Core::Seq(..))),
+    ] {
+        let ids = ids_where(&loop_core, pred);
+        assert!(!ids.is_empty(), "the loop fixture must contain a {what}");
+        for id in ids {
+            assert!(
+                loop_census.exact_ids.contains(&id),
+                "no step in the loop shape was attributed to the {what} at node {id}: the \
+                 store-passing spine's tag for it never reached a redex. Owners seen: {:?}",
+                loop_census.exact_ids
+            );
+        }
+    }
+
+    // **THE OTHER FAILURE SHAPE, NAMED SEPARATELY.** `OwnerCensus`'s doc (and this file's module doc)
+    // distinguish two ways this gate can go blind: a dropped OWN tag turns `Exact` into `Within` or
+    // `None` (what the loop above catches), and a dropped CONTEXT SCAN turns `Within` into `None` —
+    // `ZipperCursor::reduce_here`'s reverse walk of its context stack is exactly that scan, and nothing
+    // above exercises it. `While` is the one construct in this fixture whose `Within` presence is
+    // stable enough to anchor on: its root `App` encloses the entire loop body, so a redex deep inside
+    // that no nearer `Let`/`Seq` tag covers reports `Owner::Within(while_id)` instead of `Owner::None`
+    // — measured at HEAD, `within_ids` is exactly `{while_id}` plus the fixture's three `BinOp` ids;
+    // `Let { mutable: true }`'s and `Seq`'s own ids never appear there AT ALL, at HEAD or under any of
+    // the three reverts below, because every step this fixture attributes to them is `Exact`, never the
+    // *enclosing* tag for a deeper redex — so there is no `Within` presence to assert for either one.
+    // Losing `build_while`'s own root tag (`lower.rs:766`) removes `while_id` from every `App` in the
+    // term, so it can no longer be named by EITHER an exact contraction or a context scan — the one
+    // mutation this fixture can drive that breaks both symptoms from the same root cause, and (checked
+    // directly) `within_ids` stays exactly `{while_id, ...the three BinOp ids}` under the other two
+    // reverts (`Seq`, `Let { mutable: true }`), so `While`'s `Within` presence is not an artifact of
+    // whichever revert happened to be active when it was measured.
+    let while_ids = ids_where(&loop_core, &|c: &Core| matches!(c, Core::While(..)));
+    assert!(!while_ids.is_empty(), "the loop fixture must contain a while");
+    for id in while_ids {
+        assert!(
+            loop_census.within_ids.contains(&id),
+            "no step in the loop shape reached the while at node {id} through ZipperCursor's reverse \
+             context scan (Owner::Within): the while's tag never showed up as an enclosing tag for any \
+             step. Owners seen: {:?}",
+            loop_census.within_ids
+        );
+    }
+
+    // Folded in for completeness, not for a vacuity check: the six-shape floor above already ran
+    // before this merge, on purpose (see that assert's comment), and the loop shape's own tags are
+    // guarded directly by the per-`NodeId` assertions above rather than by a floor on the merged total.
+    census.merge(loop_census);
 
     // Capping cases. `EQUIV_CAP` never fires on the six shapes above or on any generated program (see
     // `EQUIV_CAP`'s doc) — everything else in this file terminates. These four are built specifically

@@ -401,3 +401,292 @@ fn the_zippers_normal_form_keeps_the_tags_the_plain_loop_keeps() {
     assert!(tags(&plain).contains(&Some(5)), "the fixture must keep its tag in the capped term at all");
     assert_eq!(tags(&zipped), tags(&plain), "the zipper's fold dropped a tag the plain loop kept");
 }
+
+/// **THE DUPLICATION GUARD, AND THE REASON THE REGION ENTRY IS NOT A TAGGING SITE.**
+/// `lower_region(node)` and `lower_region_body(node)` are called with the SAME node, so tagging both
+/// would put one `NodeId` on two distinct `App`s. Design §1 rejects that; this is what notices if it
+/// comes back.
+///
+/// **AND PER-CONSTRUCT PRESENCE THROUGH THE RESOLVED SOURCE TEXT, NOT A COUNT.** A `unique.len() >= 3`
+/// floor would assert that *some* three tags exist, which stays green if one arm is wired up and
+/// another is not. Resolving each tag to its own source text names which arms actually fired.
+#[test]
+fn region_constructs_tag_their_own_roots_without_duplicating() {
+    let src = "let mut n = 2; while n > 0 { n = n - 1; } n";
+    let (program, diags) = redextape_core::parser::parse(src);
+    assert!(diags.is_empty(), "the fixture must parse cleanly: {diags:?}");
+    let program = program.expect("parsed");
+    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
+    let (core, map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
+    let term = redextape_core::lambda::lower(&core).expect("the fixture lowers");
+
+    let tags: Vec<u32> = owners(&term).into_iter().flatten().collect();
+    let unique: std::collections::BTreeSet<u32> = tags.iter().copied().collect();
+    assert_eq!(
+        tags.len(),
+        unique.len(),
+        "a construct tagged more than one App — the region entry duplication design §1 rejects: {tags:?}"
+    );
+
+    let resolve = |id: u32| -> &str {
+        let span = map.source_span(id).unwrap_or_else(|| panic!("tag {id} resolves to no source span"));
+        &src[span.start..span.end]
+    };
+    let texts: Vec<&str> = unique.iter().map(|id| resolve(*id)).collect();
+    assert!(
+        texts.iter().any(|t| t.starts_with("let mut")),
+        "the region's `let mut` must carry a tag of its own, got {texts:?}"
+    );
+
+    // The `Seq` joining the while-statement to its continuation `n`, and the `While` itself, BOTH
+    // carry tags now (the latter as of the task that added `a_whiles_tag_names_the_loop_and_not_the_
+    // whole_program`, below) — and the desugarer gives that `Seq` the same span as the statement it
+    // opens with, so `While`'s own span is CHARACTER-IDENTICAL to `"while n > 0 { n = n - 1; }"`. A
+    // text-only assertion here could not tell whose tag it was looking at: it would stay green whether
+    // the Seq's tag, the While's, or (wrongly) only one of the two survived. Anchoring to each
+    // construct's own `NodeId` is what a text match cannot do — exactly this project's recorded defect
+    // shape, an assertion that has stopped looking at which node it names.
+    let seq_id = find_id(&core, &|c| matches!(c, redextape_core::core::Core::Seq(..)))
+        .expect("the fixture's while-statement is joined to its continuation by a Seq");
+    let while_id =
+        find_id(&core, &|c| matches!(c, redextape_core::core::Core::While(..))).expect("the fixture contains a while");
+    assert_ne!(seq_id, while_id, "the Seq and the While it opens with are distinct nodes");
+    assert!(
+        unique.contains(&seq_id),
+        "the region's `Seq` (joining the while-statement to `n`) must carry a tag of its own, got {texts:?}"
+    );
+    assert!(
+        unique.contains(&while_id),
+        "the region's `While` must carry a tag of its own, distinct from its enclosing Seq's, got {texts:?}"
+    );
+    assert_eq!(
+        resolve(seq_id),
+        "while n > 0 { n = n - 1; }",
+        "the Seq's tag must resolve to exactly the while-statement's span — the same span the While's \
+         tag also resolves to, which is why the NodeId checks above (not this text) are what tell them apart"
+    );
+}
+
+/// **FINDING 1: THE FOURTH TAGGED ARM, OBSERVED.** `lower_region_body`'s `Let { mutable: false }` arm
+/// (`lower.rs:637`) was the one tagged arm with no fixture reaching it: neither the fixture above nor
+/// `a_region_ifs_tag_sits_on_its_outer_application`'s below contains an immutable `let` in region
+/// position, and every other test in this file stays green whether or not that arm tags anything at
+/// all — reverting `lower.rs:637`'s `app_owned(..)` back to plain `app(..)` left the whole file green.
+///
+/// `let k = 1;` sits in the body of the region-opening `let mut n`, which `lower_region_body`'s
+/// `Let { mutable: true }` arm hands to `lower_region_body` again for its continuation — exactly
+/// where the `Let { mutable: false }` arm fires, rather than the separate (untagged-by-this-task)
+/// functional-path `Let` arm in `lower_expr` that a top-level immutable `let` would hit instead.
+#[test]
+fn region_immutable_let_is_tagged_at_its_own_root() {
+    let src = "let mut n = 0; let k = 1; n = k; n";
+    let (program, diags) = redextape_core::parser::parse(src);
+    assert!(diags.is_empty(), "the fixture must parse cleanly: {diags:?}");
+    let program = program.expect("parsed");
+    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
+    let (core, map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
+    let term = redextape_core::lambda::lower(&core).expect("the fixture lowers");
+
+    let let_id = find_id(&core, &|c| matches!(c, redextape_core::core::Core::Let { mutable: false, .. }))
+        .expect("the fixture contains an immutable let");
+    app_tagged_with(&term, let_id).expect(
+        "the region's immutable `let k = 1;` must carry a tag of its own root App — this is exactly \
+         what reverting lower.rs's `Let { mutable: false }` arm back to plain `app(..)` breaks",
+    );
+
+    let span = map.source_span(let_id).unwrap_or_else(|| panic!("tag {let_id} resolves to no source span"));
+    assert_eq!(
+        &src[span.start..span.end],
+        "let k = 1;",
+        "the immutable let's tag must resolve to its own binding text"
+    );
+}
+
+/// **WHICH `App` THE TAG LANDS ON, WHICH FLATTENING A TERM INTO A TAG SET CANNOT SEE.** A region `If`
+/// builds `app(app(lc, lt), le)` and only the OUTER application is the construct's own root; tagging
+/// the inner one leaves the tag set identical, resolves through the source map identically, and is
+/// exactly the wrong-node defect this project has now hit in several disguises.
+///
+/// The discriminator is the condition's own shape. `true` lowers to a Scott boolean — an `Abs` — so
+/// on the outer application the function side is an `App`, and on the inner one it would be that
+/// `Abs`. A fixture with an application-shaped condition could not tell the two apart.
+#[test]
+fn a_region_ifs_tag_sits_on_its_outer_application() {
+    let src = "let mut n = 0; if true { n = 1; } else { n = 2; }; n";
+    let (program, diags) = redextape_core::parser::parse(src);
+    assert!(diags.is_empty(), "the fixture must parse cleanly: {diags:?}");
+    let program = program.expect("parsed");
+    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
+    let (core, _map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
+    let term = redextape_core::lambda::lower(&core).expect("the fixture lowers");
+
+    let if_id =
+        find_id(&core, &|c| matches!(c, redextape_core::core::Core::If(..))).expect("the fixture contains an if");
+    let tagged = app_tagged_with(&term, if_id).expect("the region If's own root App must be tagged");
+    let Node::App(f, _, _) = tagged.node() else { unreachable!("app_tagged_with returns an App") };
+    assert!(
+        matches!(f.node(), Node::App(..)),
+        "the tag sits on the INNER application — `app(app(lc, lt), le)`'s outer node is the If's own \
+         root, and `true` lowers to an Abs so the inner one's function side is not an App"
+    );
+}
+
+/// The `App` carrying `id`, if exactly one does. Returns `None` when no node carries it; panics when
+/// two do — the `found.len() <= 1` assert below is what forbids that, not the duplication-guard
+/// assertion in `region_constructs_tag_their_own_roots_without_duplicating` above, which runs over
+/// that test's own fixture only and says nothing about whatever term a different caller passes here
+/// (e.g. `a_region_ifs_tag_sits_on_its_outer_application`'s `if` fixture, below).
+fn app_tagged_with(t: &LambdaTerm, id: u32) -> Option<LambdaTerm> {
+    let mut found: Vec<LambdaTerm> = Vec::new();
+    let mut stack = vec![t.clone()];
+    while let Some(cur) = stack.pop() {
+        match cur.node() {
+            Node::App(f, a, owner) => {
+                if *owner == Some(id) {
+                    found.push(cur.clone());
+                }
+                stack.push(f.clone());
+                stack.push(a.clone());
+            }
+            Node::Abs(_, b) => stack.push(b.clone()),
+            Node::Var(_) => {}
+        }
+    }
+    assert!(found.len() <= 1, "tag {id} sits on {} Apps; it must sit on exactly its own root", found.len());
+    found.pop()
+}
+
+/// The `NodeId` of the first `Core` node in a pre-order walk satisfying `pred`. Read off the parsed
+/// tree rather than hardcoded, so these tests track whatever ids the parser assigns instead of a
+/// number that could drift. Iterative, like every other `Core` walk in this suite (see `find_first`
+/// in `tests/sourcemap_coverage.rs`, the same function over `&Core` rather than `NodeId`) —
+/// `Core::for_each_child`'s doc (`core.rs:85-89`) states that a long statement sequence desugars to a
+/// spine tens of thousands of nodes deep and that recursive traversal of it "aborts the process with
+/// an uncatchable stack overflow", so a caller "walks the tree with its own explicit worklist"; this
+/// function IS that caller, not licence to call itself.
+fn find_id(core: &redextape_core::core::Core, pred: &impl Fn(&redextape_core::core::Core) -> bool) -> Option<u32> {
+    let mut stack = vec![core];
+    while let Some(n) = stack.pop() {
+        if pred(n) {
+            return Some(n.id());
+        }
+        n.for_each_child(&mut |c| stack.push(c));
+    }
+    None
+}
+
+/// **THE FACT THE WHOLE `Within` ARGUMENT RESTS ON, FOR THE LOOP.** A `While`'s tag encloses its
+/// entire body, so if it resolved to the whole program instead of the loop's own text, every
+/// `Within` step inside a loop would name the program — the degenerate nearest-enclosing-node
+/// answer 5b refused on the TM leg. This is the same assertion 5c added for `Let`'s span, for the
+/// same reason. Asserted as a prefix and a strict-substring bound rather than an exact literal: the
+/// property is "the loop, not the program", not a particular slice of the fixture.
+///
+/// `app_tagged_with` anchors presence on the While's own `NodeId`, not on resolved text — the same
+/// fixture's `Seq` (joining the while-statement to its continuation `n`) resolves to
+/// CHARACTER-IDENTICAL text (`region_constructs_tag_their_own_roots_without_duplicating` above), so a
+/// text-only presence check here could pass by finding the Seq's tag instead of the While's.
+#[test]
+fn a_whiles_tag_names_the_loop_and_not_the_whole_program() {
+    let src = "let mut n = 2; while n > 0 { n = n - 1; } n";
+    let (program, diags) = redextape_core::parser::parse(src);
+    assert!(diags.is_empty(), "the fixture must parse cleanly: {diags:?}");
+    let program = program.expect("parsed");
+    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
+    let (core, map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
+    let term = redextape_core::lambda::lower(&core).expect("the fixture lowers");
+
+    let while_id =
+        find_id(&core, &|c| matches!(c, redextape_core::core::Core::While(..))).expect("the fixture contains a while");
+    app_tagged_with(&term, while_id).expect("the While's own root App must be tagged");
+
+    let span = map.source_span(while_id).expect("the While's tag resolves to a source span");
+    let text = &src[span.start..span.end];
+    assert!(text.starts_with("while"), "the While's tag must name the loop, got {text:?}");
+    assert!(
+        span.end - span.start < src.len(),
+        "the While's tag must not span the whole program, got {text:?} of {} bytes",
+        src.len()
+    );
+}
+
+/// **WHICH `App` THE TAG LANDS ON, WHICH FLATTENING A TERM INTO A TAG SET CANNOT SEE.** `build_while`
+/// builds `app(app(fix(), g), s_init)` and only the OUTER application is the loop's own root; tagging
+/// the inner one — `(fix g)` — instead leaves the tag set identical and resolves through the source
+/// map identically, so neither `a_whiles_tag_names_the_loop_and_not_the_whole_program` above nor
+/// `region_constructs_tag_their_own_roots_without_duplicating` can tell the two placements apart
+/// (confirmed BEFORE THIS TEST EXISTED: mutating `build_while` to tag `(fix g)` instead of its own
+/// return left every test binary in the crate green. The test below is what closes that gap — at
+/// HEAD, the same mutation now fails it). This is `a_region_ifs_tag_sits_on_its_outer_application`'s
+/// idiom, applied here.
+///
+/// It is not just tidiness: `fix()` is itself an `Abs` (`lower.rs:83-86`, the Y-combinator shape), so
+/// `(fix g)` is a redex. Under the WRONG (inner) placement the loop's first β-step would report
+/// `Owner::Exact(while_id)` — the redex contracted first carries the tag directly. Under the correct
+/// (outer) placement that same first β-step instead descends through the tagged outer App to reach
+/// `(fix g)`, so it reports `Owner::Within(while_id)` instead — and disagreeing on `Exact` vs.
+/// `Within` here is disagreeing with the path `origins.at_root(*id)` records for the loop, which
+/// names the outer App, not `(fix g)`.
+///
+/// The discriminator is `fix()`'s own shape. On the outer application (the loop's own root) the
+/// function side is `(fix g)`, an `App`; on the inner placement the tagged App IS `(fix g)`, whose
+/// function side is `fix()` itself, an `Abs`. A fixture that could not tell an `App` function side
+/// from an `Abs` one could not tell the two placements apart.
+#[test]
+fn a_whiles_tag_sits_on_its_outer_application() {
+    let src = "let mut n = 2; while n > 0 { n = n - 1; } n";
+    let (program, diags) = redextape_core::parser::parse(src);
+    assert!(diags.is_empty(), "the fixture must parse cleanly: {diags:?}");
+    let program = program.expect("parsed");
+    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
+    let (core, _map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
+    let term = redextape_core::lambda::lower(&core).expect("the fixture lowers");
+
+    let while_id =
+        find_id(&core, &|c| matches!(c, redextape_core::core::Core::While(..))).expect("the fixture contains a while");
+    let tagged = app_tagged_with(&term, while_id).expect("the While's own root App must be tagged");
+    let Node::App(f, _, _) = tagged.node() else { unreachable!("app_tagged_with returns an App") };
+    assert!(matches!(f.node(), Node::App(..)), "the tag sits on the inner `(fix g)`, not the loop's own root");
+}
+
+/// `in_position` DISCARDS the loop in value position (`encode::church(0)`), so there is no node to
+/// tag and nothing runs. A later "fix" that stopped discarding it would silently start tagging a
+/// term the reducer never reaches; this fails if that happens.
+///
+/// **NOT REACHABLE THROUGH `parser::parse` — BUILT DIRECTLY.** `while` is a `Stmt`, never an
+/// `Expr` (`ast.rs`), and `Stmt::While` desugars UNCONDITIONALLY into
+/// `Core::Seq(seq_id, While(..), acc)` (`desugar.rs:141-153`) — even for a tail-less block, whose
+/// `acc` starts as `Core::Unit`, not the `While` itself (`desugar.rs:93-99`). `Core::Seq`'s `first`
+/// is always lowered at `Pos::Store` (the `Core::Seq` arm in `lower_region_body`), never
+/// `Pos::Value`. So no parsed program can ever put a `Core::While` node itself in `Pos::Value` — a
+/// fixture built through `parser::parse` (as originally tried here, with
+/// `"let mut n = 2; while n > 0 { n = n - 1; }"`, on the theory that a tail-less region's last
+/// statement lowers in `Pos::Value`) does not test this: it fails, because that `while` is the
+/// `first` of a `Seq` and so is tagged anyway, at `Pos::Store`, exactly like every other `while`.
+///
+/// `Core::While` IS reachable at `Pos::Value`, but only through hand-built `Core` — never through
+/// the parser. The path below is the simplest one: the TOP-LEVEL node handed to
+/// `lower`/`lower_mapped`. `lower_expr`'s `Core::While(..) => lower_region(core, ..)` arm passes
+/// `lower_region` that same node, and `lower_region` (`lower.rs:566`) enters `lower_region_body` on
+/// it at `Pos::Value`. It is not the only one: any hand-built node that encloses a `While` in value
+/// position reaches the same branch too — e.g. `Core::Lambda(_, ["x"], Core::While(..))`, the shape
+/// `forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths` (`lower.rs:1204`)
+/// uses for the sibling `Assign` branch, under `lower.rs`'s own "`forget` is reachable only through
+/// direct `Core` construction" section (`lower.rs:1193-1198`) — which states the identical
+/// structural fact for `Assign`/`While` together, so the two accounts should not drift apart.
+/// Constructing the `Core` by hand — bypassing `parser::parse`/`desugar` — is what actually
+/// exercises this branch, by any such route.
+#[test]
+fn a_while_in_value_position_carries_no_tag() {
+    use redextape_core::core::Core;
+    // A synthetic top-level `While` that mutates nothing, so `collect_region_vars` needs no bound
+    // names to resolve and the region opens with zero store slots.
+    let while_id = 1;
+    let core = Core::While(while_id, Box::new(Core::Bool(2, false)), Box::new(Core::Unit(3)));
+    let term = redextape_core::lambda::lower(&core).expect("a trivial standalone while lowers");
+
+    assert!(
+        app_tagged_with(&term, while_id).is_none(),
+        "a value-position While is discarded by `in_position`; tagging it names a term that never runs"
+    );
+}
