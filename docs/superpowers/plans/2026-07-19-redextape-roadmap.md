@@ -4477,6 +4477,34 @@ decision was new information about *why* the number fell short, not a new opinio
 should have been. **A threshold that gets quietly retired the first time it binds was never a threshold** —
 so this one is recorded as binding, as missed, and as overridden by a named decision.
 
+##### WHAT THE SLICE ACTUALLY BOUGHT: no program in this language is fully untagged any more
+
+Stated separately from M1 because it is a different property, not a softer reading of the same number.
+The threshold above measured a RATE and the rate fell short; this measures REACH, and it is total.
+
+**Verified two independent ways.** A Rust probe confirmed that an assignment parses only as a statement
+and that `desugar.rs` unconditionally wraps every statement in a `Core::Seq` — both of which this slice
+now tags — so no source program can consist wholly of untagged constructs. And `owner_probe`'s
+post-slice nine-program table has `Exact > 0` on every row, where before the loop programs' `Exact`
+rates were 4.0% and 4.4%.
+
+**The proof arrived as a test failure, which is the honest way to find it.** 5c's browser suite carried
+a fixture named `UNTAGGED` — `let mut n = 1; n = 2; n` — chosen precisely BECAUSE the region path had no
+tags, to prove the app draws nothing and raises nothing when the running focus is absent. That fixture
+is now tagged, and the test went red on `exact:let mut n = 1;`. It was renamed `SPARSELY_TAGGED` and
+rewritten to pin all five measured readings (`''`, `exact:let mut n = 1;`, `exact:n = 2;`, `''`, `''`),
+preserving the no-uncaught-error and pane-still-renders guarantees on the three steps still reporting
+`None`. **A test whose premise a feature falsifies is the feature working**; the rename records that
+rather than hiding it.
+
+**AND IT WAS CAUGHT BY CI, NOT LOCALLY, FOR A REASON WORTH WRITING DOWN.** `pkg/` is a gitignored build
+artifact of `redextape-core`. A local `pnpm run test` happily exercises whatever WASM was last built, so
+every local web run during this slice passed against a `pkg/` predating the lowering changes — testing
+code that no longer existed. The CI `web` job runs `pnpm run build:wasm` first and so tested the real
+thing. **Any slice touching `crates/` must run `build:wasm` before any web test, and `test:coverage`
+rather than `test`.** Same family as this Plan's existing "a wire rename passes every local gate and
+fails only in CI": a gate reading a stale artifact is indistinguishable from a passing one.
+
 ##### M2 — one of nine, unchanged, so width-aware rendering did NOT run
 
 | program | M2 median before | M2 median after | `Within` p90 before | `Within` p90 after | verdict |
@@ -4574,7 +4602,7 @@ the redex sits outside them; it does not establish **why** the redex sits outsid
 those live tags are on, or how many of the 382 a contractum-inherits rule would actually convert. The
 next slice's first job is to answer that, not to assume the figure is a promise.
 
-##### Two structural facts found on the way, and worth carrying forward
+##### Three structural facts found on the way, and worth carrying forward
 
 **The crate's strongest gate had never executed an imperative program.** All six curated shapes in
 `zipper_equivalence.rs::curated_shapes_agree_step_for_step` were purely functional — arithmetic, let chain,
@@ -4595,6 +4623,25 @@ this slice introduced:** the identical fact is already documented for the siblin
 hand-built-`Core` test of its own. `core` is a `pub mod` and `lower` takes `&Core`, so the branch is a
 public-API contract rather than a hypothetical, and the value-position test was rewritten to build the
 `Core` directly — established precedent, not an invention.
+
+**A synthesized `Seq` inherits the span of the STATEMENT that caused it, and two visible things follow.**
+`desugar.rs`'s `lower_stmts_at` explains why: no single `Expr` is "the seq", so each folded `Seq` borrows
+the nearest thing with a span — the statement — which is strictly more precise than the enclosing block.
+(Exception, also documented there: `Stmt::Expr` carries no statement span, so its `Seq` inherits the
+expression's, which ends AT the expression and excludes the trailing `;` that the `Assign` and `While`
+arms' spans include.)
+
+First consequence, user-visible and a happy accident: **the running focus lands on `n = 2;` for an
+assignment**, even though `Core::Assign` is deliberately untagged and could not be tagged if we wanted
+to. What lights up is the enclosing `Seq`, whose span is that statement — so a user reads "the machine is
+on this assignment", which is both what they want and structurally not what is tagged.
+
+Second consequence, and it cost a review round: **a `while`'s source span is CHARACTER-IDENTICAL to its
+enclosing `Seq`'s.** An assertion added in this slice claimed to check that the `while` carried a tag and
+was in fact satisfied by the `Seq`'s — the message was false about HEAD, and once `while` was tagged one
+task later, removing the `Seq` tag would have left it green. Fixed by anchoring on `NodeId` identity
+rather than resolved text, the same move this slice had to make twice. **Where two constructs can share a
+span, only identity distinguishes them; text never will.**
 
 **TESTS.** Two files, both `redextape-core`. `lambda_provenance.rs` gains six cases: the region
 constructs tag their own roots without duplicating any `NodeId` (the guard that notices if the region entry
