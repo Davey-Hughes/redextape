@@ -22,7 +22,7 @@ use crate::tm::build::{REG, TAPES, WORK};
 use crate::tm::defunc::defunc_mapped;
 use crate::tm::encoding::{Encoding, Unary};
 use crate::tm::lower_asm::{LowerError, lower_asm_mapped};
-use crate::tm::lower_tm::{MAX_SLOTS, SlotMap, frame_bank_unrepresentable, lower_tm_mapped, mul_count_unrepresentable};
+use crate::tm::lower_tm::{SlotMap, lower_tm_mapped};
 use crate::tm::machine::{Machine, Symbol};
 use crate::tm::sim::{self, Status};
 
@@ -71,14 +71,16 @@ pub struct Attribution {
 
 impl Attribution {
     /// What to report for a program `lower_tm_mapped` refuses to lay out — `MAX_SLOTS` (an absurd
-    /// register file), `MAX_FRAME_LOC` (an absurd `Loc` bank in a call-containing program), or
-    /// `MAX_MUL_INSTRS` (too many `Mul` instructions, each O(width²) states under `Binary`). Every one
-    /// hands back a degenerate machine that halts before doing anything, so nothing ran and nothing is
+    /// register file), `MAX_FRAME_LOC` (an absurd `Loc` bank in a call-containing program),
+    /// `MAX_MUL_INSTRS` (too many `Mul` instructions, each O(width²) states under `Binary`), or
+    /// `MAX_MACHINE_STATES` (the built machine itself exceeds the state ceiling). Every one hands back
+    /// a degenerate machine that halts before doing anything, so nothing ran and nothing is
     /// attributed — and `capped` says the histogram does not describe a complete execution.
     ///
-    /// The alternative is what this used to do for the `MAX_FRAME_LOC` half: simulate the degenerate
-    /// machine and report `{ histogram: {}, total: 0, capped: false }`, which a consumer reads as a
-    /// program that RAN and cost NOTHING. That is the one wrong answer available here.
+    /// The alternative is what this used to do for the `MAX_FRAME_LOC` half, and — until this branch's
+    /// fix — for `MAX_MACHINE_STATES` too: simulate the degenerate machine and report
+    /// `{ histogram: {}, total: 0, capped: false }`, which a consumer reads as a program that RAN and
+    /// cost NOTHING. That is the one wrong answer available here.
     ///
     /// `run_tm` reports the SAME class of program as `TmRun::TooLarge` — a program refused before it
     /// took a step, never `Ran` over tapes that decode to nothing. Attribution mirrors `run_tm`'s
@@ -145,8 +147,10 @@ struct Mapped {
 /// refusals, and the seeded REG tape. Mirroring it is the point — an attribution of a differently
 /// lowered machine would describe a program nobody executes.
 ///
-/// `Ok(None)` is a program `lower_tm_mapped` refuses to lay out (`MAX_SLOTS`, `MAX_FRAME_LOC`, or
-/// `MAX_MUL_INSTRS`): the machine halts before doing anything, so there is no run to attribute.
+/// `Ok(None)` is a program `lower_tm_mapped` refuses to lay out — any of its four conditions
+/// (`MAX_SLOTS`, `MAX_FRAME_LOC`, `MAX_MUL_INSTRS`, `MAX_MACHINE_STATES`; see its doc), reported by its
+/// own `Option` rather than re-checked here: the machine halts before doing anything, so there is no
+/// run to attribute.
 fn lower_mapped(core: &Core, enc: &dyn Encoding) -> Result<Option<Mapped>, LowerError> {
     // `lower_program`: try the program as first-order Core FIRST (a shape `defunc`'s top-level peel
     // does not recognize would otherwise be wrongly rejected), and retry through `defunc` only on
@@ -162,21 +166,19 @@ fn lower_mapped(core: &Core, enc: &dyn Encoding) -> Result<Option<Mapped>, Lower
         }
         Err(e @ LowerError::TooDeep { .. }) => return Err(e),
     };
-    let (machine, state_origins) = lower_tm_mapped(&prog, enc);
-    let sm = SlotMap::of(&prog);
-    // ALL THREE of `lower_tm_mapped`'s layout refusals, exactly the set `run_tm` now mirrors too (see
-    // `tm.rs`'s `run_tm_fitted`/`run_tm_at`). Each hands back a degenerate halt-immediately machine with
-    // an all-`None` state map, so simulating any of them would report a meaningless zero-step run — and
-    // a zero-step run passes the exhaustiveness invariant (0 == 0) while telling a consumer the program
-    // cost nothing.
-    //
-    // `MAX_SLOTS` is spelled out here because `run_tm` spells it out too (an absurd register index
-    // would also drive `init_reg` into a huge allocation just below). The `MAX_FRAME_LOC` and
-    // `MAX_MUL_INSTRS` halves go through `lower_tm`'s own predicates rather than being re-derived, so
-    // this cannot drift from the guards it mirrors.
-    if sm.n_slots() > MAX_SLOTS || frame_bank_unrepresentable(&prog, &sm) || mul_count_unrepresentable(&prog) {
+    // `lower_tm_mapped` reports EVERY layout refusal through this `Option` — all four conditions, not
+    // just the three that used to be re-derived here by hand (`MAX_SLOTS`/`frame_bank_unrepresentable`/
+    // `mul_count_unrepresentable`). That old three-check mirror left the FOURTH — the state ceiling,
+    // `MAX_MACHINE_STATES` — unmirrored: a program over it passed all three checks, simulated the
+    // degenerate halt-immediately machine, and reported `{ histogram: {}, total: 0, capped: false }` —
+    // `Attribution::unrepresentable`'s documented wrong answer, and worse than what came before this
+    // branch (an OOM) because it now answers cleanly and falsely. Deferring to `lower_tm_mapped`'s own
+    // `Option` instead of re-deriving a fourth predicate here means this cannot drift from the guard it
+    // mirrors — there is nothing left to keep in sync.
+    let Some((machine, state_origins)) = lower_tm_mapped(&prog, enc) else {
         return Ok(None);
-    }
+    };
+    let sm = SlotMap::of(&prog);
     let mut init = vec![Vec::new(); TAPES];
     // BOTH banks, exactly as `tm.rs`'s `attempt` seeds them. Seeding only REG is not a harmless
     // omission: `Unary::init_work()` is empty so nothing shows, but `Binary::init_work()` lays out a
@@ -237,7 +239,8 @@ fn parse_core(src: &str) -> Result<Core, LowerError> {
 /// desugared program — see `lower_mapped`'s doc for the exact sequence and `defunc_mapped`'s `# Errors`
 /// for what each variant means. A caller cannot recover an `Attribution` for a program that fails
 /// here; a program `lower_tm_mapped` refuses to lay out (over `MAX_SLOTS`/`MAX_FRAME_LOC`/
-/// `MAX_MUL_INSTRS`) is NOT an error — it returns `Ok` with `Attribution::unrepresentable()`.
+/// `MAX_MUL_INSTRS`/`MAX_MACHINE_STATES`) is NOT an error — it returns `Ok` with
+/// `Attribution::unrepresentable()`.
 pub fn attribute(src: &str) -> Result<Attribution, LowerError> {
     attribute_at(src, &Unary::default())
 }
@@ -564,11 +567,11 @@ mod tests {
         assert!(!a.capped);
     }
 
-    /// `lower_tm_mapped` has THREE layout refusals, and all three hand back a degenerate machine that
-    /// halts before doing anything. Mirroring only the `MAX_SLOTS` one made this program — which really
-    /// does exceed `MAX_FRAME_LOC`, 3,315 states of which 0 were mapped — attribute as
-    /// `{ histogram: {}, total: 0, capped: false }`: a program that never ran, reported as one that
-    /// ran and cost nothing.
+    /// `lower_tm_mapped` has FOUR layout refusals, and all four hand back a degenerate machine that
+    /// halts before doing anything. Before `lower_mapped` deferred to `lower_tm_mapped`'s own `Option`,
+    /// mirroring only the `MAX_SLOTS` one made this program — which really does exceed `MAX_FRAME_LOC`,
+    /// 3,315 states of which 0 were mapped — attribute as `{ histogram: {}, total: 0, capped: false }`:
+    /// a program that never ran, reported as one that ran and cost nothing.
     #[test]
     fn a_program_too_wide_for_the_frame_bank_reports_that_nothing_ran() {
         // > MAX_FRAME_LOC (1,000) locals in a function that contains a call.
@@ -582,9 +585,10 @@ mod tests {
         assert!(a.capped, "a program that never ran must not be reported as one that ran for free");
     }
 
-    /// The THIRD layout refusal, `MAX_MUL_INSTRS`: a program with too many `Mul` instructions must also
-    /// attribute as "never ran", not as a zero-cost run. Same shape as the frame-bank case above, and
-    /// the same wrong answer would result if this refusal were left unmirrored here.
+    /// Another of `lower_tm_mapped`'s four layout refusals, `MAX_MUL_INSTRS`: a program with too many
+    /// `Mul` instructions must also attribute as "never ran", not as a zero-cost run. Same shape as the
+    /// frame-bank case above, and the same wrong answer would result if this refusal reached `attribute`
+    /// unlabelled.
     #[test]
     fn a_program_with_too_many_muls_reports_that_nothing_ran() {
         // > MAX_MUL_INSTRS (32) multiplications in one straight-line expression.
@@ -594,6 +598,101 @@ mod tests {
         assert_eq!(a.total, 0, "the degenerate halt machine cannot take a step");
         assert!(a.histogram.is_empty(), "nothing ran, so nothing is attributable: {:?}", a.histogram);
         assert!(a.capped, "a program that never ran must not be reported as one that ran for free");
+    }
+
+    /// THE FOURTH LAYOUT REFUSAL, and the one Finding 1 exists to fix: `MAX_MACHINE_STATES`, the state
+    /// ceiling. It is the one `lower_mapped` used to be unable to see at all — the old code re-derived
+    /// only `MAX_SLOTS`/`frame_bank_unrepresentable`/`mul_count_unrepresentable` by hand, so a program
+    /// over the state ceiling passed all three, simulated the degenerate halt-immediately machine, and
+    /// reported `{ histogram: {}, total: 0, capped: false }`: `Attribution::unrepresentable`'s
+    /// documented wrong answer, and worse than what this branch's `MAX_MACHINE_STATES` guard replaced —
+    /// before it, the same program exhausted memory instead of answering cleanly and falsely.
+    ///
+    /// The cheap `code.len()` pre-check in `lower_tm_all` (`n >= MAX_MACHINE_STATES`) is UNREACHABLE
+    /// from source here, but not because `MAX_LOWER_DEPTH` bounds `code.len()` in general — it does
+    /// not. `lower_asm::MAX_LOWER_DEPTH` (580) bounds Core *depth*; it holds `code.len()` down only for
+    /// DEPTH-LIMITED shapes, where 3,472 was the largest measured across three such generators. THIS
+    /// program is not depth-limited — it is BALANCED, depth 11 for 2,048 leaves — so `MAX_LOWER_DEPTH`
+    /// never fires, and it lowers to 4,096 instructions, already past that 3,472 figure. What actually
+    /// keeps the pre-check unreached is `n_slots`: for this shape `n_slots` tracks `code.len()`, so
+    /// `MAX_SLOTS` (100,000) refuses the layout an order of magnitude before source could push
+    /// `code.len()` anywhere near the 1,000,000-state pre-check. So this trips the ceiling by GADGET
+    /// EXPANSION instead — a balanced arithmetic tree of 2,048 leaves, the shape `build.rs`'s
+    /// `MAX_MACHINE_STATES` doc measured building states in the hundreds of thousands to millions.
+    /// This allocates a ceiling's worth of states (~727 MB per `MAX_MACHINE_STATES`'s doc), so it is
+    /// slow tier like the repo's other large-machine tests — run explicitly via
+    /// `scripts/check-slow.sh`, not in the default suite.
+    #[test]
+    #[ignore = "slow tier: builds a ceiling's worth of states before refusing; run via scripts/check-slow.sh"]
+    fn a_program_past_the_state_ceiling_attributes_as_unrepresentable() {
+        // A balanced `(1 + 1)` nest of 2,048 leaves: 2,047 `+` nodes over 2,048 literals, built as a
+        // string so the source itself stays small (this is about GADGET count at lowering time, not
+        // about parsing a huge literal expression tree by hand).
+        fn balanced_tree(leaves: usize) -> String {
+            let mut terms: Vec<String> = (0..leaves).map(|_| "1".to_string()).collect();
+            while terms.len() > 1 {
+                terms = terms.chunks(2).map(|pair| format!("({} + {})", pair[0], pair[1])).collect();
+            }
+            terms.into_iter().next().unwrap_or_else(|| "1".to_string())
+        }
+        let src = balanced_tree(2_048);
+        let enc = Unary::default();
+
+        // PIN WHICH OF THE FOUR GUARDS FIRES. `attribute_at` alone only proves the refusal SHAPE; it
+        // says nothing about which guard produced it, and `lower_tm_mapped`'s `None` looks the same
+        // from any of the four. Lower the same source independently (mirroring `lower_and_size`'s own
+        // sequence — first-order here, so no `defunc` retry is needed) and rule the other three out by
+        // measurement, not by hardcoding the numbers this shape happens to lower to today: a future
+        // lowering change should move `code.len()`/`n_slots`, not silently relocate this test onto a
+        // guard it no longer exercises while staying green.
+        let core = parse_core(&src).expect("parses");
+        let prog = crate::tm::lower_asm::lower_asm(&core).expect("lowers first-order");
+        assert!(
+            prog.code.len() < crate::tm::build::MAX_MACHINE_STATES,
+            "must stay under the cheap `code.len()` pre-check, or THAT refusal fires instead of the \
+             one this test exists to pin: code.len()={}",
+            prog.code.len()
+        );
+        assert!(
+            crate::tm::n_slots_of(&prog) < crate::tm::lower_tm::MAX_SLOTS,
+            "must stay under `MAX_SLOTS`, or that refusal fires first instead of the one this test \
+             exists to pin: n_slots={}",
+            crate::tm::n_slots_of(&prog)
+        );
+        assert!(
+            !prog.code.iter().any(|i| matches!(i, crate::tm::asm::Instr::Bin(crate::core::BinOp::Mul, ..))),
+            "must contain no `Mul`, or `mul_count_unrepresentable` could fire instead of the guard \
+             this test exists to pin"
+        );
+        assert!(
+            !prog.code.iter().any(|i| matches!(i, crate::tm::asm::Instr::Call(_))),
+            "must contain no `Call`, or `frame_bank_unrepresentable` could fire instead of the guard \
+             this test exists to pin (that guard is dormant on any call-free program)"
+        );
+        // With the other three guards ruled out above, a refusal here can only be the remaining one:
+        // the in-loop `Builder::overflowed()` ceiling check.
+        assert!(
+            crate::tm::lower_tm_guarded(&prog, &enc).is_none(),
+            "expected the state-ceiling guard to refuse this program; if it now lowers, this test no \
+             longer reaches the refusal it exists to pin"
+        );
+
+        let a = attribute_at(&src, &enc).expect("attributes");
+        // Compared against a LIVE call, not hardcoded copies of its fields: whatever
+        // `Attribution::unrepresentable` actually produces is the answer this refusal must report, and a
+        // hardcoded `{ histogram: {}, total: 0, capped: true }` here would silently stop meaning that the
+        // moment the two drifted.
+        let unrepresentable = Attribution::unrepresentable();
+        assert_eq!(
+            a.histogram, unrepresentable.histogram,
+            "a program past the state ceiling must attribute the SAME degenerate shape \
+             `Attribution::unrepresentable` documents, not a plausible zero-cost run"
+        );
+        assert_eq!(a.total, unrepresentable.total, "the degenerate machine cannot take a step");
+        assert_eq!(
+            a.capped, unrepresentable.capped,
+            "a program that never ran must not be reported as one that ran for free"
+        );
     }
 
     /// The higher-order case, which is the only one that reaches `lower_mapped`'s `defunc` retry and

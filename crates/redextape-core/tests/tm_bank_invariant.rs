@@ -83,7 +83,7 @@ fn check_reg_bank_unit(src: &str, width: usize, name: &str, enc: &dyn Encoding) 
     };
     let slots = n_slots_of(&program) as usize;
 
-    let (m, _overflow) = lower_tm_guarded(&program, enc);
+    let (m, _overflow) = lower_tm_guarded(&program, enc).expect("test program must lower");
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(slots as u32);
     init[WORK] = enc.init_work();
@@ -263,7 +263,7 @@ fn first_violation(src: &str, width: usize, name: &str, enc: &dyn Encoding) -> O
         Err(_) => defunc(&core).ok().and_then(|d| lower_asm(&d).ok())?,
     };
     let slots = n_slots_of(&program) as usize;
-    let (m, _) = lower_tm_guarded(&program, enc);
+    let (m, _) = lower_tm_guarded(&program, enc).expect("proptest-generated program must lower");
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(slots as u32);
     init[WORK] = enc.init_work();

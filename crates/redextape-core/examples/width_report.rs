@@ -81,7 +81,7 @@ fn steps_at(src: &str, enc: &dyn Encoding) -> Option<u64> {
         Ok(p) => p,
         Err(_) => lower_asm(&defunc(&core).ok()?).ok()?,
     };
-    let (m, overflow) = lower_tm_guarded(&program, enc);
+    let (m, overflow) = lower_tm_guarded(&program, enc).expect("report demo must not be refused");
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots_of(&program));
     init[WORK] = enc.init_work();
@@ -98,7 +98,7 @@ fn steps_at(src: &str, enc: &dyn Encoding) -> Option<u64> {
 
 /// Whether a pinned-width run halts in the overflow guard.
 fn ended_in_guard(program: &Program, enc: &dyn Encoding) -> bool {
-    let (m, overflow) = lower_tm_guarded(program, enc);
+    let (m, overflow) = lower_tm_guarded(program, enc).expect("report demo must not be refused");
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots_of(program));
     init[WORK] = enc.init_work();
@@ -348,7 +348,7 @@ fn pinned_steps_any(src: &str, width: usize) -> Option<u64> {
         Err(_) => lower_asm(&defunc(&core).ok()?).ok()?,
     };
     let enc = Unary::at(width);
-    let (m, _) = lower_tm_guarded(&program, &enc);
+    let (m, _) = lower_tm_guarded(&program, &enc).expect("report demo must not be refused");
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots_of(&program));
     let (counts, _) = simulate_counts(&m, &init, TM_DEFAULT_CAPS);

@@ -122,6 +122,7 @@ LEGS=(
   "base|wasmprobe|"
   "base|clippy|--workspace --all-targets"
   "base|test|--workspace"
+  "base|clippy|-p redextape-core --features serde --all-targets"
   "base|test|-p redextape-core --features serde"
   "base|wasm|-p redextape-core --lib"
   "base|wasm|-p redextape-core --lib --features serde"

@@ -387,11 +387,14 @@ impl Session {
             Err(e) => (Err(e), None),
         };
 
-        // `run_tm_described` ERRS ONLY FOR A PROGRAM THAT NEVER RAN. Checked against `lower_and_size`,
-        // its only fallible call: `Err` carries `LowerError` or `TooLarge` and nothing else. `Overflow`
-        // is NOT an `Err` — reaching `MAX_FIELD_WIDTH` and still overflowing returns `Ok` with
-        // `run: TmRun::Overflow` and a machine attached — so the decline for it is read off `d.run`,
-        // which is why this is two matches and not one.
+        // `run_tm_described` ERRS ONLY FOR A PROGRAM THAT NEVER RAN. It has TWO fallible calls, not
+        // one: `lower_and_size` (the three pre-checked layout refusals, `Err(LowerError)` or
+        // `Err(TooLarge)`) and `attempt`'s `Option` (the fourth — the state ceiling, only knowable once
+        // that width's gadgets are built — folded into `Err(TooLarge)` the same way). Between them,
+        // `Err` carries `LowerError` or `TooLarge` and nothing else. `Overflow` is NOT an `Err` —
+        // reaching `MAX_FIELD_WIDTH` and still overflowing returns `Ok` with `run: TmRun::Overflow` and
+        // a machine attached — so the decline for it is read off `d.run`, which is why this is two
+        // matches and not one.
         let described = tm::run_tm_described(&core, kind, ty.clone(), caps);
         // Read off the `Ok` BEFORE the match consumes it, so every run that STARTED reports its own
         // count — including `Overflow` and `TooLarge` arriving inside an `Ok`, which decline the leg
@@ -400,9 +403,12 @@ impl Session {
         let tm = match described {
             Err(TmRun::TooLarge) => Err(TmDecline::TooLarge),
             Err(TmRun::LowerError(e)) => Err(TmDecline::Lower(format!("{e:?}"))),
-            // `lower_and_size` produces no other `Err`, so this arm is unreachable today. It is a
-            // mapping rather than an `unreachable!()` because that macro is a panic, and a panic under
-            // wasm aborts the module; a future `Err` variant becomes a legible decline instead.
+            // `run_tm_described`'s `Err` is only ever `LowerError` or `TooLarge` — both matched above —
+            // so this arm is unreachable today. That rests on two facts now, not one: `lower_and_size`
+            // produces no other `Err`, AND `attempt`'s `None` (the state-ceiling refusal) is folded
+            // into `TooLarge` rather than surfacing as a distinct variant. It is a mapping rather than
+            // an `unreachable!()` because that macro is a panic, and a panic under wasm aborts the
+            // module; a future `Err` variant becomes a legible decline instead.
             Err(other) => Err(TmDecline::Lower(format!("{other:?}"))),
             Ok(d) => match d.run {
                 TmRun::Overflow => Err(TmDecline::Overflow),

@@ -23,8 +23,8 @@ pub use asm::{
 };
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
-    AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP, STACK, Slot,
-    TAPE_NAMES, TAPES, WORK, ZERO,
+    AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP,
+    STACK, Slot, TAPE_NAMES, TAPES, WORK, ZERO,
 };
 pub use decode::{decode_tape, decode_tape_ty};
 pub use defunc::{defunc, defunc_mapped};
@@ -62,18 +62,35 @@ pub enum TmRun {
     /// program is not representable on this tape. Distinct from `HitCap`: nothing diverged, the tape is
     /// simply too narrow, which is a property of the encoding rather than of the program's semantics.
     Overflow,
-    /// `lower_tm` REFUSED to build a machine for this program at all — an absurd register file
-    /// (`lower_tm::MAX_SLOTS`), an absurd `Loc` bank in a call-containing program
-    /// (`lower_tm::MAX_FRAME_LOC`), or too many `Mul` instructions (`lower_tm::MAX_MUL_INSTRS`, each
-    /// O(width²) states under `Binary`). Any of the three would make `lower_tm` build (or `init_reg`
-    /// allocate) an oversized machine were lowering to proceed, so lowering never proceeds: the program
-    /// never ran a single step.
+    /// `lower_tm` REFUSED to build a machine for this program at all. FOUR conditions produce it: an
+    /// absurd register file (`lower_tm::MAX_SLOTS`), an absurd `Loc` bank in a call-containing program
+    /// (`lower_tm::MAX_FRAME_LOC`), too many `Mul` instructions (`lower_tm::MAX_MUL_INSTRS`, each
+    /// O(width²) states under `Binary`), or a machine that exceeds `build::MAX_MACHINE_STATES`.
+    ///
+    /// THE FOURTH IS NOT LIKE THE OTHER THREE. Those bound a quantity readable off the `Program`, so
+    /// `lower_and_size` pre-checks them before lowering. The state count is only known once the
+    /// gadgets have been laid out, so it is reported BY the lowering — see `lower_tm_guarded`.
+    ///
+    /// `MAX_SLOTS` in particular would also make `init_reg` allocate an oversized bank were lowering to
+    /// proceed; `MAX_FRAME_LOC` and `MAX_MUL_INSTRS` would instead make `lower_tm` itself build an
+    /// oversized machine (the `O(n_loc²)` frame gadgets, the `O(width²)` `Mul` gadgets) — which is
+    /// exactly what the fourth condition, `MAX_MACHINE_STATES`, catches after the fact rather than
+    /// before. So lowering never proceeds for any of the four: the program never ran a single step.
     ///
     /// Distinct from `HitCap`, which reports a run that started and then hit a resource cap mid-flight
     /// — a program refused here never started. Distinct from `Overflow` too: `run_tm_fitted`'s retry
-    /// loop widens the bank and tries again on `Overflow`, which would be actively wrong for this case
-    /// (the same too-large program would simply be re-lowered, and re-refused, at every width up to the
-    /// ceiling). `TooLarge` is reported once, at the first width tried, with no retry.
+    /// loop widens the bank and tries again on `Overflow`, and never on this. A refusal returns
+    /// straight out of the loop, reporting no width — nothing was fitted.
+    ///
+    /// **NOT NECESSARILY AT THE FIRST WIDTH, and the fourth cause is what changed that.** The three
+    /// pre-checked conditions are properties of the `Program` alone, so they refuse before the width
+    /// search begins and would re-refuse identically at every width — which is what made "reported
+    /// once, at the first width tried" true while those three were the only causes.
+    /// `MAX_MACHINE_STATES` is not such a property: a gadget's state count scales with the field
+    /// width (`lower_tm::MAX_MUL_INSTRS`'s doc records `Mul` as O(width²) under `Binary`), so a
+    /// program can lay out fine at `MIN_FIELD_WIDTH`, overflow its fields, and exceed the ceiling only
+    /// at a wider one. Retrying wider still would be pointless in either case — a refused machine only
+    /// grows with width — so the loop returns on the first refusal, at whatever width reached it.
     TooLarge,
     /// The program could not be lowered to asm (e.g. a higher-order use).
     LowerError(LowerError),
@@ -121,16 +138,24 @@ pub fn run_tm(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> TmRun {
 
 /// One attempt at `enc`'s own width: lower, lay out the bank, simulate, and classify the halt.
 ///
+/// `None` IF THE LAYOUT WAS REFUSED. Three of the four refusals are pre-checked by `lower_and_size`
+/// and so never reach here; `MAX_MACHINE_STATES` cannot be pre-checked — it is only known once the
+/// gadgets have been built — so this is where it surfaces.
+///
 /// Returns the machine and the initial tapes it built alongside the outcome. `run_tm_fitted` drops
 /// both; `run_tm_described` keeps them, and keeping them is the point — a header whose literal tapes
 /// were re-derived from its own `encoding`/`width`/`slots` fields could not disagree with them, so
 /// the consistency check over it would prove nothing. This is the ONE place that builds `init` on the
 /// `run_tm*` path, which is what makes the check a check. `tm/attribute.rs` builds a second `init` for
-/// its own purposes, setting only REG and never calling `init_work()` — harmless under `Unary`, where
-/// `init_work` returns empty regardless, but whether that omission is sound under `Binary` is a real
-/// open question, filed separately rather than answered here.
-fn attempt(prog: &Program, enc: &dyn Encoding, n_slots: u32, caps: TmCaps) -> (TmRun, Machine, Vec<Vec<Symbol>>, u64) {
-    let (machine, overflow) = lower_tm_guarded(prog, enc);
+/// its own purposes; it seeds BOTH REG and WORK the same way this one does, and a test pins that under
+/// both encodings, so the two `init`s cannot drift apart unnoticed.
+fn attempt(
+    prog: &Program,
+    enc: &dyn Encoding,
+    n_slots: u32,
+    caps: TmCaps,
+) -> Option<(TmRun, Machine, Vec<Vec<Symbol>>, u64)> {
+    let (machine, overflow) = lower_tm_guarded(prog, enc)?;
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots);
     init[WORK] = enc.init_work();
@@ -139,17 +164,25 @@ fn attempt(prog: &Program, enc: &dyn Encoding, n_slots: u32, caps: TmCaps) -> (T
         (tapes, _, TmStatus::Halted, n) => (TmRun::Ran { tapes }, n),
         (_, _, TmStatus::HitCap, n) => (TmRun::HitCap, n),
     };
-    (run, machine, init, steps)
+    Some((run, machine, init, steps))
 }
 
-/// Lower `core`, then check ALL THREE of `lower_tm`'s layout refusals — `MAX_SLOTS` (an absurd register
-/// file, which would also drive `init_reg` into a huge or aborting allocation just below),
-/// `frame_bank_unrepresentable` (an absurd `Loc` bank in a call-containing program), and
-/// `mul_count_unrepresentable` (too many `Mul` instructions, each O(width²) states under `Binary`).
+/// Lower `core`, then pre-check the THREE of `lower_tm`'s FOUR layout refusals that can be settled
+/// before lowering — `MAX_SLOTS` (an absurd register file, which would also drive `init_reg` into a
+/// huge or aborting allocation just below), `frame_bank_unrepresentable` (an absurd `Loc` bank in a
+/// call-containing program), and `mul_count_unrepresentable` (too many `Mul` instructions, each
+/// O(width²) states under `Binary`). The fourth is `MAX_MACHINE_STATES` — see the third paragraph.
 ///
-/// The single place `run_tm_fitted`/`run_tm_at` decide "is this program representable at all", so the
-/// two cannot drift from each other or from the guards they mirror — the same reason
-/// `frame_bank_unrepresentable` itself is a shared predicate rather than re-derived at each call site.
+/// The single place `run_tm_fitted`/`run_tm_at` PRE-CHECK representability, so the two cannot drift
+/// from each other or from the guards they mirror — the same reason `frame_bank_unrepresentable` is a
+/// shared predicate rather than re-derived at each call site.
+///
+/// THREE OF THE FOUR REFUSALS, NOT ALL FOUR. `MAX_MACHINE_STATES` cannot be pre-checked: it bounds
+/// the machine, and the machine does not exist until the gadgets are built. `attempt` reports it via
+/// `lower_tm_guarded`'s `None`. Keeping these three here anyway is deliberate — `MAX_SLOTS` in
+/// particular must refuse BEFORE `init_reg` lays out a bank from `n_slots`, which is an allocation
+/// the state ceiling would never see.
+///
 /// A refused program is reported as `TmRun::TooLarge`: it never took a step, so it must not come back
 /// as `Ran` over tapes that decode to nothing (`MAX_SLOTS`'s and `MAX_FRAME_LOC`'s old behaviour) or as
 /// `HitCap` (which claims a run started and then hit a resource cap mid-flight).
@@ -189,14 +222,23 @@ pub fn run_tm_fitted(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> (TmRun, O
     };
     let n_slots = sm.n_slots();
     if enc.field_width().is_none() {
-        return (attempt(&prog, enc, n_slots, caps).0, None);
+        return (attempt(&prog, enc, n_slots, caps).map_or(TmRun::TooLarge, |a| a.0), None);
     }
     let mut width = MIN_FIELD_WIDTH;
     loop {
         let fitted = enc.at_width(width);
-        match attempt(&prog, &*fitted, n_slots, caps).0 {
-            TmRun::Overflow if width < MAX_FIELD_WIDTH => width = (width * 2).min(MAX_FIELD_WIDTH),
-            other => return (other, Some(width)),
+        // Matched on `attempt`'s `Option`, not flattened through `map_or`, so the state-ceiling refusal
+        // (`None` — `MAX_MACHINE_STATES`, only knowable once THIS width's gadgets are built) can be told
+        // apart from every other outcome and report `None` for "the width that was fitted" too, the same
+        // as `lower_and_size`'s pre-checked refusal just above returns for the other three conditions.
+        // `Some(width)` there would claim a width was fitted when nothing was: `TmRun::TooLarge` means
+        // the program never ran a single step, at ANY width, so no width is more "the" answer than
+        // another — reporting the loop's current `width` would just be exposing an implementation detail
+        // of where the search happened to be standing when the refusal surfaced.
+        match attempt(&prog, &*fitted, n_slots, caps) {
+            None => return (TmRun::TooLarge, None),
+            Some((TmRun::Overflow, ..)) if width < MAX_FIELD_WIDTH => width = (width * 2).min(MAX_FIELD_WIDTH),
+            Some((other, ..)) => return (other, Some(width)),
         }
     }
 }
@@ -244,7 +286,8 @@ pub struct DescribedRun {
 /// `TmRun` outcomes that just never reached a configuration to describe: `Err(TmRun::LowerError(_))`
 /// if `core` could not be lowered to asm (see `lower_program`'s doc — an unsupported higher-order
 /// construct or a too-deep program), and `Err(TmRun::TooLarge)` if `lower_tm` refused to build a
-/// machine at all (`MAX_SLOTS`/`MAX_FRAME_LOC`/`MAX_MUL_INSTRS` — see `TmRun::TooLarge`'s doc). Neither
+/// machine at all (`MAX_SLOTS`/`MAX_FRAME_LOC`/`MAX_MUL_INSTRS`/`MAX_MACHINE_STATES` — see
+/// `TmRun::TooLarge`'s doc). Neither
 /// is recoverable by retrying: the caller's only recourse is rewriting `core`. `TmRun::Overflow` and
 /// `TmRun::HitCap`, by contrast, are NOT errors here — they are `Ok(DescribedRun)` results, because a
 /// run that started (even one that overflowed or hit a cap) still has a configuration to describe.
@@ -254,7 +297,9 @@ pub fn run_tm_described(core: &Core, kind: EncodingKind, result: Ty, caps: TmCap
     let mut width = MIN_FIELD_WIDTH;
     loop {
         let fitted = kind.at(width);
-        let (run, machine, init, steps) = attempt(&prog, &*fitted, n_slots, caps);
+        let Some((run, machine, init, steps)) = attempt(&prog, &*fitted, n_slots, caps) else {
+            return Err(TmRun::TooLarge);
+        };
         match run {
             TmRun::Overflow if width < MAX_FIELD_WIDTH => width = (width * 2).min(MAX_FIELD_WIDTH),
             run => {
@@ -274,7 +319,7 @@ pub fn run_tm_at(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> TmRun {
         Ok(p) => p,
         Err(e) => return e,
     };
-    attempt(&prog, enc, sm.n_slots(), caps).0
+    attempt(&prog, enc, sm.n_slots(), caps).map_or(TmRun::TooLarge, |a| a.0)
 }
 
 #[cfg(test)]
@@ -537,5 +582,68 @@ mod run_tm_tests {
         let mut cursor = TmCursor::new(&d.machine, &init, TM_DEFAULT_CAPS);
         while cursor.next().is_some() {}
         assert_eq!(cursor.steps_taken(), d.steps, "the fitting run and the cursor must not drift");
+    }
+
+    /// A program past the state ceiling must be reported as `TooLarge` and NEVER as `Ran`/`HitCap` —
+    /// asserted through `attempt`, not just `lower_tm_guarded`.
+    ///
+    /// THIS IS THE WHOLE REASON THE REFUSAL IS PLUMBED. `lower_tm_all` answers a refusal with a
+    /// degenerate machine that halts immediately; if that reached `attempt` unlabelled it would
+    /// simulate, halt at a state that is not the overflow guard, and come back as `Ran` over tapes
+    /// that decode to nothing — which is exactly the defect `lower_and_size`'s doc records having
+    /// fixed for `MAX_SLOTS` and `MAX_FRAME_LOC`. Asserting only `lower_tm_guarded(..).is_none()`
+    /// (as this test used to, identically to `guard_counterexamples.rs`'s
+    /// `a_code_stream_longer_than_the_ceiling_is_refused`) does not exercise that: it would stay green
+    /// even if `attempt` stopped checking the `Option` and simulated the degenerate machine anyway.
+    ///
+    /// `run_tm`/`run_tm_at`/`run_tm_fitted`/`run_tm_described` all take `&Core`, not `&Program`, and
+    /// there is no fast route to a `Core` this large: a million-plus asm instructions from real source
+    /// would need only a ~2-3 MB file (`code.len()` is a lower bound on the state count, and
+    /// `state_cost_probe.rs`'s generators run ~2-3 source bytes per instruction) — but
+    /// `parser::MAX_TOKENS` (100,000) caps `code.len()` at ~50,000 instructions, even for the
+    /// depth-unbounded balanced-tree shape that spends its whole token budget on instructions, a
+    /// ~950,000-instruction gap below `MAX_MACHINE_STATES` — the front door cannot reach this input at
+    /// all, by design (see `state_cost_probe.rs`'s section A/C/F). `attempt` is the actual entry point
+    /// every one of those four functions maps its `None` through — the one-line mapping below is copied
+    /// verbatim from `run_tm_at` — so calling it directly here is the cheapest REAL exercise of the same
+    /// classification those four callers depend on, not a substitute for it.
+    ///
+    /// Built as asm rather than compiled from source: `MAX_MACHINE_STATES` instructions of source would
+    /// be a ~2-3 MB file that the front door refuses to parse anyway (see above), and `code.len()` alone
+    /// is a lower bound on the state count, so this trips `lower_tm_all`'s cheap pre-check, allocating
+    /// only the two scaffolding states (`halt`, `overflow`) before refusing.
+    #[test]
+    fn a_program_past_the_state_ceiling_is_too_large_not_ran() {
+        use crate::tm::asm::{Instr, Program};
+        use crate::tm::build::MAX_MACHINE_STATES;
+
+        let prog = Program { code: vec![Instr::Halt; MAX_MACHINE_STATES + 1], labels: Vec::new() };
+        assert!(
+            lower_tm_guarded(&prog, &Unary::default()).is_none(),
+            "a code stream longer than the ceiling cannot fit and must be refused, not laid out"
+        );
+
+        // NOT the end-to-end assertion: `attempt` is private, so this exercises the classification
+        // `run_tm_at`/`run_tm_fitted`/`run_tm_described` all wrap, not the public entry points
+        // themselves (see the doc comment above for why that is still a real exercise, not a
+        // substitute). The genuinely end-to-end assertion — that `TooLarge` reaches a caller through
+        // the public API — is `guard_counterexamples.rs`'s slow-tier
+        // `a_program_past_the_ceiling_reaches_the_caller_as_too_large`. `.map_or(TmRun::TooLarge, |a|
+        // a.0)` below is `run_tm_at`'s own mapping, reused rather than reimplemented so this cannot
+        // silently test a mapping production does not use.
+        let n_slots = n_slots_of(&prog);
+        let run = attempt(&prog, &Unary::default(), n_slots, TM_DEFAULT_CAPS).map_or(TmRun::TooLarge, |a| a.0);
+        assert!(matches!(run, TmRun::TooLarge), "a program past the ceiling must report TooLarge, got {run:?}");
+    }
+
+    /// A program the ceiling does NOT refuse still runs, and still gives the reference answer. The
+    /// other half of every guard in this tree: refusing correctly is worthless if it also refuses
+    /// what it should admit.
+    #[test]
+    fn an_ordinary_program_still_runs_under_the_ceiling() {
+        let core = core_of("let x = 40; x + 2");
+        let described = run_tm_described(&core, EncodingKind::Unary, Ty::Nat, TM_DEFAULT_CAPS)
+            .expect("an ordinary program must not be refused");
+        assert!(matches!(described.run, TmRun::Ran { .. }), "got {:?}", described.run);
     }
 }

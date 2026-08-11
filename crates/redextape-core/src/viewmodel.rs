@@ -527,14 +527,19 @@ pub struct LinkIndex {
     /// dense typed array is the difference between 143 KB and 26,484 objects for `list60`.
     ///
     /// **A `NodeId` THAT WOULD NOT FIT `i32` DECLINES THE WHOLE LEG, THE SAME WAY A `None` PROGRAM
-    /// DOES — IT DOES NOT BECOME `-1`.** `NodeId` is a `u32`, and nothing bounds how many a `Core` tree
-    /// can mint (`core::NodeGen::fresh` is a bare counter), so one could in principle reach or exceed
-    /// `2^31` and go negative under `as i32` — landing on `-1` for the one id that turns it exactly, or
-    /// some other negative value for any other, and either way becoming indistinguishable from (or
-    /// worse, a wrong index next to) a state that genuinely has no owner. `build` refuses that cast with
+    /// DOES — IT DOES NOT BECOME `-1`.** `NodeId` is a `u32`, and a value at or past `2^31` goes
+    /// negative under `as i32` — landing on `-1` for the one id that turns it exactly, or some other
+    /// negative value otherwise, and either way becoming indistinguishable from (or worse, a wrong
+    /// index next to) a state that genuinely has no owner. `build` refuses that cast with
     /// `i32::try_from` and empties the whole vec on failure — the same "no lie, just nothing" refusal
-    /// `emit` (above) makes for `TermTree`'s arena index, applied here instead of laundering the
-    /// overflow into the sentinel that already means "no owner".
+    /// `emit` (above) makes for `TermTree`'s arena index.
+    ///
+    /// **THAT REFUSAL IS NOW PROVABLY UNREACHABLE, AND IS KEPT ANYWAY.** It used to cite
+    /// `core::NodeGen::fresh` as a bare counter that bounded nothing; `core::MAX_NODE_ID` bounds it
+    /// now, and sits under `i32::MAX` precisely so this cast cannot fail. The check stays because it
+    /// costs one comparison and because the alternative is a cast whose soundness lives in another
+    /// module's constant — if that ceiling is ever raised past `2^31`, this refuses instead of
+    /// silently emitting a wrong owner.
     ///
     /// THE NARROWER ALTERNATIVE WAS WEIGHED AND REJECTED, recorded so it is not re-proposed blind:
     /// map only the failing entries to some *other* negative value (`i32::MIN`) and keep every

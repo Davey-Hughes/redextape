@@ -122,12 +122,13 @@ use redextape_core::trace::{LambdaCursor, StepEvent, TmCursor};
 
 /// Verbatim copy of `tests/three_way_oracle.rs::FIRST_ORDER_DEMOS` (comments stripped).
 ///
-/// THIS COPY IS COVERED. `three_way_oracle.rs`'s `first_order_demos_stay_synced_across_all_six_copies`
+/// THIS COPY IS COVERED. `three_way_oracle.rs`'s `first_order_demos_stay_synced_across_all_seven_copies`
 /// reads this file as text and asserts its literals are byte-for-byte equal to the canonical array's.
-/// That test was extended from five to six when this file landed, which is the protocol its own doc
-/// comment specifies: the enumeration method is `grep -rn FIRST_ORDER_DEMOS` over the whole tree, and the
-/// count has been wrong twice by being maintained from memory instead. Nothing here needs a by-hand diff
-/// before it is trusted.
+/// That test was extended from five to six when this file landed (and from six to seven for
+/// `examples/state_cost_probe.rs`'s copy, added later), which is the protocol its own doc comment
+/// specifies: the enumeration method is `grep -rn FIRST_ORDER_DEMOS` over the whole tree, and the count
+/// has been wrong more than once by being maintained from memory instead. Nothing here needs a by-hand
+/// diff before it is trusted.
 const FIRST_ORDER_DEMOS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",
@@ -220,7 +221,7 @@ fn machine_of(src: &str, enc: &dyn Encoding) -> Option<(Machine, Vec<Vec<char>>)
         Ok(p) => p,
         Err(_) => lower_asm(&defunc(&core).ok()?).ok()?,
     };
-    let (m, _overflow) = lower_tm_guarded(&program, enc);
+    let (m, _overflow) = lower_tm_guarded(&program, enc).expect("probe program must not be refused");
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots_of(&program));
     init[WORK] = enc.init_work();

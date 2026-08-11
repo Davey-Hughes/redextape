@@ -175,7 +175,7 @@
 //! It was extracted mechanically rather than retyped: that list has drifted from hand-copying twice
 //! before, as `step_survey.rs`'s module doc records. Programs the λ backend cannot lower are skipped
 //! and counted, not silently dropped. The copy below is now CHECKED, by
-//! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_five_copies` — see its own doc
+//! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_seven_copies` — see its own doc
 //! comment, which reads this file, and the array's, for why it took two attempts to get here.
 //!
 //! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
@@ -217,7 +217,7 @@ use redextape_core::trace::{LambdaCursor, ZipperCursor};
 /// Verbatim copy of `tests/three_way_oracle.rs::FIRST_ORDER_DEMOS` (comments stripped).
 ///
 /// THIS COPY IS COVERED, and was not until the whole-branch review found it. `three_way_oracle.rs`'s
-/// `first_order_demos_stay_synced_across_all_five_copies` reads this file as text and asserts its
+/// `first_order_demos_stay_synced_across_all_seven_copies` reads this file as text and asserts its
 /// literals are byte-for-byte equal to the canonical array's. It was the FIFTH copy and the last one
 /// found: that test had just been extended from three to four, by a fix that enumerated the damage and
 /// missed this file. Nothing here needs a by-hand diff before it is trusted.

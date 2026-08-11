@@ -510,7 +510,7 @@ fn depth_probe() {
 /// copy of a copy known equal to the canonical, not a fresh transcription.
 ///
 /// THIS COPY IS COVERED, and was not when it was committed. `three_way_oracle.rs`'s
-/// `first_order_demos_stay_synced_across_all_five_copies` reads this file as text and asserts its
+/// `first_order_demos_stay_synced_across_all_seven_copies` reads this file as text and asserts its
 /// literals are byte-for-byte equal to the canonical array's; the test previously covered three copies
 /// and this comment claimed it covered this one. The claim was made true rather than softened — the
 /// check is textual and path-based, so a probe that CI never runs is as checkable as a test target.

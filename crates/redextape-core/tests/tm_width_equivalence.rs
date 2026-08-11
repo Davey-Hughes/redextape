@@ -296,7 +296,7 @@ fn the_box_tape_stays_well_formed_at_every_step_and_every_width() {
         for width in widths() {
             for (name, enc) in encodings_at(width) {
                 let enc = enc.as_ref();
-                let (m, _) = lower_tm_guarded(&program, enc);
+                let (m, _) = lower_tm_guarded(&program, enc).expect("corpus program must not be refused");
                 let mut init = vec![Vec::new(); TAPES];
                 init[REG] = enc.init_reg(n_slots_of(&program));
                 init[WORK] = enc.init_work();
@@ -495,7 +495,7 @@ fn step_count_is_non_decreasing_in_the_field_width() {
                 if !matches!(run_tm_at(&core, enc.as_ref(), TM_DEFAULT_CAPS), TmRun::Ran { .. }) {
                     continue;
                 }
-                let (m, _) = lower_tm_guarded(&program, enc.as_ref());
+                let (m, _) = lower_tm_guarded(&program, enc.as_ref()).expect("just confirmed Ran, so not refused");
                 let mut init = vec![Vec::new(); TAPES];
                 init[REG] = enc.init_reg(n_slots_of(&program));
                 init[WORK] = enc.init_work();

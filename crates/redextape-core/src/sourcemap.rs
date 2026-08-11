@@ -152,7 +152,17 @@ fn tm_half(core: &Core, enc: &dyn Encoding) -> (BTreeMap<NodeId, Vec<StateId>>, 
         }
         Err(LowerError::TooDeep { .. }) => return (BTreeMap::new(), BTreeMap::new()),
     };
-    let (machine, state_origins) = lower_tm_mapped(&prog, enc);
+    // `None` is the state-ceiling refusal — one of `lower_tm_mapped`'s four layout refusals (`MAX_SLOTS`,
+    // `MAX_FRAME_LOC`, `MAX_MUL_INSTRS`, `MAX_MACHINE_STATES`; see its doc). NONE of the four is
+    // re-derived above: the match just above handles a different error entirely, `LowerError`'s
+    // `Unsupported`/`TooDeep` from `lower_asm_mapped`/`defunc_mapped`. All four layout refusals arrive
+    // here, at this single `else`, deferred whole to `lower_tm_mapped`'s own `Option` — there is
+    // nothing here that could drift from what it checks. It takes the SAME "give back empty maps" path
+    // as `TooDeep`/`Unsupported`-then-`defunc`-failure just above: a refused program built no machine,
+    // so there is no state to own anything.
+    let Some((machine, state_origins)) = lower_tm_mapped(&prog, enc) else {
+        return (BTreeMap::new(), BTreeMap::new());
+    };
     let mut out: BTreeMap<NodeId, Vec<StateId>> = BTreeMap::new();
     for state in 0..machine.states.len() {
         // `None` is machine scaffolding with no instruction behind it; skip rather than invent an owner.
@@ -166,14 +176,14 @@ fn tm_half(core: &Core, enc: &dyn Encoding) -> (BTreeMap<NodeId, Vec<StateId>>, 
             continue;
         }
         // `state` is a loop index over `machine.states`, a `Vec<State>` this function only ever gets
-        // from `lower_tm_mapped` — built via `Builder::state`/`accept` (push-only, one call per state)
-        // and nothing else. NOT bounded by `MAX_SLOTS`/`MAX_FRAME_LOC`/`MAX_MUL_INSTRS`: those guard
-        // other quantities (the register footprint, the O(n_loc^2) frame gadgets, and the `Mul` count)
-        // and none of them constrains `prog.code.len()`, which is what drives the one-entry-state-per-
-        // instruction `pc` allocation `lower_tm_all` does unconditionally. The actual bound is
-        // `Builder::state`'s (in `tm/build.rs`): memory, not a runtime check — a `code: Vec<Instr>` long
-        // enough to push the state count past `StateId::MAX` needs on the order of 172 GB resident for
-        // `code` alone, before `lower_tm_all` is ever called.
+        // from `lower_tm_mapped` — built via `Builder::state`/`accept` (push-only, one call per
+        // state) and nothing else. Both enforce `MAX_MACHINE_STATES`, which is 4,295x under
+        // `StateId::MAX`, so the narrowing cannot truncate. The `#[allow]` stays only because clippy
+        // cannot see a guard two modules away.
+        //
+        // THIS USED TO RESTATE `Builder::state`'s ~172 GB memory argument IN FULL, which is how the
+        // same wrong reasoning came to live in two files: the argument was prose, so keeping it in
+        // step meant remembering to. Now there is one check and this cites it.
         #[allow(clippy::cast_possible_truncation)]
         out.entry(node).or_default().push(state as StateId);
     }

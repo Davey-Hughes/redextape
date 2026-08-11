@@ -14,7 +14,7 @@
 //! reference==λ) stay for localization; this file is the unified capstone.
 //!
 //! This file keeps the name `three_way_oracle.rs` even though the oracle it drives is now four-way:
-//! renaming it would break `first_order_demos_stay_synced_across_all_five_copies`'s path-based
+//! renaming it would break `first_order_demos_stay_synced_across_all_seven_copies`'s path-based
 //! extraction of `FIRST_ORDER_DEMOS` (by `CARGO_MANIFEST_DIR`-relative path, not by module name) for no
 //! gain, so the filename/doc mismatch is a deliberate decision, not an oversight.
 //!
@@ -433,14 +433,14 @@ fn extract_str_array(source: &str, const_name: &str) -> Vec<String> {
 }
 
 /// `examples/step_survey.rs`, `redextape-native/tests/native_oracle.rs`,
-/// `examples/list_reduction_probe.rs`, `examples/lambda_sharing_probe.rs` and
-/// `examples/concurrency_probe.rs` each hand-copy this file's
+/// `examples/list_reduction_probe.rs`, `examples/lambda_sharing_probe.rs`,
+/// `examples/concurrency_probe.rs` and `examples/state_cost_probe.rs` each hand-copy this file's
 /// `FIRST_ORDER_DEMOS` — an example is a separate binary crate and cannot `use` an integration test's
-/// module, and the native crate's oracle predates a shared fixtures crate — so all five are duplicated
+/// module, and the native crate's oracle predates a shared fixtures crate — so all six are duplicated
 /// by hand rather than referencing this array. That has already drifted twice (documented in
 /// `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`'s survey caveat and, within this very
 /// branch, in `step_survey.rs` again after the FIRST fix), so a one-off resync is demonstrably not
-/// durable on its own. This test reads all six files as TEXT (via `CARGO_MANIFEST_DIR`, so it works
+/// durable on its own. This test reads all seven files as TEXT (via `CARGO_MANIFEST_DIR`, so it works
 /// under `cargo test` from any directory) and asserts their extracted string literals are byte-for-byte
 /// equal, catching the next drift at compile-time cost instead of the next survey run silently
 /// describing a stale corpus.
@@ -466,22 +466,30 @@ fn extract_str_array(source: &str, const_name: &str) -> Vec<String> {
 /// drifted. The assert is deliberately a literal, so bumping it is a conscious act that re-runs the
 /// `grep`.
 ///
+/// **THE SEVENTH (`examples/state_cost_probe.rs`, this same branch) REVERTED TO *AFTER THE FACT* —**
+/// the pattern the sixth entry above was supposed to have broken. Its copy shipped as a `part_g` local
+/// binding named `demos`, not `FIRST_ORDER_DEMOS`, so even the `grep -rn FIRST_ORDER_DEMOS` audit this
+/// doc names would not have found it, and nothing added a row here either. Renamed to the module-level
+/// `const FIRST_ORDER_DEMOS: &[&str]` every other copy uses, and added below — closing the same window
+/// a third time, inside the branch that is supposed to be fixing this class of defect, not adding to it.
+///
 /// An example target is not a test target, but that was never what made a copy checkable — the check is
 /// textual and path-based, so an untracked-by-CI probe costs one more `read_to_string` and closes the
 /// drift window instead of documenting it.
 #[test]
-fn first_order_demos_stay_synced_across_all_six_copies() {
+fn first_order_demos_stay_synced_across_all_seven_copies() {
     let manifest = env!("CARGO_MANIFEST_DIR");
     // Every copy in the tree, as (path relative to this crate, label for the failure message). Adding a
     // row is the whole cost of adding a copy — which is the point, and is why this is a table rather than
-    // five hand-written `read_to_string`/`assert_eq!` pairs: the fifth copy was missed because each new
-    // one meant editing three places, and the sixth is the first added under this shape.
+    // six hand-written `read_to_string`/`assert_eq!` pairs: the fifth copy was missed because each new
+    // one meant editing three places, and the sixth and seventh are the ones added under this shape.
     let copies: &[(&str, &str)] = &[
         ("examples/step_survey.rs", "examples/step_survey.rs"),
         ("../redextape-native/tests/native_oracle.rs", "redextape-native/tests/native_oracle.rs"),
         ("examples/list_reduction_probe.rs", "examples/list_reduction_probe.rs"),
         ("examples/lambda_sharing_probe.rs", "examples/lambda_sharing_probe.rs"),
         ("examples/concurrency_probe.rs", "examples/concurrency_probe.rs"),
+        ("examples/state_cost_probe.rs", "examples/state_cost_probe.rs"),
     ];
 
     let canonical_src =
@@ -497,8 +505,8 @@ fn first_order_demos_stay_synced_across_all_six_copies() {
 
     // The count is asserted, not just the contents: a copy silently DROPPED from `copies` would leave
     // this test green while its file drifted. `grep -rn FIRST_ORDER_DEMOS` over the tree is the
-    // enumeration method this doc names, and 6 is what it returns — this file plus `copies`.
-    assert_eq!(copies.len() + 1, 6, "a copy was added to or removed from the tree without updating this count");
+    // enumeration method this doc names, and 7 is what it returns — this file plus `copies`.
+    assert_eq!(copies.len() + 1, 7, "a copy was added to or removed from the tree without updating this count");
 }
 
 #[test]

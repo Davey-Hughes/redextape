@@ -401,6 +401,16 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
     // text of tens of GB already resident in memory, not a compact trigger for a disproportionate
     // allocation the way `tapes N` is (see `build::MAX_TAPES`'s doc for that distinction). No caller in
     // this tree can construct that input.
+    //
+    // THIS IS THE SAME SHAPE OF ARGUMENT `tm/build.rs` and `sourcemap.rs` removed — the reason it is
+    // still sound HERE is worth citing rather than re-deriving. Parsing has a multiplier of ONE:
+    // `parse_tm_full` produces at most one state per `state <name>:` line, so the input bounds the
+    // count directly and the allocator refuses first. Lowering was dangerous because its state count
+    // is a PRODUCT — a 6 KB program expands to 8.6M states (`build::MAX_MACHINE_STATES`'s doc) — and
+    // no such multiplier exists here. See
+    // `docs/superpowers/specs/2026-08-11-count-bounds-design.md` §6, which records the corollary this
+    // site is an instance of: `MAX_MACHINE_STATES` bounds machines built through `Builder`, not
+    // machines parsed from text.
     #[allow(clippy::cast_possible_truncation)]
     let ids: std::collections::HashMap<String, StateId> =
         states.iter().enumerate().map(|(i, s)| (s.name.clone(), i as StateId)).collect();

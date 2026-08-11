@@ -86,7 +86,7 @@ fn no_machine_in_the_corpus_can_write_over_a_delimiter() {
         };
         for width in [2usize, 4, 8, 64] {
             for (name, enc) in encodings_at(width) {
-                let (m, _) = lower_tm_guarded(&program, &*enc);
+                let (m, _) = lower_tm_guarded(&program, &*enc).expect("corpus program must not be refused");
                 assert_delimiter_safe(&m, &*enc, &format!("`{src}` at width {width} ({name})"));
             }
         }
@@ -105,7 +105,7 @@ fn the_property_holds_for_programs_that_never_terminate() {
         let core = desugar(&prog.unwrap());
         let program = lower_asm(&core).expect("lowers");
         for (name, enc) in encodings_at(4) {
-            let (m, _) = lower_tm_guarded(&program, &*enc);
+            let (m, _) = lower_tm_guarded(&program, &*enc).expect("small diverging program must not be refused");
             assert_delimiter_safe(&m, &*enc, &format!("diverging `{src}` ({name})"));
         }
     }

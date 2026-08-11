@@ -8,7 +8,7 @@
 
 use crate::core::BinOp;
 use crate::tm::asm::{Instr, Program, Reg};
-use crate::tm::build::{Builder, RuleSpec, Slot};
+use crate::tm::build::{Builder, MAX_MACHINE_STATES, RuleSpec, Slot};
 use crate::tm::encoding::{Encoding, stack_is_empty};
 use crate::tm::machine::{Machine, StateId};
 
@@ -140,14 +140,30 @@ fn is_arith(op: BinOp) -> bool {
     matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul)
 }
 
-/// Lower `prog` to a Turing machine, returning the machine AND its state map: `state_origins[s]` is
-/// the `prog.code` index whose gadgets built state `s`, or `None` for machine scaffolding that
-/// belongs to no single instruction (the shared halt state, the call-site return-tag dispatch
-/// chain, the `Ret` handler's frame-restore gadget).
+/// The shape every refusal in `lower_tm_all` returns: the degenerate halt-immediately machine, a state
+/// map of all `None`s (nothing built past `b.state_count()` belongs to any instruction), the shared
+/// overflow-guard state, and `true` for "refused". `b` is MOVED rather than borrowed — every call site
+/// returns immediately after, including the one inside the per-instruction loop, so there is nothing
+/// left for the caller to do with it. Named so the five identical two-line bodies this replaces cannot
+/// drift from each other one at a time.
+fn refused(b: Builder, halt: StateId, overflow: StateId) -> (Machine, Vec<Option<usize>>, StateId, bool) {
+    let state_origins = vec![None; b.state_count()];
+    (b.finish(halt), state_origins, overflow, true)
+}
+
+/// Lower `prog` to a Turing machine, returning the machine, its state map, the overflow-guard
+/// state, and whether the layout was REFUSED: `state_origins[s]` is the `prog.code` index whose
+/// gadgets built state `s`, or `None` for machine scaffolding that belongs to no single instruction
+/// (the shared halt state, the call-site return-tag dispatch chain, the `Ret` handler's
+/// frame-restore gadget).
 ///
 /// An instruction's own entry state (`pc{i}`) bills that instruction, not scaffolding: it is the
 /// state the machine occupies when the instruction begins, so its cost is the instruction's. The
 /// `None` bucket is reserved for states that genuinely belong to no single instruction.
+///
+/// A REFUSED layout (the fourth element, `true`) returns the degenerate halt-immediately machine —
+/// `b.finish(halt)` — and a state map of all `None`s, exactly as before refusal was reported at all.
+/// Every early return in this function is a refusal; only the final return at the bottom is not.
 ///
 /// Returned rather than stored on `Machine` deliberately: `Machine` derives `PartialEq` and the TM
 /// text round-trip test asserts `parse_tm(print_tm(m)) == m`, which a side-table field would break
@@ -158,7 +174,7 @@ fn is_arith(op: BinOp) -> bool {
 /// builder", "a register", "a label", "a jump target" — renaming them would not make the lowering
 /// clearer, only longer.
 #[allow(clippy::many_single_char_names)]
-fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usize>>, StateId) {
+fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usize>>, StateId, bool) {
     let sm = SlotMap::of(prog);
     let mut b = Builder::new();
     let n = prog.code.len();
@@ -173,15 +189,25 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
     // would build a multi-million-state machine and an oversized init tape. Refuse to lay it out:
     // return a degenerate machine that halts immediately. Total, panic-free, no huge allocation.
     if sm.n_slots() > MAX_SLOTS {
-        let state_origins = vec![None; b.state_count()];
-        return (b.finish(halt), state_origins, overflow);
+        return refused(b, halt, overflow);
     }
     // Too many `Mul` instructions would build an oversized machine under EITHER encoding (see
     // `MAX_MUL_INSTRS`'s doc) — checked here, as early as `MAX_SLOTS`, since it depends on nothing built
     // below and refusing before laying out `pc` is strictly cheaper than refusing after.
     if mul_count_unrepresentable(prog) {
-        let state_origins = vec![None; b.state_count()];
-        return (b.finish(halt), state_origins, overflow);
+        return refused(b, halt, overflow);
+    }
+    // One `pc` entry state per instruction is a LOWER BOUND on the machine's size, so a `code`
+    // longer than the ceiling cannot possibly fit and is refused before the `pc` loop below builds a
+    // `format!("pc{i}")` String per instruction for a machine that is going to be thrown away.
+    //
+    // NOT AN ESTIMATE, which is the distinction that matters: `MAX_MACHINE_STATES` is enforced by
+    // COUNTING states rather than predicting them precisely so no second copy of per-gadget cost
+    // knowledge can go stale (see its doc). This is an exact lower bound on the count, so refusing on
+    // it cannot reject a program the ceiling itself would have admitted. It is a fast path, not a
+    // second opinion.
+    if n >= MAX_MACHINE_STATES {
+        return refused(b, halt, overflow);
     }
     // One entry state per instruction index. `pc[i]` means "about to execute instruction i".
     let pc: Vec<StateId> = (0..n).map(|i| b.state(format!("pc{i}"))).collect();
@@ -209,8 +235,7 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
     // below and the `Call` arm in the per-instruction loop). Refuse an absurd local count in that case
     // *before* building any of them, so a call-containing program can't OOM the lowering.
     if frame_bank_unrepresentable(prog, &sm) {
-        let state_origins = vec![None; b.state_count()];
-        return (b.finish(halt), state_origins, overflow);
+        return refused(b, halt, overflow);
     }
 
     let has_ret = prog.code.iter().any(|i| matches!(i, Instr::Ret));
@@ -307,26 +332,66 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
         for _ in before..after {
             state_origins.push(Some(i));
         }
+        // The ceiling is reached MID-GADGET for any program the length pre-check waved through — 2,000
+        // `Box` instructions are ~1.1M states from a 2,001-instruction program — so it is checked per
+        // instruction rather than once at the end. Stopping here bounds the wasted work at one
+        // instruction's worth; running on would keep attaching rules to the state-0 sentinel that
+        // `Builder::state` hands back past the ceiling, growing the machine's rule count without
+        // growing its state count.
+        if b.overflowed() {
+            return refused(b, halt, overflow);
+        }
     }
 
-    (b.finish(pc.first().copied().unwrap_or(halt)), state_origins, overflow)
+    (b.finish(pc.first().copied().unwrap_or(halt)), state_origins, overflow, false)
 }
 
-/// Lower `prog` to a Turing machine, returning the machine AND its state map (see `lower_tm_all`).
-pub fn lower_tm_mapped(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usize>>) {
-    let (m, origins, _) = lower_tm_all(prog, enc);
-    (m, origins)
+/// Lower `prog` to a Turing machine, returning the machine AND its state map (see `lower_tm_all`) — or
+/// `None` if the layout was REFUSED, the same four conditions `lower_tm_guarded` reports (see its doc).
+///
+/// `Option` RATHER THAN THE OLD BEHAVIOUR OF HANDING BACK A MAP OF ALL `None`s, for the same reason
+/// `lower_tm_guarded` is `Option` rather than a bool beside a usable-looking `Machine`: a refusal that
+/// merely LOOKS like an empty map is the easiest thing here to discard by accident, and this function has
+/// TWO callers for which discarding it means two DIFFERENT things.
+///
+/// `sourcemap.rs`'s `tm_half` is one. Reading "every state maps to `None`" as "no ownership recorded" is
+/// TRUE for it, and it already returns empty maps on every OTHER refusal along the same lowering path
+/// (`Unsupported`-then-`defunc`-failure, `TooDeep`) — so on this `None` too it takes that same existing
+/// branch. For that caller the pre-`Option` behaviour was never wrong, only implicit where it is now a
+/// branch a reader can see.
+///
+/// `attribute.rs`'s `lower_mapped` is the other, and for it "no ownership recorded" does NOT hold:
+/// simulating the degenerate machine reports `{ histogram: {}, total: 0, capped: false }` — a program
+/// that RAN and cost NOTHING, which is `Attribution::unrepresentable`'s documented wrong answer. That
+/// caller used to re-derive only THREE of these four conditions by hand and so had no way to see this
+/// one; `Option` is what makes the state ceiling's refusal impossible to leave unhandled there.
+#[must_use]
+pub fn lower_tm_mapped(prog: &Program, enc: &dyn Encoding) -> Option<(Machine, Vec<Option<usize>>)> {
+    let (m, origins, _, was_refused) = lower_tm_all(prog, enc);
+    if was_refused { None } else { Some((m, origins)) }
 }
 
-/// Lower `prog`, returning the machine AND its overflow-guard state. Halting in that state means a
-/// value did not fit the encoding's field width — retry at a wider one (`run_tm` does exactly that).
+/// Lower `prog`, returning the machine AND its overflow-guard state — or `None` if the layout was
+/// REFUSED. Halting in that guard state means a value did not fit the encoding's field width; retry
+/// at a wider one (`run_tm` does exactly that).
+///
+/// `None` MEANS NO MACHINE EXISTS, and is a different thing from the guard state entirely: one is
+/// "this program is too big to lay out", the other is "this value is too wide for its field". Four
+/// conditions produce it — `MAX_SLOTS`, `MAX_FRAME_LOC`, `MAX_MUL_INSTRS` and `MAX_MACHINE_STATES`.
+///
+/// `Option` RATHER THAN A THIRD TUPLE ELEMENT. A `bool` alongside a `Machine` that looks perfectly
+/// usable is the easiest thing in this design to ignore, and ignoring it is precisely the
+/// `Ran`-over-empty-tapes bug `lower_and_size`'s doc records: the degenerate machine halts
+/// immediately, so a caller that skips the check gets a plausible-looking wrong answer rather than a
+/// crash. `Option` makes skipping it not compile.
 ///
 /// Returned as an artifact rather than stored on `Machine` for the same reason as the origin map:
 /// `Machine` derives `PartialEq` and the TM text round-trip asserts `parse_tm(print_tm(m)) == m`, which
 /// a side-table field would break for a reason unrelated to what the machine computes.
-pub fn lower_tm_guarded(prog: &Program, enc: &dyn Encoding) -> (Machine, StateId) {
-    let (m, _, overflow) = lower_tm_all(prog, enc);
-    (m, overflow)
+#[must_use]
+pub fn lower_tm_guarded(prog: &Program, enc: &dyn Encoding) -> Option<(Machine, StateId)> {
+    let (m, _, overflow, refused) = lower_tm_all(prog, enc);
+    if refused { None } else { Some((m, overflow)) }
 }
 
 /// The number of REG-bank fields `prog` needs — the argument `Encoding::init_reg` expects. Public
@@ -337,9 +402,33 @@ pub fn n_slots_of(prog: &Program) -> u32 {
     SlotMap::of(prog).n_slots()
 }
 
-/// Lower `prog` into a `TAPES`-tape `Machine`. Total and panic-free on any `Program`. Exactly
-/// `lower_tm_mapped` with the state map discarded — there is ONE lowering implementation, so the
-/// mapped and unmapped paths cannot drift.
+/// Lower `prog` into a `TAPES`-tape `Machine`. Total and panic-free on any `Program` — but NOT total
+/// in the sense of reporting success. `lower_tm_all` is still the ONE lowering implementation behind
+/// this, `lower_tm_guarded` and `lower_tm_mapped`, so the three cannot drift on what a machine
+/// computes; they DO differ on refusal, and this is the one that hides it.
+///
+/// **PAST ANY OF `lower_tm_mapped`'s FOUR LAYOUT REFUSALS, THIS DOES NOT FAIL.** `Builder::state`/
+/// `accept` is the one choke point every lowering function shares, so past a refusal this silently
+/// returns the degenerate machine that choke point built before giving up: a halt-immediately machine
+/// starting at `halt`. How many states depends on WHICH refusal fired. `MAX_SLOTS`, `MAX_MUL_INSTRS`,
+/// and the `code.len()` pre-check for `MAX_MACHINE_STATES` all run before `lower_tm_all`'s `pc` loop,
+/// so a refusal from any of those three returns with as few as two states (`halt`, `overflow`) —
+/// nothing else laid out. `MAX_FRAME_LOC` is checked AFTER that loop, which allocates one `pc` state
+/// per instruction, so ITS refusal returns `code.len() + 2` states, itself capped at the ceiling —
+/// the one length where the formula does not hold is `code.len() == MAX_MACHINE_STATES - 1`, where
+/// the loop's last `state` call is refused and the count lands on `MAX_MACHINE_STATES` rather than
+/// one past it. That count SCALES WITH THE
+/// PROGRAM, which makes it the most convincing fake measurement of the four: more so than the fixed
+/// `MAX_MACHINE_STATES` a refusal caught only mid-layout, by `Builder::state`/`accept`'s own ceiling
+/// check, produces. Read bare — `.states.len()`, a state count printed in a report — any of these
+/// looks like a real measurement; each is the refusal `lower_tm_guarded` was built to make visible,
+/// wearing the costume of a number.
+///
+/// Use `lower_tm_guarded` (or `lower_tm_mapped`, if the state map is also needed) when the caller
+/// must know whether the layout was refused — which is every caller near the ceiling. This function
+/// exists for callers that have already proven, out of band, that refusal cannot happen (a bound on
+/// `prog` established elsewhere) and so have no use for the `Option`.
+#[must_use]
 pub fn lower_tm(prog: &Program, enc: &dyn Encoding) -> Machine {
     lower_tm_all(prog, enc).0
 }
@@ -367,11 +456,11 @@ mod tests {
         let core = desugar(&prog.unwrap());
         let program = lower_asm(&core).expect("lowers");
 
-        let (m, overflow) = lower_tm_guarded(&program, &Unary::default());
+        let (m, overflow) = lower_tm_guarded(&program, &Unary::default()).expect("small demo must not be refused");
         assert!(m.states[overflow as usize].rules.is_empty());
         assert!(!m.states[overflow as usize].accept);
 
-        let (_, origins) = lower_tm_mapped(&program, &Unary::default());
+        let (_, origins) = lower_tm_mapped(&program, &Unary::default()).expect("small demo must not be refused");
         assert_eq!(origins[overflow as usize], None, "the guard belongs to no single instruction");
 
         // The unguarded entry point is the same machine.
@@ -386,7 +475,7 @@ mod tests {
         let core = desugar(&prog.unwrap());
         let program = lower_asm(&core).expect("lowers");
         let enc = Unary::at(width);
-        let (m, overflow) = lower_tm_guarded(&program, &enc);
+        let (m, overflow) = lower_tm_guarded(&program, &enc).expect("small demo must not be refused");
         let mut init = vec![Vec::new(); TAPES];
         init[REG] = enc.init_reg(n_slots_of(&program));
         let (_, final_state, status, _) = simulate_final(&m, &init, CAPS);
@@ -462,7 +551,7 @@ mod tests {
         let defunced = crate::tm::defunc::defunc(&core).expect("defuncs");
         let program = lower_asm(&defunced).expect("lowers");
         let enc = Unary::at(width);
-        let (m, overflow) = lower_tm_guarded(&program, &enc);
+        let (m, overflow) = lower_tm_guarded(&program, &enc).expect("small demo must not be refused");
         let mut init = vec![Vec::new(); TAPES];
         init[REG] = enc.init_reg(n_slots_of(&program));
         let (_, final_state, status, _) = simulate_final(&m, &init, CAPS);
@@ -937,7 +1026,7 @@ mod tests {
     fn every_state_maps_to_the_instruction_that_built_it_or_to_scaffolding() {
         let core = desugar(&parse("fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(3)").0.unwrap());
         let prog = lower_asm(&core).expect("lowers");
-        let (m, state_origins) = lower_tm_mapped(&prog, &Unary::default());
+        let (m, state_origins) = lower_tm_mapped(&prog, &Unary::default()).expect("small demo must not be refused");
         assert_eq!(state_origins.len(), m.states.len(), "state origins must be parallel to states");
         for (s, origin) in state_origins.iter().enumerate() {
             if let Some(idx) = origin {
@@ -968,7 +1057,7 @@ mod tests {
     fn each_instructions_entry_state_bills_that_instruction() {
         let core = desugar(&parse("fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(3)").0.unwrap());
         let prog = lower_asm(&core).expect("lowers");
-        let (m, state_origins) = lower_tm_mapped(&prog, &Unary::default());
+        let (m, state_origins) = lower_tm_mapped(&prog, &Unary::default()).expect("small demo must not be refused");
         for i in 0..prog.code.len() {
             let name = format!("pc{i}");
             let entries: Vec<usize> =

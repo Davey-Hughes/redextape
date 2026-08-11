@@ -138,7 +138,7 @@ fn alphabet(kind: EncodingKind, width: usize) -> Vec<Instr> {
 /// outcome with the bank well-formed at every step.
 fn check(program: &Program, enc: &dyn Encoding, caps: TmCaps) -> Result<u64, String> {
     let slots = n_slots_of(program) as usize;
-    let (m, _) = lower_tm_guarded(program, enc);
+    let (m, _) = lower_tm_guarded(program, enc).expect("enumerated program must not be refused");
     // Free from the same sweep: `lower_tm` claims these for ANY `Program` and never tests them
     // exhaustively.
     let issues = m.validate();
@@ -462,7 +462,7 @@ fn every_single_instruction_machine_round_trips_through_the_text_form() {
         for &width in widths {
             let enc = kind.at(width);
             for p in length_one_programs(kind, width) {
-                let (m, _) = lower_tm_guarded(&p, enc.as_ref());
+                let (m, _) = lower_tm_guarded(&p, enc.as_ref()).expect("length-1 program must not be refused");
                 let (parsed, errors) = parse_tm(&print_tm(&m));
                 assert!(
                     errors.is_empty(),

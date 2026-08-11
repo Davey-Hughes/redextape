@@ -75,8 +75,8 @@ fn describe_non_value_run(run: &TmRun, encoding: EncodingKind) -> String {
         TmRun::HitCap => {
             "the simulation did not halt; it hit the step/tape-cell cap before producing a result".to_string()
         }
-        TmRun::TooLarge => "the program's register file, call-frame bank, or multiplication count is too large \
-             for the TM backend to represent"
+        TmRun::TooLarge => "the program's register file, call-frame bank, or multiplication count is too large, \
+             or the machine it would need is too large, for the TM backend to represent"
             .to_string(),
         TmRun::LowerError(e) => format!("it could not be lowered to the TM backend: {e:?}"),
     }

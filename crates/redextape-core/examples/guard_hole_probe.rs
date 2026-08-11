@@ -144,8 +144,8 @@
 //!
 //! **This file deliberately does NOT carry a copy of `FIRST_ORDER_DEMOS`.** `curve`'s rows are six
 //! hand-picked programs chosen for their `max_shared` band, not a corpus sweep, so there is nothing for
-//! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_five_copies` to keep in sync. Keep it
-//! that way: a sixth copy would have to be added to that test, and the roadmap's standing lesson is
+//! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_seven_copies` to keep in sync. Keep it
+//! that way: an eighth copy would have to be added to that test, and the roadmap's standing lesson is
 //! about copies that do not receive corrections.
 //!
 //! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
