@@ -4681,3 +4681,161 @@ improve. All of it is written up in that plan's own "Plan defects found during e
 rather than silently corrected. **The transferable rule: an assertion prescribed by a plan is not evidence
 that the assertion works. Every acceptance step should name a mutation AND state the expected failure, so
 that writing one forces checking the other.**
+
+#### THE MECHANISM PROBE — a rule that converts 92% of the unattributed steps, and a gate that was never shown capable of failing (2026-08-10)
+
+Design: [`../specs/2026-08-10-none-headroom-mechanism-design.md`](../specs/2026-08-10-none-headroom-mechanism-design.md).
+Plan: [`2026-08-10-none-headroom-mechanism-probe.md`](2026-08-10-none-headroom-mechanism-probe.md).
+
+#28 closed with an instruction to its successor: *"The 96.2% names a quantity, not a mechanism… The
+next slice's first job is to answer that, not to assume the figure is a promise."* This answers it.
+**Nothing under `crates/redextape-core/src/` was touched.** The whole deliverable is
+`examples/inherit_probe.rs`, four tables and a verdict — and the verdict needs more qualification
+than its own headline carries.
+
+##### The competing prior, and why the question was live
+
+`reduce.rs`'s `Owner` doc reads the same numbers the opposite way to #28: *"`None` IS COMMON AND
+CORRECT… `encode.rs` mints every Church/Scott combinator untagged… There is no repair for that and
+none should be attempted."* On that reading the 382 "headroom" steps are combinator interiors and the
+right answer is to build nothing. Both readings fit every number measured up to this slice.
+
+##### `[POS]` — where the live tags actually sit, and it splits the corpus in half
+
+`Owner` is derived purely from the root→redex path, so a tag alive during a `None` step is either
+reachable from the redex or in a subtree disjoint from it. There is no third case.
+
+| program | `None` | `fn` | `arg` | either | **disjoint** | no-tags |
+| --- | --- | --- | --- | --- | --- | --- |
+| `while4` | 397 | 85 | 104 | 158 | **224 (56.4%)** | 15 |
+| `countdown4` | 397 | 77 | 104 | 159 | **223 (56.2%)** | 15 |
+| `sum5` | 170 | 70 | 77 | 141 | **27 (15.9%)** | 2 |
+| `map_fold` | 72 | 35 | 26 | 54 | **10 (13.9%)** | 8 |
+
+`no-tags` reproduces `none_probe`'s consumed column exactly (15/15/2/8), which is what pins the two
+probes to one quantity. **The loop family and the recursive family are mirror images** — 56% disjoint
+against 14–16% — so neither §0 reading was right about the whole corpus.
+
+**And the natural inference from this table is WRONG, which is the reason the plan simulated the rule
+instead of estimating from it.** It is tempting to read 56% disjoint as a ceiling on what any rule can
+reach. V1 converts 90% of all `None` steps, so most disjoint steps convert too: the machinery the
+redex sits in is itself produced by contracting tagged redexes, and the tag follows it in. **`disjoint`
+says where the redex is, never where it came from.**
+
+##### `[MACH]` — and it answers a question #28 filed as unanswerable
+
+Binder-name histogram of the applied `Abs`. A hint, not evidence, and the probe's own header says so:
+`encode::church` mints `f` and `x`, `encode::diverge`'s `omega` mints `x`, and `lower.rs`'s fixpoint
+combinator mints both.
+
+| program | top 5 |
+| --- | --- |
+| `while4` / `countdown4` | `v`=78 `f`=57 `x`=57 `n`=40 `sel`=39 |
+| `sum5` | `g`=40 `h`=40 `f`=30 `x`=30 `u`=20 |
+| `map_fold` | `c`=12 `f`=12 `h`=12 `n`=12 `t`=12 |
+
+**`v` and `sel` are the store binders** — minted in `lower.rs`, and unlike `f`/`x`/`n` never by
+`encode.rs`, so they are the least ambiguous rows here. On `while4` they total **117 of 397 `None`
+steps, ~29%**. #28 listed under what it could not establish: *"Whether `Assign`'s untaggability costs
+anything observable… Nothing here counted how many of `while4`'s steps are store rebuilds."* Roughly
+three in ten. Strong but not conclusive — it is a name-frequency argument.
+
+##### `[INH]` — both rules simulated against the real reducer, and the numbers are large
+
+A real `LambdaCursor` paces the run; two shadow terms step alongside it, and **every step asserts the
+shadow's redex path equals the pacemaker's.** The rules change tags, never reduction order.
+
+| program | tagged today | V1 tagged | V1 `Exact` | V1 `Within` | V1 rate | V1 drops | V3 rate | V3 `Within` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `while4` | 15.5% | 432 | 237 | 195 | **91.9%** | 246 | 99.8% | **0** |
+| `countdown4` | 16.2% | 437 | 241 | 196 | **92.2%** | 248 | 100.0% | **0** |
+| `sum5` | 72.8% | 486 | 262 | 224 | 77.6% | 278 | 100.0% | **0** |
+| `map_fold` | 87.0% | 531 | 300 | 231 | **95.7%** | 389 | 100.0% | **0** |
+
+The pre-registered floor was `while4` ≥31.1% and `countdown4` ≥32.5%. **V1 delivers ~92%, roughly
+triple the bar, while leaking heavily** — `drops` (contractions whose contractum root is not an `App`,
+so V1 has nowhere to put the tag) runs 246–389 per program.
+
+##### THE GATE SAYS `SLICE BUILD`, AND THE FLOOR IS THE ONLY HALF THAT TESTED ANYTHING
+
+| program | V1 rate | V1 `Within` median | V3 `Within` median |
+| --- | --- | --- | --- |
+| `while4` | 91.9% | 6.5% | — |
+| `countdown4` | 92.2% | 5.2% | — |
+| `sum5` | 77.6% | 10.0% | — |
+| `map_fold` | 95.7% | 4.7% | — |
+
+`FLOOR PASS   CEILING PASS (0 degenerate, was 1)   => SLICE BUILD`
+
+**The ceiling was aimed at the opposite of the failure mode the rule has, and this slice's own numbers
+refute the premise it was built on.** §3 justified it by quoting #28: *"anything that widens `Within`
+further — a contractum inheriting its redex's tag, most obviously — pushes those medians toward the
+line."* Inheritance **narrows** `Within`, structurally: an inherited tag names the redex's own
+construct, which is always at least as near as the enclosing construct it replaces. `sum5`'s median
+moved 65.0% → 10.0% because wide claims were **displaced** by narrow ones — all 402 of its `Within`
+steps previously resolved to the same 65.0% span, and V1 adds only 30 conversions there. **The gate
+scored that displacement as the ceiling improving 1 → 0.**
+
+**For V3 the blindness is absolute and measured: V3 produces ZERO `Within` steps on every program.**
+It tags every `App` in each contractum, so the next redex finds its own node tagged and reports
+`Exact` — the *stronger* claim, *this step IS that construct*, for steps buried in Church-numeral
+machinery. A mutation feeding V3's medians to the gate changed nothing, because the filter can never
+count anything. **The ceiling does not fail to catch over-attribution; it cannot see it.**
+
+So the gate discriminates *a rule that does something* from *a rule that does nothing* — mutation 2
+proves that much and no more. **No demonstration exists that this ceiling can fail for any rule in the
+family.** The verdict line now prints that caveat beneath itself.
+
+##### THE FIVE ACCEPTANCE MUTATIONS — and TWO REFUTED THE PLAN
+
+Run in parallel, one git worktree and one cgroup scope each.
+
+| # | mutation | predicted | observed |
+| --- | --- | --- | --- |
+| 1 | shadow tries argument side first | assertion fires | **fired**, both variants, step 7, concrete paths |
+| 2 | V1's `inherit` no-op | conversions → 0 | **exact collapse** to `[OV]`'s baseline (73=51+22, …) |
+| 3 | drop the `alloc_id` memo | **OOM-kill under 2G** | **COMPLETED CLEANLY. PREDICTION WRONG.** |
+| 4 | classify the post-step term | panic or shifted share | **panic** on the first unattributed step |
+| 5 | gate reads V3's medians | ceiling verdict flips | **unchanged — the blindness above** |
+
+**Mutation 3 is the most useful thing here.** The design called the unmemoized re-tag walk "the one
+that could wedge the machine" and the plan predicted `map_fold` would OOM. It ran all four programs to
+completion under the cap with byte-identical output. Sharing genuinely IS lost without the memo — a
+unit test pins two distinct allocation ids for one shared subterm — but **the cost is not demonstrated
+on this corpus. The memo is insurance, not a proven fix**, and both documents now say so beside the
+original claim rather than in place of it.
+
+##### What this slice could not establish
+
+**Whether inheritance is semantically right.** Every number here is about coverage. "The work a
+contractum does belongs to the construct whose redex produced it" is a claim about *meaning*, and V1
+attributing 55% of its steps as `Exact` makes that claim in its strongest form for machinery that may
+have nothing to do with the named construct. Nothing measured that.
+
+**Whether the ceiling can be made to work at all.** The metric reads `Within` span width; both
+candidate rules reduce or eliminate `Within`. A gate for this rule family probably has to measure
+something else, and this slice does not say what.
+
+**The ceiling's baseline was imported, not computed** — `sum5` at 65.0% comes from `owner_probe`'s
+recorded table. Sound only because both probes use an identical nearest-rank convention, verified
+line-for-line. It was avoidable in three lines: `measure()` already sees the real reducer's
+`Owner::Within(_)` and discards the id with the `SourceMap` in scope.
+
+**No browser, no playback, no eyeball gate** — unchanged from 5c and #28.
+
+##### The review record, and a rate that is not improving
+
+Seven tasks, two fix passes, and **the recurring defect class appeared in four of them** — *an
+assertion that cannot observe the dimension its property lives in*. T2's bucket test (swapping two
+branches left all four tests green), T3's probabilistic tiebreak, T4's already-tagged contractum root,
+and **T6's gate arithmetic, which had no test coverage at all** — a flipped inequality or a ceiling
+silently reading the wrong variant would have compiled and passed all twenty tests, on the one piece
+of code whose output is the word `BUILD`.
+
+**Three of those four were authored into the plan.** #28's closing entry states the transferable rule
+— *"Every acceptance step should name a mutation AND state the expected failure, so that writing one
+forces checking the other"* — and this plan followed it and still shipped a `percentile` sketch whose
+own test contradicts it by hand-calculation. **Four of this plan's sketches failed contact with the
+real code; #28's rate was four of five and 5c's two of five. Writing the rule down did not lower it.**
+What did work is mechanical: every dispatch carried *do not trust the plan's sketches, verify against
+the real source*, and that is what caught all four.
