@@ -107,6 +107,7 @@ pub struct ZipperCursor {
 }
 
 impl ZipperCursor {
+    #[must_use]
     pub fn new(t: &LambdaTerm, cap: u64) -> ZipperCursor {
         ZipperCursor {
             focus: t.clone(),
@@ -132,6 +133,7 @@ impl ZipperCursor {
     /// context spine — including in `reduce_to_normal_form`'s result, which is this method's shipped
     /// caller. `tests/lambda_provenance.rs`'s
     /// `the_zippers_normal_form_keeps_the_tags_the_plain_loop_keeps` is what does see it.
+    #[must_use]
     pub fn term(&self) -> LambdaTerm {
         let mut t = self.focus.clone();
         for f in self.stack.iter().rev() {
@@ -150,10 +152,12 @@ impl ZipperCursor {
         self.stack.iter().map(Frame::dir).collect()
     }
 
+    #[must_use]
     pub fn steps_taken(&self) -> u64 {
         self.steps
     }
 
+    #[must_use]
     pub fn status(&self) -> Option<Status> {
         self.status
     }
@@ -162,6 +166,7 @@ impl ZipperCursor {
     /// `Σ path − climbs`, and it exists for PART D of `examples/lambda_sharing_probe.rs`.
     // Instrumentation for `lambda_sharing_probe.rs`'s PART D, not part of the cursor's contract.
     #[doc(hidden)]
+    #[must_use]
     pub fn climbs(&self) -> u64 {
         self.climbs
     }

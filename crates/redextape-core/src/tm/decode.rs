@@ -54,6 +54,11 @@ pub fn decode_tape_ty(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Option<Val
 /// Mirrors `asm.rs::decode_word`. Terminates by STRUCTURAL RECURSION on `expected` (a finite reference
 /// `Value`), so it halts regardless of heap cycles; acyclicity of the compiled heap (a cons cell's tail
 /// points only at an EARLIER cell) is what makes the RESULT correct, not what makes decoding halt.
+/// `clippy::similar_names`: flags the local `head` against the `heap` parameter, same as
+/// `asm::decode_word` — see that function's `#[allow]` comment. This function mirrors it on purpose
+/// (see the module doc above), so the local names are kept identical rather than diverging to satisfy
+/// the lint.
+#[allow(clippy::similar_names)]
 fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value> {
     match expected {
         Value::Nat(_) => Some(Value::Nat(word)),
@@ -67,7 +72,11 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
             if word == 0 {
                 return None;
             }
-            let &(h, t) = heap.get((word - 1) as usize)?;
+            // `word` is read off a `.tm` file's REG tape through `enc` (see `decode_tape`'s doc), so it
+            // may not fit `usize` on a 32-bit target. `try_from` folds that into the existing "not a
+            // valid pointer" `None` instead of truncating into a wrong, in-range index.
+            let idx = usize::try_from(word - 1).ok()?;
+            let &(h, t) = heap.get(idx)?;
             let head = decode_word(h, heap, eh)?;
             let tail = decode_word(t, heap, et)?;
             Some(Value::Cons(Rc::new(head), Rc::new(tail)))

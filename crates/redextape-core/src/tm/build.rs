@@ -89,11 +89,13 @@ impl Default for RuleSpec {
 }
 
 impl RuleSpec {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// On tape `t`: require reading `r` (`None` = any), write `w` (`None` = unchanged), move `m`.
+    #[must_use]
     pub fn on(mut self, t: usize, r: Option<Symbol>, w: Option<Symbol>, m: Move) -> Self {
         self.read[t] = r;
         self.write[t] = w;
@@ -102,6 +104,7 @@ impl RuleSpec {
     }
 
     /// Finalize into a `Rule` targeting `next`.
+    #[must_use]
     pub fn into_rule(self, next: StateId) -> Rule {
         Rule { read: self.read.to_vec(), write: self.write.to_vec(), moves: self.moves.to_vec(), next }
     }
@@ -115,6 +118,7 @@ pub struct Builder {
 }
 
 impl Builder {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -128,23 +132,39 @@ impl Builder {
     /// `Runtime`); an overflow is a different thing — the program is fine, the tape is too narrow — and
     /// the caller retries at a wider one, so it must be told apart from divergence.
     pub fn overflow(&mut self) -> StateId {
-        match self.overflow {
-            Some(s) => s,
-            None => {
-                let s = self.state("overflow");
-                self.overflow = Some(s);
-                s
-            }
+        if let Some(s) = self.overflow {
+            s
+        } else {
+            let s = self.state("overflow");
+            self.overflow = Some(s);
+            s
         }
     }
 
     /// The overflow state if one has been allocated, without allocating one.
+    #[must_use]
     pub fn overflow_state(&self) -> Option<StateId> {
         self.overflow
     }
 
     /// Allocate a fresh non-accept state; returns its id. Names should be identifiers (no reserved
     /// text-form chars) so the produced machine stays round-trippable.
+    ///
+    /// Bounded by memory, not by a runtime check. `lower_tm::lower_tm_all` (the caller that can build
+    /// the most states) allocates one `pc` entry state per `prog.code.len()` UNCONDITIONALLY: none of
+    /// its three guards constrains `prog.code.len()` itself. `MAX_SLOTS` bounds the register footprint
+    /// (`SlotMap::n_slots()`, the highest `Loc`/`Arg` index referenced, not the instruction count);
+    /// `mul_count_unrepresentable` counts only `Instr::Bin(BinOp::Mul, ..)`; `frame_bank_unrepresentable`
+    /// only fires when a `Call` is present, and only gates the `O(n_loc^2)` frame gadgets built later,
+    /// not the `pc` allocation. A `Program` of billions of `Instr::Halt` (or any other single
+    /// instruction, no `Mul`, no `Call`) passes all three untouched and still drives this to
+    /// `prog.code.len()` calls. What actually bounds the cast: `size_of::<Instr>()` is 40 bytes, so a
+    /// `code: Vec<Instr>` long enough to push `states.len()` past `StateId::MAX` (u32, ~4.29 billion)
+    /// needs ~172 GB resident for `code` alone — before `lower_tm_all`, or anything else in this crate,
+    /// is ever called. Not reachable from real input, hand-built or fuzzed alike (`lower_tm_all`'s own
+    /// doc names exactly that threat model). Every other caller (`encoding.rs`'s gadgets) builds
+    /// O(width) states bounded by `MAX_FIELD_WIDTH` (64).
+    #[allow(clippy::cast_possible_truncation)]
     pub fn state(&mut self, name: impl Into<String>) -> StateId {
         let id = self.states.len() as StateId;
         self.states.push(State { name: name.into(), accept: false, rules: Vec::new() });
@@ -152,6 +172,9 @@ impl Builder {
     }
 
     /// Allocate a fresh accept (halt) state.
+    ///
+    /// Bounded the same way `state` is — see that method's doc.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn accept(&mut self, name: impl Into<String>) -> StateId {
         let id = self.states.len() as StateId;
         self.states.push(State { name: name.into(), accept: true, rules: Vec::new() });
@@ -161,6 +184,7 @@ impl Builder {
     /// Number of states allocated so far. States are only ever appended (`state`/`accept` both push),
     /// never inserted or reordered, so a snapshot of this before and after a span of building exactly
     /// brackets the states that span created — the range `before..after` names them precisely.
+    #[must_use]
     pub fn state_count(&self) -> usize {
         self.states.len()
     }
@@ -171,6 +195,7 @@ impl Builder {
     }
 
     /// Finalize into a `TAPES`-tape `Machine` starting at `start`.
+    #[must_use]
     pub fn finish(self, start: StateId) -> Machine {
         Machine { states: self.states, start, tapes: TAPES }
     }

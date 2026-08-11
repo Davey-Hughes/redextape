@@ -163,6 +163,7 @@ fn take_stmt_children(s: &mut Stmt, work: &mut Vec<DropItem>) {
 }
 
 impl Expr {
+    #[must_use]
     pub fn span(&self) -> Span {
         match self {
             Expr::Nat { span, .. }

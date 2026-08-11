@@ -6,6 +6,7 @@ use crate::diagnostic::Diagnostic;
 use crate::span::Span;
 use crate::token::{Token, TokenKind};
 
+#[must_use]
 pub fn lex(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     let mut toks = Vec::new();
     let mut diags = Vec::new();

@@ -279,6 +279,13 @@ fn emit_guard(b: &mut FunctionBuilder, guard: FuncRef, rt_ptr: Value, exit: Bloc
 }
 
 /// Translate one subroutine into `ctx.func`.
+// One coherent state machine, not several concerns bundled together: a single `match &prog.code[idx]`
+// over every `Instr` variant, each arm emitting that opcode's Cranelift IR and jumping to the next
+// block. Splitting it by opcode group would scatter the shared locals (`loc_vars`/`arg_vars`/
+// `rr_var`/`rt_ptr`/`exit_block`) across several signatures without reducing what a reader has to
+// hold at once — the whole point of reading this function is "what does each asm opcode lower to",
+// arm by arm, against the one shared block/register setup above the loop.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn translate_subroutine(
     module: &mut dyn Module,
     ctx: &mut Context,
@@ -352,6 +359,13 @@ pub(crate) fn translate_subroutine(
         let b = &mut builder;
         match &prog.code[idx] {
             Instr::Li(rd, n) => {
+                // `iconst`'s `i64` parameter is Cranelift's ABI for "a 64-bit immediate bit
+                // pattern", not a signed value — every `u64` bit pattern round-trips losslessly
+                // through `as i64` at equal width, so this never truncates or changes `n`'s bits.
+                // Registers themselves carry no signedness (see the module doc's "Registers →
+                // `Variable`s": each is a plain 64-bit `Variable`, read/written as `u64` throughout
+                // this crate and `run_asm`), so there is no numeric meaning here to wrap either.
+                #[allow(clippy::cast_possible_wrap)]
                 let v = b.ins().iconst(types::I64, *n as i64);
                 write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
                 b.ins().jump(block_at(idx + 1)?, &[]);

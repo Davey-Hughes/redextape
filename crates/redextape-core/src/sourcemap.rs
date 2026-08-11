@@ -94,6 +94,7 @@ impl SourceMap {
         (core, map)
     }
 
+    #[must_use]
     pub fn lambda_path(&self, id: NodeId) -> Option<&Path> {
         self.node_to_lambda.get(&id)
     }
@@ -106,11 +107,13 @@ impl SourceMap {
     /// `defunc`-minted constructs, and for any name THIS lowering never produced — including every name
     /// belonging to some other lowering of the same program. The map says nothing where the lowering
     /// said nothing: there is deliberately no fallback to a nearby or similarly-spelled state.
+    #[must_use]
     pub fn tm_owner(&self, name: &str) -> Option<NodeId> {
         self.tm_name_to_node.get(name).copied()
     }
 
     /// The source text a Core node came from. `None` for a map built by `build`, which has no `Program`.
+    #[must_use]
     pub fn source_span(&self, id: NodeId) -> Option<Span> {
         self.node_to_source.get(&id).copied()
     }
@@ -162,6 +165,16 @@ fn tm_half(core: &Core, enc: &dyn Encoding) -> (BTreeMap<NodeId, Vec<StateId>>, 
         if synthetic.contains(&node) {
             continue;
         }
+        // `state` is a loop index over `machine.states`, a `Vec<State>` this function only ever gets
+        // from `lower_tm_mapped` — built via `Builder::state`/`accept` (push-only, one call per state)
+        // and nothing else. NOT bounded by `MAX_SLOTS`/`MAX_FRAME_LOC`/`MAX_MUL_INSTRS`: those guard
+        // other quantities (the register footprint, the O(n_loc^2) frame gadgets, and the `Mul` count)
+        // and none of them constrains `prog.code.len()`, which is what drives the one-entry-state-per-
+        // instruction `pc` allocation `lower_tm_all` does unconditionally. The actual bound is
+        // `Builder::state`'s (in `tm/build.rs`): memory, not a runtime check — a `code: Vec<Instr>` long
+        // enough to push the state count past `StateId::MAX` needs on the order of 172 GB resident for
+        // `code` alone, before `lower_tm_all` is ever called.
+        #[allow(clippy::cast_possible_truncation)]
         out.entry(node).or_default().push(state as StateId);
     }
     // Nodes `lower_asm` emits nothing for are simply absent, and DELIBERATELY so — see the module doc.

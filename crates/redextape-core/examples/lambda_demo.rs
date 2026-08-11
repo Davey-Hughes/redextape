@@ -5,7 +5,7 @@
 
 // Example target: a demo that cannot build its own input has nothing to demonstrate, so aborting is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 #[cfg(not(target_arch = "wasm32"))]
 #[global_allocator]

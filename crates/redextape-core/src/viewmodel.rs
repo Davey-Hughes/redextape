@@ -271,6 +271,7 @@ impl LambdaState {
     /// downstream reads the id for anything else. `want` here never holds more than the one entry
     /// `last_redex()` supplies, so no real `NodeId` this call's caller might be tracking can collide
     /// with it — the id is discarded the moment `redex_span` is pulled back out.
+    #[must_use]
     pub fn render(c: &LambdaCursor, byte_budget: usize, depth_cap: u32) -> LambdaState {
         let mut want: BTreeMap<NodeId, Path> = BTreeMap::new();
         if let Some(redex) = c.last_redex() {
@@ -300,6 +301,7 @@ impl LambdaState {
     /// about the term's shape, and a partial arena would be the same lie with an index on it. The count
     /// happens during the walk for the same reason the printer's budget does — building the tree and
     /// then measuring it defeats the purpose.
+    #[must_use]
     pub fn ast(c: &LambdaCursor, node_budget: usize) -> Option<TermTree> {
         let mut budget = node_budget;
         to_tree(c.term(), &mut budget)
@@ -406,6 +408,7 @@ impl TmProgram {
     /// Project `m` once (see the module doc: this is built per compile, never per step). `width` is
     /// the caller's field-width choice for the encoding that produced `m` — a fact about the encoding,
     /// not something a `Machine` carries, so it comes in as a parameter rather than a re-derivation.
+    #[must_use]
     pub fn of(m: &Machine, width: usize) -> TmProgram {
         let states = m
             .states
@@ -521,8 +524,26 @@ pub struct LinkIndex {
     /// the same resolution `TmState::window` performs per step, hoisted to once per compile.
     ///
     /// `-1` RATHER THAN `Option<NodeId>` because this crosses to JavaScript as an `Int32Array`, and a
-    /// dense typed array is the difference between 143 KB and 26,484 objects for `list60`. `NodeId` is
-    /// a `u32`, so `-1` cannot collide with a real node.
+    /// dense typed array is the difference between 143 KB and 26,484 objects for `list60`.
+    ///
+    /// **A `NodeId` THAT WOULD NOT FIT `i32` DECLINES THE WHOLE LEG, THE SAME WAY A `None` PROGRAM
+    /// DOES — IT DOES NOT BECOME `-1`.** `NodeId` is a `u32`, and nothing bounds how many a `Core` tree
+    /// can mint (`core::NodeGen::fresh` is a bare counter), so one could in principle reach or exceed
+    /// `2^31` and go negative under `as i32` — landing on `-1` for the one id that turns it exactly, or
+    /// some other negative value for any other, and either way becoming indistinguishable from (or
+    /// worse, a wrong index next to) a state that genuinely has no owner. `build` refuses that cast with
+    /// `i32::try_from` and empties the whole vec on failure — the same "no lie, just nothing" refusal
+    /// `emit` (above) makes for `TermTree`'s arena index, applied here instead of laundering the
+    /// overflow into the sentinel that already means "no owner".
+    ///
+    /// THE NARROWER ALTERNATIVE WAS WEIGHED AND REJECTED, recorded so it is not re-proposed blind:
+    /// map only the failing entries to some *other* negative value (`i32::MIN`) and keep every
+    /// representable owner, trading total refusal for one missing link. It buys availability and
+    /// costs honesty, and honesty is what this refusal is for — `web/src/link.ts`'s `nodeForState`
+    /// collapses ANY negative to `null`, so at the consumer `i32::MIN` renders exactly as `-1` does:
+    /// "this state has no owner." The state has one. A distinct sentinel is only distinguishable
+    /// Rust-side, and nothing Rust-side reads this field. Declining the leg is the only option that
+    /// does not tell the UI something false about a state it can click.
     pub tm_owner: Vec<i32>,
 }
 
@@ -532,11 +553,14 @@ impl LinkIndex {
     /// TOTAL OVER BOTH ABSENCES. A `None` term (the lambda backend declined this program) gives empty
     /// lambda legs rather than failing, and a `None` program (the TM backend declined) gives an empty
     /// `tm_owner`. `SourceMap::build` is already total over exactly these refusals, and the index must
-    /// not be the layer that stops being.
+    /// not be the layer that stops being. A THIRD, NARROWER REFUSAL joins those two here: a `Some`
+    /// program whose owner ids cannot all fit `i32` also empties `tm_owner` rather than emitting a
+    /// value that would misidentify a state's owner — see the field's own doc.
     ///
     /// `byte_budget` AND `depth_cap` ARE PARAMETERS because this file picks no numbers — see the
     /// module header. The web app passes `LAMBDA_BYTE_BUDGET`; the wasm boundary passes
     /// `MAX_PRINT_DEPTH`, which is a fact about an engine call stack rather than renderer policy.
+    #[must_use]
     pub fn build(
         term: Option<&LambdaTerm>,
         program: Option<&TmProgram>,
@@ -549,8 +573,22 @@ impl LinkIndex {
             Some(t) => print_lambda_linked(t, byte_budget, depth_cap, &map.node_to_lambda),
         };
         let source_nodes = map.node_to_source.iter().map(|(id, span)| (*span, *id)).collect();
+        // `collect::<Option<Vec<i32>>>()` SHORT-CIRCUITS TO `None` THE INSTANT ONE STATE'S OWNER
+        // OVERFLOWS `i32`, discarding whatever entries the walk had already produced for other states —
+        // never a vec with some real owners and one lie. That `None` then falls into the exact
+        // `unwrap_or_default` a declined program already used, so an id too big to represent is treated
+        // as no different from "the TM backend declined this program": no owner info, not wrong owner
+        // info. See `tm_owner`'s own doc for why `-1` specifically must not be the fallback here.
         let tm_owner = program
-            .map(|p| p.states.iter().map(|s| map.tm_owner(&s.name).map_or(-1, |n| n as i32)).collect())
+            .and_then(|p| {
+                p.states
+                    .iter()
+                    .map(|s| match map.tm_owner(&s.name) {
+                        None => Some(-1),
+                        Some(n) => i32::try_from(n).ok(),
+                    })
+                    .collect::<Option<Vec<i32>>>()
+            })
             .unwrap_or_default();
         LinkIndex { lambda_text, lambda_spans, lambda_cut, lambda_nodes, source_nodes, tm_owner }
     }
@@ -602,5 +640,51 @@ mod tests {
         assert_eq!(move_text(Move::L), "L");
         assert_eq!(move_text(Move::R), "R");
         assert_eq!(move_text(Move::S), "S");
+    }
+
+    /// THE DEFECT THIS PINS: before the fix, `tm_owner` cast a `NodeId` to `i32` with `as`, which wraps
+    /// silently rather than refusing. `u32::MAX` is the sharpest fixture for it — `u32::MAX as i32` is
+    /// exactly `-1`, the same sentinel `tm_owner`'s doc reserves for "this state has no owner at all" —
+    /// so the pre-fix build for `s0` (which DOES have an owner, `u32::MAX`) was byte-for-byte identical
+    /// to the pre-fix build for `s1` (which genuinely has none). A consumer reading `tm_owner` could not
+    /// tell a real, huge owner id from no owner; that is the silent wrong answer, not a crash.
+    ///
+    /// A `NodeId` this large can never occur from real parsing today (`core::NodeGen::fresh` is a bare
+    /// counter with no cap — see its own doc), which is exactly why this test builds the `SourceMap`
+    /// fixture by hand instead of parsing a program: reaching `u32::MAX` legitimately would need
+    /// billions of source constructs, and the enforcement this pins must be checkable without paying
+    /// that cost.
+    #[test]
+    fn tm_owner_declines_the_whole_leg_rather_than_wrap_an_id_into_the_no_owner_sentinel() {
+        let program = TmProgram {
+            states: vec![
+                // `s0`'s "owner" is `NodeId::MAX` (`u32::MAX`) — unrepresentable in `i32`, and the one
+                // value whose wraparound lands exactly on the `-1` sentinel.
+                StateView { name: "s0".to_string(), accept: false, rules: Vec::new() },
+                // `s1` has a real absence: no entry in `tm_name_to_node` at all.
+                StateView { name: "s1".to_string(), accept: true, rules: Vec::new() },
+            ],
+            alphabet: Vec::new(),
+            tapes: 1,
+            width: 1,
+            start: 0,
+        };
+        let map = SourceMap {
+            tm_name_to_node: [("s0".to_string(), NodeId::MAX)].into_iter().collect(),
+            ..SourceMap::default()
+        };
+
+        let index = LinkIndex::build(None, Some(&program), &map, 0, 0);
+
+        // Not `vec![-1, -1]` — that would be the pre-fix collision, s0's real (if unrepresentable) owner
+        // reading identically to s1's genuine absence. The whole leg must decline instead, exactly as it
+        // already does for a `None` program (`link_index_is_total_over_a_declined_leg`, in the
+        // integration suite).
+        assert!(
+            index.tm_owner.is_empty(),
+            "an id that cannot fit i32 must empty the whole leg, not report -1 as though there were no \
+             owner: got {:?}",
+            index.tm_owner
+        );
     }
 }

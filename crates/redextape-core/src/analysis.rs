@@ -56,6 +56,7 @@ pub enum TokenClass {
 /// a macro pairing the two would be a third thing to keep in step. The test below is what makes the
 /// pairing mechanical: it asserts the index of a variant at each end and in the middle, and pins the
 /// count, so an insertion anywhere fails rather than shifting the tail by one.
+#[must_use]
 pub fn token_class_names() -> &'static [&'static str] {
     &[
         "Ident",
@@ -116,6 +117,7 @@ pub type Attributed = Vec<(Span, TokenClass, Option<NodeId>)>;
 /// Takes `text` because a `Span` carries offsets, not the bytes at those offsets — resolving a state
 /// name means slicing the string the spans were produced against. Total: an out-of-range span or an
 /// unknown name yields `None`, never a panic, and the span sequence is returned unchanged in order.
+#[must_use]
 pub fn attribute_tm_spans(text: &str, map: &SourceMap, spans: &Classified) -> Attributed {
     spans
         .iter()
@@ -131,6 +133,7 @@ pub fn attribute_tm_spans(text: &str, map: &SourceMap, spans: &Classified) -> At
 /// Classify mini-language source. Reuses the existing lexer — no second scanner. Diagnostics are
 /// discarded here on purpose: highlighting a file with errors is exactly when it matters most, so
 /// whatever tokens the lexer recovered are classified and the errors are surfaced through `analyze`.
+#[must_use]
 pub fn classify_source(src: &str) -> Classified {
     let (tokens, _diagnostics) = lex(src);
     tokens.iter().filter(|t| t.kind != TokenKind::Eof).map(|t| (t.span, class_of(t.kind))).collect()
@@ -164,6 +167,12 @@ fn class_of(k: TokenKind) -> TokenClass {
         | TokenKind::Semi
         | TokenKind::Pipe
         | TokenKind::Dot => TokenClass::Punct,
+        // Kept apart from the real-punctuation arm above rather than merged into it, even though both
+        // produce `Punct` today: `Eof` is a synthetic end-of-scan marker with no source character
+        // behind it (and `classify_source` already filters it out before classifying), not a
+        // punctuation glyph — the two are different "not real content" cases that happen to share a
+        // rendering class now but are not the same case.
+        #[allow(clippy::match_same_arms)]
         TokenKind::Eof => TokenClass::Punct,
     }
 }

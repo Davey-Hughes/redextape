@@ -26,7 +26,7 @@
 // Test target: `wasm_bindgen_test` functions are not `#[test]` functions, so `clippy.toml`'s
 // `allow-expect-in-tests` does not reach them, and neither it nor `allow-panic-in-tests` reaches the
 // free helpers below. Stated per target, the same way `viewmodel_contract.rs` does.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use js_sys::{Array, Function, JSON, Object, Reflect};
 use redextape_core::tm::EncodingKind;

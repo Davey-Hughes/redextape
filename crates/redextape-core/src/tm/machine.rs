@@ -52,6 +52,7 @@ pub struct Machine {
 impl Machine {
     /// The sorted set of concrete symbols appearing in any rule (wildcards excluded). Derived — the
     /// text form and Plan 4's view model present it; it is not stored.
+    #[must_use]
     pub fn alphabet(&self) -> Vec<Symbol> {
         let mut set: BTreeSet<Symbol> = BTreeSet::new();
         for s in &self.states {
@@ -71,10 +72,15 @@ impl Machine {
     /// set `* ; [ ]` and not whitespace (the blank `_` is allowed), every state name is unique (the
     /// text form's identity), and an accept state carries no rules (`print_tm` drops them). Returns
     /// the problems (empty == valid). Never panics.
+    #[must_use]
     pub fn validate(&self) -> Vec<String> {
         let mut errs = Vec::new();
-        let n = self.states.len() as u32;
-        if self.start >= n {
+        // Compare in `usize` space (widen `start`/`next` up, never narrow `states.len()` down):
+        // `states.len() as u32` would truncate past `u32::MAX` states, and a truncated `n` would make
+        // this out-of-range check compare `start`/`next` against the WRONG bound — the same class of
+        // bug `mul_count_unrepresentable` avoids the same way, in `lower_tm.rs`.
+        let n = self.states.len();
+        if self.start as usize >= n {
             errs.push(format!("start state {} out of range (states: {n})", self.start));
         }
         let mut seen_names: HashSet<&str> = HashSet::new();
@@ -95,7 +101,7 @@ impl Machine {
                 if r.read.len() != self.tapes || r.write.len() != self.tapes || r.moves.len() != self.tapes {
                     errs.push(format!("state {i} `{}` rule {j}: arity != {} tapes", s.name, self.tapes));
                 }
-                if r.next >= n {
+                if r.next as usize >= n {
                     errs.push(format!("state {i} `{}` rule {j}: next {} out of range", s.name, r.next));
                 }
                 for sym in r.read.iter().chain(r.write.iter()).flatten() {

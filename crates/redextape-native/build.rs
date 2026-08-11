@@ -16,8 +16,10 @@ fn main() {
         lock.split("[[package]]")
             .find(|block| block.contains(&needle))
             .and_then(|block| block.lines().find(|l| l.trim_start().starts_with("version = ")))
-            .map(|l| l.trim().trim_start_matches("version = ").trim_matches('"').to_string())
-            .unwrap_or_else(|| "unknown".into())
+            .map_or_else(
+                || "unknown".into(),
+                |l| l.trim().trim_start_matches("version = ").trim_matches('"').to_string(),
+            )
     };
     println!("cargo:rustc-env=CRANELIFT_VERSION={}", version_of("cranelift-codegen"));
     println!("cargo:rustc-env=LLVM_VERSION={}", version_of("llvm-sys"));

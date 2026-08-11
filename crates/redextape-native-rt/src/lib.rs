@@ -12,6 +12,14 @@
 //! Every `rt_*` function below is `#[unsafe(no_mangle)]` so its linker symbol is the literal name
 //! (`rt_cons`, `rt_head`, …) rather than a mangled Rust symbol — required for the staticlib case.
 
+// Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
+// unwrap/expect/panic set: an assertion is a deliberate panic, and a probe that casts a `u64` step
+// count to `f64` to print a ratio is not a defect. `cfg_attr` rather than the one module-level
+// attribute this crate's own single inline `#[cfg(test)] mod tests` would otherwise need — under
+// `--all-targets` each lib compiles twice, and `cfg(test)` holds only in the test-harness pass, so
+// production warnings still surface from the other one.
+#![cfg_attr(test, allow(clippy::pedantic))]
+
 use redextape_core::tm::{AsmOutcome, Caps};
 use redextape_core::ty::Ty;
 
@@ -42,6 +50,7 @@ pub struct Runtime {
 impl Runtime {
     /// A runtime whose depth cap is just `caps.stack` (no frame-size awareness). Used by the
     /// `rt_*` unit tests; the JIT driver uses `with_depth_cap` instead.
+    #[must_use]
     pub fn new(caps: Caps) -> Runtime {
         Runtime::with_depth_cap(caps, caps.stack)
     }
@@ -49,6 +58,7 @@ impl Runtime {
     /// A runtime whose recursion-depth limit is `depth_cap` — the frame-size-aware
     /// `min(caps.stack, safe_depth)` the JIT backend computes so `rt_enter` trips before the native
     /// stack is exhausted.
+    #[must_use]
     pub fn with_depth_cap(caps: Caps, depth_cap: u64) -> Runtime {
         Runtime {
             heap: Vec::new(),
@@ -72,6 +82,7 @@ impl Runtime {
 
     /// Finish a run: pair the register-`rr` result word with the heap needed to decode it,
     /// mirroring `run_asm`'s `AsmRun::Ran(AsmOutcome { result: vm.rr, heap: vm.heap })`.
+    #[must_use]
     pub fn into_outcome(self, result: u64) -> AsmOutcome {
         AsmOutcome { result, heap: self.heap }
     }
@@ -114,12 +125,15 @@ pub unsafe extern "C" fn rt_head(rt: *mut Runtime, p: u64) -> u64 {
         rt.fault = Some("head of empty list".to_string());
         return 0;
     }
-    match rt.heap.get((p - 1) as usize) {
-        Some(&(h, _)) => h,
-        None => {
-            rt.fault = Some("head of invalid list pointer".to_string());
-            0
-        }
+    // `p - 1` is a u64 heap index from the JIT-generated caller; on a 32-bit target it may not fit
+    // `usize`. Rather than truncating it into a possibly-in-bounds index (which would silently
+    // alias a real cell instead of faulting), `try_from`'s `Err` folds into the SAME "invalid list
+    // pointer" fault an in-range-but-dangling `p` already takes via `.get()` returning `None`.
+    if let Some(&(h, _)) = usize::try_from(p - 1).ok().and_then(|i| rt.heap.get(i)) {
+        h
+    } else {
+        rt.fault = Some("head of invalid list pointer".to_string());
+        0
     }
 }
 
@@ -139,12 +153,13 @@ pub unsafe extern "C" fn rt_tail(rt: *mut Runtime, p: u64) -> u64 {
         rt.fault = Some("tail of empty list".to_string());
         return 0;
     }
-    match rt.heap.get((p - 1) as usize) {
-        Some(&(_, t)) => t,
-        None => {
-            rt.fault = Some("tail of invalid list pointer".to_string());
-            0
-        }
+    // See `rt_head`'s comment: `try_from`'s `Err` (32-bit targets only) folds into the same
+    // "invalid list pointer" fault a dangling-but-representable `p` already takes.
+    if let Some(&(_, t)) = usize::try_from(p - 1).ok().and_then(|i| rt.heap.get(i)) {
+        t
+    } else {
+        rt.fault = Some("tail of invalid list pointer".to_string());
+        0
     }
 }
 
@@ -185,6 +200,12 @@ pub unsafe extern "C" fn rt_box(rt: *mut Runtime, v: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+// The two quoted fault strings above are the LITERAL fault text (asserted byte-for-byte by
+// `box_get_and_set_fault_on_null_and_dangling_handles` below), not code references — an automated
+// `doc_markdown` pass once backticked `box_get` inside them, which left the doc's prose matching
+// the real bytes but broke the "this is a verbatim literal" convention the quotes signal. Reverted;
+// this allow keeps `doc_markdown` from re-adding backticks inside the quoted text.
+#[allow(clippy::doc_markdown)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
     let rt = unsafe { &mut *rt };
@@ -195,12 +216,13 @@ pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
         rt.fault = Some("box_get of null handle".to_string());
         return 0;
     }
-    match rt.boxes.get((p - 1) as usize) {
-        Some(&v) => v,
-        None => {
-            rt.fault = Some("box_get of invalid handle".to_string());
-            0
-        }
+    // See `rt_head`'s comment: `try_from`'s `Err` (32-bit targets only) folds into the same
+    // "invalid handle" fault a dangling-but-representable `p` already takes.
+    if let Some(&v) = usize::try_from(p - 1).ok().and_then(|i| rt.boxes.get(i)) {
+        v
+    } else {
+        rt.fault = Some("box_get of invalid handle".to_string());
+        0
     }
 }
 
@@ -210,6 +232,9 @@ pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
+// Same corrupted-then-reverted literal as `rt_box_get`: the two quoted strings are the exact fault
+// bytes (see `box_get_and_set_fault_on_null_and_dangling_handles`), not code references.
+#[allow(clippy::doc_markdown)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
     let rt = unsafe { &mut *rt };
@@ -220,7 +245,9 @@ pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
         rt.fault = Some("box_set of null handle".to_string());
         return;
     }
-    match rt.boxes.get_mut((p - 1) as usize) {
+    // See `rt_head`'s comment: `try_from`'s `Err` (32-bit targets only) folds into the same
+    // "invalid handle" fault a dangling-but-representable `p` already takes.
+    match usize::try_from(p - 1).ok().and_then(|i| rt.boxes.get_mut(i)) {
         Some(slot) => *slot = v,
         None => rt.fault = Some("box_set of invalid handle".to_string()),
     }
@@ -376,24 +403,19 @@ pub(crate) fn print_outcome(
         let _ = writeln!(err, "hit cap");
         return 3;
     }
-    match outcome {
-        Some(o) => match redextape_core::tm::decode_asm_ty(&o, ty) {
-            // The value is the sole thing on `out` (stdout) — exit 0.
-            Some(v) => {
-                let _ = writeln!(out, "{}", redextape_core::value::format_value(&v));
-                0
-            }
-            // Decode failure is a diagnostic → `err` (stderr), NOT `out`, so it can't be mistaken
-            // for a value by a caller grepping stdout — exit 4.
-            None => {
-                let _ = writeln!(err, "internal: could not decode result");
-                4
-            }
-        },
-        // Unreachable via `rt_run`: it handles the `fault`/thread-failure cases (its own `None`
-        // outcomes) before ever calling `print_outcome`, and only ever passes `Some(outcome)` here.
-        // Kept as a defensive exit-4 so `print_outcome` is total for any caller.
-        None => 4,
+    // `outcome: None` is unreachable via `rt_run` (it handles the `fault`/thread-failure cases
+    // before ever calling `print_outcome`, and only ever passes `Some(outcome)` here) — kept as a
+    // defensive exit-4 so `print_outcome` is total for any caller.
+    let Some(o) = outcome else { return 4 };
+    if let Some(v) = redextape_core::tm::decode_asm_ty(&o, ty) {
+        // The value is the sole thing on `out` (stdout) — exit 0.
+        let _ = writeln!(out, "{}", redextape_core::value::format_value(&v));
+        0
+    } else {
+        // Decode failure is a diagnostic → `err` (stderr), NOT `out`, so it can't be mistaken
+        // for a value by a caller grepping stdout — exit 4.
+        let _ = writeln!(err, "internal: could not decode result");
+        4
     }
 }
 
@@ -421,26 +443,29 @@ pub unsafe extern "C" fn rt_run(
     config_ptr: *const u8,
     config_len: u64,
 ) -> i32 {
+    // No producer IN THIS TREE supplies `config_len` from anywhere but `aot::emit_object`'s own
+    // `config.len() as i64` (see that function), baked into the emitted object as a compile-time
+    // constant and widened back to u64 for this `extern "C"` signature — that blob is 32 bytes of
+    // `Caps`/`depth_cap` plus a handful of `Ty` tag bytes (`aot::serialize_ty`), so it can never
+    // approach `usize::MAX` from that path. This symbol is `#[unsafe(no_mangle)]` in a `staticlib`
+    // built for foreign linking, though, so nothing stops an external caller from passing something
+    // else: a `config_len` this cast does not represent losslessly still only reaches
+    // `config::deserialize` on a short slice, which exits 4 rather than reading out of bounds.
+    #[allow(clippy::cast_possible_truncation)]
     let bytes = unsafe { std::slice::from_raw_parts(config_ptr, config_len as usize) };
-    let (caps, depth_cap, ty) = match config::deserialize(bytes) {
-        Some(c) => c,
-        None => {
-            eprintln!("internal: malformed AOT config");
-            return 4;
-        }
+    let Some((caps, depth_cap, ty)) = config::deserialize(bytes) else {
+        eprintln!("internal: malformed AOT config");
+        return 4;
     };
     // Run on a big reserved stack so the emit-time depth_cap trips before the OS stack overflows.
     let run = std::thread::Builder::new().stack_size(RUN_STACK_SIZE).spawn(move || {
         let mut rt = Runtime::with_depth_cap(caps, depth_cap);
-        let word = main_fn(&mut rt);
+        let word = main_fn(&raw mut rt);
         (rt.hit_cap, rt.fault.take(), rt.into_outcome(word))
     });
-    let (hit_cap, fault, outcome) = match run.and_then(|h| h.join().map_err(|_| std::io::Error::other("panic"))) {
-        Ok(t) => t,
-        Err(_) => {
-            eprintln!("internal: AOT run thread failed");
-            return 4;
-        }
+    let Ok((hit_cap, fault, outcome)) = run.and_then(|h| h.join().map_err(|_| std::io::Error::other("panic"))) else {
+        eprintln!("internal: AOT run thread failed");
+        return 4;
     };
     if hit_cap {
         return print_outcome(None, true, &ty, &mut std::io::stdout(), &mut std::io::stderr());

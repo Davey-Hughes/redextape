@@ -34,6 +34,7 @@ impl Default for Unary {
 impl Unary {
     /// A unary encoding whose register fields are `width` cells wide. Values `>= width` are not
     /// representable and route to the overflow guard.
+    #[must_use]
     pub const fn at(width: usize) -> Unary {
         Unary { width }
     }
@@ -807,6 +808,12 @@ impl Encoding for Unary {
     }
 
     // `arith` Add/Sub are Task 3 (below); `Mul` is Task 4; `compare` (Task 5) has its own stub.
+    //
+    // `clippy::similar_names`: each gadget step is named `after_<step>` (`after_ra`/`after_rb`,
+    // `after_ra`/`after_er`, …), tracking the state the machine is in after that step — consistent
+    // with the register names (`ra`/`rb`/`rd`) and step mnemonics the surrounding comments use, not a
+    // coincidental collision.
+    #[allow(clippy::similar_names)]
     fn arith(&self, b: &mut Builder, entry: StateId, exit: StateId, op: BinOp, ra: Slot, rb: Slot, rd: Slot) {
         // `entry` (a fresh StateId per call site) uniquifies every derived state name across calls.
         match op {
@@ -964,6 +971,10 @@ impl Encoding for Unary {
         b.add_rule(after_wr, RuleSpec::new(), exit);
     }
 
+    // `z`/`nz`/`home_z`/`home_nz` name the zero/nonzero branch pair this gadget builds, matching
+    // `if_zero`/`if_nonzero` above them — the same convention `Binary::branch_on_zero` uses for its
+    // analogous gadget, not a coincidental collision `clippy::similar_names` should rename away.
+    #[allow(clippy::similar_names)]
     fn jz(&self, b: &mut Builder, entry: StateId, if_zero: StateId, if_nonzero: StateId, r: Slot) {
         // Seek field r; its first cell is a MARK (nonzero) or a BLANK (zero, all padding). Each branch
         // rewinds REG home to its own exit. rewind_home's precondition (head inside the field, not on

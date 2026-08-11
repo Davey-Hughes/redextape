@@ -63,6 +63,7 @@ pub enum Core {
 }
 
 impl Core {
+    #[must_use]
     pub fn id(&self) -> NodeId {
         match self {
             Core::Nat(id, _)
@@ -75,9 +76,10 @@ impl Core {
             | Core::Apply(id, ..)
             | Core::Seq(id, ..)
             | Core::Assign(id, ..)
-            | Core::While(id, ..) => *id,
-            Core::Let { id, .. } | Core::LetRec { id, .. } => *id,
-            Core::LetRecGroup(id, ..) => *id,
+            | Core::While(id, ..)
+            | Core::Let { id, .. }
+            | Core::LetRec { id, .. }
+            | Core::LetRecGroup(id, ..) => *id,
         }
     }
 
@@ -140,11 +142,10 @@ impl Drop for Core {
 /// (`Core::Nat(0, 0)`) behind so `n`'s subsequent drop does not recurse into the moved-out subtree.
 fn take_core_children(n: &mut Core, stack: &mut Vec<Core>) {
     match n {
-        Core::BinOp(_, _, a, b) => {
-            stack.push(*std::mem::replace(a, Box::new(Core::Nat(0, 0))));
-            stack.push(*std::mem::replace(b, Box::new(Core::Nat(0, 0))));
-        }
-        Core::Seq(_, a, b) | Core::While(_, a, b) => {
+        // Same grouping `for_each_child` above uses: all three have exactly two `Box<Core>` children
+        // in the same positions, so the teardown is identical — and if one of them ever grows a third
+        // child, this `|`-pattern stops compiling rather than silently under-draining it.
+        Core::BinOp(_, _, a, b) | Core::Seq(_, a, b) | Core::While(_, a, b) => {
             stack.push(*std::mem::replace(a, Box::new(Core::Nat(0, 0))));
             stack.push(*std::mem::replace(b, Box::new(Core::Nat(0, 0))));
         }
@@ -188,10 +189,23 @@ pub struct NodeGen {
 impl NodeGen {
     /// A generator whose first `fresh()` returns `next`. Used by synthetic passes (e.g. `defunc`)
     /// that mint new nodes and must not collide with an existing tree's ids: seed past its max id.
+    #[must_use]
     pub fn seeded(next: NodeId) -> Self {
         NodeGen { next }
     }
 
+    /// Bounded by nothing today — `next` carries no cap, and `self.next += 1` wraps silently on
+    /// overflow in release (this workspace sets no `[profile]` overrides, so no debug assertion would
+    /// catch it), re-issuing id 0 to whatever mints next. `seeded` is `pub`, so `seeded(u32::MAX)`
+    /// followed by one `fresh()` reaches the wrap from outside this module, not only via an
+    /// implausibly large `Core` tree grown from inside it.
+    ///
+    /// KNOWN OPEN GAP, DELIBERATELY DEFERRED — not fixed here. `viewmodel.rs`'s `LinkIndex::build`
+    /// cites this function BY NAME as the reason its own `NodeId -> i32` cast cannot be shown bounded,
+    /// and refuses that cast outright rather than risk a wrong owner id (see `tm_owner`'s doc).
+    /// Capping issuance here would close the gap at the source instead of at every cast site, but that
+    /// is a separate slice with its own survey to do first (what the cap should be, and who could
+    /// observe running out) — this comment documents the gap, it does not close it.
     pub fn fresh(&mut self) -> NodeId {
         let id = self.next;
         self.next += 1;

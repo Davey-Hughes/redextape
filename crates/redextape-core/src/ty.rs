@@ -20,6 +20,7 @@ pub struct Scheme {
 
 impl Scheme {
     /// A monomorphic scheme (no quantified variables).
+    #[must_use]
     pub fn mono(ty: Ty) -> Self {
         Scheme { vars: Vec::new(), ty }
     }
@@ -74,6 +75,7 @@ pub fn show(ty: &Ty) -> String {
 ///
 /// ITERATIVE on the `List` spine (recursion would be on untrusted nesting depth), and capped at
 /// `MAX_TY_DEPTH` so the built value's recursive `Drop` is bounded too.
+#[must_use]
 pub fn parse_ty(s: &str) -> Option<Ty> {
     let mut s = s.trim();
     let mut depth = 0usize;

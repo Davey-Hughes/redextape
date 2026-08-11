@@ -38,7 +38,7 @@
 //! sparse pairs, and it is STILL a PROXY for the JS heap cost even so — the same caveat
 //! `frame_cost_probe` states about its own `json_b`. `columnar_b` is exact, because a typed array's
 //! byte length is its byte length.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use std::io::Write;
 use std::rc::Rc;

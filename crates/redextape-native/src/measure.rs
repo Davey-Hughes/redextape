@@ -94,6 +94,7 @@ pub enum Backend {
 
 impl Backend {
     /// The backends compiled into this build, in report order.
+    #[must_use]
     pub fn available() -> Vec<Backend> {
         let mut v = Vec::new();
         if cfg!(feature = "cranelift") {
@@ -106,6 +107,7 @@ impl Backend {
     }
 
     /// The lowercase name used in the report table and the baseline file.
+    #[must_use]
     pub fn name(self) -> &'static str {
         match self {
             Backend::Cranelift => "cranelift",
@@ -139,6 +141,16 @@ pub struct Measurement {
 /// Measure the whole grid: every corpus program × every available backend × every opt level.
 /// Panics on a lowering or codegen failure — this is a developer tool, not a runtime path, and a
 /// corpus program that fails to compile or faults is a bug to surface loudly rather than to time.
+///
+/// # Panics
+/// If any `CORPUS` entry fails to parse, typecheck, lower, or codegen (via `.expect()`, allowed in
+/// this module — see the `#![allow(clippy::expect_used)]` at the top of this file and its comment).
+/// This is intentional, not an oversight: `measure_all` drives the `opt_report` example and the
+/// `size_baseline` test, both developer tooling with no caller-facing diagnostic channel, over a
+/// FIXED in-repo corpus. A corpus entry that stops compiling is a bug in this repository to fail
+/// loudly on, not a runtime condition for a library caller to recover from — so this is documented
+/// as a panic rather than converted to a typed error.
+#[must_use]
 pub fn measure_all() -> Vec<Measurement> {
     let mut out = Vec::new();
     for (name, src) in CORPUS {

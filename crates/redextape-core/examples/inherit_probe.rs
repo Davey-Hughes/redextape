@@ -37,7 +37,7 @@
 //!
 //! Full design, including the pre-registered gate: `docs/superpowers/specs/2026-08-10-none-headroom
 //! -mechanism-design.md`.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;

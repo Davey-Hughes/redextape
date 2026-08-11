@@ -8,6 +8,7 @@ use crate::span::Span;
 use crate::ty::{Scheme, Ty, show};
 use std::collections::{HashMap, HashSet};
 
+#[must_use]
 pub fn typecheck(program: &Program) -> Vec<Diagnostic> {
     let mut inf = Infer::new();
     let mut env = TyEnv::new();
@@ -21,6 +22,12 @@ pub fn typecheck(program: &Program) -> Vec<Diagnostic> {
 /// Infer the program's top-level result type (the value `run` would produce), fully resolved.
 /// `Err` carries the type errors when the program is ill-typed. Used by the AOT backend to decode
 /// and print a standalone binary's result without a reference run.
+///
+/// # Errors
+///
+/// Returns `Err` with the complete diagnostic list if inference recorded at least one
+/// `Severity::Error` diagnostic (the list may also carry non-error diagnostics alongside it) — the
+/// caller should report all of them, not just the first.
 pub fn result_type(program: &Program) -> Result<Ty, Vec<Diagnostic>> {
     let mut inf = Infer::new();
     let mut env = TyEnv::new();
@@ -142,16 +149,16 @@ impl Infer {
             (Ty::Nat, Ty::Nat) | (Ty::Bool, Ty::Bool) | (Ty::Unit, Ty::Unit) => {}
             (Ty::List(x), Ty::List(y)) => self.unify(x, y, span),
             (Ty::Fun(p1, r1), Ty::Fun(p2, r2)) => {
-                if p1.len() != p2.len() {
-                    self.error(
-                        span,
-                        format!("this function takes {} argument(s) but {} were supplied", p1.len(), p2.len()),
-                    );
-                } else {
+                if p1.len() == p2.len() {
                     for (x, y) in p1.iter().zip(p2) {
                         self.unify(x, y, span);
                     }
                     self.unify(r1, r2, span);
+                } else {
+                    self.error(
+                        span,
+                        format!("this function takes {} argument(s) but {} were supplied", p1.len(), p2.len()),
+                    );
                 }
             }
             _ => self.error(span, format!("type mismatch: expected `{}`, found `{}`", show(&a), show(&b))),
@@ -384,16 +391,15 @@ impl Infer {
         match expr {
             Expr::Nat { .. } => Ty::Nat,
             Expr::Bool { .. } => Ty::Bool,
-            Expr::Var { name, span } => match env.lookup(name) {
-                Some(b) => {
+            Expr::Var { name, span } => {
+                if let Some(b) = env.lookup(name) {
                     let scheme = b.scheme.clone();
                     self.instantiate(&scheme)
-                }
-                None => {
+                } else {
                     self.error(*span, format!("unbound variable `{name}`"));
                     self.fresh()
                 }
-            },
+            }
             Expr::List { items, .. } => {
                 let elem = self.fresh();
                 for item in items {
@@ -438,15 +444,12 @@ impl Infer {
             Expr::Method { recv, name, args, span } => {
                 // UFCS: `recv.m(args)` types as `m(recv, args)`.
                 let recv_ty = self.infer_expr(env, recv);
-                let fun_ty = match env.lookup(name) {
-                    Some(b) => {
-                        let scheme = b.scheme.clone();
-                        self.instantiate(&scheme)
-                    }
-                    None => {
-                        self.error(*span, format!("unbound variable `{name}`"));
-                        return self.fresh();
-                    }
+                let fun_ty = if let Some(b) = env.lookup(name) {
+                    let scheme = b.scheme.clone();
+                    self.instantiate(&scheme)
+                } else {
+                    self.error(*span, format!("unbound variable `{name}`"));
+                    return self.fresh();
                 };
                 let mut arg_tys = vec![recv_ty];
                 arg_tys.extend(args.iter().map(|a| self.infer_expr(env, a)));

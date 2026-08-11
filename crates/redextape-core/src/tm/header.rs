@@ -172,6 +172,7 @@ impl TmHeader {
     /// `MAX_SLOTS` before a machine is ever built. The caps are not re-checked here because doing so
     /// would make a pure normalizer fallible for a case its only caller cannot reach — but a hand-built
     /// header is outside the guarantee, and that is stated here rather than discovered at parse time.
+    #[must_use]
     pub fn new(
         encoding: EncodingKind,
         width: usize,
@@ -186,12 +187,14 @@ impl TmHeader {
     }
 
     /// The literal initial tapes, by index, ascending, empties omitted.
+    #[must_use]
     pub fn tapes(&self) -> &[(usize, Vec<Symbol>)] {
         &self.tapes
     }
 
     /// The `Encoding` instance this header names, at its width. This is the half a foreign reader
     /// cannot reproduce — it needs the implementations, which the header names but cannot inline.
+    #[must_use]
     pub fn encoding(&self) -> Box<dyn Encoding> {
         self.encoding.at(self.width)
     }
@@ -204,11 +207,12 @@ impl TmHeader {
     /// only because the one caller that parses `n_tapes` from a file (`syntax::parse_tm_full`) caps it
     /// at `MAX_TAPES` before it ever reaches here — see that cap's doc for why an unbounded `tapes N`
     /// is a hazard. A caller that hands this an unvalidated `n_tapes` is outside that guarantee.
+    #[must_use]
     pub fn init(&self, n_tapes: usize) -> Vec<Vec<Symbol>> {
         let mut init = vec![Vec::new(); n_tapes];
         for (i, cells) in &self.tapes {
             if let Some(slot) = init.get_mut(*i) {
-                *slot = cells.clone();
+                slot.clone_from(cells);
             }
         }
         init

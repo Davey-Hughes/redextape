@@ -105,6 +105,12 @@ fn store_of(values: &[LambdaTerm]) -> LambdaTerm {
 /// The selector `\v0. ... \v(k-1). vi` — picks the i-th of `k` arguments. Under `k` binders the
 /// i-th (from the outside) is `var(k - 1 - i)`.
 fn selector(i: usize, k: usize) -> LambdaTerm {
+    // `k` is `StoreCtx::k()` — the count of distinct mutable-variable names in one store-passing
+    // region — and a region's mutable-variable count cannot exceed `core`'s nesting depth: each `let
+    // mut` inside a region adds one level of `Seq`/`Let` nesting to reach it, and `too_deep_node`
+    // refuses any `core` deeper than `MAX_LAMBDA_LOWER_DEPTH` (700) before `lower_expr` — and hence
+    // this function — ever runs. `k` is therefore at most 700, far inside `u32`.
+    #[allow(clippy::cast_possible_truncation)]
     let mut body = var((k - 1 - i) as u32);
     for _ in 0..k {
         body = abs("v", body);
@@ -118,6 +124,16 @@ fn project(store: LambdaTerm, i: usize, k: usize) -> LambdaTerm {
 }
 
 /// Rebuild the store with slot `i` replaced by `new` (other slots re-projected from `store`).
+///
+/// `new` is taken by value even though the loop below only ever `.clone()`s it (once, on the single
+/// iteration where `j == i`) — narrowing the parameter to `&LambdaTerm` would fix that, but `update`
+/// is called directly from `#[cfg(test)] mod tests` (`store_update_replaces_one_slot`, further down
+/// this file) with an owned `LambdaTerm`, so narrowing the signature would force an edit to that test
+/// call site for a lint's sake alone — not something worth doing here.
+/// Restructuring the loop to consume `new` by move instead (e.g. `Option::take`) was considered and
+/// rejected: every escape needs an infallible fallback, and `unwrap`/`expect` are denied in library
+/// code, so the only honest fallback is one more clone — no smaller than today's.
+#[allow(clippy::needless_pass_by_value)]
 fn update(store: &LambdaTerm, i: usize, new: LambdaTerm, k: usize) -> LambdaTerm {
     let mut slots: Vec<LambdaTerm> = Vec::with_capacity(k);
     for j in 0..k {
@@ -217,12 +233,27 @@ impl Origins {
     }
 }
 
+/// Lower `core` to a de Bruijn `LambdaTerm`.
+///
+/// # Errors
+///
+/// See `lower_mapped`, which this wraps and discards the path map from: the same `TooDeep`,
+/// `StatefulClosure` and `Unsupported` cases apply.
 pub fn lower(core: &Core) -> Result<LambdaTerm, LowerError> {
     lower_mapped(core).map(|(t, _)| t)
 }
 
 /// `lower`, plus a `NodeId -> Path` map into the produced term. Paths are root-relative and
 /// forward-ordered. Compilation is syntax-directed, so the map falls out of the traversal (§5.4).
+///
+/// # Errors
+///
+/// Returns `LowerError::TooDeep` if `core`'s nesting exceeds `MAX_LAMBDA_LOWER_DEPTH` (checked once,
+/// before any recursive pass runs — see the guard's own doc), `LowerError::StatefulClosure` if a
+/// closure assigns a variable captured from an outer scope (§5.3 — a v1 limitation), or
+/// `LowerError::Unsupported` for a `Core` construct the lambda backend does not yet lower (the
+/// `what` field names which). Lowering is total otherwise: every other `Core` within the depth bound
+/// produces a term.
 pub fn lower_mapped(core: &Core) -> Result<(LambdaTerm, Vec<(NodeId, Path)>), LowerError> {
     // The depth guard, before ANY recursive pass — including `assigns_captured`/`collect_region_vars`,
     // which run ahead of the sub-tree they analyse. See `MAX_LAMBDA_LOWER_DEPTH`.
@@ -259,6 +290,10 @@ fn too_deep_node(core: &Core) -> Option<NodeId> {
 /// Resolve a name to a de Bruijn index (innermost binding), or fall back to a prelude encoder.
 fn resolve(name: &str, scope: &[String]) -> Option<LambdaTerm> {
     if let Some(pos) = scope.iter().rposition(|n| n == name) {
+        // `scope` grows by one entry per enclosing `Core::Lambda`/store binder, so its length is
+        // bounded the same way `selector`'s `k` is: `too_deep_node` refuses any `core` nested past
+        // `MAX_LAMBDA_LOWER_DEPTH` (700) before this function's caller, `lower_expr`, ever runs.
+        #[allow(clippy::cast_possible_truncation)]
         return Some(var((scope.len() - 1 - pos) as u32));
     }
     match name {
@@ -577,6 +612,15 @@ fn lower_region(node: &Core, scope: &mut Vec<String>, origins: &mut Origins) -> 
 /// Lower a node inside a region. In `Pos::Value` it yields the region's result value; in `Pos::Store`
 /// it yields the store threaded past this node's effects. Reads of `M` variables project from the
 /// current `$store`; assignments/`while` rebind it.
+///
+/// One `match` over every `Core` variant a region body can contain — a single syntax-directed state
+/// machine, not several loosely related responsibilities. Splitting the arms into separate functions
+/// would not shorten the function so much as scatter the `Origins` path-bookkeeping across call
+/// boundaries: `wrap`/`mark`/`forget` calls must run in the exact order the surrounding arm issues
+/// them (see `Origins`'s own doc — "a parent must apply a child's complete chain of directions before
+/// it lowers the next child"), an invariant that is easy to preserve within one function body and
+/// easy to break by moving half of it behind a new call.
+#[allow(clippy::too_many_lines)]
 fn lower_region_body(
     node: &Core,
     scope: &mut Vec<String>,

@@ -137,6 +137,17 @@ impl Ctx {
 /// The map is returned rather than stored on `Program` deliberately. `Program` derives `PartialEq`
 /// and is compared in the asm goldens; a side-table field would change equality and break them for a
 /// reason that has nothing to do with what the program computes.
+///
+/// # Errors
+///
+/// `Err(LowerError::TooDeep)` if `core`'s nesting exceeds `MAX_LOWER_DEPTH` (see that constant's doc
+/// for the measured margin) — the caller's only recourse is a shallower program. `Err(LowerError::
+/// Unsupported)` for every construct outside this backend's first-order subset: a function used as a
+/// value (`reject_fn_value`), a call of a non-name (higher-order), a call arity mismatch, a call to an
+/// unknown/shadowed builtin, or a nested/local function definition. Each carries the offending
+/// `NodeId` and a `what` naming the construct; the caller's only recourse is rewriting the source, or
+/// routing the program through `defunc` first (see `tm.rs`'s `lower_program`) to eliminate the
+/// higher-order constructs this backend does not lower directly.
 pub fn lower_asm_mapped(core: &Core) -> Result<(Program, Vec<NodeId>), LowerError> {
     let mut ctx = Ctx::new();
     lower_into(&mut ctx, core, Reg::Rr)?;
@@ -149,6 +160,10 @@ pub fn lower_asm_mapped(core: &Core) -> Result<(Program, Vec<NodeId>), LowerErro
 
 /// Lower `core` to register-asm. Exactly `lower_asm_mapped` with the source map discarded — there is
 /// ONE lowering implementation, so the mapped and unmapped paths cannot drift.
+///
+/// # Errors
+///
+/// Exactly `lower_asm_mapped`'s — see that function's `# Errors` section.
 pub fn lower_asm(core: &Core) -> Result<Program, LowerError> {
     lower_asm_mapped(core).map(|(p, _)| p)
 }
@@ -206,6 +221,14 @@ fn lower_function_group(ctx: &mut Ctx, group: &[FnDef<'_>]) -> Result<(), LowerE
         let saved_scopes = std::mem::replace(&mut ctx.scopes, vec![Vec::new()]);
         let saved_next = ctx.next_local;
         ctx.next_local = 0; // each activation has its own local space
+        // Bounded by `params.len()`, an ACTUAL `Vec<String>` already resident in memory — unlike
+        // `build::MAX_TAPES`'s `tapes N` (a few bytes of text driving an allocation of that size),
+        // there is no compact input that forces `i` past `u32::MAX` here: reaching it needs >4 billion
+        // parameter strings already parsed and held in memory, far beyond anything this process could
+        // allocate. No cap on source-level arity exists or is needed for the same reason `MAX_REGISTERS`
+        // gives for register indices (see its doc): the amplifying case this cast could misbehave on is
+        // not reachable from real input.
+        #[allow(clippy::cast_possible_truncation)]
         for (i, p) in params.iter().enumerate() {
             let slot = ctx.bind(p);
             ctx.emit(Instr::Mov(slot, Reg::Arg(i as u32)));
@@ -265,6 +288,13 @@ fn reject_fn_value(body: &Core, fname: &str) -> Result<(), LowerError> {
 /// callee position is unusual (it is a value, handled as a `Var`), so only the functions appear here.
 fn lower_builtin_apply(ctx: &mut Ctx, id: NodeId, name: &str, args: &[Core], dst: Reg) -> Result<(), LowerError> {
     // Any of these being shadowed by a local binding is a function-as-a-value use we do not support.
+    //
+    // `clippy::match_same_arms`: several names share an arity NUMBER here (`cons`/`$box_set` both 2;
+    // `head`/`tail`/`is_empty`/`$head`/`$tail`/`$box`/`$box_get` all 1), but they are not the same
+    // case — the dispatch `match` just below sends every one of these names to a DIFFERENT `Instr`.
+    // Keeping this table's grouping exactly as written (rather than merged by arity) is what lets a
+    // reader check the two matches stay in sync by eye when a builtin is added or removed.
+    #[allow(clippy::match_same_arms)]
     let expected_arity = match name {
         "cons" | "$cons" => 2,
         "head" | "tail" | "is_empty" => 1,
@@ -299,6 +329,11 @@ fn lower_builtin_apply(ctx: &mut Ctx, id: NodeId, name: &str, args: &[Core], dst
     Ok(())
 }
 
+/// `clippy::too_many_lines`: syntax-directed lowering, one arm per `Core` variant — the length comes
+/// from the number of variants `Core` has, not from any one arm doing too much. Splitting arms into
+/// helpers would scatter a single dispatch that is easiest to audit kept together (a reader checking
+/// "does every `Core` variant lower correctly" wants one `match`, not a function per variant).
+#[allow(clippy::too_many_lines)]
 fn lower_inner(ctx: &mut Ctx, core: &Core, dst: Reg) -> Result<(), LowerError> {
     match core {
         Core::Nat(_, n) => {
@@ -490,6 +525,11 @@ fn lower_inner(ctx: &mut Ctx, core: &Core, dst: Reg) -> Result<(), LowerError> {
                 for (a, r) in args.iter().zip(&staged) {
                     lower_into(ctx, a, *r)?;
                 }
+                // Bounded the same way the params loop in `lower_function_group` is: `staged` is an
+                // actual `Vec<Reg>` sized by `args.len()`, so reaching `u32::MAX` here needs a call
+                // site with >4 billion argument expressions already parsed into `Core` — not reachable
+                // from real input (see that loop's comment for the fuller argument).
+                #[allow(clippy::cast_possible_truncation)]
                 for (i, r) in staged.iter().enumerate() {
                     ctx.emit(Instr::Mov(Reg::Arg(i as u32), *r));
                 }

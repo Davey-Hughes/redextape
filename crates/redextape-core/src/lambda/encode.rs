@@ -27,6 +27,7 @@ use crate::core::BinOp;
 use crate::lambda::term::{LambdaTerm, abs, app, var};
 
 /// Church numeral `n` = `\f.\x. fⁿ x`.
+#[must_use]
 pub fn church(n: u64) -> LambdaTerm {
     let mut body = var(0); // x
     for _ in 0..n {
@@ -36,21 +37,25 @@ pub fn church(n: u64) -> LambdaTerm {
 }
 
 /// `succ = \n.\f.\x. f (n f x)`
+#[must_use]
 pub fn succ() -> LambdaTerm {
     abs("n", abs("f", abs("x", app(var(1), app(app(var(2), var(1)), var(0))))))
 }
 
 /// `plus = \m.\n.\f.\x. m f (n f x)`
+#[must_use]
 pub fn plus() -> LambdaTerm {
     abs("m", abs("n", abs("f", abs("x", app(app(var(3), var(1)), app(app(var(2), var(1)), var(0)))))))
 }
 
 /// `mult = \m.\n.\f. m (n f)`
+#[must_use]
 pub fn mult() -> LambdaTerm {
     abs("m", abs("n", abs("f", app(var(2), app(var(1), var(0))))))
 }
 
 /// `pred = \n.\f.\x. n (\g.\h. h (g f)) (\u. x) (\u. u)`  (standard Church predecessor)
+#[must_use]
 pub fn pred() -> LambdaTerm {
     abs(
         "n",
@@ -68,41 +73,49 @@ pub fn pred() -> LambdaTerm {
 }
 
 /// `monus = \m.\n. n pred m`  (truncated subtraction: apply `pred` `n` times to `m`).
+#[must_use]
 pub fn monus() -> LambdaTerm {
     abs("m", abs("n", app(app(var(0), pred()), var(1))))
 }
 
 /// `is_zero = \n. n (\x. false) true`
+#[must_use]
 pub fn is_zero() -> LambdaTerm {
     abs("n", app(app(var(0), abs("x", fls())), tru()))
 }
 
 /// Scott/Church `true = \t.\f. t`.
+#[must_use]
 pub fn tru() -> LambdaTerm {
     abs("t", abs("f", var(1)))
 }
 
 /// Scott/Church `false = \t.\f. f`.
+#[must_use]
 pub fn fls() -> LambdaTerm {
     abs("t", abs("f", var(0)))
 }
 
 /// `not = \b. b false true`
+#[must_use]
 pub fn not() -> LambdaTerm {
     abs("b", app(app(var(0), fls()), tru()))
 }
 
 /// `and = \a.\b. a b false`
+#[must_use]
 pub fn and() -> LambdaTerm {
     abs("a", abs("b", app(app(var(1), var(0)), fls())))
 }
 
 /// Scott `nil = \n.\c. n`.
+#[must_use]
 pub fn nil() -> LambdaTerm {
     abs("n", abs("c", var(1)))
 }
 
 /// Scott `cons = \h.\t.\n.\c. c h t`.
+#[must_use]
 pub fn cons() -> LambdaTerm {
     abs("h", abs("t", abs("n", abs("c", app(app(var(0), var(3)), var(2))))))
 }
@@ -110,16 +123,19 @@ pub fn cons() -> LambdaTerm {
 /// `head = \l. l DIVERGE (\h.\t. h)` — the `nil` branch is an arbitrary closed term; the
 /// interpreter's `head(nil)` is a runtime error, and the oracle only compares programs that do not
 /// evaluate it. Use `\h.\t. h` for the cons branch.
+#[must_use]
 pub fn head() -> LambdaTerm {
     abs("l", app(app(var(0), diverge()), abs("h", abs("t", var(1)))))
 }
 
 /// `tail = \l. l DIVERGE (\h.\t. t)`
+#[must_use]
 pub fn tail() -> LambdaTerm {
     abs("l", app(app(var(0), diverge()), abs("h", abs("t", var(0)))))
 }
 
 /// `is_empty = \l. l true (\h.\t. false)`
+#[must_use]
 pub fn is_empty() -> LambdaTerm {
     abs("l", app(app(var(0), tru()), abs("h", abs("t", fls()))))
 }
@@ -143,6 +159,7 @@ fn eq() -> LambdaTerm {
 }
 
 /// The lambda-term implementing a Core binary operator.
+#[must_use]
 pub fn binop(op: BinOp) -> LambdaTerm {
     match op {
         BinOp::Add => plus(),

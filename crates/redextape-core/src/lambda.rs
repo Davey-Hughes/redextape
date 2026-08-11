@@ -34,6 +34,7 @@ pub enum LambdaRun {
 }
 
 /// Lower -> reduce. The convenience entry point for the oracle and later plans.
+#[must_use]
 pub fn run_lambda(core: &Core, cap: u64) -> LambdaRun {
     let term = match lower(core) {
         Ok(t) => t,

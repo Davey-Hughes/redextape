@@ -216,6 +216,11 @@ pub struct Compiled {
 /// A THIN WRAPPER ON PURPOSE, and it earns its place by existing at all: `analysis::classify_source`
 /// is `pub` in core and had no boundary, so §6.2's "CodeMirror's headline feature is already
 /// delivered, in Rust" was true of the function and false of anything JavaScript could call.
+// `CodeMirror` is deliberately NOT backticked above: the sentence quotes
+// docs/superpowers/specs/2026-08-06-wasm-boundary-completion-design.md §6.2 verbatim, and that
+// source has no backtick. `clippy --fix` added one and it was reverted — a quotation has to match
+// what it cites. The allow keeps `doc_markdown` from re-adding it.
+#[allow(clippy::doc_markdown)]
 pub fn classify_source(src: &str) -> Classified {
     redextape_core::analysis::classify_source(src)
 }
@@ -306,7 +311,10 @@ pub struct Session {
 /// `caps` IS THE BUDGET THE DESCRIBED RUN ALREADY SPENT, handed on so the cursor starts life with the
 /// same one. A cursor budgeted differently from the run whose outcome the session reports would stop
 /// somewhere that outcome never mentions.
-fn build_tm_leg(header: tm::TmHeader, machine: Machine, caps: tm::TmCaps) -> (TmProgram, TmCursor<Rc<Machine>>) {
+///
+/// `header` BY REFERENCE: both uses (`init`, `.width`) only ever read it, and both call sites still own
+/// their `TmHeader` afterward — there is nothing here for taking it by value to buy.
+fn build_tm_leg(header: &tm::TmHeader, machine: Machine, caps: tm::TmCaps) -> (TmProgram, TmCursor<Rc<Machine>>) {
     let init = header.init(machine.tapes);
     let width = header.width;
     let machine = Rc::new(machine);
@@ -403,8 +411,8 @@ impl Session {
                 // `Ran` and `HitCap` BOTH yield a working cursor, and that is the point of the split:
                 // a run that spent its budget is resumable through `raise_tm_cap`, so flattening it
                 // into a decline would throw away a session the user can still drive.
-                TmRun::Ran { tapes } => Ok((build_tm_leg(d.header, d.machine, caps), Some(tapes))),
-                TmRun::HitCap => Ok((build_tm_leg(d.header, d.machine, caps), None)),
+                TmRun::Ran { tapes } => Ok((build_tm_leg(&d.header, d.machine, caps), Some(tapes))),
+                TmRun::HitCap => Ok((build_tm_leg(&d.header, d.machine, caps), None)),
             },
         };
 
@@ -417,7 +425,7 @@ impl Session {
 
         Compiled {
             diagnostics,
-            session: Some(Session { core, ty, kind, lambda, initial_lambda, tm, map, final_tapes, total_steps }),
+            session: Some(Session { core, ty, lambda, initial_lambda, tm, map, final_tapes, kind, total_steps }),
         }
     }
 

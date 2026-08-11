@@ -37,10 +37,28 @@ impl RuntimeError {
 
 type EResult = Result<Value, RuntimeError>;
 
+/// Evaluate `core` under the default step budget (`DEFAULT_BUDGET`). The convenience entry point
+/// used by `run` and the tests; call `eval_with_budget` directly for a different cap.
+///
+/// # Errors
+///
+/// Returns `RuntimeError` when the program cannot finish evaluating — the step budget or
+/// `MAX_EVAL_DEPTH` recursion guard was exceeded — or when it is dynamically ill-typed: an unbound
+/// variable, a non-`Bool` `if`/`while` condition, a closure called with the wrong argument count, a
+/// call to a non-function, arithmetic on non-`Nat` operands, or `head`/`tail` of an empty list. The
+/// message names which case occurred. A caller wanting a higher step budget should call
+/// `eval_with_budget` instead.
 pub fn eval(core: &Core) -> EResult {
     eval_with_budget(core, DEFAULT_BUDGET)
 }
 
+/// Evaluate `core`, failing once more than `budget` steps have run.
+///
+/// # Errors
+///
+/// Returns `RuntimeError` under the same conditions as `eval`, using `budget` (rather than
+/// `DEFAULT_BUDGET`) as the step cap — raising `budget` avoids that particular failure but not the
+/// fixed `MAX_EVAL_DEPTH` recursion guard, which every call shares regardless of budget.
 pub fn eval_with_budget(core: &Core, budget: u64) -> EResult {
     let mut env: Env = None;
     for (name, value) in runtime_env() {
@@ -113,15 +131,15 @@ impl Evaluator {
             }
             Core::Apply(_, callee, args) => {
                 let f = self.eval(callee, env)?;
-                let mut argv = Vec::with_capacity(args.len());
+                let mut arg_values = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval(a, env)?);
+                    arg_values.push(self.eval(a, env)?);
                 }
-                self.apply(f, argv)
+                self.apply(&f, arg_values)
             }
             Core::Let { name, value, body, .. } => {
                 let v = self.eval(value, env)?;
-                let env2 = push(env, name, v);
+                let env2 = Some(push(env, name, v));
                 self.eval(body, &env2)
             }
             Core::LetRec { name, value, body, .. } => {
@@ -179,11 +197,13 @@ impl Evaluator {
         }
     }
 
-    fn apply(&mut self, callee: Value, args: Vec<Value>) -> EResult {
+    fn apply(&mut self, callee: &Value, args: Vec<Value>) -> EResult {
         // Match by reference: `Value` now has a hand-written `Drop`, so its fields cannot be moved
         // out by value. Borrowing the closure's parts is sufficient here (`env`/`body` are only
-        // cloned/borrowed) and keeps behavior identical.
-        match &callee {
+        // cloned/borrowed) and keeps behavior identical. `callee` itself is taken by reference too —
+        // its only caller (`eval_inner`'s `Apply` arm) never needs it back, but nothing here consumes
+        // it either, so a borrow is enough and avoids handing over ownership for nothing.
+        match callee {
             Value::Closure { params, body, env } => {
                 if params.len() != args.len() {
                     return Err(RuntimeError::new(format!(
@@ -194,11 +214,11 @@ impl Evaluator {
                 }
                 let mut env2 = env.clone();
                 for (p, a) in params.iter().zip(args) {
-                    env2 = push(&env2, p, a);
+                    env2 = Some(push(&env2, p, a));
                 }
                 self.eval(body, &env2)
             }
-            Value::Builtin(b) => apply_builtin(*b, args),
+            Value::Builtin(b) => apply_builtin(*b, &args),
             other => Err(RuntimeError::new(format!("attempted to call a non-function: {other:?}"))),
         }
     }
@@ -222,8 +242,8 @@ fn eval_binop(op: BinOp, x: Value, y: Value) -> EResult {
     })
 }
 
-fn apply_builtin(b: Builtin, args: Vec<Value>) -> EResult {
-    match (b, args.as_slice()) {
+fn apply_builtin(b: Builtin, args: &[Value]) -> EResult {
+    match (b, args) {
         (Builtin::Cons, [h, t]) => Ok(Value::Cons(Rc::new(h.clone()), Rc::new(t.clone()))),
         (Builtin::Head, [Value::Cons(h, _)]) => Ok((**h).clone()),
         (Builtin::Head, [Value::Nil]) => Err(RuntimeError::new("head of empty list")),
@@ -241,8 +261,11 @@ fn apply_builtin(b: Builtin, args: Vec<Value>) -> EResult {
     }
 }
 
-fn push(env: &Env, name: &str, value: Value) -> Env {
-    Some(Rc::new(Frame { name: name.to_string(), slot: Rc::new(RefCell::new(value)), parent: env.clone() }))
+/// Extend `env` with one new binding, returning the new frame. `Env` is `Option<Rc<Frame>>` because
+/// the ROOT environment is `None`; any frame `push` builds is never that root, so it returns the
+/// `Rc<Frame>` itself and callers that need an `Env` wrap it in `Some` (both call sites do).
+fn push(env: &Env, name: &str, value: Value) -> Rc<Frame> {
+    Rc::new(Frame { name: name.to_string(), slot: Rc::new(RefCell::new(value)), parent: env.clone() })
 }
 
 fn find_slot(env: &Env, name: &str) -> Option<Rc<RefCell<Value>>> {
@@ -251,7 +274,15 @@ fn find_slot(env: &Env, name: &str) -> Option<Rc<RefCell<Value>>> {
         if frame.name == name {
             return Some(frame.slot.clone());
         }
-        cur = frame.parent.clone();
+        // `clone_from` does not apply here: the `while let` above moves `cur` into `frame` each
+        // iteration, so `cur` is not a valid (initialized) place to call a `&mut self` method on —
+        // only a plain reassignment is legal on a moved-from binding. There is also no efficiency to
+        // gain: `Rc::clone` is a refcount bump, not a heap copy, so `clone_from`'s usual "reuse the
+        // existing allocation" benefit does not exist for this type either.
+        #[allow(clippy::assigning_clones)]
+        {
+            cur = frame.parent.clone();
+        }
     }
     None
 }

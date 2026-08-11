@@ -224,6 +224,10 @@
 //! `redextape-core`'s `[dependencies]` stays empty and WASM-clean: `libmimalloc-sys` is C that does
 //! not build for wasm32, and a library must not choose a global allocator for its consumers.
 
+// This probe carries no unwrap/expect/panic allow because it never trips those lints — it needs
+// only the pedantic exemption, for the same reason `clippy.toml` exempts test/example code generally.
+#![allow(clippy::pedantic)]
+
 #[cfg(not(target_arch = "wasm32"))]
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;

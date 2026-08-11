@@ -58,8 +58,9 @@ impl PartialEq for Value {
             match (a, b) {
                 (Value::Nat(x), Value::Nat(y)) => return x == y,
                 (Value::Bool(x), Value::Bool(y)) => return x == y,
-                (Value::Nil, Value::Nil) => return true,
-                (Value::Unit, Value::Unit) => return true,
+                // Both nullary and trivially self-equal; if either ever gains a payload this arm stops
+                // compiling rather than silently comparing it away.
+                (Value::Nil, Value::Nil) | (Value::Unit, Value::Unit) => return true,
                 (Value::Cons(h1, t1), Value::Cons(h2, t2)) => {
                     if h1 != h2 {
                         return false;
@@ -155,6 +156,7 @@ fn take_owned_value_children(v: &mut Value, stack: &mut Vec<Value>) {
 
 impl Value {
     /// Build a `Value` list from a slice of `Nat`s (test helper + used by `run` result decoding).
+    #[must_use]
     pub fn list_of_nats(ns: &[u64]) -> Value {
         let mut acc = Value::Nil;
         for &n in ns.iter().rev() {
@@ -168,6 +170,7 @@ impl Value {
 /// oracle (which compares it to the binary's stdout). Lists render `[a, b, c]`; `Nat`/`Bool` render
 /// plainly; `Unit` renders `()`. Non-value variants (closures/builtins/boxes) never reach here as a
 /// top-level result, but render a stable placeholder to keep this total.
+#[must_use]
 pub fn format_value(v: &Value) -> String {
     match v {
         Value::Nat(n) => n.to_string(),

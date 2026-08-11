@@ -138,7 +138,7 @@ pub trait Encoding {
     fn is_empty_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
     /// `rd <- head(field rl)`: read the pointer in `rl`, seek the cell, write its head-word into `rd`.
     /// Flows `entry -> exit` with all heads home/top on the value exit. A `nil` pointer (`rl == 0`) or a
-    /// dangling pointer has no value and SPINS to a cap (HitCap), matching λ (Ω) and the reference
+    /// dangling pointer has no value and SPINS to a cap (`HitCap`), matching λ (Ω) and the reference
     /// (Runtime); `rd` is not written. BOTH the head-word and the structural navigation follow the
     /// encoding: `Unary` walks the cell chain by counting marks, `Binary` skips whole fixed-width cells
     /// with a counted chain driven by a binary counter. (This doc previously said the navigation was
@@ -153,7 +153,7 @@ pub trait Encoding {
     /// leading `#` (origin) on entry and exit. PRECONDITION: `rd` distinct from `rv`.
     fn box_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rv: Slot, rd: Slot);
     /// `rd <- box_get(rb)`: read the value of the BOX field the pointer `rb` addresses into `rd`. A nil
-    /// pointer (`rb == 0`) or a dangling pointer has no value and SPINS to a cap (HitCap), matching λ (Ω)
+    /// pointer (`rb == 0`) or a dangling pointer has no value and SPINS to a cap (`HitCap`), matching λ (Ω)
     /// and the reference (Runtime); `rd` is not written. BOX head home (origin) on the value exit.
     /// PRECONDITION: `rd` distinct from `rb`.
     fn box_get_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rb: Slot, rd: Slot);

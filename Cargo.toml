@@ -17,10 +17,28 @@ repository = "https://git.daveynet.xyz/davey/redextape"
 # Deny is enforced by CI (`-D warnings`); keep the crate clippy-clean.
 all = "warn"
 # No library path may panic: every failure is a `Diagnostic`, a `RuntimeError`, or a typed `Err`.
-# That rule was documentation until now; these five make it mechanical. Test code panics on purpose
-# and is exempted in `clippy.toml` — read that file before adding a test that trips one of these.
+# That rule was documentation until now; these five make it mechanical FOR THOSE FIVE CONSTRUCTS —
+# they do real work, catching `unwrap`/`expect`/`panic!`/`todo!`/`unimplemented!` in library code.
+# `assert!` and `unreachable!` are also panics and remain outside it: no clippy lint bans `assert!`
+# at all, so the rule is not fully mechanical. Several `pub`-reachable library paths panic via
+# `assert!`/`unreachable!` on purpose rather than threading a typed error through a hot or purely
+# internal path; `crates/redextape-core/src/lambda/term.rs`'s `shift` is not the only one, but it
+# carries the fullest reasoning of the class, documented at that site — full compliance there would
+# require threading `Result` through a hot recursive path into `redextape-wasm` and `redextape-native`.
+# Test code panics on purpose and is exempted in `clippy.toml` — read that file before adding a test
+# that trips one of these.
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
 todo = "warn"
 unimplemented = "warn"
+# `pedantic` is enabled AS WRITTEN — no lint in it is allowed workspace-wide. Every production
+# warning was resolved on its merits rather than silenced here; see
+# docs/superpowers/specs/2026-08-10-clippy-pedantic-design.md for the 294 and their disposition.
+#
+# `priority = -1` is not load-bearing today (the five restriction lints above are in neither `all`
+# nor `pedantic`, so nothing conflicts) — it is here so that adding a per-lint `allow` later WORKS
+# rather than erroring. That matters more than usual: rust-toolchain.toml tracks unpinned `stable`,
+# and a new stable can add a pedantic lint that reddens CI with no code change. This field is the
+# one-line remedy.
+pedantic = { level = "warn", priority = -1 }

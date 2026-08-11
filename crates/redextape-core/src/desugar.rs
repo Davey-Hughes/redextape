@@ -25,6 +25,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// cell" is not the literal as a whole, though — it is the one element the cell exists for. So the i-th
 /// `cons` cell takes the i-th element's own span; `nil` keeps the literal's span, since it marks the
 /// literal's END rather than any element. See `Expr::List`'s arm in `lower_expr_at`.
+#[must_use]
 pub fn desugar_mapped(program: &Program) -> (Core, Vec<(NodeId, Span)>) {
     let mut g = NodeGen::default();
     let mut spans = Vec::new();
@@ -32,6 +33,7 @@ pub fn desugar_mapped(program: &Program) -> (Core, Vec<(NodeId, Span)>) {
     (core, spans)
 }
 
+#[must_use]
 pub fn desugar(program: &Program) -> Core {
     desugar_mapped(program).0
 }
@@ -90,13 +92,12 @@ fn lower_stmts_at(
     // A tail-less block appears only in statement (discarded) position; its value is the internal
     // unit. `Core::Unit` makes that explicit (and distinct from the literal 0). It has no source text
     // of its own, so it inherits `at`.
-    let mut acc = match tail {
-        Some(e) => lower_expr_at(g, e, spans),
-        None => {
-            let id = g.fresh();
-            spans.push((id, at));
-            Core::Unit(id)
-        }
+    let mut acc = if let Some(e) = tail {
+        lower_expr_at(g, e, spans)
+    } else {
+        let id = g.fresh();
+        spans.push((id, at));
+        Core::Unit(id)
     };
     let mut i = stmts.len();
     while i > 0 {
@@ -525,48 +526,45 @@ fn strongly_connected(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
                 counter += 1;
                 stack.push(v);
             }
-            match adj.get(v).and_then(|e| e.get(edge)).copied() {
-                Some(w) => {
-                    if let Some(frame) = frames.last_mut() {
-                        frame.1 = edge + 1;
-                    }
-                    match index.get(w).copied().flatten() {
-                        // Not yet visited: descend.
-                        None => frames.push((w, 0)),
-                        // Visited and still on the stack: a back/cross edge within this component.
-                        Some(iw) if on_stack.get(w).copied().unwrap_or(false) => {
-                            if let Some(slot) = low.get_mut(v) {
-                                *slot = (*slot).min(iw);
-                            }
-                        }
-                        // Visited and already assigned to a finished component: ignore.
-                        Some(_) => {}
-                    }
+            if let Some(w) = adj.get(v).and_then(|e| e.get(edge)).copied() {
+                if let Some(frame) = frames.last_mut() {
+                    frame.1 = edge + 1;
                 }
-                // Every edge explored: close the frame.
-                None => {
-                    frames.pop();
-                    let v_low = low.get(v).copied().unwrap_or(0);
-                    if index.get(v).copied().flatten() == Some(v_low) {
-                        // `v` roots a component: everything above it on the stack belongs to it.
-                        let mut component: Vec<usize> = Vec::new();
-                        while let Some(w) = stack.pop() {
-                            if let Some(slot) = on_stack.get_mut(w) {
-                                *slot = false;
-                            }
-                            component.push(w);
-                            if w == v {
-                                break;
-                            }
+                match index.get(w).copied().flatten() {
+                    // Not yet visited: descend.
+                    None => frames.push((w, 0)),
+                    // Visited and still on the stack: a back/cross edge within this component.
+                    Some(iw) if on_stack.get(w).copied().unwrap_or(false) => {
+                        if let Some(slot) = low.get_mut(v) {
+                            *slot = (*slot).min(iw);
                         }
-                        component.sort_unstable();
-                        out.push(component);
                     }
-                    if let Some(&(parent, _)) = frames.last()
-                        && let Some(slot) = low.get_mut(parent)
-                    {
-                        *slot = (*slot).min(v_low);
+                    // Visited and already assigned to a finished component: ignore.
+                    Some(_) => {}
+                }
+            } else {
+                // Every edge explored: close the frame.
+                frames.pop();
+                let v_low = low.get(v).copied().unwrap_or(0);
+                if index.get(v).copied().flatten() == Some(v_low) {
+                    // `v` roots a component: everything above it on the stack belongs to it.
+                    let mut component: Vec<usize> = Vec::new();
+                    while let Some(w) = stack.pop() {
+                        if let Some(slot) = on_stack.get_mut(w) {
+                            *slot = false;
+                        }
+                        component.push(w);
+                        if w == v {
+                            break;
+                        }
                     }
+                    component.sort_unstable();
+                    out.push(component);
+                }
+                if let Some(&(parent, _)) = frames.last()
+                    && let Some(slot) = low.get_mut(parent)
+                {
+                    *slot = (*slot).min(v_low);
                 }
             }
         }

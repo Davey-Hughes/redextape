@@ -31,7 +31,7 @@
 //! was fixed before any number existed: if the median `Within` span exceeds 60% of program length on
 //! more than one corpus program, a later task renders `Within` as a status line only, not a highlight.
 //! That verdict is not renegotiated here even if a number lands close to the line.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use std::io::Write;
 

@@ -15,7 +15,7 @@
 
 // Test target: `clippy.toml`'s `allow-*-in-tests` keys do not reach free helpers in a `tests/`
 // target, so the exemption is stated per target.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use std::collections::HashSet;
 

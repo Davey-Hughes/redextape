@@ -579,9 +579,8 @@ fn build_prologue<'ctx>(
     let exit = ctx.append_basic_block(func, "exit");
 
     b.position_at_end(prologue);
-    let rt_ptr = match func.get_nth_param(0) {
-        Some(BasicValueEnum::PointerValue(p)) => p,
-        _ => return Err(format!("subroutine `{}` has no `*mut Runtime` parameter", sub.name)),
+    let Some(BasicValueEnum::PointerValue(rt_ptr)) = func.get_nth_param(0) else {
+        return Err(format!("subroutine `{}` has no `*mut Runtime` parameter", sub.name));
     };
 
     // Size the `Arg` bank to every `Arg` the body references (read or write); the `Loc` bank to
@@ -628,6 +627,17 @@ fn build_prologue<'ctx>(
 
 /// Translate one subroutine into `func`'s body — the inkwell analog of
 /// `codegen::translate_subroutine`, arm for arm.
+// Same shape, same reasoning as `codegen::translate_subroutine`: one coherent state machine (a
+// single `match instr` over every `Instr` variant, each arm emitting that opcode's IR against the
+// shared `f`/`b`/`decls` state above the loop), not several concerns bundled together — splitting
+// it would scatter that shared state across multiple signatures without shrinking what a reader
+// holds at once.
+#[allow(clippy::too_many_lines)]
+// `h`/`t`/`p`/`v`/`x`/`y`/`l`/`r`/`f`/`b` follow the SAME compiler-codegen convention as
+// `codegen::translate_subroutine` and `run_asm`'s own `Instr` arms (head/tail/pointer/value/
+// left-operand/right-operand/label/register/function/builder) — arm-for-arm identical to the
+// Cranelift version, which reads the same way.
+#[allow(clippy::many_single_char_names)]
 fn translate_subroutine<'ctx>(
     ctx: &'ctx Context,
     b: &Builder<'ctx>,
@@ -822,6 +832,7 @@ fn declare_subroutines<'ctx>(
 /// need not be `'static`) — both because the generated code recurses on that stack up to the
 /// frame-size-aware depth cap, and because inkwell's `Context`/`ExecutionEngine` are not `Send`, so
 /// the module must be built *and* run on one thread.
+#[must_use]
 pub fn compile_and_run(prog: &Program, caps: Caps, opt: OptLevel) -> NativeRun {
     // Reject an absurd register index BEFORE building any function: materialising a billion-plus
     // register bank would attempt a multi-GB allocation whose failure aborts the process. Identical
@@ -939,7 +950,10 @@ fn build_and_run(prog: &Program, subs: &[Subroutine], caps: Caps, depth_cap: u64
     // `Loc`/`Arg` are fixed-size stack slots, so a `Call` clones nothing. Native recursion is bounded
     // by the frame-size-aware `depth_cap` via `rt_enter`, checked before each guarded call.
     let mut runtime = Runtime::with_depth_cap(caps, depth_cap);
-    let result = unsafe { main.call(&mut runtime) };
+    // `&raw mut`, not `&mut runtime`, so no intermediate mutable reference is materialized just to
+    // decay to the raw pointer `main`'s `*mut Runtime` parameter expects — same convention
+    // `redextape_native_rt::rt_run` uses for the identical Cranelift-side call.
+    let result = unsafe { main.call(&raw mut runtime) };
 
     if runtime.hit_cap {
         NativeRun::HitCap
@@ -977,6 +991,15 @@ fn build_and_run(prog: &Program, subs: &[Subroutine], caps: Caps, depth_cap: u64
 /// derived from it, is threaded through the `Runtime` the compiled code is CALLED with
 /// (`Runtime::with_depth_cap`, above) rather than baked into the IR; this function never constructs
 /// a `Runtime` at all, so there is nothing here for `caps` to reach.
+///
+/// # Errors
+/// Returns `Err(String)` — a human-readable message, not a typed variant, matching this function's
+/// measurement-only status (contrast `aot::emit_object`'s `AotError`) — when: `prog` has a register
+/// index at or past `MAX_REGISTERS`; `partition` cannot make `prog`'s subroutines disjoint;
+/// `host_target_machine` cannot describe the host ISA; `build_module` fails to declare, translate,
+/// or verify the IR; `optimize` fails to run the pass pipeline; or the `TargetMachine` fails to emit
+/// the post-pass module as an object. None of these are transient — a caller cannot usefully retry
+/// with the same `prog`/`opt`.
 pub fn object_bytes(prog: &Program, _caps: Caps, opt: OptLevel) -> Result<Vec<u8>, String> {
     if reg_over_cap(prog) {
         return Err(format!("register index exceeds MAX_REGISTERS ({MAX_REGISTERS})"));

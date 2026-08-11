@@ -50,7 +50,7 @@ pub enum StepBucket {
     /// So it is exactly ZERO for a program that makes no calls (measured: all three call-free cases
     /// in this module's tests), and it is the largest single bucket in a recursive one — ~25% of
     /// `sum(3)`, about 7.2k steps per return. And it SCALES: `push_frame`/`pop_frame_restore` unroll
-    /// O(n_loc^2) states over the `Loc` bank, because each field-copy re-seeks from home. A program
+    /// `O(n_loc^2)` states over the `Loc` bank, because each field-copy re-seeks from home. A program
     /// with more locals in scope across a call pays quadratically more here for the same call. That
     /// makes this bucket a lever, not a floor.
     MachineScaffold,
@@ -101,6 +101,7 @@ impl Attribution {
 /// Accumulation saturates so that a synthetic `counts` (this is a public entry point) cannot overflow
 /// a bucket into a debug-build panic; a simulator's own counts sum to at most `caps.steps`, so it
 /// never comes up on the real path.
+#[must_use]
 pub fn attribute_steps(
     counts: &[u64],
     state_origins: &[Option<usize>],
@@ -228,6 +229,15 @@ fn parse_core(src: &str) -> Result<Core, LowerError> {
 /// describes the same machine `run_tm` would actually run, not a differently-lowered one. Likewise
 /// the encoding and caps: every `run_tm` call site in the workspace passes `&Unary::default()` (the only
 /// `Encoding` impl) and `DEFAULT_CAPS`.
+///
+/// # Errors
+///
+/// `Err(LowerError::Unsupported { node: 0, .. })` if `src` does not parse (`node: 0` because there is
+/// no tree to blame). Otherwise the error is whatever `defunc`/`lower_asm` reported while lowering the
+/// desugared program — see `lower_mapped`'s doc for the exact sequence and `defunc_mapped`'s `# Errors`
+/// for what each variant means. A caller cannot recover an `Attribution` for a program that fails
+/// here; a program `lower_tm_mapped` refuses to lay out (over `MAX_SLOTS`/`MAX_FRAME_LOC`/
+/// `MAX_MUL_INSTRS`) is NOT an error — it returns `Ok` with `Attribution::unrepresentable()`.
 pub fn attribute(src: &str) -> Result<Attribution, LowerError> {
     attribute_at(src, &Unary::default())
 }
@@ -243,6 +253,11 @@ pub fn attribute(src: &str) -> Result<Attribution, LowerError> {
 /// A program whose values do not fit `enc` halts in the overflow guard, which is a real halt, so the
 /// histogram it produces describes a run that computed nothing. Callers must pass a width the program
 /// fits (`run_tm_fitted` reports one).
+///
+/// # Errors
+///
+/// Exactly `attribute`'s — see that function's `# Errors` section. `enc` plays no part in whether this
+/// returns `Err`; it only changes the resulting histogram's step counts.
 pub fn attribute_at(src: &str, enc: &dyn Encoding) -> Result<Attribution, LowerError> {
     let core = parse_core(src)?;
     Ok(match lower_mapped(&core, enc)? {

@@ -55,7 +55,7 @@
 // Test target: `clippy.toml`'s `allow-*-in-tests` keys reach a `#[test]` function's own body but not
 // free helpers in a `tests/` target (its doc comment explains why), and the enumeration below is all
 // free helpers. Exemption stated per target, same idiom as `lambda_sharing.rs`.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use std::collections::HashSet;
 use std::rc::Rc;

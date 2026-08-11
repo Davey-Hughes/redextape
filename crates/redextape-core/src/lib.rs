@@ -5,6 +5,14 @@
 //! interpreter, the λ backend, and the TM backend each independently produce a `Value` (the
 //! three-way oracle).
 
+// Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
+// unwrap/expect/panic set: an assertion is a deliberate panic, and a probe that casts a `u64` step
+// count to `f64` to print a ratio is not a defect. `cfg_attr` rather than the 36 module-level
+// attributes this crate's own inline `#[cfg(test)]` modules would otherwise need — under
+// `--all-targets` each lib compiles twice, and `cfg(test)` holds only in the test-harness pass, so
+// production warnings still surface from the other one.
+#![cfg_attr(test, allow(clippy::pedantic))]
+
 pub mod analysis;
 pub mod ast;
 pub mod core;
@@ -41,6 +49,7 @@ pub struct Analysis {
 
 /// Parse, typecheck, and desugar `src`, collecting every static diagnostic. `core` is `Some` only
 /// when there are no error-severity diagnostics.
+#[must_use]
 pub fn analyze(src: &str) -> Analysis {
     let (program, mut diagnostics) = parser::parse(src);
     let Some(program) = program else {
@@ -62,6 +71,12 @@ pub enum RunError {
 }
 
 /// End-to-end: analyze then evaluate. The convenience entry point for the CLI and tests.
+///
+/// # Errors
+///
+/// Returns `RunError::Static` if `src` fails to parse or typecheck — the diagnostics say why, and no
+/// evaluation is attempted — or `RunError::Runtime` if evaluation itself faults (the step budget,
+/// `head`/`tail` of an empty list, or any other dynamic error `interp::eval` can raise).
 pub fn run(src: &str) -> Result<value::Value, RunError> {
     let analysis = analyze(src);
     match analysis.core {

@@ -36,7 +36,7 @@
 //! totals plus the last non-`None` step's index (to see whether the tail is uniformly `None`), and
 //! `[TRAJ]` the tagged-App count at step 0 and the 25th/50th/75th/100th percentile step (to see whether
 //! it decays monotonically).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use std::collections::HashSet;
 use std::io::Write;

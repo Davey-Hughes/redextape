@@ -15,6 +15,7 @@ use crate::token::{Token, TokenKind};
 /// how many tokens the program contains.
 pub const MAX_TOKENS: usize = 100_000;
 
+#[must_use]
 pub fn parse(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
     let (tokens, mut diags) = lex(src);
     if !diags.is_empty() {

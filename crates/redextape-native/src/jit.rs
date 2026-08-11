@@ -48,6 +48,7 @@ fn internal_error(msg: impl std::fmt::Display) -> NativeRun {
 /// `partition` failures surface as `NativeRun::LowerError`. Everything else — compilation and the
 /// run itself — happens on a dedicated big-stack thread (`RUN_STACK_SIZE`, a scoped thread so the
 /// borrowed `prog`/`subs` need not be `'static`); its result is joined back and returned.
+#[must_use]
 pub fn compile_and_run(prog: &Program, caps: Caps, opt: OptLevel) -> NativeRun {
     // Reject an absurd register index BEFORE building any function: materialising a billion-plus
     // register `Variable` bank would attempt a multi-GB allocation whose failure aborts the process.
@@ -210,7 +211,7 @@ fn build_and_run(prog: &Program, subs: &[Subroutine], caps: Caps, opt: OptLevel)
     // before each guarded call — so a fat-frame program returns `HitCap` long before this reserved
     // stack overflows (no process abort), while small-frame recursion still runs to `caps.stack`.
     let mut runtime = Runtime::with_depth_cap(caps, native_depth_cap(prog, subs, caps));
-    let result = main(&mut runtime);
+    let result = main(&raw mut runtime);
 
     if runtime.hit_cap {
         NativeRun::HitCap

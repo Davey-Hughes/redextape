@@ -9,6 +9,7 @@ use crate::value::{Builtin, Value};
 pub const BUILTIN_NAMES: [&str; 5] = ["nil", "cons", "head", "tail", "is_empty"];
 
 /// The initial type environment: `name -> polymorphic scheme`.
+#[must_use]
 pub fn type_env() -> Vec<(String, Scheme)> {
     // Type variable 0 stands for the list element type `a`; each scheme quantifies over it.
     let a = || Ty::Var(0);
@@ -23,6 +24,7 @@ pub fn type_env() -> Vec<(String, Scheme)> {
 }
 
 /// The initial runtime environment: `name -> builtin value`.
+#[must_use]
 pub fn runtime_env() -> Vec<(String, Value)> {
     vec![
         ("nil".into(), Value::Nil),

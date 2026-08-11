@@ -6,6 +6,14 @@
 //! design: the crate is deliberately WASM-clean. A separate crate keeps that invariant intact while
 //! still letting `redextape-core` and `redextape-native` share one definition.
 
+// Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
+// unwrap/expect/panic set: an assertion is a deliberate panic, and a probe that casts a `u64` step
+// count to `f64` to print a ratio is not a defect. This crate has no inline `#[cfg(test)]` module of
+// its own — it is itself a test-only helper library, consumed by other crates' tests, not a holder
+// of tests — so there is no module-level attribute for `cfg_attr` to stand in for here; kept for
+// consistency with the other crates in this workspace, which do have inline test modules.
+#![cfg_attr(test, allow(clippy::pedantic))]
+
 use proptest::prelude::*;
 
 /// The first-order expression-generator shape shared by four call sites, parameterised by its LEAF

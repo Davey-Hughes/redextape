@@ -49,7 +49,9 @@ use crate::tm::machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
 use crate::{Diagnostic, Span};
 
 /// One read/write entry: `*` for the wildcard (read) / unchanged (write) marker, else the symbol.
-fn write_sym(out: &mut String, spans: &mut Classified, s: &Option<Symbol>) {
+/// Takes `s` by value: `Option<Symbol>` is `Copy` (`Symbol` is `char`), so passing the 4-byte value is
+/// cheaper than a reference to it (`clippy::trivially_copy_pass_by_ref`/`clippy::ref_option`).
+fn write_sym(out: &mut String, spans: &mut Classified, s: Option<Symbol>) {
     let mut buf = [0u8; 4];
     let text: &str = match s {
         None => "*",
@@ -64,7 +66,7 @@ fn write_syms(out: &mut String, spans: &mut Classified, v: &[Option<Symbol>]) {
         if i > 0 {
             out.push(' ');
         }
-        write_sym(out, spans, s);
+        write_sym(out, spans, *s);
     }
 }
 
@@ -96,6 +98,7 @@ fn write_state_name(out: &mut String, spans: &mut Classified, m: &Machine, id: u
 /// Render `m` as the readable TM text form, with NO header. Byte-identical to what this function has
 /// always emitted — a machine printed without a header must stay exactly as readable, and as
 /// parseable, as it was before headers existed.
+#[must_use]
 pub fn print_tm(m: &Machine) -> String {
     print_tm_mapped(m).0
 }
@@ -103,16 +106,19 @@ pub fn print_tm(m: &Machine) -> String {
 /// Render `m` with `h`'s directives between `start` and the states. The result is a complete,
 /// self-describing `.tm` file: a reader can build the initial configuration and simulate it with no
 /// knowledge of this project, and decode the answer given the encoding implementations.
+#[must_use]
 pub fn print_tm_with(m: &Machine, h: &TmHeader) -> String {
     print_tm_with_mapped(m, h).0
 }
 
 /// `print_tm`, plus a class per span of the produced text.
+#[must_use]
 pub fn print_tm_mapped(m: &Machine) -> (String, Classified) {
     print_tm_inner(m, None)
 }
 
 /// `print_tm_with`, plus a class per span of the produced text — header directives included.
+#[must_use]
 pub fn print_tm_with_mapped(m: &Machine, h: &TmHeader) -> (String, Classified) {
     print_tm_inner(m, Some(h))
 }
@@ -230,7 +236,7 @@ fn parse_rule_line(line: &str, span: Span) -> Result<RawRule, Diagnostic> {
     let (write_s, rest) = bracket(rest, span)?;
     let rest = rest.trim_start().strip_prefix(',').ok_or_else(|| err(span, "expected `,`"))?;
     let rest = rest.trim_start().strip_prefix("move").ok_or_else(|| err(span, "expected `move`"))?;
-    let (move_s, rest) = bracket(rest, span)?;
+    let (moves_s, rest) = bracket(rest, span)?;
     let rest = rest.trim_start().strip_prefix(',').ok_or_else(|| err(span, "expected `,`"))?;
     let goto = rest.trim_start().strip_prefix("goto").ok_or_else(|| err(span, "expected `goto`"))?.trim();
     if goto.is_empty() {
@@ -238,7 +244,10 @@ fn parse_rule_line(line: &str, span: Span) -> Result<RawRule, Diagnostic> {
     }
     let read = read_s.split_whitespace().map(parse_sym).collect();
     let write = write_s.split_whitespace().map(parse_sym).collect();
-    let moves = move_s
+    // Named `moves_s` (not `move_s`) to stay clear of `moves` below — `clippy::similar_names` flagged
+    // the original `move_s`/`moves` pair, and this keeps the `<field>_s` (raw bracket text) vs
+    // `<field>` (parsed value) convention that `read_s`/`write_s` already use.
+    let moves = moves_s
         .split_whitespace()
         .map(parse_move)
         .collect::<Option<Vec<_>>>()
@@ -268,6 +277,7 @@ fn header_position(key: &str, states: &[RawState]) -> Result<(), String> {
 /// aesthetic preference: `parse_tm` MUST be taught to skip header directives regardless, or it hits
 /// its unknown-line error path and rejects any file carrying one. Given that it must change, having
 /// it delegate removes the failure mode where two parsers drift.
+#[must_use]
 pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
     let (m, _, ds) = parse_tm_full(src);
     (m, ds)
@@ -277,6 +287,15 @@ pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
 /// panics.
 ///
 /// A `None` header means the file carried none, which is NOT an error — see `HeaderParts::finish`.
+///
+/// `clippy::too_many_lines`: this is one coherent per-line dispatch loop over a flat grammar (the
+/// module doc says so explicitly — "Iterative, no recursion"), sharing six mutable accumulators
+/// (`diags`, `tapes`, `start_name`, `states`, `header`, `offset`) across every line kind. Splitting it
+/// would mean threading all six through new function boundaries for no gain in clarity — the loop
+/// body's length comes from the number of line kinds the grammar has, not from doing too much in one
+/// place.
+#[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagnostic>) {
     let mut diags: Vec<Diagnostic> = Vec::new();
     let mut tapes: Option<usize> = None;
@@ -376,6 +395,13 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
     // Resolve names -> ids (definition order). Owned keys, so it does not borrow `states` and the
     // final builder can consume `states` freely. (Duplicate names were diagnosed above; if any exist
     // the error gate below returns `None` before this map is used to build.)
+    // Bounded by `src.len()`, not by any explicit cap: `states` holds one entry per `state <name>:`
+    // LINE actually present in `src`, which `parse_tm_full` takes as a single in-memory `&str` up
+    // front (no streaming) — so reaching `StateId::MAX` (u32, ~4.29 billion) states requires a source
+    // text of tens of GB already resident in memory, not a compact trigger for a disproportionate
+    // allocation the way `tapes N` is (see `build::MAX_TAPES`'s doc for that distinction). No caller in
+    // this tree can construct that input.
+    #[allow(clippy::cast_possible_truncation)]
     let ids: std::collections::HashMap<String, StateId> =
         states.iter().enumerate().map(|(i, s)| (s.name.clone(), i as StateId)).collect();
     for rs in &states {
@@ -388,18 +414,16 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
             }
         }
     }
-    let start = match &start_name {
-        Some((name, span)) => match ids.get(name).copied() {
-            Some(id) => id,
-            None => {
-                diags.push(err(*span, format!("unknown start state `{name}`")));
-                0
-            }
-        },
-        None => {
-            diags.push(err(Span { start: 0, end: 0 }, "missing `start <name>`"));
+    let start = if let Some((name, span)) = &start_name {
+        if let Some(id) = ids.get(name).copied() {
+            id
+        } else {
+            diags.push(err(*span, format!("unknown start state `{name}`")));
             0
         }
+    } else {
+        diags.push(err(Span { start: 0, end: 0 }, "missing `start <name>`"));
+        0
     };
 
     if diags.iter().any(|d| d.severity == Severity::Error) {

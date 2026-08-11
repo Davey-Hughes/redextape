@@ -33,6 +33,7 @@ pub struct Tape {
 
 impl Tape {
     /// A tape seeded with `init` left-to-right (head at the leftmost cell, or blank if empty).
+    #[must_use]
     pub fn new(init: &[Symbol]) -> Tape {
         let mut it = init.iter().copied();
         let head = it.next().unwrap_or(BLANK);
@@ -66,6 +67,7 @@ impl Tape {
     }
 
     /// Materialize as `(contents left-to-right, head index)`.
+    #[must_use]
     pub fn snapshot(&self) -> (Vec<Symbol>, usize) {
         let mut cells = self.left.clone();
         let head = cells.len();
@@ -77,6 +79,7 @@ impl Tape {
     /// The head's index into the tape *as currently materialized* — `left.len()` cells lie to its
     /// left. O(1), unlike `snapshot`, which clones the whole tape before computing the same value; a
     /// per-step caller (`viewmodel::TmState::window`) cannot pay that cost just to learn this index.
+    #[must_use]
     pub fn head_index(&self) -> usize {
         self.left.len()
     }
@@ -96,6 +99,7 @@ impl Tape {
     /// Returns `(window, window_start)`, where `window_start` is the index of `window[0]` in the same
     /// materialized-tape coordinates as `head_index` — so `head_index() - window_start` is always the
     /// head's position within the returned window.
+    #[must_use]
     pub fn window(&self, radius: usize) -> (Vec<Symbol>, usize) {
         let left_len = self.left.len();
         let left_start = left_len.saturating_sub(radius);
@@ -128,6 +132,7 @@ impl Tape {
     /// centred on the head: `left` is already in natural left-to-right order, the head is the single
     /// cell at index `left.len()`, and `right` is the mirror image and so is reversed — an index `i`
     /// past the head reads `right[right.len() - (i - left.len())]`, which descends as `i` ascends.
+    #[must_use]
     pub fn slice(&self, from: usize, to: usize) -> Vec<Symbol> {
         let len = self.cells();
         let (from, to) = (from.min(len), to.min(len));
@@ -265,6 +270,7 @@ fn run(
 }
 
 /// Simulate to a halt or a cap, without retaining the step trace.
+#[must_use]
 pub fn simulate(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<Tape>, Status) {
     let (tapes, _final, status, _steps) = run(m, init, caps, None, None, None);
     (tapes, status)
@@ -278,6 +284,7 @@ pub fn simulate(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<Tape>, St
 /// THE COUNT IS REPORTED HERE RATHER THAN BY A FIFTH WRAPPER, because it is a fact about the run
 /// that every caller could use and none could previously reach — `run` has always counted it to
 /// enforce the step cap.
+#[must_use]
 pub fn simulate_final(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<Tape>, StateId, Status, u64) {
     run(m, init, caps, None, None, None)
 }
@@ -310,6 +317,7 @@ pub fn simulate_trace(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> Trace {
 /// The counting analogue of `simulate_trace`, and the reason it exists: a trace records tapes per
 /// step, so counting a 178k-step program through it would allocate 178k tape snapshots. This
 /// allocates one `u64` per state, once.
+#[must_use]
 pub fn simulate_counts(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<u64>, Status) {
     let mut counts = vec![0u64; m.states.len()];
     let (_tapes, _final, status, _steps) = run(m, init, caps, None, Some(&mut counts), None);

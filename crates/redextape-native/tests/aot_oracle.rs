@@ -1,7 +1,7 @@
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
 // `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 #![cfg(feature = "cranelift")]
 //! The AOT oracle leg (B1): compile a program all the way through `emit_object` -> `link_executable`
 //! into a REAL standalone native binary, run that binary as a subprocess, and check its stdout + exit

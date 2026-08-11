@@ -1,5 +1,16 @@
 //! The native backend: Core -> register-asm -> machine code (JIT/AOT via Cranelift, or JIT via
 //! LLVM), a fourth oracle leg with two swappable codegen backends behind the `Codegen` seam.
+
+// Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
+// unwrap/expect/panic set: an assertion is a deliberate panic, and a probe that casts a `u64` step
+// count to `f64` to print a ratio is not a defect. `cfg_attr` rather than 54 module-level attributes
+// — under `--all-targets` each lib compiles twice, and `cfg(test)` holds only in the test-harness
+// pass, so production warnings still surface from the other one.
+//
+// This ALSO covers the four `#[cfg(all(test, feature = "..."))]` modules in redextape-native that
+// clippy.toml's header calls out as unreachable by clippy's own in-test detection: that limitation
+// is specific to clippy's `is_in_test` heuristic, and this is ordinary `cfg` evaluation.
+#![cfg_attr(test, allow(clippy::pedantic))]
 use redextape_core::core::{Core, NodeId};
 use redextape_core::tm::{AsmOutcome, Caps, LowerError};
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
@@ -63,6 +74,10 @@ impl std::error::Error for AotError {}
 
 /// Without the `cranelift` feature there is no codegen backend to emit an object file; report that
 /// as `Unsupported` (mirroring how `run_native` stubs) rather than failing to build the crate.
+///
+/// # Errors
+/// Always returns `AotError::Unsupported` — this build has no `cranelift` feature, so there is no
+/// codegen to run. Caller: rebuild with `--features cranelift` (the default) to emit an object.
 #[cfg(not(feature = "cranelift"))]
 pub fn emit_object(
     _prog: &redextape_core::tm::Program,
@@ -101,6 +116,10 @@ impl Default for LinkOptions {
 
 /// Without the `cranelift` feature there is no linker driver to invoke; report that as
 /// `Unsupported` (mirroring `emit_object`'s stub) rather than failing to build the crate.
+///
+/// # Errors
+/// Always returns `AotError::Unsupported` — this build has no `cranelift` feature, so there is no
+/// object to link. Caller: rebuild with `--features cranelift` (the default) to link an executable.
 #[cfg(not(feature = "cranelift"))]
 pub fn link_executable(_obj: &[u8], _out: &std::path::Path, _opts: &LinkOptions) -> Result<(), AotError> {
     Err(AotError::Unsupported("redextape-native built without the `cranelift` feature".into()))
@@ -197,6 +216,7 @@ pub enum Codegen {
 /// in, so lowering to `Program` is always worth attempting first; each match arm then runs its own
 /// backend if compiled in, or reports `unsupported(..)` otherwise.
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
+#[must_use]
 pub fn run_native_with(core: &Core, caps: Caps, codegen: Codegen) -> NativeRun {
     let prog = match lower_program(core) {
         Ok(p) => p,
@@ -231,6 +251,7 @@ pub fn run_native_with(core: &Core, caps: Caps, codegen: Codegen) -> NativeRun {
 /// Neither backend is compiled in: there is no codegen to lower a `Program` for, so this variant
 /// skips `lower_program` entirely and reports `unsupported(..)` for whichever backend was asked for.
 #[cfg(not(any(feature = "cranelift", feature = "llvm")))]
+#[must_use]
 pub fn run_native_with(_core: &Core, caps: Caps, codegen: Codegen) -> NativeRun {
     let _ = caps;
     match codegen {
@@ -245,9 +266,10 @@ pub fn run_native_with(_core: &Core, caps: Caps, codegen: Codegen) -> NativeRun 
     }
 }
 
-/// Lower `core` (reusing lower_asm/defunc), JIT-compile, and run on the Cranelift backend at the
+/// Lower `core` (reusing `lower_asm`/`defunc`), JIT-compile, and run on the Cranelift backend at the
 /// default optimization level. Panic-free, bounded by `caps`. Exactly
 /// `run_native_with(core, caps, Codegen::Cranelift { opt: OptLevel::default() })`.
+#[must_use]
 pub fn run_native(core: &Core, caps: Caps) -> NativeRun {
     run_native_with(core, caps, Codegen::Cranelift { opt: OptLevel::default() })
 }

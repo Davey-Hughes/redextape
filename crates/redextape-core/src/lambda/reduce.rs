@@ -221,6 +221,7 @@ pub enum Owner {
 impl Owner {
     /// The `NodeId` under either claim, for a consumer that only needs to know WHICH construct.
     /// A consumer that renders the two differently must match on the variant instead.
+    #[must_use]
     pub fn node(&self) -> Option<NodeId> {
         match self {
             Owner::Exact(id) | Owner::Within(id) => Some(*id),
@@ -236,6 +237,7 @@ impl Owner {
 /// regardless; carrying "the innermost tagged node passed so far" down that walk costs one
 /// `Option<NodeId>` copy per level, on a path measured at mean 9.3 and max 30. There is no second
 /// traversal and no allocation.
+#[must_use]
 pub fn reduce_step(t: &LambdaTerm) -> Option<(LambdaTerm, Path, Owner)> {
     reduce_step_go(t, None)
 }
@@ -300,6 +302,7 @@ fn reduce_step_go(t: &LambdaTerm, enclosing: Option<NodeId>) -> Option<(LambdaTe
 /// statuses across 256 generated programs and ten curated shapes. The guarantee moved from "there is
 /// only one" to "there are two and a gate holds them equal"; a slice that deletes that gate reintroduces
 /// exactly the hazard the old sentence was avoiding.
+#[must_use]
 pub fn reduce_trace(t: &LambdaTerm, cap: u64) -> Trace {
     let mut cursor = crate::trace::LambdaCursor::new(t, cap);
     let mut steps = Vec::new();
@@ -315,6 +318,11 @@ pub fn reduce_trace(t: &LambdaTerm, cap: u64) -> Trace {
             Some(crate::trace::StepEvent::Beta { redex, owner: _ }) => steps.push(Step { term: before, redex }),
             // Unreachable in practice: a `LambdaCursor` only ever emits `Beta`. Stopping here returns a
             // well-formed partial trace if that ever changes, rather than panicking on a library path.
+            // Kept apart from `None`'s arm rather than merged, even though both `break` today: this one
+            // is "an event kind `LambdaCursor` doesn't currently emit" (a forward-compat safety net),
+            // `None`'s is "the cursor is genuinely done" — different situations that share a body only
+            // by accident of `LambdaCursor` having one variant today.
+            #[allow(clippy::match_same_arms)]
             Some(_) => break,
             None => break,
         }
@@ -344,6 +352,7 @@ pub fn reduce_trace(t: &LambdaTerm, cap: u64) -> Trace {
 /// required, not chosen (see this module's own doc comment for the three independent reasons).
 ///
 /// Full record: `docs/superpowers/specs/2026-08-02-lambda-reduction-context-zipper-design.md`.
+#[must_use]
 pub fn reduce_to_normal_form(t: &LambdaTerm, cap: u64) -> (LambdaTerm, Status) {
     let mut cursor = crate::trace::ZipperCursor::new(t, cap);
     while cursor.next().is_some() {}

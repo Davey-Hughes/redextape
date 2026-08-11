@@ -82,6 +82,19 @@ fn serialize_config(caps: Caps, depth_cap: u64, ty: &Ty) -> Result<Vec<u8>, AotE
 /// debuggability), defines a local `redextape_config` data object, and imports `rt_run` plus the
 /// `rt_*` runtime helpers — all resolved at link time (Task 6). A non-value `ty`, an over-cap
 /// register index, or a partition failure is returned as the corresponding `AotError`, not a panic.
+///
+/// # Errors
+/// - `AotError::Unsupported` — `ty` is `Fun`/`Var` (no runtime representation to print), or `prog`
+///   has a register index at or past `MAX_REGISTERS`. Caller: reject the program before emission;
+///   this is a property of `prog`/`ty`, not a transient failure.
+/// - `AotError::Lower` — `analysis::partition` could not partition `prog` into disjoint
+///   subroutines (see its own `# Errors`). Caller: `prog` is malformed; there is nothing to retry.
+/// - `AotError::Codegen` — the shared Cranelift codegen (`codegen::translate_subroutine`) failed
+///   translating a subroutine. Caller: treat as a compiler bug in `prog`'s lowering, not a
+///   recoverable condition.
+/// - `AotError::Object` — ISA setup or Cranelift `Module`/`ObjectBuilder` construction, symbol
+///   declaration, or final `emit()` failed. Caller: usually an environment problem (unsupported
+///   host ISA); retrying with the same inputs will not help.
 pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result<Vec<u8>, AotError> {
     // Reject a non-value result type up front (before building any IR) so a `Fun`/`Var` program
     // fails cleanly rather than doing codegen work it would only discard.
@@ -130,6 +143,11 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result
     // CONFIG data object: `caps` + the frame-size-aware `depth_cap` + the result `ty`.
     let depth_cap = native_depth_cap(prog, &subs, caps);
     let config = serialize_config(caps, depth_cap, ty)?;
+    // `config` is `serialize_config`'s own output: 32 bytes of `Caps`/`depth_cap` plus a handful of
+    // `Ty` tag bytes (`serialize_ty`, one byte per nesting level of a hand-written program's result
+    // type) — nowhere near `i64::MAX`. This is the compile-time immediate `rt_run`'s ABI reads back
+    // as `config_len: u64` (ambient widening on the read side, not a Rust-side check on this one).
+    #[allow(clippy::cast_possible_wrap)]
     let config_len = config.len() as i64;
     let config_id = module
         .declare_data("redextape_config", Linkage::Local, false, false)
@@ -272,9 +290,10 @@ const RT_STATICLIB: &str = "libredextape_native_rt.a";
 /// re-checks once; if it's still missing, returns `AotError::NoStaticlib`. Total: a failure to
 /// locate or build the staticlib is always a returned error, never a panic.
 fn locate_staticlib() -> Result<std::path::PathBuf, AotError> {
-    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("target"));
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR").map_or_else(
+        || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("target"),
+        std::path::PathBuf::from,
+    );
 
     let find = || ["debug", "release"].into_iter().map(|p| target_dir.join(p).join(RT_STATICLIB)).find(|p| p.is_file());
 
@@ -297,6 +316,16 @@ fn locate_staticlib() -> Result<std::path::PathBuf, AotError> {
 /// adds `-Wl,-s`. If the selected non-default linker fails, falls back to one retry with the
 /// platform's default linker before giving up. Best-effort: a missing `cc`/linker/staticlib or a
 /// failing link is a returned `AotError` (`NoLinker`/`NoStaticlib`/`Link`), never a panic.
+///
+/// # Errors
+/// - `AotError::NoLinker` — no `cc` (or `$CC`) found on `$PATH`. Caller: install a C toolchain, or
+///   point `$CC` at one; there is nothing this function can fall back to.
+/// - `AotError::NoStaticlib` — `libredextape_native_rt.a` could not be found or built
+///   (`locate_staticlib`). Caller: build `redextape-native-rt` first, or check `$CARGO_TARGET_DIR`.
+/// - `AotError::Link` — writing `obj` to a temp `.o` next to `out` failed (disk/permissions), or
+///   the selected linker ran and reported failure (and, if a non-default linker was selected, the
+///   default-linker retry also failed too). Caller: the message carries the underlying `io::Error`
+///   or `cc`'s own stderr, whichever applies.
 pub fn link_executable(obj: &[u8], out: &std::path::Path, opts: &LinkOptions) -> Result<(), AotError> {
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".to_string());
     if !on_path(&cc) {

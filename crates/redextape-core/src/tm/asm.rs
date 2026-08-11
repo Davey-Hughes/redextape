@@ -65,6 +65,7 @@ pub struct Program {
 
 impl Program {
     /// The `code` index a label precedes, or `None` if undefined.
+    #[must_use]
     pub fn label_index(&self, name: &str) -> Option<usize> {
         self.labels.iter().find(|(n, _)| n == name).map(|(_, i)| *i)
     }
@@ -146,12 +147,14 @@ fn instr_parts(i: &Instr) -> (&'static str, Vec<Operand<'_>>) {
 }
 
 /// Render a `Program` as the readable assembly listing (labels at column 0, instructions indented).
+#[must_use]
 pub fn print_asm(prog: &Program) -> String {
     print_asm_mapped(prog).0
 }
 
 /// `print_asm`, plus a class per span of the produced text. Spans are pushed as each piece is written,
 /// so offsets are exact by construction — nothing re-scans the output.
+#[must_use]
 pub fn print_asm_mapped(prog: &Program) -> (String, crate::analysis::Classified) {
     use crate::analysis::TokenClass as C;
     let mut out = String::new();
@@ -323,6 +326,12 @@ fn instr_reg_over_cap(i: &Instr) -> bool {
 }
 
 /// Execute `prog` starting at index 0, bounded by `caps`. Never panics, never hangs.
+///
+/// `clippy::too_many_lines`: one `match instr` arm per `Instr` variant, executing the interpreter's
+/// fetch-decode-execute loop — the length tracks `Instr`'s variant count, not any one arm's
+/// complexity. Splitting the loop body out would separate the dispatch from the loop that drives it,
+/// the opposite of easier to follow.
+#[allow(clippy::too_many_lines)]
 pub fn run_asm(prog: &Program, caps: Caps) -> AsmRun {
     // Guard against absurd register indices before running: an unbounded `Reg::Loc(n)`/`Reg::Arg(n)`
     // would make `grow_set` attempt a multi-GB `Vec::resize`, whose allocation failure aborts the
@@ -430,8 +439,12 @@ pub fn run_asm(prog: &Program, caps: Caps) -> AsmRun {
                 if p == 0 {
                     return AsmRun::Fault("head of empty list".to_string());
                 }
-                // A non-null pointer past the heap end is a dangling pointer: fault, never index.
-                let Some(&(h, _)) = vm.heap.get((p - 1) as usize) else {
+                // A non-null pointer past the heap end is a dangling pointer: fault, never index. `p`
+                // is a register value a program can set to any `u64` (an `Li` immediate, or arithmetic
+                // over one), so `p - 1` may not fit `usize` on a 32-bit target; `try_from` routes that
+                // case to the same fault as an in-range-but-past-the-end pointer, rather than
+                // truncating into a wrong, in-range index that would read the wrong heap cell.
+                let Some(&(h, _)) = usize::try_from(p - 1).ok().and_then(|idx| vm.heap.get(idx)) else {
                     return AsmRun::Fault("head of invalid list pointer".to_string());
                 };
                 vm.write(*rd, h);
@@ -442,7 +455,9 @@ pub fn run_asm(prog: &Program, caps: Caps) -> AsmRun {
                 if p == 0 {
                     return AsmRun::Fault("tail of empty list".to_string());
                 }
-                let Some(&(_, t)) = vm.heap.get((p - 1) as usize) else {
+                // Same truncation hazard as `Head` above, and the same fix: never let a `p` that does
+                // not fit `usize` alias into a small, in-range index.
+                let Some(&(_, t)) = usize::try_from(p - 1).ok().and_then(|idx| vm.heap.get(idx)) else {
                     return AsmRun::Fault("tail of invalid list pointer".to_string());
                 };
                 vm.write(*rd, t);
@@ -468,7 +483,8 @@ pub fn run_asm(prog: &Program, caps: Caps) -> AsmRun {
                 if p == 0 {
                     return AsmRun::Fault("box_get of null handle".to_string());
                 }
-                let Some(&v) = vm.boxes.get((p - 1) as usize) else {
+                // Same truncation hazard as `Head`/`Tail` above.
+                let Some(&v) = usize::try_from(p - 1).ok().and_then(|idx| vm.boxes.get(idx)) else {
                     return AsmRun::Fault("box_get of invalid handle".to_string());
                 };
                 vm.write(*rd, v);
@@ -480,7 +496,8 @@ pub fn run_asm(prog: &Program, caps: Caps) -> AsmRun {
                     return AsmRun::Fault("box_set of null handle".to_string());
                 }
                 let v = vm.read(*rv);
-                let Some(slot) = vm.boxes.get_mut((p - 1) as usize) else {
+                // Same truncation hazard as `Head`/`Tail`/`BoxGet` above.
+                let Some(slot) = usize::try_from(p - 1).ok().and_then(|idx| vm.boxes.get_mut(idx)) else {
                     return AsmRun::Fault("box_set of invalid handle".to_string());
                 };
                 *slot = v;
@@ -492,10 +509,17 @@ pub fn run_asm(prog: &Program, caps: Caps) -> AsmRun {
 
 /// Decode a completed run's outcome to a `Value`, guided by the *shape* of `expected`. Returns the
 /// actual decoded value (equal to `expected` iff the machine computed the right answer), or `None`.
+#[must_use]
 pub fn decode_asm(outcome: &AsmOutcome, expected: &Value) -> Option<Value> {
     decode_word(outcome.result, &outcome.heap, expected)
 }
 
+/// `clippy::similar_names`: flags the local `head` against the `heap` parameter. Both are the
+/// established domain terms (a cons cell's head; the HEAP tape/table) and neither can rename without
+/// losing that — `head` least of all, since `tm::decode::decode_word` mirrors this function on
+/// purpose (see its doc: "Mirrors `asm.rs::decode_word`") and a reader checking the two stay in step
+/// wants matching local names, not divergent ones.
+#[allow(clippy::similar_names)]
 fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value> {
     match expected {
         Value::Nat(_) => Some(Value::Nat(word)),
@@ -515,7 +539,12 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
             if word == 0 {
                 return None; // expected a cons, got nil
             }
-            let &(h, t) = heap.get((word - 1) as usize)?;
+            // `word` comes from a public, caller-supplied `AsmOutcome` (see `decode_asm`), not only
+            // from a `run_asm` run of this module's own bounded heap — a hand-built `word` may not fit
+            // `usize` on a 32-bit target. Fold that into the existing "not a valid pointer" `None`
+            // rather than truncating into a wrong, in-range index.
+            let idx = usize::try_from(word - 1).ok()?;
+            let &(h, t) = heap.get(idx)?;
             let head = decode_word(h, heap, exp_h)?;
             let tail = decode_word(t, heap, exp_t)?;
             Some(Value::Cons(Rc::new(head), Rc::new(tail)))
@@ -575,12 +604,18 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
 ///
 /// `decode_asm`/`decode_word`, the Value-directed siblings, need no budget: they recurse on a finite
 /// reference `Value` already in memory, so its size is the bound.
+///
+/// Bounded by construction, not by a runtime check: `DEFAULT_CAPS.heap` is the literal constant
+/// `5_000_000` (see `DEFAULT_CAPS`), so `4 * DEFAULT_CAPS.heap` is `20_000_000` — far under both
+/// `u32::MAX` and `usize::MAX` on every target this workspace builds for (native 64-bit and wasm32).
+#[allow(clippy::cast_possible_truncation)]
 pub(crate) const MAX_DECODE_NODES: usize = 4 * DEFAULT_CAPS.heap as usize;
 
 /// Type-directed decode of a run's outcome to a `Value` (the AOT sibling of `decode_asm`, which is
 /// value-directed). Drives off the static `Ty` instead of a reference `Value`, so the standalone
 /// binary can decode without a reference run. Returns `None` on a representation mismatch, a
 /// non-value type (`Fun`/`Var`), or an exhausted `MAX_DECODE_NODES` budget.
+#[must_use]
 pub fn decode_asm_ty(outcome: &AsmOutcome, ty: &Ty) -> Option<Value> {
     let mut budget = MAX_DECODE_NODES;
     decode_word_ty(outcome.result, &outcome.heap, ty, &mut budget)
@@ -643,7 +678,12 @@ pub(crate) fn decode_word_ty(word: u64, heap: &[(u64, u64)], ty: &Ty, budget: &m
                     }
                     return Some(out);
                 }
-                let &(h, t) = heap.get((w - 1) as usize)?;
+                // `w` is read off a `.tm` FILE's tapes (see this function's doc: "neither acyclicity
+                // nor a small size is something the compiler guaranteed"), so it may not fit `usize` on
+                // a 32-bit target. `try_from` folds that into the existing "not a valid pointer" `None`
+                // instead of truncating into a wrong, in-range index.
+                let idx = usize::try_from(w - 1).ok()?;
+                let &(h, t) = heap.get(idx)?;
                 heads.push(decode_word_ty(h, heap, elem, budget)?);
                 w = t;
             }

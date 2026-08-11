@@ -1,6 +1,10 @@
 //! The tag survives β. Design §2.1 asserts that reduction creates no node ex nihilo; this file is
 //! that assertion made executable, because the whole coordinate system rests on it.
 
+// This file carries no unwrap/expect/panic allow because it never trips those lints — it needs
+// only the pedantic exemption, for the same reason `clippy.toml` exempts test/example code generally.
+#![allow(clippy::pedantic)]
+
 use redextape_core::lambda::reduce::Owner;
 use redextape_core::lambda::reduce::reduce_step;
 use redextape_core::lambda::term::{LambdaTerm, Node, abs, app, app_owned, beta, var};

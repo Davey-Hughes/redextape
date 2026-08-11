@@ -46,6 +46,7 @@ use crate::span::Span;
 /// the native stack-overflow depth; raise only with a larger stack (see Plan 1).
 pub const MAX_PARSE_DEPTH: u32 = 256;
 
+#[must_use]
 pub fn parse_lambda(src: &str) -> (Option<LambdaTerm>, Vec<Diagnostic>) {
     let mut p = Parser { src, chars: src.char_indices().collect(), pos: 0, depth: 0 };
     match p.parse_term(&mut Vec::new()) {
@@ -128,7 +129,7 @@ impl Parser<'_> {
     fn parse_atom(&mut self, scope: &mut Vec<String>) -> PResult<LambdaTerm> {
         self.skip_ws();
         match self.peek() {
-            Some('\\') | Some('λ') => self.parse_abstraction(scope),
+            Some('\\' | 'λ') => self.parse_abstraction(scope),
             Some('(') => {
                 self.bump();
                 let t = self.parse_term(scope)?;
@@ -142,6 +143,11 @@ impl Parser<'_> {
                 let start = self.byte_pos();
                 let name = self.parse_ident();
                 match scope.iter().rposition(|n| *n == name) {
+                    // `scope` gains one entry per `parse_abstraction` call, and every such call is
+                    // reached only through `parse_term`, which increments `self.depth` and refuses to
+                    // recurse past `MAX_PARSE_DEPTH` (256) before `parse_atom` (and so this arm) ever
+                    // runs. `scope.len()` is therefore bounded by 256, far inside `u32`.
+                    #[allow(clippy::cast_possible_truncation)]
                     Some(pos) => Ok(var((scope.len() - 1 - pos) as u32)),
                     None => {
                         Err(Diagnostic::error(Span::new(start, self.byte_pos()), format!("unbound variable `{name}`")))
@@ -189,6 +195,7 @@ fn is_ident_continue(c: char) -> bool {
 
 /// Print a term with readable names, freshening on shadow collision, minimal parens. Binders print as
 /// `λ`, never `\` — see the module doc on why input accepts both and output picks one.
+#[must_use]
 pub fn print_lambda(t: &LambdaTerm) -> String {
     print_lambda_mapped(t).0
 }
@@ -238,6 +245,7 @@ pub fn print_lambda(t: &LambdaTerm) -> String {
 /// than the one this call actually printed, silently. That is more dangerous than the budget case, not
 /// less, so the advice does not soften for it: do not pass output from a call where `cut` came back
 /// `Some`, for either reason, to `parse_lambda`.
+#[must_use]
 pub fn print_lambda_capped(
     t: &LambdaTerm,
     byte_budget: usize,
@@ -254,6 +262,7 @@ pub fn print_lambda_capped(
 /// One walker, not two: this is `print_lambda_capped` at a budget no real term reaches, so there is
 /// nothing here that can drift from the capped path — the property `an_unreachable_budget_is_identical
 /// _to_the_uncapped_printer` pins.
+#[must_use]
 pub fn print_lambda_mapped(t: &LambdaTerm) -> (String, crate::analysis::Classified) {
     let (text, spans, _) = print_lambda_capped(t, usize::MAX, MAX_TERM_DEPTH);
     (text, spans)
@@ -283,6 +292,7 @@ pub fn print_lambda_mapped(t: &LambdaTerm) -> (String, crate::analysis::Classifi
 ///
 /// Cost is one walk, the walk that was already happening. `want` is `SourceMap::node_to_lambda`, which
 /// the demo corpus measures at 5-403 entries.
+#[must_use]
 pub fn print_lambda_linked(
     t: &LambdaTerm,
     byte_budget: usize,
@@ -419,10 +429,10 @@ impl Printer<'_> {
     }
 
     fn write(&mut self, t: &LambdaTerm, depth: u32) {
+        use crate::analysis::TokenClass as C;
         if self.bail(depth) {
             return;
         }
-        use crate::analysis::TokenClass as C;
         match t.node() {
             Node::Var(i) => {
                 let idx = self.names.len().checked_sub(1 + *i as usize);
@@ -470,10 +480,10 @@ impl Printer<'_> {
     }
 
     fn parens(&mut self, t: &LambdaTerm, depth: u32) {
+        use crate::analysis::TokenClass as C;
         if self.bail(depth) {
             return;
         }
-        use crate::analysis::TokenClass as C;
         push_span(&mut self.out, &mut self.spans, "(", C::Punct);
         self.write(t, depth);
         // Re-checked, not assumed: without this, a budget that fired partway through `write` above

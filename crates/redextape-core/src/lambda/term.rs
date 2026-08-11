@@ -117,6 +117,7 @@ impl LambdaTerm {
     /// The variant. Deliberately a method rather than a `Deref` impl: the indirection stays visible
     /// at every match site instead of being inferred, in exactly the code that most needs to read
     /// literally.
+    #[must_use]
     pub fn node(&self) -> &Node {
         &self.0
     }
@@ -126,6 +127,7 @@ impl LambdaTerm {
     /// `None` for `Var`, `Abs`, and any `App` that no source construct owns — which is most of them in
     /// a real program, because `encode.rs` mints every combinator untagged. See design §5.1: `None` is
     /// the correct answer there, not a gap.
+    #[must_use]
     pub fn owner(&self) -> Option<NodeId> {
         match self.node() {
             Node::App(_, _, owner) => *owner,
@@ -143,6 +145,7 @@ impl LambdaTerm {
     /// rather than by fact. Any caller collecting these across a walk must keep the terms alive for the
     /// whole walk. `tests/lambda_sharing.rs:73-81` argues that hazard at length for the sharing gate,
     /// which is the in-tree consumer that depends on it.
+    #[must_use]
     pub fn alloc_id(&self) -> usize {
         Rc::as_ptr(&self.0) as usize
     }
@@ -154,6 +157,7 @@ impl LambdaTerm {
     /// `Option` match: `shift(d, cutoff, t)` is the identity exactly when `maxfree(t) <= cutoff`, and
     /// `subst(j, s, t)` is the identity exactly when `maxfree(t) <= j`. A plain "highest index" would
     /// need a separate "has no free variable" case for both.
+    #[must_use]
     pub fn maxfree(&self) -> u32 {
         self.1
     }
@@ -164,6 +168,7 @@ impl LambdaTerm {
     /// Saturating at `u32::MAX`, which is a FLOOR rather than a value: exact below the ceiling, and
     /// "at least that much" at it. A wrapping version would report a tiny depth for an enormous term
     /// and the guard reading it would admit exactly what it exists to refuse.
+    #[must_use]
     pub fn depth(&self) -> u32 {
         self.2
     }
@@ -187,6 +192,7 @@ impl LambdaTerm {
 /// exact below `u64::MAX`, and `u64::MAX` meaning "at least that much". Callers comparing against a
 /// bound far below saturation are unaffected; anything wanting an exact count must check for
 /// `u64::MAX` first.
+#[must_use]
 pub fn logical_size(t: &LambdaTerm) -> u64 {
     logical_sizes(t).get(&t.alloc_id()).copied().unwrap_or(u64::MAX)
 }
@@ -258,6 +264,7 @@ fn logical_sizes(t: &LambdaTerm) -> HashMap<usize, u64> {
 /// the terms this exists to measure. **Cost is stated in PHYSICAL size on purpose:** 92.6 ms optimized
 /// on that 497,691-allocation list, against a `lower()` of 9.7 ms. "O(physical)" is the expensive case
 /// for a term at a 1.000x ratio, not the cheap one.
+#[must_use]
 pub fn max_shared_logical_size(t: &LambdaTerm) -> u64 {
     let mut indeg: HashMap<usize, u32> = HashMap::new();
     let mut expanded: HashSet<usize> = HashSet::new();
@@ -303,6 +310,7 @@ pub enum Dir {
 
 pub type Path = Vec<Dir>;
 
+#[must_use]
 pub fn var(i: u32) -> LambdaTerm {
     // `saturating_add` rather than `+ 1`: a `Var(u32::MAX)` is unreachable from lowering, and
     // saturating there fails toward "has a free variable", which is the side that does more work
@@ -318,6 +326,7 @@ pub fn abs(name: impl Into<Rc<str>>, body: LambdaTerm) -> LambdaTerm {
     LambdaTerm(Rc::new(Node::Abs(name.into(), body)), maxfree, depth)
 }
 
+#[must_use]
 pub fn app(f: LambdaTerm, a: LambdaTerm) -> LambdaTerm {
     app_tagged(f, a, None)
 }
@@ -327,6 +336,7 @@ pub fn app(f: LambdaTerm, a: LambdaTerm) -> LambdaTerm {
 /// Used only by `lower.rs`, and only at the sites where the `App` being built IS a Core node's own
 /// root. `encode.rs` deliberately does not call this: a Church numeral's internal applications belong
 /// to no source construct, and tagging them with the numeral's own id would claim they do.
+#[must_use]
 pub fn app_owned(f: LambdaTerm, a: LambdaTerm, owner: NodeId) -> LambdaTerm {
     app_tagged(f, a, Some(owner))
 }
@@ -334,6 +344,7 @@ pub fn app_owned(f: LambdaTerm, a: LambdaTerm, owner: NodeId) -> LambdaTerm {
 /// Rebuild an `App` carrying a tag that is already in hand. **This is the spine-rebuild constructor**,
 /// used by `reduce_step` where `app_tagged`'s privacy does not reach; `shift`/`subst`/`beta_go` use
 /// `app_tagged` directly because they live in this module.
+#[must_use]
 pub fn app_tagged_for_rebuild(f: LambdaTerm, a: LambdaTerm, owner: Option<NodeId>) -> LambdaTerm {
     app_tagged(f, a, owner)
 }
@@ -355,34 +366,55 @@ fn app_tagged(f: LambdaTerm, a: LambdaTerm, owner: Option<NodeId>) -> LambdaTerm
 ///
 /// # Panics
 ///
-/// If a shifted index would go negative. `d` is signed, and **as of β-fusion (2026-08-03) NO
-/// NON-TEST CALL SITE IN THIS CRATE PASSES A NEGATIVE ONE.** `beta`'s closing `shift(-1, 0, …)` was
-/// the only such caller; `beta_go` decrements in place, at `k > j >= 0`, so the case is now impossible
-/// by branch rather than by check. **The qualifier is exact rather than defensive** — this file's own
-/// `#[cfg(test)]` module still calls `shift(-1, 0, &var(0))`, `shift(-1, 0, &var(3))` and
-/// `shift(-1, 5, &var(0))`, in `shift_panics_instead_of_wrapping_to_a_dangling_index` and
+/// If a shifted index would go negative, **or if it would exceed `u32::MAX`.** `d` is signed and
+/// `k: u32` (`Var`'s payload) carries no ceiling of its own, so both ends are checked.
+///
+/// **As of β-fusion (2026-08-03) NO NON-TEST CALL SITE IN THIS CRATE PASSES A NEGATIVE `d`.** `beta`'s
+/// closing `shift(-1, 0, …)` was the only such caller; `beta_go` decrements in place, at `k > j >= 0`,
+/// so the case is now impossible by branch rather than by check. **The qualifier is exact rather than
+/// defensive** — this file's own `#[cfg(test)]` module still calls `shift(-1, 0, &var(0))`,
+/// `shift(-1, 0, &var(3))` and `shift(-1, 5, &var(0))`, in
+/// `shift_panics_instead_of_wrapping_to_a_dangling_index` and
 /// `a_negative_shift_that_stays_in_range_is_fine`, which are precisely the tests that keep this
 /// `# Panics` contract honest. A doc that said "nothing" would be falsified by `grep` from inside the
 /// same file.
 ///
-/// **The assert and the signed `d` stay, and not out of caution:** `shift` is `pub`,
-/// `tests/subst_differential.rs` passes negative `d` deliberately, and the failure this guards is a
-/// term full of dangling references that reduces to a wrong answer — the arithmetic was
-/// `(i64::from(*k) + d) as u32`, which WRAPS. A miscompile is worse than a crash. Narrowing the
-/// signature is a separate slice with a public-API survey to do first.
+/// **THE UPPER BOUND — the public-API survey this doc used to defer.** `shift` is `pub`
+/// (`redextape_core::lambda::term::shift`), and so is `var`, so an external caller can build
+/// `var(u32::MAX)` directly and pass it here with no in-crate guard in between. Before this check, the
+/// arithmetic was `(i64::from(*k) + d) as u32`: for `k = u32::MAX, d = 1` that computes
+/// `4_294_967_296i64 as u32`, which WRAPS to `0` — a *different, wrong, silently-accepted* index rather
+/// than a failure. The survey found no caller, in `src/`, `tests/*.rs` or `examples/*.rs`, that comes
+/// anywhere near this boundary: every real `d` is in `{-1, 0, 1, 2, 3}` and every real `k` comes from a
+/// lowered or hand-built term far below `u32::MAX`. **Narrowing `d`'s type would not have closed this
+/// on its own** — the overflow is reachable from `k` alone (`var(u32::MAX)` plus `d = 1`) regardless of
+/// what type bound `d` carries, because `Var`'s `u32` payload has no ceiling either. So the fix is the
+/// same shape as the lower-bound check: prove the range, then convert with `u32::try_from` rather than
+/// `as u32` — `cast_sign_loss`/`cast_possible_truncation` fire on the CAST EXPRESSION itself and do
+/// **not** do value-range analysis on a preceding `assert!` (confirmed: pedantic still flagged the old
+/// `as u32` cast with only the lower-bound assert in place). `unreachable!` in the `Err` arm rather than
+/// `unwrap`/`expect` (denied in library code) or `panic!` (also denied): both asserts above already
+/// proved `shifted` is in `0..=u32::MAX`, so that arm cannot run — it exists only so the conversion
+/// typechecks without an `as` cast, and it still fails LOUD rather than silently if that ever changes.
 ///
-/// **The lockstep argument this invariant used to rest on is now internal to `beta_go`, not to this
+/// **The asserts and the signed `d` stay, and not out of caution:** `shift` is `pub`,
+/// `tests/subst_differential.rs` passes negative `d` deliberately, and the failure this guards is a
+/// term full of dangling references that reduces to a wrong answer. A miscompile is worse than a crash.
+///
+/// **The lockstep argument the lower bound used to rest on is now internal to `beta_go`, not to this
 /// function's relationship with `subst`.** Before fusion, `subst`'s `j + 1` and this function's
 /// `cutoff + 1` stepped together under `Abs`, so the index `subst` replaced was exactly the one `beta`'s
 /// closing call would decrement — two functions agreeing by construction, which a refactor could break
 /// silently. `beta_go` now carries that same pairing (its own `j + 1` against `shift(1, 0, s)`) inside
 /// one function, guarded by its own unconditional `assert!(*k > j, …)`. What keeps THIS function's
-/// panic unreachable from compiled output is simpler and no longer a two-function argument: nothing in
-/// `src/` calls `shift` with a negative `d` at all. The check stays unconditional rather than a
-/// `debug_assert!` regardless, because `shift` is `pub` and a refactor can reintroduce a caller
-/// silently. Measured cost in release: none — five runs put the guarded version's range around the
-/// unguarded one (0.2078–0.2191s vs 0.2123–0.2151s for 2,000 shifts over a 400-deep term), i.e. below
-/// run-to-run noise.
+/// negative-index panic unreachable from compiled output is simpler and no longer a two-function
+/// argument: nothing in `src/` calls `shift` with a negative `d` at all. Both checks stay unconditional
+/// rather than `debug_assert!`, because `shift` is `pub` and a refactor can reintroduce a caller
+/// silently. Measured cost in release of the lower-bound check alone: none — five runs put the guarded
+/// version's range around the unguarded one (0.2078–0.2191s vs 0.2123–0.2151s for 2,000 shifts over a
+/// 400-deep term), i.e. below run-to-run noise; the upper-bound check is the same shape of comparison
+/// and is not expected to differ.
+#[must_use]
 pub fn shift(d: i64, cutoff: u32, t: &LambdaTerm) -> LambdaTerm {
     // Every free index in `t` is below `cutoff`, so no index is in range and this call is the
     // identity. Returning the handle preserves the ALLOCATION, which is the half that matters: the
@@ -405,7 +437,29 @@ pub fn shift(d: i64, cutoff: u32, t: &LambdaTerm) -> LambdaTerm {
             );
             let shifted = i64::from(*k) + d;
             assert!(shifted >= 0, "shift({d}, {cutoff}) produced a negative de Bruijn index from Var({k})");
-            var(shifted as u32)
+            assert!(
+                shifted <= i64::from(u32::MAX),
+                "shift({d}, {cutoff}) produced a de Bruijn index above u32::MAX from Var({k})"
+            );
+            // `u32::try_from`, not `as u32`: see this function's doc for why the cast lints do not
+            // see the two asserts above. `unreachable!` in the `Err` arm cannot fire — both asserts
+            // already proved `shifted` is in `0..=u32::MAX` — and exists only so this typechecks
+            // without an `as` cast, failing loud rather than silently if that ever stops holding.
+            //
+            // THE DUPLICATED RANGE CHECK IS DELIBERATE AND FORCED, not an oversight. The asserts and
+            // the `try_from` test the same `0..=u32::MAX`. Neither mechanism can be dropped: without
+            // the asserts the `Err` arm becomes reachable, so `unreachable!` would be a lie and the
+            // descriptive message would have to move into `panic!`/`expect`, both denied by
+            // `[workspace.lints.clippy]`; without the `try_from` an `as` cast remains, which
+            // `pedantic` flags and which this fix was explicitly not permitted to `#[allow]`.
+            //
+            // Note what that leaves: `assert!` and `unreachable!` are panics in a `pub` library
+            // path, and the manifest's five deny-lints reach NEITHER macro — so the "no library path
+            // may panic" rule stated there is not mechanically enforced at this site. Closing that
+            // for real means `shift` returning a typed `Err`, which ripples through `lower.rs` into
+            // `redextape-wasm` and `redextape-native` for a boundary no real caller reaches. Left
+            // open deliberately; see docs/superpowers/specs/2026-08-10-clippy-pedantic-design.md.
+            var(u32::try_from(shifted).unwrap_or_else(|_| unreachable!("shift bound already checked above")))
         }
         Node::Abs(n, b) => abs(Rc::clone(n), shift(d, cutoff + 1, b)),
         Node::App(f, a, owner) => app_tagged(shift(d, cutoff, f), shift(d, cutoff, a), *owner),
@@ -413,6 +467,13 @@ pub fn shift(d: i64, cutoff: u32, t: &LambdaTerm) -> LambdaTerm {
 }
 
 /// Substitute `s` for the variable with index `j` in `t`.
+///
+/// `j`/`s`/`t`, and the `k`/`n`/`b`/`f`/`a` the match arms below bind, are this module's standing
+/// notation for de Bruijn substitution (`s` for the substituted term, `t` for the target, `j`/`k` for
+/// indices) — the same letters the papers this module implements use. Renaming them to satisfy
+/// `many_single_char_names` would make the code harder to check against that source material.
+#[allow(clippy::many_single_char_names)]
+#[must_use]
 pub fn subst(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> LambdaTerm {
     // Index `j` cannot occur free in `t`, so there is nothing to replace.
     //
@@ -473,6 +534,7 @@ pub fn subst(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> LambdaTerm {
 ///
 /// Equivalence to the three-pass form is exhaustive, not exemplary:
 /// `tests/subst_differential.rs::the_shipped_beta_agrees_with_the_three_pass_formulation_on_every_enumerated_pair`.
+#[must_use]
 pub fn beta(abs_body: &LambdaTerm, arg: &LambdaTerm) -> LambdaTerm {
     // `arg`, NOT `shift(1, 0, arg)` — see the doc above.
     beta_go(abs_body, 0, arg)
@@ -483,6 +545,10 @@ pub fn beta(abs_body: &LambdaTerm, arg: &LambdaTerm) -> LambdaTerm {
 /// `s` is `arg` lifted by `j`, maintained by the `Abs` arm exactly as `subst`'s is — which is why
 /// `Σ reshift` is unchanged by fusion, and `shift(1, 0, s)` short-circuits to a refcount bump on the
 /// 88.4% of corpus steps whose argument is closed either way.
+///
+/// Same single-letter notation as `subst` (`j`/`s`/`t`, plus the match arms' `k`/`n`/`b`/`f`/`a`) for
+/// the same reason: it matches the papers this module implements.
+#[allow(clippy::many_single_char_names)]
 fn beta_go(t: &LambdaTerm, j: u32, s: &LambdaTerm) -> LambdaTerm {
     // `subst`'s short-circuit, and simultaneously the closing shift's: every free index in `t` is below
     // `j`, so there is nothing to substitute AND nothing to decrement. Returning the handle preserves
@@ -682,6 +748,29 @@ mod tests {
         assert_eq!(shift(-1, 0, &var(3)), var(2));
         // Below the cutoff the index is bound, so it is untouched and cannot go negative.
         assert_eq!(shift(-1, 5, &var(0)), var(0));
+    }
+
+    /// **THE UPPER-BOUND SIBLING OF `shift_panics_instead_of_wrapping_to_a_dangling_index`, AND THE ONE
+    /// THAT DEMONSTRATES THE FIX RATHER THAN THE PRE-EXISTING GUARD.** `var` is `pub` with no ceiling on
+    /// its `u32` payload, and `shift` is `pub`, so an external caller can build `var(u32::MAX)` directly
+    /// and shift it past `u32::MAX` with nothing in between to stop it.
+    ///
+    /// Before the upper-bound `assert!` this test is pinning, the arithmetic was
+    /// `(i64::from(u32::MAX) + 1) as u32` — `4_294_967_296i64 as u32`, which truncates to `0`. That is
+    /// `Var(0)`, a DIFFERENT and WRONG index accepted silently, not a failure: this test fails (does not
+    /// panic) against that code, which is what proves it exercises the boundary rather than merely
+    /// restating that ordinary shifts still work.
+    #[test]
+    #[should_panic(expected = "above u32::MAX")]
+    fn shift_panics_instead_of_wrapping_a_de_bruijn_index_above_u32_max() {
+        let _ = shift(1, 0, &var(u32::MAX));
+    }
+
+    /// The neighbouring case must still work: landing EXACTLY on `u32::MAX` is in range and must not
+    /// panic, so the new upper-bound guard must not be off-by-one in the tight direction.
+    #[test]
+    fn a_shift_that_lands_exactly_on_u32_max_is_fine() {
+        assert_eq!(shift(0, 0, &var(u32::MAX)), var(u32::MAX));
     }
 
     /// **THE UNDERFLOW IS UNREACHABLE BY BRANCH AND ENFORCED BY CHECK, AND THIS IS WHAT REACHES THE

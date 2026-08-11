@@ -1,7 +1,7 @@
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
 // `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 #![cfg(all(feature = "llvm", feature = "cranelift"))]
 //! The LLVM oracle leg (Task 6, native Phase 2): extends `native_oracle.rs`'s four-way oracle
 //! (`reference == λ == TM == native`) with a SECOND native codegen backend behind the same

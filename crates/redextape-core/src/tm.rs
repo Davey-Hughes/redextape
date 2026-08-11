@@ -237,6 +237,17 @@ pub struct DescribedRun {
 /// Mirrors `run_tm_fitted`'s search — `MIN_FIELD_WIDTH`, doubling, retrying only on the overflow
 /// guard — but has no unbounded-encoding branch: `EncodingKind` names only bounded encodings, since
 /// an unbounded one has no name to write in a file.
+///
+/// # Errors
+///
+/// The error type is `TmRun` itself, not a dedicated error enum, because both failure shapes ARE
+/// `TmRun` outcomes that just never reached a configuration to describe: `Err(TmRun::LowerError(_))`
+/// if `core` could not be lowered to asm (see `lower_program`'s doc — an unsupported higher-order
+/// construct or a too-deep program), and `Err(TmRun::TooLarge)` if `lower_tm` refused to build a
+/// machine at all (`MAX_SLOTS`/`MAX_FRAME_LOC`/`MAX_MUL_INSTRS` — see `TmRun::TooLarge`'s doc). Neither
+/// is recoverable by retrying: the caller's only recourse is rewriting `core`. `TmRun::Overflow` and
+/// `TmRun::HitCap`, by contrast, are NOT errors here — they are `Ok(DescribedRun)` results, because a
+/// run that started (even one that overflowed or hit a cap) still has a configuration to describe.
 pub fn run_tm_described(core: &Core, kind: EncodingKind, result: Ty, caps: TmCaps) -> Result<DescribedRun, TmRun> {
     let (prog, sm) = lower_and_size(core)?;
     let n_slots = sm.n_slots();

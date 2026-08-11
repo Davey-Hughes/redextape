@@ -198,7 +198,7 @@
 
 // Example target: `clippy.toml`'s `allow-*-in-tests` keys do not reach example targets at all, so the
 // exemption is stated per target. A probe that cannot build its own fixture has nothing to report.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 #[cfg(not(target_arch = "wasm32"))]
 #[global_allocator]

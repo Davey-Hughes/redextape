@@ -58,6 +58,7 @@ pub struct LambdaCursor {
 }
 
 impl LambdaCursor {
+    #[must_use]
     pub fn new(t: &LambdaTerm, cap: u64) -> LambdaCursor {
         LambdaCursor {
             current: t.clone(),
@@ -71,6 +72,7 @@ impl LambdaCursor {
     }
 
     /// The path to the redex contracted by the most recent step, or `None` before any step.
+    #[must_use]
     pub fn last_redex(&self) -> Option<&Path> {
         self.last_redex.as_ref()
     }
@@ -78,20 +80,24 @@ impl LambdaCursor {
     /// The source construct the most recent step belonged to. `Owner::None` before any step, which is
     /// the same answer as "the step belonged to no construct" — indistinguishable, and correctly so:
     /// a frame at step 0 has no step to attribute.
+    #[must_use]
     pub fn last_owner(&self) -> Owner {
         self.last_owner
     }
 
     /// The term as of the last emitted event (the initial term before the first `next`).
+    #[must_use]
     pub fn term(&self) -> &LambdaTerm {
         &self.current
     }
 
+    #[must_use]
     pub fn steps_taken(&self) -> u64 {
         self.steps
     }
 
     /// `None` while the run may still advance; `Some` once it has ended, saying why.
+    #[must_use]
     pub fn status(&self) -> Option<Status> {
         self.status
     }
@@ -105,6 +111,7 @@ impl LambdaCursor {
     /// provably cannot advance the run. That is the same defect `raise_cap`'s own guard fixed one
     /// layer in. `false` whenever `status()` is not `HitCap`, because there is then no `HitCap` for
     /// either producer to own.
+    #[must_use]
     pub fn depth_capped(&self) -> bool {
         self.depth_capped
     }
@@ -159,18 +166,15 @@ impl Iterator for LambdaCursor {
             self.depth_capped = true;
             return None;
         }
-        match reduce_step(&self.current) {
-            Some((next, redex, owner)) => {
-                self.current = next;
-                self.steps += 1;
-                self.last_redex = Some(redex.clone());
-                self.last_owner = owner;
-                Some(StepEvent::Beta { redex, owner })
-            }
-            None => {
-                self.status = Some(Status::Normalized);
-                None
-            }
+        if let Some((next, redex, owner)) = reduce_step(&self.current) {
+            self.current = next;
+            self.steps += 1;
+            self.last_redex = Some(redex.clone());
+            self.last_owner = owner;
+            Some(StepEvent::Beta { redex, owner })
+        } else {
+            self.status = Some(Status::Normalized);
+            None
         }
     }
 }
@@ -330,6 +334,18 @@ impl<M: Borrow<Machine>> Iterator for TmCursor<M> {
         }
         // Built before `apply`, so the event names the state the machine was in when the rule fired —
         // the same "before the transition" convention `sim::Step` and `LambdaCursor` use.
+        //
+        // `rule_index` is a position within `state.rules: Vec<Rule>` — a rule count, a DIFFERENT
+        // quantity from `machine.states.len()` — so `sourcemap.rs`'s state-count argument does not
+        // apply here. `TmCursor` is `pub` and generic over `Borrow<Machine>`, so `self.machine` need
+        // not have come from `lower_tm` at all: `tm::syntax::parse_tm` builds `Machine`s too, a path
+        // `lower_tm`'s guards never touch. Bounded by memory regardless of which path built it: every
+        // `Rule` is at least three `Vec` headers (`read`, `write`, `moves`) plus a `StateId`, and both
+        // constructors only ever push one (`Builder::add_rule` in `tm/build.rs`; the rule-parsing arm in
+        // `tm/syntax.rs`). Reaching `u32::MAX` rules on a single state needs that many `Rule` structs
+        // already resident for ONE state alone — far beyond anything this process could allocate, and
+        // not reachable from real input either way.
+        #[allow(clippy::cast_possible_truncation)]
         let event = StepEvent::Delta { state: self.cur, rule: rule_index as u32 };
         apply(rule, &mut self.tapes);
         self.cur = rule.next;

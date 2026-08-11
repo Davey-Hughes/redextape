@@ -103,6 +103,14 @@ fn reachable_from(prog: &Program, entry: usize) -> Result<BTreeSet<usize>, Lower
         };
         // Resolve a label to its index, faulting (never panicking) on an undefined target.
         let target = |l: &str| prog.label_index(l).ok_or_else(|| unsupported(format!("jump to undefined label `{l}`")));
+        // `Instr::Call` and the "everything else falls through" bucket both `work.push(i + 1)`
+        // today, but they are NOT the same case: `Call`'s successor is "resume after the callee
+        // returns" (the callee itself is a separate subroutine, deliberately excluded from this
+        // body — see the comment below), while the fallthrough arms' successor is just "the next
+        // instruction in this same straight-line body". Merging them would erase that distinction
+        // for a future reader (or a future change that needs to treat calls differently, e.g.
+        // collecting call-graph edges here).
+        #[allow(clippy::match_same_arms)]
         match instr {
             // Terminators: reachable, but add no successors.
             Instr::Ret | Instr::Halt => {}
@@ -136,6 +144,21 @@ fn reachable_from(prog: &Program, entry: usize) -> Result<BTreeSet<usize>, Lower
 /// Partition `prog` into subroutines by reachability from each entry. See the module doc for the
 /// algorithm. Total and panic-free: an undefined `Call`/`Jz`/`Jmp` target, or control flow that
 /// runs past the end of `code`, yields `LowerError::Unsupported` rather than panicking.
+///
+/// # Errors
+/// Returns `LowerError::Unsupported` (never panics) when `prog` cannot be partitioned into
+/// disjoint, well-formed subroutines:
+/// - a `Call`/`Jz`/`Jmp` targets an undefined label, or control flow reaches an index past
+///   `prog.code.len()` (both surfaced from `reachable_from`);
+/// - two subroutines' bodies overlap — only reachable via a producer other than `lower_asm`, or a
+///   hand-built `Program`, since `lower_asm` always emits a guard `Jmp` over every inline `fn` body
+///   (see the module doc);
+/// - a non-`$main` subroutine's body contains `Halt`, which would wrongly stop the whole program
+///   from inside a callee instead of returning to its caller (`lower_asm` never emits this).
+///
+/// A caller cannot repair any of these programmatically — they indicate a malformed or
+/// adversarially hand-built `Program` — so the only useful response is to reject the input (e.g.
+/// report a compiler diagnostic) rather than retry.
 pub fn partition(prog: &Program) -> Result<Vec<Subroutine>, LowerError> {
     // Entry set = {0} ("$main") union every resolved `Call` target. `BTreeMap` both dedupes and
     // sorts ascending in one structure; each entry's name is its label's name (recursive/mutual

@@ -265,6 +265,25 @@ struct AnonClosure {
 /// the unique-name counter for anonymous lambdas (`$lam{k}`) draws from the same generator, so a
 /// handful of returned ids label no node at all. A bucket that collects zero steps costs nothing;
 /// the reverse (an output node in neither set) is what would silently misattribute cost.
+///
+/// # Errors
+///
+/// `Err(LowerError::TooDeep)` if `core`'s nesting exceeds `MAX_DEFUNC_DEPTH`, checked iteratively
+/// before any recursive pass runs (see that constant's doc) — the caller's only recourse is a
+/// shallower program. `Err(LowerError::Unsupported)` for every higher-order construct this pass
+/// cannot rewrite: a builtin used as a bare value, a nested/local function definition, a top-level
+/// function whose body references an outer `let` binding (guard 2 — hoisting would put it out of
+/// scope), a boxed mutable that collides with a parameter or function name (the Plan 3b-2 box-handle
+/// guard), or a cyclic higher-order call graph among the emitted binders (step 8's `topo_order`; see
+/// the module doc for the non-obvious shapes this catches). Each `Unsupported` names the offending
+/// construct; the caller's only recourse is rewriting the source to avoid it.
+///
+/// `clippy::too_many_lines`: this is ONE coherent, numbered pass (steps 0-9 in the comments below),
+/// each step consuming state built by the last — `g`, `tags`, `kept`, `arms`, `emitted` thread through
+/// the whole function. Splitting it into helpers would mean passing that accumulating state through
+/// new function boundaries for no gain in clarity; the length comes from the number of steps
+/// defunctionalization has, not from any one step doing too much.
+#[allow(clippy::too_many_lines)]
 pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError> {
     // 0. Total-by-construction: measure `core`'s nesting depth iteratively (no native recursion) and
     // reject as `TooDeep` BEFORE any recursive pass runs. See `MAX_DEFUNC_DEPTH`'s doc comment.
@@ -575,6 +594,10 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
 
 /// Defunctionalize `core`. Exactly `defunc_mapped` with the synthetic-id set discarded — ONE
 /// implementation, so the two cannot drift.
+///
+/// # Errors
+///
+/// Exactly `defunc_mapped`'s — see that function's `# Errors` section.
 pub fn defunc(core: &Core) -> Result<Core, LowerError> {
     defunc_mapped(core).map(|(c, _)| c)
 }
@@ -1256,10 +1279,10 @@ fn collect_mutable_names(core: &Core) -> BTreeSet<String> {
     let mut stack = vec![core];
     while let Some(n) = stack.pop() {
         match n {
-            Core::Let { mutable: true, name, .. } => {
-                out.insert(name.clone());
-            }
-            Core::Assign(_, name, _) => {
+            // A `let mut` binder and an `Assign` use-site are the two ways a name becomes "mutable" by
+            // this function's own definition (see its doc comment) — genuinely the same case, not a
+            // coincidence, so merged rather than kept apart.
+            Core::Let { mutable: true, name, .. } | Core::Assign(_, name, _) => {
                 out.insert(name.clone());
             }
             _ => {}

@@ -10,12 +10,14 @@ pub struct Span {
 }
 
 impl Span {
+    #[must_use]
     pub fn new(start: usize, end: usize) -> Self {
         debug_assert!(start <= end, "span start must not exceed end");
         Span { start, end }
     }
 
     /// The smallest span covering both `self` and `other`.
+    #[must_use]
     pub fn merge(self, other: Span) -> Span {
         Span::new(self.start.min(other.start), self.end.max(other.end))
     }

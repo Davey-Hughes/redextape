@@ -20,14 +20,14 @@ use crate::tm::machine::{Machine, StateId};
 pub(crate) const MAX_SLOTS: u32 = 100_000;
 
 /// Bound on the local count when a program contains calls. The STACK frame gadgets
-/// (`push_frame`/`pop_frame_restore`) are O(n_loc^2) states (each field-copy re-seeks from home), so
+/// (`push_frame`/`pop_frame_restore`) are `O(n_loc^2)` states (each field-copy re-seeks from home), so
 /// an absurd local count in a call-containing program would build an OOM-sized machine. Real
 /// first-order programs use « this. A program that exceeds it routes to a degenerate halt (total,
-/// bounded). `MAX_SLOTS` (the O(n_slots) bank/init-tape bound) stays as-is for no-call programs.
+/// bounded). `MAX_SLOTS` (the `O(n_slots)` bank/init-tape bound) stays as-is for no-call programs.
 pub(crate) const MAX_FRAME_LOC: u32 = 1_000;
 
 /// True when `lower_tm_mapped` will REFUSE to lay `prog` out over the `Loc` bank and return the
-/// degenerate halt-immediately machine instead: a program that contains a `Call` (so the O(n_loc^2)
+/// degenerate halt-immediately machine instead: a program that contains a `Call` (so the `O(n_loc^2)`
 /// frame gadgets would be built) with an absurd local count.
 ///
 /// The single definition of that condition, so a caller obliged to mirror the refusal — `attribute`,
@@ -43,7 +43,7 @@ pub(crate) fn frame_bank_unrepresentable(prog: &Program, sm: &SlotMap) -> bool {
 /// gadget is O(width²) — measured `1.5*width^2 + 26.5*width + 13` states for the gadget alone: 143
 /// states at width 4, 7,853 at the 64-cell ceiling (`MAX_FIELD_WIDTH`). A chain of `Mul`s therefore
 /// grows the machine far faster than a chain of any other instruction would, so it needs its own bound
-/// the way `MAX_FRAME_LOC` bounds the `Loc` bank's own O(n_loc^2) blowup.
+/// the way `MAX_FRAME_LOC` bounds the `Loc` bank's own `O(n_loc^2)` blowup.
 ///
 /// This is checked UNCONDITIONALLY — not only when `enc` happens to be `Binary` — because `Unary`'s
 /// per-`Mul` cost (dominated by seeking to a growing slot index, not by width) grows with the same
@@ -69,7 +69,10 @@ pub(crate) const MAX_MUL_INSTRS: u32 = 32;
 /// mirrors.
 pub(crate) fn mul_count_unrepresentable(prog: &Program) -> bool {
     let n_mul = prog.code.iter().filter(|i| matches!(i, Instr::Bin(BinOp::Mul, ..))).count();
-    n_mul as u32 > MAX_MUL_INSTRS
+    // Compare in `usize` space (widen `MAX_MUL_INSTRS` up, never narrow `n_mul` down): `n_mul as u32`
+    // would truncate for a `prog.code` longer than `u32::MAX`, and a truncated count could silently
+    // pass this guard instead of tripping it — the exact failure this function exists to prevent.
+    n_mul > MAX_MUL_INSTRS as usize
 }
 
 /// Maps the asm register file onto REG-tape fields. Layout: slot 0 = `Rr` (the result), then the
@@ -149,6 +152,12 @@ fn is_arith(op: BinOp) -> bool {
 /// Returned rather than stored on `Machine` deliberately: `Machine` derives `PartialEq` and the TM
 /// text round-trip test asserts `parse_tm(print_tm(m)) == m`, which a side-table field would break
 /// for a reason that has nothing to do with what the machine computes.
+///
+/// `clippy::many_single_char_names`: `b` (`Builder`), `n` (instruction count), and the `r`/`l`/`t`
+/// bound in the per-instruction match are this module's terse, consistently-used names for "the
+/// builder", "a register", "a label", "a jump target" — renaming them would not make the lowering
+/// clearer, only longer.
+#[allow(clippy::many_single_char_names)]
 fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usize>>, StateId) {
     let sm = SlotMap::of(prog);
     let mut b = Builder::new();
@@ -259,10 +268,10 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
             Instr::Li(rd, v) => enc.write_literal(&mut b, pc[i], fall, *v, sm.slot(*rd)),
             Instr::Mov(rd, rs) => enc.mov(&mut b, pc[i], fall, sm.slot(*rs), sm.slot(*rd)),
             Instr::Bin(op, rd, ra, rb) if is_arith(*op) => {
-                enc.arith(&mut b, pc[i], fall, *op, sm.slot(*ra), sm.slot(*rb), sm.slot(*rd))
+                enc.arith(&mut b, pc[i], fall, *op, sm.slot(*ra), sm.slot(*rb), sm.slot(*rd));
             }
             Instr::Bin(op, rd, ra, rb) => {
-                enc.compare(&mut b, pc[i], fall, *op, sm.slot(*ra), sm.slot(*rb), sm.slot(*rd))
+                enc.compare(&mut b, pc[i], fall, *op, sm.slot(*ra), sm.slot(*rb), sm.slot(*rd));
             }
             Instr::Halt => b.add_rule(pc[i], RuleSpec::new(), halt),
             Instr::Jmp(l) => {
@@ -323,6 +332,7 @@ pub fn lower_tm_guarded(prog: &Program, enc: &dyn Encoding) -> (Machine, StateId
 /// The number of REG-bank fields `prog` needs — the argument `Encoding::init_reg` expects. Public
 /// because a caller laying out a bank by hand (an invariant test, a report, a visualizer) needs it and
 /// `SlotMap` is crate-internal.
+#[must_use]
 pub fn n_slots_of(prog: &Program) -> u32 {
     SlotMap::of(prog).n_slots()
 }

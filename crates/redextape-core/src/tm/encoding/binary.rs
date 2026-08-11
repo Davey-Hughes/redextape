@@ -56,13 +56,17 @@ impl Default for Binary {
 impl Binary {
     /// A binary encoding whose fields are `width` cells — i.e. `width` BITS. Values `>= 2^width` are
     /// not representable and route to the overflow guard.
+    #[must_use]
     pub const fn at(width: usize) -> Binary {
         Binary { width }
     }
 
     /// Whether `n` is representable in `width` digits. The `width >= 64` arm is not an optimization:
     /// `1u64 << 64` overflows, and at 64 cells every `u64` fits by definition.
-    const fn fits(&self, n: u64) -> bool {
+    ///
+    /// Takes `self` by value: `Binary` is `Copy` (one `usize` field), so passing the 8-byte value is
+    /// cheaper than a reference to it (`clippy::trivially_copy_pass_by_ref`).
+    const fn fits(self, n: u64) -> bool {
         self.width >= 64 || n < (1u64 << self.width)
     }
 
@@ -73,7 +77,9 @@ impl Binary {
     }
 
     /// Lay out a `#`-delimited all-zero bank of `fields` fields at this width.
-    fn zero_bank(&self, fields: u32) -> Vec<Symbol> {
+    ///
+    /// Takes `self` by value, same reason as `fits` above.
+    fn zero_bank(self, fields: u32) -> Vec<Symbol> {
         let mut cells = vec![SEP];
         for _ in 0..fields {
             cells.extend(std::iter::repeat_n(ZERO, self.width));
@@ -923,6 +929,13 @@ fn digit_run(cells: &[Symbol]) -> usize {
 fn word(digits: &[Symbol]) -> Option<u64> {
     let mut acc = 0u64;
     for (k, &d) in digits.iter().enumerate() {
+        // `clippy::match_same_arms`: `MARK` (k >= 64) and `_` both `return None` today, but they are
+        // not the same case — a set bit past the `u64` ceiling is a real digit this function simply
+        // cannot represent, while `_` is a foreign symbol that should never reach here at all (see the
+        // doc comment above: "a silent 0 for a foreign symbol is the failure mode this file must not
+        // have"). Merging them would blur a real overflow into the same bucket as a should-be-
+        // unreachable input.
+        #[allow(clippy::match_same_arms)]
         match d {
             ZERO => {}
             MARK if k < 64 => acc |= 1u64 << k,
@@ -1090,6 +1103,10 @@ impl Encoding for Binary {
         }
     }
 
+    // `x`/`y`/`t`/`f`/`b`/`l` match the primitive's own notation, `le(x, y) = is_zero(monus(x, y))`,
+    // stated in the comment just below — renaming them to satisfy `clippy::many_single_char_names`
+    // would make this harder to check against that formula, not easier.
+    #[allow(clippy::many_single_char_names)]
     fn compare(&self, b: &mut Builder, entry: StateId, exit: StateId, op: BinOp, ra: Slot, rb: Slot, rd: Slot) {
         // The primitive is `le(x, y) = is_zero(monus(x, y))`, and every op derives from it — the same
         // decomposition `Unary::compare` uses, which is why supplying binary `monus` (ripple_sub) and
@@ -1329,6 +1346,11 @@ impl Encoding for Binary {
 /// Scanning the WHOLE field is the point: value 2 at width 4 is `0100`, whose FIRST digit is zero. A
 /// unary `jz` can legitimately look at the first cell only; a binary one that did would call every
 /// even number zero.
+// `z`/`nz`/`home_z`/`home_nz` name the zero/nonzero branch pair this gadget builds, matching
+// `if_zero`/`if_nonzero` above them — the same zero/nonzero naming convention `Unary`'s own
+// `rewind_home` call sites use. Not a coincidental collision `clippy::similar_names` should rename
+// away.
+#[allow(clippy::similar_names)]
 pub(crate) fn branch_on_zero(
     b: &mut Builder,
     entry: StateId,
