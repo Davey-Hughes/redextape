@@ -65,7 +65,11 @@ export class SessionClient {
 
   /**
    * Post the λ scratchpad build for `gen`, or do nothing if a later `supersede` has already replaced
-   * it — design §4.3's fork, seeded with the text a pane was showing.
+   * it — design §4.3's fork. `src` HERE IS THE SOURCE'S STEP-0 TEXT, NOT THE TEXT A PANE WAS SHOWING —
+   * this doc's own wording predates the `step` parameter below, which is what turns that fixed text
+   * into the actual term a pane had on screen (`lambda_scratch_at`'s replay, `scratch.ts`'s `detach`).
+   * Both arrive from the caller unresolved, for the same reason `detach`'s own doc gives: neither is
+   * this class's to go looking for.
    *
    * THE SAME GUARD AS `request` AND FOR THE SAME REASON, spelled out rather than shared: both are
    * "post this generation's work if it is still the current one", and the two differ only in the
@@ -77,9 +81,9 @@ export class SessionClient {
    * has just decided to supersede whatever that session was doing, and `SessionClient.supersede`'s own
    * doc is the argument for keeping the claim at the dispatch site.
    */
-  scratch(gen: number, src: string): void {
+  scratch(gen: number, src: string, step: number): void {
     if (gen !== this.#gen) return
-    this.#port.postMessage({ kind: 'lambda-scratch', gen, src })
+    this.#port.postMessage({ kind: 'lambda-scratch', gen, src, step })
   }
 
   /**

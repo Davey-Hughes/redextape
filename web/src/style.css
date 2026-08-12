@@ -291,6 +291,21 @@ main {
   margin: 0;
   min-height: 6lh;
 }
+
+/* Design §4.2's upper region — the editor scrolls rather than pushing the term off the pane. */
+.term-editor {
+  max-height: 8lh;
+  overflow: auto;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 0.5rem;
+}
+
+/* Collapsed is ABSENT, not faded: no colour carries this state (design §6.2), and the control's
+   accessible name says which way it is. */
+.term-editor.is-collapsed {
+  display: none;
+}
+
 .truncated {
   color: var(--fg-dim);
   font-style: italic;

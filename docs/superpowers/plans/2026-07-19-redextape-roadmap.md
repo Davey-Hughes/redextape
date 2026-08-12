@@ -1452,6 +1452,55 @@ that deleted `node_to_lambda` rather than let it answer a sometimes-wrong node, 
 item 1 of the accessibility list above: a thing that provably cannot work should not be presented as
 though it might.
 
+#### 5d-iv IS THE TM EDITABLE PANE — NAMED AND GIVEN A POSITION, BECAUSE THE LAST UNNAMED CAPABILITY FELL BETWEEN TWO SLICES FOR A WHOLE PR (2026-08-12, filed with 5d-iii, no code)
+
+**Filed as a requirement of 5d-iii rather than as a courtesy**, per that slice's design §6.1. The
+reason is the reason 5d-iii exists at all: 5d-i's §1 split named the session model and the pane
+multiplexer, **neither owned "make a pane editable"**, and the gap surfaced only when a task reached
+for a trigger and found no surface to trigger on. A loose paragraph would repeat exactly that. This is
+a name and a place in the sequence.
+
+**THE POSITION: after 5d-ii, before Plan 5's accessibility pass.** Two reasons, stated here so they
+can be argued with rather than inherited. It needs a **new view**, and views-and-layout is 5d-ii's
+subsystem — this is nearer the multiplexer's work than either 5d-i's or 5d-iii's. And it adds controls
+to the list the accessibility pass is meant to close over *once the controls settle*; running that
+pass before 5d-iv lands would invalidate it for the third time.
+
+**WHAT EXISTS**, verified against the tree at `126b379` rather than remembered:
+
+- **Exported.** `tmScratch(src)` at `crates/redextape-wasm/src/lib.rs:165`, assembled by hand beside
+  `lambdaScratch` and `lambdaScratchAt` for the reason all three give.
+- **Typed, and deliberately not as a `TmStatus`.** `session::TmScratchStatus` (`session.rs:1013`) has
+  exactly five fields — `available`, `reason`, `width`, `run`, `header` — with **no `total_steps`**,
+  and is pinned by an exhaustive destructuring (`session.rs:2052`) so a sixth fails to compile with
+  `E0027`.
+- **Tested.** `session::tm_scratch` (`session.rs:1075`) carries native unit tests; `tests/browser.rs`
+  reaches it at the boundary (`:1161`, `:1214`) and proves by method resolution that `tmValue`,
+  `sourceSpan` and `linkIndex` are absent from the type (`:1272`); `web/tests/browser/session-memory.test.ts`
+  imports it from `pkg/` to price a third session.
+- **AND IT HAS NO CALLER.** Nothing under `web/src/` calls it. The only mention there is
+  `protocol.ts:280`'s comment recording the absence.
+
+**WHAT IS MISSING IS NOT "THE SAME WORK AGAIN FOR THE OTHER PANE":**
+
+- **A TM source view does not exist.** `tm-pane.ts` renders five tape rows and the δ function as a
+  virtualized table, *projected from a compiled program* — its own doc says so at `:17-19`. Nothing in
+  the app holds `.tm` text, so there is nothing to fork from and nowhere to type. **That view is the
+  slice**, and it is why this is not a port of 5d-iii.
+- **`protocol.ts` ships `lambda-scratch` and no `tm-scratch`.** The request variant is at `:291`; `:279`
+  records the absence and its reason in as many words — *"a `tm-scratch` variant is absent because
+  nothing could send it"* — and says the variant lands with the surface that can send it, because a
+  request kind no surface can produce is the fabricated-state shape `session.rs:257-273` prices.
+- **No `TmScratchpad`.** `LambdaScratchpad` owns one scratch session's whole lifetime — create,
+  recompile, retire — and the TM half has no equivalent.
+- **A status shape that is deliberately not interchangeable has to be rendered**: no `total_steps` to
+  drive a step readout against, and a `header` boolean carrying decision 6's blank-tapes-at-
+  `MIN_FIELD_WIDTH` state, which the pane must surface rather than silently invent.
+
+**UNTIL IT LANDS, 5d-i's §4.3 TWO-SINGLETON CLAIM STAYS HALF-INSTANTIABLE**, and it stays that way in
+writing rather than being quietly true. The registry, the pool and the one-worker-per-session model all
+admit a `TmScratch` today; nothing in the app can create one.
+
 #### ~~`settled()`'s invariant is false, and it is the root cause of the browser tier's flakes~~ — FIXED (raised 2026-08-08, PR 5a-ii; closed 2026-08-09, PR 5b task 1)
 
 **Closed by the first of the two shapes below**, taken deliberately as task 1 of a fresh branch rather
@@ -5230,3 +5279,262 @@ here says where that stops being a good trade.
 
 **No accessibility pass** — still deferred to the end of Plan 5, still gated on 5d-ii, and this slice
 added no colour-carried state on purpose.
+
+#### PLAN 5d-iii CLOSES — the fork can be typed into, and the control it needed was hidden by a line no task in the plan was assigned to remove (2026-08-12, branch `plan5d-iii`, `1243dec..96e3ed7`)
+
+Design: [`../specs/2026-08-11-plan5d-iii-editable-lambda-design.md`](../specs/2026-08-11-plan5d-iii-editable-lambda-design.md).
+Plan: [`2026-08-11-plan5d-iii-editable-lambda.md`](2026-08-11-plan5d-iii-editable-lambda.md).
+
+The capability the entry above filed as unowned. **A detached λ pane is editable**: a CodeMirror
+instance mounted over the frame renderer, seeded with the term at the step that was forked,
+recompiling the scratch on the source pane's own 300 ms debounce, with the worker's diagnostics
+pushed into its gutter rather than pulled by a linter that has no reply to pull from.
+
+**THE SEED IS RE-DERIVED, NOT READ OFF THE SCREEN.** `lambda_scratch_at(src, step, byte_budget)`
+parses the source's step-0 text, replays `step` times, prints at `LAMBDA_BYTE_BUDGET` — 65,536 bytes,
+**128× the 512-byte history frame** — and builds *the* scratch from that string, which travels back on
+the reply so the editor is seeded from the same text that created the session. The editor's contents,
+the scratch's step 0 and the term that was on screen are one object rather than three that agree by
+construction until they do not. `PaneEvents.detach` went from `(text: string)` to `(step: number)` to
+make that possible, because the pane owns neither of the new inputs.
+
+##### THE PLAN WOULD HAVE SHIPPED THIS SLICE WITHOUT ITS HEADLINE CAPABILITY
+
+**`LambdaPane.#refreshDetach` still offered the fork only when `frame.cut === null` — the FRAME's own
+512-byte truncation — and no task in the nine ever removed it.** The plan's T7 snippet
+(`2026-08-11-plan5d-iii-editable-lambda.md:1177`, copied into `task-7-brief.md:164`) handed the
+implementer that condition **verbatim** inside the rewrite of that exact function, so the one task
+that touched `#refreshDetach` re-asserted it while adding the link-window arm beside it. Nine file
+tables, and not one assigned its removal to anybody. Found by T8, the last code task, in a file its
+own brief was about.
+
+Design §4.1a is explicit that this refusal *"moved rather than vanished"* to a budget 128× larger and
+that **"the pane keeps offering ✎"**. Keeping the frame gate hid the control **exactly when a user
+most wants a scratchpad** — which is §3.1's stated limitation, and therefore the entire reason this
+slice exists. It did not merely fail a test: it made §5's required browser test *unpassable*, since
+forking a truncated frame needs a button that is not in the DOM to click.
+
+**The surviving refusal is real and lands somewhere else.** A source step-0 term that is itself cut at
+`LAMBDA_BYTE_BUDGET` cannot be detected from a `LambdaState` frame at all — different budget,
+different print — so it is reported *after* the click. **This entry originally said that diagnostic
+routes into the pane's own editor — wrong, and it was the CRITICAL finding of plan 5d-iii's ninth task,
+found and fixed in `b397178` after this entry was written.** No editor is ever mounted on that path:
+`detach`'s own build never lands a single frame on the phantom-fork route, so `scratch-compiled` never
+fires, `LambdaPane.setEditor` is never called, and `setDiagnostics`
+(`this.#editor?.setDiagnostics(ds)`) is a silent no-op — the pane was stuck reading the `'building…'`
+placeholder forever, with `#refreshDetach`'s own `!this.#detached` gate hiding the only control that
+could recover it. `b397178`'s fix: `onScratchReply`'s `no-session` arm now asks
+`LambdaScratchpad.noSessionReply` to retire the phantom scratch — which is what actually puts the fork
+control back — and routes the diagnostic to `#link-status` via `LinkStatus.forkFailed` instead, the
+surface built to survive exactly that rebind. `lambda-pane.ts:270-280` and `pane-chrome.ts:163-172`
+carry the corrected wording. A control that can work is offered; the particular step that cannot is
+refused when it is tried, and now on a surface that survives the rebind the refusal itself performs.
+
+##### THREE TESTS THAT COULD NOT FAIL, AND THREE THAT COULD NOT HAVE RUN
+
+**T6's brief contradicted its own Step 3.** Every "keystroke" in its four tests was driven through
+`LambdaEditor#setText()` — which sets `#seeding = true` *precisely so* the update listener does not
+schedule a recompile. So `coalesces a burst of keystrokes into ONE recompile` would have observed
+`onEdit` called **0** times against an expected 1. **Two more were vacuous rather than merely wrong:**
+`does not fire before the debounce elapses` and `cancels a pending recompile on destroy` both **passed
+as written**, because no timer was ever scheduled — there was nothing to not-fire and nothing to
+cancel. They asserted the absence of something that could never have been present.
+
+The fix drives genuine edits through `EditorView.findFromDOM(host)` and a real change transaction
+rather than through the class's own seed path, and the reviewer is the part worth trusting: it ran the
+brief's tests verbatim and reproduced the 0-vs-1, then built three targeted mutants — no-debounce
+(3/5 fail), delay hardcoded to 0 (1/5), `destroy` not clearing the timer (1/5) — establishing that
+each rewritten test fails on exactly the defect it names. The accurate count is **rewrote three of
+four, left one, added a fifth.**
+
+**Separately, three of T3+T4's tests referenced things that do not exist** — six brief-vs-source
+mismatches in one dispatch, of which these three could not have run at all: `SessionClient`'s real
+constructor takes `(port, onReply)`; `scratch.test.ts` has `harness()`/`sourceEntry()`, not the
+`fixture()` the brief invented; and `pool.size === 2` was unreachable because `sourceEntry`'s own doc
+says the source session is never pool-bound.
+
+##### THE BRANCH'S MOST COMMON DEFECT WAS ONE CONDITION DESCRIBED IN TWO PLACES, ONE OF WHICH WENT STALE
+
+Three times, and naming the pattern is worth more than any of the three fixes:
+
+1. **A comment claiming a guard that did not exist.** A `lambda-pane.ts` comment asserted as present fact that
+   *"`#refreshDetach` refuses the fork outright while a link window is showing (see there)"*. It did
+   not — the method checked `#detached` and the frame's cut and never read `#link`. The text came
+   verbatim from the task brief, and it contradicted `pane-chrome.ts`'s correctly-hedged version of the
+   same fact **in the same commit**. Rewritten in `2574b57` to state the obligation rather than claim
+   it discharged; T7 then implemented the condition and made it present tense.
+2. **A comment naming a gate after it was removed.** T8 deleted the `frame.cut` check and amended
+   `#refreshDetach`'s own doc and `detachButton`'s — but the constructor comment three hundred lines up
+   still said the method *"checks `#link` alongside `#detached` and the frame's cut"*. Fixed in
+   `6fb3bff`.
+3. **A comment falsified by this very slice.** `no-session`'s arm called itself *"unreachable through
+   the fork control"* and said a scratchpad had nowhere to put diagnostics *"until one can be typed
+   into"*. One can now. Amended in the commit that made it false.
+
+Two of the three were caught after the fact — one by review, one by a follow-up pass — and only the
+third was caught by the commit that falsified it. **The discipline of amending a contradicted comment
+instead of leaving two places asserting opposite things is 5d-i's decision 6, and this branch shows
+what it costs when the amendment is not part of the same edit.**
+
+##### Mutation results, predicted vs ACTUAL
+
+| task | mutation | predicted | ACTUAL | mechanism |
+| --- | --- | --- | --- | --- |
+| T1 | break `lambda_scratch_at`'s clamp (`if !tmp.step_lambda() { break }` → `let _ = tmp.step_lambda();`) | 1 | **0** | `LambdaCursor::next` latches permanently once ended (`trace.rs:149-152`), so looping past the end and breaking early reach bit-identical state |
+| T3+T4 | `recompile` creates a scratch rather than reusing one | 1 | **1** | right count, **wrong mechanism** — `SessionPool.bind` THROWS on an already-live id, so the test dies on an uncaught exception inside `recompile`, not on the `pool.size` divergence predicted |
+| T6 | delete `LambdaEditor`'s `#seeding` guard | 0 | **0/4, then 1/5** | prediction held, which the brief said means a MISSING TEST rather than a harmless mutation |
+| T7 | `setEditor(null)` hides the editor rather than unmounting it | 1 | **1** | clean match, right mechanism — the test found `<div class="term-editor" hidden>` where it expected null |
+
+**T1's zero is not a coverage gap, and that is the interesting half.** The `break` is an *optimisation*,
+not correctness any test can observe: removing it reaches identical state after up to ~4 billion inert
+iterations at a `step` near `u32::MAX`. The reviewer reproduced the 0 independently. So the discipline
+worked exactly as designed and its answer was **"this line is a performance guard"** — a different and
+more useful fact than a missing test. (The test earns its place regardless; nothing else checks
+`lambda_scratch_at` survives a step far past the reduction's end. Its inline comment overstates what it
+pins and is queued for the final review.)
+
+**T3+T4's match is the argument for recording mechanisms and not only counts.** A matching count that
+hides a wrong model of the failure is worth less than a mismatch that exposes one. **T6's zero is the
+discipline working in the other direction** — a predicted-0 that was acted on rather than shrugged at:
+`does not treat a seed as an edit` was added, confirmed failing under the mutation (1/5), restored,
+5/5 green.
+
+##### Alpha-equivalence, measured rather than argued around
+
+T8's wiring broke an existing end-to-end assertion and the cause is not a bug. **Two independent
+print/parse walks can freshen an alpha-equivalent term's bound-variable names differently.** Measured
+directly: `let x = 40; x + 2` forked at step 2 produces the *same* term with two binder names swapped
+end to end (`λx0.` where the other walk chose `λx.`, and vice versa). `lambda/syntax.rs`'s round-trip
+property promises print → parse → print is stable for **one** walk; it makes no claim across two, and
+§4.1's re-derivation is exactly a second one.
+
+Fixed with an `alphaCanonical` helper — **first written to rewrite every identifier to `v0`, `v1`, … in
+order of first appearance, free variables included** — rather than by weakening the assertion to a
+substring or deleting it. **That first version was itself wrong, and code review is what found it.**
+Renaming free variables along with bound ones meant `f (g x)` and `g (f x)` — two different terms —
+both canonicalised to `v0 (v1 v2)`; numbering by first appearance rather than by nesting depth meant two
+independent, non-nested binders that the real printer's `fresh()` is free to spell with the same
+concrete name (`(λx. x) (λx. x)` vs `(λx. x) (λy. y)`) canonicalised to *different* strings despite
+being alpha-equivalent. `d6ac8ed` replaced it with a scope-aware, single left-to-right scan over the
+printer's own grammar: only a name at its binder, or a use that resolves to a binder currently in
+scope, is rewritten, numbered by NESTING DEPTH at the point it is introduced rather than by how many
+distinct names have been seen, and a name with no enclosing binder is left exactly as printed. **Where
+the seed used to be the pane's own frame text reparsed at step 0, nothing gave the printer's name
+generator a reason to walk differently; §4.1 is what created the gap** that made a canonicalising
+helper necessary in the first place, and the first helper's own two mistakes are why one commit was not
+enough to close it.
+
+##### THE REPLAY DID NOT HAVE TO BE IN RUST, AND THE REASON IT WENT THERE ANYWAY IS THE ONE THAT PAID
+
+The design's §4.5 implied a new wasm export was required. It was not: `LambdaScratchHandle`
+(`session-worker.ts:95-101`) already exposes `stepLambda()`, `lambdaState(budget)` and `free()`, so the
+whole of §4.1 is expressible in ~8 lines of TypeScript in the worker with **no boundary change at
+all**. The plan's File Structure section found that before T1 ran, and recorded it rather than letting
+the design's implication stand.
+
+It went to Rust anyway on §5's own rule — *"where a fact can be pinned natively or in node instead, it
+must be"* — because `session-worker.ts` is reachable only from the browser tier, which needs Chrome and
+is skippable, and is the one file `vite.config.ts` excludes from the coverage include set. **That is
+the reason that turned out to matter.** `lambda_scratch_at` got five unit tests in `cargo nextest`, the
+tier that always runs, and the mutation above that produced this slice's most interesting result ran
+there too. Set against it: the one claim this slice could pin *only* in the browser tier — fork a
+truncated frame and the editor holds an untruncated term — is precisely the claim the `frame.cut` gate
+made untestable for nine tasks. The secondary reason (`scratch.ts:66-69`'s rule that the worker holds
+the wasm call and nothing else) held as well, but nothing measured it.
+
+##### `PaneEvents.detach` reversed a rule written in the tree, and SPEC SELF-REVIEW is what caught it
+
+`pane-chrome.ts`'s `detach` doc stated the rule as fact: *"THE TEXT IS THE PANE'S, NOT A LOOKUP… the
+pane is what has it."* Correct for a seed that *was* the rendered frame; it cannot survive §4.1, whose inputs
+are the source's step-0 text (which `main.ts` holds) and the step (which `History` owns). **Recorded in
+the design rather than absorbed** — and it is the one reversal on this branch that was found by reading
+the spec against the tree rather than by executing against it, which is the exception that makes the
+rest of this ledger's rate worth stating.
+
+**The half of the old rule that survives is the half worth keeping:** it is still not a lookup. The
+pane reports a fact it owns and the caller resolves it; what changed is which fact is the small one.
+
+**And the link-window refusal stopped being free.** Under the old signature the guard was *implied* by
+which text the handler passed — the frame's, never the window's. A step carries no such distinction, so
+the same refusal is now an explicit `this.#link === null` in `#refreshDetach` with a test behind it. A
+guard that used to hold by construction and now holds by rule is a guard that needs a test, and this is
+the second time on this branch a comment asserted that transition had already happened.
+
+##### `main.ts` passed a literal `0`, and it was right to
+
+The subtlest finding, from T3+T4's stopgap. `scratchpad.detach(slot, leg.hist.current?.text ?? '', 0)`
+looks like an unfinished parameter and is not: `src` there is **already** `hist.current`'s text, already
+reduced to the step on screen, so forwarding the real step would reduce an already-reduced term forward
+by `step` *more* — a double-application bug that T3's wire change **made possible for the first time**.
+The reviewer settled it by checking the pre-T3 call site: `git show 9aec1a2:web/src/main.ts` took
+`(slot, text)` with no `step` on the wire at all, so the hazard was structurally impossible before.
+
+**T8's replacement had to move both halves together** — the seed becomes the source's step-0 text *and*
+the step becomes real — and the final check on that is that no `_step` and no literal-`0` seed survive
+in `main.ts`. **This is the shape of provisional code that survives to merge because nothing breaks:**
+the stopgap was functionally correct in every reachable case, since a click is synchronous against the
+last-rendered frame.
+
+##### Verification
+
+`cargo nextest run --workspace` **900 passed / 8 skipped** (baseline 895) · `cargo clippy --workspace
+--all-targets -- -D warnings` **clean**, re-run after `cargo clean -p` on all **five** workspace crates
+so the result is not a cached one that re-printed nothing · web **262 node / 109 browser / 371 merged**
+(baseline 257 / 90 / 347), coverage **95.19 statements / 90.16 branches / 97.2 functions / 97.34
+lines** against thresholds 92/85/93/94 — all four above the 94.85 / 89.88 / 96.92 / 97.01 baseline · 24
+wasm browser tests, was 22, from T2's `scripts/check-all.sh` run rather than one taken here.
+
+**RE-MEASURED FOR THE FINAL WHOLE-BRANCH REVIEW.** The crate count above was a miscount from the
+start — five, not three, per `Cargo.toml`'s `members` (`redextape-core`, `redextape-native`,
+`redextape-native-rt`, `redextape-test-support`, `redextape-wasm`). The browser-test and coverage
+figures this entry originally reported (262 node / 103 browser / 365 merged; 95.35 statements / 90.25
+branches / 97.18 functions / 97.48 lines) no longer matched the tree by the time this review ran:
+`b397178` and `d6ac8ed` each landed tests of their own after this entry was written, and this review's
+own regression test (`scratch-rebind-editor.test.ts`, the Important finding above) added a 371st. The
+figures inline above are this review's fresh measurement, `cargo clean -p` included — `cargo
+nextest`'s count is the one figure this paragraph got right the first time.
+
+**The collapse-button regression test was verified the way this branch needed**, given it shipped three
+tests that passed vacuously: stash `pane-chrome.ts` only (fix out, test in), run, observe
+`expected 'show the term editor' to be 'hide the term editor'`; restore, 365/365. The defect itself —
+`setEditor(null)` removed the button from the DOM but left `collapseButton`'s `collapsed` closure
+variable set, so a remounted editor came back expanded under a label saying "show" — was found by T7's
+reviewer through independent probing, in a file T7's diff did not touch, and **was not reachable until
+T8 wired `setEditor` at all.**
+
+##### What this slice could not establish
+
+**Whether anyone can work in this.** The fork can now be typed into, which 5d-i's entry could not say —
+but nobody has yet sat in front of a scratchpad and used one for anything. Every claim here is about
+DOM, types, text and counts.
+
+**Whether re-deriving at step k is affordable at large k.** §3.2 prices the *rejected* design (an
+attached-pane editor replaying on every scrub tick, ~0.2–0.35 s at step 50,000) and argues the fork's
+one-off replay is cheap by comparison. **The fork's own latency was never measured at any step.** The
+argument that it costs the same reduction a text-fetch message would have cost anyway is sound and
+unquantified.
+
+**How far `alphaCanonical` can be trusted — the question, restated after the answer changed.** It was
+listed here as an open worry in exactly the terms the first implementation deserved: it rewrote *every*
+identifier by first appearance, free variables included, so `f (g x)` and `g (f x)` canonicalised
+identically. **That is fixed** (`d6ac8ed`), and this paragraph survived the fix asserting the defect as
+a live limitation — **the eighth instance of this branch's signature failure, and the second inside
+this entry.** The rule it keeps proving: a comment amended in one place is not amended.
+
+What is genuinely unestablished, now that it is scope-aware: it is still a **textual** stand-in for
+alpha-equivalence rather than a decision procedure. It trusts its input to be real `print_lambda`
+output, and neither the reviewer's adversarial probing nor the four unit tests bound what it would do
+with text that is grammar-conformant but not printer-produced. Nothing has driven it at a term large
+or strangely-parenthesised enough to test the paren-depth scope stack near its limits.
+
+**No accessibility pass, and this slice ADDED to the standing list rather than discharging any of it.**
+Two additions: the collapse control and a text input region, both gated on 5d-ii per the roadmap's
+deferral. No colour carries state in either. CodeMirror over a `<pre>` is a strict improvement for
+assistive tech, and it is a side effect rather than a discharge.
+
+**`TmScratch` still has no producer**, unchanged from 5d-i. That is now a named slice with a position
+rather than a gap — see the 5d-iv entry filed in the Plan 5 section above, which is a requirement of
+this slice's own design §6.1 and not a courtesy.
+
+**Written before the final whole-branch review**, which is the last item on this branch's endgame list;
+eight Minors are queued for it to triage, including the T1 clamp comment above.

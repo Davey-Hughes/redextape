@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import type { EditorView } from '@codemirror/view'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { History } from '../../src/history'
+import { LambdaPane } from '../../src/lambda-pane'
+import { linkStatus } from '../../src/link-status'
 import type { RunReply } from '../../src/protocol'
 import { HISTORY_BYTES, lambdaFrameBytes, tmFrameBytes } from '../../src/protocol'
 import { LambdaScratchpad } from '../../src/scratch'
@@ -150,7 +153,7 @@ describe('detach is a fork', () => {
 
       const tm = reg.legOf({ session: SOURCE, leg: 'tm' })
       const before = tm.hist.newestStep
-      pad.detach(slot, '(λx. x) (λy. y)')
+      pad.detach(slot, '(λx. x) (λy. y)', 0)
 
       // Two threads now, and the fork did not take the source's. Kept above the behavioural
       // assertion so a failure says "there is one worker" rather than leaving it to be inferred.
@@ -206,7 +209,7 @@ describe('detach is a fork', () => {
         },
       })
 
-      pad.detach(new PaneSlot('lambda', SOURCE), '(λx. x) (λy. y)')
+      pad.detach(new PaneSlot('lambda', SOURCE), '(λx. x) (λy. y)', 0)
       await until(() => seen.some((r) => r.kind === 'lambda-frames' && r.done !== null), "the scratchpad's frames")
 
       // `scratch-compiled`, NOT `compiled`, and never a `result`: §3.3 puts `lambdaValue`, `linkIndex`
@@ -258,7 +261,7 @@ describe('detach is a fork', () => {
         onReply: (r) => seen.push(r),
       })
 
-      pad.detach(slot, 'λx. x')
+      pad.detach(slot, 'λx. x', 0)
       await until(() => seen.some((r) => r.kind === 'scratch-compiled'), "the scratchpad's thread to answer")
       const thread = spawned[1]
       if (thread === undefined) throw new Error('the fork should have spawned a second thread')
@@ -274,7 +277,7 @@ describe('detach is a fork', () => {
       expect(thread.terminated).toBe(1)
       const afterDeath: RunReply[] = []
       thread.worker.addEventListener('message', (e: MessageEvent<RunReply>) => afterDeath.push(e.data))
-      thread.worker.postMessage({ kind: 'lambda-scratch', gen: 99, src: 'λz. z' })
+      thread.worker.postMessage({ kind: 'lambda-scratch', gen: 99, src: 'λz. z', step: 0 })
       // 3 SECONDS AGAINST A THREAD THAT ANSWERED THE IDENTICAL MESSAGE IN THE `until` ABOVE, which is
       // what makes silence mean something here. A live worker's `lambdaScratch` on a two-token term is
       // one uninterruptible parse and a print; the wait above measures it at well under a second.
@@ -283,5 +286,236 @@ describe('detach is a fork', () => {
     } finally {
       for (const id of [SOURCE, SCRATCH]) pool.unbind(id)
     }
+  })
+})
+
+/**
+ * **THE `no-session` REMEDY — CRITICAL finding, plan 5d-iii's ninth task.** `detach` rebinds a pane to
+ * the λ scratchpad SYNCHRONOUSLY, before the worker has answered (`scratch.ts`'s own doc: "supersede
+ * then post"), so a build that fails used to strand the pane there forever: `scratch-compiled` never
+ * fires, so `LambdaPane.setEditor` is never called and `setDiagnostics` is a silent no-op against
+ * `#editor === null`; the step readout is stuck on the `'building…'` placeholder `detach` seeds; and
+ * `#refreshDetach`'s `!this.#detached` gate hides the only control that could recover it, because the
+ * session the pane is stuck on IS the one that never works. Design §4.1a promises the opposite: "the
+ * pane keeps offering ✎ — the user can scrub to a smaller step and fork there". `LambdaScratchpad.
+ * noSessionReply` is the fix, and this is the test that would have failed before it existed.
+ *
+ * **AN UNPARSEABLE SEED, DELIBERATELY, NOT A GENUINELY OVER-BUDGET TERM.** Both reach the identical
+ * `scratch === null` branch of `session-worker.ts`'s `onLambdaScratch` (`ForkedAt`'s doc in
+ * `session.rs`: "`scratch` and `text` are null together"), but a real term over `LAMBDA_BYTE_BUDGET`
+ * (65,536 bytes) needs a genuinely large fixture to construct and would make this test slow; garbage
+ * text is one string literal and fails in the same place for a different reason `lambda_scratch_at`
+ * already tests directly in Rust (`lambda_scratch_at_refuses_unparseable_text`).
+ *
+ * **DRIVEN AT THE `LambdaScratchpad`/`PaneSlot`/`LambdaPane` LAYER, NOT THROUGH `main.ts`'s `ready`
+ * APP, AND THAT IS A DELIBERATE CHOICE RATHER THAN A SHORTCUT.** `main.ts`'s own `detach` handler
+ * always sends `index.lambdaText` — the SOURCE compile's own step-0 print, which round-trips by
+ * construction (`lambda/syntax.rs`'s guarantee) unless it is itself cut at `LAMBDA_BYTE_BUDGET`, which
+ * only a genuinely enormous program reaches. There is no seam in the mounted app to hand `detach` a
+ * deliberately broken string instead, and `onScratchReply` is a closure with no export — so a test
+ * that needed BOTH a cheap unparseable seed AND the exact production code path had nowhere to go
+ * through `main.ts` at all. This file's own siblings already establish the alternative this test
+ * follows: `PaneSlot.render` is written to be "the SAME resolution the app's `draw()` does rather than
+ * a re-implementation of it" (`sessions.ts`'s own doc), and the `describe` above drives
+ * `LambdaScratchpad` directly over real `session-worker.ts` threads for the identical reason. Nothing
+ * here re-implements `noSessionReply`; it is the exact method `main.ts`'s `onScratchReply` calls.
+ */
+describe('the no-session remedy for a failed fork', () => {
+  it('retires a phantom scratchpad, restores the fork control, and hands back a diagnostic to show — but leaves an already-live scratch alone', {
+    timeout: 120_000,
+  }, async () => {
+    const { pool } = realPool()
+    const reg = new SessionRegistry()
+    const slot = new PaneSlot('lambda', SOURCE)
+    const seen: RunReply[] = []
+    const pad = new LambdaScratchpad({
+      registry: reg,
+      pool,
+      id: SCRATCH,
+      label: 'λ scratchpad',
+      historyBytes: HISTORY_BYTES,
+      onReply: (r) => {
+        seen.push(r)
+        if (r.kind === 'lambda-frames') {
+          const l = reg.legOf({ session: SCRATCH, leg: 'lambda' })
+          for (const f of r.frames) l.hist.push(f, lambdaFrameBytes(f))
+          l.done = r.done
+        }
+      },
+    })
+
+    const host = document.createElement('div')
+    document.body.append(host)
+    try {
+      reg.add(sourceSession(pool, []))
+      // A REAL, COMPILED SOURCE LEG — `#refreshDetach` refuses the fork control with no frame to
+      // report a step against (`render(null, …)`), same as an uncompiled page, so the source session
+      // needs one real frame before the button this test starts by checking can exist at all.
+      const srcLeg = reg.legOf({ session: SOURCE, leg: 'lambda' })
+      const srcClient = reg.entryOf(SOURCE).client
+      srcClient.request(srcClient.supersede(), 'let x = 40; x + 2', 'unary')
+      await until(() => srcLeg.hist.current !== undefined, 'the source session to compile')
+
+      // A REAL `LambdaPane`, WIRED THE WAY `main.ts` WIRES ONE — `slot.render` is the same call
+      // `draw()` makes, so "the fork control is back in the DOM" is asserted on the real chrome
+      // rather than on a fact about the registry alone.
+      const pane = new LambdaPane(host, {
+        back: () => undefined,
+        forward: () => undefined,
+        play: () => undefined,
+        restart: () => undefined,
+        extend: () => undefined,
+        rebind: (session) => slot.rebind(session),
+        detach: () => undefined,
+      })
+      slot.render(reg, pane, slot.resolve(reg))
+      expect(host.querySelector('.controls .detach')).not.toBeNull()
+
+      // THE PHANTOM BUILD. `detach` has already rebound the slot by the time this call returns —
+      // the CRITICAL finding's own bug, reproduced here before it is fixed by what comes next.
+      pad.detach(slot, 'not a valid lambda term (((', 0)
+      slot.render(reg, pane, slot.resolve(reg))
+      expect(slot.binding.session).toBe(SCRATCH)
+
+      await until(() => seen.some((r) => r.kind === 'no-session'), 'the failed build to answer')
+      const failReply = seen.find((r) => r.kind === 'no-session')
+      if (failReply === undefined || failReply.kind !== 'no-session') throw new Error('expected a no-session reply')
+      expect(failReply.diagnostics.length).toBeGreaterThan(0)
+
+      // THE FIX, CALLED EXACTLY AS `main.ts`'s `onScratchReply` CALLS IT.
+      const failed = pad.noSessionReply(failReply.diagnostics, SOURCE, [slot])
+      slot.render(reg, pane, slot.resolve(reg))
+
+      // NOT LEFT DETACHED.
+      expect(failed).not.toBeNull()
+      expect(slot.binding.session).toBe(SOURCE)
+      expect(reg.has(SCRATCH)).toBe(false)
+      // THE FORK CONTROL IS BACK IN THE DOM.
+      expect(host.querySelector('.controls .detach')).not.toBeNull()
+      // THE DIAGNOSTIC IS VISIBLE — composed exactly as `main.ts`'s `drawLink` composes `#link-status`.
+      const message = (failed ?? []).map((d) => d.message).join(' · ')
+      const line = linkStatus({ state: 'none', forkFailed: message })
+      expect(line).toContain('fork failed')
+      for (const d of failReply.diagnostics) expect(line).toContain(d.message)
+
+      // THE LIVE-EDIT CASE, FOR CONTRAST, ON THE SAME SCRATCHPAD OBJECT. Design §4.4: "an edit that
+      // does not parse leaves the frames region showing the last good run" — a `no-session` for a
+      // scratch that already has a good build must NOT retire it, which is the regression
+      // `scratch-edit.test.ts`'s STAGE 3 already pins through the app; this asserts the same rule at
+      // the method `main.ts` actually calls.
+      pad.detach(slot, '(λx. x) (λy. y)', 0)
+      await until(() => seen.some((r) => r.kind === 'lambda-frames' && r.done !== null), "the scratchpad's frames")
+      expect(reg.has(SCRATCH)).toBe(true)
+      expect(reg.legOf({ session: SCRATCH, leg: 'lambda' }).hist.current).not.toBeUndefined()
+
+      const stillLive = pad.noSessionReply(
+        [{ span: { start: 0, end: 0 }, severity: 'Error', message: 'a fabricated parse failure' }],
+        SOURCE,
+        [slot],
+      )
+      expect(stillLive).toBeNull()
+      expect(reg.has(SCRATCH)).toBe(true)
+      expect(slot.binding.session).toBe(SCRATCH)
+    } finally {
+      pool.unbind(SOURCE)
+      pool.unbind(SCRATCH)
+      host.remove()
+    }
+  })
+})
+
+/**
+ * **THE DOM HALF OF §4.1A'S CLAIM, DRIVEN THROUGH THE REAL APP.** Every test above builds
+ * `LambdaScratchpad` over a hand-built `SessionRegistry`, with no `LambdaPane` anywhere in reach —
+ * right for the mechanism (`scratch()`/`retire()`/the singleton), wrong for "the CONTROL forks a
+ * frame the OLD gate would have hidden", which is a fact about `LambdaPane.#refreshDetach` and the
+ * DOM it drives, not about the session underneath it. This block mounts the real app, the same
+ * `SHELL` `scratch-app.test.ts` uses and for the same "one page per test FILE" reason its own comment
+ * states.
+ *
+ * `WHILE4` IS THE FIXTURE, AND IT WAS MEASURED TO TRUNCATE BEFORE BEING TRUSTED TO — the brief's own
+ * instruction, followed literally: a probe run against this exact string during this task's
+ * development (`compile(WHILE4, 'unary')`, then `lambdaState(FRAME_BYTES)` and
+ * `lambdaState(LAMBDA_BYTE_BUDGET)` at each step) found `cut === 'Bytes'` at the 512-byte budget on
+ * EVERY one of steps 0 through 9, while the 65,536-byte budget stayed `cut === null` throughout
+ * (777-2,095 bytes printed, nowhere near that budget) — truncated at the frame's own print, whole at
+ * the readout's, exactly the pairing this test needs. `frame-cost.test.ts` uses the same source for
+ * an unrelated reason (span cost, not truncation) and never checks `cut`; this file's own `BIG` was
+ * picked for its TM leg's size and was never measured for λ truncation at all; `SAMPLE`-sized
+ * programs (`scratch-app.test.ts`) never truncate at either budget. None of the existing fixtures
+ * would have proven anything here.
+ */
+describe('the fork control forks a truncated frame, through the app', () => {
+  const WHILE4 = 'let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc'
+
+  const SHELL = `
+    <header class="bar"><span class="wordmark">redextape</span>
+      <button type="button" id="appearance"></button>
+      <label class="encoding">encoding <select id="encoding"></select></label>
+    </header>
+    <main>
+      <section id="source" class="pane"><div id="editor"></div><div id="link-status" class="link-status"></div></section>
+      <section id="lambda" class="pane"></section>
+      <section id="tm" class="pane wide"></section>
+      <section id="results" class="pane results wide"></section>
+    </main>`
+
+  let view: EditorView
+
+  const resultsText = () => document.querySelector('#results')?.textContent ?? ''
+  const stepText = () => document.querySelector('#lambda .step')?.textContent ?? ''
+
+  const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
+
+  const clickLambda = (label: string) => {
+    const b = [...document.querySelectorAll<HTMLButtonElement>('#lambda .controls button')].find(
+      (x) => x.textContent === label,
+    )
+    if (b === undefined) throw new Error(`no \`${label}\` button in the λ pane`)
+    b.click()
+  }
+
+  // ONE MOUNT FOR THE FILE — `scratch-app.test.ts`'s own reason: ES module imports are cached, so
+  // `main()` runs once per page. The three `describe` blocks above never import `../../src/main` at
+  // all, so this is the first and only mount in this file; nothing above shares a page with it.
+  beforeAll(async () => {
+    document.body.innerHTML = SHELL
+    view = await (await import('../../src/main')).ready
+    await until(idle, 'the first compile')
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: WHILE4 } })
+    await until(idle, 'the truncating program to compile')
+  }, 60_000)
+
+  it('forks a TRUNCATED frame and seeds the editor with the whole term', async () => {
+    // `↺` FIRST: a settled pane sits at the frontier, not step 0 (`scratch-app.test.ts`'s own note).
+    // Two steps forward from there is not the free `step === 0` case §4.1a calls out — the worker has
+    // to do the replay, not skip it.
+    clickLambda('↺')
+    clickLambda('▶')
+    clickLambda('▶')
+    expect(stepText()).toContain('step 2 of')
+
+    // THE CAPABILITY THIS SLICE EXISTS FOR. Before T8's fix to `#refreshDetach`, a frame this
+    // truncated hid the fork control outright — `lambda-pane.ts`'s own module doc calls this shape
+    // "most non-trivial terms".
+    expect(document.querySelector('#lambda .truncated')).not.toBeNull()
+    const fork = document.querySelector<HTMLButtonElement>('#lambda .controls .detach')
+    expect(fork).not.toBeNull()
+
+    fork?.click()
+
+    await until(() => document.querySelector('#lambda .term-editor') !== null, 'the editor to mount')
+    const editorText = document.querySelector('#lambda .term-editor')?.textContent ?? ''
+    expect(editorText).not.toBe('')
+    // NOT A PREFIX. A truncated frame's own text ends mid-token, with no closing paren or binder; the
+    // editor's seed is the worker's full-fidelity re-print (`index.lambdaText`, replayed to step 2
+    // and re-printed at `LAMBDA_BYTE_BUDGET`), a WHOLE, parseable term — `lambda/syntax.rs`'s
+    // round-trip guarantee holds over it, which is not a promise `while4`'s 512-byte frame ever made.
+    expect(editorText).not.toContain('…')
+
+    // AND THE SOURCE SESSION IS STILL THE ONE THE PANE LEFT — the scratch is a second session, not a
+    // mutation of the first (§4.3, and this file's first `describe` proves the mechanism directly).
+    // `[detached]` is the DOM's own witness that a second session now exists at all.
+    expect(document.querySelector('#lambda h2')?.textContent).toContain('[detached]')
   })
 })

@@ -30,7 +30,7 @@
  * why the fork's POLICY — singleton, which pane rebinds, when a scratch is retired — lives in
  * `scratch.ts` and only the wasm call it cannot make from the main thread lives here.
  */
-import init, { compile, lambdaScratch, tapeNames } from '../../pkg/redextape_wasm.js'
+import init, { compile, lambdaScratchAt, tapeNames } from '../../pkg/redextape_wasm.js'
 import type { LinkIndexWire } from './link'
 import type { LambdaLeg, Leg, RecordEnd, RunReply, RunRequest, TmLeg } from './protocol'
 import {
@@ -103,14 +103,15 @@ type LambdaScratchHandle = {
 type CompileResult = { diagnostics: Diagnostic[]; session: Session | null }
 
 /**
- * `lambdaScratch(src)`'s hand-built object — a handle and plain data, which `lib.rs` assembles with
- * `js_sys::Object` for the reason `compile`'s own doc gives.
+ * `lambdaScratchAt(src, step, byteBudget)`'s hand-built object — a handle and plain data, which
+ * `lib.rs` assembles with `js_sys::Object` for the reason `compile`'s own doc gives.
  *
- * `scratch: null` MEANS THE TEXT DID NOT PARSE, and it is not `compile`'s "a backend declined" case: a
- * scratchpad has no backend to decline, only a parser. `onLambdaScratch` answers it with `no-session`,
- * which is the same claim about a different producer — see that variant's doc in `protocol.ts`.
+ * `scratch` AND `text` ARE NULL TOGETHER OR NEITHER (`session::ForkedAt`) — see `scratch-compiled`'s
+ * doc in `protocol.ts`. `scratch: null` covers both text that did not parse and a term too large to
+ * print at `LAMBDA_BYTE_BUDGET`; `onLambdaScratch` answers either with `no-session`, the same claim
+ * about a different producer.
  */
-type ScratchResult = { diagnostics: Diagnostic[]; scratch: LambdaScratchHandle | null }
+type ForkedAtResult = { diagnostics: Diagnostic[]; scratch: LambdaScratchHandle | null; text: string | null }
 
 /**
  * Exactly what this worker uses of its global scope.
@@ -509,6 +510,13 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
  * IT DOES NOT `await recordTm`. A `LambdaScratch` has one leg; `recordTm` would answer `false` at its
  * own `kind` guard, and calling it to be told so would be a line asserting the absence rather than
  * respecting it.
+ *
+ * **THE REPLAY HAPPENS INSIDE `lambdaScratchAt`, NOT HERE, AND THAT IS DELIBERATE.** Every method the
+ * loop needs is on `LambdaScratchHandle`, so ~8 lines of TypeScript here would have worked and needed
+ * no new export. It is in Rust because this file is excluded from the coverage include set and is
+ * reachable only from the browser tier, which needs Chrome and is skippable — and 5d-i recorded a
+ * fabricated status that left the native suite 894/894 green and was caught only there. The rule this
+ * file already states is that it holds the wasm call and not the logic.
  */
 async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch' }>): Promise<void> {
   await ready
@@ -520,26 +528,26 @@ async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch'
   recording.lambda = false
   recording.tm = false
 
-  const { diagnostics, scratch } = lambdaScratch(req.src) as ScratchResult
+  const { diagnostics, scratch, text } = lambdaScratchAt(req.src, req.step, LAMBDA_BYTE_BUDGET) as ForkedAtResult
   if (scratch === null) {
     ctx.postMessage({ kind: 'no-session', gen: req.gen, diagnostics })
     return
   }
-  // Deliberate silence: a newer request landed while `lambdaScratch` (uninterruptible) was in flight.
-  // This scratch was never posted anywhere, so freeing it and returning is the whole cleanup — the
-  // same reasoning `onRun` gives for the `Session` it discards on the same race.
+  // Deliberate silence: a newer request landed while `lambdaScratchAt` (uninterruptible) was in
+  // flight. This scratch was never posted anywhere, so freeing it and returning is the whole cleanup
+  // — the same reasoning `onRun` gives for the `Session` it discards on the same race.
   if (latest !== req.gen) {
     scratch.free()
     return
   }
   live = { gen: req.gen, kind: 'lambda-scratch', session: scratch }
 
-  // DIAGNOSTICS ARE DROPPED ON THE SUCCESS PATH, and there is nothing to drop: `parse_lambda` returns
-  // them only alongside a `None` term (`lambda/syntax.rs`), so a non-null `scratch` always comes with
-  // an empty list. Posting an always-empty array on a message the app receives per fork would be a
-  // field with no reader — the case the `scratch: null` arm above genuinely has is the one that
-  // carries them.
-  ctx.postMessage({ kind: 'scratch-compiled', gen: req.gen, lambda: scratch.lambdaStatus() })
+  // DIAGNOSTICS ARE DROPPED ON THE SUCCESS PATH, and there is nothing to drop: `lambda_scratch_at`'s
+  // `diagnostics` on a non-null `scratch` come from REPARSING ITS OWN PRINTED OUTPUT
+  // (`lambda/syntax.rs`'s round-trip guarantee), so they are always empty there — the case that
+  // genuinely carries them is the `scratch: null` arm above. Posting an always-empty array on a
+  // message the app receives per fork would be a field with no reader.
+  ctx.postMessage({ kind: 'scratch-compiled', gen: req.gen, lambda: scratch.lambdaStatus(), text })
   await recordLambda(req.gen, true)
 }
 

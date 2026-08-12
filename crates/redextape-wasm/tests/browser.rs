@@ -1127,6 +1127,30 @@ fn unparseable_lambda_text_crosses_as_diagnostics_and_a_null_handle() {
     assert_eq!(scratch, JsValue::NULL, "no term, no handle — and `null`, not `undefined`");
 }
 
+/// 5d-iii T2: `lambdaScratchAt` forks a scratch from mid-history and hands back the text that built it,
+/// through the boundary — the marshalling this tier exists to catch, not the reduction itself (that is
+/// `session.rs`'s `lambda_scratch_at_*` unit tests).
+#[wasm_bindgen_test]
+fn lambda_scratch_at_returns_a_handle_and_the_text_that_built_it() {
+    let out = redextape_wasm::lambda_scratch_at("(\\x. x) (\\y. y)", 1, 65_536).expect("marshals");
+    let text = get(&out, "text");
+    // `λ`, NOT `\`. `lambda/syntax.rs`'s binder spelling is asymmetric on purpose — the parser
+    // accepts both, the printer emits only `λ` — and `text` is always a reparsed PRINT, never the
+    // caller's `src`. T1 found three of its five tests wrong this way before this note existed.
+    assert_eq!(text.as_string().as_deref(), Some("λy. y"));
+    let scratch = get(&out, "scratch");
+    assert!(!scratch.is_null(), "a term that parsed must yield a handle");
+}
+
+/// `ForkedAt`'s one fact, not two independent nullables: `scratch` and `text` are null together.
+#[wasm_bindgen_test]
+fn lambda_scratch_at_nulls_both_fields_when_the_text_does_not_parse() {
+    let out = redextape_wasm::lambda_scratch_at("(\\x.", 0, 65_536).expect("marshals");
+    for field in ["scratch", "text"] {
+        assert!(get(&out, field).is_null(), "{field} must be null when no scratch was built");
+    }
+}
+
 /// 5d-i T3: a headerless `.tm` file crosses as a runnable machine, and `tmStatus().header` is `false`
 /// so the pane can say the configuration was invented (decision 6). Asserted through the glue because
 /// `tmStatus` on this type answers a DIFFERENT wire shape from `Session::tmStatus` — no `total_steps`,

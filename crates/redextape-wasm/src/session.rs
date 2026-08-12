@@ -860,6 +860,73 @@ pub fn lambda_scratch(src: &str) -> Scratched<LambdaScratch> {
     Scratched { diagnostics, scratch }
 }
 
+/// A λ scratchpad forked from step `step` of `src`, **and the text that built it**.
+///
+/// A THIRD FIELD RATHER THAN `Scratched<LambdaScratch>`, because the caller needs the string. Design
+/// §4.1: the editor is seeded from the same text that created the scratch rather than from a second
+/// print that could disagree with it, and a `Scratched` has no room to say what that was.
+///
+/// **`text` IS `None` FOR EXACTLY THE CASES `scratch` IS**, which is one fact rather than two: no
+/// scratch was built, so there is no string that built one. A non-null text beside a null scratch
+/// would be a fourth state for a renderer to switch on — the redundancy `protocol.ts`'s
+/// `scratch-compiled` doc already refused for a `no-scratch` variant.
+pub struct ForkedAt {
+    pub diagnostics: Vec<Diagnostic>,
+    pub scratch: Option<LambdaScratch>,
+    pub text: Option<String>,
+}
+
+/// Fork a λ scratchpad from **step `step`** of `src`, printing the forked term at `byte_budget`.
+///
+/// **TWO REDUCTIONS IN ONE CALL, AND THE SECOND PARSE IS THE POINT RATHER THAN THE PRICE** (design
+/// §4.1). `lambda_scratch` builds from λ TEXT, so for the fork's step 0 to BE the term that was on
+/// screen, that term's text has to exist. It does not: history frames print at 512 bytes and the
+/// full-fidelity print exists only at step 0, in the `compiled` reply. Re-deriving it here and then
+/// building the scratch from the derived string is what makes the editor's contents, the scratch's
+/// step 0, and the term the user was looking at one object instead of three that agree until they do
+/// not — and it puts the whole path through `lambda/syntax.rs`'s round-trip guarantee.
+///
+/// **`step` IS CLAMPED BY THE REDUCTION, NOT VALIDATED.** `step_lambda` answers `false` at the normal
+/// form, so a step past the end lands on the normal form. A history's step count and a fresh
+/// reduction's cannot disagree today, but a caller is a pane and a pane is not a proof.
+///
+/// **A CUT REFUSES THE FORK, AND THAT IS §4.1's MOVED REFUSAL RATHER THAN A NEW ONE.** `detachButton`
+/// already declines a truncated 512-byte frame because a `Bytes` cut is a prefix that will not parse
+/// and a `Depth` cut is not even a prefix. At `byte_budget` the same hazard is 128x further out, not
+/// gone, so the same refusal applies with a message a pane can show.
+#[must_use]
+pub fn lambda_scratch_at(src: &str, step: u32, byte_budget: usize) -> ForkedAt {
+    let Scratched { diagnostics, scratch } = lambda_scratch(src);
+    let Some(mut tmp) = scratch else {
+        return ForkedAt { diagnostics, scratch: None, text: None };
+    };
+    for _ in 0..step {
+        if !tmp.step_lambda() {
+            break;
+        }
+    }
+    let state = tmp.lambda_state(byte_budget);
+    if state.cut.is_some() {
+        // A ZERO-WIDTH SPAN AT THE ORIGIN, because this diagnostic is about the TERM and not about a
+        // location in the text the user typed — there is no offset in `src` that names "the result of
+        // reducing this 40,000 times is too big to print".
+        return ForkedAt {
+            diagnostics: vec![Diagnostic::error(
+                Span { start: 0, end: 0 },
+                "the term at this step is too large to fork — scrub to an earlier step",
+            )],
+            scratch: None,
+            text: None,
+        };
+    }
+    let Scratched { diagnostics: reparse_diagnostics, scratch } = lambda_scratch(&state.text);
+    // `text` FOLLOWS `scratch`, never independently. The second parse can still fail — a printed term
+    // that does not re-parse would be a round-trip bug in `lambda/syntax.rs` rather than a user error,
+    // and reporting a text that built nothing would hide it behind a seeded editor.
+    let text = scratch.is_some().then_some(state.text);
+    ForkedAt { diagnostics: reparse_diagnostics, scratch, text }
+}
+
 impl LambdaScratch {
     /// **`available` IS ALWAYS `true` AND `reason` IS ALWAYS EMPTY, AND THAT IS NOT A FABRICATION.**
     /// A `LambdaScratch` exists only for text that parsed, so the leg genuinely is there and there
@@ -1498,6 +1565,68 @@ mod tests {
         let sc = lambda_scratch("(\\x. x) (\\y. y)").scratch.expect("parses");
         assert!(sc.lambda_ast(1).is_none(), "a 1-node budget must refuse, not truncate");
         assert!(sc.lambda_ast(usize::MAX).is_some());
+    }
+
+    // --- the fork -------------------------------------------------------------------------------
+
+    #[test]
+    fn lambda_scratch_at_step_zero_round_trips() {
+        // The identity case, and the free test of the whole path design §4.1 names: the replay is a
+        // no-op, so both `lambda_scratch` calls must produce the same term from the same text.
+        //
+        // The expected text is the PRINTER's spelling, `λ`, not the `\` the source used — `print_lambda`
+        // emits only `λ` (`lambda/syntax.rs`'s module doc), and `lambda_scratch_at`'s output is a
+        // reparse of a print, never the original source string.
+        let out = lambda_scratch_at("(\\x. x) (\\y. y)", 0, 65_536);
+        assert!(out.diagnostics.is_empty());
+        assert!(out.scratch.is_some());
+        assert_eq!(out.text.as_deref(), Some("(λx. x) (λy. y)"));
+    }
+
+    #[test]
+    fn lambda_scratch_at_replays_to_the_requested_step() {
+        // One β-step of `(\x. x) (\y. y)` is `\y. y`, and the scratch that comes back must be at ITS
+        // step 0 holding that term — not at step 1 of the original.
+        let out = lambda_scratch_at("(\\x. x) (\\y. y)", 1, 65_536);
+        assert_eq!(out.text.as_deref(), Some("λy. y"));
+        let scratch = out.scratch.expect("a scratch for a term that parsed");
+        assert_eq!(scratch.lambda_state(65_536).step, 0, "the fork's step 0 is the term forked");
+    }
+
+    #[test]
+    fn lambda_scratch_at_clamps_a_step_past_the_end() {
+        // `step` is what a pane was showing, and a history can outlive nothing — asking for step 500
+        // of a 1-step reduction must still answer the term the reduction actually ended on.
+        //
+        // THIS DOES NOT PIN THE REPLAY LOOP'S `break` (final whole-branch review, T1's mutation
+        // result). `LambdaCursor::next` latches permanently once ended (`trace.rs:149-152`:
+        // `self.status.is_some()` short-circuits every call after the first `None`), so `step_lambda`
+        // answers `false` forever past the end — looping the full 500 iterations and breaking out
+        // early reach bit-identical state, which is why deleting the `break` kills nothing here. What
+        // this genuinely pins is that `lambda_scratch_at` survives a step far past the reduction's
+        // length and reports the right term, rather than panicking or spinning.
+        let out = lambda_scratch_at("(\\x. x) (\\y. y)", 500, 65_536);
+        assert_eq!(out.text.as_deref(), Some("λy. y"));
+    }
+
+    #[test]
+    fn lambda_scratch_at_refuses_unparseable_text() {
+        let out = lambda_scratch_at("(\\x.", 0, 65_536);
+        assert!(out.scratch.is_none());
+        assert!(out.text.is_none(), "no string built a scratch, so there is no string to report");
+        assert!(!out.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn lambda_scratch_at_refuses_a_term_over_budget() {
+        // Design §4.1's moved refusal: a term that does not fit the print budget yields a CUT, and a
+        // cut is a prefix that will not parse (or worse, parses to a different term). A tiny budget
+        // reproduces at 8 bytes what 64 KiB does for a genuinely enormous term.
+        let out = lambda_scratch_at("(\\xxxxxxxx. xxxxxxxx) (\\yyyyyyyy. yyyyyyyy)", 0, 8);
+        assert!(out.scratch.is_none(), "a cut term must not seed a scratch");
+        assert!(out.text.is_none());
+        assert_eq!(out.diagnostics.len(), 1);
+        assert!(out.diagnostics[0].message.contains("too large to fork"));
     }
 
     // --- the TM leg ---------------------------------------------------------------------------

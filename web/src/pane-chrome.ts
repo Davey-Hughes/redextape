@@ -22,18 +22,41 @@ export type PaneEvents = {
    */
   rebind(session: SessionId): void
   /**
-   * Fork this pane's term into the λ scratchpad — design §4.3, carrying the text the pane is showing.
+   * Fork this pane's term into the λ scratchpad — design §4.3, at the step the pane is showing.
    *
    * OPTIONAL, LIKE THE TWO BELOW AND UNLIKE `rebind`, and the test is the one those two already
    * apply: a pane has this handler when it has the affordance the handler reports. The TM pane has no
-   * term to fork — it renders a δ-table projected from a compiled program, and §4.1's `TmScratch` is
-   * built from `.tm` TEXT that no surface in this app holds (see `protocol.ts`'s `lambda-scratch`).
+   * term to fork; see §6.1 of 5d-iii's design for the slice that changes that.
    *
-   * THE TEXT IS THE PANE'S, NOT A LOOKUP. §4.3 seeds the scratchpad with "that pane's current text",
-   * and the pane is what has it; see `LambdaPane`'s detach handler for which of its two texts that is
-   * and why.
+   * **IT CARRIES A STEP, NOT TEXT, AND THAT REVERSES WHAT THIS COMMENT USED TO SAY.** The rule was
+   * "THE TEXT IS THE PANE'S, NOT A LOOKUP", and it was right for a seed that WAS the rendered frame.
+   * Design §4.1 replaced that seed: the inputs are now the SOURCE session's step-0 term — which lives
+   * in the `compiled` reply that `main.ts` holds, not in any pane — and the step, which `History`
+   * owns. So the pane reports the one fact it owns and `main.ts` resolves the rest.
+   *
+   * **THE HALF OF THE OLD RULE THAT SURVIVES IS THE IMPORTANT HALF:** the pane does not go looking for
+   * a term. What changed is which fact is the small one.
+   *
+   * **A PANE SHOWING A LINK WINDOW MUST STILL DECLINE TO FORK, AND THAT IS NOW A RULE RATHER THAN A
+   * CONSEQUENCE.** It used to hold for free — the pane passed its own body text, and `LambdaPane`'s
+   * handler chose the frame's text over the window's for the reason recorded there. A step carries no
+   * such distinction, so `LambdaPane.#refreshDetach` checks `#link` directly, and
+   * `lambda-pane-editor.test.ts`'s "offers no fork while a link window is showing" pins it.
    */
-  detach?: (text: string) => void
+  detach?: (step: number) => void
+  /**
+   * A genuine edit landed in a detached pane's own scratch buffer — design §4.3's second edit
+   * gesture, and `detach`'s counterpart: that one forks a new scratch from a source-derived view,
+   * this one recompiles the scratch that already exists. `LambdaEditor`'s debounced `onEdit` is the
+   * only caller, wired through `LambdaPane.setEditor`, so it fires on a keystroke that survived the
+   * debounce — never on the seed that mounted the editor (`LambdaEditor#setText`'s `#seeding` guard
+   * is what keeps a seed from reaching here at all).
+   *
+   * OPTIONAL, FOR THE SAME REASON `detach` IS: an editor exists only on a pane whose slot owns a
+   * scratch (§4.2), and this file declares the shape without deciding when a pane gets it — that is
+   * `main.ts`'s wiring, same as `detach` above.
+   */
+  editScratch?: (src: string) => void
   /** A state row was clicked. Absent on panes that have no table. */
   linkState?: (stateId: number) => void
   /** A token in the λ link window was clicked, at this byte offset into the full `lambdaText`. */
@@ -110,10 +133,16 @@ export function detachedBadge(title: HTMLElement): { update(detached: boolean): 
  * and one status affordance". So the edit gesture the design names has no surface to happen on, and
  * this button is the smallest thing that means the same event: fork the term I am looking at.
  *
- * **WHAT THAT COSTS, SAID PLAINLY: the scratchpad cannot be typed into yet.** It runs the term the
- * pane was showing, independently, with the source session still going — which is every claim §4.3
- * makes about the FORK, and none of what a user would eventually do with one. A term box belongs with
- * the pane shape that can hold it.
+ * **THE SCRATCHPAD CAN NOW BE TYPED INTO, AND THAT REVERSES WHAT THIS PARAGRAPH USED TO SAY** —
+ * inherited from 5d-i, where this button was all that shipped: it ran the term the pane was showing,
+ * independently, with the source session still going, and nothing more — every claim §4.3 made about
+ * the FORK, and none of what a user would eventually do with one. **5d-iii shipped exactly that**: a
+ * detached pane's body gained a second region, a `LambdaEditor` mounted over the frame renderer
+ * (`LambdaPane`'s `#editorHost`, design §4.2), and this button is still how a user reaches it — the
+ * click still forks, the editor is what the fork now lands on. What has not changed, and could not
+ * have: an ATTACHED pane still has no editor and this button still does not add one, because the
+ * paragraph above still holds — there is nothing in an attached λ view to edit, and forking is still
+ * how a user reaches the pane shape that can hold one.
  *
  * REAL TEXT, NOT A GLYPH ALONE, unlike the four transport buttons beside it. `↺ ◀ ▶ ⏵` are a
  * transport idiom a user has seen before; "fork this into a scratchpad" is not, and the accessible
@@ -121,18 +150,33 @@ export function detachedBadge(title: HTMLElement): { update(detached: boolean): 
  * reader on an element that has some. Same reasoning as `detachedBadge` above, which chose text over a
  * colour and over an icon for §4.5's a11y interim.
  *
- * ADDED AND REMOVED, NEVER DISABLED — this file's stated idiom, and here it carries two facts rather
- * than one:
+ * ADDED AND REMOVED, NEVER DISABLED — this file's stated idiom, and it now carries ONE fact rather
+ * than two:
  *
  *   * A DETACHED PANE HAS NOTHING TO FORK. It is already showing the scratchpad; §4.3's second edit
  *     "rebinds to the existing scratch", which is what the binding selector beside it already does.
- *   * A TRUNCATED TERM CANNOT BE FORKED AT ALL, and this is the correctness half. A frame prints at
- *     `FRAME_BYTES` (512), two orders below the readout's budget, so most non-trivial terms truncate
- *     — and `lambda/syntax.rs`'s round-trip guarantee is about a WHOLE printed term. A `Bytes` cut is
- *     a prefix that will not parse; a `Depth` cut is not even a prefix. Seeding a scratchpad from one
- *     would answer `no-session` with a parse diagnostic, or worse, parse into a different term.
- *     §4.5's standard — a thing that provably cannot work should not be presented as though it might
- *     — is the same one that deleted `node_to_lambda`.
+ *
+ * **A TRUNCATED 512-BYTE FRAME NO LONGER DISQUALIFIES THIS BUTTON, AND THAT REVERSES WHAT THIS
+ * PARAGRAPH USED TO SAY — corrected in T8 (plan 5d-iii) alongside `LambdaPane.#refreshDetach`, which
+ * carried the matching `frame.cut === null` check.** It was true while `detach` sent the FRAME's own
+ * text: `FRAME_BYTES` (512) prints two orders below the readout's budget, so most non-trivial terms
+ * truncated there, a `Bytes` cut was a prefix that would not parse, and a `Depth` cut was not even
+ * that. Design §4.1 changed what `detach` sends — a STEP, not text — and `main.ts` re-derives the
+ * term from the SOURCE compile's step-0 print at `LAMBDA_BYTE_BUDGET` (128× `FRAME_BYTES`), which
+ * this frame's own truncation says nothing about. §4.1a: "the refusal moved rather than vanished...
+ * the worker answers `scratch: null` with a diagnostic saying so, and the pane keeps offering ✎" —
+ * the remaining refusal (the source's OWN step-0 term cut at `LAMBDA_BYTE_BUDGET`) cannot be told
+ * from a `LambdaState` frame at all, so it surfaces after the click — **NOT as a diagnostic in an
+ * editor this fork mounts, because this refusal is exactly the one case where no editor ever gets
+ * mounted at all.** That was this paragraph's own claim once, and it was wrong: a build this refusal
+ * answers never reaches `scratch-compiled`, so `LambdaPane.setEditor` is never called and there is no
+ * editor to put anything in — found in code review against a real worker, alongside the matching claim
+ * on `LambdaPane.#refreshDetach`'s doc. `LambdaScratchpad.noSessionReply` (`scratch.ts`) retires the
+ * failed attempt instead, which is what makes THIS control reappear, and `main.ts` puts the diagnostic
+ * on `#link-status` (`link-status.ts`'s `forkFailed`) — the surface that survives a rebind rather than
+ * one this refusal never gets to create. §4.5's standard — a thing that provably cannot work should not
+ * be presented as though it might, the same one that deleted `node_to_lambda` — now cuts the other way
+ * here: hiding this button for a truncated FRAME was presenting a working control as broken.
  *
  * THE PARENT IS PASSED IN AND IS THE CONTROL STRIP, which is why this takes an element like
  * `detachedBadge` does rather than returning one to place. The strip is already a flex row of
@@ -159,6 +203,83 @@ export function detachButton(parent: HTMLElement, onDetach: () => void): { updat
       on = available
       if (available) parent.append(el)
       else el.remove()
+    },
+  }
+}
+
+/**
+ * The editor-collapse control on a detached λ pane — design §4.2.
+ *
+ * IT TOGGLES A CLASS AND NOTHING ELSE. The frame renderer below never learns it has more room, so
+ * there is no second body state for `#redraw` and `renderLink` to disagree about — one code path, and
+ * the collapse is presentation.
+ *
+ * ADDED AND REMOVED, NEVER DISABLED — this file's stated idiom. It is absent on an attached pane
+ * because there is no editor to collapse, which is the same "a control that provably cannot work
+ * should not be offered" standard `detachButton` and `bindingSelect` both apply.
+ *
+ * THE LABEL NAMES THE CURRENT STATE, WHICH IS PR #20's `aria-label` TREATMENT and the mitigation the
+ * accessibility list's item 2 asks for on the δ-table toggle. Nothing here carries state in colour:
+ * the glyph changes and the accessible name changes with it.
+ *
+ * **THE "CURRENT STATE" SURVIVES A REMOVAL, WHICH MEANS IT RESETS ON ONE — found and fixed after a
+ * reviewer walked the exact cycle this note now pins.** Mount an editor, click collapse (label ->
+ * "show the term editor", host gains `.is-collapsed`), `setEditor(null)` to unmount, `setEditor(text)`
+ * to remount: the fresh mount is expanded (`LambdaPane.setEditor` sets `#editorHost.className =
+ * 'term-editor'` with no `.is-collapsed`, and calls `update(true)` here), but the button that used to
+ * only detach `el` from `parent` on `update(false)` left the closure's `collapsed` flag untouched, so
+ * it came back still reading "show the term editor" over an editor that was already showing. The label
+ * named the PREVIOUS pane's state, not the one on screen — exactly what the paragraph above forbids.
+ * Design §4.2 is explicit that this cannot be read as a feature: "THE STATE IS NOT PERSISTED... a
+ * persisted collapse preference would outlive every session it described" — a scratch is retired and
+ * replaced, not resumed, so there is no session for a remembered collapse to describe.
+ *
+ * THE RESET LIVES INSIDE `update`, NOT A SEPARATE METHOD, because `available` going false already IS
+ * the unmount signal — this control's only caller ever hides it for that one reason
+ * (`LambdaPane.setEditor`'s `text === null` branch) — and the existing no-op guard above (`available
+ * === on`) already fires exactly once per real transition. Piggybacking on that guard is what keeps
+ * this safe on the per-frame path every control here is written for: the reset cannot fire twice for
+ * one unmount, and cannot fire at all while the control sits hidden across repeated calls with the same
+ * `available`. A second exported method would have needed that same guard rebuilt beside this one
+ * instead of reusing it.
+ */
+export function collapseButton(
+  parent: HTMLElement,
+  onToggle: (collapsed: boolean) => void,
+): { update(available: boolean): void } {
+  const el = document.createElement('button')
+  el.type = 'button'
+  el.className = 'collapse'
+  let collapsed = false
+  const relabel = () => {
+    el.textContent = collapsed ? '⌄' : '⌃'
+    el.setAttribute('aria-label', collapsed ? 'show the term editor' : 'hide the term editor')
+    el.title = collapsed ? 'show the term editor' : 'hide the term editor'
+  }
+  relabel()
+  el.addEventListener('click', () => {
+    collapsed = !collapsed
+    relabel()
+    onToggle(collapsed)
+  })
+  // The same no-op guard every control in this file states, for the same reason: this runs on every
+  // recorded frame during playback.
+  let on = false
+  return {
+    update(available: boolean) {
+      if (available === on) return
+      on = available
+      if (available) {
+        parent.append(el)
+        return
+      }
+      el.remove()
+      // See "THE 'CURRENT STATE' SURVIVES A REMOVAL" above: a removed control has no state left to
+      // survive with, so the next mount must not inherit this one's click history.
+      if (collapsed) {
+        collapsed = false
+        relabel()
+      }
     },
   }
 }

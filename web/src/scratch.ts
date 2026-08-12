@@ -2,7 +2,7 @@ import { History } from './history'
 import type { RunReply } from './protocol'
 import type { SessionId, SessionPool } from './session-client'
 import { resetLegs, type SessionRegistry } from './sessions'
-import type { LambdaState } from './types'
+import type { Diagnostic, LambdaState } from './types'
 
 /**
  * What retiring a scratchpad needs from a pane slot: which session it is on, and the ability to move
@@ -47,12 +47,13 @@ export type ScratchpadConfig = {
  * **THE λ SCRATCHPAD — design §4.3's "detach is a fork, and scratchpads are singletons", and the
  * policy half of plan T8.**
  *
- * Editing a source-derived λ view creates a `LambdaScratch` seeded with that pane's current text and
- * rebinds THAT pane to it. **The source session is untouched and keeps running** — which is the entire
- * reason three sessions exist rather than one mutable one, and the property
- * `tests/browser/scratch-fork.test.ts` asserts by watching the source's step count advance across a
- * detach. Nothing in this class reads or writes the source session's entry, its client or its legs;
- * `detach` touches the registry, the pool and ONE slot.
+ * Editing a source-derived λ view creates a `LambdaScratch` seeded with the source's step-0 text plus
+ * a step — not, any more, that pane's own current text; `detach`'s own doc below has the full
+ * argument for why — and rebinds THAT pane to it. **The source session is untouched and keeps
+ * running** — which is the entire reason three sessions exist rather than one mutable one, and the
+ * property `tests/browser/scratch-fork.test.ts` asserts by watching the source's step count advance
+ * across a detach. Nothing in this class reads or writes the source session's entry, its client or its
+ * legs; `detach` touches the registry, the pool and ONE slot.
  *
  * **A CLASS IN ITS OWN MODULE RATHER THAN THREE CLOSURES IN `main()`, AND THE REASON IS THE TEST.**
  * The singleton claim is "two source-derived λ panes edited in turn produce ONE `LambdaScratch`", and
@@ -119,17 +120,19 @@ export class LambdaScratchpad {
    * would make the singleton observable only in the pool's size and not in what the user sees, and
    * would silently discard the first pane's scratchpad the moment a second pane detached.
    *
-   * THE SEED IS THE CALLER'S TEXT AND THIS FUNCTION DOES NOT GO LOOKING FOR IT. "That pane's current
-   * text" is a fact about what is on screen, and the pane is what has it — `LambdaPane` passes the
-   * term it is currently rendering. Resolving `slot`'s leg here and printing its head would be the
-   * same string most of the time and a different one whenever the pane is showing something else,
-   * which is a disagreement between the seed and the screen that nothing would report.
+   * **THE SEED IS THE SOURCE'S STEP-0 TEXT PLUS A STEP, AND THIS FUNCTION STILL DOES NOT GO LOOKING FOR
+   * EITHER.** It was "that pane's current text" when the pane's own 512-byte frame was the seed; design
+   * §4.1 replaced that because most non-trivial terms truncate there. The caller now supplies the
+   * source session's step-0 term (from the `compiled` reply, at `LAMBDA_BYTE_BUDGET`) and the step the
+   * pane was showing, and the worker re-derives the term between them. What survives unchanged is the
+   * rule: this function is handed its inputs rather than resolving them, so the seed and the screen
+   * cannot disagree without something reporting it.
    *
    * REBINDING IS UNCONDITIONAL AND CREATION IS NOT. A pane already bound to the scratchpad rebinding
    * to it is a no-op that costs one object; branching to avoid it would be a second place the
    * singleton rule is written down.
    */
-  detach(slot: Detachable, src: string): void {
+  detach(slot: Detachable, src: string, step: number): void {
     if (!this.#reg.has(this.#id)) {
       const client = this.#pool.bind(this.#id, this.#onReply)
       this.#reg.add({
@@ -158,9 +161,34 @@ export class LambdaScratchpad {
       // SUPERSEDE THEN POST, the pattern `main.ts`'s `schedule` uses and for the same reason
       // (`SessionClient.supersede`'s doc): a fresh client is at generation 0, which matches nothing,
       // so the claim has to happen before the post or `scratch` would drop its own message.
-      client.scratch(client.supersede(), src)
+      client.scratch(client.supersede(), src, step)
     }
     slot.rebind(this.#id)
+  }
+
+  /**
+   * Rebuild the scratchpad from `src` — design §4.3's edit path. Answers whether there was one.
+   *
+   * **IT IS `detach` WITH `step: 0` AND NO CREATION, WHICH IS WHY THERE IS NO SECOND MESSAGE.** The
+   * text in the editor IS the term, so there is nothing to replay to; `lambda-scratch` already means
+   * "build a scratch from this text at this step" and 0 is its identity value. A `scratch-edit`
+   * variant would be a second name for one request.
+   *
+   * **IT DOES NOT REBIND AND DOES NOT TOUCH THE REGISTRY.** The pane is already on this session and
+   * stays on it; what changes is the term behind the leg. `resetLegs` is NOT called here either — the
+   * worker's reply drives the leg through the same path a first fork does, and clearing the ring
+   * ahead of it would blank the pane for the round trip rather than at the end of it.
+   *
+   * ANSWERS A BOOLEAN FOR `retire`'s REASON, INVERTED: `retire` returns one because most recompiles
+   * happen with no scratchpad, and this returns one because an editor cannot exist without a
+   * scratchpad — so `false` is a caller bug rather than the common case, and a caller that ignores it
+   * has a pane bound to nothing.
+   */
+  recompile(src: string): boolean {
+    if (!this.#reg.has(this.#id)) return false
+    const client = this.#reg.entryOf(this.#id).client
+    client.scratch(client.supersede(), src, 0)
+    return true
   }
 
   /**
@@ -205,5 +233,50 @@ export class LambdaScratchpad {
     this.#reg.remove(this.#id)
     this.#pool.unbind(this.#id)
     return true
+  }
+
+  /**
+   * A `no-session` reply naming this scratchpad — CRITICAL finding, plan 5d-iii's ninth task, and
+   * design §4.1a's remedy made real rather than merely promised.
+   *
+   * **A `no-session` REACHES THIS SESSION FOR TWO REASONS THAT DEMAND OPPOSITE ANSWERS, AND THE WIRE
+   * CANNOT TELL THEM APART.** `detach`'s OWN build can fail — the term at the requested step is over
+   * `LAMBDA_BYTE_BUDGET`, or (rarely, §4.1a) the source's own step-0 print was itself cut, so the
+   * replay's first parse fails — and `detach` has ALREADY rebound the pane synchronously, before
+   * either of those was knowable (`detach`'s own doc). Left alone, that strands the pane forever: no
+   * `scratch-compiled` ever fires, so `main.ts`'s `lambdaPane.setEditor` is never called, `#editor`
+   * stays `null`, and `LambdaPane.setDiagnostics` (`this.#editor?.setDiagnostics(ds)`) is a silent
+   * no-op — the pane reads the `'building…'` placeholder `detach` seeded forever, and
+   * `#refreshDetach`'s `!this.#detached` gate hides the only control that could recover it, because
+   * this session IS the one the pane is stuck on. `editScratch`'s recompile can ALSO fail, on a
+   * scratch that already has a good build behind it — the ordinary case a user hits on nearly every
+   * mid-identifier keystroke — and there design §4.4 is explicit: "an edit that does not parse leaves
+   * the frames region showing the last good run". Retiring on THAT path would erase the very term that
+   * sentence promises to keep, on nearly every keystroke of ordinary editing.
+   *
+   * **THE DISCRIMINATOR IS WHETHER THE λ LEG HAS EVER RECORDED A FRAME.** `detach` posts a build only
+   * when `!this.#reg.has(this.#id)` — its own doc: "the second detach does not re-seed" — so a session
+   * with no frame yet can only be mid-`detach`'s first (and only) build; nothing else this class does
+   * ever asks a worker to build without first checking `has`. A session that already holds a frame can
+   * only be mid-`editScratch`'s recompile, because that is the only other message this class ever
+   * posts to an EXISTING scratch, and every recompile before it succeeded (that is what "already holds
+   * a frame" means). The two cases are exhaustive and mutually exclusive by construction, not by
+   * inspecting which caller happened to trigger this reply.
+   *
+   * RETIRES AND RETURNS THE DIAGNOSTICS ON THE PHANTOM PATH — `retire` already does the whole job
+   * (panes home, legs reset, registry and pool forgotten) — so the caller has the reason to show on a
+   * surface that survives the rebind this call just performed. `null` ON THE LIVE-EDIT PATH, where
+   * nothing here moves anything: the caller's existing `setDiagnostics`-into-the-editor handling is
+   * exactly what design §4.4 asks for and this method has nothing to add to it.
+   */
+  noSessionReply(
+    diagnostics: readonly Diagnostic[],
+    home: SessionId,
+    slots: readonly Detachable[],
+  ): readonly Diagnostic[] | null {
+    const leg = this.#reg.entryOf(this.#id).legs.lambda
+    if (leg !== undefined && leg.hist.current !== undefined) return null
+    this.retire(home, slots)
+    return diagnostics
   }
 }

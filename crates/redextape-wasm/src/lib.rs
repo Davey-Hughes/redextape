@@ -103,6 +103,39 @@ pub fn lambda_scratch(src: &str) -> Result<JsValue, JsValue> {
     Ok(out.into())
 }
 
+/// `lambdaScratchAt(src, step, byteBudget)` -> `{ diagnostics, scratch: LambdaScratch | null, text: string | null }`.
+///
+/// Design §4.1's fork. Assembled by hand for the reason `compile` and `lambdaScratch` give: a handle
+/// and plain data cross two different ways.
+///
+/// **`scratch` AND `text` ARE NULL TOGETHER OR NEITHER.** See `session::ForkedAt` — they are one fact,
+/// and `protocol.ts` types the pair as nullable for the same reason.
+///
+/// # Errors
+///
+/// Returns `Err` only if `to_value` cannot marshal the diagnostics, or if a `Reflect::set` on the
+/// freshly created object fails; neither is expected for this crate's own types. Text that does not
+/// parse, and a term too large to print, are NOT errors — both arrive as diagnostics beside nulls.
+#[wasm_bindgen(js_name = lambdaScratchAt)]
+pub fn lambda_scratch_at(src: &str, step: u32, byte_budget: usize) -> Result<JsValue, JsValue> {
+    let made = session::lambda_scratch_at(src, step, byte_budget);
+
+    let out = js_sys::Object::new();
+    let diagnostics = to_value(&made.diagnostics)?;
+    js_sys::Reflect::set(&out, &JsValue::from_str("diagnostics"), &diagnostics)?;
+    let handle = match made.scratch {
+        Some(s) => JsValue::from(LambdaScratch(s)),
+        None => JsValue::NULL,
+    };
+    js_sys::Reflect::set(&out, &JsValue::from_str("scratch"), &handle)?;
+    let text = match made.text {
+        Some(t) => JsValue::from_str(&t),
+        None => JsValue::NULL,
+    };
+    js_sys::Reflect::set(&out, &JsValue::from_str("text"), &text)?;
+    Ok(out.into())
+}
+
 /// A Turing machine typed straight into a pane, with no program behind it. Owns the projection and
 /// the cursor.
 ///

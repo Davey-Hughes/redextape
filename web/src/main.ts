@@ -221,6 +221,21 @@ async function main(): Promise<EditorView> {
   let linkable = false
   let link: Pin | null = null
 
+  /**
+   * The most recent fork attempt's failure, or `null` — CRITICAL finding, plan 5d-iii's ninth task.
+   * `link-status.ts`'s `forkFailed` field is what this feeds; see that field's own doc for why
+   * `#link-status` is the surface and not the pane `onScratchReply`'s `no-session` arm was trying to
+   * reach.
+   *
+   * CLEARED ON THE NEXT FORK ATTEMPT (`events(...)`'s `detach` handler) AND ON THE NEXT SOURCE
+   * KEYSTROKE (`schedule`), NOT LEFT TO ACCUMULATE. Neither event means the message stopped being
+   * true — it means it stopped being NEWS: a stale failure from three edits ago sitting on the one
+   * line design §4.5 already uses for live, current-tick narration would be the same silent-wrongness
+   * standard this file refuses everywhere else (`draw()`'s own comments), just aimed at a message
+   * instead of a highlight.
+   */
+  let forkFailed: string | null = null
+
   const draw = () => {
     // RESOLVED THROUGH THE PANES' BINDINGS, NOT CLOSED OVER. This is the read path: `lam` and `tm`
     // used to be two `const`s in the enclosing scope, so this function rendered whatever was lexically
@@ -358,12 +373,17 @@ async function main(): Promise<EditorView> {
    */
   const drawLink = (l: Link | null, focusCoincident: boolean) => {
     const detached = detachedPanes()
+    // SPREAD, NOT ASSIGNED `undefined` — the same `exactOptionalPropertyTypes` idiom `events(...)`
+    // already uses for `detach`/`editScratch`/`linkState`/`linkLambda` below: `LinkStatus.forkFailed`
+    // is optional, and `{ forkFailed: undefined }` does not satisfy an optional property under that
+    // flag.
+    const failed = forkFailed === null ? {} : { forkFailed }
     if (!linkable) {
-      linkStatusHost.textContent = linkStatus({ state: 'stale', detached })
+      linkStatusHost.textContent = linkStatus({ state: 'stale', detached, ...failed })
       return
     }
     if (l === null) {
-      linkStatusHost.textContent = linkStatus({ state: 'none', detached })
+      linkStatusHost.textContent = linkStatus({ state: 'none', detached, ...failed })
       return
     }
     linkStatusHost.textContent = linkStatus({
@@ -372,6 +392,7 @@ async function main(): Promise<EditorView> {
       lambda: lambdaLinkState(l.lambda),
       focus: focusCoincident,
       detached,
+      ...failed,
     })
   }
 
@@ -532,21 +553,71 @@ async function main(): Promise<EditorView> {
     // the app). OMITTED ON THE TM LEG for the reason the two handlers below are, and one more: §4.1's
     // `TmScratch` is built from `.tm` text and nothing in this app holds any — see `scratch.ts`.
     //
-    // THE TEXT COMES FROM THE PANE AND IS NOT RE-DERIVED HERE. `LambdaPane` passes the term it is
-    // rendering; resolving `slot`'s leg and reading its head would be the same string most of the
-    // time and a different one whenever the pane is showing something else, which is a disagreement
-    // between the seed and the screen that nothing would report. It is also what keeps this handler
-    // free of a narrowing `K` cannot supply: `slot.resolve(sessions).hist.current` is a
-    // `LegFrame[K]`, and only the λ instantiation has a `text`.
+    // THE PANE NOW SENDS A STEP, NOT TEXT, AND THIS HANDLER RESOLVES IT — see `PaneEvents.detach`'s
+    // doc for why (design §4.1 moved the seed off the frame's own printed text).
+    //
+    // **THE STOPGAP IS GONE, AND BOTH HALVES OF IT MOVED TOGETHER, NOT ONE.** The old body read
+    // `hist.current`'s text — ALREADY reduced to the step on screen — and paired it with a literal
+    // `0` ("parse this text and stop"), because forwarding the real step on top of an
+    // already-reduced text would have reduced it twice. §4.1's real seed is the other pairing: the
+    // SOURCE session's step-0 term AT `LAMBDA_BYTE_BUDGET`, plus the REAL step, so the worker does
+    // the one reduction this text has not had yet (`lambdaScratchAt`, T1/T2's wasm boundary). Passing
+    // the real step alongside already-reduced text double-applies the reduction; passing `0` with
+    // step-0 text forks the wrong term. Both changed in this commit, together, for exactly that
+    // reason.
+    //
+    // `index.lambdaText`, NOT A `compiled` REPLY FIELD — THERE ISN'T ONE TO READ. A `compiled` reply's
+    // `lambda` is `LambdaStatus` (`available`/`reason`/`node`/`run`), which carries no term text at
+    // all; the shape that DOES carry one, `LambdaLeg` (`state: LambdaState | null`), only ever rides
+    // the LATER `result` reply — after the whole run has finished, which is not usable to seed a fork
+    // taken mid-run, and `null` outright for a declined leg. `index.lambdaText` is the SOURCE
+    // compile's step-0 term printed at `LAMBDA_BYTE_BUDGET` (`session-worker.ts`'s `onRun`:
+    // `session.linkIndex(LAMBDA_BYTE_BUDGET)`, built for every session that exists, decline or not),
+    // and it is already what `lambdaLinkWindow` above reads for the very same reason (`:405`) — a
+    // second name for the one string this file already holds, not a second lookup.
+    //
+    // `index === null || index.lambdaText === ''` COVERS EVERY CASE A FORK CAN BE CLICKED FROM AND
+    // NO OTHERS. `index` is `null` between a keystroke and the next `compiled`/`no-session` reply and
+    // for an uncompiled page — but `#refreshDetach` already hides this control whenever the pane's
+    // frame is `null`, which a `no-session`/pre-compile leg always is, so this guard is defence
+    // against a call this file's own chrome should never produce, not a path a user can reach.
+    // `lambdaText === ''` is `lambdaLinkState`'s own spelling of "declined" (`:334`) — a declined leg
+    // also renders no frame, so the same defence applies. NEITHER READS THE SLOT'S SESSION: a
+    // detached pane's own `#refreshDetach` already refuses (`!this.#detached`), and the only session
+    // that is ever NOT detached is `SOURCE_SESSION` — the one `index` describes — so whenever this
+    // handler can fire at all, `index` is already describing the right session.
     ...(slot.binding.leg === 'lambda'
       ? {
-          detach: (text: string) => {
-            scratchpad.detach(slot, text)
+          detach: (step: number) => {
+            if (index === null || index.lambdaText === '') return
+            // A FRESH ATTEMPT RETIRES YESTERDAY'S NEWS. `forkFailed` is a report about the LAST click
+            // on this control; a new click means the user is trying again, and the stale message would
+            // otherwise sit on `#link-status` through a successful fork (nothing on the success path
+            // touches it) or, worse, read like it describes THIS attempt when this one has not even
+            // answered yet. See `forkFailed`'s own doc for the other clear site.
+            forkFailed = null
+            scratchpad.detach(slot, index.lambdaText, step)
             // IMMEDIATELY, NOT ON THE SCRATCHPAD'S FIRST REPLY. The rebind has already happened, so
             // this pane's `[detached]` badge, its selector (which gains a second option the instant a
             // second session is registered) and the status line are all stale until something paints
             // — and the first frame is a worker round trip away.
             draw()
+          },
+          // THE EDIT PATH — design §4.3's second gesture, `LambdaEditor`'s debounced `onEdit` wired
+          // through `LambdaPane.setEditor` (`pane-chrome.ts`'s `editScratch` doc). `recompile` REUSES
+          // the existing scratch rather than forking a second one — the singleton is `scratch.ts`'s
+          // to keep, not this handler's to re-derive — so there is nothing else here to decide.
+          //
+          // NO `draw()`, UNLIKE `detach` ABOVE, and the asymmetry is the point rather than an
+          // oversight. `detach` draws because it REBINDS the slot synchronously — the badge, the
+          // selector and the status line are stale the instant the click returns. `recompile` posts a
+          // message and changes nothing else synchronously: the pane is already on this session and
+          // stays on it (`scratch.ts`'s own doc: "does not rebind and does not touch the registry"),
+          // so there is no fact for a draw to catch up on until the worker's `scratch-compiled` reply
+          // arrives and `onScratchReply` paints it. Drawing here would be the same waste the source
+          // editor's own `updateListener` already declines to pay on every keystroke (`:941-982`).
+          editScratch: (src: string) => {
+            scratchpad.recompile(src)
           },
         }
       : {}),
@@ -805,6 +876,20 @@ async function main(): Promise<EditorView> {
         // session does not have rather than writing one so the record is square — its own doc, and
         // this is the caller it was written for.
         resetLegs(sessions.entryOf(session).legs, reply.lambda, null)
+        // THE EDITOR IS SEEDED FROM THE REPLY'S OWN TEXT, NOT FROM THE FRAME THAT ARRIVES NEXT
+        // (design §4.1: `text` "travels back so `main.ts` can seed the editor from the same string
+        // that created the scratch, rather than from a second print that could disagree with it").
+        // `null` HERE MEANS NO SCRATCH WAS BUILT — unparseable text and a term over
+        // `LAMBDA_BYTE_BUDGET` both land there (§4.1a) — and the `no-session` reply that carries the
+        // diagnostic is what routes to the pane below; there is nothing to seed with, and calling
+        // `setEditor(null)` here on the strength of an unrelated `no-session` would tear down an
+        // editor this reply never touched. `text: string | null` on the wire type is nullable
+        // DEFENSIVELY here rather than reachably — `onLambdaScratch` never posts `scratch-compiled`
+        // at all when its own `scratch` came back `null` (`session-worker.ts:531-535`) — the same
+        // "nullable defensively, not reachably" shape `protocol.ts`'s `linkIndex` field states for
+        // itself, and the guard costs one `if` against a wire contract that should not assume today's
+        // producer forever.
+        if (reply.text !== null) lambdaPane.setEditor(reply.text)
         draw()
         return
       case 'lambda-frames': {
@@ -814,16 +899,60 @@ async function main(): Promise<EditorView> {
         draw()
         return
       }
-      case 'no-session':
-        // THE TEXT DID NOT PARSE. Unreachable through the fork control as it stands — it is absent
-        // for a truncated frame and `lambda/syntax.rs` round-trips a whole printed term (see
-        // `detachButton`) — and handled anyway, because that guarantee is a property of another
-        // crate's printer and this is what the pane says if it ever stops holding. The diagnostics
-        // are not rendered: `#results` belongs to the source compile, and a scratchpad has no pane of
-        // its own to put them in until one can be typed into.
-        resetLegs(sessions.entryOf(session).legs, null, null, 'the λ text did not parse')
+      case 'no-session': {
+        // WHICH OF TWO REASONS THIS FIRES IS `LambdaScratchpad.noSessionReply`'s QUESTION, NOT THIS
+        // FILE'S — see that method's doc for the discriminator (has this session's λ leg ever recorded
+        // a frame) and why retiring is required for one reason and wrong for the other. Everything
+        // below is what THIS reply still has to do once that question is answered.
+        const failed = scratchpad.noSessionReply(reply.diagnostics, SOURCE_SESSION, [lambdaSlot, tmSlot])
+        if (failed !== null) {
+          // THE PHANTOM PATH — CRITICAL finding, plan 5d-iii's ninth task. `detach`'s OWN build never
+          // landed a single frame, so `scratch-compiled` never fired, `lambdaPane.setEditor` was never
+          // called, and `#editor` is still `null` — `lambdaPane.setDiagnostics` below
+          // (`this.#editor?.setDiagnostics(ds)`) would be exactly the silent no-op the finding names.
+          // `noSessionReply` has already retired the scratchpad: the pane is back on `SOURCE_SESSION`,
+          // `SessionEntry.detached` reads `false` for it again, and `#refreshDetach`'s `!this.#detached`
+          // gate offers the fork control once more — which is design §4.1a's promised remedy ("the pane
+          // keeps offering ✎ — the user can scrub to a smaller step and fork there") actually happening
+          // rather than merely documented. What retiring does NOT do is say why — `#link-status` is the
+          // surface built for exactly that (`link-status.ts`'s `forkFailed`, its own doc has the case
+          // for this surface over the pane).
+          forkFailed = failed.map((d) => d.message).join(' · ')
+          draw()
+          return
+        }
+        // THE LIVE-EDIT PATH — THE TEXT DID NOT PARSE ON A SCRATCH THAT ALREADY HAS A GOOD BUILD
+        // BEHIND IT, AND THIS ARM IS REACHABLE NOW, WHICH IS WHY THE COMMENT IT USED TO CARRY IS
+        // AMENDED HERE RATHER THAN LEFT BESIDE THE CODE THAT CONTRADICTS IT. It read "unreachable
+        // through the fork control as it stands... `lambda/syntax.rs` round-trips a whole printed
+        // term", true of `detach`'s own src (always the worker's own re-print of the source's step-0
+        // term, `index.lambdaText` above) — but T8 is what gives this session's worker a SECOND way to
+        // be asked to parse text, `editScratch`'s `recompile`, which posts whatever the user just
+        // typed. Most keystrokes mid-identifier do not parse; this is now the ordinary path, not the
+        // defensive one. (`detach` itself can still fail too, on the same two reasons `noSessionReply`
+        // names — but every one of those lands in the branch above, on a session with no frame yet,
+        // never here.)
+        //
+        // THE FRAMES ARE LEFT ALONE — NOT `resetLegs` — WHICH IS THE OTHER HALF OF WHY THIS ARM
+        // CHANGED. Design §4.4: "an edit that does not parse leaves the frames region showing the
+        // last good run", the opposite of `onReply`'s "STALE FRAMES MUST NOT SURVIVE A BROKEN
+        // PROGRAM" for the SOURCE (`:722`) — and deliberately so. A source recompile that fails to
+        // compile has no program behind it at all; a scratch mid-edit still has the term it had a
+        // keystroke ago, and blanking the reduction under a user who has not finished typing is worse
+        // than leaving last frame on screen for one more keystroke. `leg.hist`/`leg.status` are
+        // whatever the last successful build left them — this arm does not touch either.
+        //
+        // THE DIAGNOSTICS ARE NOW RENDERED. There is a pane that can be typed into (`LambdaPane`'s
+        // split body, T7) and `setDiagnostics` puts them in its own gutter — the push-based path
+        // design §4.4 gives a scratch, as against `lint.ts`'s pull-based linter, which has no worker
+        // reply to pull from. The comment this replaces said "a scratchpad has no pane of its own to
+        // put them in until one can be typed into" — one can now, so the claim is amended in the
+        // commit that makes it false, matching this branch's own standard (5d-i's decision 6, and T5
+        // and T7 both did the same to earlier claims this slice outgrew).
+        lambdaPane.setDiagnostics(reply.diagnostics)
         draw()
         return
+      }
       case 'worker-error':
         // THE SAME SURFACE AS THE SOURCE SESSION'S, AND DELIBERATELY. `showWorkerError` renders into
         // `#results` rather than replacing `<main>` (`banner.ts`'s split), which is right here for the
@@ -831,6 +960,17 @@ async function main(): Promise<EditorView> {
         // for `onReply`'s reason — stale frames must not survive under a message saying it broke.
         results.dataset.state = 'idle'
         resetLegs(sessions.entryOf(session).legs, null, null, 'the scratchpad failed')
+        // `setEditor(null)` TOO — Important finding, whole-branch review before merge, second instance
+        // of the same root as the binding-selector one `LambdaPane.setDetached`'s doc now covers. This
+        // thread is dead and nothing here retires the scratchpad (only `LambdaScratchpad.retire` does
+        // that, and a worker throwing is not a call to it), so the registry entry keeps
+        // `detached: true`, the pane's binding does not move, and `setDetached`'s own new teardown
+        // never fires — its input never changes. But the editor `main.ts` mounted from an earlier
+        // `scratch-compiled` is now sitting over a worker that will never answer another message, so
+        // it has to come down explicitly, here, rather than by that invariant. A no-op if the pane had
+        // already moved on before this reply arrived (`setEditor`'s own doc: unmounting an
+        // already-unmounted editor costs nothing).
+        lambdaPane.setEditor(null)
         showWorkerError(results, new Error(reply.message))
         draw()
         return
@@ -841,6 +981,11 @@ async function main(): Promise<EditorView> {
   const schedule = (src: string) => {
     clearTimeout(timer)
     results.dataset.state = 'running'
+    // A SOURCE KEYSTROKE IS ALSO THE OTHER CLEAR SITE FOR `forkFailed` — see its own doc. `schedule`
+    // runs on every keystroke, unconditionally, which is what makes this the right place: a report
+    // about a click on the OLD program is not news about whatever the user is typing now, whether or
+    // not this particular keystroke happens to retire a scratchpad.
+    forkFailed = null
     // RECOMPILE-FROM-SOURCE RETIRES THE SCRATCHPAD AND TERMINATES ITS WORKER — design §4.3,
     // deliberately the same mechanism as §4.2's poison recovery so the app has ONE recovery path.
     //
@@ -855,7 +1000,18 @@ async function main(): Promise<EditorView> {
     // `draw()` on a keystroke: `hist` has not changed, so repainting both panes is pure waste.
     // `retire` answers whether anything moved, so the repaint happens on the one keystroke that
     // retired a scratchpad.
-    if (scratchpad.retire(SOURCE_SESSION, [lambdaSlot, tmSlot])) draw()
+    //
+    // `setEditor(null)` IN THE SAME BRANCH, BEFORE `draw()`. A retired scratchpad has no term left to
+    // show in the box that was editing it — `retire`'s own doc: "the text in the box is lost" (design
+    // §4.3) — and `LambdaPane.setEditor(null)` is what UNMOUNTS it rather than leaving a live
+    // CodeMirror instance, and its own pending debounce, over a session `pool.unbind` just terminated
+    // (`setEditor`'s doc: "mounted and unmounted, never hidden"). Guarded by the same boolean as
+    // `draw()`, for the same reason: most recompiles retire nothing, and calling this on every
+    // keystroke would be `#editor?.destroy()` finding `null` every time it already was.
+    if (scratchpad.retire(SOURCE_SESSION, [lambdaSlot, tmSlot])) {
+      lambdaPane.setEditor(null)
+      draw()
+    }
     // THE SOURCE SESSION BY NAME, NOT THROUGH A PANE'S BINDING. Recompiling is what the editor does to
     // the session it is the source of; it is not something a pane slot points at, so this stays
     // addressed to `SOURCE_SESSION` however the three panes end up bound. Resolved inside `schedule`

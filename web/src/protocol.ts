@@ -282,8 +282,13 @@ export type RunRequest =
    * source that would have built one. A request kind no surface can produce is the fabricated-state
    * shape `session.rs:257-273` records the cost of, so the variant lands with the surface that can
    * send it. See `LambdaScratchpad`'s doc in `scratch.ts` for the same line drawn on the session side.
+   *
+   * **`step` IS WHICH FRAME THE PANE WAS SHOWING, AND THE WORKER REPLAYS TO IT** (design §4.1). It is
+   * not an offset into `src`: `src` is the SOURCE session's step-0 term at `LAMBDA_BYTE_BUDGET`, and
+   * `step` says how far to reduce it before forking. An edit posts `step: 0`, because the text in the
+   * box IS the term — which is why editing needs no message of its own.
    */
-  | { kind: 'lambda-scratch'; gen: number; src: string }
+  | { kind: 'lambda-scratch'; gen: number; src: string; step: number }
   /**
    * Record further. For a `capped` leg the worker raises the cursor cap first; for a `budget` leg it
    * simply allows another `HISTORY_BYTES` and resumes.
@@ -329,8 +334,21 @@ export type RunReply =
    * NO `result` EVER FOLLOWS IT, unlike `compiled`. `result` carries `lambdaLeg(session).value`, which
    * reads `lambdaValue` — the method §3.3 puts off this type. The frames and their `RecordEnd` are the
    * whole answer for a scratchpad; there is no decoded value to arrive later.
+   *
+   * **`text` IS THE STRING THAT BUILT THE SCRATCH.** The editor is seeded from it rather than from a
+   * second print that could disagree, which is what keeps the box, the scratch's step 0 and the term
+   * the user forked one object instead of three that agree until they do not.
+   *
+   * **IT IS NULLABLE DEFENSIVELY AND IS NEVER `null` ON THIS REPLY, and the distinction is worth
+   * stating because an earlier version of this comment got it wrong.** The type mirrors
+   * `session::ForkedAt`, where `scratch` and `text` are one fact — null together or neither. But
+   * `onLambdaScratch` posts `no-session` and returns the moment `scratch` is null, so the only path
+   * that reaches `scratch-compiled` has already proved both are present. **Unparseable text and a
+   * term over budget do not arrive here as a null `text`; they do not arrive here at all** — they
+   * take `no-session`, which carries the diagnostics and has no `text` field. A reader hunting for a
+   * live null case on this variant will not find one.
    */
-  | { kind: 'scratch-compiled'; gen: number; lambda: LambdaStatus }
+  | { kind: 'scratch-compiled'; gen: number; lambda: LambdaStatus; text: string | null }
   /**
    * A session exists. Sent BEFORE any recording, so the panes can mount and show their declines
    * while the legs are still being stepped.

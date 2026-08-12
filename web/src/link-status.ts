@@ -107,7 +107,41 @@ export type LinkStatus = {
        */
       focus: boolean
     }
-)
+) & {
+    /**
+     * A fork that just failed and put the pane back on the source session, or absent — CRITICAL
+     * finding, plan 5d-iii's ninth task, and `#link-status`'s THIRD live-updating job.
+     *
+     * WHY THIS LINE AND NOT THE PANE'S OWN EDITOR. `onScratchReply`'s `no-session` arm can be answering
+     * a `detach` whose build never succeeded even once — `LambdaScratchpad.noSessionReply` retires that
+     * phantom scratchpad synchronously, which is what makes the pane's fork control reappear at all
+     * (design §4.1a). Retiring is also what makes `LambdaPane.setDiagnostics` unusable for the answer:
+     * `scratch-compiled` never fired for a build that never succeeded, so no editor was ever mounted,
+     * and `setDiagnostics` (`this.#editor?.setDiagnostics(ds)`) is a silent no-op against `#editor ===
+     * null`. This field is the surface that survives the rebind the retirement just performed — the
+     * same argument `detached` above makes for why detachment belongs on this line and not only on the
+     * pane's own badge, one step further: there is no pane-local surface left to put it on at all.
+     *
+     * A TOP-LEVEL FIELD, LIKE `detached`, NOT A FOURTH `state` ARM — same reasoning as `LinkStatus`'s
+     * own doc gives for `detached`: this answers a different question (what did a recent FORK ATTEMPT
+     * do) from the one `state` answers (what is currently pinned), and the two are independent — a
+     * fork can fail with nothing pinned, with a stale index, or with a live link, so folding it into
+     * `state` would be the three-way duplication that field's doc already refuses once.
+     *
+     * LEADS, AHEAD OF `detached` — the one exception to "most-global first" `linkStatus`'s own doc
+     * states for `detached`'s position, and deliberately so. By the time this renders, `detached.lambda`
+     * already reads `false` (the retirement that produced this value ran before `draw()`), so there is
+     * no scoping conflict to get backwards; what earns this the front of the line is that it is the
+     * most RECENT thing that happened, not the most global fact currently true.
+     *
+     * CLEARED BY THE CALLER, NOT BY THIS FUNCTION — `linkStatus` is a pure read of whatever `main.ts`
+     * passes in on the current tick, same as every other field here; deciding how long a stale fork
+     * failure stays on screen is `main.ts`'s own lifecycle question (a new fork attempt or a source
+     * keystroke retires the message), and answering it here would make this function stateful, which
+     * the whole rest of the file goes out of its way not to be.
+     */
+    forkFailed?: string
+  }
 
 const LAMBDA_TEXT: Record<LambdaLinkState, string> = {
   shown: '',
@@ -169,6 +203,9 @@ function detachedText(d: DetachedPanes): string {
 export function linkStatus(s: LinkStatus): string {
   const detached = s.detached ?? ATTACHED
   const parts: string[] = []
+  // FIRST — see `forkFailed`'s own doc for why this is the one field that leads ahead of detachment
+  // rather than after it.
+  if (s.forkFailed !== undefined) parts.push(`fork failed — ${s.forkFailed}`)
   const detachment = detachedText(detached)
   if (detachment !== '') parts.push(detachment)
   if (s.state === 'stale') {

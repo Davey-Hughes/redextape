@@ -118,7 +118,7 @@ describe('LambdaScratchpad.detach', () => {
 
     expect(pool.has(SCRATCH)).toBe(false)
     expect(reg.has(SCRATCH)).toBe(false)
-    pad.detach(slot, '(λx. x) 1')
+    pad.detach(slot, '(λx. x) 1', 0)
 
     expect(pool.has(SCRATCH)).toBe(true)
     expect(reg.has(SCRATCH)).toBe(true)
@@ -128,9 +128,23 @@ describe('LambdaScratchpad.detach', () => {
     // — the source leg's frame says `'from source'`. `gen: 1` is `supersede` claiming the fresh
     // client's first generation before the post, without which `scratch` would drop its own message
     // (generation 0 matches nothing).
-    expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: '(λx. x) 1' }])
+    expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: '(λx. x) 1', step: 0 }])
     // The pane moved, and it moved to the scratchpad rather than to a session that merely exists.
     expect(slot.binding).toEqual({ session: SCRATCH, leg: 'lambda' })
+  })
+
+  // T4 — design §4.1: `step` says how far the worker replays `src` before forking
+  // (`session-worker.ts`'s `onLambdaScratch`), and `detach` is handed it rather than resolving it —
+  // see `detach`'s own doc. A hard-coded `step: 0` here would pass every OTHER assertion in this
+  // file, since every other call site happens to pass `0`; this is the one that pins the real value.
+  it('posts the step it was forked at', () => {
+    const { reg, pad, ports } = harness()
+    reg.add(sourceEntry())
+    const slot = new PaneSlot('lambda', SOURCE)
+
+    pad.detach(slot, '(λx. x) 1', 7)
+
+    expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: '(λx. x) 1', step: 7 }])
   })
 
   /**
@@ -145,7 +159,7 @@ describe('LambdaScratchpad.detach', () => {
     reg.add(source)
     const slot = new PaneSlot('lambda', SOURCE)
 
-    pad.detach(slot, 'λy. y')
+    pad.detach(slot, 'λy. y', 0)
 
     expect(reg.entryOf(SOURCE)).toBe(source)
     expect(reg.entryOf(SOURCE).client).toBe(source.client)
@@ -170,13 +184,13 @@ describe('LambdaScratchpad.detach', () => {
     const a = new PaneSlot('lambda', SOURCE)
     const b = new PaneSlot('lambda', SOURCE)
 
-    pad.detach(a, 'first')
-    pad.detach(b, 'second')
+    pad.detach(a, 'first', 0)
+    pad.detach(b, 'second', 0)
 
     expect(pool.size).toBe(1)
     expect(reg.size).toBe(2)
     expect(ports.length).toBe(1)
-    expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'first' }])
+    expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'first', step: 0 }])
     expect(a.binding.session).toBe(SCRATCH)
     expect(b.binding.session).toBe(SCRATCH)
     // Neither container was asked to hold the id twice — both of them THROW on that, and this is the
@@ -187,6 +201,26 @@ describe('LambdaScratchpad.detach', () => {
     ])
   })
 
+  // T4, THE SINGLETON RESTATED WITH TWO STEPS RATHER THAN TWO STRINGS: a second detach at a
+  // DIFFERENT step must not be read as "a different fork", only as "a different text" already was
+  // above. THE SINGLETON IS ASSERTED ON POOL SIZE, per the plan's own rule that rendering looks right
+  // either way — two panes on two DIFFERENT `LambdaScratch` sessions would look identical to one.
+  // `pool.size` is 1 rather than 2 here because this fixture's source session is never pool-bound
+  // (see `sourceEntry`'s doc); the pool only ever holds scratchpads.
+  it('keeps ONE scratch across two forks at two different steps', () => {
+    const { reg, pool, pad, ports } = harness()
+    reg.add(sourceEntry())
+    const a = new PaneSlot('lambda', SOURCE)
+    const b = new PaneSlot('lambda', SOURCE)
+
+    pad.detach(a, '(λx. x) (λy. y)', 3)
+    pad.detach(b, '(λx. x) (λy. y)', 9)
+
+    expect(pool.size).toBe(1) // exactly one scratchpad, not one per fork
+    // The second detach's step never reached the wire — it rebound to the fork the first step built.
+    expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: '(λx. x) (λy. y)', step: 3 }])
+  })
+
   // Detaching a pane already on the scratchpad is the degenerate case of the line above, and it must
   // not spawn, re-seed or throw — `pool.bind` and `SessionRegistry.add` both throw on a live id, and
   // the singleton branch is what they are relying on (both docs say so).
@@ -195,8 +229,8 @@ describe('LambdaScratchpad.detach', () => {
     reg.add(sourceEntry())
     const slot = new PaneSlot('lambda', SOURCE)
 
-    pad.detach(slot, 'first')
-    expect(() => pad.detach(slot, 'again')).not.toThrow()
+    pad.detach(slot, 'first', 0)
+    expect(() => pad.detach(slot, 'again', 0)).not.toThrow()
 
     expect(pool.size).toBe(1)
     expect(ports[0]?.sent.length).toBe(1)
@@ -209,7 +243,7 @@ describe('LambdaScratchpad.detach', () => {
   it('registers the scratchpad detached, with one leg and no TM leg', () => {
     const { reg, pad } = harness()
     reg.add(sourceEntry())
-    pad.detach(new PaneSlot('lambda', SOURCE), 'λx. x')
+    pad.detach(new PaneSlot('lambda', SOURCE), 'λx. x', 0)
 
     const entry = reg.entryOf(SCRATCH)
     expect(entry.detached).toBe(true)
@@ -227,15 +261,21 @@ describe('LambdaScratchpad.detach', () => {
   it('routes its own replies to the caller that asked for them', () => {
     const { reg, pad, ports, replies } = harness()
     reg.add(sourceEntry())
-    pad.detach(new PaneSlot('lambda', SOURCE), 'λx. x')
+    pad.detach(new PaneSlot('lambda', SOURCE), 'λx. x', 0)
 
     ports[0]?.deliver({
       kind: 'scratch-compiled',
       gen: 1,
       lambda: { available: true, reason: '', node: null, run: 'Running' },
+      text: 'λx. x',
     })
     expect(replies).toEqual([
-      { kind: 'scratch-compiled', gen: 1, lambda: { available: true, reason: '', node: null, run: 'Running' } },
+      {
+        kind: 'scratch-compiled',
+        gen: 1,
+        lambda: { available: true, reason: '', node: null, run: 'Running' },
+        text: 'λx. x',
+      },
     ])
   })
 })
@@ -255,8 +295,8 @@ describe('LambdaScratchpad.retire', () => {
     reg.add(sourceEntry())
     const a = new PaneSlot('lambda', SOURCE)
     const b = new PaneSlot('lambda', SOURCE)
-    pad.detach(a, 'λx. x')
-    pad.detach(b, 'λx. x')
+    pad.detach(a, 'λx. x', 0)
+    pad.detach(b, 'λx. x', 0)
 
     expect(pad.retire(SOURCE, [a, b])).toBe(true)
 
@@ -284,7 +324,7 @@ describe('LambdaScratchpad.retire', () => {
     reg.add(source)
     const lambda = new PaneSlot('lambda', SOURCE)
     const tm = new PaneSlot('tm', SOURCE)
-    pad.detach(lambda, 'λx. x')
+    pad.detach(lambda, 'λx. x', 0)
 
     pad.retire(SOURCE, [lambda, tm])
     expect(lambda.binding).toEqual({ session: SOURCE, leg: 'lambda' })
@@ -305,7 +345,7 @@ describe('LambdaScratchpad.retire', () => {
     const { reg, pad } = harness()
     reg.add(sourceEntry())
     const slot = new PaneSlot('lambda', SOURCE)
-    pad.detach(slot, 'λx. x')
+    pad.detach(slot, 'λx. x', 0)
 
     const leg = reg.legOf({ session: SCRATCH, leg: 'lambda' })
     leg.hist.push(lambdaFrame('λx. x'), 1)
@@ -337,7 +377,7 @@ describe('LambdaScratchpad.retire', () => {
     expect(pool.size).toBe(0)
     expect(slot.binding.session).toBe(SOURCE)
 
-    pad.detach(slot, 'λx. x')
+    pad.detach(slot, 'λx. x', 0)
     expect(pad.retire(SOURCE, [slot])).toBe(true)
     expect(pad.retire(SOURCE, [slot])).toBe(false)
     expect(ports[0]?.terminated).toBe(1)
@@ -351,14 +391,49 @@ describe('LambdaScratchpad.retire', () => {
     reg.add(sourceEntry())
     const slot = new PaneSlot('lambda', SOURCE)
 
-    pad.detach(slot, 'first')
+    pad.detach(slot, 'first', 0)
     pad.retire(SOURCE, [slot])
-    pad.detach(slot, 'second')
+    pad.detach(slot, 'second', 0)
 
     expect(ports.length).toBe(2)
     expect(ports[0]).not.toBe(ports[1])
-    expect(ports[1]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'second' }])
+    expect(ports[1]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'second', step: 0 }])
     expect(ports[1]?.terminated).toBe(0)
     expect(slot.binding.session).toBe(SCRATCH)
+  })
+})
+
+describe('LambdaScratchpad.recompile', () => {
+  /**
+   * **§4.3's EDIT PATH, AND `recompile`'s OWN DOC IS THE CLAIM UNDER TEST: "IT IS `detach` WITH
+   * `step: 0` AND NO CREATION."** `pool.size` staying put is what distinguishes reusing the existing
+   * worker from spawning a second one — `ports.length` staying at 1 is the same claim from the other
+   * container, since `SessionPool.bind` would either throw on the already-live id or, if that guard
+   * were the thing broken, leave a second port this asserts against directly.
+   */
+  it('recompiles the existing scratch and does not create a second', () => {
+    const { reg, pool, pad, ports } = harness()
+    reg.add(sourceEntry())
+    const slot = new PaneSlot('lambda', SOURCE)
+    pad.detach(slot, '(λx. x) (λy. y)', 0)
+    const before = pool.size
+
+    expect(pad.recompile('λz. z')).toBe(true)
+
+    expect(pool.size).toBe(before)
+    expect(ports.length).toBe(1)
+    expect(ports[0]?.sent).toContainEqual(expect.objectContaining({ kind: 'lambda-scratch', src: 'λz. z', step: 0 }))
+  })
+
+  // No scratch exists, so there is nothing to rebuild — `recompile` cannot mean "create one from
+  // nothing" (`detach` owns creation), so this is the caller-bug case `recompile`'s own doc names,
+  // not the common one. Nothing is posted and no worker is spawned.
+  it('answers false when there is no scratch to recompile', () => {
+    const { reg, pool, pad, ports } = harness()
+    reg.add(sourceEntry())
+
+    expect(pad.recompile('λz. z')).toBe(false)
+    expect(ports.length).toBe(0)
+    expect(pool.size).toBe(0)
   })
 })
