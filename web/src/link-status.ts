@@ -28,7 +28,59 @@ export type LambdaLinkState =
   /** The λ backend declined this PROGRAM, so no construct has a λ link. */
   | 'declined'
 
-export type LinkStatus =
+/**
+ * WHICH PANES ARE OUTSIDE THE CORRESPONDENCE — a record, not a boolean, because they detach
+ * independently. Design §4.3: editing a source-derived λ view seeds a `LambdaScratch` and rebinds
+ * THAT pane; the source session keeps running and the TM pane stays bound to it. So "λ detached, TM
+ * still linked" is the ordinary state, not a corner, and a single flag could not name it.
+ *
+ * TWO REQUIRED BOOLEANS RATHER THAN A LIST OR A THREE-WAY TAG (`'lambda' | 'tm' | 'both'`). A caller
+ * holds two bindings and reads one boolean off each; a tag would make every caller encode the cross
+ * product, and a `Pane[]` would admit duplicates and an order that means nothing. The cost is that
+ * "nothing detached" is spellable twice — this record all-false, or `LinkStatus.detached` absent —
+ * and `linkStatus` collapses the two deliberately (see its own note).
+ *
+ * NOT A `Set` OR A MAP KEYED BY PANE ID, EITHER, and that is a 5d-i/5d-ii boundary rather than an
+ * oversight: 5d-i's pane set is fixed at three slots (§1), so the panes that can detach are known at
+ * compile time and a fixed record is checkable where a keyed collection is not. 5d-ii's multiplexer
+ * is what makes the pane set open, and it can widen this then.
+ */
+export type DetachedPanes = {
+  /** The λ pane is bound to a `LambdaScratch`, which has no `SourceMap` and so no `sourceSpan`/`linkIndex` (§3.3). */
+  lambda: boolean
+  /** The TM pane is bound to a `TmScratch`, whose every `TmState` carries `source_node: null` (§3.1). */
+  tm: boolean
+}
+
+export type LinkStatus = {
+  /**
+   * A FIELD ON EVERY ARM, NOT A FOURTH ARM, and the choice is forced rather than stylistic.
+   *
+   * The `state` discriminant answers "what did the user pin, and did it resolve" — the pin is the
+   * subject of all three of `none`/`stale`/`linked`. Detachment answers a different question about a
+   * different object: which PANES are bound to a scratch session. Both are true at once, so an arm
+   * would have to choose, and it would choose wrong in the case §4.3 makes ordinary — a detached λ
+   * pane with a live TM link would report `{state:'detached'}` and throw away the narration for the
+   * pane that is still inside the correspondence.
+   *
+   * It is also not ONE arm. A pane can be detached with nothing pinned, with a stale index, or with a
+   * live link — three states this union already distinguishes — so the arm version is three arms, and
+   * `linkStatus` would carry two parallel switches over the same three cases.
+   *
+   * NOT `'stale'` AND NOT `'none'`, which is the trap this field exists to avoid. `'stale'` promises
+   * "linking resumes when this compiles", and for a detached pane a recompile does something else
+   * entirely (§4.3: it TERMINATES the scratch's worker and rebinds the pane back); `'none'` says
+   * nothing is pinned, which is silent, and §4.5's whole obligation is that detachment must not be.
+   *
+   * OPTIONAL, AND THAT IS A COMPATIBILITY REQUIREMENT RATHER THAN A CONVENIENCE. `main.ts:307-322` is
+   * the only place in the app that builds a `LinkStatus`, and it cannot fill this in yet — no pane has
+   * a binding to report (§3.2b: `main()`'s local scope is the state, and the session registry lands
+   * separately). Absent therefore means "both attached", so today's call sites keep compiling
+   * unchanged and adopting this is one added property. Under `exactOptionalPropertyTypes` that
+   * property is added by spread, never assigned `undefined` — `main.ts:426-443`'s idiom.
+   */
+  detached?: DetachedPanes
+} & (
   | { state: 'none' }
   | { state: 'stale' }
   | {
@@ -55,6 +107,7 @@ export type LinkStatus =
        */
       focus: boolean
     }
+)
 
 const LAMBDA_TEXT: Record<LambdaLinkState, string> = {
   shown: '',
@@ -64,17 +117,77 @@ const LAMBDA_TEXT: Record<LambdaLinkState, string> = {
   declined: 'this program has no λ lowering, so no construct has a λ link',
 }
 
-/** The `link-status` line's text. Empty means the line is blank, not that the line is absent. */
+const ATTACHED: DetachedPanes = { lambda: false, tm: false }
+
+/**
+ * The detachment clause, or `''` when both panes are inside the correspondence.
+ *
+ * ONE CLAUSE FOR BOTH PANES, NOT THE SAME SENTENCE TWICE. "not linked to source" is one fact about
+ * one correspondence; emitting it either side of a `·` would read as two unrelated failures, and the
+ * line is already carrying up to three other parts.
+ *
+ * "detached" IS SAID IN THE SAME BREATH AS WHAT IT MEANS, deliberately. `[detached]` alone is the
+ * badge's job — glanceable, in the pane, with the pane's own title beside it to say which pane. This
+ * line is the authoritative narration (§4.5), and a reader who has never seen a scratch session
+ * cannot derive "not linked to source" from the word.
+ */
+function detachedText(d: DetachedPanes): string {
+  if (d.lambda && d.tm) return 'λ and TM panes detached — not linked to source'
+  if (d.lambda) return 'λ pane detached — not linked to source'
+  if (d.tm) return 'TM pane detached — not linked to source'
+  return ''
+}
+
+/**
+ * The `link-status` line's text. Empty means the line is blank, not that the line is absent.
+ *
+ * NO LONGER AN EARLY RETURN PER ARM, and the restructure is what detachment costs: a detached pane is
+ * a fact about panes, independent of what is pinned, so it has to be reachable from `none` and
+ * `stale` too — `{state:'none'}` with a detached λ pane is the case where this line goes from blank
+ * to speaking, which is exactly §4.5's obligation.
+ *
+ * DETACHMENT LEADS, ahead of the coincidence that used to lead. Ordered most-global first — the rule
+ * `main.ts`'s `lambdaLinkState` states for its own three-way choice — because "this pane is not part
+ * of the correspondence" scopes every clause after it: those are about the panes still inside.
+ *
+ * A DETACHED PANE'S OWN CLAUSES ARE SUPPRESSED, NOT MERELY PRECEDED. §4.5's standard is the one that
+ * deleted `node_to_lambda`: a thing that provably cannot work should not be presented as though it
+ * might. A detached λ pane is showing a scratch term, so "the λ term is truncated before this
+ * construct" describes a truncation in a term that is not on screen; a detached TM pane renders
+ * states whose `source_node` is `null` by construction (§3.1), so neither the coincidence nor the
+ * emits-no-states absence is a claim about anything the user is looking at.
+ *
+ * SUPPRESSION IS UNIFORM ACROSS `LambdaLinkState` RATHER THAN TRIAGED PER MEMBER. `'declined'` is the
+ * one that could be argued to survive — it is a property of the program's lowering, not of the pane —
+ * but splitting the rule would put "is the λ pane detached" in two places, and the clause is still
+ * being read as an explanation of an empty λ pane that is not empty for that reason.
+ *
+ * `s.detached` ABSENT AND ALL-FALSE ARE THE SAME OUTPUT, which is the redundancy `DetachedPanes`'
+ * doc admits. Collapsed here, in the one function that reads the field, so no caller has to know
+ * which encoding it holds.
+ */
 export function linkStatus(s: LinkStatus): string {
-  if (s.state === 'none') return ''
-  if (s.state === 'stale') return 'linking resumes when this compiles'
+  const detached = s.detached ?? ATTACHED
   const parts: string[] = []
-  // REPORTED FIRST, AHEAD OF EITHER ABSENCE BELOW — coincidence is live, present-tense news ("the run
-  // just reached what you pinned"), not a reason something is missing, and it is the state this whole
-  // slice exists to surface.
-  if (s.focus) parts.push('the machine is here right now')
-  if (!s.tm) parts.push('this construct emits no machine states')
-  const lambda = LAMBDA_TEXT[s.lambda]
-  if (lambda !== '') parts.push(lambda)
+  const detachment = detachedText(detached)
+  if (detachment !== '') parts.push(detachment)
+  if (s.state === 'stale') {
+    // STILL TRUE OF A DETACHED PANE, and not by accident: §4.3 says a recompile from source terminates
+    // the scratch's worker and rebinds its panes back, so "linking resumes when this compiles" is a
+    // promise the detached case keeps too — it is the same event that reattaches the pane.
+    parts.push('linking resumes when this compiles')
+  } else if (s.state === 'linked') {
+    if (!detached.tm) {
+      // REPORTED FIRST OF THE PIN'S OWN PARTS, AHEAD OF EITHER ABSENCE BELOW — coincidence is live,
+      // present-tense news ("the run just reached what you pinned"), not a reason something is
+      // missing, and it is the state 5c exists to surface.
+      if (s.focus) parts.push('the machine is here right now')
+      if (!s.tm) parts.push('this construct emits no machine states')
+    }
+    if (!detached.lambda) {
+      const lambda = LAMBDA_TEXT[s.lambda]
+      if (lambda !== '') parts.push(lambda)
+    }
+  }
   return parts.join(' · ')
 }

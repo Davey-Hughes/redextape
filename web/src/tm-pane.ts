@@ -1,6 +1,8 @@
 import type { ControlState } from './controls'
 import { n } from './format'
-import { controlStrip, type PaneEvents } from './pane-chrome'
+import { bindingSelect, controlStrip, detachedBadge, type PaneEvents } from './pane-chrome'
+import type { SessionId } from './session-client'
+import type { BindingOption } from './sessions'
 import { centredScrollTop, Follow, focusedRows, highlight, linkedRows, ROW_HEIGHT, StateIndex } from './state-table'
 import { tapeRows } from './tape'
 import type { TmProgram, TmState } from './types'
@@ -24,6 +26,8 @@ export class TmPane {
   #status: HTMLElement
   #tapes: HTMLElement
   #strip: ReturnType<typeof controlStrip>
+  #badge: ReturnType<typeof detachedBadge>
+  #select: ReturnType<typeof bindingSelect>
   #program: TmProgram | null = null
   #names: string[] = []
   #frame: TmState | null = null
@@ -55,6 +59,10 @@ export class TmPane {
   constructor(host: HTMLElement, on: PaneEvents) {
     const title = document.createElement('h2')
     title.textContent = 'turing machine'
+    this.#badge = detachedBadge(title)
+    // Anchored to the title for the reason `LambdaPane`'s constructor states: the control removes
+    // itself below two options and needs somewhere to go back to.
+    this.#select = bindingSelect(title, on.rebind)
     this.#status = document.createElement('div')
     this.#status.className = 'tm-status'
     this.#tapes = document.createElement('div')
@@ -228,6 +236,38 @@ export class TmPane {
    */
   setFocus(states: number[]): void {
     this.#focused = this.#index === null ? new Set() : focusedRows(this.#index, states)
+  }
+
+  /**
+   * Show or hide the `[detached]` badge — design §4.5's second surface, paired with the sentence
+   * `link-status.ts` puts in `#link-status`. Same name and same shape as `LambdaPane.setDetached`;
+   * that method's doc carries the naming argument, which is not repeated here.
+   *
+   * **THIS FILE NOW HAS TWO UNRELATED MEANINGS OF "DETACHED", AND THE SPEC DID NOT NOTICE.**
+   * `Follow`'s detach — `#reattach`, `#follow.following`, `state-table.ts`'s own vocabulary — means
+   * THE USER SCROLLED THE δ-TABLE AWAY FROM THE CURRENT ROW, a scroll-position fact about one widget
+   * inside this pane, undone by the `follow` button sitting a few lines above the table. §4.5's
+   * detached means THIS PANE IS BOUND TO A SCRATCH SESSION and is outside the correspondence
+   * entirely, undone only by a recompile from source (§4.3). They can be true independently and in
+   * any combination.
+   *
+   * The badge's text is left as `[detached]` because §4.5 fixes that wording and the two are not
+   * confusable ON SCREEN — the badge sits in the `<h2>` and reads "turing machine [detached]", while
+   * the follow state is a button captioned `follow` beside the table. In CODE they are one word apart,
+   * so the private field is `#badge` rather than anything containing "detach", and this note exists so
+   * the next reader of `#drawTable`'s `#reattach.hidden` line does not go looking for a connection.
+   */
+  setDetached(detached: boolean): void {
+    this.#badge.update(detached)
+  }
+
+  /**
+   * Offer `options` in the binding selector and show `current` as the one in force. Same shape and
+   * same contract as `LambdaPane.setBindings`; that method's doc carries the argument for pushing the
+   * list in rather than letting a pane hold a registry, and it is not repeated here.
+   */
+  setBindings(options: BindingOption[], current: SessionId): void {
+    this.#select.update(options, current)
   }
 
   render(frame: TmState | null, controls: ControlState): void {

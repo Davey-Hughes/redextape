@@ -64,6 +64,85 @@ pub fn compile(src: &str, encoding: &str) -> Result<JsValue, JsValue> {
     Ok(out.into())
 }
 
+/// A λ term typed straight into a pane, with no program behind it. Owns its cursor.
+///
+/// **A THIRD TYPE AT THIS BOUNDARY RATHER THAN `Option` FIELDS ON `Session`** — the design's decision
+/// 2. A method that would need a `ty` or a `SourceMap` DOES NOT EXIST here rather than existing and
+/// declining, so `lambdaValue`, `sourceSpan` and `linkIndex` are absent from the generated `.d.ts` and
+/// a renderer cannot reach for one. `session.rs`'s `LambdaScratch` doc carries the per-method
+/// reasoning; this newtype adds only marshalling, exactly as `Session` above does.
+#[wasm_bindgen]
+pub struct LambdaScratch(session::LambdaScratch);
+
+/// `lambdaScratch(src)` -> `{ diagnostics: Diagnostic[], scratch: LambdaScratch | null }`.
+///
+/// FREE, BESIDE `compile`, AND ASSEMBLED THE SAME WAY AND FOR THE SAME REASON: a handle and plain data
+/// cross this boundary two different ways, and `serde_wasm_bindgen` has no way to place an exported
+/// class's handle inside a serialized object. See `compile`'s own doc.
+///
+/// **`scratch: null` MEANS THE TEXT DID NOT PARSE, and `diagnostics` says where.** It is not the
+/// "a backend declined" case `compile` has — a scratchpad has no backend to decline, only a parser.
+///
+/// # Errors
+///
+/// Returns `Err` only if `to_value` cannot marshal the diagnostics, or if a `Reflect::set` on the
+/// freshly created object fails; neither is expected for this crate's own types. Unparseable input is
+/// NOT an error here — it arrives as diagnostics beside a null `scratch`.
+#[wasm_bindgen(js_name = lambdaScratch)]
+pub fn lambda_scratch(src: &str) -> Result<JsValue, JsValue> {
+    let made = session::lambda_scratch(src);
+
+    let out = js_sys::Object::new();
+    let diagnostics = to_value(&made.diagnostics)?;
+    js_sys::Reflect::set(&out, &JsValue::from_str("diagnostics"), &diagnostics)?;
+    let handle = match made.scratch {
+        Some(s) => JsValue::from(LambdaScratch(s)),
+        None => JsValue::NULL,
+    };
+    js_sys::Reflect::set(&out, &JsValue::from_str("scratch"), &handle)?;
+    Ok(out.into())
+}
+
+/// A Turing machine typed straight into a pane, with no program behind it. Owns the projection and
+/// the cursor.
+///
+/// **THE THIRD TYPE, AND THE ONE WITH A DECISION IN IT.** `tmValue`, `sourceSpan` and `linkIndex` are
+/// absent for decision 2's reason (no `ty`, no `SourceMap`), and `tmStatus` here answers
+/// `TmScratchStatus` rather than `TmStatus` — a DIFFERENT wire shape, with no `total_steps` and with a
+/// `header` boolean. A renderer must not assume the two are interchangeable; see
+/// `session::TmScratchStatus` for why they are not.
+#[wasm_bindgen]
+pub struct TmScratch(session::TmScratch);
+
+/// `tmScratch(src)` -> `{ diagnostics: Diagnostic[], scratch: TmScratch | null }`.
+///
+/// Assembled by hand for the reason `compile` and `lambdaScratch` give: a handle and plain data cross
+/// two different ways.
+///
+/// **A MISSING HEADER IS NOT A DIAGNOSTIC.** `parse_tm_full` does not treat one as an error, and
+/// neither does this: the machine runs from blank tapes at `MIN_FIELD_WIDTH` and `tmStatus().header`
+/// is `false`, which is the fact a pane must surface (design decision 6, §3.4).
+///
+/// # Errors
+///
+/// Returns `Err` only if `to_value` cannot marshal the diagnostics, or if a `Reflect::set` on the
+/// freshly created object fails; neither is expected for this crate's own types. Text that does not
+/// parse to a machine is NOT an error — it arrives as diagnostics beside a null `scratch`.
+#[wasm_bindgen(js_name = tmScratch)]
+pub fn tm_scratch(src: &str) -> Result<JsValue, JsValue> {
+    let made = session::tm_scratch(src);
+
+    let out = js_sys::Object::new();
+    let diagnostics = to_value(&made.diagnostics)?;
+    js_sys::Reflect::set(&out, &JsValue::from_str("diagnostics"), &diagnostics)?;
+    let handle = match made.scratch {
+        Some(s) => JsValue::from(TmScratch(s)),
+        None => JsValue::NULL,
+    };
+    js_sys::Reflect::set(&out, &JsValue::from_str("scratch"), &handle)?;
+    Ok(out.into())
+}
+
 /// `classifySource(src)` -> `[Span, TokenClass][]`.
 ///
 /// NO SESSION, BY DESIGN. An editor highlights while a program is mid-edit and unparseable, so this
@@ -456,5 +535,146 @@ impl Session {
         set("sourceNodeId", &src_id)?;
         set("tmOwner", &owner)?;
         Ok(out.into())
+    }
+}
+
+/// **SIX METHODS, AND THE SEVENTH'S ABSENCE IS LOAD-BEARING.** §3.3's audit puts `lambdaStatus`,
+/// `stepLambda`, `lambdaState`, `lambdaAst`, `raiseLambdaCap` and `runLambda` on this type unchanged —
+/// they read nothing but the cursor. `lambdaValue` reads `self.ty`, `sourceSpan` and `linkIndex` read
+/// `self.map`, and none of the three is declared below; `tests/browser.rs` pins that at compile time
+/// rather than in prose.
+///
+/// **TWO OF THEM DROP THE `Result` `Session`'s CARRY, AND THE JS TYPE IS UNCHANGED BY IT.**
+/// `Session::stepLambda` throws `SessionError::LambdaAbsent` for a session whose λ backend declined;
+/// a `LambdaScratch` holds a cursor rather than a `Result`, so that error is a state nothing here can
+/// reach and declaring it would put an unreachable `# Errors` clause on the boundary. `bool` and
+/// `Result<bool, JsValue>` both cross as `boolean`, and `()` and `Result<(), JsValue>` both cross as
+/// `void`, so the `.d.ts` a renderer reads is the same either way. The four that keep a `Result` keep
+/// it for `to_value` alone.
+#[wasm_bindgen]
+impl LambdaScratch {
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for this
+    /// crate's own types. Unlike `Session::lambdaStatus`'s neighbours there is no absent-leg case: a
+    /// `LambdaScratch` exists only for text that parsed.
+    #[wasm_bindgen(js_name = lambdaStatus)]
+    pub fn lambda_status(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.lambda_status())
+    }
+
+    /// `false` once the run has ended — `lambdaStatus().run` says which of the three endings, and is
+    /// the only thing that can.
+    #[wasm_bindgen(js_name = stepLambda)]
+    #[must_use]
+    pub fn step_lambda(&mut self) -> bool {
+        self.0.step_lambda()
+    }
+
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the frame; not expected for this crate's own
+    /// types.
+    #[wasm_bindgen(js_name = lambdaState)]
+    pub fn lambda_state(&self, byte_budget: usize) -> Result<JsValue, JsValue> {
+        to_value(&self.0.lambda_state(byte_budget))
+    }
+
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the arena; not expected for this crate's own
+    /// types. An exhausted `node_budget` is NOT an error: the caller receives `null`.
+    #[wasm_bindgen(js_name = lambdaAst)]
+    pub fn lambda_ast(&self, node_budget: usize) -> Result<JsValue, JsValue> {
+        to_value(&self.0.lambda_ast(node_budget))
+    }
+
+    /// `u32` and widened, for the reason `Session::raiseLambdaCap` records: wasm-bindgen maps `u64` to
+    /// JS `bigint`, and the raise is additive, so a caller wanting more than 4.29e9 calls it twice.
+    #[wasm_bindgen(js_name = raiseLambdaCap)]
+    pub fn raise_lambda_cap(&mut self, extra: u32) {
+        self.0.raise_lambda_cap(u64::from(extra));
+    }
+
+    /// `u32` and widened, for the reason `raiseLambdaCap` above records.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the status; not expected for this crate's own
+    /// types. A budget that runs out mid-run is NOT an error — the returned status distinguishes
+    /// `Running` from `Ended`, so the caller knows whether to call again.
+    #[wasm_bindgen(js_name = runLambda)]
+    pub fn run_lambda(&mut self, budget: u32) -> Result<JsValue, JsValue> {
+        to_value(&self.0.run_lambda(u64::from(budget)))
+    }
+}
+
+/// **FIVE METHODS, AND TWO ABSENCES AND ONE RESHAPE.** §3.3's audit puts `tmProgram`, `stepTm`,
+/// `tapeSlice` and `raiseTmCap` on this type unchanged, and `tmState` too — but only because T1 made
+/// `TmState::window` take `Option<&SourceMap>`; before that, the method a TM pane renders from every
+/// frame could not have existed here at all.
+///
+/// `tmValue` is absent (it reads `ty` + `final_tapes` + `kind`), and so are `sourceSpan` and
+/// `linkIndex`. `tmStatus` is present with a DIFFERENT RETURN SHAPE — see `session::TmScratchStatus`.
+/// `tests/browser.rs` pins the absences at compile time.
+///
+/// Three of the five drop the `Result` `Session`'s carry, for the reason `LambdaScratch`'s impl
+/// records: `SessionError::TmAbsent` is unreachable on a type that holds a cursor rather than a
+/// `Result`. `tapeSlice` keeps its throw because `NoSuchTape` is genuinely reachable.
+#[wasm_bindgen]
+impl TmScratch {
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for this
+    /// crate's own types.
+    #[wasm_bindgen(js_name = tmStatus)]
+    pub fn tm_status(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.tm_status())
+    }
+
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the projection; not expected for this crate's
+    /// own types.
+    #[wasm_bindgen(js_name = tmProgram)]
+    pub fn tm_program(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.tm_program())
+    }
+
+    /// `false` once the run has halted or hit a cap — `tmStatus().run` says which.
+    #[wasm_bindgen(js_name = stepTm)]
+    #[must_use]
+    pub fn step_tm(&mut self) -> bool {
+        self.0.step_tm()
+    }
+
+    /// `source_node` is ALWAYS `null` on this leg, and that is the honest answer rather than a missing
+    /// one: a scratch has no lowering to have recorded an owner. §4.5 is why a pane must announce that
+    /// rather than merely render nothing highlighted.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the frame; not expected for this crate's own
+    /// types.
+    #[wasm_bindgen(js_name = tmState)]
+    pub fn tm_state(&self, radius: usize) -> Result<JsValue, JsValue> {
+        to_value(&self.0.tm_state(radius))
+    }
+
+    /// # Errors
+    ///
+    /// Returns `Err` when `tape` names a tape the machine does not have — the thrown message carries
+    /// both the requested index and the machine's actual tape count. Unlike `Session::tapeSlice` there
+    /// is no absent-leg case: a `TmScratch` exists only for text that parsed to a machine.
+    #[wasm_bindgen(js_name = tapeSlice)]
+    pub fn tape_slice(&self, tape: usize, from: usize, to: usize) -> Result<JsValue, JsValue> {
+        let cells = self.0.tape_slice(tape, from, to).map_err(err)?;
+        to_value(&cells)
+    }
+
+    /// `u32` and widened, for the reason `Session::raiseLambdaCap` records.
+    #[wasm_bindgen(js_name = raiseTmCap)]
+    pub fn raise_tm_cap(&mut self, extra_steps: u32, extra_cells: u32) {
+        self.0.raise_tm_cap(u64::from(extra_steps), u64::from(extra_cells));
     }
 }

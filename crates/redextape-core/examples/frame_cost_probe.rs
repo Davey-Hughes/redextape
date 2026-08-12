@@ -290,7 +290,7 @@ fn record_tm(c: &mut TmCursor<Rc<Machine>>, map: &SourceMap, radius: usize) -> L
         steps += 1;
 
         let t = Instant::now();
-        let st = TmState::window(c, map, radius);
+        let st = TmState::window(c, Some(map), radius);
         render_total += t.elapsed();
 
         let cells: usize = st.window.iter().map(Vec::len).sum();

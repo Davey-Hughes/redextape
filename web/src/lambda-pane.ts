@@ -1,6 +1,8 @@
 import type { ControlState } from './controls'
 import type { LambdaWindow } from './lambda-window'
-import { controlStrip, type PaneEvents } from './pane-chrome'
+import { bindingSelect, controlStrip, detachButton, detachedBadge, type PaneEvents } from './pane-chrome'
+import type { SessionId } from './session-client'
+import type { BindingOption } from './sessions'
 import { byteIndexAt, byteToIndex, decorationRanges, indexToByte } from './spans'
 import type { LambdaState } from './types'
 
@@ -26,15 +28,61 @@ function ellipsis(): HTMLElement {
 export class LambdaPane {
   #text: HTMLElement
   #strip: ReturnType<typeof controlStrip>
+  #badge: ReturnType<typeof detachedBadge>
+  #select: ReturnType<typeof bindingSelect>
+  /**
+   * The fork control, or `null` on a pane whose events carry no `detach` handler — design §4.3's
+   * trigger; see `detachButton` for why it is a button at all.
+   *
+   * BUILT ONLY WHEN THE HANDLER EXISTS, rather than built always and calling `on.detach?.()`. That is
+   * the same standard §4.5 states and the `linkLambda` handler below does NOT need: a click that goes
+   * nowhere is invisible, but a control that cannot work is on screen. A caller with no `detach` — a
+   * test fixture, or any future pane that renders λ frames it does not own — gets a pane with no fork
+   * offered rather than one that offers a fork and swallows it.
+   */
+  #detach: ReturnType<typeof detachButton> | null = null
   #frame: LambdaState | null = null
   #link: LambdaWindow | null = null
+  /**
+   * Whether the session this pane is bound to is outside the source correspondence — §4.5's fact,
+   * kept because the fork control needs it and `setDetached` is not the only thing that moves it.
+   *
+   * A FIELD RATHER THAN A READ OF THE BADGE'S OWN STATE. The fork control's availability is a
+   * function of TWO inputs that arrive through two different calls — the binding (`setDetached`) and
+   * the frame (`render`) — so whichever arrives second has to see the first. `detachedBadge` holds an
+   * equivalent boolean privately for its own no-op guard; asking it would make one widget's internal
+   * state another's input.
+   */
+  #detached = false
 
   constructor(host: HTMLElement, on: PaneEvents) {
     const title = document.createElement('h2')
     title.textContent = 'lambda'
+    this.#badge = detachedBadge(title)
+    // ANCHORED TO THE TITLE, NOT PLACED IN `replaceChildren` BELOW, because the control removes itself
+    // whenever the slot has fewer than two sessions to offer (see `bindingSelect`) and has to know
+    // where to go back. `title.after` is a no-op until the title has a parent, which it gets on the
+    // `host.replaceChildren` line below — and nothing calls `setBindings` before then.
+    this.#select = bindingSelect(title, on.rebind)
     this.#text = document.createElement('pre')
     this.#text.className = 'term'
     this.#strip = controlStrip(on)
+    // IN THE CONTROL STRIP, NOT ON THE `<h2>`'s ROW BESIDE THE SELECTOR. The heading already carries
+    // two things — the pane's name and §4.5's `[detached]` badge — and both are STATEMENTS about the
+    // pane; the strip is where its verbs live. It is also why no stylesheet rule was needed: the
+    // button is a `.controls button` like the four beside it. `detachedBadge` and `bindingSelect` take
+    // the title for the same kind of reason in the other direction.
+    const detach = on.detach
+    if (detach !== undefined) {
+      // THE FRAME'S TEXT, NOT THE `<pre>`'s. When a link window is showing, this pane's body is a
+      // slice of the SOURCE COMPILE's step-0 term printed at `LAMBDA_BYTE_BUDGET` — a different
+      // program's text in a different coordinate system (`renderLink`'s own doc), and clipped at both
+      // ends besides. Forking from it would seed the scratchpad with something the pane's own leg
+      // never produced, which is §5's standard for a detached pane's clauses applied to the fork.
+      // `#frame` is this leg's term at its current step, which is what "that pane's current text"
+      // means.
+      this.#detach = detachButton(this.#strip.el, () => detach(this.#frame?.text ?? ''))
+    }
     host.replaceChildren(title, this.#text, this.#strip.el)
 
     // λ TEXT -> SOURCE, the third direction. Delegated from the `<pre>` rather than bound per token,
@@ -59,6 +107,74 @@ export class LambdaPane {
     this.#strip.update(controls)
     this.#frame = frame
     this.#redraw()
+    // THE FRAME IS HALF OF WHETHER A FORK IS POSSIBLE — see `#refreshDetach`. Driven from here and
+    // from `setDetached`, which are the two calls that move either half, rather than from a third
+    // setter the slot would have to remember to call.
+    this.#refreshDetach()
+  }
+
+  /**
+   * Offer `options` in the binding selector and show `current` as the one in force.
+   *
+   * A PUSH FROM THE SLOT RATHER THAN A PULL FROM A REGISTRY, which is what keeps design §3.2b's
+   * "neither pane knows what it is bound to" true of the pane's TYPE while making it false of its
+   * chrome. This pane still renders `(frame, controls) -> DOM`; what it gained is a control it reports
+   * a click from (`PaneEvents.rebind`) and a list it displays. It does not resolve a binding, hold a
+   * `SessionId` of its own, or know that a registry exists — `PaneSlot.render` in `sessions.ts` is the
+   * one place those live.
+   *
+   * A PURE SETTER, LIKE `setDetached` BELOW: the selector is chrome on the `<h2>`'s row and is
+   * unaffected by which text the body is showing.
+   */
+  setBindings(options: BindingOption[], current: SessionId): void {
+    this.#select.update(options, current)
+  }
+
+  /**
+   * Show or hide the `[detached]` badge — design §4.5's second surface, paired with the sentence
+   * `link-status.ts` puts in `#link-status`.
+   *
+   * `setDetached`, NOT `renderDetached`, THOUGH §4.5 CALLS IT "analogous to `renderLink`". The
+   * analogy is about the shape of the call, not about what it does: `renderLink` swaps the pane's
+   * BODY between two texts in two different coordinate systems, and a `render*` name here would
+   * suggest this participates in that redraw. It does not touch `#redraw` at all — the badge is
+   * chrome, it lives on the `<h2>`, and it is unaffected by which text the body is showing. `TmPane`
+   * spells its chrome-and-highlight setters `setLink`/`setFocus`/`setProgram` for the same reason,
+   * and this pane's counterpart is named to match across the two.
+   *
+   * A PURE SETTER, LIKE `TmPane.setFocus` AND UNLIKE `renderLink`: nothing here needs a redraw,
+   * because `detachedBadge` mutates the title directly and the body is the caller's separate
+   * decision — a detached λ pane shows its scratch's own term, which arrives through `render` like
+   * any other frame.
+   *
+   * DEFAULTS TO ATTACHED AND IS NOW DRIVEN EVERY FRAME. It was "never called today" when the badge
+   * landed, because no pane had a binding to report (§3.2b); `PaneSlot.render` calls it with
+   * `SessionEntry.detached` for whichever session the slot is bound to, so the badge follows a rebind
+   * without a second fact to keep in step. The default still matters: a pane that has never been
+   * rendered shows no badge.
+   */
+  setDetached(detached: boolean): void {
+    this.#detached = detached
+    this.#badge.update(detached)
+    this.#refreshDetach()
+  }
+
+  /**
+   * Offer the fork control exactly when a fork would work.
+   *
+   * BOTH CONDITIONS ARE `detachButton`'s DOC, EVALUATED WHERE THE TWO INPUTS MEET: a detached pane is
+   * already on the scratchpad and has nothing to fork, and a frame that is absent or TRUNCATED has no
+   * whole term to seed one with — `lambda/syntax.rs` round-trips a printed term, not a prefix of one,
+   * and a `Depth` cut is not even a prefix. §4.5's standard is that a thing which provably cannot work
+   * must not be presented as though it might.
+   *
+   * IT DOES NOT ASK WHETHER THE LEG IS AVAILABLE. `render(null, …)` is what a declined or
+   * not-yet-compiled leg produces, so the `frame === null` arm already covers it, and reading
+   * `ControlState` here would be a second source for the same fact.
+   */
+  #refreshDetach(): void {
+    const frame = this.#frame
+    this.#detach?.update(!this.#detached && frame !== null && frame.cut === null)
   }
 
   /**

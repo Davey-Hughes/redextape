@@ -5,22 +5,24 @@ import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirro
 import init, { analyze, classifySource, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
 import { APPEARANCE_LABEL, applyAppearance, nextAppearance, readStored, STORAGE_KEY } from './appearance'
 import { showBanner, showWorkerError } from './banner'
-import { canRecordFurther, controlState } from './controls'
+import { canRecordFurther } from './controls'
 import { declineMark, focusMark, highlighting, linkMark, setDecline, setFocus, setLink, setSpans } from './highlight'
 import { History } from './history'
 import { LambdaPane } from './lambda-pane'
 import type { LambdaWindow } from './lambda-window'
 import { LINK_CONTEXT, lambdaWindow } from './lambda-window'
 import { isCoincident, type Link, LinkIndex, type Pin, runningFocus, sourceNodeOwner } from './link'
-import { type LambdaLinkState, linkStatus } from './link-status'
+import { type DetachedPanes, type LambdaLinkState, linkStatus } from './link-status'
 import { lintFromAnalyze } from './lint'
-import type { Leg, RecordEnd, RunReply } from './protocol'
+import type { Leg, RunReply } from './protocol'
 import { HISTORY_BYTES, lambdaFrameBytes, tmFrameBytes } from './protocol'
 import type { Row } from './results'
 import { noSessionRows, resultRows } from './results'
-import { SessionClient } from './session-client'
+import { LambdaScratchpad } from './scratch'
+import { type SessionId, SessionPool } from './session-client'
+import { type LegState, PaneSlot, resetLegs, SessionRegistry } from './sessions'
 import { TmPane } from './tm-pane'
-import type { Classified, Diagnostic, LambdaState, LambdaStatus, Span, TmState, TmStatus } from './types'
+import type { Classified, Diagnostic, LambdaState, Span, TmState } from './types'
 import { assertTokenClasses } from './types'
 
 const DEBOUNCE_MS = 300
@@ -55,17 +57,6 @@ function renderRows(host: HTMLElement, rows: Row[]): void {
       return el
     }),
   )
-}
-
-/**
- * One leg's live state on this side of the boundary: its history, how recording ended, and what the
- * worker said about it at compile time.
- */
-type LegState<T> = {
-  hist: History<T>
-  status: { available: boolean; reason: string }
-  done: RecordEnd | null
-  timer: ReturnType<typeof setInterval> | null
 }
 
 async function main(): Promise<EditorView> {
@@ -142,18 +133,74 @@ async function main(): Promise<EditorView> {
 
   let view: EditorView
 
-  const lam: LegState<LambdaState> = {
-    hist: new History<LambdaState>(HISTORY_BYTES),
-    status: { available: false, reason: '' },
-    done: null,
-    timer: null,
-  }
-  const tm: LegState<TmState> = {
-    hist: new History<TmState>(HISTORY_BYTES),
-    status: { available: false, reason: '' },
-    done: null,
-    timer: null,
-  }
+  /**
+   * THE SESSION REGISTRY — the container design §3.2b says decision 1 presupposes.
+   *
+   * IT IS A `SessionRegistry` FROM `sessions.ts` NOW, NOT A `Map` DECLARED HERE, and the move is what
+   * this task's test costs rather than a tidy-up. T7's claim is that two panes bound to two different
+   * λ sessions show two different terms at the same time, and nothing in this slice can put a second
+   * session in this registry: a `LambdaScratch` needs a worker message `session-worker.ts` does not
+   * have, and creating one on edit is §4.3, which is T8. A registry that is a module is a registry a
+   * test can put two sessions in. `SessionRegistry`'s own doc carries the argument in full.
+   *
+   * **T8 HAS LANDED AND THE APP CAN NOW HOLD TWO, WHICH RETIRES THE SECOND HALF OF THE PARAGRAPH
+   * ABOVE BUT NOT THE FIRST.** The λ pane's fork control registers a second entry (`scratchpad`
+   * below, `scratch.ts`), so the selector this app draws is no longer hypothetical. The reason the
+   * registry is a module survives it: the singleton must be asserted on POOL SIZE, which is not
+   * reachable from the DOM, and this app has ONE λ pane — so "two panes on two λ sessions" still
+   * cannot be performed here, whatever the registry can hold.
+   */
+  const sessions = new SessionRegistry()
+
+  /**
+   * The session compiled from the editor's text — the only one that exists today, and the only one
+   * that will ever have a `SourceMap` behind it (§3.3: `linkIndex` and `sourceSpan` exist on neither
+   * scratch type).
+   */
+  const SOURCE_SESSION: SessionId = 'source'
+
+  /**
+   * The one λ scratchpad — design §4.3's singleton, named here for the reason `SessionEntry.label`'s
+   * doc gives: `main.ts` names the app's sessions, `sessions.ts` and `scratch.ts` never do.
+   *
+   * THE LABEL IS WHAT THE BINDING SELECTOR PUTS IN FRONT OF A USER, so it is words rather than the id
+   * — `tests/browser/binding-selector.test.ts` already asserts the options are told apart by their
+   * labels and not by colour or position (§6).
+   */
+  const LAMBDA_SCRATCH: SessionId = 'lambda-scratch'
+  const LAMBDA_SCRATCH_LABEL = 'λ scratchpad'
+
+  /**
+   * What the two panes are bound to, and the only writers of a `Binding` in the app.
+   *
+   * `PaneSlot`s NOW, AND `let` DID NOT BECOME THE ANSWER. T4 left these as `const` bindings and said
+   * "the task that adds the binding selector is the one that makes these mutable" — a reassignable
+   * local would have been the smaller diff and it is the wrong shape, because a pane's handlers are
+   * wired once at mount and would then close over whichever `Binding` value was current AT MOUNT.
+   * `events(...)` below takes the SLOT and reads `slot.binding` inside each handler, so a rebind is
+   * seen by handlers that were built before it happened. The slot is also where the leg is pinned:
+   * `rebind` takes a `SessionId` and there is no writer for the leg, which is what keeps `Binding<K>`
+   * a type-level fact (see `PaneSlot`'s doc for the constraint and for what it gives up).
+   */
+  const lambdaSlot = new PaneSlot('lambda', SOURCE_SESSION)
+  const tmSlot = new PaneSlot('tm', SOURCE_SESSION)
+
+  /**
+   * Which panes are outside the source correspondence right now — §4.5's first surface, read off the
+   * bindings.
+   *
+   * TWO LOOKUPS RATHER THAN A FLAG, and that is what makes §4.5's pairing cheap: detachment is a
+   * property of the SESSION (`SessionEntry.detached`), so a pane is detached exactly when the session
+   * it is bound to is, and both surfaces — this sentence and the pane's own `[detached]` badge, which
+   * `PaneSlot.render` sets from the same field — cannot disagree.
+   *
+   * §5 OWED THE JOINT CASE TO "THE TASK THAT WIRES `main.ts`", which is this one: T6 shipped both
+   * surfaces with no binding to drive them, and this is the call that drives them.
+   */
+  const detachedPanes = (): DetachedPanes => ({
+    lambda: sessions.entryOf(lambdaSlot.binding.session).detached,
+    tm: sessions.entryOf(tmSlot.binding.session).detached,
+  })
 
   /**
    * The current compile's link index, and the construct the user has linked.
@@ -162,26 +209,39 @@ async function main(): Promise<EditorView> {
    * after it shifts every source span it holds; linking is disabled from that keystroke until the
    * next `compiled` lands. Resolving against a stale index is the silently-wrong answer this whole
    * slice refuses elsewhere.
+   *
+   * NOT IN THE REGISTRY, AND THAT IS THIS TASK'S SCOPE LINE. §3.2b asks for an entry owning "its own
+   * `LegState`s and its own `SessionClient`", which is what `SessionEntry` holds — and no more. An
+   * index is a property of a COMPILE, and §3.3 puts `linkIndex` and `sourceSpan` on neither scratch
+   * type, so a per-entry `index` would be `null` for every entry that is not the source one. Moving
+   * it is therefore not a mechanical extension of this refactor: it changes what the field means, and
+   * it belongs to whichever task first has a second session for it to be wrong about.
    */
   let index: LinkIndex | null = null
   let linkable = false
   let link: Pin | null = null
 
   const draw = () => {
-    lambdaPane.render(
-      lam.hist.current ?? null,
-      controlState({
-        available: lam.status.available,
-        reason: lam.status.reason,
-        head: lam.hist.head,
-        length: lam.hist.length,
-        oldestStep: lam.hist.oldestStep,
-        currentStep: lam.hist.currentStep,
-        newestStep: lam.hist.newestStep,
-        evicted: lam.hist.evicted,
-        done: lam.done,
-      }),
-    )
+    // RESOLVED THROUGH THE PANES' BINDINGS, NOT CLOSED OVER. This is the read path: `lam` and `tm`
+    // used to be two `const`s in the enclosing scope, so this function rendered whatever was lexically
+    // in scope and a pane could not be pointed anywhere else (§3.2b). They are now two resolutions
+    // through the slots, and every read below keeps its exact spelling — the names still mean "the leg
+    // the λ pane shows" and "the leg the TM pane shows"; WHICH leg that is is a fact about the
+    // registry and the slot's binding, not about this closure.
+    //
+    // ONCE PER FRAME, NOT ONCE PER READ, AND `PaneSlot.render` TAKES THE RESULT RATHER THAN RESOLVING
+    // AGAIN. `draw()` runs on every recorded frame during playback, so resolving at each read would
+    // put a `Map.get` on the per-frame path for nothing. Safe because nothing between here and the end
+    // of this function can rebind a pane: every call below is a pane render, a `view.dispatch` of a
+    // decoration effect, or an `index` read, and none of them writes the registry or a slot.
+    const lam = lambdaSlot.resolve(sessions)
+    const tm = tmSlot.resolve(sessions)
+    // THE CONTROL STRIP, THE SELECTOR AND THE `[detached]` BADGE ALL MOVED INTO `PaneSlot.render`,
+    // because all three are functions of the binding and of the registry and none of them is a
+    // function of anything else in this closure. Keeping the `controlState(...)` block here would have
+    // meant the test that drives two slots over two sessions had to re-implement it, and a test that
+    // re-implements the thing it is testing does not test it.
+    lambdaSlot.render(sessions, lambdaPane, lam)
     // THE TM LEG'S OWN RUNNING FOCUS — `TmState.source_node`, NOT `lam.hist.current?.owner` below.
     // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2): "TM: TmState.source_node,
     // resolved through SourceMap::tm_owner ... none; shipped 2026-07-30." Each pane reports what ITS
@@ -203,20 +263,7 @@ async function main(): Promise<EditorView> {
     // NO SCROLL ARGUMENT — `TmPane.setFocus`'s own doc says why: the running focus is not a gesture,
     // and scrolling to it on every δ-step would fight `Follow`'s own scroll for the CURRENT row.
     tmPane.setFocus(tmFocusLink?.states ?? [])
-    tmPane.render(
-      tm.hist.current ?? null,
-      controlState({
-        available: tm.status.available,
-        reason: tm.status.reason,
-        head: tm.hist.head,
-        length: tm.hist.length,
-        oldestStep: tm.hist.oldestStep,
-        currentStep: tm.hist.currentStep,
-        newestStep: tm.hist.newestStep,
-        evicted: tm.hist.evicted,
-        done: tm.done,
-      }),
-    )
+    tmSlot.render(sessions, tmPane, tm)
     // EVERY RE-RENDER REFRESHES THE STATUS LINE, NOT JUST THE PANES THEMSELVES. `drawLink` reads
     // `lam.hist.currentStep` (via `lambdaLinkState`), and `back`/`forward`/`play`/`restart`/history
     // scrubbing all route through this function without calling `drawLink` on their own — so its call,
@@ -285,7 +332,7 @@ async function main(): Promise<EditorView> {
    */
   const lambdaLinkState = (lambdaSpan: Span | null): LambdaLinkState => {
     if (index === null || index.lambdaText === '') return 'declined'
-    if (lam.hist.currentStep !== 0) return 'not-step-0'
+    if (lambdaSlot.resolve(sessions).hist.currentStep !== 0) return 'not-step-0'
     if (lambdaSpan !== null) return 'shown'
     return index.lambdaCut !== null ? 'truncated' : 'unmapped'
   }
@@ -303,14 +350,20 @@ async function main(): Promise<EditorView> {
    * running focus against `link` (`isCoincident`) once, and re-deriving it here would need `tmFocus`
    * threaded in anyway — passing the boolean it produces is the smaller surface. Meaningless when
    * `l === null` (nothing is pinned to coincide with) or `!linkable` (both return before reading it).
+   *
+   * `detached` IS ON ALL THREE ARMS, NOT ONLY `'linked'`, and that is §4.5's obligation rather than
+   * symmetry: `{state:'none'}` with a detached λ pane is precisely the case where this line goes from
+   * blank to speaking. `linkStatus` is the one function that reads the field and it suppresses a
+   * detached pane's own clauses itself, so nothing here has to know which clauses those are.
    */
   const drawLink = (l: Link | null, focusCoincident: boolean) => {
+    const detached = detachedPanes()
     if (!linkable) {
-      linkStatusHost.textContent = linkStatus({ state: 'stale' })
+      linkStatusHost.textContent = linkStatus({ state: 'stale', detached })
       return
     }
     if (l === null) {
-      linkStatusHost.textContent = linkStatus({ state: 'none' })
+      linkStatusHost.textContent = linkStatus({ state: 'none', detached })
       return
     }
     linkStatusHost.textContent = linkStatus({
@@ -318,16 +371,25 @@ async function main(): Promise<EditorView> {
       tm: l.states.length > 0,
       lambda: lambdaLinkState(l.lambda),
       focus: focusCoincident,
+      detached,
     })
   }
 
   /**
    * The λ pane's link view, or `null` when there is nothing to show.
    *
-   * GATED ON `lam.hist.currentStep === 0`, and ONLY on the λ leg's own head. `main.ts` holds two
-   * independent histories with two heads; the TM leg runs at wildly different step counts (the `map`
-   * demo is 344,999 δ-steps against a few hundred β-steps), so gating on a shared condition would make
-   * the λ link vanish almost immediately for reasons that have nothing to do with λ.
+   * GATED ON THE λ PANE'S OWN LEG BEING AT STEP 0, and only on that leg's head — resolved through the
+   * λ slot for the same reason `draw()` does. A session holds two independent histories with two
+   * heads; the TM leg runs at wildly different step counts (the `map` demo is 344,999 δ-steps against
+   * a few hundred β-steps), so gating on a shared condition would make the λ link vanish almost
+   * immediately for reasons that have nothing to do with λ.
+   *
+   * AND GATED ON THE PANE BEING ATTACHED, which is the same standard §5 applies to the status line's
+   * clauses, applied to the pane BODY where it bites harder. `index` describes the SOURCE session's
+   * step-0 term; a detached λ pane is showing a scratch's term, so painting this window would replace
+   * what the user is looking at with a different program's text and highlight a construct inside it.
+   * `linkStatus` suppresses the sentence about a term that is not on screen; this suppresses putting
+   * that term on screen.
    *
    * `l` IS `draw()`'S RESOLUTION, PASSED IN — the same one `drawLink` got. A second
    * `index.linkFor(link.node)` call here for the same node in the same tick is exactly the double
@@ -336,7 +398,8 @@ async function main(): Promise<EditorView> {
    */
   const lambdaLinkWindow = (l: Link | null): LambdaWindow | null => {
     if (l === null || index === null) return null
-    if (lam.hist.currentStep !== 0) return null
+    if (sessions.entryOf(lambdaSlot.binding.session).detached) return null
+    if (lambdaSlot.resolve(sessions).hist.currentStep !== 0) return null
     const span = l.lambda
     if (span === null) return null
     return lambdaWindow(index.lambdaText, index.lambdaSpans, span, LINK_CONTEXT)
@@ -385,6 +448,15 @@ async function main(): Promise<EditorView> {
    * Playback is an interval over recorded frames and stops at the frontier. It never asks the worker
    * for more — `▶` at the frontier does that, deliberately, so play cannot run away with a cap raise
    * nobody clicked.
+   *
+   * BACK TO `<T>(leg: LegState<T>)` FROM T4's `(leg: AnyLeg)`, AND THE CONSTRAINT FLIPPED RATHER THAN
+   * THE TASTE. T4 changed it because `T` could not be inferred from `SessionLegs[K]` — a DEFERRED
+   * indexed access is not syntactically `LegState<T>` (TS2345). This task made `SessionLegs` a mapped
+   * type so `legOf` could return an INSTANTIATED `LegState<LegFrame[K]>` for `PaneView<LegFrame[K]>`
+   * to consume (see `SessionLegs`'s own doc for why both forms cannot be had at once), and that is
+   * exactly the shape `T` infers from — while `AnyLeg`, a union of two instantiations, is now the one
+   * that fails. Both spellings say the same thing: this function walks a history and parks a timer,
+   * and never looks at a frame. `T` is unused in the body, which is that claim written in the type.
    */
   const play = <T>(leg: LegState<T>) => {
     if (leg.timer !== null) {
@@ -401,29 +473,94 @@ async function main(): Promise<EditorView> {
     }, PLAY_MS)
   }
 
-  const events = <T>(leg: LegState<T>, which: Leg) => ({
+  /**
+   * One pane's control handlers, resolved through its slot's binding on every click.
+   *
+   * TAKES THE SLOT, NOT THE BINDING AND NOT THE `LegState`. Both panes are constructed once, at mount,
+   * and keep the handler object they were given for the life of the page — `pane-chrome.ts`'s
+   * `controlStrip` wires each `addEventListener` exactly once, in `button()`. A handler that closed
+   * over an already-resolved leg would go on driving the leg this pane was bound to AT MOUNT; a
+   * handler that closed over a `Binding` VALUE would do the same thing one level up, because `rebind`
+   * replaces the binding rather than editing it. The slot is the thing that is still current after a
+   * rebind, so the slot is what gets captured and `slot.binding` is read inside each body.
+   *
+   * `which` IS GONE, and the leg comes from `slot.binding.leg` instead. It was always the same value
+   * as the leg of the `LegState` beside it, passed separately only because a `LegState` carries no
+   * identity (§3.2b); a binding carries both, so passing them apart is a way for them to disagree.
+   */
+  const events = <K extends Leg>(slot: PaneSlot<K>) => ({
     back: () => {
-      leg.hist.back()
+      slot.resolve(sessions).hist.back()
       draw()
     },
     forward: () => {
       // At the frontier `▶` means "record one more", which is the same operation as `[continue]`.
       // `canRecordFurther` is `controls.ts`'s call, not re-derived here — see its doc comment.
+      const leg = slot.resolve(sessions)
       if (!leg.hist.forward() && canRecordFurther(leg.done)) {
-        client.extend(which)
+        sessions.entryOf(slot.binding.session).client.extend(slot.binding.leg)
       }
       draw()
     },
-    play: () => play(leg),
+    // RESOLVED AT THE CLICK LIKE EVERY OTHER HANDLER HERE, AND THE INTERVAL THEN HOLDS THE LEG IT
+    // RESOLVED TO — `play` parks its timer ON that `LegState` (`leg.timer`), which is what makes a
+    // second click a stop rather than a second interval.
+    //
+    // T4 ASKED THIS TASK TO DECIDE WHETHER PLAYBACK FOLLOWS THE PANE OR STAYS WITH THE LEG, AND IT
+    // STAYS WITH THE LEG. A play head is a property of a history, and a pane looking away is not the
+    // user un-pressing play; more concretely, two slots may now be bound to the same leg, so stopping
+    // the timer on rebind would let one pane's selector silently stop the other pane's playback. The
+    // interval clears itself at the frontier, so an unwatched run is bounded rather than forever. See
+    // `PaneSlot.rebind` for the same decision stated where the rebind happens.
+    play: () => play(slot.resolve(sessions)),
     restart: () => {
-      leg.hist.seek(0)
+      slot.resolve(sessions).hist.seek(0)
       draw()
     },
-    extend: () => client.extend(which),
+    extend: () => sessions.entryOf(slot.binding.session).client.extend(slot.binding.leg),
+    // THE SELECTOR'S PICK. `PaneSlot.rebind` writes the session and nothing else — the leg is fixed by
+    // `K` and has no writer anywhere in the app, which is what keeps `Binding<K>`'s type property
+    // (see `PaneSlot`'s doc). `draw()` immediately afterwards because a rebind changes what this pane
+    // shows, what its `[detached]` badge says, and what the status line narrates, and none of those
+    // has another path to the DOM.
+    rebind: (session: SessionId) => {
+      slot.rebind(session)
+      draw()
+    },
+    // THE FORK — design §4.3, and the handler that finally puts a second session in the registry
+    // (T7's own doc names its absence as the reason this slice's tests could not be driven through
+    // the app). OMITTED ON THE TM LEG for the reason the two handlers below are, and one more: §4.1's
+    // `TmScratch` is built from `.tm` text and nothing in this app holds any — see `scratch.ts`.
+    //
+    // THE TEXT COMES FROM THE PANE AND IS NOT RE-DERIVED HERE. `LambdaPane` passes the term it is
+    // rendering; resolving `slot`'s leg and reading its head would be the same string most of the
+    // time and a different one whenever the pane is showing something else, which is a disagreement
+    // between the seed and the screen that nothing would report. It is also what keeps this handler
+    // free of a narrowing `K` cannot supply: `slot.resolve(sessions).hist.current` is a
+    // `LegFrame[K]`, and only the λ instantiation has a `text`.
+    ...(slot.binding.leg === 'lambda'
+      ? {
+          detach: (text: string) => {
+            scratchpad.detach(slot, text)
+            // IMMEDIATELY, NOT ON THE SCRATCHPAD'S FIRST REPLY. The rebind has already happened, so
+            // this pane's `[detached]` badge, its selector (which gains a second option the instant a
+            // second session is registered) and the status line are all stale until something paints
+            // — and the first frame is a worker round trip away.
+            draw()
+          },
+        }
+      : {}),
     // OMITTED ENTIRELY ON THE λ LEG, not set to `undefined` — `PaneEvents.linkState` is optional
     // under `exactOptionalPropertyTypes`, which distinguishes "absent" from "present and undefined".
     // The λ pane has no table to click.
-    ...(which === 'tm'
+    //
+    // DECIDED FROM THE SLOT'S LEG, ONCE, AT CONSTRUCTION — not per click like the handlers above, and
+    // now sound for a second reason as well as the first. Which handlers a pane HAS is a fact about
+    // the pane's shape (the λ pane has no δ-table to click), and this object is built once and then
+    // held by the pane for the life of the page, so there is no later moment at which a spread could
+    // take effect anyway. The second reason is `PaneSlot`'s: a slot's leg cannot change, so a fact
+    // decided from it at construction cannot go stale the way one decided from its session would.
+    ...(slot.binding.leg === 'tm'
       ? {
           linkState: (stateId: number) => {
             if (!linkable || index === null) return
@@ -433,7 +570,7 @@ async function main(): Promise<EditorView> {
       : {}),
     // OMITTED ENTIRELY ON THE TM LEG, mirroring `linkState` above — `PaneEvents.linkLambda` is
     // optional under `exactOptionalPropertyTypes`, and the TM pane has no λ window to click.
-    ...(which === 'lambda'
+    ...(slot.binding.leg === 'lambda'
       ? {
           linkLambda: (byteOffset: number) => {
             if (!linkable || index === null) return
@@ -443,39 +580,128 @@ async function main(): Promise<EditorView> {
       : {}),
   })
 
-  const worker = new Worker(new URL('./session-worker.ts', import.meta.url), { type: 'module' })
-  // THE SECOND HALF OF §6's LOAD-FAILURE ROW, and it is not the same failure as `init()`'s. A worker
-  // whose module fails to load does not throw from the constructor — it fires `error` on the handle,
-  // asynchronously, and nothing else in this file would ever hear it. Without this the pane sits on
-  // "running…" forever, which is the same blank-page problem one layer in.
-  worker.addEventListener('error', (e) => showBanner(root, e instanceof ErrorEvent ? (e.error ?? e.message) : e))
-  const client = new SessionClient(worker, (reply: RunReply) => onReply(reply))
-  const lambdaPane = new LambdaPane(lambdaHost, events(lam, 'lambda'))
-  const tmPane = new TmPane(tmHost, events(tm, 'tm'))
+  /**
+   * ONE WORKER PER SESSION (design §4.2), AND THE ONLY THING HERE THAT MAY SPAWN OR TERMINATE ONE.
+   *
+   * THE `worker` LOCAL IS GONE, AND IT WAS THE LAST PIECE OF A SESSION LIVING OUTSIDE ITS ENTRY. The
+   * task before this one gave an entry its own legs and its own client but left `main()` holding a
+   * `Worker` handle and its `error` listener beside them, because spawning is this task's. A
+   * session's thread is now created where its client is and dies where its client does.
+   *
+   * WHY IT IS WORTH A CLASS AT ALL, since there is still exactly one session: the pool's reason is
+   * damage containment, not tidiness. A wasm call that aborts leaves a wasm-bindgen borrow taken and
+   * poisons the module permanently, and a worker's print-stack ceiling drops after its first deep
+   * print and stays down — both are properties of the THREAD, so one worker holding three sessions
+   * shares both. `SessionPool`'s own doc carries the measurements; this call site is just where the
+   * policy lands.
+   *
+   * THE FACTORY IS THIS FILE'S HALF OF THE SPLIT, and it is exactly the two decisions the pool must
+   * not make: which module a session's worker runs — `session-worker.ts`, resolved against
+   * `import.meta.url` so the bundler rewrites the URL — and what a load failure looks like, which
+   * needs `root`. §4.2 puts the pool in `session-client.ts`, and a module with no DOM cannot own the
+   * second of those.
+   */
+  const pool = new SessionPool(() => {
+    const worker = new Worker(new URL('./session-worker.ts', import.meta.url), { type: 'module' })
+    // THE SECOND HALF OF §6's LOAD-FAILURE ROW, and it is not the same failure as `init()`'s. A worker
+    // whose module fails to load does not throw from the constructor — it fires `error` on the handle,
+    // asynchronously, and nothing else in this file would ever hear it. Without this the pane sits on
+    // "running…" forever, which is the same blank-page problem one layer in.
+    worker.addEventListener('error', (e) => showBanner(root, e instanceof ErrorEvent ? (e.error ?? e.message) : e))
+    return worker
+  })
 
-  // `reason` is what a leg's control strip reads (`controls.ts`'s `controlState` returns it straight
-  // as `stepText` while `!available`) when there is no per-leg `LambdaStatus`/`TmStatus` to read one
-  // from — i.e. when neither leg compiled at all. Design §6's error table says the panes "read 'not
-  // compiled'" for that case; leaving it as `''` left them reading nothing.
-  const resetLegs = (lambda: LambdaStatus | null, tmStatus: TmStatus | null, reason = '') => {
-    for (const leg of [lam, tm]) {
-      leg.hist.clear()
-      leg.done = null
-      if (leg.timer !== null) clearInterval(leg.timer)
-      leg.timer = null
-    }
-    lam.status = { available: lambda?.available ?? false, reason: lambda?.reason ?? reason }
-    tm.status = { available: tmStatus?.available ?? false, reason: tmStatus?.reason ?? reason }
-  }
+  /**
+   * THE λ SCRATCHPAD — design §4.3's fork, and the thing that makes a second session reachable.
+   *
+   * ONE OBJECT RATHER THAN A `detach`/`retire` PAIR OF CLOSURES HERE, and the reason is the test the
+   * plan names: the singleton claim has to be asserted on POOL SIZE, which is not reachable from the
+   * DOM, and this app has ONE λ pane so "two source-derived λ panes edited in turn" cannot be
+   * performed through it at all. `scratch.ts` is a module a test can drive with two slots and fake
+   * ports; this line is the app taking the same object.
+   *
+   * THE REPLY HANDLER IS THE SCRATCHPAD'S OWN, NOT `onReply`. A scratchpad has one leg, no results
+   * pane, no link index and no `tmProgram`, so every branch of `onReply` below except `lambda-frames`
+   * is about state it does not have — routing it there would mean five `if (session === …)` guards
+   * inside a function whose whole point (see its doc) is that a reply belongs to the session whose
+   * worker sent it. Two handlers, one per session kind, is the same split §3.2 draws at the port.
+   */
+  const scratchpad = new LambdaScratchpad({
+    registry: sessions,
+    pool,
+    id: LAMBDA_SCRATCH,
+    label: LAMBDA_SCRATCH_LABEL,
+    historyBytes: HISTORY_BYTES,
+    onReply: (reply: RunReply) => onScratchReply(LAMBDA_SCRATCH, reply),
+  })
 
-  const onReply = (reply: RunReply): void => {
+  // THE SOURCE SESSION, AND NO LONGER THE ONLY ENTRY THE APP EVER HOLDS. It is the only one created
+  // at start-up: §4.3's scratchpad is created by a click (`scratchpad` above) and retired by the next
+  // recompile, so the selector has one option to offer until someone forks — which is why
+  // `bindingSelect` renders nothing on a fresh page and appears the moment there are two. That is the
+  // control's stated idiom, not a gap: see its doc.
+  //
+  // ASSEMBLED HERE RATHER THAN WHERE `lam`/`tm` USED TO BE DECLARED, because an entry owns its client
+  // and the client cannot exist before its worker does. The legs are initialised inline for the same
+  // reason the entry exists at all: a session's legs and its client are one thing now, and splitting
+  // them across two hundred lines is what let them drift apart into unrelated locals in the first
+  // place. Registered before either pane is constructed — `events(...)` below resolves through the
+  // registry, and although every handler it builds runs later, `entryOf` would throw if one somehow
+  // fired first.
+  //
+  // `detached: false`, AND IT IS THE ONLY ENTRY THAT MAY SAY SO. This is the session with a
+  // `SourceMap` behind it; §3.3 puts `linkIndex` and `sourceSpan` on neither scratch type, so the
+  // scratchpad entry is `detached: true` by construction — `LambdaScratchpad.detach` writes the
+  // literal and nothing derives it, for the reason `SessionEntry.detached`'s own doc gives.
+  //
+  // THE REPLY HANDLER NAMES ITS SESSION. Nothing on the wire does (§3.2 — the port is the id), so the
+  // binding between a client and the legs its frames land in is made here, at the one place that
+  // knows both. `pool.bind` is what pairs that handler with a thread; this file never sees the port.
+  sessions.add({
+    id: SOURCE_SESSION,
+    label: 'source',
+    detached: false,
+    client: pool.bind(SOURCE_SESSION, (reply: RunReply) => onReply(SOURCE_SESSION, reply)),
+    legs: {
+      lambda: {
+        hist: new History<LambdaState>(HISTORY_BYTES),
+        status: { available: false, reason: '' },
+        done: null,
+        timer: null,
+      },
+      tm: {
+        hist: new History<TmState>(HISTORY_BYTES),
+        status: { available: false, reason: '' },
+        done: null,
+        timer: null,
+      },
+    },
+  })
+  const lambdaPane = new LambdaPane(lambdaHost, events(lambdaSlot))
+  const tmPane = new TmPane(tmHost, events(tmSlot))
+
+  /**
+   * One session's replies, applied to that session's legs.
+   *
+   * THE SESSION IS A PARAMETER, NOT A CLOSED-OVER CONST, even though exactly one exists. A reply
+   * belongs to the session whose worker sent it and to nothing else — §3.2's "the port is the id" is
+   * precisely the claim that this pairing is established at the port and cannot be recovered from the
+   * message. Resolving it here keeps this function from quietly being *the source session's* reply
+   * handler under a name that says otherwise.
+   *
+   * `index`/`linkable`/`link` AND THE `results`/`view` WRITES BELOW ARE NOT PER SESSION and stay
+   * closed over: they are the app's one editor, one status line and one results pane. See `index`'s
+   * own doc for why the link index in particular is not in the registry.
+   */
+  const onReply = (session: SessionId, reply: RunReply): void => {
+    const { legs } = sessions.entryOf(session)
     switch (reply.kind) {
       case 'no-session':
         results.dataset.state = 'idle'
         renderRows(results, noSessionRows(reply.diagnostics))
         // STALE FRAMES MUST NOT SURVIVE A BROKEN PROGRAM. A pane still showing the last good run
         // under source that does not compile is the worst of both answers.
-        resetLegs(null, null, 'not compiled')
+        resetLegs(legs, null, null, 'not compiled')
         tmPane.setProgram(null, [])
         index = null
         linkable = false
@@ -485,7 +711,7 @@ async function main(): Promise<EditorView> {
         draw()
         return
       case 'compiled':
-        resetLegs(reply.lambda, reply.tm)
+        resetLegs(legs, reply.lambda, reply.tm)
         tmPane.setProgram(reply.tmProgram, reply.tapeNames)
         index = reply.linkIndex === null ? null : new LinkIndex(reply.linkIndex)
         linkable = index !== null
@@ -500,16 +726,25 @@ async function main(): Promise<EditorView> {
         view.dispatch({ effects: [setDecline.of(reply.declinedSpan), setLink.of(null)] })
         draw()
         return
-      case 'lambda-frames':
-        for (const f of reply.frames) lam.hist.push(f, lambdaFrameBytes(f))
-        lam.done = reply.done
+      // RESOLVED THROUGH `legOf`, NOT READ OFF `legs` DIRECTLY, because a session's legs are optional
+      // now (§4.1: a `LambdaScratch` has one leg) and a reply naming a leg its session does not have
+      // is a wiring bug rather than a state to render. `legOf`'s throw is the one policy for that
+      // whole class — see its doc — and reusing it here is what keeps this file from inventing a
+      // second answer (a silent drop) for the same question.
+      case 'lambda-frames': {
+        const leg = sessions.legOf({ session, leg: 'lambda' })
+        for (const f of reply.frames) leg.hist.push(f, lambdaFrameBytes(f))
+        leg.done = reply.done
         draw()
         return
-      case 'tm-frames':
-        for (const f of reply.frames) tm.hist.push(f, tmFrameBytes(f))
-        tm.done = reply.done
+      }
+      case 'tm-frames': {
+        const leg = sessions.legOf({ session, leg: 'tm' })
+        for (const f of reply.frames) leg.hist.push(f, tmFrameBytes(f))
+        leg.done = reply.done
         draw()
         return
+      }
       case 'result':
         results.dataset.state = 'idle'
         renderRows(results, resultRows(reply.lambda, reply.tm))
@@ -530,7 +765,7 @@ async function main(): Promise<EditorView> {
         // all, and the panes are still showing the PREVIOUS program's frames under a message saying the
         // app broke. Either way there is no session, which is what "not compiled" means — the same
         // reason `no-session` above passes, since a `compile()` that threw never produced one.
-        resetLegs(null, null, 'not compiled')
+        resetLegs(legs, null, null, 'not compiled')
         tmPane.setProgram(null, [])
         index = null
         linkable = false
@@ -542,10 +777,91 @@ async function main(): Promise<EditorView> {
     }
   }
 
+  /**
+   * One λ scratchpad reply, applied to the scratchpad's one leg.
+   *
+   * A SECOND HANDLER RATHER THAN BRANCHES IN `onReply`, for the reason the `scratchpad` construction
+   * above gives. What the two share is `lambda-frames`, which is fifteen characters of `hist.push`
+   * loop; what they do not share is everything `onReply` does with `index`, `results`, `tmPane` and
+   * `view`, none of which a detached session has any claim on (§3.3: no `linkIndex`, no `sourceSpan`,
+   * no `ty`).
+   *
+   * FOUR ARMS AND NO `default`, WHICH IS NOT AN OVERSIGHT. `session-worker.ts` answers a
+   * `lambda-scratch` request with exactly `scratch-compiled`, `lambda-frames`, `no-session` or
+   * `worker-error` — `compiled`, `tm-frames` and `result` need a TM leg, a `SourceMap` or a `ty`, and
+   * `onLambdaScratch`/`onExtend` are where each is refused. A reply this switch does not name is a
+   * reply this session's worker cannot send, and falling through is the honest answer: there is
+   * nothing on a scratchpad for a TM frame to land in, and inventing somewhere is the shape
+   * `session.rs:257-273` prices.
+   *
+   * IT NEVER TOUCHES `results.dataset.state` EXCEPT ON A THROW. That flag is the source compile's
+   * "running…" indicator and `app.test.ts`'s `settled` waits on it; a scratchpad's traffic is not a
+   * compile and must not be seen as one finishing.
+   */
+  const onScratchReply = (session: SessionId, reply: RunReply): void => {
+    switch (reply.kind) {
+      case 'scratch-compiled':
+        // ONE STATUS, AND THE `null` IS NOT A FABRICATION. `resetLegs` drops a status for a leg the
+        // session does not have rather than writing one so the record is square — its own doc, and
+        // this is the caller it was written for.
+        resetLegs(sessions.entryOf(session).legs, reply.lambda, null)
+        draw()
+        return
+      case 'lambda-frames': {
+        const leg = sessions.legOf({ session, leg: 'lambda' })
+        for (const f of reply.frames) leg.hist.push(f, lambdaFrameBytes(f))
+        leg.done = reply.done
+        draw()
+        return
+      }
+      case 'no-session':
+        // THE TEXT DID NOT PARSE. Unreachable through the fork control as it stands — it is absent
+        // for a truncated frame and `lambda/syntax.rs` round-trips a whole printed term (see
+        // `detachButton`) — and handled anyway, because that guarantee is a property of another
+        // crate's printer and this is what the pane says if it ever stops holding. The diagnostics
+        // are not rendered: `#results` belongs to the source compile, and a scratchpad has no pane of
+        // its own to put them in until one can be typed into.
+        resetLegs(sessions.entryOf(session).legs, null, null, 'the λ text did not parse')
+        draw()
+        return
+      case 'worker-error':
+        // THE SAME SURFACE AS THE SOURCE SESSION'S, AND DELIBERATELY. `showWorkerError` renders into
+        // `#results` rather than replacing `<main>` (`banner.ts`'s split), which is right here for the
+        // same reason it is there: the app is alive, one session's thread threw. `resetLegs` first
+        // for `onReply`'s reason — stale frames must not survive under a message saying it broke.
+        results.dataset.state = 'idle'
+        resetLegs(sessions.entryOf(session).legs, null, null, 'the scratchpad failed')
+        showWorkerError(results, new Error(reply.message))
+        draw()
+        return
+    }
+  }
+
   let timer: ReturnType<typeof setTimeout> | undefined
   const schedule = (src: string) => {
     clearTimeout(timer)
     results.dataset.state = 'running'
+    // RECOMPILE-FROM-SOURCE RETIRES THE SCRATCHPAD AND TERMINATES ITS WORKER — design §4.3,
+    // deliberately the same mechanism as §4.2's poison recovery so the app has ONE recovery path.
+    //
+    // AT DISPATCH, NOT ON THE `compiled` REPLY, and the difference is a second of stale screen. This
+    // runs synchronously on the keystroke that invalidates the scratchpad's provenance, so the pane
+    // is back on the source session immediately; waiting for the reply would leave a detached pane
+    // showing a scratch term for `DEBOUNCE_MS` plus a compile — and `no-session` and `worker-error`
+    // are recompiles too, so the reply-side version is three call sites where this is one.
+    //
+    // GUARDED BY ITS OWN RETURN VALUE RATHER THAN BY A `has` HERE. `schedule` runs on EVERY keystroke
+    // while the post itself is debounced, and the editor's update listener says why it does not call
+    // `draw()` on a keystroke: `hist` has not changed, so repainting both panes is pure waste.
+    // `retire` answers whether anything moved, so the repaint happens on the one keystroke that
+    // retired a scratchpad.
+    if (scratchpad.retire(SOURCE_SESSION, [lambdaSlot, tmSlot])) draw()
+    // THE SOURCE SESSION BY NAME, NOT THROUGH A PANE'S BINDING. Recompiling is what the editor does to
+    // the session it is the source of; it is not something a pane slot points at, so this stays
+    // addressed to `SOURCE_SESSION` however the three panes end up bound. Resolved inside `schedule`
+    // rather than held as a local for the reason `draw()` gives: a client belongs to a registry entry
+    // now, and a second reference to it beside the registry is a second thing to keep in step.
+    const client = sessions.entryOf(SOURCE_SESSION).client
     // SUPERSEDE NOW, POST LATER. The generation is claimed synchronously so the previous run's
     // replies stop being current at the instant of dispatch; `request` drops the post if another
     // keystroke claimed a newer one during the debounce. See `SessionClient.supersede`.

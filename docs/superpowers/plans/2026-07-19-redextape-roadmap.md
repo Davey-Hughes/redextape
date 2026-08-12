@@ -5086,3 +5086,147 @@ cap.
 `overflowed()` reaches it. Fixes carry discriminating tests: reverting the `overflow()` guard fails with
 `left: Some(0), right: None`, and reverting the `attribute` fix fails with
 `capped: left=false, right=true`.
+
+#### PLAN 5d-i CLOSES — three sessions that survive each other, and the edit gesture the split forgot to assign (2026-08-11, PR #34)
+
+Design: [`../specs/2026-08-11-plan5d-i-session-model-design.md`](../specs/2026-08-11-plan5d-i-session-model-design.md).
+Plan: [`2026-08-11-plan5d-i-session-model.md`](2026-08-11-plan5d-i-session-model.md).
+
+The 2026-08-10 brainstorm recorded six decisions and built nothing; **all six survived contact and none
+was reversed.** `Session` is joined by `LambdaScratch` and `TmScratch` at the wasm boundary, each pane
+binds to a `(session, leg)` pair through a registry that did not previously exist, each session gets its
+own worker, and a forked pane says so in two places.
+
+##### WHAT SHIPPED IS THE FORK, NOT THE EDIT — and the gap is in this spec's own split
+
+**The most important line in this entry, because it is a capability the roadmap already promised.** Plan
+5's entry says *"5d makes the λ and TM panes editable with detach-on-edit."* §1 of the design splits 5d
+into the session model (5d-i) and the pane multiplexer (5d-ii). **Neither owns making a pane editable**,
+so it fell between them and nobody noticed until T8 reached for the trigger.
+
+§4.3's gesture is *"editing a source-derived λ view"*, which presumes an editable λ view. The pane body
+is a `<pre>` of decorated tokens carrying 5b/5c's `data-at` offsets, and §1 freezes the pane set's shape
+and budgets one control per pane — so T8 could not build the editor without exceeding its own spec. **It
+shipped a `✎ fork` button: the same event, and a scratchpad that cannot be typed into.**
+
+So a scratch session exists, runs independently of the source, binds to a pane, badges itself, and is
+retired by a recompile. **What nobody can yet do is change its text.** That is a third slice — CodeMirror
+instances for the derived panes — nearer 5d-ii's layout work than 5d-i's session work, and belonging to
+neither as written.
+
+**`TmScratch` has no producer for the same reason.** Nothing in the app holds `.tm` text to fork from;
+the TM pane renders tapes and a δ-table, not a source. The type and its wasm exports are complete and
+tested, and `protocol.ts` ships `lambda-scratch` and no `tm-scratch`. §4.3's two-singleton claim is
+half-instantiable until the editable panes land.
+
+##### Three findings that came from verifying anchors, before any code was written
+
+**`TmState::window` needed the `SourceMap` and a scratch has none** — `viewmodel.rs:465`, used at `:478`
+for one field. A scratch definitionally has no owner, so the value is `None` rather than unavailable, and
+the parameter became `Option<&SourceMap>`. **Admissible here and NOT at the wasm boundary**, because
+`source_node` is already `Option` and no new state becomes spellable; at the boundary it would have.
+**T3 then applied that same test to `build_tm_leg` and got the opposite answer** — blank tapes at
+`MIN_FIELD_WIDTH` is unreachable on the `Session` path, so widening there would put an invented
+configuration one accidental `None` away from a compiled program. One principle, two applications,
+opposite outcomes.
+
+**`main()` had no state object — its local scope WAS the state.** `lam` and `tm` were two `const`s in the
+function body and `LegState<T>` carried no session identity, because there had only ever been one
+session. So decision 1 was not a field addition; there was nothing to add a field to. That repriced the
+slice and forced T4 ahead of everything presupposing it.
+
+**Decision 6 reversed a refusal already in the tree.** `examples/tm_emit.rs:172-181` declines headerless
+machines because such a file *"genuinely cannot be run without the caller supplying `init` by hand."*
+That stays true for a batch tool with no user — **a scratchpad IS the caller supplying init by hand** — so
+the decision stood and the comment was amended rather than leaving two places asserting opposite things
+about one condition.
+
+##### THE PLAN WAS WRONG SIX TIMES, AND EXECUTING IT IS WHAT FOUND ALL SIX
+
+Annotated in place rather than edited away, because the record is only worth having if the predictions
+stay beside the outcomes.
+
+| task | the claim | what happened |
+| --- | --- | --- |
+| T4 | mutation: "point two registry entries at one `LegState`" | **not executable** — the same task mandates one session |
+| T4 | "an existing history/playback test fails" | **30 of 76 browser tests failed** |
+| T4 | `play`'s signature is untouched | had to change (TS2345) — unanticipated |
+| T5 | "poison a worker with a deep print" | **the poison no longer exists** — PR #25 closed it |
+| T5 | "only the isolation test fails" | **6 node tests caught it too** |
+| T7 | "three pane slots" | there are two — the third is the editor, and `Leg` has no `'source'` |
+
+**The transferable rule: a mutation's expected failure needs a COUNT, not just a name.** T4's was
+understated 30×; T5's was understated in the *reassuring* direction, since the non-skippable tier
+already discriminated it. Both were found the same way — run the mutation, count the failures — and
+neither would have been found by reading.
+
+**T5's dead poison is the one worth carrying forward.** The 2026-08-09 borrow-poisoning repro was real
+and `depth-cap.test.ts` still pins it, but `MAX_PRINT_DEPTH` made it unreachable through this protocol,
+and `session-worker.ts`'s `dropLive` already said so in as many words. **A design doc asserting a hazard
+is not evidence the hazard remains.** It was measured at three depths against a real worker before being
+believed, and the isolation test now drives what IS reachable: co-tenancy is unsurvivable because the
+worker frees its one live session at the top of every `run`, and the cure must be local because
+terminating a shared thread takes the source session with the scratchpad.
+
+##### The memory probe: the threshold was met, and the term nobody counted
+
+Pre-registered before any number existed: **three sessions at four legs must sit at or below 2× the
+single-session resident figure.** Measured **1.8160189425298086 — met**, so `DROP_HISTORY_ON_UNFOCUS`
+defaults to `false`. The threshold was not moved and not reinterpreted.
+
+**The readings that do NOT clear 2× are recorded beside the one that does**, which is the half that
+matters:
+
+| reading | ratio | |
+| --- | --- | --- |
+| resident `usedJSHeapSize` — the figure the threshold names | **1.8160189425298086** | ✓ |
+| same, page baseline stripped | 1.99990656956171 | ✓, and it straddles 2 across runs |
+| wasm linear memory | 2.4153005464480874 | ✗ |
+| resident + wasm | 1.884843254120645 | ✓ |
+
+**"2× and not 3×" is true of the histories and false of the process.** Three sessions is three threads by
+decision 3, and the **8,454,144-byte wasm module baseline is paid per thread** — a term neither the plan
+nor §4.4 counted. The overshoot did not flip the boolean, and deliberately not on the grounds that the
+threshold named a different reading: dropping an unfocused pane's history frees `History` entries on the
+main thread and **cannot reach a byte of a worker's module baseline**. Flipping it would apply a remedy
+to a cost it provably cannot reduce.
+
+**Two corrections to the design's own arithmetic.** `session-worker.ts:97` bounds bytes *produced* — the
+worker posts each batch and clears it — where it is `main.ts`'s two `History` rings that bound bytes
+*retained*; the two come apart on `[continue]`. And `tmFrameBytes` under-reports retained bytes by
+**2.0455×** against `lambdaFrameBytes`'s 1.0719×, left as is because the design's question is a ratio in
+which an equal per-leg error cancels.
+
+##### Two test designs worth stealing
+
+**`TmScratchStatus` is pinned by a destructuring pattern, not by field reads** — exhaustive, so a sixth
+field fails to compile with `E0027`. It exists because the mutation proved the previous check was
+missing: fabricating `total_steps: Some(0)` left the native suite **894/894 green** and was caught only
+by the browser tier, which needs Chrome and is skippable. **The trap the plan called its biggest was
+guarded only by the tier most likely not to run.**
+
+**Method absence is a compile-time test built from method resolution.** A blanket trait whose default
+bodies return a distinct `Absent` type; an inherent method out-resolves it, so adding `lambdaValue` to
+`LambdaScratch` fails with `E0308`. Stronger than both options §5 suggested and cheaper than either: no
+`trybuild` dependency, and no dependence on `pkg/`, which is a gitignored artifact that may hold whatever
+WASM was last built — PR #28's recorded trap.
+
+##### Verification
+
+`cargo nextest run --workspace` 895 passed / 8 skipped (baseline 883) · `cargo clippy --workspace
+--all-targets -- -D warnings` clean · `scripts/check-all.sh` **all configs green — base, LLVM and
+browser** (22 wasm browser tests, was 20) · web 257 node / 90 browser / **347 merged**, coverage 94.85
+statements / 89.88 branches / 96.92 functions / 97.01 lines against thresholds 92/85/93/94.
+
+##### What this slice could not establish
+
+**Whether the session model is right for a user**, as opposed to consistent. Nobody has yet forked a pane
+and worked in it, because the fork cannot be typed into. Every claim here is about types, isolation and
+bytes.
+
+**Whether one worker per session is affordable at the pane counts 5d-ii will allow.** Three threads cost
+2.4153× one thread's wasm baseline, measured; the multiplexer makes the session count open, and nothing
+here says where that stops being a good trade.
+
+**No accessibility pass** — still deferred to the end of Plan 5, still gated on 5d-ii, and this slice
+added no colour-carried state on purpose.

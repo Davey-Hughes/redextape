@@ -1,8 +1,9 @@
 /* Design tokens. A foundation for Plan 5's panes, not a visual identity — §7 of the design spec. */
 :root {
-  /* Not just a UA-drawn-widget hint anymore — the encoding `<select>` is still the only one in this
-     slice `prefers-color-scheme` cannot reach inside, and this is still what keeps a dark page from
-     getting a light dropdown, but every token below now resolves AGAINST this property via
+  /* Not just a UA-drawn-widget hint anymore — the encoding `<select>` and each pane's binding
+     selector (`.pane-binding` below) are the widgets `prefers-color-scheme` cannot reach inside, and
+     this is still what keeps a dark page from getting a light dropdown, but every token below now
+     resolves AGAINST this property via
      `light-dark()`. It is the one switch: `system` (this default, tracking the OS), an explicit
      `:root[data-theme="light"]`, or `:root[data-theme="dark"]` below all just set `color-scheme`
      and every `light-dark()` value follows without a second copy of the palette. */
@@ -220,6 +221,66 @@ main {
   letter-spacing: 0.08em;
   color: var(--fg-dim);
   margin: 0 0 var(--space-2);
+}
+
+/* `[detached]` — design §4.5's second surface, on the pane's own title.
+
+   NOT COLOUR-ONLY, AND THAT IS THE RULE'S WHOLE CONSTRAINT rather than a preference. §4.5 rejected a
+   whole-pane visual treatment because hue is already the sole discriminator for FIVE states
+   (accessibility item 7 and its two aggravations) and this slice's §6 forbids adding a sixth. So the
+   carriers here are the bracketed TEXT itself (`pane-chrome.ts` writes the brackets, and they survive
+   this rule never reaching the page at all), a BORDER, and a MONOSPACE face against the title's UI
+   font. `color` below is `--fg`, one step up from the `--fg-dim` the heading inherits — a contrast
+   nudge on top of three non-colour signals, not one of them.
+
+   `tests/browser/detached-badge.test.ts` asserts the border computes to a non-zero width, so reducing
+   this to `color:` alone fails a test rather than quietly shipping the thing §4.5 ruled out.
+
+   `letter-spacing: normal` UNDOES `.pane h2`'s 0.08em, which is tracking for a lowercase label and
+   pushes the closing bracket a visible gap away from the word inside it. */
+.detached-badge {
+  margin-inline-start: var(--space-2);
+  padding: 0 0.35em;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  letter-spacing: normal;
+  color: var(--fg);
+}
+
+/* The binding selector — which session this pane's slot is showing (design §2 decision 1, plan T7).
+
+   NOTHING HERE CARRIES STATE IN COLOUR, which §6 requires of every control this slice adds and §4.5
+   argues at length: hue is already the sole discriminator for five states (accessibility item 7 and
+   its two aggravations), and the badge rule above went to three non-colour carriers rather than add a
+   sixth. This control needs none, because it has no state to carry — which session is in force is the
+   `<select>`'s own value, which is text a screen reader reads out and a stylesheet cannot suppress.
+
+   THE SAME TREATMENT AS `.controls button` AND `#appearance`, deliberately: one control in a pane, not
+   a new style. The caption is `.pane h2`'s dimmed voice so the row reads as one line of chrome under
+   the heading rather than as a second heading.
+
+   IT IS ABSENT FROM THE DOM BELOW TWO SESSIONS, so this rule usually matches nothing —
+   `pane-chrome.ts`'s `bindingSelect` removes the element rather than hiding it, and its doc says why.
+   There is nothing here to make it disappear; do not add a `display: none` reading of that state. */
+.pane-binding {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: calc(-1 * var(--space-1)) 0 var(--space-2);
+  color: var(--fg-dim);
+  font-size: var(--step--2);
+}
+.pane-binding select {
+  font: inherit;
+  font-family: var(--font-mono);
+  padding: 0.1em 0.4em;
+  border-radius: var(--radius);
+  border: 1px solid var(--fg-dim);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
 }
 
 .term {

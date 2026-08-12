@@ -449,6 +449,28 @@ impl TmState {
     /// state's name, which allocates nothing and so does not disturb the cost above. See the struct doc
     /// for what it resolves and the three cases where it honestly answers `None`.
     ///
+    /// **`Option<&SourceMap>` BECAUSE A CALLER CAN HONESTLY HAVE NO MAP AT ALL**, which is 5d-i's
+    /// `TmScratch`: a machine typed straight into a pane was never lowered from a Core, so there is no
+    /// lowering for `tm_owner` to have recorded anything in. `Session::tm_state` passes
+    /// `Some(&self.map)`; a scratch passes `None`, and `source_node` becomes `None` on exactly the path
+    /// where it has no meaning. See
+    /// `docs/superpowers/specs/2026-08-11-plan5d-i-session-model-design.md` §3.1.
+    ///
+    /// **THIS IS THE SHAPE §3.1's DECISION 2 REJECTED ONE LAYER OUT, AND IT IS ADMISSIBLE HERE FOR A
+    /// REASON THAT DOES NOT TRANSFER.** At the wasm boundary that design chose three distinct types
+    /// over one type with `Option` fields, because `redextape-wasm`'s `session.rs` records what the
+    /// looser shape cost there: a fabricated, permanently uncovered user-facing status for a state no
+    /// program could produce. Here the *output* field is ALREADY `Option<NodeId>` and independently
+    /// reachable — a `Session` whose lowering recorded nothing gets `source_node: None` today, and the
+    /// struct doc above lists three kinds of state that do — so the parameter adds no state to the type
+    /// and there is no status to fabricate.
+    ///
+    /// **THE REJECTED ALTERNATIVE IS A SECOND `window_unmapped` CONSTRUCTOR**, which is the cheaper
+    /// diff: it leaves the twelve test call sites of this function untouched. It duplicates the window,
+    /// heads and rule computation — the part of this function with logic in it — so a change to how a
+    /// window is clamped, or to how `rule` matches, would have to land in two places or silently land
+    /// in one. Cheap diff, wrong factoring.
+    ///
     /// CLAMPED AT BOTH ENDS OF WHAT THE TAPE HAS MATERIALIZED, not merely bounded in length: a head
     /// near the start of a tape has no `radius` cells to its left, and `Tape::window`'s own
     /// `saturating_sub`/`min` are what stop the slice running off either edge rather than merely
@@ -462,7 +484,7 @@ impl TmState {
     /// left edge (and therefore the origin `left.len()` counts from) shifts with the head rather than
     /// staying fixed at the start of the run. `heads`/`window_start` are reported against the region as
     /// materialized at the moment of this call, which is well-defined, just not a fixed absolute origin.
-    pub fn window<M: Borrow<Machine>>(c: &TmCursor<M>, map: &SourceMap, radius: usize) -> TmState {
+    pub fn window<M: Borrow<Machine>>(c: &TmCursor<M>, map: Option<&SourceMap>, radius: usize) -> TmState {
         let mut window = Vec::with_capacity(c.tapes().len());
         let mut heads = Vec::with_capacity(c.tapes().len());
         let mut window_start = Vec::with_capacity(c.tapes().len());
@@ -475,7 +497,12 @@ impl TmState {
         let state = c.state();
         // `get`, never `[]`: a `StateId` past the end must answer `None` rather than abort a renderer.
         let entry = c.machine().states.get(state as usize);
-        let source_node = entry.and_then(|s| map.tm_owner(&s.name));
+        // `entry` FIRST, `map` SECOND, which is the order this line already read in before the map
+        // became optional — both are pure `Option`s over lookups with no side effects, so the nesting
+        // is free to be chosen for legibility rather than forced by evaluation order. NO FALLBACK IN
+        // THE `None` ARM: an absent map answers `None` for every state, the same answer `tm_owner`
+        // already gives for scaffolding, rather than an invented owner. See this function's doc.
+        let source_node = entry.and_then(|s| map.and_then(|m| m.tm_owner(&s.name)));
         let rule = entry.and_then(|s| s.rules.iter().position(|r| crate::tm::sim::rule_matches(&r.read, c.tapes())));
         TmState { state, step: c.steps_taken(), heads, window_start, window, source_node, rule }
     }

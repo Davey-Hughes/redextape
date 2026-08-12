@@ -133,7 +133,7 @@ fn the_window_is_bounded_by_its_radius_and_clamped_at_tape_ends() {
     cursor.by_ref().take(50).count();
 
     for radius in [0usize, 1, 8] {
-        let st = TmState::window(&cursor, &empty_map(), radius);
+        let st = TmState::window(&cursor, Some(&empty_map()), radius);
         assert_eq!(st.window.len(), machine.tapes, "one window per tape");
         for w in &st.window {
             assert!(w.len() <= 2 * radius + 1, "radius {radius} yielded {} cells", w.len());
@@ -176,7 +176,7 @@ fn the_window_costs_the_same_regardless_of_how_large_the_tape_has_grown() {
     // slice, just after paying to clone the whole tape first. It is a regression guard on the SHAPE of
     // the result; the allocation check below is what pins the COST.
     for cursor in [&small, &large] {
-        let st = TmState::window(cursor, &empty_map(), 2);
+        let st = TmState::window(cursor, Some(&empty_map()), 2);
         assert_eq!(st.window.len(), 1, "one window per tape");
         for w in &st.window {
             assert!(w.len() <= 5, "radius 2 must yield at most 5 cells, got {}", w.len());
@@ -199,11 +199,11 @@ fn the_window_costs_the_same_regardless_of_how_large_the_tape_has_grown() {
     let map = empty_map();
 
     let before_small = BYTES_ALLOCATED.load(Ordering::SeqCst);
-    let _ = TmState::window(&small, &map, 2);
+    let _ = TmState::window(&small, Some(&map), 2);
     let bytes_small = BYTES_ALLOCATED.load(Ordering::SeqCst) - before_small;
 
     let before_large = BYTES_ALLOCATED.load(Ordering::SeqCst);
-    let _ = TmState::window(&large, &map, 2);
+    let _ = TmState::window(&large, Some(&map), 2);
     let bytes_large = BYTES_ALLOCATED.load(Ordering::SeqCst) - before_large;
 
     // A bound, not `assert_eq!(bytes_small, bytes_large)`: `BYTES_ALLOCATED` is a process-wide
@@ -244,7 +244,7 @@ fn a_tape_can_be_sliced_in_the_same_coordinates_the_window_reports() {
     let mut c = redextape_core::trace::TmCursor::new(&machine, &init, tm_caps());
     c.by_ref().take(50).count();
 
-    let st = TmState::window(&c, &empty_map(), 4);
+    let st = TmState::window(&c, Some(&empty_map()), 4);
     let tape0 = &c.tapes()[0];
 
     // The window is the slice its own coordinates name.
@@ -301,7 +301,7 @@ fn tm_state_resolves_its_source_node_through_the_map() {
 
     let mut saw_some = false;
     for _ in 0..200 {
-        let st = TmState::window(&c, &map, 2);
+        let st = TmState::window(&c, Some(&map), 2);
         if st.source_node.is_some() {
             saw_some = true;
             break;
@@ -315,7 +315,47 @@ fn tm_state_resolves_its_source_node_through_the_map() {
     // A map with no TM leg resolves nothing — the map says nothing where the lowering said nothing.
     let mut c2 = redextape_core::trace::TmCursor::new(&machine, &init, tm_caps());
     c2.by_ref().take(10).count();
-    assert_eq!(TmState::window(&c2, &empty_map(), 2).source_node, None);
+    assert_eq!(TmState::window(&c2, Some(&empty_map()), 2).source_node, None);
+}
+
+/// **`window` TAKES `Option<&SourceMap>`, AND `None` MUST DECIDE `source_node` AND NOTHING ELSE.** 5d-i
+/// §3.1: a `TmScratch` is a machine typed straight into a pane, never lowered from a Core, so it has no
+/// map to pass — but it renders from this same function every frame, and everything else the frame
+/// carries (the window, the heads, the rule about to fire) is a fact about the machine that a missing
+/// map has no business touching.
+///
+/// **THE WHOLE STRUCT IS ASSERTED, NOT JUST `source_node`.** That is what makes this discriminating
+/// rather than a smoke test: the alternative §3.1 rejected — a second `window_unmapped` constructor —
+/// would duplicate the window/heads/rule computation, and the failure mode of a duplicate is the two
+/// copies drifting on one of those fields while `source_node` still looks right. Struct-update syntax
+/// is used so the equality covers fields this test does not know the names of; a field added to
+/// `TmState` later is covered the day it is added.
+///
+/// THE FIXTURE IS STEPPED TO A STATE THAT ACTUALLY RESOLVES, and the `is_some` assertion is
+/// load-bearing: against a state with no owner both arms answer `None` and the test would pass while
+/// proving nothing — the same trap `tm_state_resolves_its_source_node_through_the_map` above steps past.
+#[test]
+fn an_absent_map_zeroes_the_source_node_and_leaves_every_other_field_alone() {
+    let (_program, _core, map, machine, init) = tm_fixture_with_map("let x = 40; x + 2");
+    let mut c = redextape_core::trace::TmCursor::new(&machine, &init, tm_caps());
+
+    let mut steps = 0;
+    while TmState::window(&c, Some(&map), 3).source_node.is_none() {
+        assert!(c.next().is_some(), "the fixture halted before reaching an owned state");
+        steps += 1;
+        assert!(steps < 200, "no owned state within 200 steps; the fixture no longer discriminates");
+    }
+
+    let mapped = TmState::window(&c, Some(&map), 3);
+    let unmapped = TmState::window(&c, None, 3);
+
+    assert!(mapped.source_node.is_some(), "the loop above exited on an owned state, or it proves nothing");
+    assert_eq!(unmapped.source_node, None, "no map, no owner — and no fallback to a nearby state");
+    assert_eq!(
+        unmapped,
+        TmState { source_node: None, ..mapped.clone() },
+        "the map decides `source_node` and nothing else: {mapped:?} vs {unmapped:?}"
+    );
 }
 
 #[test]
@@ -479,7 +519,7 @@ fn every_view_model_round_trips_through_json() {
 
     let mut c = redextape_core::trace::TmCursor::new(&machine, &init, tm_caps());
     c.by_ref().take(20).count();
-    let ts = TmState::window(&c, &empty_map(), 8);
+    let ts = TmState::window(&c, Some(&empty_map()), 8);
     let back: TmState = serde_json::from_str(&serde_json::to_string(&ts).expect("serialize")).expect("deserialize");
     assert_eq!(ts, back);
 }
@@ -570,7 +610,7 @@ fn rule_names_the_transition_the_next_step_actually_takes() {
 
     let mut checked = 0usize;
     loop {
-        let before = TmState::window(&cursor, &empty_map(), 2);
+        let before = TmState::window(&cursor, Some(&empty_map()), 2);
         match before.rule {
             Some(idx) => {
                 let state = &machine.states[before.state as usize];
@@ -585,7 +625,7 @@ fn rule_names_the_transition_the_next_step_actually_takes() {
                 // make this `assert!` fail while `rule`'s own doc is still correct — not a regression in
                 // the field, a fixture that has outgrown the bound it was implicitly relying on.
                 assert!(cursor.next().is_some(), "a rule matched but the cursor would not advance");
-                let after = TmState::window(&cursor, &empty_map(), 2);
+                let after = TmState::window(&cursor, Some(&empty_map()), 2);
                 assert_eq!(
                     after.state, expected,
                     "step {}: rule {idx} of `{}` says next = {expected}, machine went to {}",

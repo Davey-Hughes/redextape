@@ -62,3 +62,93 @@ describe('linkStatus', () => {
     )
   })
 })
+
+/**
+ * Design §4.5's first surface: the line that already narrates the correspondence states which panes
+ * are OUTSIDE it. The badge — the second surface — is `tests/browser/detached-badge.test.ts`, because
+ * this module is pure logic and that one needs a DOM; §4.5's own note that the both-surfaces test
+ * splits by runner.
+ *
+ * EVERY CASE HERE HAS AN ATTACHED COUNTERPART, per §5: "a test that only checks the badge appears
+ * would pass an implementation that never removes it" is equally true of the sentence, and the
+ * first `it` below is the one that fails such an implementation.
+ */
+describe('linkStatus · detachment', () => {
+  // THE ABSENT-FIELD CASE IS NOT REDUNDANT WITH THE ALL-FALSE ONE. `detached` is optional so that
+  // `main.ts`'s three existing `linkStatus(...)` call sites keep compiling while the session registry
+  // (§3.2b) lands separately — this asserts that the default that silence rests on is "attached",
+  // not `undefined` leaking into the output.
+  it('says nothing about detachment when both panes are attached', () => {
+    expect(linkStatus({ state: 'none' })).toBe('')
+    expect(linkStatus({ state: 'none', detached: { lambda: false, tm: false } })).toBe('')
+    expect(
+      linkStatus({ state: 'linked', tm: true, lambda: 'shown', focus: true, detached: { lambda: false, tm: false } }),
+    ).toBe('the machine is here right now')
+  })
+
+  // BOTH PANES DETACH INDEPENDENTLY (§4.3: detaching one pane leaves the source session running and
+  // the other pane bound to it), which is why `detached` is a record and not a boolean. A shape that
+  // could only say "something is detached" passes every other case here and fails these two.
+  it('names only the pane that is detached', () => {
+    expect(linkStatus({ state: 'none', detached: { lambda: true, tm: false } })).toBe(
+      'λ pane detached — not linked to source',
+    )
+    expect(linkStatus({ state: 'none', detached: { lambda: false, tm: true } })).toBe(
+      'TM pane detached — not linked to source',
+    )
+  })
+
+  // ONE CLAUSE, NOT THE SAME SENTENCE TWICE. "not linked to source" is one fact about one
+  // correspondence; repeating it verbatim either side of a `·` reads as two unrelated failures.
+  it('names both panes in one clause when both are detached', () => {
+    expect(linkStatus({ state: 'none', detached: { lambda: true, tm: true } })).toBe(
+      'λ and TM panes detached — not linked to source',
+    )
+  })
+
+  // ORDERED MOST-GLOBAL FIRST, the rule `main.ts`'s `lambdaLinkState` states for its own three-way
+  // choice: a pane being outside the correspondence entirely is a bigger fact than anything about
+  // what resolved inside it, and every clause after it is about the panes still inside.
+  it('reports detachment ahead of the pin narration', () => {
+    expect(linkStatus({ state: 'stale', detached: { lambda: true, tm: false } })).toBe(
+      'λ pane detached — not linked to source · linking resumes when this compiles',
+    )
+  })
+
+  // §4.5's standard, applied to the clauses themselves: "a thing that provably cannot work should not
+  // be presented as though it might". A detached λ pane is showing a scratch term, so
+  // `LAMBDA_TEXT['truncated']` would describe a truncation in a term that is not on screen — while
+  // the TM clause, whose pane is still bound to the source session, stays.
+  it('suppresses the λ clause for a detached λ pane and keeps the TM one', () => {
+    expect(
+      linkStatus({
+        state: 'linked',
+        tm: false,
+        lambda: 'truncated',
+        focus: false,
+        detached: { lambda: true, tm: false },
+      }),
+    ).toBe('λ pane detached — not linked to source · this construct emits no machine states')
+  })
+
+  // The mirror, and `focus: true` is the load-bearing half: `TmState.source_node` is `None` for every
+  // state a `TmScratch` renders (§3.1), so "the machine is here right now" about a detached TM pane
+  // is a claim no scratch can make. Suppressed rather than trusted from the caller.
+  it('suppresses the TM clauses for a detached TM pane and keeps the λ one', () => {
+    expect(
+      linkStatus({
+        state: 'linked',
+        tm: false,
+        lambda: 'truncated',
+        focus: true,
+        detached: { lambda: false, tm: true },
+      }),
+    ).toBe('TM pane detached — not linked to source · the λ term is truncated before this construct')
+  })
+
+  it('leaves only the detachment clause when both panes are detached', () => {
+    expect(
+      linkStatus({ state: 'linked', tm: false, lambda: 'declined', focus: true, detached: { lambda: true, tm: true } }),
+    ).toBe('λ and TM panes detached — not linked to source')
+  })
+})

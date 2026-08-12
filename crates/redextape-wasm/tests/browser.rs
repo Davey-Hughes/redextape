@@ -1061,3 +1061,191 @@ fn a_term_past_the_print_cap_is_bounded_rather_than_fatal() {
     let again = call(&session, "linkIndex", &[JsValue::from_f64(65_536.0)]);
     assert!(!again.is_null(), "the session survives its own bounded print");
 }
+
+/// 5d-i T2: a `LambdaScratch` crosses as a HANDLE beside plain diagnostics, and its six methods are
+/// reachable on the prototype. Same shape as `compile`, and asserted the same way — through `Reflect`,
+/// because a method missing from the generated glue is exactly what this tier exists to catch and
+/// holding the Rust value would prove nothing about the glue.
+///
+/// **THE ABSENT METHODS ARE ASSERTED TOO, AND THAT IS THE HALF THAT MATTERS.** Design decision 2 is
+/// that a method needing a `ty` or a `SourceMap` DOES NOT EXIST on a scratch rather than existing and
+/// declining, so `lambdaValue`, `sourceSpan` and `linkIndex` must be `undefined` on this prototype. A
+/// renderer that feature-detects them is the consumer this protects: an available-and-throwing method
+/// looks identical to a working one until it is called.
+///
+/// That runtime check is the browser half; `scratch_methods_that_must_not_exist` below is the
+/// compile-time half, and it is the one the ordinary `cargo clippy --all-targets` gate enforces.
+#[wasm_bindgen_test]
+fn a_lambda_scratch_crosses_as_a_handle_and_steps() {
+    let out = redextape_wasm::lambda_scratch("(\\x. x) (\\y. y)").expect("lambdaScratch must not throw");
+    let diagnostics: Array = get(&out, "diagnostics").unchecked_into();
+    assert_eq!(diagnostics.length(), 0, "a well-formed term has no diagnostics");
+    let scratch = get(&out, "scratch");
+    assert!(!scratch.is_null(), "a well-formed term yields a scratch handle");
+
+    let status = call(&scratch, "lambdaStatus", &[]);
+    assert_eq!(get(&status, "available"), JsValue::TRUE, "a scratch that exists has its leg");
+    assert_eq!(get(&status, "run").as_string().as_deref(), Some("Running"), "a fresh cursor has not ended");
+
+    assert_eq!(call(&scratch, "stepLambda", &[]), JsValue::TRUE, "this term takes a step");
+    assert_eq!(call(&scratch, "stepLambda", &[]), JsValue::FALSE, "and exactly one");
+    let ended = call(&scratch, "lambdaStatus", &[]);
+    assert_eq!(get(&ended, "run").as_string().as_deref(), Some("Ended"), "normalized, not capped");
+
+    let state = call(&scratch, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
+    assert_eq!(get(&state, "text").as_string().as_deref(), Some("λy. y"), "the identity applied to the identity");
+    assert_eq!(num(&state, "step"), 1.0);
+
+    let ast = call(&scratch, "lambdaAst", &[JsValue::from_f64(1_000_000.0)]);
+    assert!(!ast.is_null(), "an unreachable node budget yields a tree");
+    assert_eq!(depth(&ast), 1, "`λy. y` is one binder over one variable");
+
+    // `raiseLambdaCap` returns `void` rather than a `Result` — there is no absent leg for it to throw
+    // about — and `runLambda` still answers a `RunStatus` string. Both are called so the glue is
+    // exercised, not merely declared.
+    call(&scratch, "raiseLambdaCap", &[JsValue::from_f64(1_000.0)]);
+    let run = call(&scratch, "runLambda", &[JsValue::from_f64(10.0)]);
+    assert_eq!(run.as_string().as_deref(), Some("Ended"), "a normalized run stays ended");
+
+    for absent in ["lambdaValue", "sourceSpan", "linkIndex", "tmProgram", "evaluate"] {
+        assert!(
+            get(&scratch, absent).is_undefined(),
+            "`{absent}` must not exist on a LambdaScratch — decision 2 removes it rather than letting it decline"
+        );
+    }
+}
+
+/// Unparseable λ text is diagnostics beside a NULL handle, which is the shape a pane's error state
+/// reads. Asserted through the boundary because `scratch: null` is assembled by hand in `lib.rs`
+/// (`JsValue::NULL`, not serde's `undefined`) and nothing else checks that it arrives as `null`.
+#[wasm_bindgen_test]
+fn unparseable_lambda_text_crosses_as_diagnostics_and_a_null_handle() {
+    let out = redextape_wasm::lambda_scratch("(\\x.").expect("lambdaScratch must not throw on bad input");
+    let diagnostics: Array = get(&out, "diagnostics").unchecked_into();
+    assert!(diagnostics.length() > 0, "an unterminated abstraction must be reported");
+    let scratch = get(&out, "scratch");
+    assert_eq!(scratch, JsValue::NULL, "no term, no handle — and `null`, not `undefined`");
+}
+
+/// 5d-i T3: a headerless `.tm` file crosses as a runnable machine, and `tmStatus().header` is `false`
+/// so the pane can say the configuration was invented (decision 6). Asserted through the glue because
+/// `tmStatus` on this type answers a DIFFERENT wire shape from `Session::tmStatus` — no `total_steps`,
+/// a `header` boolean, and `width`/`run` that are never null — and a renderer switching on the wrong
+/// one would read `undefined` rather than fail.
+#[wasm_bindgen_test]
+fn a_headerless_tm_scratch_runs_and_says_its_configuration_was_invented() {
+    let src = "tapes 1\nstart scan\n\nstate scan:\n  [1] -> write [*], move [R], goto scan\n  [*] -> write [1], move [S], goto halt\nstate halt: accept\n";
+    let out = redextape_wasm::tm_scratch(src).expect("tmScratch must not throw");
+    let diagnostics: Array = get(&out, "diagnostics").unchecked_into();
+    assert_eq!(diagnostics.length(), 0, "a missing header is not a diagnostic");
+    let scratch = get(&out, "scratch");
+    assert!(!scratch.is_null(), "a headerless file is still a machine");
+
+    let status = call(&scratch, "tmStatus", &[]);
+    assert_eq!(get(&status, "available"), JsValue::TRUE);
+    assert_eq!(get(&status, "header"), JsValue::FALSE, "decision 6: the pane must be able to say this");
+    assert_eq!(num(&status, "width"), 4.0, "MIN_FIELD_WIDTH, invented because the file named none");
+    assert_eq!(get(&status, "run").as_string().as_deref(), Some("Running"));
+    assert!(
+        get(&status, "total_steps").is_undefined(),
+        "a scratch is stepped, never described-run — there is no whole-run length for it to report"
+    );
+
+    // Blank tape, then the mark the one rule writes. `window` is a Vec<Vec<Symbol>> and a `Symbol` is a
+    // `char`, so each cell crosses as a one-character string.
+    let before = call(&scratch, "tmState", &[JsValue::from_f64(3.0)]);
+    let tape0: Array = Array::from(&get(&before, "window")).get(0).unchecked_into();
+    assert_eq!(tape0.get(0).as_string().as_deref(), Some("_"), "a headerless machine starts on blank tape");
+    assert_eq!(get(&before, "source_node"), JsValue::NULL, "a scratch has no lowering, so no owner");
+
+    assert_eq!(call(&scratch, "stepTm", &[]), JsValue::TRUE, "the wildcard rule fires on the blank");
+    assert_eq!(call(&scratch, "stepTm", &[]), JsValue::FALSE, "and lands in the accept state");
+    let ended = call(&scratch, "tmStatus", &[]);
+    assert_eq!(get(&ended, "run").as_string().as_deref(), Some("Ended"));
+
+    let program = call(&scratch, "tmProgram", &[]);
+    assert_eq!(num(&program, "width"), 4.0, "tmProgram and tmStatus must agree on the width");
+    assert_eq!(num(&program, "tapes"), 1.0);
+
+    let cells: Array =
+        call(&scratch, "tapeSlice", &[JsValue::from_f64(0.0), JsValue::from_f64(0.0), JsValue::from_f64(4.0)])
+            .unchecked_into();
+    assert_eq!(cells.get(0).as_string().as_deref(), Some("1"), "the rule wrote its mark");
+
+    call(&scratch, "raiseTmCap", &[JsValue::from_f64(10.0), JsValue::from_f64(10.0)]);
+
+    for absent in ["tmValue", "sourceSpan", "linkIndex", "lambdaState", "evaluate"] {
+        assert!(
+            get(&scratch, absent).is_undefined(),
+            "`{absent}` must not exist on a TmScratch — decision 2 removes it rather than letting it decline"
+        );
+    }
+}
+
+/// TM text that does not parse to a machine crosses as diagnostics beside a NULL handle, the same
+/// shape `lambdaScratch` uses. A missing header is deliberately NOT one of these cases.
+#[wasm_bindgen_test]
+fn untranslatable_tm_text_crosses_as_diagnostics_and_a_null_handle() {
+    let out = redextape_wasm::tm_scratch("tapes 1\nstart s\nstate s:\n  [*] -> write [*], move [S], goto nowhere\n")
+        .expect("tmScratch must not throw on bad input");
+    let diagnostics: Array = get(&out, "diagnostics").unchecked_into();
+    assert!(diagnostics.length() > 0, "an unresolvable goto must be reported");
+    assert_eq!(get(&out, "scratch"), JsValue::NULL, "no machine, no handle — and `null`, not `undefined`");
+}
+
+/// **THE COMPILE-TIME HALF OF DECISION 2, AND IT IS A TEST RATHER THAN A COMMENT.** The design's §5
+/// asks for a `trybuild`-style case or an assertion against the generated `.d.ts`; this is neither
+/// literally, and it is stronger than both for what it costs — no new dependency, and no dependence on
+/// `pkg/`, which is a gitignored build artifact that may hold whatever WASM was last built (the trap
+/// PR #28 recorded).
+///
+/// HOW IT WORKS: Rust resolves an INHERENT method before a trait method. `NotOnAScratch` is a blanket
+/// impl over every type, so `s.lambda_value()` below binds to the trait's default body — and its
+/// `Absent` return type type-checks — only while `LambdaScratch` has no inherent `lambda_value`. Add
+/// one and the call resolves to it instead, its return type is not `Absent`, and this file stops
+/// compiling. `cargo clippy --workspace --all-targets` compiles this target natively (this file's own
+/// module doc notes the tier does not RUN under cargo — it is still type-checked), so the check is
+/// enforced by the ordinary gate rather than only by a browser run.
+///
+/// The functions are never called. Type-checking them IS the assertion; the anonymous `const` items
+/// are what keep them from being dead code.
+mod scratch_methods_that_must_not_exist {
+    /// What an absent method resolves to. A distinct type with no other use, so a binding to it cannot
+    /// accidentally keep compiling against some real return type.
+    pub struct Absent;
+
+    /// Every method decision 2 keeps OFF the scratch types, given to every type in the crate by a
+    /// blanket impl — so the only way one of these calls can stop returning `Absent` is an inherent
+    /// method appearing on the receiver.
+    pub trait NotOnAScratch {
+        fn lambda_value(&self) -> Absent {
+            Absent
+        }
+        fn tm_value(&self) -> Absent {
+            Absent
+        }
+        fn source_span(&self, _node: u32) -> Absent {
+            Absent
+        }
+        fn link_index(&self, _byte_budget: usize) -> Absent {
+            Absent
+        }
+    }
+    impl<T: ?Sized> NotOnAScratch for T {}
+
+    fn lambda_scratch_has_none_of_them(s: &redextape_wasm::LambdaScratch) -> (Absent, Absent, Absent) {
+        (s.lambda_value(), s.source_span(0), s.link_index(0))
+    }
+    const _: fn(&redextape_wasm::LambdaScratch) -> (Absent, Absent, Absent) = lambda_scratch_has_none_of_them;
+
+    /// `tmValue` reads `ty` + `final_tapes` + `kind`, none of which a `TmScratch` has — §3.3's row for
+    /// it. `sourceSpan`/`linkIndex` are off both scratch types for the same reason they are off the λ
+    /// one. `tmStatus` is NOT in this list: it exists here, with a different return type
+    /// (`TmScratchStatus`), which is a reshape rather than an absence — checked at run time by
+    /// `a_headerless_tm_scratch_runs_and_says_its_configuration_was_invented`, which asserts
+    /// `total_steps` is undefined on the value that comes back.
+    fn tm_scratch_has_none_of_them(s: &redextape_wasm::TmScratch) -> (Absent, Absent, Absent) {
+        (s.tm_value(), s.source_span(0), s.link_index(0))
+    }
+    const _: fn(&redextape_wasm::TmScratch) -> (Absent, Absent, Absent) = tm_scratch_has_none_of_them;
+}

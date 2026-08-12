@@ -174,6 +174,25 @@ fn run(args: &[String]) -> Result<(), String> {
         return Err(format!("`{path}` does not parse as a `.tm` file:\n{}", format_diagnostics(&ds)));
     }
     let m = m.ok_or_else(|| format!("`{path}` did not parse to a machine"))?;
+    // THIS REFUSAL IS NO LONGER THE TREE'S ONLY ANSWER TO A MISSING HEADER, AND THAT IS DELIBERATE
+    // RATHER THAN DRIFT. `redextape-wasm`'s `session::tm_scratch` RUNS a headerless machine, from blank
+    // tapes at `MIN_FIELD_WIDTH` — decision 6 of
+    // docs/superpowers/specs/2026-08-11-plan5d-i-session-model-design.md, taken at §3.4 with this
+    // example named as the refusal it reverses.
+    //
+    // THE TWO ARE NOT IN CONFLICT ABOUT THE FACTS, ONLY ABOUT WHO IS PRESENT. The message below is
+    // still exactly true: a header-free file records δ and the start state and no initial
+    // configuration, so it cannot be run unless the CALLER supplies `init`. A scratchpad IS that
+    // caller — a user typed the machine into a pane and is looking at it, so inventing blank tapes is
+    // a visible offer they can correct, and `tmStatus().header` reports `false` so the pane is
+    // obliged to say the configuration was not the file's. `tm_emit run` is a batch tool with nobody
+    // to offer anything to and nowhere to say it, so for IT the honest answer is still to decline.
+    //
+    // The wording below is left alone on purpose: it describes this tool, and softening it to
+    // accommodate a caller that is not this tool would make it less true here. What is corrected is
+    // the reading a future maintainer would otherwise take from it — that nothing in this tree runs a
+    // headerless machine. #32's `lower_tm` "cannot drift" entry is the failure this comment exists to
+    // avoid: two places asserting opposite things about one condition, with neither naming the other.
     let h = h.ok_or_else(|| {
         format!(
             "`{path}` has no header. A `.tm` file without one records δ and the start state but not \

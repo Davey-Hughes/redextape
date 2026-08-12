@@ -314,16 +314,78 @@ pub struct Session {
 ///
 /// `header` BY REFERENCE: both uses (`init`, `.width`) only ever read it, and both call sites still own
 /// their `TmHeader` afterward — there is nothing here for taking it by value to buy.
+///
+/// **STILL `&TmHeader` AND NOT `Option<&TmHeader>`, WHICH IS THE OPPOSITE CALL FROM THE ONE `window`
+/// TOOK IN T1, AND DELIBERATELY SO.** `TmScratch` also has to build a leg and may have no header
+/// (§3.4), so widening this would let both callers share one function. It is not widened, because
+/// `source_node: None` was ALREADY reachable on the `Session` path and "blank tapes at
+/// `MIN_FIELD_WIDTH`" is not: `compile` reads its header off `run_tm_described`, which always
+/// produces one, so a `None` here would be a state no `Session` can reach and every `Session` could
+/// spell. Widening would put decision 6's invented width and invented tapes one accidental `None`
+/// away from a compiled program. The shared part is factored into `tm_leg_at` instead, which knows
+/// nothing about headers.
 fn build_tm_leg(header: &tm::TmHeader, machine: Machine, caps: tm::TmCaps) -> (TmProgram, TmCursor<Rc<Machine>>) {
     let init = header.init(machine.tapes);
-    let width = header.width;
+    tm_leg_at(machine, header.width, &init, caps)
+}
+
+/// Project a machine and open a cursor on it at an explicit `width` and initial configuration — the
+/// part of building a TM leg that has nothing to do with where those two came from.
+///
+/// EXTRACTED SO THERE IS ONE PROJECTION SITE, not two. `build_tm_leg` (above) derives `width`/`init`
+/// from a `TmHeader`; `tm_scratch` derives them from a header or, absent one, from §3.4's defaults.
+/// Both then do the same three things, and the `Rc` sharing between the projection and the cursor is
+/// exactly the detail that would rot if it were written twice.
+fn tm_leg_at(
+    machine: Machine,
+    width: usize,
+    init: &[Vec<Symbol>],
+    caps: tm::TmCaps,
+) -> (TmProgram, TmCursor<Rc<Machine>>) {
     let machine = Rc::new(machine);
     // `TmProgram` is projected ONCE, here, and cached — never per step. The `map` demo is 3,203 states
     // over 344,999 steps; re-projecting per `tmState` is the cost the `TmProgram`/`TmState` split
     // exists to avoid.
     let program = TmProgram::of(&machine, width);
-    let cursor = TmCursor::new(Rc::clone(&machine), &init, caps);
+    let cursor = TmCursor::new(Rc::clone(&machine), init, caps);
     (program, cursor)
+}
+
+/// Where a λ cursor's run stands, as the four-state `RunStatus` a renderer switches on.
+///
+/// **THE ONE PLACE THIS MAPPING LIVES**, because §3.3 puts the whole λ leg on `LambdaScratch`
+/// unchanged and a transplant that copies the mapping is a second chance to get it wrong. The wrong
+/// way is specific and known: folding `DepthRefused` back into `Capped`, which puts a "continue"
+/// affordance on the one run that provably cannot continue — see `RunStatus`'s own doc and
+/// `LambdaCursor::raise_cap`'s refusal to clear the depth latch.
+///
+/// `depth_capped` is what separates the two: the cursor latches `HitCap` for both producers, and only
+/// the step cap can be raised out of.
+fn lambda_run_status(c: &LambdaCursor) -> RunStatus {
+    match c.status() {
+        None => RunStatus::Running,
+        Some(lambda::Status::Normalized) => RunStatus::Ended,
+        Some(lambda::Status::HitCap) if c.depth_capped() => RunStatus::DepthRefused,
+        Some(lambda::Status::HitCap) => RunStatus::Capped,
+    }
+}
+
+/// Advance `c` up to `budget` β-steps, then report where the run stands. The shared body of
+/// `Session::run_lambda` and `LambdaScratch::run_lambda`; the two differ only in how they reach a
+/// cursor, and `Session::run_lambda`'s doc carries the argument for why this is chunked at all.
+///
+/// **A SPENT `budget` LEAVES THE RUN `Running`, AND THAT FALLS OUT OF THE LOOP RATHER THAN BEING
+/// ASSERTED.** Nothing here writes a status: the answer comes from `lambda_run_status` reading the
+/// cursor afterwards, and a cursor whose own cap is untouched reports `Running` however many chunks
+/// have been spent against it. Folding the two together is the defect `RunStatus` was introduced to
+/// prevent one layer in.
+fn run_lambda_cursor(c: &mut LambdaCursor, budget: u64) -> RunStatus {
+    for _ in 0..budget {
+        if c.next().is_none() {
+            break;
+        }
+    }
+    lambda_run_status(c)
 }
 
 /// The ONE place an interpreter run becomes a `Decoded`. `evaluate` and `evaluate_with_budget` differ
@@ -440,15 +502,7 @@ impl Session {
     pub fn lambda_status(&self) -> LambdaStatus {
         match &self.lambda {
             Ok(c) => {
-                // `depth_capped` is what separates `Capped` from `DepthRefused`: the cursor latches
-                // `HitCap` for both, and only the first can be continued.
-                let run = match c.status() {
-                    None => RunStatus::Running,
-                    Some(lambda::Status::Normalized) => RunStatus::Ended,
-                    Some(lambda::Status::HitCap) if c.depth_capped() => RunStatus::DepthRefused,
-                    Some(lambda::Status::HitCap) => RunStatus::Capped,
-                };
-                LambdaStatus { available: true, reason: String::new(), node: None, run: Some(run) }
+                LambdaStatus { available: true, reason: String::new(), node: None, run: Some(lambda_run_status(c)) }
             }
             Err(e) => {
                 let (reason, node) = match e {
@@ -489,18 +543,16 @@ impl Session {
     ///
     /// Returns `RunStatus` rather than `bool` for the reason `step_lambda`'s doc records: `false`
     /// answers every end condition identically, and a renderer cannot act on that.
+    /// **NO LONGER RE-READS `lambda_status()` FOR ITS ANSWER, AND THAT DELETED AN UNREACHABLE
+    /// FALLBACK.** It used to end `self.lambda_status().run.unwrap_or(RunStatus::Running)` — `run` is
+    /// `None` only for an absent leg, which the `?` above has already ruled out, so the `unwrap_or` was
+    /// a branch no input could take, written that way only because unwrapping is a panic and a panic
+    /// under wasm aborts the module. `run_lambda_cursor` answers a bare `RunStatus` off the cursor it
+    /// was handed, so there is no `Option` to unwrap and no unreachable arm to justify. Same values,
+    /// one fewer state spellable — the shape argument the `tm` field's own doc makes.
     pub fn run_lambda(&mut self, budget: u64) -> Result<RunStatus, SessionError> {
         let c = self.lambda.as_mut().map_err(|_| SessionError::LambdaAbsent)?;
-        for _ in 0..budget {
-            if c.next().is_none() {
-                break;
-            }
-        }
-        // `run` is `None` only for an absent leg, which the `?` above has already ruled out — so the
-        // fallback is unreachable today. It is a fallback rather than an unwrap because unwrapping is a
-        // panic and a panic under wasm aborts the module; if `lambda_status` ever grows a case that
-        // withholds `run` from a leg that is present, this reports "still running" instead of dying.
-        Ok(self.lambda_status().run.unwrap_or(RunStatus::Running))
+        Ok(run_lambda_cursor(c, budget))
     }
 
     /// `LambdaState::render(cursor, byte_budget, depth_cap)` and nothing else — PR 2 removed the map and redex
@@ -618,7 +670,7 @@ impl Session {
 
     pub fn tm_state(&self, radius: usize) -> Result<TmState, SessionError> {
         let (_, c) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
-        Ok(TmState::window(c, &self.map, radius))
+        Ok(TmState::window(c, Some(&self.map), radius))
     }
 
     /// Cells `from..to` of tape `tape`, in the same materialized coordinates `tm_state` reports its
@@ -746,6 +798,305 @@ impl Session {
     pub fn link_index(&self, byte_budget: usize) -> LinkIndex {
         let program = self.tm.as_ref().ok().map(|(p, _)| p);
         LinkIndex::build(self.initial_lambda.as_ref(), program, &self.map, byte_budget, MAX_PRINT_DEPTH)
+    }
+}
+
+// --- the scratchpads --------------------------------------------------------------------------
+
+/// What a scratchpad constructor answers: the thing, or the diagnostics saying why not.
+///
+/// **THE SAME SHAPE AS `Compiled`, AND GENERIC RATHER THAN WRITTEN TWICE.** Both scratch parsers
+/// (`lambda::parse_lambda`, `tm::parse_tm_full`) return a value alongside diagnostics, so both
+/// constructors answer the same pair; `Compiled` stays its own struct only because its payload field
+/// is named `session` and nothing is gained by renaming it. See the design's §4.1.
+///
+/// **A `None` HERE IS "THE TEXT DID NOT PARSE", NOT "A BACKEND DECLINED"** — the distinction `Compiled`
+/// draws in the other direction. A `Session` with both legs declined is still a session, because
+/// declining is a backend's answer about a program; a scratchpad IS its parsed artifact, so text that
+/// does not parse leaves nothing to hold.
+pub struct Scratched<T> {
+    pub diagnostics: Vec<Diagnostic>,
+    pub scratch: Option<T>,
+}
+
+/// A λ term typed straight into a pane: **a `LambdaCursor`, and nothing else** (design §4.1).
+///
+/// **NO `ty`, SO NO `lambda_value`.** Decoding is type-directed — `decode_lambda_ty(nf, &ty)` — and λ
+/// text carries no result type (`lambda/syntax.rs`'s module doc: `\a.\b. b` is `false` and `church(0)`
+/// at once). So the method is not merely unavailable here, there is nothing to decode *against*, which
+/// is decision 2 stated precisely: a method that needs a `ty` DOES NOT EXIST on a scratch rather than
+/// being available-and-declining. `tests/browser.rs` pins that absence at compile time.
+///
+/// **NO `initial_lambda`, AND CHECKING WHY IS WHAT CORRECTED THE FIRST DRAFT OF THE DESIGN.** That
+/// field's doc on `Session` says it is kept "so `link_index` can print step 0 after the cursor has
+/// moved", and `link_index` is its only consumer in this file. §3.3 puts `linkIndex` off both scratch
+/// types — it needs a `SourceMap` as well, and a scratch has none — so the field would be retained for
+/// nobody. `lambda_state` prints from the cursor, not from it. A first draft added it anyway "for the
+/// same `Rc`-bump reason as `Session`", which is a reason to keep a field cheap, not a reason to have
+/// one.
+///
+/// **NO `SourceMap` EITHER, WHICH IS WHAT DETACHED MEANS.** `sourceSpan` and `linkIndex` are the two
+/// linking affordances 5b and 5c built, and neither exists here — see §4.5 for why that has to be said
+/// out loud in the UI rather than merely being true.
+pub struct LambdaScratch {
+    lambda: LambdaCursor,
+}
+
+/// Build a λ scratchpad from λ TEXT — not from source, and not from a `Session`.
+///
+/// A FREE FUNCTION BESIDE `compile`, because there is no compilation step to hang it off: §4.1's
+/// scratchpads are built from text a user typed, so the front end (parse, typecheck, desugar, lower)
+/// never runs and there is no `Core`, no `Ty` and no `SourceMap` to produce.
+///
+/// **THE CAP IS `MAX_REDUCTION_STEPS`, THE SAME ONE `compile_with_caps` HANDS `LambdaCursor::new`.** A
+/// scratch reduces the same reducer under the same guard; a different number here would make the same
+/// term reach `Capped` at two different step counts depending only on which pane it was typed into.
+///
+/// `parse_lambda` answers `(Option<LambdaTerm>, Vec<Diagnostic>)` and its `None` is always accompanied
+/// by a diagnostic, so this cannot produce a silent empty answer.
+pub fn lambda_scratch(src: &str) -> Scratched<LambdaScratch> {
+    let (term, diagnostics) = lambda::parse_lambda(src);
+    let scratch = term.map(|t| LambdaScratch { lambda: LambdaCursor::new(&t, lambda::MAX_REDUCTION_STEPS) });
+    Scratched { diagnostics, scratch }
+}
+
+impl LambdaScratch {
+    /// **`available` IS ALWAYS `true` AND `reason` IS ALWAYS EMPTY, AND THAT IS NOT A FABRICATION.**
+    /// A `LambdaScratch` exists only for text that parsed, so the leg genuinely is there and there
+    /// genuinely is nothing to explain — degenerate values that are TRUE, unlike the `total_steps` a
+    /// `TmScratch` would have to invent (see `TmScratch::tm_status`, and the `tm` field's doc on what
+    /// fabricating a status for an unreachable state cost this file once already).
+    ///
+    /// The struct is shared with `Session` rather than narrowed so one renderer can read either kind of
+    /// session's λ leg through one shape; `run` is the field it actually switches on.
+    pub fn lambda_status(&self) -> LambdaStatus {
+        LambdaStatus { available: true, reason: String::new(), node: None, run: Some(lambda_run_status(&self.lambda)) }
+    }
+
+    /// Advance one β-step. `false` once the run has ended — `lambda_status().run` says which.
+    ///
+    /// **NO `Result`, AND THE DIFFERENCE FROM `Session::step_lambda` IS THE POINT.** There is the
+    /// `SessionError::LambdaAbsent` a `Session` can answer, and there is no state of this type that
+    /// could produce it: the cursor is not a `Result` here, so a "leg absent" error would be a variant
+    /// no input can reach — exactly the shape the `tm` field's doc records as costly. The JS-facing
+    /// type is unchanged either way (`Result<bool, JsValue>` and `bool` both cross as `boolean`), so
+    /// nothing on the TypeScript side pays for this.
+    pub fn step_lambda(&mut self) -> bool {
+        self.lambda.next().is_some()
+    }
+
+    /// Advance up to `budget` β-steps, then report how the run stands. Chunked for the reason
+    /// `Session::run_lambda`'s doc gives — a five-million-step call blocks the thread with no progress
+    /// and no cancellation — and through the same shared loop, so the two cannot drift.
+    pub fn run_lambda(&mut self, budget: u64) -> RunStatus {
+        run_lambda_cursor(&mut self.lambda, budget)
+    }
+
+    /// The current term, printed at `byte_budget` under the boundary's `MAX_PRINT_DEPTH`.
+    ///
+    /// THE DEPTH CAP IS NOT NEGOTIABLE PER SESSION KIND. It is a fact about a Web Worker's call stack
+    /// (see `MAX_PRINT_DEPTH`), and a scratch prints through the same worker; a scratch that printed
+    /// deeper would poison the module the same way.
+    pub fn lambda_state(&self, byte_budget: usize) -> LambdaState {
+        LambdaState::render(&self.lambda, byte_budget, MAX_PRINT_DEPTH)
+    }
+
+    /// The term as a flat arena, or `None` over `node_budget` — never a partial tree.
+    pub fn lambda_ast(&self, node_budget: usize) -> Option<TermTree> {
+        LambdaState::ast(&self.lambda, node_budget)
+    }
+
+    /// Extend a capped run's budget. Additive and saturating; clears `HitCap` only when the STEP CAP
+    /// produced it, never the depth guard.
+    pub fn raise_lambda_cap(&mut self, extra: u64) {
+        self.lambda.raise_cap(extra);
+    }
+
+    /// Rebuild the cursor with a small cap, so a test has something to raise from. TEST-ONLY, for the
+    /// reason `Session::cap_lambda_at` records: there is no product reason to lower a budget, and
+    /// `MAX_REDUCTION_STEPS` is 5,000,000, so `Capped` is otherwise only reachable by actually spending
+    /// five million β-steps on a divergent term.
+    #[cfg(test)]
+    fn cap_lambda_at(&mut self, cap: u64) {
+        self.lambda = LambdaCursor::new(self.lambda.term(), cap);
+    }
+}
+
+/// Where a `TmScratch`'s machine stands. **NOT `TmStatus`, AND THE DIFFERENCE IS THIS TASK'S TRAP.**
+///
+/// `TmStatus::total_steps` is "how long the WHOLE run is, in δ-steps, from the run `compile`
+/// performed" — it comes from `run_tm_described`, and a scratch is never described-run. It is
+/// *stepped*. So there is no such total to report, and the two candidate ways to report one anyway are
+/// both worse than not having the field: `Some(0)` is a lie a progress bar would render as "step 40 of
+/// 0", and `None` beside `available: true` is a shape `TmStatus`'s own doc reserves for a DECLINED
+/// leg. The `tm` field's doc records at length what the last fabricated-status-for-an-unreachable-state
+/// cost this file; this type is that lesson applied before the fact.
+///
+/// **`width` AND `run` ARE NOT `Option`, WHICH IS THE SAME ARGUMENT IN THE OTHER DIRECTION.** They are
+/// optional on `TmStatus` because a `Session`'s TM backend can decline; a `TmScratch` exists only for
+/// text that parsed to a machine, so both are always answerable and an `Option` would be a state
+/// nothing can produce.
+///
+/// **`available` AND `reason` ARE DEGENERATE AND KEPT ANYWAY**, because they are TRUE rather than
+/// fabricated — the leg genuinely is there and there genuinely is nothing to explain — and because one
+/// renderer reads a status off either session kind. That is the same call `LambdaScratch::lambda_status`
+/// makes; `total_steps` is different in kind, not merely in degeneracy, which is why it is absent
+/// rather than constant.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TmScratchStatus {
+    pub available: bool,
+    pub reason: String,
+    /// The field width the machine's encoding uses. **INVENTED WHEN `header` IS `false`** — see that
+    /// field.
+    pub width: usize,
+    /// Where the CURSOR stands. `Ended` for a halted machine, `Capped` for one that spent its budget,
+    /// `Running` otherwise. `DepthRefused` is λ-only and unreachable here: there is no term to recurse
+    /// over, which is the same asymmetry `Session::tm_status` notes.
+    pub run: RunStatus,
+    /// Whether the text carried a header at all.
+    ///
+    /// **`false` MEANS THE PANE IS SHOWING SOMETHING THE FILE DID NOT SAY, AND MUST SAY SO** — design
+    /// decision 6, where "and the pane says so" is load-bearing rather than decoration. A headerless
+    /// `.tm` file records δ and the start state and nothing about an initial configuration, so the
+    /// `width` above and the blank tapes the cursor started on were both chosen by this boundary. This
+    /// field is the only thing that lets a renderer distinguish that from a file that asked for exactly
+    /// those values.
+    pub header: bool,
+}
+
+/// A Turing machine typed straight into a pane: the projected program, the cursor walking it, and the
+/// header the text carried — **if it carried one** (design §4.1).
+///
+/// **NO `ty`, SO NO `tm_value`.** `Session::tm_value` reads `self.ty`, `self.final_tapes` and
+/// `self.kind`; decoding is type-directed and TM text carries a `result` type only inside a header,
+/// which may be absent, and there is no compile-time run to have recorded final tapes from. Decision
+/// 2: the method does not exist rather than existing and declining. `tests/browser.rs` pins that at
+/// compile time.
+///
+/// **NO `SourceMap`, WHICH IS WHY T1 HAPPENED.** `tm_state` is the method a TM pane renders from every
+/// frame, and it needed a map. `TmState::window` now takes `Option<&SourceMap>` and this passes `None`,
+/// so `source_node` is `None` on exactly the leg where a Core node would be meaningless — see §3.1 and
+/// that function's own doc.
+///
+/// **`Option<TmHeader>` AND THAT `None` IS NOT AN ERROR.** `parse_tm_full` already answers
+/// `Option<TmHeader>` and explicitly does not treat absence as a failure (`HeaderParts::finish`).
+/// Decision 6 is what `None` MEANS at the pane, and `tm_status().header` is how the pane learns it.
+pub struct TmScratch {
+    program: TmProgram,
+    cursor: TmCursor<Rc<Machine>>,
+    /// Kept whole rather than reduced to the `width` the cursor already runs at, because the pane has
+    /// more than one question for it — `result`, `encoding` and the literal `tape` lines are all in
+    /// here — and because `tm_status().header` is a fact about the FILE, not about the width.
+    header: Option<tm::TmHeader>,
+}
+
+/// Build a TM scratchpad from TM TEXT — the `.tm` form, not asm and not source.
+///
+/// **A HEADERLESS FILE RUNS FROM BLANK TAPES AT `MIN_FIELD_WIDTH`, WHICH REVERSES AN EXPLICIT REFUSAL
+/// ALREADY IN THE TREE.** `examples/tm_emit.rs`'s `run` declines exactly this file, on the grounds that
+/// it "genuinely cannot be run without the caller supplying `init` by hand". That remains true, and the
+/// difference is who is present: `tm_emit` is a batch tool with nobody to supply anything, and **a
+/// scratchpad IS the caller supplying `init` by hand** — the user typed the machine into a pane and is
+/// looking at it. Design §3.4 takes that decision deliberately rather than by drift, and `tm_emit`'s
+/// own comment now names this path so the tree does not assert two opposite things about one
+/// condition. Because the values are invented, `tm_status().header` reports `false` and the pane is
+/// obliged to say so (decision 6).
+///
+/// `TM_DEFAULT_CAPS`, THE SAME BUDGET `compile` USES. `compile_with_caps` hands `build_tm_leg` the caps
+/// the described run already spent, so its cursor and its reported outcome agree; a scratch has no
+/// described run to agree with, so it takes the product default the boundary exposes no way to change.
+pub fn tm_scratch(src: &str) -> Scratched<TmScratch> {
+    tm_scratch_with_caps(src, tm::TM_DEFAULT_CAPS)
+}
+
+/// `tm_scratch` with the cursor's budget as a parameter rather than a constant.
+///
+/// PRIVATE, AND EVERY PRODUCT CALLER TAKES THE DEFAULT — the boundary exposes no way to choose, exactly
+/// as `Session::compile_with_caps` does and for the identical reason: `TM_DEFAULT_CAPS` is 5,000,000
+/// δ-steps, so the `Capped` state, and therefore everything `raise_tm_cap` exists for, is otherwise
+/// only reachable by actually simulating five million steps. A test that cannot afford that is a test
+/// that never runs. With a budget of three the same states are reached in microseconds, by the same
+/// code, from the same text.
+fn tm_scratch_with_caps(src: &str, caps: tm::TmCaps) -> Scratched<TmScratch> {
+    let (machine, header, diagnostics) = tm::parse_tm_full(src);
+    let scratch = machine.map(|m| {
+        let (program, cursor) = match &header {
+            // The IDENTICAL function `compile` builds its leg with, not a copy of it — which is what
+            // makes "a headered scratch matches the `Session` path" a property of one code path rather
+            // than an agreement between two.
+            Some(h) => build_tm_leg(h, m, caps),
+            // BLANK TAPES, SPELLED AS AN EMPTY `init` RATHER THAN AS `vec![Vec::new(); m.tapes]`.
+            // `TmCursor::new` reads `init.get(i)` and falls back to an empty slice per tape, so the two
+            // are the same configuration — and it is also exactly what `TmHeader::init`
+            // (`tm/header.rs`) yields for a header carrying no `tape` directives, which is the sense in
+            // which decision 6's default is not a new kind of configuration, only a new way to reach
+            // one.
+            None => tm_leg_at(m, tm::MIN_FIELD_WIDTH, &[], caps),
+        };
+        TmScratch { program, cursor, header }
+    });
+    Scratched { diagnostics, scratch }
+}
+
+impl TmScratch {
+    /// See `TmScratchStatus` for why this is a different type from `TmStatus` rather than the same one
+    /// with a hole in it.
+    pub fn tm_status(&self) -> TmScratchStatus {
+        // No depth guard on this leg — the machine has no term to recurse over — so `HitCap` has one
+        // producer and `Capped` is unambiguous, exactly as in `Session::tm_status`.
+        let run = match self.cursor.status() {
+            None => RunStatus::Running,
+            Some(tm::TmStatus::Halted) => RunStatus::Ended,
+            Some(tm::TmStatus::HitCap) => RunStatus::Capped,
+        };
+        TmScratchStatus {
+            available: true,
+            reason: String::new(),
+            width: self.program.width,
+            run,
+            header: self.header.is_some(),
+        }
+    }
+
+    /// The cached projection, cloned — never a re-walk, for the reason `Session::tm_program` records.
+    ///
+    /// NO `Result`: there is no absent leg here for `SessionError::TmAbsent` to describe, so declaring
+    /// one would put an unreachable throw on the boundary. Same call as `LambdaScratch::step_lambda`.
+    pub fn tm_program(&self) -> TmProgram {
+        self.program.clone()
+    }
+
+    /// Advance one δ-step. `false` once the run has halted or hit a cap — `tm_status().run` says which.
+    pub fn step_tm(&mut self) -> bool {
+        self.cursor.next().is_some()
+    }
+
+    /// **THE METHOD T1 EXISTED FOR.** `source_node` is `None` for every state this renders, because a
+    /// scratch has no lowering that could have recorded an owner — which is what "detached" means at
+    /// §4.5 and why the pane has to announce it rather than merely show nothing highlighted.
+    pub fn tm_state(&self, radius: usize) -> TmState {
+        TmState::window(&self.cursor, None, radius)
+    }
+
+    /// Cells `from..to` of tape `tape`, in the same materialized coordinates `tm_state` reports.
+    ///
+    /// **THE ONE SCRATCH METHOD THAT KEEPS ITS `Result`**, and the reason is that its error is
+    /// reachable: `SessionError::NoSuchTape` is a caller naming a tape the machine does not have, which
+    /// has nothing to do with whether a leg is present. `TmAbsent` is what a scratch cannot produce.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(SessionError::NoSuchTape)` when `tape` is past the machine's tape count. `from`/`to`
+    /// need no guard because `Tape::slice` clamps both.
+    pub fn tape_slice(&self, tape: usize, from: usize, to: usize) -> Result<Vec<Symbol>, SessionError> {
+        let tapes = self.cursor.tapes();
+        let t = tapes.get(tape).ok_or(SessionError::NoSuchTape { tape, tapes: tapes.len() })?;
+        Ok(t.slice(from, to))
+    }
+
+    /// Extend a capped run's budget. Additive and saturating, like every other cap raise here.
+    pub fn raise_tm_cap(&mut self, extra_steps: u64, extra_cells: u64) {
+        self.cursor.raise_cap(extra_steps, extra_cells);
     }
 }
 
@@ -1052,6 +1403,103 @@ mod tests {
         assert!(s.lambda_ast(usize::MAX).expect("λ available").is_some());
     }
 
+    // --- the λ scratchpad ------------------------------------------------------------------------
+
+    #[test]
+    fn a_lambda_scratch_parses_text_and_reduces_it() {
+        let made = lambda_scratch("(\\x. x) (\\y. y)");
+        assert!(made.diagnostics.is_empty(), "{:?}", made.diagnostics);
+        let mut sc = made.scratch.expect("a well-formed term yields a scratch");
+
+        let st = sc.lambda_status();
+        assert!(st.available, "a scratch that exists has its leg");
+        assert!(st.reason.is_empty(), "and nothing to explain");
+        assert_eq!(st.node, None, "no lowering refused anything, so no node is named");
+        assert_eq!(st.run, Some(RunStatus::Running), "a fresh cursor has not ended");
+
+        assert_eq!(sc.lambda_state(usize::MAX).step, 0);
+        assert!(sc.step_lambda(), "this term takes a step");
+        assert!(!sc.step_lambda(), "and exactly one");
+        assert_eq!(sc.lambda_status().run, Some(RunStatus::Ended));
+        assert_eq!(sc.lambda_state(usize::MAX).text, "λy. y", "the identity applied to the identity");
+    }
+
+    /// **THE FIXTURE FOR T8's DETACH, ASSERTED HERE WHERE IT IS CHEAP.** Detaching a source-derived λ
+    /// pane seeds a `LambdaScratch` with that pane's current TEXT (design §4.3), so the scratch's whole
+    /// value depends on the round trip: `print_lambda` -> `parse_lambda` -> the same reduction.
+    ///
+    /// **IT IS ALSO WHAT PINS THE CAP.** `lambda_scratch` hands `LambdaCursor::new` the same
+    /// `MAX_REDUCTION_STEPS` `compile_with_caps` does; a different constant here would show up as the
+    /// same term reaching `Capped` in one pane and `Ended` in another. Seven β-steps to Church 42 is
+    /// the figure `the_reference_program_produces_the_figures_the_browser_test_pins` owns for the
+    /// session path, and this asserts the scratch path reaches it identically.
+    ///
+    /// The binder is REPRINTED AS `x0`, not `x`: `print_lambda` renames so no binder shadows an
+    /// enclosing one, and `λf. λx.` re-prints from the reparsed term with the hint already taken. That
+    /// is the text form's documented behaviour, not a defect, so the assertion is on the applications
+    /// rather than on the binder spelling.
+    #[test]
+    fn a_scratch_seeded_from_a_sessions_own_lambda_text_reduces_identically() {
+        let s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
+        let text = s.lambda_state(usize::MAX).expect("λ available").text;
+
+        let made = lambda_scratch(&text);
+        assert!(made.diagnostics.is_empty(), "a printed term must reparse: {:?}", made.diagnostics);
+        let mut sc = made.scratch.expect("a printed term must reparse");
+
+        let mut beta = 0u64;
+        while sc.step_lambda() {
+            beta += 1;
+        }
+        assert_eq!(beta, 7, "β step count must match the session leg the text came from");
+        assert_eq!(sc.lambda_status().run, Some(RunStatus::Ended));
+
+        let nf = sc.lambda_state(usize::MAX).text;
+        assert!(nf.starts_with("λf. λx0. f "), "the normal form is Church 42, got {nf:?}");
+        assert_eq!(nf.matches("f (").count() + 1, 42, "Church 42 applies `f` 42 times, got {nf:?}");
+    }
+
+    /// Text that does not parse is diagnostics and no scratch — the "the parser refused" case, which is
+    /// NOT `compile`'s "a backend declined" case. There is no backend here to decline.
+    #[test]
+    fn unparseable_lambda_text_yields_diagnostics_and_no_scratch() {
+        let made = lambda_scratch("(\\x.");
+        assert!(!made.diagnostics.is_empty(), "an unterminated abstraction must be reported");
+        assert!(made.scratch.is_none(), "and must not yield a scratch to step");
+
+        // Trailing input is the OTHER `None` producer in `parse_lambda`, and it is the one a user
+        // typing into a pane actually hits — a second term pasted after the first.
+        let trailing = lambda_scratch("(\\x. x) )");
+        assert!(!trailing.diagnostics.is_empty());
+        assert!(trailing.scratch.is_none());
+    }
+
+    /// `runLambda`'s chunk/cap distinction has to hold on a scratch too, and it is the same shared loop
+    /// — so this is a check that the transplant reached it, not a re-test of the loop.
+    ///
+    /// THE DIVERGENT TERM IS ω = `(λx. x x) (λx. x x)`, which β-reduces to itself forever. A spent
+    /// CHUNK leaves it `Running`; only the cursor's own cap yields `Capped`, which `cap_lambda_at`
+    /// reaches without spending `MAX_REDUCTION_STEPS`' five million steps.
+    #[test]
+    fn a_scratch_separates_a_spent_chunk_from_a_spent_cap() {
+        let mut sc = lambda_scratch("(\\x. x x) (\\x. x x)").scratch.expect("omega parses");
+        assert_eq!(sc.run_lambda(3), RunStatus::Running, "a spent chunk budget has not capped anything");
+        assert_eq!(sc.lambda_state(usize::MAX).step, 3, "the chunk ran exactly its budget");
+
+        sc.cap_lambda_at(2);
+        assert_eq!(sc.run_lambda(1_000_000), RunStatus::Capped, "the CURSOR ran out, not the chunk");
+        sc.raise_lambda_cap(5);
+        assert_eq!(sc.lambda_status().run, Some(RunStatus::Running), "continuing is honest here");
+        assert!(sc.step_lambda(), "and the raise really does let it proceed");
+    }
+
+    #[test]
+    fn the_lambda_ast_on_a_scratch_refuses_a_budget_it_cannot_meet() {
+        let sc = lambda_scratch("(\\x. x) (\\y. y)").scratch.expect("parses");
+        assert!(sc.lambda_ast(1).is_none(), "a 1-node budget must refuse, not truncate");
+        assert!(sc.lambda_ast(usize::MAX).is_some());
+    }
+
     // --- the TM leg ---------------------------------------------------------------------------
 
     #[test]
@@ -1338,6 +1786,215 @@ mod tests {
         assert_eq!(s.tm_value(), Err(SessionError::TmAbsent));
     }
 
+    // --- the TM scratchpad -----------------------------------------------------------------------
+
+    /// A hand-written unary incrementer with NO header — δ and a start state and nothing else, which is
+    /// exactly the file `examples/tm_emit.rs`'s `run` declines. Copied from `tm/syntax.rs`'s own
+    /// round-trip fixture rather than invented, so the text form it exercises is one that file already
+    /// pins as representable.
+    ///
+    /// ON BLANK TAPES IT TAKES EXACTLY ONE STEP: the head reads `_`, which the second rule's `*`
+    /// wildcard matches, writes `1`, stays put and goes to the accept state. That is short enough to
+    /// assert the whole configuration and long enough that the cursor is genuinely stepped rather than
+    /// merely constructed.
+    const HEADERLESS_TM: &str = "\
+; a hand-written incrementer, header-free
+tapes 1
+start scan
+
+state scan:
+  [1] -> write [*], move [R], goto scan
+  [*] -> write [1], move [S], goto halt
+state halt: accept
+";
+
+    /// **DECISION 6, AND IT REVERSES A REFUSAL ALREADY IN THE TREE** (`examples/tm_emit.rs`, whose
+    /// comment now names this path). A headerless machine runs, from blank tapes, at
+    /// `MIN_FIELD_WIDTH` — and `tm_status().header` is `false`, which is the ONLY thing that lets a
+    /// pane tell an invented configuration from one the file asked for.
+    ///
+    /// THE WIDTH IS ASSERTED AGAINST THE CONSTANT AND AGAINST ITS VALUE. `MIN_FIELD_WIDTH` alone would
+    /// stay green if the constant itself moved; `4` alone would break for a reason that has nothing to
+    /// do with this code. Both together fail loudly for the right one — and a default taken from some
+    /// other width (`MAX_FIELD_WIDTH`, say) fails with a concrete number rather than a shape error.
+    #[test]
+    fn a_headerless_machine_runs_from_blank_tapes_at_the_minimum_width() {
+        let made = tm_scratch(HEADERLESS_TM);
+        assert!(made.diagnostics.is_empty(), "a missing header is not a diagnostic: {:?}", made.diagnostics);
+        let mut sc = made.scratch.expect("a headerless file is still a machine");
+
+        let st = sc.tm_status();
+        assert!(st.available, "the machine parsed, so the leg is there");
+        assert!(st.reason.is_empty());
+        assert!(!st.header, "this file carried no header, and the pane has to be able to say so");
+        assert_eq!(st.width, tm::MIN_FIELD_WIDTH, "a headerless machine takes the narrowest width");
+        assert_eq!(st.width, 4, "and `MIN_FIELD_WIDTH` is 4 — pinned so a moved constant is visible here");
+        assert_eq!(st.run, RunStatus::Running, "a fresh cursor has not ended");
+
+        // BLANK, not merely short: the one materialized cell is the blank symbol, so nothing was
+        // seeded. This is the assertion a fabricated `init` would fail.
+        let before = sc.tm_state(3);
+        assert_eq!(before.step, 0);
+        assert_eq!(before.window, vec![vec!['_']], "a headerless machine starts on blank tape");
+        assert_eq!(before.source_node, None, "a scratch has no lowering, so no state can own a Core node");
+
+        assert!(sc.step_tm(), "the wildcard rule fires on the blank");
+        assert!(!sc.step_tm(), "and lands in the accept state, which has no rules");
+        assert_eq!(sc.tm_status().run, RunStatus::Ended, "a halted machine has ended, not capped");
+
+        let after = sc.tm_state(3);
+        assert_eq!(after.step, 1);
+        assert_eq!(after.window, vec![vec!['1']], "the rule wrote its mark");
+        assert_eq!(sc.tm_program().width, tm::MIN_FIELD_WIDTH, "tmProgram and tmStatus must agree on the width");
+        assert_eq!(sc.tm_program().tapes, 1);
+    }
+
+    /// **THE TEST THAT CATCHES A HEADERLESS DEFAULT LEAKING INTO THE MAPPED PATH.** A `.tm` file WITH a
+    /// header, pasted into a scratch pane, must produce exactly what the `Session` path produces for
+    /// the program it came from — same projection, same frame — because both go through the same
+    /// `build_tm_leg`. If the scratch ever reached for `MIN_FIELD_WIDTH` or blank tapes when a header
+    /// was present, this fails on the width and on the tapes at once.
+    ///
+    /// THE TEXT IS PRODUCED THE WAY `tm_emit emit` PRODUCES IT — `run_tm_described` then
+    /// `print_tm_with` — rather than hand-written, so this also exercises the round trip a user
+    /// actually performs: emit a file, paste it into a pane.
+    ///
+    /// **`source_node` IS THE ONE FIELD ALLOWED TO DIFFER, AND THE STRUCT-UPDATE ASSERTION IS WHAT SAYS
+    /// SO.** That is T1's whole contract seen from the consumer side: the scratch passes `None` to
+    /// `TmState::window`, so it loses the sync anchor and nothing else. `core`'s
+    /// `an_absent_map_zeroes_the_source_node_and_leaves_every_other_field_alone` pins the same property
+    /// at the builder; this pins that the boundary actually wired it that way.
+    #[test]
+    fn a_headered_scratch_matches_the_session_path_except_for_the_source_node() {
+        let src = "let x = 40; x + 2";
+        let kind = EncodingKind::Unary;
+
+        let (program, ds) = parser::parse(src);
+        assert!(ds.is_empty(), "{ds:?}");
+        let program = program.expect("the fixture parses");
+        let ty = typeck::result_type(&program).expect("the fixture types");
+        let enc = kind.at(tm::MIN_FIELD_WIDTH);
+        let (core, _map) = SourceMap::build_from_program(&program, &*enc);
+        let described =
+            tm::run_tm_described(&core, kind, ty, tm::TM_DEFAULT_CAPS).expect("the fixture lowers and runs");
+        let text = tm::print_tm_with(&described.machine, &described.header);
+
+        let made = tm_scratch(&text);
+        assert!(made.diagnostics.is_empty(), "an emitted file must reparse: {:?}", made.diagnostics);
+        let mut sc = made.scratch.expect("an emitted file must reparse");
+
+        let st = sc.tm_status();
+        assert!(st.header, "this file HAS a header, and nothing invented its width");
+        assert_eq!(st.width, 64, "the width the auto-fit chose, not `MIN_FIELD_WIDTH`");
+
+        let mut s = Session::compile(src, kind).session.expect("compiles");
+        assert_eq!(sc.tm_program(), s.tm_program().expect("TM available"), "same machine, same projection");
+
+        // Driven in lockstep rather than compared only at step 0: a wrong `init` can still agree on an
+        // empty tape at step 0 and diverge the moment the machine reads one.
+        //
+        // `owned` IS LOAD-BEARING. If the mapped side resolved no owner anywhere in this window, both
+        // sides would carry `source_node: None` and the struct-update assertion would hold for a reason
+        // that has nothing to do with the scratch — a green test proving nothing, which is the trap
+        // core's `tm_state_resolves_its_source_node_through_the_map` steps past the same way.
+        let mut owned = 0usize;
+        for step in 0..50u32 {
+            let mapped = s.tm_state(3).expect("TM available");
+            owned += usize::from(mapped.source_node.is_some());
+            assert_eq!(
+                sc.tm_state(3),
+                TmState { source_node: None, ..mapped.clone() },
+                "step {step}: the scratch loses `source_node` and must lose nothing else"
+            );
+            assert_eq!(sc.step_tm(), s.step_tm().expect("TM available"), "step {step}: the two must stop together");
+        }
+        assert!(owned > 0, "the mapped side resolved no owner in 50 steps, so the comparison proves nothing");
+    }
+
+    /// **`TmScratchStatus` HAS EXACTLY THESE FIVE FIELDS, AND A SIXTH FAILS TO COMPILE HERE.** The
+    /// field this type exists in order NOT to have is `total_steps` — `Session::tm_status` reports one
+    /// from the run `compile` performed, and a scratch is stepped rather than described-run, so any
+    /// value it put there would be invented. See `TmScratchStatus`'s own doc.
+    ///
+    /// **A DESTRUCTURING PATTERN RATHER THAN FIVE FIELD READS, BECAUSE ONLY THE PATTERN IS EXHAUSTIVE.**
+    /// Rust requires a struct pattern to name every field (or say `..`), so adding one to the type
+    /// breaks this line with `missing field in pattern` — while five `assert_eq!(st.field, ..)` lines
+    /// would happily keep passing beside a newly fabricated sixth.
+    ///
+    /// **THIS EXISTS BECAUSE THE MUTATION PROVED IT WAS MISSING.** Adding `total_steps: Some(0)` to the
+    /// struct was caught by `tests/browser.rs`'s wire assertion and by NOTHING in the native suite —
+    /// 894 tests green. The browser tier needs Chrome and is skippable; the trap this task's own plan
+    /// flags as its biggest should not depend on a tier that can be skipped.
+    #[test]
+    fn the_tm_scratch_status_has_no_field_for_a_total_it_cannot_know() {
+        let sc = tm_scratch(HEADERLESS_TM).scratch.expect("parses");
+        let TmScratchStatus { available, reason, width, run, header } = sc.tm_status();
+        assert!(available);
+        assert!(reason.is_empty());
+        assert_eq!(width, tm::MIN_FIELD_WIDTH);
+        assert_eq!(run, RunStatus::Running);
+        assert!(!header);
+    }
+
+    /// Text that does not parse to a machine is diagnostics and a `None` scratch — and a MISSING HEADER
+    /// is not one of those cases, which is the half worth pinning: `parse_tm_full` deliberately does not
+    /// treat header absence as failure, and `a_headerless_machine_runs_from_blank_tapes_at_the_minimum
+    /// _width` above depends on that staying true.
+    #[test]
+    fn unparseable_tm_text_yields_diagnostics_and_no_scratch() {
+        let made = tm_scratch("tapes 1\nstart s\nstate s:\n  [*] -> write [*], move [S], goto nowhere\n");
+        assert!(made.diagnostics.iter().any(|d| d.message.contains("nowhere")), "{:?}", made.diagnostics);
+        assert!(made.scratch.is_none(), "an unresolvable goto leaves no machine to step");
+
+        let garbage = tm_scratch("this is not a machine");
+        assert!(!garbage.diagnostics.is_empty());
+        assert!(garbage.scratch.is_none());
+    }
+
+    /// `tapeSlice` speaks the same coordinates `tmState` reports, and names an absent tape rather than
+    /// indexing out of bounds — the one error a scratch CAN produce, which is why it is the one method
+    /// here that keeps a `Result`.
+    #[test]
+    fn a_scratch_tape_slice_agrees_with_its_window_and_refuses_an_absent_tape() {
+        let mut sc = tm_scratch(HEADERLESS_TM).scratch.expect("parses");
+        assert!(sc.step_tm());
+
+        let st = sc.tm_state(3);
+        let from = st.window_start[0];
+        let got = sc.tape_slice(0, from, from + st.window[0].len()).expect("tape 0 exists");
+        assert_eq!(got, st.window[0], "slice and window must agree in the same space");
+
+        assert_eq!(
+            sc.tape_slice(9, 0, 4),
+            Err(SessionError::NoSuchTape { tape: 9, tapes: 1 }),
+            "an absent tape must not index out of bounds"
+        );
+    }
+
+    /// `Capped` and `raise_tm_cap` on a scratch, reached through `tm_scratch_with_caps` rather than by
+    /// spending `TM_DEFAULT_CAPS`' five million δ-steps — the same affordance `compile_with_caps`
+    /// exists to give the `Session` tests.
+    ///
+    /// THE FIXTURE NEVER HALTS: `scan` on a tape of marks moves right forever once it is seeded, and
+    /// the seeding rule fires on the first blank. Two steps in, the three-step budget is spent.
+    #[test]
+    fn a_capped_scratch_machine_can_be_raised_and_continued() {
+        let spin = "tapes 1\nstart go\n\nstate go:\n  [*] -> write [*], move [R], goto go\n";
+        let caps = tm::TmCaps { steps: 3, cells: tm::TM_DEFAULT_CAPS.cells };
+        let mut sc = tm_scratch_with_caps(spin, caps).scratch.expect("parses");
+
+        let mut driven = 0;
+        while sc.step_tm() {
+            driven += 1;
+        }
+        assert_eq!(driven, 3, "the cursor spends exactly its budget");
+        assert_eq!(sc.tm_status().run, RunStatus::Capped, "a spent budget is Capped, not Ended");
+
+        sc.raise_tm_cap(2, 0);
+        assert_eq!(sc.tm_status().run, RunStatus::Running, "continuing is honest here");
+        assert!(sc.step_tm(), "and the raise really does let it proceed");
+    }
+
     /// THE NUMBERS `tests/browser.rs` PINS, PINNED HERE TOO. That file asserts the values coming back
     /// across the wasm boundary are "the ones a native run produces", which is only a claim if a native
     /// run names the same ones. Both sides therefore hardcode this program's figures, and a change to
@@ -1479,7 +2136,7 @@ mod tests {
 
         let mut saw_some = false;
         for _ in 0..200 {
-            if TmState::window(&c, &s.map, 2).source_node.is_some() {
+            if TmState::window(&c, Some(&s.map), 2).source_node.is_some() {
                 saw_some = true;
                 break;
             }
