@@ -344,7 +344,18 @@ export function bindingSelect(
         rendered = ''
         return
       }
-      const key = options.map((o) => `${o.id} ${o.label}`).join('')
+      // TWO DELIMITERS THAT CANNOT OCCUR IN AN ID OR A LABEL, so no two option lists can collide into
+      // one key by containing each other's separators.
+      //
+      // **WRITTEN AS `\x00`/`\x01` ESCAPES, AND THAT IS LOAD-BEARING FOR THE SOURCE FILE RATHER THAN
+      // FOR THE STRING.** They were literal control characters until `scripts/check-text-bytes.sh`
+      // was added, and one NUL byte makes the WHOLE FILE binary to every search tool: `rg` skips it
+      // and reports no match with exit 1 — silently, no warning — while `grep` says "Binary file
+      // matches" and prints nothing. So every search across `web/src/` quietly omitted this file,
+      // which holds four heavily-argued doc comments, one of which had gone stale and was found only
+      // because a reviewer read the file instead of searching it. The escapes produce the identical
+      // string at runtime; do not "tidy" them back into literals.
+      const key = options.map((o) => `${o.id}\x00${o.label}`).join('\x01')
       if (key !== rendered) {
         rendered = key
         select.replaceChildren(

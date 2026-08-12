@@ -8,6 +8,19 @@
 repos:
   - repo: local
     hooks:
+      # NOT scoped by `files:`, unlike every hook below it, and that is the point: the byte this
+      # rejects makes a file invisible to search, so a gate that only fires when a matching path is
+      # staged would miss it arriving in a path nobody thought to list. It walks `git ls-files` and
+      # costs milliseconds.
+      # `--self-test` FIRST, then the scan — the same order CI uses, and for the same reason: this
+      # gate's first draft passed against a planted NUL, so a scan of a clean tree proves nothing on
+      # its own. Both together are milliseconds.
+      - id: check-text-bytes
+        name: no control bytes in tracked text
+        entry: bash -c 'scripts/check-text-bytes.sh --self-test && scripts/check-text-bytes.sh'
+        language: system
+        always_run: true
+        pass_filenames: false
       - id: cargo-fmt
         name: cargo fmt
         entry: cargo fmt --all --check

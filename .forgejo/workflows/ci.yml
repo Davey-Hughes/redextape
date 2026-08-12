@@ -82,6 +82,23 @@ jobs:
       - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
+      # IN THIS JOB RATHER THAN A NEW ONE, DELIBERATELY. `gate` aggregates a fixed `needs:` list and
+      # re-derives each result by name, so a new job means editing three places and changing the set
+      # of checks branch protection sees. This job already means "repo hygiene that needs a full
+      # checkout and nothing else", already runs on every push and PR, and is already gated — so the
+      # check lands enforced without moving any of that. `scripts/check-text-bytes.sh` is the same
+      # script `.pre-commit-config.yaml` runs, per the convention `scripts/check-all.sh` states: the
+      # local and CI gates cannot drift because there is one implementation.
+      # THE SELF-TEST RUNS FIRST AND IS NOT CEREMONY. This gate's first draft reported "clean"
+      # against a planted NUL — it had the exact defect it exists to catch — and a scan that only
+      # ever runs against a passing tree cannot tell the difference between working and broken.
+      # `--self-test` plants a NUL, asserts the detector fires, and asserts an escaped `\x00` does
+      # not. It calls the same `violations_in` the scan does, so it cannot drift into agreeing with
+      # a broken scan.
+      - name: Prove the control-byte detector still detects
+        run: scripts/check-text-bytes.sh --self-test
+      - name: Reject control bytes in tracked text files
+        run: scripts/check-text-bytes.sh
       - name: Reject merge commits
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
