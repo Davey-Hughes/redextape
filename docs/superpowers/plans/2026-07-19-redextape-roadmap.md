@@ -4839,3 +4839,250 @@ own test contradicts it by hand-calculation. **Four of this plan's sketches fail
 real code; #28's rate was four of five and 5c's two of five. Writing the rule down did not lower it.**
 What did work is mechanical: every dispatch carried *do not trust the plan's sketches, verify against
 the real source*, and that is what caught all four.
+
+#### CLIPPY::PEDANTIC CLOSES — no lint allowed globally, three real defects it surfaced, and a headline count that was a property of one build configuration out of four (2026-08-10, PR #31)
+
+Design: [`../specs/2026-08-10-clippy-pedantic-design.md`](../specs/2026-08-10-clippy-pedantic-design.md).
+Plan: [`2026-08-10-clippy-pedantic.md`](2026-08-10-clippy-pedantic.md).
+
+`clippy::pedantic` is on across the workspace at `warn`, and **no lint in it is allowed
+workspace-wide**. Every production warning was resolved on its merits rather than silenced in
+`Cargo.toml`, which is the only reason this entry has bugs to report at all: a manifest `allow` would
+have produced exactly the same green CI and found nothing. `priority = -1` is on the lint entry and is
+**not load-bearing today** — the five restriction lints above it are in neither `all` nor `pedantic`, so
+nothing conflicts. It is there because `rust-toolchain.toml` tracks unpinned `stable` and `pedantic` is
+large and actively extended: **the first unexplained red CI after a Rust release is now most likely a
+new pedantic lint**, and that field is what makes the one-line per-lint `allow` work rather than error.
+
+Test code is exempt by **two** mechanisms, because the two surfaces are not the same shape. Five
+`#![cfg_attr(test, allow(clippy::pedantic))]` crate-root lines cover all 54 inline `#[cfg(test)]`
+modules — under `--all-targets` each lib compiles twice and `cfg(test)` holds only in the harness pass,
+so production warnings still surface from the other one, and this also reaches the four
+`#[cfg(all(test, feature = "…"))]` modules that `clippy.toml`'s header notes are invisible to clippy's
+own in-test detection. Fifty-one file-level attributes cover `tests/` and `examples/`, because Cargo has
+no per-target lint config; 49 of those files already carried an identical `unwrap`/`expect`/`panic`
+allow to extend and 2 had none.
+
+##### THE HEADLINE 294 IS A PROPERTY OF ONE BUILD CONFIGURATION, AND THERE ARE FOUR
+
+The design doc's count was measured on the default build only. Scope D checked the other three and
+found 14 more.
+
+| surface | warnings |
+| --- | --- |
+| `tests/` + `examples/` targets (51 files) | 330 |
+| inline `#[cfg(test)]` modules in `src/` (54) | 379 |
+| **production, default config** | **294** |
+| **production, other build configs** | **+14** |
+
+`cargo clippy --workspace` never compiles `redextape-native` under `--no-default-features` or
+`--features llvm`, so those warnings were not hidden by a filter — they were never generated. Of the 14,
+**6 were real production warnings**, 6 were inside `#[cfg(test)]`, and 2 were in
+`--no-default-features` stubs. **The spec still leads with 294 and the ledger carries the correction**,
+deliberately: the number was correct for what it measured and the fix is to say what it measured, not to
+overwrite it with a second number that will have the same problem.
+
+The transferable form is worth stating on its own, because it is not specific to clippy. **A warning
+count is a property of a build configuration, not of a codebase**, and a workspace with feature flags
+has as many counts as it has configurations. Any gate that reports one number is reporting one
+configuration.
+
+##### THREE REAL DEFECTS, AND THE PR TITLE SAYS TWO
+
+Recorded as three because three is what the code shows; the PR title's "two" counts the two that were
+closed as **dedicated fix slices with their own branches** (`ped-fix-shift`, `ped-fix-owner`) and does
+not count the one resolved inside the scope-D sweep. The distinction is real but it is a workflow
+distinction, not a severity one.
+
+**`redextape-native-rt`'s heap and box indexing.** Four `(p - 1) as usize` casts could alias a valid
+cell instead of faulting. Now `usize::try_from(p - 1).ok().and_then(…)` folded into the *existing* fault
+path — provably infallible on 64-bit, and no new error variant, `extern "C"` signature change, or
+fault-string change. Live at `redextape-native-rt/src/lib.rs:132`, `:158`, `:221`, `:250`.
+
+**`lambda::term::shift`'s upper bound.** The site had an `assert!` guarding the sign direction and
+nothing guarding the top. `shift` is `pub`, so `var(u32::MAX)` followed by `shift(1, 0, ·)` overflows
+**regardless of what type `d` is** — narrowing the signature would not have closed it. Now bounded by a
+matching assert.
+
+**`viewmodel::LinkIndex::tm_owner`.** `map_or(-1, |n| n as i32)` where `-1` is the live "no owner"
+sentinel: a `NodeId` past 2³¹ casts negative and becomes indistinguishable from "no owner", silently
+deleting a real link from the UI. Now declines the whole leg via `Option<Vec<i32>>` rather than
+laundering the overflow into the sentinel. **The narrower alternative was weighed and rejected rather
+than overlooked** — a distinct negative sentinel preserving the other entries renders identically at the
+consumer, because `web/src/link.ts` collapses *any* negative to `null`, so it tells the UI the same
+false thing. That reasoning is in the field's doc, not only here. This one is a workaround at the
+consumer; **PR #32 closed it at the source** with `MAX_NODE_ID`.
+
+Every one of these tests was **independently mutated by a reviewer rather than merely reverted**, to
+confirm it discriminates a subtly-wrong fix and not just an absent one.
+
+##### A CLAIM IN THIS REPOSITORY'S OWN MANIFEST, DISPROVED
+
+`Cargo.toml`'s lint block said the five panic-lints made "no library path may panic" *mechanical*. **They
+do not.** `assert!` and `unreachable!` are panics that trip none of them, and no clippy lint bans
+`assert!` at all. The comment now says what is true and names `shift` as the known live exception: a
+`pub` path that panics via two documented asserts, because full compliance would mean threading `Result`
+through a hot recursive path into `redextape-wasm` and `redextape-native`.
+
+Worth carrying forward as a pattern rather than a one-off. **The claim was load-bearing, written down,
+and false for the whole time it was written down** — and what exposed it was turning on a lint family
+that had nothing to do with panics. A policy comment asserting that a class of bug is mechanically
+impossible is a claim like any other and nothing was checking this one.
+
+##### Known gaps, deliberately left open — and both were closed by the next slice
+
+- **Nothing bounds Core AST node *count*** (only nesting depth), and **nothing bounds
+  `Program::code.len()`** the way `MAX_TAPES`/`MAX_SLOTS` bound their quantities. Two agents found these
+  independently. The casts that depended on them were made safe either way by this branch, so this was
+  filed as *not a live defect* — one gap wearing two hats, expected to surface again.
+- **`scripts/check-all.sh` lints feature variants of `redextape-native` only.** It builds and tests
+  `redextape-core --features serde` but never lints it, so serde-gated core code sat outside every lint
+  gate — more consequential now that pedantic is on.
+
+**The first of those two was filed wrong, and PR #32's entry below is what measuring it produced.**
+
+##### Verification
+
+`cargo clippy --workspace --all-targets -- -D warnings` clean with pedantic on ·
+`./scripts/check-all.sh` green across base, LLVM and browser · `cargo nextest run --workspace` 874
+passed, 3 skipped · `pnpm run build:wasm && pnpm run typecheck` green.
+
+**`check-all.sh`'s LLVM rows need `LLVM_SYS_221_PREFIX=/usr`** on this machine — LLVM 22.1.8 is
+installed as the system llvm, not at the `/usr/lib/llvm-22` path the script's probe assumes.
+
+#### THE COUNT NOBODY BOUNDS CLOSES — a 6 KB program that OOMs the editor, a filing that measurement reclassified, and thirteen defects all of which were in the plan (2026-08-11, PR #32)
+
+Design: [`../specs/2026-08-11-count-bounds-design.md`](../specs/2026-08-11-count-bounds-design.md).
+Plan: [`2026-08-11-count-bounds.md`](2026-08-11-count-bounds.md).
+
+Closes the gap #31's review found from two directions at once — and **the measurement turned it from
+"not a live defect" into one.**
+
+##### THE FILING WAS WRONG, AND WRONG IN THE DIRECTION THAT MATTERS
+
+#31 filed this as a latent cast hazard: four sites narrowing a count, justified with prose
+("~172 GB resident before this is reachable"), one instance of which was that same prose already copied
+verbatim into a second file. Under that reading the right response is a comment.
+
+It is **a live, user-reachable OOM**. A *balanced* arithmetic expression of **~6 KB — 4,094 tokens
+against a `MAX_TOKENS` of 100,000, well inside every existing guard — builds an 8,595,317-state machine
+costing 6.0 GB.** At ~24 KB the same shape was killed by `SIGKILL` under an 8 GB budget.
+`run_tm_described` is on the wasm session's compile path, so on wasm32 that is a dead module, not a slow
+tab.
+
+**The casts were the symptom, not the defect.** They cannot truncate: the process dies at ~0.2% of the
+way to `StateId::MAX`. The defect was an unbounded *product* — `lower_tm_all`'s three guards bound the
+multipliers (`MAX_SLOTS`, `MAX_FRAME_LOC`, `MAX_MUL_INSTRS`) and **nothing bounded the base.**
+
+##### Why it hid, which is a fact about the lowering and not about the reviewers
+
+**Every generator anyone tried refuses first at n ≈ 578** — that is `lower_asm`'s
+`MAX_LOWER_DEPTH = 580` — so `code.len()` *looked* bounded at 3,472. Width costs depth in this lowering,
+**but only for left-nested shapes.** A balanced tree is depth-logarithmic, so `MAX_LOWER_DEPTH` never
+bites, and the whole token budget becomes instructions **and** slots, which multiply: growth is
+~O(n^1.9).
+
+So the guard that was doing the hiding was a real guard doing its real job on the shapes it was written
+for. **An existing bound can mask a missing one by being reached first on every input anyone tries**,
+and the way to find that out is to construct the input shape it does not bind on.
+
+##### `MAX_MACHINE_STATES = 1_000_000`, counted at the choke point rather than predicted
+
+Enforced inside `Builder::state`/`accept` — the single choke point every state goes through — so it
+**counts states rather than predicting them and cannot go stale when a gadget's cost changes.** At a
+measured **700–725 bytes/state** (machine- and allocator-dependent) that is roughly 700–725 MB: 20× the
+worst demo this project ships, and 4,295× under `StateId::MAX`, which is what makes
+`states.len() as StateId` provable rather than argued. It admits the largest size measured to work
+(1,022 tokens → 575,861 states, 398 MB) and refuses the first measured not to.
+
+**A bare `MAX_CODE_LEN` cannot do this job**, and the reason generalises. Per-instruction cost runs from
+1 state (`Halt`, `Jmp`) to ~270,000 — **196 MB for one `Call`** at the largest `n_loc` `MAX_FRAME_LOC`
+permits. **A length that bounds the allocation is single digits; a length that admits real programs
+bounds nothing.** The symmetric alternative — a `state_count_unrepresentable` pre-check estimating cost
+up front — was rejected for duplicating per-gadget cost knowledge in a second place that goes stale
+silently, which is the same failure mode as the prose it replaces.
+
+##### THE REFUSAL IS PLUMBED, NOT SILENTLY DEGENERATED — AND THIS BRANCH REINTRODUCED EXACTLY THAT BUG
+
+`lower_tm_guarded` and `lower_tm_mapped` now return `Option`. Without that, `attempt` simulates the
+degenerate halt-immediately machine and reports `TmRun::Ran` over tapes that decode to nothing — the
+exact bug `lower_and_size`'s doc records fixing once already, for `MAX_SLOTS`. `TooLarge` was already
+wired to the UI's *"the machine this program needs is too large to build"*.
+
+**Found during review: `attribute.rs` discarded the refusal** and re-derived only the three
+pre-checkable conditions, so a ceiling-refused program returned `{ histogram: {}, total: 0, capped:
+false }` — which that module's own doc names as *"the one wrong answer available here"*. **Before the
+ceiling it OOM'd; after, it answered cleanly and falsely.** Closed by making `lower_tm_mapped` return
+`Option` too. Note the shape: the branch that added the guard is the branch that added the
+silent-degeneration bug, on a path whose own documentation had already named that failure mode, in a
+codebase that had already fixed it once elsewhere.
+
+Two more from review, neither planned. **`Builder::overflow()` cached the ceiling sentinel**,
+permanently pinning the overflow-guard id to state 0 if first called after a trip — unreachable only
+because `lower_tm_all` happens to allocate it eagerly. And **a fifth cast site** (`tm/syntax.rs`) that is
+sound for the reason the lowering's was not: parsing has multiplier one, so the input bounds the state
+count. The corollary is recorded in the spec — **this ceiling bounds machines built through `Builder`,
+not machines parsed from text.**
+
+**The ceiling is width-dependent and the other three refusals are not.** Witness: 537,996 states at
+width 4 (runs), 692,772 at width 8 (runs), refused at 16 — so **`TooLarge` is not always reported at the
+first width tried**, which any caller iterating widths has to account for.
+
+##### `MAX_NODE_ID = 1_000_000_000`, chosen against `i32` and not against memory
+
+`NodeGen::fresh` was a bare counter that **wraps silently in release**, re-issuing id 0 into the map the
+UI resolves clicks through. The value sits under `i32::MAX` so `LinkIndex::build`'s `NodeId -> i32` cast
+provably succeeds — which is exactly what that function's old doc predicted capping at the source would
+buy, and it closes #31's `tm_owner` workaround at the source rather than at the consumer.
+
+Also here: **`scripts/check-all.sh` now lints the serde config**, which it built and tested but never
+linted — #31's second known gap, closed.
+
+##### THIRTEEN DEFECTS, EVERY ONE IN THE PLAN OR SPEC AND NONE IN THE CODEBASE — and the three found by measuring were worth more than the ten found by reading
+
+**The constant's floor was wrong.** *"The worst program this project ships builds 38,070 states"* came
+from ten demos picked by hand and asserted to be the largest of `FIRST_ORDER_DEMOS`. **That array has 46
+entries and the true worst is 49,135.** Safety is unaffected — 20× headroom rather than 26× — but it was
+**the floor of the entire "never rejects a legitimate program" argument and it had never been checked.**
+
+**`lower_tm`'s doc promised the mapped and unmapped paths "cannot drift".** This branch made them drift,
+precisely on the refusal path.
+
+**A sync check documented as impossible already existed.** The plan stated in three places that
+`FIRST_ORDER_DEMOS` could not be mechanically checked because `redextape-core` cannot import
+`redextape-native`. `three_way_oracle.rs` has checked it for six copies all along — textually, by path,
+using no import. This branch added a seventh binding as `let demos`, invisible to the `grep` audit that
+test's own doc prescribes. Now covered, and perturbing it fails the test.
+
+This continues the ledger #30's entry ends on. **#30's rate was four of five plan sketches failing
+contact with the real code, #28's four of five, 5c's two of five.** Thirteen here is a larger absolute
+count against a larger plan, and the distribution is the same one: **defects concentrate in the planning
+documents, not in the implementations, and the mechanical remedy — verify every sketch against the real
+source before implementing it — is still the only thing that catches them.** What is new is that three
+of the thirteen were reachable *only* by running something. **Reading found the prose slips; only
+measurement found the wrong floor.**
+
+##### Known, and deliberate: the evidence for a guard stops being reproducible once the guard is enforced
+
+`examples/state_cost_probe.rs` **can no longer produce the 8,595,317-state row or the `SIGKILL`**,
+because `MAX_MACHINE_STATES` bounds every path it can reach. Refused rows print a refusal rather than a
+misleading `1000000`. A third casualty follows: the "727 bytes per state, stable across a 15× range"
+claim needed **both** the 1,022-token and the now-refused 4,094-token row, so a fresh run re-derives the
+surviving row's 700–725 B/state but neither 727 nor the stability claim across the pair.
+`MAX_MACHINE_STATES`'s own doc says all of this and records the one-line change (raise the constant,
+re-run under a memory cap) that restores the measurement.
+
+**Being killed IS the measurement**, which is why the restoring instruction has to name the cap as well
+as the constant.
+
+##### Verification
+
+`cargo nextest run --workspace` 883 passed / 8 skipped · `cargo clippy --workspace --all-targets -- -D
+warnings` clean · `scripts/check-all.sh --no-llvm --no-browser` green · slow tier green under an 8 GB
+cap.
+
+**Every refusal test is pinned to the guard it claims.** The 4,000-`Box` program has `n_slots = 4` and
+`code.len() = 4002`, so neither `MAX_SLOTS` nor the length pre-check can fire and only the in-loop
+`overflowed()` reaches it. Fixes carry discriminating tests: reverting the `overflow()` guard fails with
+`left: Some(0), right: None`, and reverting the `attribute` fix fails with
+`capped: left=false, right=true`.
