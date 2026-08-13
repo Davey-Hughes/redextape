@@ -94,8 +94,9 @@ describe('session-worker', () => {
     expect(replies.every((r) => r.gen === 7)).toBe(true)
   })
 
-  // `compile` throws by design for a name `EncodingKind::parse` rejects (`lib.rs:36-38`) — the
-  // reachable trigger for the whole class of thrown-session-call defects this variant exists to catch.
+  // `compile` throws by design for a name `EncodingKind::parse` rejects (`redextape-wasm`'s own
+  // `compile` doc) — the reachable trigger for the whole class of thrown-session-call defects this
+  // variant exists to catch.
   it('reports a thrown session call instead of going silent', async () => {
     const { replies, worker } = await askAll({ kind: 'run', gen: 1, src: 'let x = 40; x + 2', encoding: 'nonsense' })
     worker.terminate()

@@ -302,9 +302,14 @@ body {
    a new style. The caption is `.pane h2`'s dimmed voice so the row reads as one line of chrome under
    the heading rather than as a second heading.
 
-   IT IS ABSENT FROM THE DOM BELOW TWO SESSIONS, so this rule usually matches nothing —
-   `pane-chrome.ts`'s `bindingSelect` removes the element rather than hiding it, and its doc says why.
-   There is nothing here to make it disappear; do not add a `display: none` reading of that state. */
+   IT IS ABSENT FROM THE DOM BELOW TWO PAIRS, AND THAT RULE NOW MATCHES ON EVERY PAGE — the opposite
+   of what this paragraph used to tell a reader. It said "IT IS ABSENT FROM THE DOM BELOW TWO SESSIONS,
+   so this rule usually matches nothing", which was true while the control listed sessions and a fresh
+   page had one. It lists `(leg, session)` PAIRS now, and the source session's two legs clear the
+   threshold on their own, so the styling below is what every pane wears from the first paint rather
+   than a rule that waits for a fork. What has not changed is the mechanism: `pane-chrome.ts`'s
+   `paneSelect` REMOVES the element rather than hiding it, and its doc says why. There is still nothing
+   here to make it disappear; do not add a `display: none` reading of that state. */
 .pane-binding {
   display: flex;
   align-items: center;
@@ -423,6 +428,85 @@ body {
   color: var(--fg-dim);
 }
 
+/* The split picker's menu (`pane-chrome.ts`'s `splitControl`). AFTER `.controls button` ABOVE AND NOT
+   BEFORE IT, which is load-bearing rather than tidy: the menu is appended into the `.controls` strip,
+   so every item inside it is already a `.controls button` and inherits that rule's padding, border and
+   radius. `.pane-picker button` has the SAME specificity (0,2,0), so source order is the only thing
+   deciding which of the two sets the layout — a menu of rows rather than a row of buttons needs these
+   three declarations to win.
+
+   NOTHING HERE IS A NEW COLOUR, which §6 requires of every control this slice adds: `--rule` and
+   `--bg` are tokens the results pane and the page background already use. A native `popover` sits in
+   the top layer, so it needs no z-index of its own to clear the dividers `layout-view.ts` draws
+   between panes — that is one of the two reasons `splitControl` is built on the attribute rather than
+   on a hand-rolled dropdown, and the absence of a rule for it here is what that decision looks like
+   from the stylesheet's side.
+
+   **`position-area` IS NOT DECORATION — WITHOUT IT THIS MENU OPENS IN THE TOP-LEFT CORNER OF THE
+   VIEWPORT, and that was measured rather than reasoned about** (`.superpowers/sdd/task-8-picker-*.png`
+   is the before/after pair). The UA stylesheet gives `[popover]` `position: fixed; inset: 0;
+   width: fit-content; margin: auto`; the `margin: 0` below is what stops the menu being centred in the
+   window, and the moment it is gone `left: 0`/`right: 0` against a definite width is over-constrained,
+   `right` is dropped, and the menu pins to the corner — detached from the button that opened it and
+   sitting on top of the pane chrome.
+
+   THE ANCHOR IS THE BUTTON, AND IT IS IMPLICIT RATHER THAN NAMED. A popover shown by an invoker gets
+   that invoker as its implicit anchor element, which `position-area` resolves against with no
+   `anchor-name` to mint and keep unique per pane — `splitControl` sets `popoverTargetElement` and this
+   rule is the whole of the positioning. Each split control therefore anchors to ITS OWN button, which
+   is the requirement one shared anchor would break: `split →` and `split ↓` sit side by side, so a
+   menu anchored to the strip would put both in one place and the second would cover the first.
+
+   `position-try-fallbacks` IS THE VIEWPORT EDGE. A pane at the bottom of the window has no room below
+   its control strip, and a top-layer element cannot be scrolled to — the document's own scrollbars do
+   not reach it — so a menu that only ever opened downward would be unreachable rather than merely
+   awkward. `flip-block` opens it above the button instead, `flip-inline` answers the right edge, and
+   the pair answers the bottom-right corner where both apply. The tactics flip the margins along with
+   the position, so nothing here is restated per side. `pane-layout-controls.test.ts`'s "where the split
+   picker opens" measures all three claims — beside its own button, one place per control, and above the
+   button at the bottom edge. */
+.pane-picker {
+  position-area: block-end span-inline-end;
+  position-try-fallbacks:
+    flip-block,
+    flip-inline,
+    flip-block flip-inline;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  padding: 0.25rem;
+  margin: 0;
+  min-width: 12rem;
+}
+/* WITHOUT ANCHOR POSITIONING, GIVE THE MARGIN BACK — because `margin: 0` above is the half of the rule
+   that does harm on its own. The block above is two declarations that only work together: a UA without
+   `position-area` drops it AND `position-try-fallbacks`, keeps `margin: 0`, and lands on `position:
+   fixed; inset: 0; width: fit-content` with no margin to resolve the over-constraint — which is the
+   top-left-corner bug `task-8-picker-*.png` pairs, byte for byte, in a browser nobody would think to
+   check. `margin: auto` is not a guess at a nicer degraded state; it is the UA default this rule
+   overrides, so what a reader gets back is the browser's own centred popover: detached from its button,
+   but on screen, dismissible, and not sitting on top of the pane chrome.
+
+   `not (position-area: block-end)` RATHER THAN A FEATURE NAME, because `@supports` tests a
+   property/value pair and there is no other way to ask. Chromium shipped `position-area` under the
+   earlier spelling `inset-area` first, and those versions take this branch too — correctly, since the
+   rule above is inert for them either way.
+
+   THIS BRANCH IS UNTESTABLE IN THIS REPO AND THAT IS THE ARGUMENT FOR IT, NOT AGAINST. The browser tier
+   runs Chromium only (`vite.config.ts`'s provider), where `@supports not (...)` never applies, so
+   nothing here can regress the tested path and nothing here will report the untested one either. Four
+   lines that cannot fire in CI beat a comment recording the same risk and doing nothing about it. */
+@supports not (position-area: block-end) {
+  .pane-picker {
+    margin: auto;
+  }
+}
+
+.pane-picker button {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
 .banner {
   padding: var(--space-3);
   border: 1px solid currentColor;
@@ -445,7 +529,7 @@ body {
   margin-inline-start: var(--space-2);
 }
 
-/* `.pane` is `overflow: auto` and NOT a flex column (style.css:96-98), so the table cannot size itself
+/* `.pane` is `overflow: auto` and NOT a flex column (its own rule above), so the table cannot size itself
    with `flex: 1 1 auto` — it needs an explicit bound or it grows to its full 3,069,144px. */
 .state-table {
   overflow-y: auto;

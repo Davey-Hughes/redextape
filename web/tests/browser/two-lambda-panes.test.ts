@@ -6,8 +6,9 @@ import { defaultLayout, LAYOUT_STORAGE_KEY, leaves, parseLayout } from '../../sr
  * TWO λ PANES ON TWO λ SESSIONS, THROUGH THE APP — the claim 5d-i could assert only with hand-built
  * panes.
  *
- * `sessions.ts:180-184` and `binding-selector.test.ts`'s own header both record why that was: "this app
- * has ONE λ pane, so two panes side by side on two λ sessions is still not a state `main()` can reach".
+ * `sessions.ts`'s `SessionRegistry` doc and `binding-selector.test.ts`'s own header both record why that
+ * was; the latter, in as many words: "this app has ONE λ pane, so two panes side by side on two λ
+ * sessions is still not a state `main()` can reach".
  * Neither file is wrong and neither is superseded — they assert the resolution and the rendering. This
  * one asserts that a user can GET there, which is the property the layout tree adds and the reason
  * 5d-ii-a is sequenced ahead of the multiplexer.
@@ -32,12 +33,60 @@ const SHELL = `
   <section id="results" class="pane results"></section>`
 
 const leafIds = () => [...document.querySelectorAll('[data-leaf]')].map((e) => (e as HTMLElement).dataset.leaf ?? '')
-const lambdaLeaves = () => leafIds().filter((id) => id.startsWith('lambda'))
+/**
+ * The ids of every λ pane — by `data-kind`, NOT by an `id` prefix. `nextLeafId` now mints `pane-${n}`
+ * regardless of which leg the split came from (`main.ts`'s own doc on `nextLeafId`: a pane can change
+ * which leg it renders, so an id like `lambda-3` would describe something the pane is not), so
+ * `dataset.kind` is the only truthful statement of what a leaf renders left to select on.
+ */
+const lambdaLeaves = () =>
+  [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')].map((e) => e.dataset.leaf ?? '')
 const textOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .term`)?.textContent ?? ''
 const btn = (leaf: string, label: string) =>
   document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button[aria-label="${label}"]`)
+/**
+ * Split `leaf` through `control` into a second pane of the same kind on the same session — the gesture
+ * every test here reached with a single `btn(leaf, 'split …')?.click()`.
+ *
+ * **A SPLIT IS TWO CLICKS NOW, AND THE FIRST MENU ENTRY IS WHY IT IS STILL ONE GESTURE.** The control
+ * opens a picker (`pane-chrome.ts`'s `splitControl`), whose first item is the pane's own `(leg, session)`
+ * pair labelled `(same)` — put there precisely so the case that WAS the whole gesture stays one click
+ * away. That is what keeps every test below testing what it always tested: the same pane, duplicated,
+ * on the same session, which is how this file reaches two λ panes on one scratch without a rebind.
+ *
+ * THE MENU IS REACHED THROUGH `aria-controls`, AND THE LABEL IS CHECKED. A pane has two pickers and each
+ * keeps the entries it was last opened with, so `[data-leaf] .pane-picker button` could click an item in
+ * a popover that is not open; and a missing entry clicked through `?.` is a silent no-op that would
+ * leave every assertion after it describing a page nothing happened on.
+ */
+const splitSame = (leaf: string, control: string): void => {
+  const button = btn(leaf, control)
+  if (button === null) throw new Error(`no "${control}" control on [data-leaf="${leaf}"]`)
+  button.click()
+  const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
+  const first = menu?.querySelector<HTMLButtonElement>('button') ?? null
+  if (first === null || !(first.textContent ?? '').endsWith('(same)')) {
+    throw new Error(`${leaf}'s "${control}" menu does not start with the duplicate case: ${first?.textContent}`)
+  }
+  first.click()
+}
 const selectOf = (leaf: string) =>
   document.querySelector<HTMLSelectElement>(`[data-leaf="${leaf}"] .pane-binding select`)
+/**
+ * The λ `<optgroup>`'s own options on `leaf` — WHICH SESSIONS OFFER A λ LEG. The selector lists both
+ * legs now, so `select.options` would mix the source session's TM leg into every count; naming the
+ * group is what keeps an assertion about the λ sessions about λ.
+ */
+const lambdaOptionsOf = (leaf: string) =>
+  [...document.querySelectorAll(`[data-leaf="${leaf}"] .pane-binding optgroup[label="λ"] option`)].map(
+    (o) => o.textContent,
+  )
+/**
+ * The `<option>` value the pane selector encodes a `(leg, session)` pair as — spelled out here rather
+ * than imported from `pane-chrome.ts`, so this pins the DOM contract instead of agreeing with whatever
+ * the control currently does. `\x00` as an escape is `scripts/check-text-bytes.sh`'s rule.
+ */
+const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
 const editorsIn = (leaf: string) => document.querySelectorAll(`[data-leaf="${leaf}"] .cm-editor`).length
 /** The TM pane's own transport strip — the δ leg has a play head independent of λ's. */
 const tmClick = (glyph: string) =>
@@ -115,14 +164,14 @@ describe('two λ panes on two λ sessions', () => {
     await until(() => document.querySelectorAll('[data-leaf="lambda-0"] .term-editor').length > 0)
 
     // 2. Split it — the control this slice adds.
-    btn('lambda-0', 'split left and right')?.click()
+    splitSame('lambda-0', 'split left and right')
     await until(() => lambdaLeaves().length === 2)
     const [first, second] = lambdaLeaves()
 
     // 3. Point the new pane back at the source session — 5d-i's selector.
     const sel = selectOf(second ?? '')
     if (sel === null || sel === undefined) throw new Error('the split pane has no binding selector')
-    sel.value = 'source'
+    sel.value = optionValue('lambda', 'source')
     sel.dispatchEvent(new Event('change', { bubbles: true }))
 
     // 4. Edit the scratch so the two sessions genuinely differ — a REAL CodeMirror transaction via
@@ -164,7 +213,7 @@ describe('two λ panes on two λ sessions', () => {
     fork?.click()
     await until(() => document.querySelectorAll('.cm-editor').length > 1)
 
-    btn('lambda-0', 'split left and right')?.click()
+    splitSame('lambda-0', 'split left and right')
     await until(() => lambdaLeaves().length === 2)
     const [first, second] = lambdaLeaves()
 
@@ -277,7 +326,7 @@ describe('two λ panes on two λ sessions', () => {
     fork?.click()
     await until(() => editorsIn('lambda-0') > 0)
 
-    btn('lambda-0', 'split left and right')?.click()
+    splitSame('lambda-0', 'split left and right')
     await until(() => lambdaLeaves().length === 2)
     const [holder, survivor] = lambdaLeaves()
     expect(editorsIn(holder ?? '')).toBe(1)
@@ -339,7 +388,7 @@ describe('two λ panes on two λ sessions', () => {
       // 1-2. Fork, then split, so one pane holds the editor and one does not.
       document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')?.click()
       await until(() => editorsIn('lambda-0') > 0)
-      btn('lambda-0', 'split left and right')?.click()
+      splitSame('lambda-0', 'split left and right')
       await until(() => lambdaLeaves().length === 2)
       const [holder, survivor] = lambdaLeaves()
       expect(editorsIn(holder ?? '')).toBe(1)
@@ -368,7 +417,7 @@ describe('two λ panes on two λ sessions', () => {
 
       // 6. Any layout gesture reconciles editors. An unrelated pane's split is the mildest one there is.
       const leavesBefore = leafIds().length
-      btn('tm-0', 'split top and bottom')?.click()
+      splitSame('tm-0', 'split top and bottom')
       await until(() => leafIds().length === leavesBefore + 1)
 
       // ONE editor in one λ pane, and it is the LIVE one — not the stale view over the worker
@@ -413,17 +462,19 @@ describe('two λ panes on two λ sessions', () => {
     // Point it at the scratch, which is still live — no pane's death retires a session.
     const sel = selectOf('lambda-0')
     if (sel === null || sel === undefined) throw new Error('the restored λ pane has no binding selector')
-    sel.value = 'lambda-scratch'
+    sel.value = optionValue('lambda', 'lambda-scratch')
     sel.dispatchEvent(new Event('change', { bubbles: true }))
     // THE REBIND TOOK — asserted rather than assumed, because `select.value = x` for an option that is
     // not in the list silently leaves the value at `''`, and every assertion below would then pass on a
-    // pane that never went near the scratch.
-    expect(sel.value).toBe('lambda-scratch')
+    // pane that never went near the scratch. That hazard is sharper since the control started listing
+    // pairs: the value is `leg\x00id` now, so the plain `'lambda-scratch'` this line used to set would
+    // match nothing and fail exactly that way.
+    expect(sel.value).toBe(optionValue('lambda', 'lambda-scratch'))
     expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('[detached]')
 
     // A layout gesture on an UNRELATED pane. This is where the editor used to arrive unbidden.
     const leavesBefore = leafIds().length
-    btn('tm-0', 'split top and bottom')?.click()
+    splitSame('tm-0', 'split top and bottom')
     await until(() => leafIds().length === leavesBefore + 1)
 
     expect(editorsIn('lambda-0')).toBe(0)
@@ -476,19 +527,26 @@ describe('two λ panes on two λ sessions', () => {
       await until(() => lambdaLeaves().length === 0)
 
       // 3. `reset layout` re-mints the literal `lambda-0`, which DROPS the claim. The scratch session is
-      // untouched by any of this — no pane's death retires one — and the binding selector is how that is
-      // observed from the DOM: two registered sessions is what makes `bindingSelect` render at all.
+      // untouched by any of this — no pane's death retires one — and the pane selector is how that is
+      // observed from the DOM: two λ sessions is what puts a second entry in its λ group.
+      //
+      // **READ THROUGH THE λ GROUP RATHER THAN THROUGH THE CONTROL'S PRESENCE, WHICH IS WHAT THESE TWO
+      // STEPS USED TO DO.** They asserted `selectOf('lambda-0')` non-null here and null after the
+      // retire, because the control listed SESSIONS and withdrew below two. It lists `(leg, session)`
+      // PAIRS now and the source session alone contributes two, so it never withdraws — the fact both
+      // steps were reaching for is which sessions offer a λ leg, and that is what the group says.
       document.querySelector<HTMLButtonElement>('#restore-layout')?.click()
       await until(() => lambdaLeaves().length === 1)
-      expect(selectOf('lambda-0')).not.toBeNull()
+      expect(lambdaOptionsOf('lambda-0')).toEqual(['source', 'λ scratchpad'])
 
       // 4. A SOURCE keystroke retires the scratch. THIS is the sweep that had nothing left to sweep: the
-      // custody entry was still there and no claim named it. The selector withdrawing is the retire
-      // landing — one session left to offer.
+      // custody entry was still there and no claim named it. The λ group falling back to one entry is
+      // the retire landing — one λ session left to offer.
       view.dispatch({ changes: { from: view.state.doc.length, insert: ' + 0' } })
       await until(
         () =>
-          document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && selectOf('lambda-0') === null,
+          document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
+          lambdaOptionsOf('lambda-0').length === 1,
       )
 
       // 5. Fork again on the fresh `lambda-0` — a NEW scratch under the SAME constant session id, and a
@@ -503,7 +561,7 @@ describe('two λ panes on two λ sessions', () => {
       // 6. Any layout gesture reconciles editors. An unrelated pane's split is the mildest one there is,
       // and it is the step that used to throw before it could paint or persist anything.
       const leavesBefore = leafIds().length
-      btn('tm-0', 'split top and bottom')?.click()
+      splitSame('tm-0', 'split top and bottom')
       await until(() => leafIds().length === leavesBefore + 1)
 
       // ONE editor in one λ pane, and it is the LIVE one — not the view over the worker `retire`

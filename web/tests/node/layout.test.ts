@@ -9,7 +9,9 @@ import {
   MIN_PANE_FRACTION,
   parseLayout,
   resize,
+  SOURCE_LEAF,
   serializeLayout,
+  setLeafKind,
   splitLeaf,
 } from '../../src/layout'
 
@@ -44,7 +46,7 @@ describe('defaultLayout', () => {
 
 describe('splitLeaf', () => {
   it('replaces the leaf with a split holding it and a duplicate of its kind', () => {
-    const tree = splitLeaf(leaf('lambda-0', 'lambda'), 'lambda-0', 'row', 'lambda-1')
+    const tree = splitLeaf(leaf('lambda-0', 'lambda'), 'lambda-0', 'row', 'lambda-1', 'lambda')
     expect(tree).toEqual({
       kind: 'split',
       dir: 'row',
@@ -54,28 +56,28 @@ describe('splitLeaf', () => {
   })
 
   it('splits a nested leaf without disturbing its siblings', () => {
-    const tree = splitLeaf(defaultLayout(), 'tm-0', 'column', 'tm-1')
+    const tree = splitLeaf(defaultLayout(), 'tm-0', 'column', 'tm-1', 'tm')
     expect(leaves(tree).map((l) => l.id)).toEqual(['source', 'lambda-0', 'tm-0', 'tm-1'])
   })
 
   it('refuses to split the source leaf, because there is no second editor to duplicate', () => {
-    expect(() => splitLeaf(defaultLayout(), 'source', 'row', 'source-1')).toThrow(/source/)
+    expect(() => splitLeaf(defaultLayout(), 'source', 'row', 'source-1', 'lambda')).toThrow(/source/)
   })
 
   it('throws on an unknown leaf rather than returning the tree unchanged', () => {
-    expect(() => splitLeaf(defaultLayout(), 'nope', 'row', 'x')).toThrow(/nope/)
+    expect(() => splitLeaf(defaultLayout(), 'nope', 'row', 'x', 'lambda')).toThrow(/nope/)
   })
 
   it('refuses a newId already in the tree, because the duplicate would be unreachable', () => {
     // findLeaf uses .find(), so a duplicate id would silently hide the second leaf behind the first
     // rather than surface as a tree parseLayout could also reject on load.
-    expect(() => splitLeaf(defaultLayout(), 'lambda-0', 'row', 'tm-0')).toThrow(/tm-0/)
+    expect(() => splitLeaf(defaultLayout(), 'lambda-0', 'row', 'tm-0', 'lambda')).toThrow(/tm-0/)
   })
 })
 
 describe('closeLeaf', () => {
   it('collapses a split left with one child into that child', () => {
-    const tree = splitLeaf(leaf('lambda-0', 'lambda'), 'lambda-0', 'row', 'lambda-1')
+    const tree = splitLeaf(leaf('lambda-0', 'lambda'), 'lambda-0', 'row', 'lambda-1', 'lambda')
     expect(closeLeaf(tree, 'lambda-1')).toEqual(leaf('lambda-0', 'lambda'))
   })
 
@@ -181,7 +183,7 @@ describe('immutability', () => {
   it('never mutates the tree it was given', () => {
     const before = defaultLayout()
     const snapshot = structuredClone(before)
-    splitLeaf(before, 'tm-0', 'row', 'tm-1')
+    splitLeaf(before, 'tm-0', 'row', 'tm-1', 'tm')
     closeLeaf(before, 'source')
     resize(before, [], 0, 0.2)
     expect(before).toEqual(snapshot)
@@ -297,6 +299,73 @@ describe('parseLayout', () => {
     ).toBeNull()
   })
 
+  /**
+   * THE COMPANION TO THE CASE ABOVE, AND THE ONE THAT COSTS SOMETHING REAL WHEN IT IS MISSING. "At
+   * most one source leaf" was enforced; "the source leaf is `SOURCE_LEAF`" was not, and the two are
+   * not the same claim. `SOURCE_LEAF`'s own doc says a source leaf under a fresh id "would be a
+   * different leaf as far as every one of those is concerned — an empty pane beside a detached
+   * editor": `pane-host.ts`'s creation pass skips the source kind (the editor's host is seeded before
+   * any layout exists), so `hostFor('foo', 'source')` mints an EMPTY `<section>` and the real editor
+   * is left mounted in a host the tree no longer names.
+   *
+   * ONE SOURCE LEAF UNDER THE WRONG ID, NOT TWO — a tree with `{id:'foo', pane:'source'}` and nothing
+   * else of that kind passes the `sources > 1` count, which is exactly why counting was not enough.
+   */
+  it('returns null for a source leaf under an id that is not SOURCE_LEAF', () => {
+    expect(
+      parseLayout(
+        wrap({
+          kind: 'split',
+          dir: 'row',
+          children: [
+            { kind: 'leaf', id: 'foo', pane: 'source' },
+            { kind: 'leaf', id: 'b', pane: 'lambda' },
+          ],
+          sizes: [0.5, 0.5],
+        }),
+      ),
+    ).toBeNull()
+  })
+
+  /** The same tree with the id spelled right, so the case above is failing on the ID and not the shape. */
+  it('accepts that same tree once the source leaf carries SOURCE_LEAF', () => {
+    expect(
+      parseLayout(
+        wrap({
+          kind: 'split',
+          dir: 'row',
+          children: [
+            { kind: 'leaf', id: SOURCE_LEAF, pane: 'source' },
+            { kind: 'leaf', id: 'b', pane: 'lambda' },
+          ],
+          sizes: [0.5, 0.5],
+        }),
+      ),
+    ).not.toBeNull()
+  })
+
+  /**
+   * AND THE CONVERSE: `SOURCE_LEAF` IS RESERVED FOR THE SOURCE KIND. The id and the kind have to agree
+   * in BOTH directions, because `pane-host.ts` keys the editor's pre-seeded host on this id — a
+   * `{id: SOURCE_LEAF, pane: 'lambda'}` entry would have the creation pass build a `LambdaPane` into
+   * the host the editor is already mounted in.
+   */
+  it('returns null for a non-source leaf carrying SOURCE_LEAF', () => {
+    expect(
+      parseLayout(
+        wrap({
+          kind: 'split',
+          dir: 'row',
+          children: [
+            { kind: 'leaf', id: SOURCE_LEAF, pane: 'lambda' },
+            { kind: 'leaf', id: 'b', pane: 'tm' },
+          ],
+          sizes: [0.5, 0.5],
+        }),
+      ),
+    ).toBeNull()
+  })
+
   it('returns null for an unknown split direction', () => {
     expect(
       parseLayout(
@@ -324,5 +393,77 @@ describe('parseLayout', () => {
       sizes: [0.5, 0.5],
     })
     expect(parseLayout(noSource)).not.toBeNull()
+  })
+})
+
+describe('setLeafKind', () => {
+  const tree = (): LayoutNode => ({
+    kind: 'split',
+    dir: 'row',
+    sizes: [0.3, 0.7],
+    children: [leaf('source', 'source'), leaf('a', 'lambda')],
+  })
+
+  it('changes the kind and touches nothing else', () => {
+    const next = setLeafKind(tree(), 'a', 'tm')
+    expect(leaves(next).map((l) => [l.id, l.pane])).toEqual([
+      ['source', 'source'],
+      ['a', 'tm'],
+    ])
+    // Decision 1 is that the pane keeps its place: same shape, same sizes.
+    expect(next).toMatchObject({ kind: 'split', dir: 'row', sizes: [0.3, 0.7] })
+  })
+
+  it('refuses source as a target even when the tree has no source leaf', () => {
+    // The condition that lets the PICKER create a source pane is exactly the condition a reader
+    // expects to unlock this. Decision 4 is why it does not: a pane never becomes the source pane.
+    const noSource: LayoutNode = {
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.5, 0.5],
+      children: [leaf('a', 'lambda'), leaf('b', 'tm')],
+    }
+    expect(() => setLeafKind(noSource, 'a', 'source')).toThrow(/source/)
+  })
+
+  it('refuses to change the source leaf', () => {
+    expect(() => setLeafKind(tree(), 'source', 'lambda')).toThrow(/source/)
+  })
+
+  it('refuses an id that is not in the tree', () => {
+    expect(() => setLeafKind(tree(), 'nope', 'tm')).toThrow(/not in the tree/)
+  })
+})
+
+describe('splitLeaf with an explicit kind', () => {
+  const twoLeaves = (): LayoutNode => ({
+    kind: 'split',
+    dir: 'row',
+    sizes: [0.5, 0.5],
+    children: [leaf('source', 'source'), leaf('a', 'lambda')],
+  })
+
+  it('creates a leaf of the requested kind, not the split leaf’s', () => {
+    const next = splitLeaf(twoLeaves(), 'a', 'row', 'b', 'tm')
+    expect(leaves(next).find((l) => l.id === 'b')?.pane).toBe('tm')
+  })
+
+  it('still refuses to split the source leaf, whatever kind is requested', () => {
+    expect(() => splitLeaf(twoLeaves(), 'source', 'row', 'b', 'lambda')).toThrow(/source/)
+  })
+
+  it('refuses to create a second source leaf', () => {
+    expect(() => splitLeaf(twoLeaves(), 'a', 'row', 'b', 'source')).toThrow(/source/)
+  })
+
+  it('creates a source leaf when the tree has none', () => {
+    const noSource: LayoutNode = {
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.5, 0.5],
+      children: [leaf('a', 'lambda'), leaf('b', 'tm')],
+    }
+    const next = splitLeaf(noSource, 'a', 'row', 'c', 'source')
+    expect(leaves(next).find((l) => l.id === 'c')?.pane).toBe('source')
   })
 })

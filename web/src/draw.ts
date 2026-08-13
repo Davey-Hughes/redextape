@@ -22,7 +22,7 @@ import type { TmPane } from './tm-pane'
  * `link-wiring.ts` already uses for the same variable and the same reason.
  *
  * `panes: PaneCollection` REPLACES `lambdaSlot`/`tmSlot`/`lambdaPane`/`tmPane` (T7). No longer "still
- * two panes, still the same two hosts" as of T12 (5d-ii-a): `main.ts`'s `applyLayout` derives which
+ * two panes, still the same two hosts" as of T12 (5d-ii-a): `pane-host.ts`'s `applyLayout` derives which
  * panes exist from the layout tree, so a leg can now hold any number of panes — only the route to them
  * (through the collection rather than a fixed pair of consts) stayed the same. See `PaneCollection`'s
  * own doc for why `of`/`ofSession` read the binding through the slot on every call rather than caching
@@ -34,6 +34,12 @@ import type { TmPane } from './tm-pane'
  * happened. `draw.ts` DOES NOT IMPORT `layout.ts` TO COMPUTE THIS ITSELF — `main.ts` holds the one
  * `LayoutNode` this app has; a second way to ask "how many leaves" here would be a second opinion about
  * a tree this module has no other reason to know exists.
+ *
+ * `sourceAvailable: () => boolean` IS `leaves`' SIBLING IN EVERY RESPECT — another fact about the one
+ * tree `main.ts` holds, asked live because a split or a close moves it, and phrased as a thunk over that
+ * tree rather than as a `layout.ts` import here for the reason above. It is the one input the split
+ * picker needs that this module cannot already see: `SessionRegistry.pairs()` and each pane's own
+ * binding, which are the rest of a `SplitChoices`, are both already in the loop below's hands.
  */
 export function createDraw(deps: {
   view: () => EditorView
@@ -41,8 +47,9 @@ export function createDraw(deps: {
   panes: PaneCollection
   links: LinkWiring
   leaves: () => number
+  sourceAvailable: () => boolean
 }): () => void {
-  const { view, sessions, panes, links: linkWiring, leaves } = deps
+  const { view, sessions, panes, links: linkWiring, leaves, sourceAvailable } = deps
   return () => {
     // "THE" λ AND TM PANES, RESOLVED THROUGH THE COLLECTION RATHER THAN CLOSED OVER — AND EITHER MAY
     // BE ABSENT. This block used to destructure `of(leg)[0]` and throw when it came back `undefined`,
@@ -52,18 +59,20 @@ export function createDraw(deps: {
     // offers `close` on the single λ pane a fresh page ships, and clicking it left this throwing on
     // every subsequent frame. Worse, `applyLayout` persists the new tree BEFORE calling `draw()`, so
     // the λ-less arrangement was already committed to `localStorage` and the dead app came back on
-    // reload — only `reset layout` escaped it. `PaneCollection.first` is now the one place that answers
-    // this question, and it answers `undefined`; see its own doc for why all four consumers were
-    // holding the same expired invariant privately.
+    // reload — only `reset layout` escaped it. `PaneCollection.active` is now the one place that
+    // answers this question, and it answers `undefined` when the leg is empty; see its own doc for why
+    // all four consumers were once holding the same expired invariant privately, and for how it now
+    // picks among several panes on the same leg — the pane the user last focused, per leg, falling back
+    // to insertion order (5d-ii-b).
     //
     // A LEG WITH NO PANE CONTRIBUTES NOTHING, RATHER THAN BEING FAKED WITH A DEFAULT. The scalar reads
     // below (`tmFocus`'s `tm.hist...`, the source editor's `lam.hist...`) feed the ONE shared status
-    // line and the ONE source editor's decoration, neither of which has a per-pane identity yet —
-    // which pane's state should win once a leg holds more than one is 5d-ii-b's question. What a leg
-    // with NO pane should contribute has an answer today, and it is `null` at both sites: there is no
-    // running focus on a leg nobody is looking at.
-    const lam = panes.first('lambda')?.slot.resolve(sessions)
-    const tm = panes.first('tm')?.slot.resolve(sessions)
+    // line and the ONE source editor's decoration, neither of which has a per-pane identity yet — which
+    // pane's state should win once a leg holds more than one is answered by `active` itself now, not
+    // here. What a leg with NO pane should contribute has an answer today, and it is `null` at both
+    // sites: there is no running focus on a leg nobody is looking at.
+    const lam = panes.active('lambda')?.slot.resolve(sessions)
+    const tm = panes.active('tm')?.slot.resolve(sessions)
     // THE TM LEG'S OWN RUNNING FOCUS — `TmState.source_node`, NOT `lam.hist.current?.owner` below.
     // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2): "TM: TmState.source_node,
     // resolved through SourceMap::tm_owner ... none; shipped 2026-07-30." Each pane reports what ITS
@@ -89,6 +98,15 @@ export function createDraw(deps: {
     const tmFocusLink: Link | null =
       tmFocus !== null && linkWiring.index !== null ? linkWiring.index.linkFor(tmFocus.node) : null
 
+    // THE PICKER'S TWO SHARED INPUTS, RESOLVED ONCE PER FRAME RATHER THAN ONCE PER PANE. Both answers
+    // are app-wide — every pane may be pointed at the same set of pairs, and "is there a source leaf" is
+    // a question about the one tree — so this is the same fan-out `tmFocusLink` above already performs,
+    // and it keeps the per-pane cost of the `setLayoutControls` call below to one small object.
+    // `PaneSlot.render` calls `pairs()` again for the binding selector; hoisting THAT would mean handing
+    // the slot a list it is documented to fetch for itself.
+    const pairs = sessions.pairs()
+    const canCreateSource = sourceAvailable()
+
     // THE DRAW PASS, OVER EVERY PANE RATHER THAN EXACTLY TWO (T7's conversion of the render calls).
     // `setFocus` still runs BEFORE `render` for a tm-kind pane and for the reason above; `tmFocusLink`
     // is the SAME value handed to every tm-kind pane found here, matching `setFocus`'s per-leg
@@ -97,7 +115,7 @@ export function createDraw(deps: {
     // the narrow structural type `PaneSlot.render` needs (see that type's own doc in `sessions.ts`),
     // which does not carry `setFocus` — a fact about the CONCRETE `TmPane` class, not about what a
     // slot's render pass requires. Safe here because `p.slot.binding.leg === 'tm'` is exactly the
-    // condition under which `main.ts` ever constructs a `PaneEntry` with a `TmPane` in `.pane`.
+    // condition under which `pane-host.ts` ever constructs a `PaneEntry` with a `TmPane` in `.pane`.
     for (const p of panes.all()) {
       const leg = p.slot.resolve(sessions)
       if (p.slot.binding.leg === 'tm') (p.pane as TmPane).setFocus(tmFocusLink?.states ?? [])
@@ -109,7 +127,17 @@ export function createDraw(deps: {
       // the last leaf on THIS pane's leg" — a lone TM pane still offers close as long as source or λ
       // panes exist beside it. `p.kind !== 'source'` is the split refusal: one editor, nothing to
       // duplicate into (`splitLeaf`'s own doc).
-      p.pane.setLayoutControls(leaves() > 1, p.kind !== 'source')
+      //
+      // THE THIRD ARGUMENT IS WHAT THE SPLIT MAY CREATE, and it rides this call rather than a setter of
+      // its own — `PaneView.setLayoutControls`'s own doc has that argument. `p.slot.binding` is the
+      // pane's own pair, which the menu puts first and labels `(same)`; it is read here rather than
+      // remembered by the pane for `PaneCollection`'s reason for reading bindings through the slot on
+      // every call — a copy is a second place to be wrong.
+      p.pane.setLayoutControls(leaves() > 1, p.kind !== 'source', {
+        options: pairs,
+        sourceAvailable: canCreateSource,
+        current: p.slot.binding,
+      })
     }
 
     // RESOLVED ONCE, HERE, AND SHARED BY BOTH CONSUMERS BELOW. `draw()` runs on every recorded frame

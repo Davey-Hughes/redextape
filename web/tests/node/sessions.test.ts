@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { ControlState } from '../../src/controls'
 import { History } from '../../src/history'
-import type { RunReply, RunRequest } from '../../src/protocol'
+import type { LinkWiring } from '../../src/link-wiring'
+import type { Leg, RunReply, RunRequest } from '../../src/protocol'
+import type { LambdaScratchpad } from '../../src/scratch'
 import type { ClientPort, SessionId } from '../../src/session-client'
 import { SessionClient } from '../../src/session-client'
-import type { BindingOption, LegState, PaneView, SessionEntry } from '../../src/sessions'
+import type { Binding, LegState, PaneOption, PaneView, SessionEntry } from '../../src/sessions'
 import { PaneSlot, resetLegs, SessionRegistry } from '../../src/sessions'
+import { createTransport } from '../../src/transport'
 import type { LambdaState, TmState } from '../../src/types'
 
 /**
@@ -87,14 +90,17 @@ function entry(
     for (const s of opts.tm) t.hist.push(tmFrame(s), 1)
     legs.tm = t
   }
-  return { id, label: opts.label ?? id, detached: opts.detached ?? false, client: fakeClient(), legs }
+  // NO MACHINE ON ANY OF THEM. `SessionEntry.tmProgram` is retained from a `compiled` reply, and this
+  // file drives the binding model rather than the reply switch — `tests/node/replies.test.ts` is where
+  // the retention itself is asserted.
+  return { id, label: opts.label ?? id, detached: opts.detached ?? false, client: fakeClient(), legs, tmProgram: null }
 }
 
 /** A `PaneView` that records every call instead of touching a DOM. */
 function recorder<T>() {
   const frames: (T | null)[] = []
   const controls: ControlState[] = []
-  const bindings: { options: BindingOption[]; current: SessionId }[] = []
+  const bindings: { options: PaneOption[]; current: Binding<Leg> }[] = []
   const detached: boolean[] = []
   const view: PaneView<T> = {
     render: (frame, c) => {
@@ -234,6 +240,86 @@ describe('PaneSlot', () => {
   })
 
   /**
+   * **THE SESSION AXIS, WHICH IS THE WHOLE OF WHAT `transport.ts`'s HANDLER DECIDES — and this test used
+   * to assert one more thing, which moved.**
+   *
+   * It was written for a Critical, found in review of the commit that widened the selector to
+   * `(leg, session)` pairs. The chain, all four links live: `PaneSlot.render` pushes `reg.pairs()` to
+   * EVERY pane, so a TM pane's selector listed the λ-only scratch; `transport.ts`'s handler kept the
+   * slot's leg and discarded the picked one, minting `{ leg: 'tm', session: 'lambda-scratch' }`; and
+   * `draw.ts`'s per-pane loop calls `slot.resolve` with no `try`/`catch`, so `legOf`'s throw took the
+   * whole render pass — not one dropped frame, but every frame after it. Three clicks from a fresh page:
+   * compile, fork the λ pane, then pick `λ scratchpad` on the TM pane's selector. The fix was a guard in
+   * that handler, and this test asserted the refusal: the slot unmoved, and — the assertion the render
+   * loop was implicitly making — the binding still resolving.
+   *
+   * **THE REFUSAL BECAME A THROW, AND WHAT IT MEANS MOVED WITH IT.** A cross-leg pick is ACTED ON now:
+   * `pane-host.ts`'s `paneEvents.rebind` changes the leaf's kind and `applyLayout` rebuilds the entry on
+   * the picked leg. So "ignored" is no longer the app's answer and this test no longer asserts it — but
+   * the pick still cannot be projected onto this slot's leg, and that is what the throw below pins. The
+   * distinction is the whole of why the comparison came back after one commit without it: a silent
+   * decline is an ANSWER, and the wrong one now; a throw is this layer stating it does not answer.
+   * `new LambdaPane(host, transport.events(slot))` typechecks, and `scratch-fork.test.ts` writes that
+   * shape twice with hand-built events, so "no caller does this" is a fact worth checking rather than
+   * asserting.
+   *
+   * **THE BEHAVIOUR HALF MOVED TO THE BROWSER TIER, WHICH IS WHERE IT CAN BE DRIVEN AT ALL.** The
+   * replacement needs a layout tree, two pane classes and a DOM, so `tests/browser/pane-kind-switch.test.ts`
+   * drives the Critical's own three clicks — compile, fork, pick the λ-only scratch on the TM pane — and
+   * asserts the pane follows the pick AND keeps painting afterwards, the second half being `legOf` not
+   * throwing on a LATER frame, which was the Critical's actual signature.
+   *
+   * WHAT IS LEFT HERE IS NOT PADDING. This is still the only test that drives `rebind` through
+   * `createTransport` rather than calling `slot.rebind` directly, and the same-leg assertions are the
+   * two facts the browser tier can only read through several layers of DOM: the pick moves the binding,
+   * and it repaints exactly once. A handler that took the pick and skipped the draw would leave the
+   * `<select>` naming a pair the pane is not showing.
+   */
+  it('takes the session a same-leg pick names, repaints once, and throws on a cross-leg one', () => {
+    const reg = new SessionRegistry()
+    reg.add(entry('source', { label: 'source', lambda: ['from source'], tm: [0] }))
+    reg.add(entry('lambda-scratch', { label: 'λ scratchpad', detached: true, lambda: ['from scratch'] }))
+
+    const transport = createTransport({
+      sessions: reg,
+      // NEITHER IS REACHED BY `rebind`, AND THE CASTS SAY SO RATHER THAN BUILDING TWO FAKES. The
+      // scratchpad is touched only by `detach`/`editScratch` and `linkWiring` only by
+      // `detach`/`linkState`/`linkLambda`; a `rebind` that consulted either would fail here loudly,
+      // which is the point of not supplying them.
+      scratchpad: {} as LambdaScratchpad,
+      draw: () => draws++,
+      linkWiring: () => ({}) as LinkWiring,
+    })
+    let draws = 0
+
+    const lambda = new PaneSlot('lambda', 'source')
+    transport.events(lambda).rebind({ leg: 'lambda', session: 'lambda-scratch' })
+    expect(lambda.binding).toEqual({ session: 'lambda-scratch', leg: 'lambda' })
+    // RESOLVED, NOT JUST RECORDED — the binding having moved and the binding being usable are two
+    // claims, and it was the second one the Critical broke.
+    expect(lambda.resolve(reg).hist.current?.text).toBe('from scratch')
+    expect(draws).toBe(1)
+
+    // THE CROSS-LEG PICK, WHICH THIS LAYER REFUSES TO ANSWER. The exact pick that produced the
+    // Critical: the session half is λ-only, so projecting it onto a TM slot mints the binding `legOf`
+    // dies on.
+    const tm = new PaneSlot('tm', 'source')
+    expect(() => transport.events(tm).rebind({ leg: 'lambda', session: 'lambda-scratch' })).toThrow(
+      /cannot take a lambda pick/,
+    )
+    // AND THE SLOT DID NOT MOVE ON THE WAY OUT — a throw AFTER `slot.rebind` would leave exactly the
+    // state this exists to prevent, reported rather than avoided. Both halves, for `detached-badge`'s
+    // reason: the assertion that something did not happen is not the assertion that it was announced.
+    expect(tm.binding).toEqual({ session: 'source', leg: 'tm' })
+    expect(() => tm.resolve(reg)).not.toThrow()
+    // NO DRAW ON THE REFUSED PICK — the count is unchanged from the same-leg one above. The `<select>`
+    // is left showing the pick, which is correct here and is NOT the "a refused pick still paints"
+    // rule the old guard followed: that rule was for a decline a user could reach, and this is a
+    // wiring bug no user can.
+    expect(draws).toBe(1)
+  })
+
+  /**
    * §5's JOINT DETACHMENT CASE, WHICH THE DESIGN OWED TO "THE TASK THAT WIRES `main.ts`". Its words:
    * "bind a pane to a scratch, see both, rebind, see neither — CANNOT be written in this slice ... It
    * needs a binding to flip, and per §3.2b none exists." A binding exists now, and it flips here.
@@ -258,9 +344,19 @@ describe('PaneSlot', () => {
     expect(pane.detached.at(-1)).toBe(false)
   })
 
-  // The selector's contents are a function of the registry AND of the slot's leg, and both are read
-  // on the render path — so a session added while a pane sits still reaches that pane's selector.
-  it('pushes the options for its own leg, marking the session in force', () => {
+  /**
+   * The selector's contents are a function of the registry ALONE now, and the pair in force is what
+   * ties the list to the slot — so a session added while a pane sits still reaches that pane's
+   * selector.
+   *
+   * **EVERY PAIR, NOT THE SLOT'S OWN LEG, AND THAT REVERSES WHAT THIS TEST USED TO ASSERT.** It was
+   * "pushes the options for its own leg, marking the session in force", and it pinned
+   * `reg.options(b.leg)` — a list that could never mention the other leg. `PaneSlot.render` pushes
+   * `reg.pairs()` now, so a TM slot's list carries the λ pairs too, and the pairs that never appear
+   * are the ones whose SESSION lacks the leg. `tm-scratch` below is that distinction under test: a
+   * TM-only session adds a TM pair and no λ one.
+   */
+  it('pushes every (leg, session) pair, marking the one in force', () => {
     const reg = new SessionRegistry()
     reg.add(entry('source', { label: 'source', lambda: ['a'], tm: [0] }))
 
@@ -268,16 +364,23 @@ describe('PaneSlot', () => {
     const pane = recorder<TmState>()
 
     paintTm(reg, slot, pane.view)
-    expect(pane.bindings.at(-1)).toEqual({ options: [{ id: 'source', label: 'source' }], current: 'source' })
+    expect(pane.bindings.at(-1)).toEqual({
+      options: [
+        { leg: 'lambda', id: 'source', label: 'source' },
+        { leg: 'tm', id: 'source', label: 'source' },
+      ],
+      current: { session: 'source', leg: 'tm' },
+    })
 
     reg.add(entry('tm-scratch', { label: 'TM scratchpad', detached: true, tm: [7] }))
     paintTm(reg, slot, pane.view)
     expect(pane.bindings.at(-1)).toEqual({
       options: [
-        { id: 'source', label: 'source' },
-        { id: 'tm-scratch', label: 'TM scratchpad' },
+        { leg: 'lambda', id: 'source', label: 'source' },
+        { leg: 'tm', id: 'source', label: 'source' },
+        { leg: 'tm', id: 'tm-scratch', label: 'TM scratchpad' },
       ],
-      current: 'source',
+      current: { session: 'source', leg: 'tm' },
     })
   })
 
@@ -349,5 +452,29 @@ describe('resetLegs', () => {
     expect(tmOnly.legs.lambda).toBeUndefined()
     expect(tmLeg.status).toEqual({ available: true, reason: 'ok' })
     expect(tmLeg.hist.length).toBe(0)
+  })
+})
+
+describe('SessionRegistry.pairs', () => {
+  it('omits the pair a session has no leg for', () => {
+    // THE CLAIM: an invalid (leg, session) pair is ABSENT FROM THE LIST rather than rejected when
+    // selected. `legOf` throws on a binding naming a missing leg, so a selector that offered
+    // (tm, scratch) would be the one way a user gesture could reach that throw.
+    const reg = new SessionRegistry()
+    reg.add(entry('source', { label: 'source', lambda: ['x'], tm: [0] }))
+    reg.add(entry('scratch-1', { label: 'scratch 1', detached: true, lambda: ['y'] }))
+
+    expect(reg.pairs()).toEqual([
+      { leg: 'lambda', id: 'source', label: 'source' },
+      { leg: 'lambda', id: 'scratch-1', label: 'scratch 1' },
+      { leg: 'tm', id: 'source', label: 'source' },
+    ])
+  })
+
+  it('groups by leg and keeps registration order within each', () => {
+    const reg = new SessionRegistry()
+    reg.add(entry('a', { label: 'a', lambda: ['x'], tm: [0] }))
+    reg.add(entry('b', { label: 'b', lambda: ['y'], tm: [1] }))
+    expect(reg.pairs().map((p) => `${p.leg}:${p.id}`)).toEqual(['lambda:a', 'lambda:b', 'tm:a', 'tm:b'])
   })
 })

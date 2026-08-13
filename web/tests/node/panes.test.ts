@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { ControlState } from '../../src/controls'
 import { PaneCollection, type PaneEntry } from '../../src/panes'
+import type { Leg } from '../../src/protocol'
 import type { SessionId } from '../../src/session-client'
-import type { BindingOption, PaneView } from '../../src/sessions'
+import type { Binding, PaneOption, PaneView } from '../../src/sessions'
 import { PaneSlot } from '../../src/sessions'
 import type { LambdaState, TmState } from '../../src/types'
 
@@ -23,7 +24,7 @@ function fakePane<T>(): PaneView<T> & { frames: (T | null)[] } {
     render(frame: T | null, _c: ControlState) {
       frames.push(frame)
     },
-    setBindings(_o: BindingOption[], _c: SessionId) {},
+    setBindings(_o: PaneOption[], _c: Binding<Leg>) {},
     setDetached(_d: boolean) {},
     setLayoutControls(_canClose: boolean, _canSplit: boolean) {},
   }
@@ -72,15 +73,15 @@ describe('PaneCollection', () => {
     expect(panes.ofSession('lambda', 'lambda-scratch').map((p) => p.id)).toEqual(['a'])
   })
 
-  // `first` IS THE ONE PLACE "THE λ PANE" IS ANSWERED, and the answer it has to give is `undefined`.
+  // `active` IS THE ONE PLACE "THE λ PANE" IS ANSWERED, and the answer it has to give is `undefined`.
   // Four modules used to ask this question privately and three of them threw, on an invariant that
   // expired when panes started being derived from the layout tree — see the method's own doc.
   it('answers undefined for a leg with no pane rather than throwing', () => {
     const panes = new PaneCollection()
     panes.add(lambdaEntry('a', 'source'))
-    expect(panes.first('tm')).toBeUndefined()
+    expect(panes.active('tm')).toBeUndefined()
     panes.remove('a')
-    expect(panes.first('lambda')).toBeUndefined()
+    expect(panes.active('lambda')).toBeUndefined()
   })
 
   it('answers first-in-insertion-order for a leg holding several', () => {
@@ -88,8 +89,8 @@ describe('PaneCollection', () => {
     panes.add(tmEntry('c', 'source'))
     panes.add(lambdaEntry('a', 'source'))
     panes.add(lambdaEntry('b', 'source'))
-    expect(panes.first('lambda')?.id).toBe('a')
-    expect(panes.first('tm')?.id).toBe('c')
+    expect(panes.active('lambda')?.id).toBe('a')
+    expect(panes.active('tm')?.id).toBe('c')
   })
 
   it('throws on a duplicate id, mirroring SessionRegistry.add', () => {
@@ -133,5 +134,57 @@ describe('PaneCollection', () => {
     expect(panes.get('a')).toBeDefined()
     panes.remove('a')
     expect(panes.get('a')).toBeUndefined()
+  })
+})
+
+describe('active', () => {
+  it('falls back to insertion order when nothing is marked', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    panes.add(lambdaEntry('b', 'source'))
+    expect(panes.active('lambda')?.id).toBe('a')
+  })
+
+  it('returns the marked pane', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    panes.add(lambdaEntry('b', 'source'))
+    panes.markActive('b')
+    expect(panes.active('lambda')?.id).toBe('b')
+  })
+
+  it('falls back when the marked pane was removed', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    panes.add(lambdaEntry('b', 'source'))
+    panes.markActive('b')
+    panes.remove('b')
+    expect(panes.active('lambda')?.id).toBe('a')
+  })
+
+  it('falls back when the marked leaf changed leg', () => {
+    // THE KIND CHANGE. `markActive` recorded lambda -> 'b'; 'b' is now a TM pane under the same id,
+    // so it is no longer an answer to "which lambda pane is active". Design §4.2c.
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    panes.add(lambdaEntry('b', 'source'))
+    panes.markActive('b')
+    panes.remove('b')
+    panes.add(tmEntry('b', 'source'))
+    expect(panes.active('lambda')?.id).toBe('a')
+    expect(panes.active('tm')?.id).toBe('b')
+  })
+
+  it('is undefined for a leg with no pane', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    expect(panes.active('tm')).toBeUndefined()
+  })
+
+  it('ignores a mark for an id it does not hold', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    panes.markActive('ghost')
+    expect(panes.active('lambda')?.id).toBe('a')
   })
 })

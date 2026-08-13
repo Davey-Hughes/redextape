@@ -9,7 +9,7 @@ import { lambdaFrameBytes, type RunReply, tmFrameBytes } from './protocol'
 import { noSessionRows, type Row, resultRows } from './results'
 import type { LambdaScratchpad } from './scratch'
 import type { SessionId } from './session-client'
-import { resetLegs, type SessionRegistry } from './sessions'
+import { resetLegs, type SessionRegistry, type TmCompiled } from './sessions'
 import type { TmPane } from './tm-pane'
 
 function renderRows(host: HTMLElement, rows: Row[]): void {
@@ -51,10 +51,11 @@ function renderRows(host: HTMLElement, rows: Row[]): void {
  * factory is called, unlike the `let`s `link-wiring.ts` and `draw.ts` themselves close over earlier in
  * construction.
  *
- * `panes: PaneCollection` REPLACES `lambdaSlot`/`tmSlot`/`lambdaPane`/`tmPane` (T7). `setProgram` below
- * is PER-SESSION — it belongs to the session whose worker sent the reply, routed through
- * `panes.ofSession('tm', session)` — while `setEditor` keeps exactly one target; see that call's own
- * comment for why generalising it to "every pane bound to this session" is not the same move.
+ * `panes: PaneCollection` REPLACES `lambdaSlot`/`tmSlot`/`lambdaPane`/`tmPane` (T7). `setProgram` — now
+ * reached through `setTmProgram` below, which retains what it pushes — is PER-SESSION: it belongs to the
+ * session whose worker sent the reply, routed through `panes.ofSession('tm', session)`, while
+ * `setEditor` keeps exactly one target; see that call's own comment for why generalising it to "every
+ * pane bound to this session" is not the same move.
  *
  * `renderRows` IS NOT A DEPENDENCY. `main.ts` used to define it locally over `results.ts`'s `Row` type;
  * grepping its call sites (`renderRows(results, noSessionRows(...))`, `renderRows(results,
@@ -93,14 +94,14 @@ export function createReplies(deps: {
    * about there being exactly one editor to mount, not about which pane's binding currently names which
    * session (see the `scratch-compiled` and `worker-error` arms below) — true only until wave 3
    * (5d-ii-a)'s editor-moves rule, which is what turns "which pane" into a real question with more than
-   * one candidate answer. `main.ts`'s `editorHomeFor` is the one place that answers it, since only it
+   * one candidate answer. `editor-custody.ts`'s `editorHomeFor` is the one place that answers it, since only it
    * holds `editorOwner`; `undefined` here replaces the old helper's throw, because the recorded owner
    * can be stale (its pane closed, or rebound away) rather than a wiring bug — a reply landing on a
    * session with nowhere to mount its editor has nothing to do, not an invariant to raise about.
    */
   editorHome: () => LambdaPane | undefined
   /**
-   * Make every `LambdaEditor` agree with where `main.ts` says it belongs — called on the ONE arm below
+   * Make every `LambdaEditor` agree with where `editor-custody.ts` says it belongs — called on the ONE arm below
    * that retires a session (`no-session`'s phantom-fork path), for the reason `compile.ts`'s identical
    * dependency records at length: a retire has to leave no editor behind for a session that no longer
    * exists, and `editorHome()` above can only ever reach one a pane is still HOLDING, never one in
@@ -108,7 +109,7 @@ export function createReplies(deps: {
    * session's incarnation" is a property of the retire, not of which caller happened to trigger it.
    *
    * **THAT SENTENCE NEEDED A SECOND HALF, ADDED BY THE THIRD REVIEW ROUND: BOTH CALLERS CALLING IT WAS
-   * NOT SUFFICIENT.** `reconcileEditors` swept the sessions `main.ts`'s `editorOwner` named, and a
+   * NOT SUFFICIENT.** `reconcileEditors` swept the sessions `editor-custody.ts`'s `editorOwner` named, and a
    * custody entry whose claim had been dropped (which is what `reset layout` does to a closed pane's
    * claim) appeared in neither pass — so the property held of the CALLERS and not of the app. Its
    * custody pass now iterates `heldEditors` itself. Nothing changed here, which is the point worth
@@ -116,10 +117,11 @@ export function createReplies(deps: {
    * still false.
    *
    * **AND THIS CALL SITE WAS ITSELF UNCOVERED WHEN THE CLAIM ABOVE WAS WRITTEN** — a Minor from the same
-   * round: `replies.ts:314-330` was reported uncovered by `pnpm test:coverage`, so deleting the call
-   * below could not fail a test, and "both retire paths call this" was defended by argument on exactly
-   * the path this file owns. `tests/browser/scratch-fork.test.ts`'s "drives the phantom `no-session`
-   * through `createReplies`" case now executes it against a real failed fork on a real worker thread.
+   * round: `onScratchReply`'s `no-session` arm was reported uncovered by `pnpm test:coverage`, so
+   * deleting the call below could not fail a test, and "both retire paths call this" was defended by
+   * argument on exactly the path this file owns. `tests/browser/scratch-fork.test.ts`'s "drives the
+   * phantom `no-session` through `createReplies`" case now executes it against a real failed fork on a
+   * real worker thread.
    */
   reconcileEditors: () => void
 }): {
@@ -138,6 +140,32 @@ export function createReplies(deps: {
     editorHome,
     reconcileEditors,
   } = deps
+
+  /**
+   * Tell every TM pane on `session` what machine it is showing, and leave that on the session's entry.
+   *
+   * **THE STORE AND THE PUSH ARE ONE CALL SO THEY CANNOT DISAGREE.** `SessionEntry.tmProgram` exists to
+   * seed a TM pane created later (see its own doc), which is only correct while it holds what the panes
+   * on screen were actually told — and the arms below tell them different things, one of which is
+   * "nothing". Storing beside each `setProgram` loop instead would be one chance per arm to update one
+   * and not the other, and the failure that produces is a pane created during an outage showing a
+   * machine nobody else is showing, which nothing on screen would report.
+   *
+   * PER-SESSION, WHICH IS WHAT `panes.ofSession('tm', session)` SAYS AND `panes.of('tm')` WOULD NOT — the
+   * fan-out this replaces carried that argument at every one of its sites, and it is the same one: a
+   * reply belongs to the session whose worker sent it, so a scratch session's TM pane (there is none
+   * today, but the collection does not know that) is never repainted with the source session's answer.
+   *
+   * THE `as TmPane` CAST IS THE ONE THE LOOPS ALREADY CARRIED. `PaneView<TmState>` is what the collection
+   * is parameterised by and `setProgram` is not on it — deliberately, since `PaneSlot` never calls it —
+   * so this is the same narrowing at one site instead of at every arm.
+   */
+  const setTmProgram = (session: SessionId, compiled: TmCompiled | null): void => {
+    sessions.entryOf(session).tmProgram = compiled
+    for (const p of panes.ofSession('tm', session)) {
+      ;(p.pane as TmPane).setProgram(compiled?.program ?? null, compiled?.tapeNames ?? [])
+    }
+  }
 
   /**
    * One session's replies, applied to that session's legs.
@@ -162,12 +190,9 @@ export function createReplies(deps: {
         // STALE FRAMES MUST NOT SURVIVE A BROKEN PROGRAM. A pane still showing the last good run
         // under source that does not compile is the worst of both answers.
         resetLegs(legs, null, null, 'not compiled')
-        // PER-SESSION — belongs to the session whose worker sent this reply. `session` is this
-        // function's own parameter, which is exactly the tell T7's own doc gives for this class of
-        // call: `panes.ofSession('tm', session)`, not `panes.of('tm')`, so a scratch session's TM pane
-        // (there is none today, but the collection does not know that) is never repainted with the
-        // SOURCE session's "not compiled".
-        for (const p of panes.ofSession('tm', session)) (p.pane as TmPane).setProgram(null, [])
+        // NOTHING TO SHOW, AND THE SESSION IS LEFT HOLDING NOTHING EITHER — see `setTmProgram` above for
+        // why those are one call. The per-session argument this line used to carry lives there now.
+        setTmProgram(session, null)
         linkWiring.setIndex(null)
         view().dispatch({ effects: [setDecline.of(null), setLink.of(null)] })
         // `draw()` calls `drawLink()` at its end now — see that function's doc.
@@ -175,8 +200,13 @@ export function createReplies(deps: {
         return
       case 'compiled':
         resetLegs(legs, reply.lambda, reply.tm)
-        // PER-SESSION, same reason as the `no-session` arm above.
-        for (const p of panes.ofSession('tm', session)) (p.pane as TmPane).setProgram(reply.tmProgram, reply.tapeNames)
+        // THE ONE REPLY THAT CARRIES A MACHINE, RETAINED AS IT IS FANNED OUT. `tmProgram` is nullable on
+        // the wire defensively rather than reachably (`protocol.ts`'s own doc), so a reply with no machine
+        // in it leaves the session holding nothing rather than an envelope around a `null`.
+        setTmProgram(
+          session,
+          reply.tmProgram === null ? null : { program: reply.tmProgram, tapeNames: reply.tapeNames },
+        )
         linkWiring.setIndex(reply.linkIndex === null ? null : new LinkIndex(reply.linkIndex))
         // `setLink.of(null)` HERE TOO, NOT ONLY `setDecline`. `linkMark` clears its own decoration on
         // `docChanged`, which covers the ordinary typing path — but the `#encoding` picker's `change`
@@ -221,15 +251,16 @@ export function createReplies(deps: {
         // against the SAME live nodes they always did — nothing here was ever the problem.
         results.dataset.state = 'idle'
         // STALE FRAMES MUST NOT SURVIVE A BROKEN PROGRAM, same as `no-session` above. `compile()`
-        // throws by design for an unknown encoding (`lib.rs:36-38`) from inside `onRun`, before any
-        // session exists — so a `worker-error` from a fresh `client.request()` is not only a call that
+        // throws by design for an unknown encoding (`redextape-wasm`'s `compile` doc) from inside
+        // `onRun`, before any session exists — so a `worker-error` from a fresh `client.request()` is
+        // not only a call that
         // threw mid-record on top of a live session; it can also mean there was never a new session at
         // all, and the panes are still showing the PREVIOUS program's frames under a message saying the
         // app broke. Either way there is no session, which is what "not compiled" means — the same
         // reason `no-session` above passes, since a `compile()` that threw never produced one.
         resetLegs(legs, null, null, 'not compiled')
-        // PER-SESSION, same reason as the two arms above.
-        for (const p of panes.ofSession('tm', session)) (p.pane as TmPane).setProgram(null, [])
+        // NOTHING TO SHOW AND NOTHING RETAINED, same as the `no-session` arm above.
+        setTmProgram(session, null)
         linkWiring.setIndex(null)
         view().dispatch({ effects: [setDecline.of(null), setLink.of(null)] })
         showWorkerError(results, new Error(reply.message))
@@ -330,7 +361,7 @@ export function createReplies(deps: {
           // `noSessionReply` calls `retire` internally, so this arm kills a session exactly as
           // `compile.ts`'s recompile-from-source does, and like it reaches for `draw()` rather than
           // `applyLayout()`. A MOUNTED editor comes down either way, through the `setDetached(false)`
-          // the `draw()` below drives once `retire` has rebound the pane; a HELD one — `main.ts`'s
+          // the `draw()` below drives once `retire` has rebound the pane; a HELD one — `editor-custody.ts`'s
           // `heldEditors`, a closed pane's editor in custody — is what nothing here could reach, and it
           // is narrow rather than unreachable. Custody needs an editor to have been mounted, which needs
           // `scratch-compiled` above to have landed; this branch needs the λ leg to hold no FRAME, and
@@ -392,9 +423,9 @@ export function createReplies(deps: {
         // thread is dead and nothing here retires the scratchpad (only `LambdaScratchpad.retire` does
         // that, and a worker throwing is not a call to it), so the registry entry keeps
         // `detached: true`, the pane's binding does not move, and `setDetached`'s own new teardown
-        // never fires — its input never changes. But the editor `main.ts` mounted from an earlier
-        // `scratch-compiled` is now sitting over a worker that will never answer another message, so
-        // it has to come down explicitly, here, rather than by that invariant. A no-op if the pane had
+        // never fires — its input never changes. But the editor this file's own `scratch-compiled` arm
+        // mounted is now sitting over a worker that will never answer another message, so it has to
+        // come down explicitly, here, rather than by that invariant. A no-op if the pane had
         // already moved on before this reply arrived (`setEditor`'s own doc: unmounting an
         // already-unmounted editor costs nothing). ONE TARGET, same as the `scratch-compiled` arm's
         // own comment above — `undefined` here means the owning pane already closed, in which case

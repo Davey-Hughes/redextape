@@ -20,8 +20,8 @@ export type PaneKind = 'source' | 'lambda' | 'tm'
  * itself and the element it is mounted in.
  *
  * PARAMETERISED BY THE LEG, so `of('lambda')` yields entries whose `pane` is a `PaneView<LambdaState>`
- * and whose `slot` is a `PaneSlot<'lambda'>` — the property `Binding<K>` exists to protect
- * (`sessions.ts:110-124`), carried through the collection rather than lost at its boundary.
+ * and whose `slot` is a `PaneSlot<'lambda'>` — the property `Binding<K>` exists to protect (its own doc
+ * in `sessions.ts`), carried through the collection rather than lost at its boundary.
  */
 export type PaneEntry<K extends Leg> = {
   readonly id: LeafId
@@ -41,14 +41,16 @@ export type PaneEntry<K extends Leg> = {
  *
  * IT READS THE BINDING THROUGH THE SLOT ON EVERY CALL RATHER THAN INDEXING BY SESSION. A
  * `Map<SessionId, …>` would be a second copy of a fact `PaneSlot` already owns, and `rebind` would
- * have to remember to update it — the two-places-to-be-wrong failure `sessions.ts:8-16` refuses one
- * type up. The cost is a linear scan of a collection whose size is the number of panes on screen.
+ * have to remember to update it — the two-places-to-be-wrong failure `sessions.ts`'s `LegState` doc
+ * refuses one type up. The cost is a linear scan of a collection whose size is the number of panes on
+ * screen.
  *
  * INSERTION ORDER IS ITERATION ORDER, matching `SessionRegistry`'s `Map` for the same reason: it
  * falls out without a comparator that would have to invent a rank.
  */
 export class PaneCollection {
   #entries = new Map<LeafId, PaneEntry<Leg>>()
+  #activeByLeg = new Map<Leg, LeafId>()
 
   get size(): number {
     return this.#entries.size
@@ -84,27 +86,49 @@ export class PaneCollection {
   }
 
   /**
-   * The pane rendering `leg`, if this leg has one at all — the one place that answers "the λ pane" /
-   * "the TM pane" for every scalar surface that still asks.
+   * Record that `id`'s pane is the one the user is working in.
    *
-   * `undefined` RATHER THAN A THROW, AND THAT IS THE WHOLE REASON THE METHOD EXISTS. Four modules used
-   * to hold their own private copy of this question — `draw.ts` destructured `of(leg)[0]` and threw,
-   * `link-wiring.ts` did the same twice, and `compile.ts`/`replies.ts` each carried a `theLambdaPane`
-   * helper before `editorHome` replaced them — and every one of those justified the throw with the
-   * same invariant: "`main.ts` always registers one pane of each leg before this can be called". That
-   * invariant expired the day `applyLayout` started deriving panes from the layout tree. `closeLeaf`
-   * refuses only the last leaf in the TREE, not the last leaf on a LEG, so a user who closes the one λ
-   * pane a fresh page ships reaches a legal state in which `of('lambda')` is empty — and the next
-   * slice, which lets a pane change leg, makes an empty leg routine rather than reachable-if-you-try.
-   * A leg with no pane is a state, not a wiring bug.
+   * IT TAKES A `LeafId` AND DERIVES THE LEG, WHICH IS WHAT KEEPS THIS MODULE FREE OF THE DOM. The
+   * caller is a `focusin` listener in `pane-host.ts` and knows only which host fired; the collection
+   * already holds the entry that says which leg that is, so asking the caller would be asking it to
+   * carry a fact this class owns.
    *
-   * "THE FIRST" RATHER THAN "THE ONLY", because a leg can hold any number and this deliberately does
-   * not check. The callers are the surfaces with no per-pane identity yet — the one shared status
-   * line, the one source editor's decoration — which need A pane on the leg rather than all of them;
-   * which pane's state should win once several disagree is 5d-ii-b's question. Insertion order is the
-   * answer that needs no comparator to invent a rank, for the reason `of` above gives.
+   * AN UNKNOWN ID IS IGNORED RATHER THAN THROWN ON. Focus can land in a host whose entry has already
+   * been removed — a close repaints and moves focus in the same tick — and that is a race, not a
+   * wiring bug.
    */
-  first<K extends Leg>(leg: K): PaneEntry<K> | undefined {
+  markActive(id: LeafId): void {
+    const entry = this.#entries.get(id)
+    if (entry === undefined) return
+    this.#activeByLeg.set(entry.slot.binding.leg, id)
+  }
+
+  /**
+   * The pane on `leg` whose state the app's shared surfaces should describe.
+   *
+   * THIS REPLACES `first`, AND IT IS THE ANSWER TO THE QUESTION `first`'s DOC DEFERRED to this slice:
+   * "which pane's state should win once several disagree". The two consumers — `draw.ts`'s
+   * running-focus decoration and `link-wiring.ts`'s `detachedPanes` — drive the ONE source editor and
+   * the ONE status line, so with several panes on a leg they need a pane the user can CHOOSE, and
+   * clicking into one is that choice.
+   *
+   * PER LEG RATHER THAN ONE GLOBAL ACTIVE PANE. Clicking into the source editor must not blank out
+   * which λ pane the status line is describing; the source editor is on neither leg.
+   *
+   * THE LEG IS RE-CHECKED RATHER THAN TRUSTED, AND THAT IS THE KIND CHANGE RATHER THAN DEFENSIVE
+   * STYLE. `markActive` may have recorded `lambda -> 'pane-3'` before `pane-3` became a TM pane; the
+   * entry under that id is now a different pane on a different leg.
+   *
+   * THE FALLBACK IS EXACTLY THE OLD `first`, so the single-pane case and the empty-leg case are
+   * unchanged — including the `undefined`, which four modules once each answered privately with a
+   * throw. A leg with no pane is a state, not a wiring bug.
+   */
+  active<K extends Leg>(leg: K): PaneEntry<K> | undefined {
+    const marked = this.#activeByLeg.get(leg)
+    if (marked !== undefined) {
+      const entry = this.#entries.get(marked)
+      if (entry !== undefined && entry.slot.binding.leg === leg) return entry as PaneEntry<K>
+    }
     for (const e of this.#entries.values()) {
       if (e.slot.binding.leg === leg) return e as PaneEntry<K>
     }

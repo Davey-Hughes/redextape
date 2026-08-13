@@ -78,19 +78,20 @@ export function createLinkWiring(deps: {
    *
    * STAND IN FOR THE `lambdaSlot`/`tmSlot` CONSTS THIS FACTORY USED TO CLOSE OVER DIRECTLY (T7). NO
    * LONGER "still exactly one pane of each kind", which is what these two used to assert twice by
-   * throwing on an empty collection. That invariant expired when `main.ts`'s `applyLayout` started
+   * throwing on an empty collection. That invariant expired when `pane-host.ts`'s `applyLayout` started
    * deriving panes from the layout tree — `closeLeaf` refuses only the last leaf in the TREE, so
    * closing the one λ pane a fresh page ships is an ordinary gesture, and this module is reached from
    * it independently of `draw.ts`: `drawLink` -> `detachedPanes` -> `theTmSlot` fires from the source
-   * editor's `updateListener` on every keystroke. `PaneCollection.first` is the one place that answers
-   * the question now, and its own doc has the argument for why all four consumers were carrying a
-   * private copy of the same expired invariant.
+   * editor's `updateListener` on every keystroke. `PaneCollection.active` is the one place that answers
+   * the question now — the pane the user last focused on that leg, falling back to insertion order when
+   * none is marked or the mark no longer resolves (5d-ii-b) — and its own doc has the argument for why
+   * all four consumers were once carrying a private copy of the same expired invariant.
    *
    * THE THREE READERS BELOW GIVE HONEST ANSWERS FOR ABSENCE RATHER THAN PROPAGATING IT: a pane that
    * does not exist is not detached, has no link window, and contributes no λ link state.
    */
-  const theLambdaSlot = (): PaneSlot<'lambda'> | undefined => panes.first('lambda')?.slot
-  const theTmSlot = (): PaneSlot<'tm'> | undefined => panes.first('tm')?.slot
+  const theLambdaSlot = (): PaneSlot<'lambda'> | undefined => panes.active('lambda')?.slot
+  const theTmSlot = (): PaneSlot<'tm'> | undefined => panes.active('tm')?.slot
 
   /**
    * Which panes are outside the source correspondence right now — §4.5's first surface, read off the

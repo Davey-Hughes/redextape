@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { History } from '../../src/history'
 import { LambdaPane } from '../../src/lambda-pane'
 import type { PaneEvents } from '../../src/pane-chrome'
+import type { Leg } from '../../src/protocol'
 import type { ClientPort, SessionId } from '../../src/session-client'
 import { SessionClient } from '../../src/session-client'
-import type { LegState, SessionEntry } from '../../src/sessions'
+import type { Binding, LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
-import type { LambdaState } from '../../src/types'
+import type { LambdaState, TmState } from '../../src/types'
 
 /**
  * TWO PANES BOUND TO TWO DIFFERENT λ SESSIONS, RENDERING TWO DIFFERENT TERMS AT THE SAME TIME — plan
@@ -52,7 +53,34 @@ function lambdaSession(id: SessionId, label: string, text: string, detached: boo
   const hist = new History<LambdaState>(1_000_000)
   hist.push({ text, spans: [], cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
   const leg: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, timer: null }
-  return { id, label, detached, client: fakeClient(), legs: { lambda: leg } }
+  return { id, label, detached, client: fakeClient(), legs: { lambda: leg }, tmProgram: null }
+}
+
+/**
+ * A session with BOTH legs — the source session's shape, and the one the λ-only helper above cannot
+ * make. It exists for the grouped-pairs test alone: a registry in which every session is λ-only can
+ * never produce a TM `<optgroup>`, so the omission it asserts would hold vacuously.
+ */
+function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
+  const lambdaHist = new History<LambdaState>(1_000_000)
+  lambdaHist.push({ text, spans: [], cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
+  const tmHist = new History<TmState>(1_000_000)
+  tmHist.push({ state: 0, step: 0, heads: [0], window_start: [0], window: [['_']], source_node: null, rule: null }, 1)
+  const ok = { available: true, reason: '' }
+  return {
+    id,
+    label,
+    detached: false,
+    client: fakeClient(),
+    legs: {
+      lambda: { hist: lambdaHist, status: ok, done: null, timer: null },
+      tm: { hist: tmHist, status: ok, done: null, timer: null },
+    },
+    // A TM LEG WITH NO MACHINE BEHIND IT, WHICH IS A STATE THE APP HAS TOO — between registering the
+    // source session and its first `compiled` reply. The panes here are built directly rather than by
+    // `pane-host.ts`, so nothing in this file reads it.
+    tmProgram: null,
+  }
 }
 
 const host = () => {
@@ -71,6 +99,17 @@ const term = (pane: HTMLElement) => pane.querySelector('pre.term')?.textContent 
 
 const selector = (pane: HTMLElement) => pane.querySelector<HTMLSelectElement>('.pane-binding select')
 
+/**
+ * The `<option>` value the control encodes a `(leg, session)` pair as.
+ *
+ * SPELLED OUT HERE RATHER THAN IMPORTED FROM THE CONTROL. A helper that asked `pane-chrome.ts` how it
+ * encodes a pair would agree with any encoding it chose, including a broken one; writing the two
+ * fields and the `\x00` join out by hand is what makes these assertions pin the DOM contract. The
+ * escape rather than a literal NUL is `scripts/check-text-bytes.sh`'s rule and applies to test files
+ * for exactly the reason it applies to `pane-chrome.ts` — see that control's own comment.
+ */
+const optionValue = (leg: Leg, id: SessionId) => `${leg}\x00${id}`
+
 /** `PaneEvents`'s six required members. `rebind` is the only one any test here fires. */
 const events = (slot: PaneSlot<'lambda'>, after: () => void): PaneEvents => ({
   back: () => undefined,
@@ -78,8 +117,16 @@ const events = (slot: PaneSlot<'lambda'>, after: () => void): PaneEvents => ({
   play: () => undefined,
   restart: () => undefined,
   extend: () => undefined,
-  rebind: (session: SessionId) => {
-    slot.rebind(session)
+  // THE SESSION ONLY, THOUGH THE PICK NOW CARRIES A LEG — `PaneSlot<K>`'s leg is fixed at
+  // construction and has no writer, so this is the whole of what a same-leg pick can do. It is also
+  // exactly what `transport.ts`'s production handler does. **THE PANE MULTIPLEXER THAT ACTS ON A
+  // DIFFERENT LEG EXISTS NOW, AND THIS COMMENT USED TO CALL IT "a later slice"** — it lives in
+  // `pane-host.ts`, which answers a cross-leg pick by changing the LEAF's kind and rebuilding the
+  // entry. That needs a layout tree and these hand-built panes have none, which is why this harness
+  // still answers only the axis it can reach; `tests/browser/pane-kind-switch.test.ts` drives the
+  // other one through the mounted app.
+  rebind: (binding: Binding<Leg>) => {
+    slot.rebind(binding.session)
     after()
   },
 })
@@ -195,10 +242,12 @@ describe('the binding selector', () => {
     // and the sessions are told apart by their labels — which is also what a screen reader gets. An
     // implementation that distinguished them any other way would leave these strings unset.
     expect([...(select?.options ?? [])].map((o) => o.textContent)).toEqual(['source', 'λ scratchpad'])
-    expect(select?.value).toBe(SOURCE)
+    expect(select?.value).toBe(optionValue('lambda', SOURCE))
     // The `<select>` is inside a `<label>` carrying the caption, so the control is named without an
     // `aria-label` to keep in step — the same implicit-label idiom `index.html`'s encoding picker uses.
-    expect(select?.closest('label')?.textContent).toContain('session')
+    // The caption is `shows` rather than `session` because `session` is now the name of one of the two
+    // things the control picks, not the name of the control.
+    expect(select?.closest('label')?.textContent).toContain('shows')
 
     reg.remove(SCRATCH)
     paint(reg, slot, pane)
@@ -227,15 +276,15 @@ describe('the binding selector', () => {
 
     const select = selector(el)
     if (select === null) throw new Error('two λ sessions should have produced a selector')
-    select.value = SCRATCH
+    select.value = optionValue('lambda', SCRATCH)
     select.dispatchEvent(new Event('change'))
 
     expect(slot.binding).toEqual({ session: SCRATCH, leg: 'lambda' })
     expect(term(el)).toBe('from scratch')
     expect(el.querySelector('h2')?.textContent).toContain('[detached]')
-    expect(select.value).toBe(SCRATCH)
+    expect(select.value).toBe(optionValue('lambda', SCRATCH))
 
-    select.value = SOURCE
+    select.value = optionValue('lambda', SOURCE)
     select.dispatchEvent(new Event('change'))
     expect(term(el)).toBe('from source')
     expect(el.querySelector('h2')?.textContent).toBe('lambda')
@@ -263,5 +312,42 @@ describe('the binding selector', () => {
     paint(reg, slot, pane)
     expect(selector(el)?.options.length).toBe(2)
     expect(selector(el)?.options[0]).toBe(first)
+  })
+
+  /**
+   * THE CONTROL OFFERS `(leg, session)` PAIRS, NOT SESSIONS — the widening this task is, asserted on
+   * the two things that distinguish a pair list from a session list: the legs are GROUPED, and a pair
+   * naming a leg its session does not have is ABSENT rather than present-and-broken.
+   *
+   * THE SCRATCH IS λ-ONLY AND THE SOURCE HAS BOTH, which is why the omission is observable at all.
+   * `SessionRegistry.legOf` THROWS on a binding naming a leg the session lacks, so an option for
+   * `(tm, λ scratchpad)` would be an option that crashes the next render — the reason design §3.2's
+   * axes are not independent and the reason this is one control rather than two.
+   *
+   * READ THROUGH `<optgroup>` RATHER THAN THROUGH `select.options`, because `options` flattens the
+   * groups away and the grouping is half of what is under test. The λ group comes first because
+   * `SessionRegistry.pairs()` walks `LEGS` in that order, which is a value rather than a key walk for
+   * exactly this reason.
+   */
+  it('lists both legs, grouped, and omits a pair the session has no leg for', () => {
+    const reg = new SessionRegistry()
+    reg.add(bothLegs(SOURCE, 'source', 'a'))
+    reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
+
+    const el = host()
+    const slot = new PaneSlot('lambda', SOURCE)
+    const pane = new LambdaPane(
+      el,
+      events(slot, () => undefined),
+    )
+    paint(reg, slot, pane)
+
+    const select = selector(el)
+    expect(select).not.toBeNull()
+    const groups = [...(select?.querySelectorAll('optgroup') ?? [])].map((g) => g.label)
+    expect(groups).toEqual(['λ', 'TM'])
+    const tmOptions = [...(select?.querySelectorAll('optgroup:nth-of-type(2) option') ?? [])].map((o) => o.textContent)
+    // The scratch has no TM leg, so the pair is not in the list at all.
+    expect(tmOptions).toEqual(['source'])
   })
 })

@@ -97,7 +97,9 @@ export default defineConfig({
       // DELIBERATELY. The floors were set when branches measured 88.96 (`floor(88.96) - 1 = 87`); the
       // review fixes above moved it to 89.17, which crosses the integer `floor` rounds on and would
       // read out as 88. Chasing a 0.21-point drift across a rounding boundary would be the gate
-      // tracking noise — exactly what the one-to-two-point margin exists to absorb — so 87 stands.
+      // tracking noise — exactly what the one-to-two-point margin exists to absorb — so 87 stood.
+      // (SUPERSEDED 2026-08-13, at a slice's close rather than mid-review: `branches` is 88 now. The
+      // reasoning here is not repudiated — the last block below answers it on its own terms.)
       //
       // RAISED HERE RATHER THAN LEFT, AND THAT WAS A DECISION, NOT THE DEFAULT. The convention above
       // is stated as a formula, not as a one-way ratchet that only fires when coverage falls — and
@@ -116,24 +118,67 @@ export default defineConfig({
       // is a floor nobody can read a regression against. The place to re-run the formula is a slice's
       // close, where a reviewer sees the argument beside the number.
       //
-      // THE TIGHTEST OF THE FOUR IS STILL `functions`, NOT `branches`. Computed from the RE-MEASURED
-      // figures against these floors, the number of NEW UNTESTED entries needed to trip each is:
-      // functions **10** (308/325 -> 94.77%), branches 27 (829/953 -> 86.99%), statements 46
-      // (1713/1842 -> 92.99%), lines 33 (1513/1577 -> 95.94%). LOSING already-covered entries instead
-      // takes: functions 9 (299/315 -> 94.92%), branches 24 (805/926 -> 86.93%), statements 43
-      // (1670/1796 -> 92.98%), lines 31 (1482/1544 -> 95.98%).
+      // RE-MEASURED 2026-08-13 (plan 5d-ii-b's close), AND THE FORMULA IS RE-RUN: lines 98.13
+      // (1634/1665), functions 97.98 (340/347), branches 89.89 (890/990), statements 95.71
+      // (1854/1937), over 498 tests in 51 files. Every figure is above the 5d-ii-a close recorded in
+      // the paragraph above, so this slice raised coverage too. `floor(measured) - 1` gives
+      // 97/96/88/94 and THOSE ARE THE FLOORS BELOW, raised from 96/95/87/93.
+      //
+      // THIS IS THE RE-RUN THE PARAGRAPH ABOVE DEFERRED, NOT A NEW POLICY. That block declined to move
+      // the floors for a review-fix delta and named where the decision belonged: "the place to re-run
+      // the formula is a slice's close, where a reviewer sees the argument beside the number." This is
+      // a slice's close.
+      //
+      // THE COUNTER-ARGUMENT, ANSWERED RATHER THAN SKIPPED. Movement since that measurement is small —
+      // statements +0.34, branches +0.37, functions +0.21, lines +0.14, none of them half a point — and
+      // by itself that is noise, which is exactly the reasoning that left `branches` at 87 across a
+      // 0.21-point drift and was right to. **The operative quantity is the gap between floor and
+      // measured, not the delta since the last run.** That gap had reached 2.71 (statements), 2.89
+      // (branches), 2.98 (functions) and 2.13 (lines) — past the one-to-two points this convention says
+      // its floors are sized for, on all four at once. Deltas too small to justify a move individually
+      // are precisely how a floor drifts a full point behind and stops catching a regression near where
+      // it happens. After the raise the gaps are 1.71 / 1.89 / 1.98 / 1.13, back inside the margin.
+      // (Subtracted from the figures as the reporter PRINTS them, which truncates; from the unrounded
+      // ratios each is up to 0.01 larger. Stated so a reader re-deriving these does not read a
+      // discrepancy where there is only a rounding rule.)
+      //
+      // THE TIGHTEST OF THE FOUR IS STILL `functions`, AND IT IS THE REASON TO ACT. Under the OLD floor
+      // of 95, **11** already-covered functions could disappear (329/347 -> 94.81%) or 11 new untested
+      // ones arrive (340/358 -> 94.97%) before the gate said anything — the same magnitude (12) that
+      // argued 5d-ii-a's raise. Under 96 it is 7 lost (333/347 -> 95.96%) or 8 new (340/355 -> 95.77%).
+      //
+      // THE OTHER THREE UNDER THE NEW FLOORS, both scenarios computed separately for each metric rather
+      // than one derived from the other by a rule — see the paragraph below for why that matters.
+      // NEW UNTESTED entries needed to trip each: lines 20 (1634/1685 -> 96.97%), branches 22
+      // (890/1012 -> 87.94%), statements 36 (1854/1973 -> 93.96%). LOSING already-covered entries
+      // instead takes: lines 19 (1615/1665 -> 96.99%), branches 19 (871/990 -> 87.97%), statements 34
+      // (1820/1937 -> 93.95%).
+      //
+      // EVERY PERCENTAGE IN THIS BLOCK IS TRUNCATED, NOT ROUNDED — the rule the parenthetical four
+      // paragraphs up already states, restated here because five of the ten fractions above are cases
+      // where truncating and rounding disagree, and this block used to print the rounded one for them.
+      // `istanbul-lib-coverage`'s `percent` is `Math.floor((100000 * covered / total) / 10) / 100`, so
+      // a figure written the way a calculator rounds it is not the figure the report shows. The
+      // sharpest case is `lines` under the losing scenario: 1615/1665 is 96.9970%, which a ROUNDING
+      // reporter would print as `97.00` — equal to the floor, and so reading as a pass on a run that
+      // has in fact tripped. It prints `96.99`, and that is the whole reason the rule is worth stating
+      // twice.
+      //
+      // NO TRIP COUNT ABOVE MOVES BECAUSE OF THIS, and it cannot: every floor is an integer, and
+      // truncating to two decimals never carries a value across an integer boundary, so `pct < floor`
+      // has the same answer for the truncated figure and the exact ratio alike.
       //
       // BOTH LISTS ARE SPELLED OUT RATHER THAN ONE BEING DERIVED FROM THE OTHER BY A RULE. This block
       // used to say the losing counts were "one fewer each, since the denominator doesn't grow with
       // them" — true of functions and lines, false of branches (three fewer) and statements (two), and
       // it came paired with parenthetical fractions that were the LOSING scenario's arithmetic printed
-      // against the NEW-UNTESTED scenario's integers. Both were found in the whole-branch review. The
-      // integers above are computed, not reasoned about: the rounding is not linear near a floor and
-      // the two scenarios differ by however many entries that rounding swallows.
+      // against the NEW-UNTESTED scenario's integers. Both were found in 5d-ii-a's whole-branch review.
+      // The integers above are computed, not reasoned about: the rounding is not linear near a floor and
+      // the two scenarios differ by however many entries that rounding swallows. Under the new floors
+      // `functions` still differs by one between the two scenarios and `branches` by three.
       //
-      // `functions` has 315 entries against a 95% floor, so nine lost or ten new-and-untested trips
-      // it — still the floor that will produce friction first, same as before the raise.
-      thresholds: { lines: 96, functions: 95, branches: 87, statements: 93 },
+      // See roadmap.md, "PLAN 5d-ii-b CLOSES", for the argument in full.
+      thresholds: { lines: 97, functions: 96, branches: 88, statements: 94 },
     },
     projects: [
       {

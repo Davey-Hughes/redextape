@@ -56,9 +56,9 @@ const PLUS = SAMPLE.indexOf('+')
  * and `While`'s own root `App` — and this program's desugaring cannot avoid two of them: `let mut n = 1`
  * is a `Let{mutable: true}` node, and `desugar.rs`'s `Stmt::Assign` arm unconditionally wraps the
  * assignment in a `Core::Seq` (`desugar.rs:129-140`) — there is no statement position that skips it.
- * `Assign` itself is STILL never tagged (`lower.rs:655-669` returns the rebuilt store untagged), but the
- * `Seq` wrapping it is, and `desugar.rs:136,138` mints that `Seq`'s span from the same `Stmt::Assign`
- * span, so its tag reads on screen as if `n = 2;` itself were the named construct.
+ * `Assign` itself is STILL never tagged (`lower.rs`'s `Core::Assign` arm returns the rebuilt store
+ * untagged), but the `Seq` wrapping it is, and `desugar.rs:136,138` mints that `Seq`'s span from the
+ * same `Stmt::Assign` span, so its tag reads on screen as if `n = 2;` itself were the named construct.
  *
  * MEASURED, NOT ASSUMED, THE SAME WAY AS `SAMPLE`: driving `trace::LambdaCursor` over this source
  * (`cargo run --example`-style, against a throwaway probe, cross-checked against the running app)

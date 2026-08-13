@@ -107,7 +107,8 @@ function sourceEntry(text = 'from source'): SessionEntry {
   const hist = new History<LambdaState>(1_000_000)
   hist.push(lambdaFrame(text), 1)
   const lambda: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, timer: null }
-  return { id: SOURCE, label: 'source', detached: false, client: fakeClient(), legs: { lambda } }
+  // NO MACHINE — nothing here sends a `compiled` reply, which is the only thing that retains one.
+  return { id: SOURCE, label: 'source', detached: false, client: fakeClient(), legs: { lambda }, tmProgram: null }
 }
 
 describe('LambdaScratchpad.detach', () => {

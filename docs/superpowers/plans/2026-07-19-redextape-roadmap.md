@@ -1364,6 +1364,16 @@ rather than a note saying a11y is on the todo. Known outstanding, all observed r
    defect is the *silence*, and item 1's principle applies directly — a control that provably cannot
    work should not be offered — so the fix is a control-visibility rule, moving focus/labelling
    deliberately, not a second messaging mechanism, which would be worse than the gap.
+9. **Six layout controls change what the page contains and announce none of it** (added 2026-08-13,
+   PR 5d-ii-b — and **four of the six were declared added here on 2026-08-12 by PR 5d-ii-a's closing
+   entry and never actually written into this list**, which is the silent-never-happens failure the
+   preamble names, committed by the entry that names it). `split →`, `split ↓`, `close` and `reset
+   layout` (5d-ii-a) rearrange the pane tree with no live-region report of the new arrangement, and
+   `reset layout` is the largest of those four — it rebuilds the tree's DOM wholesale on one click. 5d-ii-b adds two that go further: the **split picker's menu** and the
+   **widened `(leg, session)` selector** do not merely rearrange panes, they change what a pane *is*,
+   and a user who picks `TM · source` on a λ pane is told by nothing but the pixels that the pane they
+   were reading has been replaced. Both new controls ship keyboard-*operable* (see 5d-ii-b's entry,
+   §6.2's exception) — the gap here is announcement, not reach.
 
 What already exists, so the pass starts from the right baseline: the appearance control is a real
 `<button type="button">` with an `aria-label` naming its current state, updated on every change
@@ -5925,3 +5935,355 @@ a seeded layout), one for the stranded-editor Important, two for `PaneCollection
 `LambdaLinkState`'s new `absent` member — and moved all four metrics up. The figures this entry first
 carried, 442 in 46 files at 94.68 / 88.96 / 96.81 / 97.30, describe the tree at the point the review
 began rather than the tree that merged.
+
+#### PLAN 5d-ii-b CLOSES — a pane changes what it shows, and the one Critical was caught by a reviewer tracing a call chain, not by 462 green tests (2026-08-13, branch `plan5d-ii-b`, `9465053..eee8862` plus this entry)
+
+Design: [`../specs/2026-08-12-plan5d-ii-b-renderer-multiplexer-design.md`](../specs/2026-08-12-plan5d-ii-b-renderer-multiplexer-design.md).
+Plan: [`2026-08-12-plan5d-ii-b-renderer-multiplexer.md`](2026-08-12-plan5d-ii-b-renderer-multiplexer.md).
+
+The second of the three slices 5d-ii-a's §1 splits 5d-ii into, and the one that owns §3.1's filed
+decision. A pane's binding selector is now a list of `(leg, session)` **pairs** rather than a session
+list, so a λ pane can be pointed at a TM leg and rebuilt in place — same leaf, same siblings, same
+sizes. `split →` and `split ↓` stopped duplicating the leaf's kind and became a picker: they open a
+menu of the same pairs plus `source`, and create the pane you asked for. The source pane, which
+5d-ii-a could close but never bring back except through `reset layout`, is now re-creatable
+by that picker without discarding the arrangement around it — the wart this slice exists to close.
+Underneath, `SessionRegistry.pairs()` is the single table both controls read, `panes.markActive`/
+`active` make the shared surfaces follow the last-focused pane per leg instead of insertion order, and
+a `LeafId` stopped naming a kind: new leaves mint `pane-${n}`, and `dataset.kind` is the one truthful
+statement of what a leaf renders.
+
+Executed in four rounds across up to three lanes, each concurrent lane in its own worktree, with the
+browser port held by exactly one lane per round. Wave 1 was an extraction that changed no behaviour:
+`editor-custody.ts` and `pane-host.ts` left `main.ts` before any feature was built on top of them, and
+the gate that a pure move must pass — the test count not moving — held on both.
+
+##### §3.1's FILED DECISION RESOLVES AS "NEVER WIDEN", AND THE ARGUMENT IS THAT WIDENING SAVES NOTHING
+
+`PaneSlot<K extends Leg>` is not widened, here or ever. `sessions.ts`'s own doc had priced one side of
+it — widening `K` to `Leg` collapses `Binding<K>` to `Binding<Leg>`, makes `legOf` return
+`LegState<LambdaState> | LegState<TmState>`, and puts a union in front of every render that the pane's
+renderer type had already decided — and left the decision open.
+
+**What settles it is the fact on the other side, and it is not that widening is ugly.** A `LambdaPane`
+cannot render `TmState` under any implementation: `PaneView<T>` is generic in the frame type and
+`LambdaPane`'s render path reads `LambdaState` fields throughout. **So the view is torn down and
+rebuilt whichever way the question is answered.** Widening does not avoid that teardown — it pays it
+anyway *and* spends `Binding<K>`'s type property to do so. It saves nothing. The one alternative that
+would genuinely avoid the rebuild, a single `MultiPane` holding both renderers, is a
+`PaneView<LambdaState | TmState>` — the same union arriving from the other side, plus every pane
+carrying a δ-table it is not showing.
+
+So the multiplexer is built the way `sessions.ts:337-344` itself defined it before this slice existed:
+a slot that mounts a different pane class per leg. `applyLayout`'s two existing passes do all of it —
+pass 1 drops the entry whose kind no longer matches its leaf, handing any editor to custody exactly as
+a close does; pass 2 builds the pane the leaf now names. `pendingBinding`, built to tell a freshly
+split leaf which session to start on, answers the identical question for a leaf whose kind just
+changed, unmodified. **The kind change added no teardown code and no new code path**, which is the
+concrete payoff of answering §3.1 this way rather than the other.
+
+##### roadmap:5834's OPEN QUESTION CLOSES WITH A NUMBER
+
+That line asked *"whether 1,115 lines in one file is a problem for 5d-ii-b or -c to inherit"* and
+declined to answer. This slice answered it as wave 1, before building anything.
+
+**Measured for this entry, `wc -l` against the live tree: `main.ts` 758, `pane-host.ts` 693,
+`editor-custody.ts` 305.** The inherited figure was **1,119** at `9465053`, the squash-merged commit
+this branch forks from — four lines above the 1,115 that entry cites, because its last re-measure
+predates its branch tip by a few commits, which is the drift that entry itself documents twice.
+
+The path: 1,119 → 920 (custody out) → 709 (pane lifecycle out) → **758 at close**. So `main.ts` is
+down 32% while the slice's whole feature was added on top of it, and the 49 lines it grew back are the
+composition root's share of the new wiring — the picker's choices fan-out and the source-leaf
+constant — rather than machinery that should have moved.
+
+**The two new modules are not a tidier `main.ts`; they are the reason the feature was cheap.** Every
+gesture this slice added — the cross-leg rebind, both split arms, the source re-creation, focus after
+each of them — is a member of `pane-host.ts`'s `paneEvents`, in the file that owns `applyLayout`'s two
+passes. Had that machinery still been interleaved with session bootstrap and `EditorView` construction
+in a 1,119-line composition root, each of those would have been a change to that file instead.
+
+Two honest qualifications. **`pane-host.ts` nearly doubled (367 → 693) while holding the feature**, so
+the total across the three files is 1,756 against an inherited 1,119; this slice did not make the
+subsystem smaller, it made it addressable. And the extraction's cost was visible at the time: `deps`
+grew from 8 members to 14 on the second move, which a review ruled the honest price of extracting a
+composition root's centre only after tracing each of the six additions to a specific moved line. The
+exported surface was then trimmed by ruling to the three members `main.ts` actually calls.
+
+##### THE FINDING THAT MATTERS MOST — A CRITICAL SURVIVED 462 GREEN TESTS, A CLEAN TYPECHECK, A CLEAN GATE AND AN IMPLEMENTER REPORT ARGUING THE CASE WAS SAFE
+
+The task that widened the selector to pairs shipped `transport.ts`'s rebind handler as
+`slot.rebind(binding.session)` — **taking the session half of the picked pair and projecting it onto
+the slot's own leg**, discarding the leg the user picked. That re-creates exactly the invalid binding
+the pair list exists to make unrepresentable.
+
+The chain runs through four files, none of which is wrong on its own. `pairs()` pushes every pair to
+every pane, including TM ones. The selector now renders at two or more pairs, so **a TM pane has a
+binding selector for the first time**, and its list genuinely contains the λ-only scratch. Taking the
+session half of `λ · λ scratchpad` on a TM slot mints `{ leg: 'tm', session: 'lambda-scratch' }`, which
+`legOf` throws on — deliberately, because a binding naming a missing leg is supposed to be impossible.
+And `draw.ts`'s per-pane loop has no `try`/`catch`.
+
+**So it is not a dropped frame. Every subsequent `draw()` throws and the app stops repainting.
+Compile, fork the λ pane, then on the TM pane pick `λ scratchpad`: three clicks from a fresh page.**
+
+What it got past is the point of recording it. The full suite was green at **462 passing**;
+`tsc --noEmit` was clean; the pre-commit gate passed; the implementer's own report listed its concerns
+carefully and this was not among them. **Two comments in the diff asserted in prose that a cross-leg
+pick was "a no-op the next paint undoes", and both were false** — it is a no-op only in the special
+case where the picked session happens to be the one already in force; otherwise the pane silently
+jumps to a third session and the `<select>` snaps to a value nobody chose. It was found by a reviewer
+following `pairs()` → the selector's visibility predicate → the rebind handler → `legOf`, across four
+files, and by nothing else.
+
+**The transferable line: the invariant was stated only in a comment, and a comment cannot fail.**
+`legOf`'s doc was, at that moment, the sole written statement of an invariant nothing enforced. The fix
+was one `if` — and after the multiplexer landed and the cross-leg branch became real, that comparison
+was briefly deleted on the argument that "a branch that cannot be taken is a second answer to what a
+cross-leg pick means". A review put it back **as a throw rather than as a refusal**, on a distinction
+worth keeping: a silent refusal is an answer, and the wrong one now that the app has a real one; a
+throw says this layer does not answer the question, which is the true statement. Deleting it had
+re-minted the Critical's own binding for any caller wiring a pane straight to those handlers — a shape
+two existing test harnesses already write. **One `if` moves an invariant from comment-checked back to
+machine-checked, and that is what it is worth.**
+
+##### THE SEMANTIC MERGE CONFLICT AT THE ROUND-2 JOIN — TWO GREEN BRANCHES, A CLEAN `git merge`, SEVEN FAILING TESTS
+
+Both lanes were green individually. `git merge` reported no conflict. **The merged tree failed seven
+browser tests, and nothing in `src/` was broken** — the splits worked, the panes were right.
+
+The cause: leaf ids stopped naming a kind (`lambda-3` became `pane-3`), and **four browser test files
+identified λ panes by the `lambda` id prefix** — precisely the fact that change made meaningless. One
+of them counted `panes().filter(p => p?.startsWith('lambda')).length` and got 1 where the split had
+just produced 2.
+
+**Why it reached the join is a controller decision, not an agent error, and it is recorded that way.**
+The id task was scoped node-tier-only because a concurrent lane held the browser port, and its reviewer
+inherited that scope — neither could have seen these. **The port-contention rule that makes parallel
+lanes safe is the same rule that hid this.** The reviewer also asked a reasonable question and got a
+true-but-insufficient answer: it grepped for callers of the changed *function* and found none, while
+the breakage was in tests depending on the changed *value format*, which no such grep reaches.
+
+Fixed by asserting what a pane **is** (`data-kind`) rather than what it is **named**, which is what
+those assertions always meant. The rule the fix settled on is worth keeping: **keep an id literal where
+it addresses an id already in the tree; change it where it names an id a split would mint.** And the
+fix closed an item carried forward from the id task's own review as a bonus rather than by design —
+the restore fixture seeds a tree holding the OLD spelling and then splits to mint the NEW one, so the
+mixed-spelling counter case that had no test now has one, pinned in both directions.
+
+**Both of this slice's predicted merge conflicts failed to materialise, and the one real collision was
+semantic.** Both were `pane-host.ts` and both were empty — one because the widened handler
+rode through an existing spread, the other because an optional parameter left the old zero-arg handlers
+assignable. Structural conflict prediction was 0 for 2; the failure that actually cost time was the one
+`git` cannot see. **"Both sides green plus a clean merge" is not a release criterion**, and this is the
+strongest evidence in the branch for the join check existing at all.
+
+##### THE THIRTEENTH TASK, ADDED MID-SLICE BY THE HUMAN — A TM PANE THAT RENDERED BLANK
+
+A TM pane created after its session's last `compiled` reply rendered 0 tapes and 0 δ-rows. **Verified
+pre-existing rather than assumed**: `setProgram` had three callers, all in `replies.ts`, all
+reply-driven, and nothing in the creation pass seeded a new `TmPane` — so split-created TM panes had
+always had it.
+
+It was fixed here anyway, as a task the plan did not contain, because **λ→TM is what the picker is
+for**: this slice turns a corner case into the primary path, and shipping "a pane changes what it
+shows" where what it shows is blank is not acceptable. `SessionEntry` now retains the machine its
+session last compiled, `replies.ts` writes it through one helper, and the creation pass seeds a newly
+built `TmPane` from it. **Deliberately fixing every creation route rather than only the new one** — a
+kind-change-only seed would leave two creation paths behaving differently for no reason a reader could
+infer.
+
+Building it found two things the dispatch had not named. **`reset layout` is a fourth blank
+route**, not the three that were listed — though its reviewer then corrected the implementer's reasoning
+while confirming the claim: that pass drops a pane only on a kind mismatch, so a live TM pane survives
+a reset and the route is real only where the user had closed it or rebound its leg. And **the retention
+must be cleared on `no-session` and `worker-error`**, or a pane created during an outage renders a
+machine no other pane on that session shows — ruled in scope rather than creep, because it is the
+minimum that makes the new field's invariant true.
+
+##### THE FOCUS ANSWERS — THREE GESTURES END IN `focusPane`, AND TWO OF THEM ONLY BECAUSE A REVIEW SAID SO
+
+`close` has set focus explicitly since 5d-ii-a, which took it as an exception rather than deferring it.
+**The cross-leg pick and `split` did not. Both were added during review, neither by the task that built
+the gesture.**
+
+The argument in both cases is the one `pane-host.ts` already contained against its own new gestures: a
+control that removes the clicked element *unconditionally* must not strand focus on `<body>`. A
+cross-leg pick is the worse of the two — `applyLayout` reaches the new pane's `host.replaceChildren`,
+which destroys the `<select>` the user is operating, so **a keyboard user who arrows to a TM pair and
+presses Enter loses the page.** `renderLayout`'s existing focus rescue does not cover it; it restores
+dividers by path and nothing else. The cross-leg arm targets its own leaf rather than a neighbour, and
+that is the difference from `close`: the pane has not moved, it is showing something else, and
+`focusPane` lands on the first enabled control, which for both pane classes is the binding selector the
+pick was made with.
+
+**The standing test this settles into: a creation control whose keyboard path is built cannot then
+discard focus one call later.** Shipping the picker keyboard-operable (below) and leaving its result on
+`<body>` would be building half a control and calling it accessible.
+
+##### WHAT THE PLAN GOT WRONG — FIVE DEFECTS, ALL FOUND BY THE PEOPLE EXECUTING IT
+
+Recorded because the plan is the artifact this process trusts most, and four of these would have
+shipped as written.
+
+1. **An assertion that could never fail.** A test asserted `labels().some(l => l.includes('source'))`
+   was false before the source pane is closed — but the source *session* is labelled `source`, so
+   `λ · source` contains the substring and the assertion had nothing it could catch. Replaced with
+   exact equality.
+2. **A silent no-op.** `items[0]?.focus()` inside `beforetoggle` does nothing: the popover is still
+   `display: none` at that point. `autofocus` is what the popover's show algorithm honours, because it
+   runs its focusing steps *after* making the element visible. The implementer used it and pinned it
+   with a test the plan never asked for.
+3. **A test unwritable at the task it was assigned to.** Its snippet needed wiring the plan assigns to
+   a later task, in files a concurrent lane held. Declining to reach across was correct; five
+   equivalent tests were written against the control directly, with the boundary documented in the
+   file.
+4. **A return type that could not supply the text a later section required.** The *design* specified
+   `pairs(): Binding<Leg>[]` where the plan said `PaneOption[]`. **Here the plan was right and the
+   design was wrong** — `Binding<Leg>` carries no label, so it cannot produce the `<option>` text §4.3
+   demands. Code was built against the plan and the design was corrected. Worth stating plainly: the
+   one defect of the five that was not the plan's was caught only because the two documents disagreed
+   in a place an implementer had to read both.
+5. **The worst one: a `'source'` split minting a fresh leaf id.** The plan's sample code called
+   `nextLeafId()` for every choice. But `hostFor` keys the source host — the one holding `#editor` and
+   the live CodeMirror — under the literal id `'source'`. A minted id would have returned an **empty**
+   source pane with the user's program stranded in a detached host: **the slice's headline wart-fix
+   failing silently at exactly the moment it is meant to work**, with no error and no clue. Fixed by
+   introducing a `SOURCE_LEAF` constant and routing `defaultLayout()` and four `main.ts` literals
+   through it.
+
+A sixth of a different class, twice: **the plan's per-task file lists were derived from `web/src/` and
+under-counted callers in `tests/`.** A signature change hit a browser-test fixture the list did not
+name, and a type widening broke two source files it did not name. The repo-wide `tsc --noEmit` in the
+pre-commit gate makes this self-correcting rather than dangerous — it simply forces the fix into the
+same commit — but a plan that says which files a task touches should say all of them.
+
+##### THE ACCESSIBILITY LIST — TWO ADDITIONS, ONE EXCEPTION TAKEN, AND FOUR ENTRIES 5d-ii-a DECLARED AND NEVER WROTE
+
+**Added to the standing list as item 9** (roadmap:1297 onward): the split picker's menu and the widened
+`(leg, session)` selector announce nothing when the layout changes underneath them — the same gap
+5d-ii-a recorded for its four layout controls, extended to two controls that do not merely rearrange
+panes but change what a pane *is*.
+
+**And the four 5d-ii-a's own entry declared were added were never actually written into the list.**
+That entry says *"Added to the standing list (roadmap:1297 onward)"* and names `split →`, `split ↓`,
+`close` and `reset layout`; the list went from item 8 to the closing paragraph with nothing
+in between. **This is the silent-never-happens failure the list's preamble exists to prevent, committed
+by the entry that invokes it** — and it is the second instance in this file, PR 5c's own item 7
+recording the first ("one report described the debt as *already on this list* when it was on no list at
+all"). Item 9 now carries all six, with that history in it. **A closing entry saying a list was updated
+is not the list being updated**, and nothing mechanical distinguishes the two.
+
+**One exception is taken rather than deferred, on the test 5d-ii-a's §6.2 established.** The picker
+ships **keyboard-operable**: native `<button>` semantics throughout, a native `popover` (so light
+dismiss, top-layer placement and Escape come from the platform rather than from a hand-rolled
+dropdown), `aria-haspopup="menu"` and `aria-controls`, `aria-expanded` **stated at construction and
+maintained on both toggle edges** — a disclosure control that has no `aria-expanded` until it has been
+used once announces itself as a plain button to the one user who most needs to know it opens something
+— and focus moved into the menu on open, via `autofocus` for the reason defect 2 above records. A
+mouse-only *creation* control is inoperability rather than unannounced semantics, and the list's item 1
+says the fix for inoperability is to build the control, not to defer it.
+
+##### WHAT THIS SLICE COULD NOT ESTABLISH
+
+**Whether the TM half of the pair list works at more than one entry.** 5d-i decision 5's singleton
+scratch rule still holds, so `options('tm')` returns exactly the source session today and the picker's
+TM group has one item. Every claim about pairs, grouping and self-removal is exercised against a λ
+group that can grow and a TM group that cannot. **5d-ii-c is the slice that first makes this false**,
+and it inherits the obligation to re-test it.
+
+**A user-visible change nobody designed on purpose, kept deliberately.** The selector removes itself
+below two pairs, and the source session has both legs — so a fresh page now has two pairs and **the
+binding selector appears where it used to be absent.** It is arguably correct (a λ pane genuinely can
+become a TM pane now, so the control is not vacuous), but it fell out of the pair count rather than
+being chosen. Three tests had been using "selector is absent" as a proxy for "only one λ session" and
+were rewritten to read the λ group's contents instead — **a test rewritten by the same change that
+broke it is the highest-risk artifact in a diff**, and it was flagged to the reviewer as exactly that.
+
+**Whether anyone can work in a multiplexed layout.** Unchanged from 5d-ii-a: every claim in this entry
+is about DOM, geometry and counts. Nobody has sat in front of a mixed arrangement and used it for a real
+task.
+
+**The column split is still not driven end to end through `main()`.** 5d-ii-a recorded this as a
+near-duplicate risk — `splitColumn` four lines from `splitRow`, differing in one string literal. That
+specific shape is **gone**: both now call one `split(dir, choice)` helper in `pane-host.ts`, so there is
+no duplicate to drift. But no browser test still clicks `split ↓` on a tree `main()` mounted, so the
+claim rests on the helper being shared rather than on a test.
+
+**Reload, divider drag on the real page, and `MIN_PANE_FRACTION`** are all carried forward from
+5d-ii-a's list unchanged. This slice touched none of them.
+
+##### 5d-ii-c AND 5d-iv KEEP THEIR FILED POSITIONS
+
+- **5d-ii-c — N scratch buffers.** Unchanged from 5d-ii-a §6.1 and roadmap:5869-5873. It still owns the
+  measured session cap and the worker-affordability probe 5d-i left open. **It also still inherits
+  `pane-chrome.ts`'s collapse-state question, unchanged**: that file's reason for not persisting collapse
+  state is *"a scratch is retired and replaced, not resumed, so there is no session for a remembered
+  collapse to describe"* — a premise (c) falsifies by definition, since buffers are resumed, and which
+  this slice does not touch either way.
+- **5d-iv — the TM editable pane.** Unaffected by this slice. Still after 5d-ii, still before Plan 5's
+  accessibility pass.
+
+##### THE COVERAGE FLOORS WERE RAISED, AND WHAT CAME DUE IS A DEFERRAL `vite.config.ts` FILED AT 5d-ii-a's CLOSE
+
+Raised from 93/87/95/96 to **94/88/96/97** (statements/branches/functions/lines), and the argument is
+the one the config filed against this exact moment rather than a fresh preference.
+
+`vite.config.ts` states the convention as a formula — each floor is `floor(measured) - 1`, a margin of
+one to two points sized for genuine run-to-run variation in a merged browser+node report — and its last
+block explicitly **declined** to re-run it for 5d-ii-a's third-round review fixes, on the grounds that a
+half-point delta is not a reason to move a gate and *"the place to re-run the formula is a slice's
+close, where a reviewer sees the argument beside the number."* **This is that slice's close, and this is
+that re-run.** The formula against the figures measured for this entry gives exactly 94/88/96/97.
+
+**The counter-argument is real and is answered rather than ignored.** Movement since 5d-ii-a's final
+measure is small — statements +0.34, branches +0.37, functions +0.21, lines +0.14, none of them as much
+as half a point — and by itself that is noise, which is the reasoning that left `branches` at 87 across
+a 0.21-point drift and was right to. **But the operative quantity is the gap between floor and measured,
+not the delta since the last run**, and that gap had reached 2.71 / 2.89 / 2.98 / 2.13 points on the
+four metrics: past the one-to-two the file says its floors are sized for, on all four at once. After
+the raise they are 1.71 / 1.89 / 1.98 / 1.13, back inside it. Small deltas that never individually
+justify a move are precisely how a floor drifts a full point behind and stops catching a regression
+near where it happens.
+
+Made concrete the way 5d-ii-a's raise was, and computed rather than reasoned about. `functions` is still
+the tightest of the four and the reason to act: **under the old floor of 95, 11 already-covered functions
+could disappear — or 11 new untested ones arrive — before the gate said anything.** That is the same
+magnitude (12) that argued 5d-ii-a's raise. Under 96 it is 7 lost or 8 new, back inside the margin. The
+other three under the new floors: `lines` 19 lost / 20 new, `branches` 19 lost / 22 new, `statements` 34
+lost / 36 new. Both scenarios are computed separately for each metric rather than one derived from the
+other by a rule — rounding near a floor is not linear, and 5d-ii-a's whole-branch review found exactly
+that mistake in this same config block.
+
+##### Verification
+
+**Every figure below was measured against the live tree at `eee8862` for this entry. None is copied
+forward.** This is stated because the repo has been burned twice: 5d-iii's entry shipped stale counts
+its reviewer had to correct (roadmap:5488-5495), and 5d-ii-a's own entry carried counts that moved under
+it twice and says so.
+
+`pnpm test` → **498 passed (498) in 51 files**, from a baseline of 453 in 47 files at the plan commit.
+`pnpm test:coverage` → **95.71% statements (1854/1937), 89.89% branches (890/990), 97.98% functions
+(340/347), 98.13% lines (1634/1665)** — all four above both the old floors and the raised 94/88/96/97,
+and all four above the figures 5d-ii-a closed on (95.37 / 89.52 / 97.77 / 97.99). `pnpm run typecheck` →
+`tsc --noEmit` clean. `wc -l src/main.ts src/pane-host.ts src/editor-custody.ts` → **758 / 693 / 305**.
+
+The test count's route, written down because a clean merge cannot be trusted to preserve a file: 453 at
+the plan commit → 461 at the round-1 join (the pre-recorded 453 + 2 + 6, in the pre-recorded 47 files) →
+479 at round 2 complete, *after* the seven-test semantic conflict above was diagnosed and fixed → 483 →
+489 → 492 across round 3's three serial tasks → **498** after the thirteenth task. Four new test files
+(`active-pane`, `pane-kind-switch`, `pane-picker`, `replies`) and 45 new tests.
+
+**The coverage run was performed twice — before the floors were edited and again after — and all four
+figures reproduced to the last digit** (1854/1937, 890/990, 340/347, 1634/1665), with the second run
+exiting 0 against the raised 94/88/96/97. So the raise is verified against the gate rather than only
+against arithmetic, and the run-to-run variation the one-to-two-point margin is sized for was, on this
+tree at this moment, zero. That is not a licence to shrink the margin: it is one pair of runs on one
+machine, and the variation the comment describes is in which arm of a timing-dependent branch runs, not
+in whether the suite is deterministic on a quiet box.
+
+One measurement caveat, stated rather than buried: an **unrelated** vitest run from a different repo
+held a port during the suite run, and Vitest reported `Port 63315 is in use, trying another one...` and
+moved on. Both runs completed green with identical counts, and no test in this repo binds a fixed port —
+but the branch's own rule is that only one lane runs the browser tier at a time, and that rule does not
+extend to other projects on the same machine.

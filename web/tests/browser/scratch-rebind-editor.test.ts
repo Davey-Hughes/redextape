@@ -48,6 +48,12 @@ const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
 const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')
 const selector = () => document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')
+/**
+ * The `<option>` value the pane selector encodes a `(leg, session)` pair as — spelled out here rather
+ * than imported from `pane-chrome.ts`, so this pins the DOM contract instead of agreeing with whatever
+ * the control currently does. `\x00` as an escape is `scripts/check-text-bytes.sh`'s rule.
+ */
+const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
 const editor = () => document.querySelector('[data-leaf="lambda-0"] .term-editor')
 
 /** `scratch-app.test.ts`'s own `settled`, and the same invariant argument applies — see its doc there. */
@@ -83,19 +89,24 @@ describe('rebinding a forked λ pane back to source through the binding selector
     expect(editor()).not.toBeNull()
 
     const select = selector()
-    if (select === null) throw new Error('a second λ session should have produced a selector')
-    expect(select.value).toBe('lambda-scratch')
+    // NOT "a second λ session should have produced a selector", which this message used to say: the
+    // control lists `(leg, session)` pairs, and the source session's two legs put it on screen before
+    // any fork. What the fork produced is the λ scratchpad OPTION, which is what the next line reads.
+    if (select === null) throw new Error('the pane selector should be on screen from the first paint')
+    expect(select.value).toBe(optionValue('lambda', 'lambda-scratch'))
 
     // THE REBIND — through the real `<select>`, the same `change` event `main.ts` listens for, not a
-    // direct call into `slot.rebind`. `bindingSelect`'s own option values are the app's `SessionId`s,
-    // and `main.ts`'s `SOURCE_SESSION` is the literal string `'source'`.
-    select.value = 'source'
+    // direct call into `slot.rebind`. `paneSelect`'s own option values are `(leg, session)` PAIRS —
+    // they were bare `SessionId`s until the control was widened to both axes, which is why this goes
+    // through `optionValue` rather than the literal id — and `main.ts`'s `SOURCE_SESSION` is the
+    // literal string `'source'`.
+    select.value = optionValue('lambda', 'source')
     select.dispatchEvent(new Event('change'))
 
     // THE OLD SURFACES STILL PASS: the badge is gone and the selector agrees. Neither of these two
     // assertions is what this test exists for — the one below is.
     expect(heading()).toBe('lambda')
-    expect(select.value).toBe('source')
+    expect(select.value).toBe(optionValue('lambda', 'source'))
     // THE REGRESSION. Without `LambdaPane.setDetached`'s teardown, this stayed non-null: the scratch's
     // editor, still mounted, still listening, over a body now showing the source's term.
     expect(editor()).toBeNull()

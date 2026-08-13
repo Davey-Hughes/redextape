@@ -1,8 +1,15 @@
 import type { ControlState } from './controls'
 import { n } from './format'
-import { bindingSelect, controlStrip, detachedBadge, layoutControls, type PaneEvents } from './pane-chrome'
-import type { SessionId } from './session-client'
-import type { BindingOption } from './sessions'
+import {
+  controlStrip,
+  detachedBadge,
+  layoutControls,
+  type PaneEvents,
+  paneSelect,
+  type SplitChoices,
+} from './pane-chrome'
+import type { Leg } from './protocol'
+import type { Binding, PaneOption } from './sessions'
 import { centredScrollTop, Follow, focusedRows, highlight, linkedRows, ROW_HEIGHT, StateIndex } from './state-table'
 import { tapeRows } from './tape'
 import type { TmProgram, TmState } from './types'
@@ -27,8 +34,13 @@ export class TmPane {
   #tapes: HTMLElement
   #strip: ReturnType<typeof controlStrip>
   #badge: ReturnType<typeof detachedBadge>
-  #select: ReturnType<typeof bindingSelect>
+  #select: ReturnType<typeof paneSelect>
   #layout: ReturnType<typeof layoutControls>
+  /**
+   * What this pane's split menus offer — `LambdaPane.#choices`'s twin, and its doc carries the argument
+   * for the starting value and for reading it through a thunk rather than handing a list over once.
+   */
+  #choices: SplitChoices = { options: [], sourceAvailable: false, current: null }
   #program: TmProgram | null = null
   #names: string[] = []
   #frame: TmState | null = null
@@ -63,13 +75,13 @@ export class TmPane {
     this.#badge = detachedBadge(title)
     // Anchored to the title for the reason `LambdaPane`'s constructor states: the control removes
     // itself below two options and needs somewhere to go back to.
-    this.#select = bindingSelect(title, on.rebind)
+    this.#select = paneSelect(title, on.rebind)
     this.#status = document.createElement('div')
     this.#status.className = 'tm-status'
     this.#tapes = document.createElement('div')
     this.#tapes.className = 'tapes'
     this.#strip = controlStrip(on)
-    this.#layout = layoutControls(this.#strip.el, on)
+    this.#layout = layoutControls(this.#strip.el, on, () => this.#choices)
 
     this.#toggle = document.createElement('button')
     this.#toggle.type = 'button'
@@ -264,20 +276,23 @@ export class TmPane {
   }
 
   /**
-   * Offer `options` in the binding selector and show `current` as the one in force. Same shape and
-   * same contract as `LambdaPane.setBindings`; that method's doc carries the argument for pushing the
-   * list in rather than letting a pane hold a registry, and it is not repeated here.
+   * Offer `options` in the pane selector and show `current` as the pair in force. Same shape and same
+   * contract as `LambdaPane.setBindings`; that method's doc carries the argument for pushing the list
+   * in rather than letting a pane hold a registry, and the argument for `Binding<Leg>` rather than
+   * `Binding<'tm'>`, and neither is repeated here.
    */
-  setBindings(options: BindingOption[], current: SessionId): void {
+  setBindings(options: PaneOption[], current: Binding<Leg>): void {
     this.#select.update(options, current)
   }
 
   /**
-   * Which layout gestures this pane currently offers. Same shape and same contract as
-   * `LambdaPane.setLayoutControls`; that method's doc carries the argument for driving this from
-   * `main.ts`'s draw pass rather than from the pane, and it is not repeated here.
+   * Which layout gestures this pane currently offers, and what a split may create. Same shape and same
+   * contract as `LambdaPane.setLayoutControls`; that method's doc carries the argument for driving this
+   * from `main.ts`'s draw pass rather than from the pane, and `PaneView.setLayoutControls` carries the
+   * argument for `choices` riding this call. Neither is repeated here.
    */
-  setLayoutControls(canClose: boolean, canSplit: boolean): void {
+  setLayoutControls(canClose: boolean, canSplit: boolean, choices: SplitChoices): void {
+    this.#choices = choices
     this.#layout.update(canClose, canSplit)
   }
 

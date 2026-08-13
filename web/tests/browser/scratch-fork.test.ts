@@ -116,7 +116,7 @@ function sourceSession(pool: SessionPool, seen: RunReply[]): SessionEntry {
       for (const f of reply.frames) legs.tm.hist.push(f, tmFrameBytes(f))
     }
   })
-  return { id: SOURCE, label: 'source', detached: false, client, legs }
+  return { id: SOURCE, label: 'source', detached: false, client, legs, tmProgram: null }
 }
 
 describe('detach is a fork', () => {
@@ -379,7 +379,7 @@ describe('the no-session remedy for a failed fork', () => {
         play: () => undefined,
         restart: () => undefined,
         extend: () => undefined,
-        rebind: (session) => slot.rebind(session),
+        rebind: (binding) => slot.rebind(binding.session),
         detach: () => undefined,
       })
       slot.render(reg, pane, slot.resolve(reg))
@@ -459,7 +459,7 @@ describe('the no-session remedy for a failed fork', () => {
    * retire, the rebind and the fork-failed report are the production ones.
    *
    * **THE THREE STUBS ARE THE THREE DEPENDENCIES `main.ts` INJECTS, AND `reconcileEditors` IS THE
-   * ASSERTION.** It is a `() => void` closed over `main()`'s own maps, so nothing outside that function
+   * ASSERTION.** It is a `() => void` closed over `createEditorCustody`'s own maps, so nothing outside that function
    * can build the real one — which is exactly why it is a parameter. Counting its calls is what makes
    * the deleted-line mutation fail, and `expect(swept).toBe(0)` before the reply is what stops the
    * count from being satisfied by anything earlier in the sequence.
@@ -496,7 +496,7 @@ describe('the no-session remedy for a failed fork', () => {
         play: () => undefined,
         restart: () => undefined,
         extend: () => undefined,
-        rebind: (session) => slot.rebind(session),
+        rebind: (binding) => slot.rebind(binding.session),
         detach: () => undefined,
       })
       // IN THE COLLECTION, BECAUSE THAT IS WHERE THE PRODUCTION ARM LOOKS FOR SLOTS TO REBIND
@@ -527,7 +527,7 @@ describe('the no-session remedy for a failed fork', () => {
         },
         sourceSession: SOURCE,
         // `undefined` IS THE HONEST ANSWER HERE AND THE REASON THIS ARM NEEDS THE SWEEP AT ALL: after a
-        // retire, `main.ts`'s `editorHomeFor` can no longer resolve any pane to the dead session, so the
+        // retire, `editor-custody.ts`'s `editorHomeFor` can no longer resolve any pane to the dead session, so the
         // narrow dependency is a no-op on exactly this path (`compile.ts`'s own doc has the measurement).
         editorHome: () => undefined,
         reconcileEditors: () => {

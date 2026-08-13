@@ -93,12 +93,15 @@ export type LinkStatus = {
    * entirely (§4.3: it TERMINATES the scratch's worker and rebinds the pane back); `'none'` says
    * nothing is pinned, which is silent, and §4.5's whole obligation is that detachment must not be.
    *
-   * OPTIONAL, AND THAT IS A COMPATIBILITY REQUIREMENT RATHER THAN A CONVENIENCE. `main.ts:307-322` is
-   * the only place in the app that builds a `LinkStatus`, and it cannot fill this in yet — no pane has
-   * a binding to report (§3.2b: `main()`'s local scope is the state, and the session registry lands
-   * separately). Absent therefore means "both attached", so today's call sites keep compiling
-   * unchanged and adopting this is one added property. Under `exactOptionalPropertyTypes` that
-   * property is added by spread, never assigned `undefined` — `main.ts:426-443`'s idiom.
+   * OPTIONAL, AND THAT IS A COMPATIBILITY REQUIREMENT RATHER THAN A CONVENIENCE. It was written while
+   * the one place in the app that builds a `LinkStatus` could not fill it in — no pane had a binding to
+   * report (§3.2b: `main()`'s local scope was the state, and the session registry landed separately) —
+   * so absent means "both attached" and adopting this was one added property against call sites that
+   * kept compiling unchanged. **THAT BUILDER IS `link-wiring.ts`'s `drawLink` NOW, AND IT DOES FILL
+   * THIS IN**, on all three arms, from `detachedPanes()`; the optionality is what the other producers
+   * of this type — this file's own tests among them — still spend. Under `exactOptionalPropertyTypes`
+   * an optional property is added by spread, never assigned `undefined`, which is the idiom `drawLink`
+   * uses for `forkFailed` beside it.
    */
   detached?: DetachedPanes
 } & (

@@ -316,8 +316,13 @@ ensure_llvm_prefix() {
 # installed reports it as missing. Setting CHROME_PATH from the first binary that actually exists is
 # the fix, and doing it here rather than in a README is what stops the next person rediscovering it.
 #
-# chromedriver is deliberately NOT probed: wasm-pack downloads a matching one on first use, so
-# requiring it up front would fail on a machine where the leg would have worked.
+# CHROMEDRIVER IS MATCHED TO CHROME BY `ensure_chromedriver` BELOW, and this paragraph used to say the
+# opposite: "chromedriver is deliberately NOT probed: wasm-pack downloads a matching one on first use."
+# It does not download a matching one — it downloads the LATEST one, which is the same thing only while
+# the machine's Chrome is also the latest. That stopped being true when Chrome 152 shipped, and the
+# resulting failure is unusually hard to read: chromedriver starts, announces success, and the run dies
+# with `http status: 404` and `driver status: signal: 9 (SIGKILL)`. See that function for the
+# measurement both ways.
 #
 # `crates/redextape-wasm/webdriver.json` CARRIES THE TWO FLAGS THIS LEG NEEDS IN A CONTAINER, and it
 # lives there because that is where wasm-bindgen-test looks (crate root, `goog:chromeOptions.args`).
@@ -351,6 +356,77 @@ ensure_browser() {
     exit 1
   fi
   if [ -n "${CHROME_PATH:-}" ]; then echo "==> using Chrome at $CHROME_PATH"; fi
+  ensure_chromedriver
+}
+
+# A chromedriver whose MAJOR VERSION MATCHES THE INSTALLED CHROME, placed on `$PATH` so wasm-pack
+# uses it instead of fetching its own.
+#
+# THIS EXISTS BECAUSE THE COMMENT ABOVE USED TO SAY WASM-PACK "DOWNLOADS A MATCHING ONE ON FIRST USE",
+# AND THAT WAS NEVER TRUE. It downloads the LATEST one. The two agree only while the machine's Chrome
+# is also the latest, which is a coincidence that expires on every Chrome release — and it expired:
+# Chrome 152 shipped, wasm-pack began fetching chromedriver 152, and every machine still on 151
+# started failing. The failure does not say "version mismatch"; chromedriver starts fine, reports
+# `ChromeDriver was started successfully`, and then the runner gets `http status: 404` and reports
+# `driver status: signal: 9 (SIGKILL)`, which reads like a crash or an OOM. MEASURED BOTH WAYS on one
+# machine: driver 152 against Chrome 151 reproduces that signature byte for byte; driver 151.0.7922.138
+# against Chrome 151.0.7922.137 runs 24 tests green. Major-matching is enough — the patch levels differ
+# in that passing run.
+#
+# ON `$PATH` RATHER THAN VIA `--chromedriver`, because `$PATH` is the hook wasm-pack documents for
+# exactly this ("if the chromedriver WebDriver client is not on the `$PATH`, and not specified with
+# `--chromedriver`, then wasm-pack will download a local copy"). Taking the `$PATH` branch means the
+# `wasm-pack test` invocation in `do_leg` needs no argument and cannot drift out of step with this.
+#
+# AN ALREADY-MATCHING DRIVER IS LEFT ALONE, so a machine that manages its own chromedriver — a distro
+# package, a pinned CI image — is not second-guessed and nothing is downloaded.
+ensure_chromedriver() {
+  local chrome="${CHROME_PATH:-google-chrome}" major have cache url
+  major="$("$chrome" --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)"
+  if [ -z "$major" ]; then
+    echo "warning: could not read Chrome's version, so chromedriver cannot be matched to it." >&2
+    echo "  letting wasm-pack choose; if it fetches a different major you will see a 404 and a SIGKILL." >&2
+    return 0
+  fi
+
+  if command -v chromedriver >/dev/null 2>&1; then
+    have="$(chromedriver --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)"
+    if [ "$have" = "$major" ]; then
+      echo "==> chromedriver $have already matches Chrome $major"
+      return 0
+    fi
+  fi
+
+  cache="${XDG_CACHE_HOME:-$HOME/.cache}/redextape/chromedriver-$major"
+  if [ ! -x "$cache/chromedriver" ]; then
+    if ! command -v unzip >/dev/null 2>&1; then
+      echo "error: unzip not found, and Chrome for Testing ships chromedriver only as a .zip." >&2
+      echo "  install unzip, or put a chromedriver for Chrome $major on \$PATH yourself." >&2
+      echo "  or skip this tier: scripts/check-all.sh --no-browser" >&2
+      exit 1
+    fi
+    # ONE ENDPOINT, KEYED BY MILESTONE, so this asks the question it actually has ("a driver for Chrome
+    # $major") rather than the one that broke us ("the newest driver"). `latest-patch` within the
+    # milestone is fine: the passing measurement above pairs .138 with .137.
+    url="$(curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/latest-versions-per-milestone-with-downloads.json 2>/dev/null \
+      | tr ',' '\n' | grep -F "/$major." | grep -F 'chromedriver-linux64.zip' | grep -oE 'https://[^"]+' | head -1 || true)"
+    if [ -z "$url" ]; then
+      echo "error: no chromedriver published for Chrome $major." >&2
+      echo "  Chrome for Testing lists drivers per milestone; $major is not among them." >&2
+      echo "  put one on \$PATH yourself, or skip this tier: scripts/check-all.sh --no-browser" >&2
+      exit 1
+    fi
+    echo "==> fetching chromedriver for Chrome $major"
+    mkdir -p "$cache"
+    curl -fsSL -o "$cache/cd.zip" "$url"
+    unzip -qo "$cache/cd.zip" -d "$cache"
+    # The archive nests the binary one directory down; move it up so `$PATH` needs one entry.
+    find "$cache" -name chromedriver -type f -exec mv -f {} "$cache/chromedriver" \; 2>/dev/null || true
+    chmod +x "$cache/chromedriver"
+    rm -f "$cache/cd.zip"
+  fi
+  export PATH="$cache:$PATH"
+  echo "==> using chromedriver $("$cache/chromedriver" --version 2>&1 | grep -oE '[0-9.]+' | head -1) for Chrome $major"
 }
 
 do_leg() {

@@ -157,6 +157,11 @@ export class LambdaScratchpad {
             timer: null,
           },
         },
+        // NO MACHINE, EVER — `SessionEntry.tmProgram` is retained from a `compiled` reply, and a λ
+        // scratchpad's worker answers `scratch-compiled` instead (§3.3: no TM leg, no `SourceMap`). A
+        // TM pane cannot be bound to this session either, so nothing will ever read it; stating the
+        // `null` is what makes that a fact the type carries rather than one the reader has to derive.
+        tmProgram: null,
       })
       // SUPERSEDE THEN POST, the pattern `main.ts`'s `schedule` uses and for the same reason
       // (`SessionClient.supersede`'s doc): a fresh client is at generation 0, which matches nothing,

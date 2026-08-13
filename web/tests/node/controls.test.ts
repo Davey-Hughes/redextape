@@ -45,8 +45,9 @@ describe('controlState', () => {
     expect(controlState(view({ available: false, length: 0, head: 0, done: 'budget' })).canForward).toBe(false)
   })
 
-  // `session.rs:415` names this trap one layer in: exhausting a BUDGET leaves the run Running, and
-  // only the cursor's own cap yields Capped. Three stop reasons, three different sentences.
+  // `session.rs`'s `run_lambda` names this trap one layer in: exhausting a BUDGET leaves the run
+  // Running, and only the cursor's own cap yields Capped. Three stop reasons, three different
+  // sentences.
   it('words a spent recording budget as free to continue', () => {
     const c = controlState(view({ done: 'budget', length: 500, head: 499, newestStep: 499 }))
     expect(c.continueLabel).toBe('keep recording')
@@ -57,9 +58,10 @@ describe('controlState', () => {
     expect(c.continueLabel).toBe('continue — raise the step cap')
   })
 
-  // THE TRAP. `LambdaCursor::raise_cap` refuses to clear `depth_capped` (trace.rs:98,
-  // session.rs:76-77), so raising the cap provably cannot help. An affordance here would be a lie
-  // the UI tells on the backend's behalf — so there is no affordance at all, not a disabled one.
+  // THE TRAP. `LambdaCursor::raise_cap` refuses to clear `depth_capped` (its own doc in `trace.rs`,
+  // and `RunStatus::DepthRefused`'s in `session.rs`), so raising the cap provably cannot help. An
+  // affordance here would be a lie the UI tells on the backend's behalf — so there is no affordance
+  // at all, not a disabled one.
   it('offers NO continue affordance for a depth refusal', () => {
     const c = controlState(view({ done: 'depth-refused', length: 9, head: 8, newestStep: 8 }))
     expect(c.continueLabel).toBeNull()

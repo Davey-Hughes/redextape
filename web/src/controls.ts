@@ -35,8 +35,9 @@ export type ControlState = {
  *
  * THREE STOP REASONS AND THREE SENTENCES, because they are three different facts. A spent recording
  * budget leaves the run `Running` and costs nothing to continue; a spent cursor cap needs the cap
- * raised; and a depth refusal cannot be continued at all. `session.rs:415` records the first
- * distinction one layer in, and `trace.rs:98` records the second.
+ * raised; and a depth refusal cannot be continued at all. `session.rs`'s `run_lambda` records the first
+ * distinction one layer in ("A SPENT `budget` IS NOT A SPENT CAP"), and `trace.rs`'s
+ * `LambdaCursor::raise_cap` records the second.
  */
 function doneText(done: RecordEnd): string {
   switch (done) {

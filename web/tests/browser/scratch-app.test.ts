@@ -45,6 +45,24 @@ const step = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textC
 const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
 const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')
 const selector = () => document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')
+/**
+ * The λ `<optgroup>`'s own options — WHICH SESSIONS OFFER A λ LEG, which is the question every
+ * assertion in this file was really asking of the selector before it listed both legs.
+ *
+ * `select.options` FLATTENS THE GROUPS AWAY and would now answer with the TM group's entries mixed in,
+ * so a fork that added nothing would still look right the moment the source session's TM leg was
+ * counted. Reading the group by its own label is what keeps the assertion about λ.
+ */
+const lambdaOptions = () =>
+  [...document.querySelectorAll('[data-leaf="lambda-0"] .pane-binding optgroup[label="λ"] option')].map(
+    (o) => o.textContent,
+  )
+/**
+ * The `<option>` value the pane selector encodes a `(leg, session)` pair as — spelled out here rather
+ * than imported from `pane-chrome.ts`, so this pins the DOM contract instead of agreeing with whatever
+ * the control currently does. `\x00` as an escape is `scripts/check-text-bytes.sh`'s rule.
+ */
+const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
 const statusLine = () => document.querySelector('#link-status')?.textContent ?? ''
 
 /** `app.test.ts`'s `settled`, and the same invariant argument applies — see its doc there. */
@@ -189,14 +207,21 @@ describe('the fork control, end to end', () => {
   it('forks the λ pane onto a scratchpad seeded with the term it was showing, and comes home on a recompile', async () => {
     await settled('let x = 40; x + 2')
 
-    // STAGE 1 — attached, and the app looks exactly as T7 left it, modulo one gate T8 removed. The
-    // selector is absent because one session offers λ (`bindingSelect`'s "not shown at all below two
-    // options"), and the fork control is present because the pane is attached — it no longer also
-    // requires the frame to be whole (`LambdaPane.#refreshDetach`'s `frame.cut` check came out in T8;
-    // `scratch-fork.test.ts`'s "forks a truncated frame" `describe` is the test that would catch its
-    // return).
+    // STAGE 1 — attached, and the app looks exactly as T7 left it, modulo one gate T8 removed and one
+    // control T7's own successor widened. The fork control is present because the pane is attached —
+    // it no longer also requires the frame to be whole (`LambdaPane.#refreshDetach`'s `frame.cut`
+    // check came out in T8; `scratch-fork.test.ts`'s "forks a truncated frame" `describe` is the test
+    // that would catch its return).
+    //
+    // **THE SELECTOR IS ON SCREEN HERE, AND THIS ASSERTION USED TO SAY IT WAS ABSENT** — "the selector
+    // is absent because one session offers λ (`bindingSelect`'s 'not shown at all below two
+    // options')". The threshold counts `(leg, session)` PAIRS now, and the source session has both
+    // legs, so it clears two on its own. The claim that sentence was really making — that only ONE
+    // session offers λ until a fork happens — is what the λ group's own contents say, and that is what
+    // is asserted instead. `main.ts`'s note on registering the source session carries the same
+    // correction.
     expect(heading()).toBe('lambda')
-    expect(selector()).toBeNull()
+    expect(lambdaOptions()).toEqual(['source'])
     expect(forkButton()).not.toBeNull()
 
     // Two steps in, so the seed is a term the SOURCE SESSION IS NOT AT STEP 0 OF. §4.3 seeds with
@@ -225,12 +250,18 @@ describe('the fork control, end to end', () => {
     // `SessionEntry.detached` the badge does, so the two cannot disagree.
     expect(statusLine()).toContain('λ pane detached')
     // The control is gone, because a pane already on the scratchpad has nothing to fork — and the
-    // selector has arrived in its place, which is the affordance for the same intent that still works.
+    // selector is the affordance for the same intent that still works: it is how a user comes back.
+    // It did not ARRIVE here, which this comment used to say. Since the control started listing
+    // `(leg, session)` pairs it has been on screen since STAGE 1; what the fork changed is the λ
+    // group's contents, asserted two lines below.
     expect(forkButton()).toBeNull()
     const select = selector()
-    if (select === null) throw new Error('a second λ session should have produced a selector')
-    expect([...select.options].map((o) => o.textContent)).toEqual(['source', 'λ scratchpad'])
-    expect(select.value).toBe('lambda-scratch')
+    if (select === null) throw new Error('the pane selector should be on screen from the first paint')
+    // THE λ GROUP, NOT `select.options`, WHICH FLATTENS THE GROUPS AWAY. The TM group is beside it and
+    // holds the source session's TM leg, which this stage says nothing about; what the fork changed is
+    // the λ group, and naming the group is what keeps this assertion about the fork.
+    expect(lambdaOptions()).toEqual(['source', 'λ scratchpad'])
+    expect(select.value).toBe(optionValue('lambda', 'lambda-scratch'))
     // BEFORE ANY REPLY: the leg exists and has nothing in it yet, and the step readout says which of
     // those two it is. `controlState` renders `reason` while `!available`, which is what
     // `LambdaScratchpad` seeds the leg's status with rather than leaving it `''`.
@@ -264,9 +295,12 @@ describe('the fork control, end to end', () => {
 
     expect(heading()).toBe('lambda')
     expect(statusLine()).not.toContain('detached')
-    // The selector is gone too, which is the registry having genuinely lost a session rather than the
-    // pane having merely looked away — `bindingSelect` removes itself below two options.
-    expect(selector()).toBeNull()
+    // The scratchpad is gone from the λ group too, which is the registry having genuinely lost a
+    // session rather than the pane having merely looked away. This used to be `expect(selector()).
+    // toBeNull()` — the whole control withdrawing — and it cannot be any more: the source session's
+    // two legs keep the control above its two-option threshold on their own. The λ group emptying back
+    // to one entry is the same fact, stated where the retire is actually observable.
+    expect(lambdaOptions()).toEqual(['source'])
 
     await until(
       () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText().includes('45'),

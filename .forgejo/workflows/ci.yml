@@ -74,8 +74,16 @@ jobs:
   # convenience — it cannot bind anyone, and it does not survive a fresh clone. This is the gate: a
   # merge commit reaching main fails CI however it got there.
   #
-  # Checks only the commits this push/PR actually adds, so it never re-litigates history that is
-  # already on main.
+  # Checks only the commits a push to `main` actually adds, so it never re-litigates history that is
+  # already there. **The merge-commit step is scoped to pushes on `main` and does NOT run on
+  # `pull_request`** — under a squash merge a branch's own shape never reaches main, so checking it
+  # there enforced a property main does not have. Since squash is now the only enabled merge style and
+  # `enable_push` is off, that step cannot fire at all: it is a tripwire against a settings regression
+  # nothing in this repository could otherwise detect. Its own comment carries the settings it read
+  # and the measurement that prompted the narrowing.
+  #
+  # THE CONTROL-BYTE STEPS BELOW ARE UNCONDITIONAL AND ARE THE REASON THIS JOB IS STILL A REQUIRED
+  # CONTEXT ON PULL REQUESTS. They are what a PR needs from this job; the merge check never was.
   linear-history:
     runs-on: docker
     steps:
@@ -99,19 +107,59 @@ jobs:
         run: scripts/check-text-bytes.sh --self-test
       - name: Reject control bytes in tracked text files
         run: scripts/check-text-bytes.sh
+      # ON PUSHES TO `main` ONLY, AND THE NARROWING IS THE POINT RATHER THAN A RELAXATION. This job's
+      # heading states the goal exactly: "a merge commit REACHING MAIN fails CI however it got there."
+      # Running it on `pull_request` checked a different artifact — the PR branch's own shape — which
+      # under a squash merge never reaches main at all. The squash produces one commit whose parent is
+      # main's tip, so a branch may carry any number of merge commits and main stays linear regardless.
+      #
+      # MEASURED, NOT HYPOTHETICAL: PR #38 (5d-ii-b) failed this job on six `--no-ff` commits that were
+      # the joins of six parallel worktree lanes. Every one of them was discarded by the squash. The
+      # only remedy the check offered was rebasing thirty-two commits — destroying the per-commit
+      # reasoning this repository keeps deliberately — to satisfy a property main never observes.
+      #
+      # **THIS STEP IS A TRIPWIRE FOR A SETTINGS REGRESSION, NOT AN ACTIVE GATE — say so plainly rather
+      # than let a future reader assume it is load-bearing.** As configured today it cannot fire, and
+      # that is the intended state. The settings were READ, not assumed, when this was written (an
+      # earlier draft asserted a squash-only restriction that did not exist at the time):
+      #
+      #   * Branch protection on `main`: `enable_push = false` with an EMPTY push whitelist. Nothing
+      #     reaches `main` except a pull-request merge.
+      #   * Merge styles: `allow_squash_merge` is the ONLY one enabled. `allow_merge_commits`,
+      #     `allow_rebase`, `allow_rebase_explicit` and `allow_fast_forward_only_merge` are all off.
+      #     A squash produces one commit whose parent is `main`'s tip, so it cannot be a merge commit.
+      #
+      # Those two facts together make a merge commit on `main` unreachable. The check is kept anyway
+      # because **the coupling is invisible from inside the repository**: the guarantee lives in
+      # Forgejo's settings, which no file here can see, and re-enabling `allow_fast_forward_only_merge`
+      # in the web UI would silently restore the hole — a fast-forward lands a branch's commits
+      # verbatim, and `main` is already an ancestor of every PR head. One `git log --merges` on pushes
+      # to `main` is the whole cost of noticing that.
+      #
+      # It is the idiom `layout.ts`'s `splitLeaf` already uses for its own refusals: a backstop for a
+      # caller that got there another way, labelled as a backstop rather than dressed up as the
+      # mechanism. If this ever fires, the bug is in the repository settings, not in a branch.
+      #
+      # THE CONDITION NAMES `main` RATHER THAN RELYING ON `on.push.branches`. That list is `[main]`
+      # today, so `github.event_name == 'push'` would be equivalent — and would silently stop being
+      # equivalent the moment someone adds a branch to it. A `v*` tag push skips the step, correctly:
+      # the tagged commit is already on `main` and was checked by (2) when it landed.
+      #
+      # The other two steps in this job are unconditional and must stay that way. They are the
+      # control-byte gate, which has nothing to do with merge shape and everything to do with a defect
+      # that made a whole source file invisible to `rg`.
       - name: Reject merge commits
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
           BEFORE: ${{ github.event.before }}
         run: |
           set -eu
-          # A PR compares against its base; a push compares against what the branch was before it.
-          # A first push (or a null base) has no meaningful range, so fall back to the last commit.
+          # A push compares against what the branch was before it. A first push (or a null base) has no
+          # meaningful range, so fall back to the last commit. The `pull_request` base is gone from this
+          # step along with the event that supplied it.
           range=""
-          if [ -n "${BASE:-}" ]; then
-            range="$BASE..HEAD"
-          elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
-               && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+          if [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+             && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             range="$BEFORE..HEAD"
           else
             range="HEAD~1..HEAD"
@@ -119,7 +167,7 @@ jobs:
           echo "checking $range"
           merges=$(git log --merges --format='%h %s' "$range" || true)
           if [ -n "$merges" ]; then
-            echo "error: merge commit(s) on main — rebase instead:" >&2
+            echo "error: merge commit(s) reached main — squash-merge the PR instead:" >&2
             echo "$merges" >&2
             exit 1
           fi

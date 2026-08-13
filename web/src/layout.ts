@@ -34,6 +34,24 @@ export type LayoutNode =
 export const MIN_PANE_FRACTION = 0.1
 
 /**
+ * The `LeafId` of the source pane, which is a CONSTANT rather than a minted id.
+ *
+ * **EVERY OTHER LEAF IS INTERCHANGEABLE AND THIS ONE IS NOT.** `main.ts`'s `nextLeafId` mints
+ * `pane-${n}` for anything a split creates, and which pane ends up at which id is a fact about the order
+ * the user clicked in. The source leaf is the exception in kind: there is ONE editor, `main.ts` builds
+ * the element that holds it and seeds it into `pane-host.ts`'s host map under this key before any layout
+ * exists, and its close control is written directly against it because it has no `PaneSlot` to route a
+ * gesture through. A source leaf that came back under a fresh id would be a different leaf as far as
+ * every one of those is concerned — an empty pane beside a detached editor.
+ *
+ * EXPORTED NOW THAT A SECOND MODULE MINTS ONE. It was a literal in `defaultLayout()` below and three
+ * more in `main.ts` while the only source leaf was the one a fresh page shipped; `pane-host.ts`'s split
+ * handler creating one through the picker is what made "the id is the same id" a claim two files have to
+ * agree on rather than a spelling.
+ */
+export const SOURCE_LEAF: LeafId = 'source'
+
+/**
  * The arrangement `index.html` ships, as a tree — design §4.1.
  *
  * Two columns holding source and λ, with TM spanning beneath them — the same visual shape a two-column
@@ -55,7 +73,7 @@ export function defaultLayout(): LayoutNode {
         dir: 'row',
         sizes: [0.5, 0.5],
         children: [
-          { kind: 'leaf', id: 'source', pane: 'source' },
+          { kind: 'leaf', id: SOURCE_LEAF, pane: 'source' },
           { kind: 'leaf', id: 'lambda-0', pane: 'lambda' },
         ],
       },
@@ -81,18 +99,42 @@ function normalize(sizes: number[]): number[] {
   return sizes.map((s) => s / total)
 }
 
+/** Whether a `'source'` leaf is already in the tree — the "at most one source leaf" invariant, asked. */
+function hasSource(root: LayoutNode): boolean {
+  return leaves(root).some((l) => l.pane === 'source')
+}
+
 /**
- * Replace the leaf `id` with a split holding it and a new leaf of the same kind.
+ * Replace the leaf `id` with a split holding it and a new leaf of `kind`.
  *
- * THE NEW LEAF DUPLICATES THE KIND, WHICH IS WHY THIS SLICE NEEDS NO PICKER. Splitting the λ pane
- * gives a second λ pane, which the binding selector 5d-i shipped can then point at a scratch — and
- * that is "two λ sessions side by side" with `PaneSlot<K>` untouched. Creating a pane of a DIFFERENT
- * kind is 5d-ii-b.
+ * `kind` IS THE CALLER'S CHOICE, NOT A COPY OF THE SPLIT LEAF'S. It used to be: splitting the λ pane
+ * gave a second λ pane, which the binding selector 5d-i shipped could then point at a scratch, and
+ * that was "two λ sessions side by side" with `PaneSlot<K>` untouched. A caller that still wants that
+ * passes the same kind back — the picker's first entry, labelled `(same)`, is exactly that request, and
+ * it is what `pane-host.ts`'s split handler forwards here — but the tree itself no longer decides.
  *
- * THE SOURCE LEAF IS REFUSED RATHER THAN SPECIAL-CASED INTO SOMETHING. There is one editor, so there
- * is nothing to duplicate into, and a split producing an undefined second thing is the fabricated
- * state `session.rs:257-273` prices. `layout-view.ts` does not render a split control on the source
- * pane at all — this throw is the backstop for a caller that got there another way, not the UI.
+ * THIS FUNCTION HAS TWO `'source'` REFUSALS, ON TWO DIFFERENT ARGUMENTS, AND THEY ARE NOT THE SAME
+ * REFUSAL (design §4.2a):
+ *
+ * | argument | refusal |
+ * | --- | --- |
+ * | `id`, the leaf being split | always, if it is `'source'` — unchanged from before this kind existed |
+ * | `kind`, the leaf being created | only if a `'source'` leaf is already in the tree |
+ *
+ * THE SUBJECT'S REFUSAL IS UNCONDITIONAL because there is one editor, so there is nothing to duplicate
+ * into, and a split producing an undefined second thing is the fabricated state `session.rs:257-273`
+ * prices. `layout-view.ts` does not render a split control on the source pane at all — this throw is
+ * the backstop for a caller that got there another way, not the UI.
+ *
+ * THE TARGET'S REFUSAL IS CONDITIONAL, ON PURPOSE: this function must be able to CREATE a source leaf
+ * — letting a closed source pane come back without discarding the whole layout is the capability that
+ * needs it, and it has shipped: `pane-chrome.ts`'s picker offers `source` exactly while the tree has
+ * none, and `pane-host.ts`'s split handler makes that call with `SOURCE_LEAF` — while still enforcing
+ * "at most one source leaf" on a tree that already has one. The UI's own `sourceAvailable` and this
+ * refusal ask the same question of the same tree; this one is what holds when a caller does not.
+ * `setLeafKind` below refuses `'source'` as a target unconditionally instead, because a pane never
+ * BECOMES the source pane; that they read as the same guard is exactly why its own doc restates this
+ * table rather than pointing here.
  *
  * `newId` IS REFUSED IF IT IS ALREADY IN THE TREE. `findLeaf` resolves an id with `.find()`, so a
  * duplicate would not error — it would silently make the second leaf unreachable, present in the tree
@@ -100,10 +142,11 @@ function normalize(sizes: number[]): number[] {
  * refusal keeps the tree unable to reach that state in the first place rather than only detecting it
  * after the fact.
  */
-export function splitLeaf(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId): LayoutNode {
+export function splitLeaf(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: PaneKind): LayoutNode {
   const target = findLeaf(root, id)
   if (target === null) throw new Error(`cannot split a leaf that is not in the tree: ${id}`)
   if (target.pane === 'source') throw new Error('the source pane cannot be split: there is one editor to duplicate')
+  if (kind === 'source' && hasSource(root)) throw new Error('the tree already has a source leaf')
   if (findLeaf(root, newId) !== null) throw new Error(`cannot split into an id already in the tree: ${newId}`)
 
   const rewrite = (node: LayoutNode): LayoutNode => {
@@ -113,9 +156,39 @@ export function splitLeaf(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId)
         kind: 'split',
         dir,
         sizes: [0.5, 0.5],
-        children: [node, { kind: 'leaf', id: newId, pane: node.pane }],
+        children: [node, { kind: 'leaf', id: newId, pane: kind }],
       }
     }
+    return { ...node, children: node.children.map(rewrite) }
+  }
+  return rewrite(root)
+}
+
+/**
+ * Replace the kind of the leaf `id`, keeping its place, its siblings and every size.
+ *
+ * THIS IS WHAT MAKES A LEG CHANGE DIFFERENT FROM CLOSE-THEN-CREATE, and it is the whole of decision 1:
+ * a pane that changes what it shows stays exactly where the user put it and exactly the size they made
+ * it, which a close followed by a split cannot promise.
+ *
+ * IT REFUSES `'source'` AS A TARGET UNCONDITIONALLY, WHERE `splitLeaf` REFUSES IT ONLY WHEN ONE
+ * EXISTS, and the asymmetry is deliberate rather than an oversight. `splitLeaf` is enforcing the "at
+ * most one source leaf" invariant, which an empty tree satisfies; this is enforcing decision 4, which
+ * says no pane ever BECOMES the source pane — there is one editor and it is chrome `main.ts` owns, not
+ * a `PaneView` this tree can conjure. A reader who finds a tree with no source leaf will expect that to
+ * unlock this call, so the refusal is unconditional and this paragraph is why.
+ *
+ * A `'source'` LEAF IS ALSO REFUSED AS THE SUBJECT, for `splitLeaf`'s reason one line up: the editor
+ * would be left with no host in the tree.
+ */
+export function setLeafKind(root: LayoutNode, id: LeafId, kind: PaneKind): LayoutNode {
+  const target = findLeaf(root, id)
+  if (target === null) throw new Error(`cannot change the kind of a leaf that is not in the tree: ${id}`)
+  if (target.pane === 'source') throw new Error('the source leaf cannot change kind: there is one editor')
+  if (kind === 'source') throw new Error('a pane cannot become the source pane: there is one editor')
+
+  const rewrite = (node: LayoutNode): LayoutNode => {
+    if (node.kind === 'leaf') return node.id === id ? { ...node, pane: kind } : node
     return { ...node, children: node.children.map(rewrite) }
   }
   return rewrite(root)
@@ -249,6 +322,25 @@ function validate(node: unknown, ids: Set<string>): node is LayoutNode {
   if (n.kind === 'leaf') {
     if (typeof n.id !== 'string' || n.id.length === 0) return false
     if (typeof n.pane !== 'string' || !PANE_KINDS.includes(n.pane)) return false
+    // THE SOURCE KIND AND `SOURCE_LEAF` IMPLY EACH OTHER, AND NEITHER DIRECTION IS DECORATION.
+    // `parseLayout`'s `sources > 1` count below says at most one leaf renders the editor; it does NOT
+    // say that leaf is the one every other module means. `SOURCE_LEAF`'s own doc has the consequence:
+    // a source leaf under a fresh id "would be a different leaf as far as every one of those is
+    // concerned — an empty pane beside a detached editor". `pane-host.ts`'s creation pass skips the
+    // source kind because `main.ts` seeds the editor's host under this key before any layout exists,
+    // so `{id:'foo', pane:'source'}` reaches the `finally`'s `hostFor('foo', 'source')` and mints an
+    // empty `<section>` while the real editor stays mounted in a host the tree no longer names —
+    // which the count cannot catch, because one such leaf is not two.
+    //
+    // THE CONVERSE IS THE SAME FACT FROM THE OTHER SIDE: `{id: SOURCE_LEAF, pane: 'lambda'}` has the
+    // creation pass build a `LambdaPane` INTO the host the editor already occupies. One biconditional
+    // rather than two rules, because there is one pairing and it is either honoured or not.
+    //
+    // HERE RATHER THAN BESIDE THE COUNT, because this is a property of ONE leaf and the count is a
+    // property of the tree. This function is where the per-leaf rules live and where the hazard is
+    // stated: "every rejection here is something a person could plausibly type", and a hand-edited
+    // `localStorage` entry is exactly how either spelling arrives.
+    if ((n.id === SOURCE_LEAF) !== (n.pane === 'source')) return false
     if (ids.has(n.id)) return false
     ids.add(n.id)
     return true

@@ -13,8 +13,8 @@ export type TapeRow = {
  *
  * `headIndex = heads[i] - window_start[i]` IS THE WHOLE JOB, and it is here rather than inline in
  * the pane so it can be tested without a DOM. Both quantities are materialized-tape coordinates
- * (`viewmodel.rs:108-115`); neither is window-relative, and treating either as if it were puts the
- * marker on the wrong cell with nothing to notice it.
+ * (`viewmodel.rs`'s `TmState` struct doc); neither is window-relative, and treating either as if it
+ * were puts the marker on the wrong cell with nothing to notice it.
  *
  * AN OUT-OF-WINDOW HEAD IS REPORTED, NOT CLAMPED. `Tape::window` centres on the head so it should
  * not happen; clamping would convert a coordinate bug into a marker that is merely in the wrong

@@ -45,10 +45,10 @@ const DEBOUNCE_MS = 300
  * USED TO CALL `setEditor(null)` THROUGH — IMPORTANT finding, re-review of the whole-branch review's own
  * custody fix. Both spellings are about the same moment (a retire has to leave no `LambdaEditor` behind
  * for a session that no longer exists), and the narrow one could only ever reach an editor a pane was
- * still HOLDING. It could not reach one in CUSTODY — `main.ts`'s `heldEditors`, where a closed pane's
+ * still HOLDING. It could not reach one in CUSTODY — `editor-custody.ts`'s `heldEditors`, where a closed pane's
  * editor waits — and a custody entry is keyed by SESSION while the scratch session's id is a constant
  * the next fork re-registers, so the entry outlived the incarnation that produced it and was handed to
- * the next pane to legitimately hold one. See `main.ts`'s `reconcileEditors` for the fix's own account
+ * the next pane to legitimately hold one. See `editor-custody.ts`'s `reconcileEditors` for the fix's own account
  * — INCLUDING THE THIRD ROUND'S CORRECTION TO IT: that sweep visited the sessions `editorOwner` named,
  * so it could not see a custody entry with no CLAIM against it either, until its custody pass was given
  * `heldEditors` as its own domain. That is a fact about the callee, not about this call site, and the
@@ -130,7 +130,7 @@ export function createCompile(deps: {
     // `reconcileEditors()` IN THE SAME BRANCH, BEFORE `draw()`. A retired scratchpad has no term left
     // to show in the box that was editing it — `retire`'s own doc: "the text in the box is lost"
     // (design §4.3) — and no `LambdaEditor` for it may survive this line, whether it is MOUNTED on a
-    // pane or WAITING in `main.ts`'s `heldEditors` after the pane holding it was closed. Both are one
+    // pane or WAITING in `editor-custody.ts`'s `heldEditors` after the pane holding it was closed. Both are one
     // live CodeMirror instance with its own pending debounce over a session `pool.unbind` has just
     // terminated; the second one is what a `setEditor(null)` through a single pane could not reach, and
     // is the Important finding this call replaces (see the `reconcileEditors` dependency's own doc).

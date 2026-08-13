@@ -29,9 +29,10 @@ import type { LambdaState, TmState } from '../../src/types'
  *
  * THE HARNESS IS `frame-cost.test.ts`'s AND THE DEBTS IT PAID ARE NOT RE-DERIVED HERE — read that
  * file for why `performance.memory` and `globalThis.gc` are typed locally rather than in `types.ts`,
- * why `vite.config.ts:150` passes `--enable-precise-memory-info` and `--js-flags=--expose-gc`, and
- * why a reading taken without a forced collection first is "a schedule, not a size". Three
- * adaptations were forced by the size of what this file retains, and each is documented at its site:
+ * why `vite.config.ts`'s browser `launchOptions` passes `--enable-precise-memory-info` and
+ * `--js-flags=--expose-gc`, and why a reading taken without a forced collection first is "a schedule,
+ * not a size". Three adaptations were forced by the size of what this file retains, each documented at
+ * its site:
  * the rounds RELEASE rather than accumulate, the release needs a task boundary before a collection
  * can see it, and the warm-up round is discarded rather than kept.
  */
@@ -73,9 +74,9 @@ function requireHeapHarness(): () => void {
  * IT IS THE FIXTURE BECAUSE ITS TM LEG ACTUALLY FILLS THE RING. The measurement is about what
  * `HISTORY_BYTES` costs when it is spent, and almost no program spends it: `frame-cost.test.ts`'s
  * `while4` retains ~6 MB of λ frames and stops. This one reaches the `budget` stop at 75,025 TM
- * frames — the count `app.test.ts:637` records from a worker-only probe, reproduced to the frame by
- * the runs below, which is worth more as a cross-check than a fresh fixture would be worth as
- * novelty. Its λ leg ends naturally at 253 frames and ~6.3 MB, well under the budget, and that
+ * frames — the count `app.test.ts`'s history-budget case records from a worker-only probe, reproduced
+ * to the frame by the runs below, which is worth more as a cross-check than a fresh fixture would be
+ * worth as novelty. Its λ leg ends naturally at 253 frames and ~6.3 MB, well under the budget, and that
  * asymmetry is itself reported by the second test.
  */
 const MAP =

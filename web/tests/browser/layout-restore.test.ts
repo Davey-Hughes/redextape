@@ -63,17 +63,54 @@ Object.defineProperty(window, 'localStorage', { value: shim, configurable: true 
  * A once-split tree, built with the app's OWN `splitLeaf` and `serializeLayout` rather than a
  * hand-written literal.
  *
- * That is what keeps the fixture honest in both directions: the stored string is exactly what the app
- * writes after one split (so `parseLayout` accepting it proves something about the app rather than
- * about this file's arithmetic on `sizes`), and the id it carries — `lambda-1` — is exactly the id
- * `nextLeafId` mints first, which is the collision under test rather than a chosen one.
+ * That keeps the fixture honest in one direction — the stored string is exactly what `serializeLayout`
+ * produces for a real split tree, so `parseLayout` accepting it proves something about the app rather
+ * than about this file's arithmetic on `sizes` — and `lambda-1` IS PASSED IN EXPLICITLY, NOT MINTED,
+ * on purpose, in the other: `nextLeafId` no longer mints ids shaped like this at all. It minted
+ * `${leg}-${n}` (so `lambda-1`, first split) until `main.ts`'s rename to `pane-${n}` (that same file's
+ * own doc on `nextLeafId` has the reason: a pane can change which leg it renders, so a name like
+ * `lambda-3` can end up describing something the pane is not). This literal is what a REAL
+ * `localStorage` entry from a build before that rename would still contain — the fixture stands in for
+ * that entry, and `lambda-1` has to be spelled the old way for it to. The split test below relies on
+ * exactly this: it restores a tree carrying the OLD spelling and then mints the NEW one, which is why
+ * it is the one place in this file that exercises `seedLeafCounter` against both at once — see its own
+ * doc.
  */
-const STORED = serializeLayout(splitLeaf(defaultLayout(), 'lambda-0', 'row', 'lambda-1'))
+const STORED = serializeLayout(splitLeaf(defaultLayout(), 'lambda-0', 'row', 'lambda-1', 'lambda'))
 
 const leafIds = () => [...document.querySelectorAll('[data-leaf]')].map((e) => (e as HTMLElement).dataset.leaf ?? '')
-const lambdaLeaves = () => leafIds().filter((id) => id.startsWith('lambda'))
+/**
+ * The ids of every λ pane — by `data-kind`, NOT by an `id` prefix. `nextLeafId` now mints `pane-${n}`
+ * regardless of which leg the split came from (`main.ts`'s own doc on `nextLeafId`: a pane can change
+ * which leg it renders, so an id like `lambda-3` would describe something the pane is not), so
+ * `dataset.kind` is the only truthful statement of what a leaf renders left to select on. This matters
+ * MORE in this file than in its siblings: `STORED` below deliberately seeds a leaf spelled the OLD way
+ * (`lambda-1`), so an id-prefix filter would still find it by luck while silently missing a freshly
+ * split leaf spelled the new way (`pane-N`) — the exact mismatch this file exists to restore correctly.
+ */
+const lambdaLeaves = () =>
+  [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')].map((e) => e.dataset.leaf ?? '')
 const splitRowOn = (leaf: string) =>
   document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button[aria-label="split left and right"]`)
+
+/**
+ * Split `leaf` into a second pane of the same kind on the same session — `layout-app.test.ts`'s
+ * `splitRow`, verbatim, and its doc carries the argument: the control opens a picker now, whose first
+ * entry is the pane's own pair labelled `(same)`, so the gesture that used to be one click is two and
+ * still means what it meant. The label is checked rather than assumed, because a silent no-op here would
+ * leave the test below asserting a split that never happened.
+ */
+const splitRow = (leaf: string): void => {
+  const button = splitRowOn(leaf)
+  if (button === null) throw new Error(`no split control on [data-leaf="${leaf}"]`)
+  button.click()
+  const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
+  const first = menu?.querySelector<HTMLButtonElement>('button') ?? null
+  if (first === null || !(first.textContent ?? '').endsWith('(same)')) {
+    throw new Error(`${leaf}'s split menu does not start with the duplicate case: ${first?.textContent}`)
+  }
+  first.click()
+}
 
 // SEEDED BEFORE THE MOUNT, not in a `beforeEach` — `main()` reads the key exactly once, synchronously,
 // while resolving `let tree`, so anything written after that read is never seen. Same reason every
@@ -89,10 +126,35 @@ describe('a layout restored from storage', () => {
     expect(leafIds()).toEqual(['source', 'lambda-0', 'lambda-1', 'tm-0'])
   })
 
+  /**
+   * THE MIXED-SPELLING CASE — `seedLeafCounter` MUST ADVANCE PAST BOTH ID SPELLINGS, NOT JUST ONE, AND
+   * THIS IS THE ONE TEST IN THE FILE THAT PUTS BOTH IN PLAY AT ONCE.
+   *
+   * `STORED` restores a tree carrying the OLD spelling (`lambda-1`, from before `main.ts`'s rename of
+   * `nextLeafId`); the click below mints under the NEW one (`pane-${n}`). Because the two spellings are
+   * disjoint namespaces, an under-seeded counter could never produce a `splitLeaf` collision BY NAME
+   * here — `pane-1` and `lambda-1` are different strings even if the counter never saw the stored leaf
+   * at all. What an under-seed produces instead is a WRONG NUMBER: `seedLeafCounter` reads the digits
+   * after a leaf id's last `-` regardless of which word precedes them (`main.ts`'s own doc on
+   * `nextLeafId`), specifically so a restored `lambda-1` still advances the counter the way a `pane-1`
+   * would. `defaultLayout()`'s own `lambda-0`/`tm-0` contribute suffix `0` and would leave the counter
+   * at 1 by themselves; only seeing `lambda-1`'s `1` pushes it to 2. So `pane-2` is the one id that
+   * proves the stored leaf's suffix was actually seen — `pane-1` would mean it was not, and would still
+   * pass a uniqueness check today only because nothing else in this small tree happens to want `pane-1`
+   * yet.
+   *
+   * THE FILE'S OWN CRITICAL FINDING (above) IS THE SAME MECHANISM UNDER A DIFFERENT SPELLING. It was
+   * found against `${leg}-${n}` ids, before `nextLeafId` was renamed to mint `pane-${n}`; the rename did
+   * not change what `seedLeafCounter` has to do — see every leaf actually in the tree — only which
+   * strings the tree can contain. A restored tree spelled the old way is exactly the drift that
+   * requirement has to survive without a change to `main.ts`, and this test is what still asserts it.
+   */
   it('splits into a fresh id rather than colliding with one the stored tree already carries', () => {
-    // ONE CLICK, AND ONLY ONE. The second click always worked even before the fix, so a test that
+    // ONE SPLIT, AND ONLY ONE — the two clicks inside `splitRow` are one gesture (open the picker, take
+    // the `(same)` entry), not two attempts. That distinction is the point: a SECOND split always worked
+    // even before the fix, because the refused attempt had still incremented the counter, so a test that
     // retried would pass against the bug it exists to catch.
-    splitRowOn('lambda-0')?.click()
+    splitRow('lambda-0')
 
     const lambdas = lambdaLeaves()
     expect(lambdas.length).toBe(3)
@@ -101,6 +163,11 @@ describe('a layout restored from storage', () => {
     // above would pass and the second `lambda-1` would be silently unreachable — the exact failure
     // that guard's own doc says it exists to prevent.
     expect(new Set(lambdas).size).toBe(lambdas.length)
-    expect(lambdas).toContain('lambda-2')
+    // THE STORED LEAF IS STILL THERE, spelled the old way — this split adds a pane, it does not rename
+    // one — and the NEW pane is spelled `pane-2`, not `pane-1` and not `lambda-2`: `pane-1` would mean
+    // `seedLeafCounter` never saw `lambda-1`'s suffix, and `lambda-2` is not a spelling `nextLeafId`
+    // mints anymore.
+    expect(lambdas).toContain('lambda-1')
+    expect(lambdas).toContain('pane-2')
   })
 })

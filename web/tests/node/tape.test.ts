@@ -17,8 +17,9 @@ const state = (over: Partial<TmState> = {}): TmState => ({
 
 describe('tapeRows', () => {
   // THE ONE PIECE OF ARITHMETIC IN THE TM PANE. `heads` and `window_start` are both
-  // MATERIALIZED-TAPE coordinates (viewmodel.rs:108-115), so the head's position inside the window
-  // is their difference. Getting it wrong draws the marker on the wrong cell, silently.
+  // MATERIALIZED-TAPE coordinates (`viewmodel.rs`'s `TmState` struct doc), so the head's position
+  // inside the window is their difference. Getting it wrong draws the marker on the wrong cell,
+  // silently.
   it('places the head at heads[i] - window_start[i]', () => {
     const [row] = tapeRows(state(), NAMES)
     expect(row?.headIndex).toBe(2)

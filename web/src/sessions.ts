@@ -1,8 +1,14 @@
 import { type ControlState, controlState } from './controls'
 import type { History } from './history'
+// A TYPE-ONLY IMPORT, AND THE ONE DIRECTION THAT WOULD OTHERWISE BE A CYCLE — `pane-chrome.ts` already
+// imports `Binding`/`PaneOption` from here. `import type` is erased entirely at build time, so this
+// names a shape rather than creating a load-order relationship between the two modules; `SplitChoices`
+// is declared beside the control that reads it because it is that control's input, not the registry's
+// output — this module does not supply all of it, and a count of what it does would go stale on sight.
+import type { SplitChoices } from './pane-chrome'
 import type { Leg, RecordEnd } from './protocol'
 import type { SessionClient, SessionId } from './session-client'
-import type { LambdaState, LambdaStatus, TmState, TmStatus } from './types'
+import type { LambdaState, LambdaStatus, TmProgram, TmState, TmStatus } from './types'
 
 /**
  * One leg's live state on this side of the boundary: its history, how recording ended, and what the
@@ -63,8 +69,23 @@ export type LegFrame = { lambda: LambdaState; tm: TmState }
 export type SessionLegs = { [L in Leg]?: LegState<LegFrame[L]> }
 
 /**
+ * The machine a session's last `compiled` reply carried, in the form a TM pane is handed one.
+ *
+ * **THE TWO FIELDS ARE `TmPane.setProgram`'s TWO ARGUMENTS, AND THEY ARE ONE VALUE BECAUSE THEY ARE ONLY
+ * MEANINGFUL TOGETHER.** `TmProgram` says `tapes: 5` and nothing about what any of them is called;
+ * `tapeNames` is what `tapeRows` labels them with. Two nullable fields side by side on the entry would
+ * make "a program with no names" and "names with no program" representable states that no producer can
+ * produce and no consumer could render — one nullable envelope has exactly the two states the wire has.
+ *
+ * `tapeNames` RATHER THAN `setProgram`'s OWN PARAMETER NAME (`names`), because on the entry the pair is
+ * read a long way from that method: `protocol.ts` spells it `tapeNames`, and so does the reply this is
+ * retained from.
+ */
+export type TmCompiled = { readonly program: TmProgram; readonly tapeNames: string[] }
+
+/**
  * One session: what it is called, whether it is inside the source correspondence, the legs it records
- * into, and the client that talks to its worker.
+ * into, the machine its last compile produced, and the client that talks to its worker.
  *
  * THE CLIENT IS PER ENTRY BECAUSE THE GENERATION ALREADY IS. `SessionClient`'s `#gen`
  * (`session-client.ts:15`) is private and per instance, and design §3.2 records that this was always
@@ -105,6 +126,31 @@ export type SessionEntry = {
   readonly detached: boolean
   readonly client: SessionClient
   readonly legs: SessionLegs
+  /**
+   * The machine this session's TM panes were last told about, or `null` for a session that has not
+   * compiled one — which every session is at construction, and which a `LambdaScratch` stays forever.
+   *
+   * **IT EXISTS BECAUSE A TM PANE CAN BE CREATED AT ANY TIME AND A `compiled` REPLY ARRIVES ONCE.**
+   * `TmPane.setProgram` is called from the reply switch and from nowhere else, so a pane built after
+   * that reply had no route to a program at all: it rendered no tapes, no status line and no δ-rows until
+   * something recompiled. `pane-host.ts`'s creation pass seeds a new pane from this field, which covers
+   * a split, a cross-leg pick and a layout restore alike, because all three create panes there.
+   *
+   * **THE ONE WRITABLE FIELD ON THIS TYPE, AND THE ONE THAT IS NOT KNOWN AT CONSTRUCTION.** `id`,
+   * `label`, `detached` and `client` are decided by whoever registers the session; `legs` is a record
+   * whose CONTENTS move (that is what `resetLegs` is) under a reference that does not. This is neither:
+   * it is a fact the worker sends back later, replaced whole each time it does. Retaining it here rather
+   * than beside the TM `LegState` is deliberate — `LegState<T>` is the frame-generic both legs share, and
+   * a machine is not a frame; it is set once per compile and does not change as the head moves, which is
+   * the whole point of the `TmProgram`/`TmState` split one layer in.
+   *
+   * **IT IS WRITTEN WHEREVER THE PANES ARE PUSHED TO, WHICH IS WHY IT CANNOT GO STALE.** `replies.ts`
+   * stores and fans out in one call, so every arm that clears the panes (`no-session`, `worker-error`)
+   * or replaces their program (`compiled`) leaves this holding exactly what a pane on screen is showing.
+   * A retention that only ever grew would seed a pane created during an outage with a machine no other
+   * pane is displaying.
+   */
+  tmProgram: TmCompiled | null
 }
 
 /**
@@ -125,6 +171,17 @@ export type Binding<K extends Leg> = { readonly session: SessionId; readonly leg
 
 /** One entry in a pane's binding selector: the session it names, and what to call it on screen. */
 export type BindingOption = { readonly id: SessionId; readonly label: string }
+
+/**
+ * The two legs, in the order a selector lists them.
+ *
+ * A VALUE RATHER THAN A KEY WALK OVER SOME ENTRY'S `legs`, because the order must not depend on which
+ * legs the first session in the registry happens to have.
+ */
+const LEGS = ['lambda', 'tm'] as const satisfies readonly Leg[]
+
+/** One `(leg, session)` pair a pane may be pointed at, with the label the selector shows. */
+export type PaneOption = { readonly leg: Leg; readonly id: SessionId; readonly label: string }
 
 /**
  * Clear every leg this session has, and set each one's compile-time status.
@@ -269,10 +326,34 @@ export class SessionRegistry {
    * pane's to `LegState<TmState>` with no narrowing at either call site.
    *
    * THROWS WHEN THE SESSION HAS NO SUCH LEG, for the same reason `entryOf` throws when there is no
-   * such session, and it is the same class of bug: `options` below is what a selector offers, and it
-   * offers only sessions that HAVE the leg, so a binding that names a missing one did not come from
-   * the selector. Returning `undefined` would push a "this pane is showing nothing, for a reason no
-   * user did" branch into every renderer.
+   * such session. Returning `undefined` would push a "this pane is showing nothing, for a reason no
+   * user did" branch into every renderer, and `draw.ts`'s per-pane loop has no `try`/`catch`, so a
+   * throw here stops the whole render pass and every later one — which is the cost of reaching this
+   * line, and the reason the invariant below is enforced rather than merely asserted.
+   *
+   * **WHICH BINDINGS CAN REACH THIS, AND WHY THAT SENTENCE HAD TO BE REWRITTEN.** It read: "`options`
+   * below is what a selector offers, and it offers only sessions that HAVE the leg, so a binding that
+   * names a missing one did not come from the selector." The selector offers `pairs()` now, for BOTH
+   * legs, to EVERY pane — so it is precisely a source of pairs a given slot cannot resolve, and that
+   * sentence went from an argument to a false reassurance in the commit that widened the control. It
+   * cost a Critical: `transport.ts`'s handler took the session half of a cross-leg pick and kept the
+   * slot's leg, minting exactly the binding this line throws on.
+   *
+   * **THE INVARIANT IS ENFORCED AT THE ONE PLACE A BINDING IS CONSTRUCTED FROM A PICK, AND THAT PLACE
+   * MOVED ONCE.** Every pair `pairs()` emits resolves for the leg it names — that is its own doc's
+   * claim, and it holds — so what has to be true is that a slot only ever rebinds to a session offering
+   * the slot's OWN leg. `transport.ts`'s `rebind` used to be where that was decided, by refusing a
+   * cross-leg pick outright. It is `pane-host.ts`'s `paneEvents.rebind` now, and that one does not
+   * refuse: a same-leg pick is delegated to `transport.ts` (which reaches `PaneSlot.rebind` with a
+   * session bindable at this slot's leg, exactly as before), and a cross-leg pick never reaches a
+   * `rebind` at all — the leaf changes kind and `applyLayout` builds a new entry, whose `PaneSlot` is
+   * constructed on the picked leg. Either way no slot is ever pointed at a session lacking its leg.
+   * `transport.ts`'s own comparison survives as a THROW rather than as the decision: it asserts that a
+   * cross-leg pick never arrives there, so a caller wiring a pane straight to those handlers is told
+   * at the mistake instead of minting the binding this line dies on.
+   * `tests/browser/pane-kind-switch.test.ts` drives the three clicks that produced the Critical and
+   * asserts the pane both follows the pick and keeps painting afterwards, which is this line not
+   * throwing.
    */
   legOf<K extends Leg>(b: Binding<K>): LegState<LegFrame[K]> {
     const leg = this.entryOf(b.session).legs[b.leg]
@@ -288,17 +369,51 @@ export class SessionRegistry {
    * λ leg to render. There is no second table of which kind offers what — the legs an entry was built
    * with ARE the answer, so the selector and the resolver cannot disagree about what is bindable.
    *
-   * A FRESH ARRAY PER CALL, on the per-frame path (`main.ts`'s `draw()` runs on every recorded frame
-   * during playback). Accepted rather than cached: it is one array of at most three small objects
-   * against a `controlState` call that formats step counts into strings on the same tick, and
-   * `pane-chrome.ts`'s `bindingSelect.update` compares before it touches the DOM, so nothing downstream
-   * pays for the allocation. A cache would need invalidating on `add`/`remove`, which is a second fact
-   * to keep in step for a saving nobody measured.
+   * A FRESH ARRAY PER CALL. Accepted rather than cached: it is one array of at most three small
+   * objects, and a cache would need invalidating on `add`/`remove`, which is a second fact to keep in
+   * step for a saving nobody measured.
+   *
+   * **IT IS NO LONGER ON THE PER-FRAME PATH, WHICH THIS DOC USED TO SAY IT WAS.** `PaneSlot.render`
+   * pushes `pairs()` below now, so `draw()` never reaches here; that method's own doc carries the
+   * allocation argument for the call that IS on the path. This one is a registry query with no
+   * production caller left — it survives because it is `pairs()`'s per-leg half stated directly, and
+   * because `tests/node/sessions.test.ts` and `tests/node/scratch.test.ts` ask a registry what one leg
+   * offers without building a whole render pass to find out.
    */
   options<K extends Leg>(leg: K): BindingOption[] {
     const out: BindingOption[] = []
     for (const entry of this.#entries.values()) {
       if (entry.legs[leg] !== undefined) out.push({ id: entry.id, label: entry.label })
+    }
+    return out
+  }
+
+  /**
+   * Every `(leg, session)` pair a pane may be pointed at — `options` for both legs, tagged.
+   *
+   * IT IS BUILT FROM `options`' OWN SOURCE OF TRUTH AND NOT FROM A SECOND TABLE. `options`' doc states
+   * the property this inherits: "the legs an entry was built with ARE the answer, so the selector and
+   * the resolver cannot disagree about what is bindable." Widening the selector from one axis to two is
+   * exactly the change that would have made a second table tempting, and a second table is how a
+   * selector comes to offer a pair `legOf` throws on.
+   *
+   * GROUPED BY LEG RATHER THAN BY SESSION, because that is how the control renders it — one `<optgroup>`
+   * per leg. Registration order holds within each group, for `options`' reason: it falls out without a
+   * comparator that would have to invent a rank.
+   *
+   * A FRESH ARRAY PER CALL, AND THIS IS THE ONE ON THE PER-FRAME PATH — `PaneSlot.render` calls it for
+   * every pane on every recorded frame during playback. Accepted rather than cached, which is the
+   * argument `options` above used to carry: it is one array of a handful of small objects against a
+   * `controlState` call that formats step counts into strings on the same tick, and
+   * `pane-chrome.ts`'s `paneSelect.update` compares its rendered key before it touches the DOM, so
+   * nothing downstream pays for the allocation.
+   */
+  pairs(): PaneOption[] {
+    const out: PaneOption[] = []
+    for (const leg of LEGS) {
+      for (const entry of this.#entries.values()) {
+        if (entry.legs[leg] !== undefined) out.push({ leg, id: entry.id, label: entry.label })
+      }
     }
     return out
   }
@@ -319,15 +434,40 @@ export class SessionRegistry {
  */
 export type PaneView<T> = {
   render(frame: T | null, controls: ControlState): void
-  setBindings(options: BindingOption[], current: SessionId): void
+  /**
+   * `PaneOption[]` AND A WHOLE `Binding<Leg>`, NOT `BindingOption[]` AND A `SessionId`. The pane's
+   * selector offers `(leg, session)` PAIRS (`pairs()` above, `pane-chrome.ts`'s `paneSelect`), so both
+   * halves of what it displays have to cross this boundary: the list of pairs, and which pair is in
+   * force. `Binding<Leg>` and not `Binding<K>` — a `PaneView<T>` is parameterised by its FRAME type,
+   * which is what pins its renderer, and the pair on offer is deliberately not restricted to the leg
+   * the pane happens to render.
+   */
+  setBindings(options: PaneOption[], current: Binding<Leg>): void
   setDetached(detached: boolean): void
-  setLayoutControls(canClose: boolean, canSplit: boolean): void
+  /**
+   * **`choices` RIDES THE CALL THAT MOUNTS THE CONTROL, WHICH IS WHY IT IS HERE AND NOT ON A SETTER OF
+   * ITS OWN.** The split control is a picker now (`pane-chrome.ts`'s `splitControl`), and its menu is
+   * built on open from a list only the app can produce — the registry's pairs, the pane's own binding,
+   * and whether the layout tree is currently without a source leaf. Two routes reached the pane from
+   * `draw()`'s per-frame loop: widen this call, or add a sibling setter beside it. This one is the
+   * narrower claim: `canSplit` is what puts the button in the DOM at all, so a caller that can offer the
+   * gesture has, in the same statement, said what the gesture may create. A sibling setter would make
+   * that two calls with an ordering between them — a button mountable while the list behind it was still
+   * whatever the previous frame left, which is the class of staleness this file already refuses for
+   * `setBindings` by driving it from the one per-frame pass.
+   *
+   * THE VALUE IS READ ON OPEN, NOT ON ARRIVAL. Both panes store it in a field and hand `layoutControls` a
+   * thunk over that field, so this call costs a field write on every recorded frame during playback and
+   * the menu that reads it is built at most once per user gesture — `splitControl`'s own doc has the
+   * argument for why the thunk exists rather than a list handed over at construction.
+   */
+  setLayoutControls(canClose: boolean, canSplit: boolean, choices: SplitChoices): void
 }
 
 /**
  * One pane slot: which `(session, leg)` pair it shows, and the resolution every render goes through.
  *
- * THE SELECTOR VARIES THE SESSION AND NOT THE LEG, WHICH IS HOW `Binding<K>`'S TYPE PROPERTY SURVIVES
+ * THE SLOT VARIES THE SESSION AND NOT THE LEG, WHICH IS HOW `Binding<K>`'S TYPE PROPERTY SURVIVES
  * HAVING A SELECTOR AT ALL. This is the constraint T4's correction carried forward to this task, so it
  * is stated in full rather than cited:
  *
@@ -349,8 +489,37 @@ export type PaneView<T> = {
  * pane MULTIPLEXER — a slot that mounts a different pane class per leg — and design §1 puts the
  * multiplexer in 5d-ii. Both the test and the mutation plan T7 specifies exercise the SESSION axis
  * ("two panes bound to two different λ sessions"; "resolve every binding to the source session"), and
- * that is the axis this builds. Widening `K` to `Leg` here is where 5d-ii starts, and it is a decision
- * with the property above at stake, not a field write.
+ * that is the axis this builds. **THIS PARAGRAPH USED TO END "Widening `K` to `Leg` here is where 5d-ii
+ * starts", AND 5d-ii ANSWERED IT THE OTHER WAY**: the multiplexer landed and `K` is still fixed at
+ * construction, because a leg change replaces the pane and its slot together rather than mutating
+ * either. The last paragraph below has that in full. What is given up is unchanged and still worth
+ * stating: a slot cannot be pointed at the other leg, and nothing above bends to let it.
+ *
+ * **THE SELECTOR NOW OFFERS BOTH LEGS WHILE THIS CLASS STILL VARIES ONLY THE SESSION, AND THE GAP IS
+ * DELIBERATE RATHER THAN AN OVERSIGHT.** `render` below pushes `reg.pairs()` — every `(leg, session)`
+ * pair, not `options(b.leg)` — and `PaneEvents.rebind` carries the whole pair a user picked. Nothing
+ * above changed: `K` is still fixed at construction, `leg` still has no writer, and every claim in the
+ * three paragraphs above still holds word for word.
+ *
+ * **A PICK NAMING THE OTHER LEG IS ACTED ON BY REPLACING THE PANE, NOT BY MOVING THIS SLOT — AND THIS
+ * PARAGRAPH HAS NOW BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS.** It first read "What a pick naming the
+ * OTHER leg does today is nothing — `transport.ts`'s handler takes the session half and drops the leg,
+ * and the next paint snaps the `<select>` back to the pair in force." Taking the session half was not
+ * nothing: it MOVED the slot to a session that may not have this leg at all, and `legOf` throws on the
+ * result — the Critical that handler's comment records in full. It then read that the same handler
+ * REFUSES such a pick, which was true of the guard that closed the Critical and false the moment the
+ * multiplexer landed. What is true now: `pane-host.ts`'s `paneEvents.rebind` compares the picked leg
+ * against the slot's, delegates a same-leg pick to `transport.ts` (whose own comparison came back as a
+ * THROW — deleted and reinstated one commit apart, not carried through; see its own note — so this
+ * class's `rebind` is still only ever handed a session bindable at this leg, and now by
+ * a check rather than by an argument), and answers a cross-leg pick by changing the
+ * LEAF's kind — `setLeafKind`, keeping its place and size — and letting `applyLayout` build a fresh
+ * entry: a different `PaneSlot`, on the picked leg, a different pane class, the same host, and any
+ * editor handed to custody on the way out. **Nothing above changed.** `K` is still fixed at
+ * construction, `leg` still has no writer, and a leg change is a new slot rather than a mutated one —
+ * which is exactly why the multiplexer could be built without widening `K`: the pane and the slot are
+ * replaced together, so `Binding<K>`'s type property is what makes that replacement checked rather
+ * than something it stands in the way of.
  */
 export class PaneSlot<K extends Leg> {
   #binding: Binding<K>
@@ -423,7 +592,7 @@ export class PaneSlot<K extends Leg> {
         done: leg.done,
       }),
     )
-    pane.setBindings(reg.options(b.leg), b.session)
+    pane.setBindings(reg.pairs(), b)
     pane.setDetached(reg.entryOf(b.session).detached)
   }
 }

@@ -41,11 +41,11 @@ export const TM_RADIUS = 40
  * without changing the number.
  *
  * IT BOUNDS TWO DIFFERENT THINGS AT TWO DIFFERENT SITES, AND ONLY ONE OF THEM IS MEMORY.
- * `session-worker.ts:97`'s `allowance` bounds bytes PRODUCED — the worker posts each batch and clears
- * it, so it retains none of them. `main.ts:653`/`:659` construct the two `History` rings that bound
- * bytes RETAINED. They happen to be the same constant, which is why the plan's "one session is
- * already 64 MB" is true, but it is `main.ts`'s two rings and not `session-worker.ts:97` that make it
- * true. The two come apart on `[continue]`: `onExtend` (`session-worker.ts:422`) raises the allowance
+ * `session-worker.ts`'s `allowance` bounds bytes PRODUCED — the worker posts each batch and clears
+ * it, so it retains none of them. `main.ts`'s `sessions.add` call constructs the two `History` rings
+ * that bound bytes RETAINED. They happen to be the same constant, which is why the plan's "one session
+ * is already 64 MB" is true, but it is `main.ts`'s two rings and not the worker's `allowance` that make
+ * it true. The two come apart on `[continue]`: `onExtend` (`session-worker.ts`) raises the allowance
  * to `recorded + HISTORY_BYTES` every click, so production is unbounded across clicks — while the
  * ring's budget never moves, so retention stays at one `HISTORY_BYTES` per leg however many times the
  * user continues.
@@ -62,7 +62,7 @@ export const TM_RADIUS = 40
  *     spends this budget costs ~68.6 MB of heap for a 33.55 MB allowance. The TM figure reproduced to
  *     the byte across four runs; the λ one varied by ~6,600 bytes in 6.8 million.
  *
- * `tmFrameBytes` (`:258`) charges 2 bytes a cell for a `window: string[][]` whose cells are
+ * `tmFrameBytes` (below) charges 2 bytes a cell for a `window: string[][]` whose cells are
  * one-character JS strings, and charges nothing for the per-tape array headers around them or for the
  * ring's own two parallel arrays — `History`'s `#frames` and `#sizes` are 8 bytes an entry each, about
  * 16 B/frame here by arithmetic rather than by separate measurement. **Left as is, and deliberately.**
@@ -83,7 +83,8 @@ export const HISTORY_BYTES = 32 * 1024 * 1024
  * first: a threshold quietly retired the first time it binds was never a threshold.
  *
  * **IT IS MET. 1.8160189425298086**, measured 2026-08-11 by `tests/browser/session-memory.test.ts` in
- * real Chromium under `vite.config.ts:150`'s two flags, driving three real `session-worker.ts` threads
+ * real Chromium under `vite.config.ts`'s browser `launchOptions` flags, driving three real
+ * `session-worker.ts` threads
  * through a real `SessionPool` into real `History` rings. Mean resident heap over three alternating
  * rounds after one discarded warm-up pair: **92,435,664.67 bytes** for one session at two legs against
  * **167,864,918** for three sessions at four. Round-by-round, one session / three sessions:
@@ -229,7 +230,7 @@ export type Leg = 'lambda' | 'tm'
 
 /**
  * Why recording stopped. FOUR OUTCOMES, NOT THREE, and conflating any two of them is the trap
- * `session.rs:415` names one layer in ("A SPENT `budget` IS NOT A SPENT CAP"):
+ * `session.rs`'s `run_lambda` names one layer in ("A SPENT `budget` IS NOT A SPENT CAP"):
  *
  *   * `ended`        — the cursor is exhausted. Nothing to continue.
  *   * `capped`       — the cursor's own cap. `[continue]` raises it.

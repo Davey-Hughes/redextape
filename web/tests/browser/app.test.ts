@@ -206,8 +206,9 @@ describe('the app, end to end', () => {
   // panes, and `#results` in one call, after which nothing on the page could ever dispatch again.
   //
   // TRIGGERED VIA THE PICKER, the one reachable path to `compile()` throwing without a second bug to
-  // manufacture: `EncodingKind::parse` (`lib.rs:36-38`) is the only thing in this path that throws, and
-  // it throws for any name outside the registry. The picker itself only ever offers registered names —
+  // manufacture: `EncodingKind::parse` (`redextape-wasm`'s `compile` doc) is the only thing in this
+  // path that throws, and it throws for any name outside the registry. The picker itself only ever
+  // offers registered names —
   // this test appends one it does not, and selects it exactly the way a user's own click would, so the
   // `change` event `main.ts` listens for is the real one, not a synthesized substitute for it.
   it('recovers from a worker-error without killing the editor', async () => {

@@ -2,7 +2,6 @@ import type { ControlState } from './controls'
 import { LambdaEditor } from './lambda-editor'
 import type { LambdaWindow } from './lambda-window'
 import {
-  bindingSelect,
   claimEditorButton,
   collapseButton,
   controlStrip,
@@ -10,9 +9,11 @@ import {
   detachedBadge,
   layoutControls,
   type PaneEvents,
+  paneSelect,
+  type SplitChoices,
 } from './pane-chrome'
-import type { SessionId } from './session-client'
-import type { BindingOption } from './sessions'
+import type { Leg } from './protocol'
+import type { Binding, PaneOption } from './sessions'
 import { byteIndexAt, byteToIndex, decorationRanges, indexToByte } from './spans'
 import type { Diagnostic, LambdaState } from './types'
 
@@ -47,7 +48,7 @@ export class LambdaPane {
   #text: HTMLElement
   #strip: ReturnType<typeof controlStrip>
   #badge: ReturnType<typeof detachedBadge>
-  #select: ReturnType<typeof bindingSelect>
+  #select: ReturnType<typeof paneSelect>
   /**
    * The fork control, or `null` on a pane whose events carry no `detach` handler — design §4.3's
    * trigger; see `detachButton` for why it is a button at all.
@@ -90,6 +91,16 @@ export class LambdaPane {
   #claim: ReturnType<typeof claimEditorButton> | null = null
   #layout: ReturnType<typeof layoutControls>
   /**
+   * What this pane's split menus offer, last pushed by `setLayoutControls` — see `SplitChoices` for why
+   * the starting value is "nothing on offer, and no pair in force" rather than an invented binding, and
+   * `PaneView.setLayoutControls` for why the whole list arrives on the call that mounts the control.
+   *
+   * A FIELD READ THROUGH A THUNK RATHER THAN A LIST HANDED TO `layoutControls` ONCE. The menu is built
+   * when it opens (`splitControl`'s doc), so what it needs is the CURRENT value at that moment; a list
+   * passed at construction would be the one thing a build-on-open cannot fix.
+   */
+  #choices: SplitChoices = { options: [], sourceAvailable: false, current: null }
+  /**
    * `on.editScratch`, captured once at construction — `setEditor` reads it per mount rather than
    * closing over `on` directly, so a pane built with no handler mounts an editor that simply drops
    * its edits, the same "control that cannot work is still absent, an edit that goes nowhere is
@@ -113,18 +124,18 @@ export class LambdaPane {
     title.textContent = 'lambda'
     this.#badge = detachedBadge(title)
     // ANCHORED TO THE TITLE, NOT PLACED IN `replaceChildren` BELOW, because the control removes itself
-    // whenever the slot has fewer than two sessions to offer (see `bindingSelect`) and has to know
+    // whenever the slot has fewer than two PAIRS to offer (see `paneSelect`) and has to know
     // where to go back. `title.after` is a no-op until the title has a parent, which it gets on the
     // `host.replaceChildren` line below — and nothing calls `setBindings` before then.
-    this.#select = bindingSelect(title, on.rebind)
+    this.#select = paneSelect(title, on.rebind)
     this.#text = document.createElement('pre')
     this.#text.className = 'term'
     this.#strip = controlStrip(on)
-    this.#layout = layoutControls(this.#strip.el, on)
+    this.#layout = layoutControls(this.#strip.el, on, () => this.#choices)
     // IN THE CONTROL STRIP, NOT ON THE `<h2>`'s ROW BESIDE THE SELECTOR. The heading already carries
     // two things — the pane's name and §4.5's `[detached]` badge — and both are STATEMENTS about the
     // pane; the strip is where its verbs live. It is also why no stylesheet rule was needed: the
-    // button is a `.controls button` like the four beside it. `detachedBadge` and `bindingSelect` take
+    // button is a `.controls button` like the four beside it. `detachedBadge` and `paneSelect` take
     // the title for the same kind of reason in the other direction.
     const detach = on.detach
     if (detach !== undefined) {
@@ -233,7 +244,7 @@ export class LambdaPane {
   /**
    * Detach this pane's mounted editor WITHOUT DESTROYING IT, for a caller about to remount it on a
    * different pane — the editor-moves rule's other half of `receiveEditor`, and together the two are
-   * what `main.ts`'s `reconcileEditors` uses to answer the "bring the term editor to this pane" control. `null` if
+   * what `editor-custody.ts`'s `reconcileEditors` uses to answer the "bring the term editor to this pane" control. `null` if
    * this pane holds none, so a caller can call this on every lambda pane and only act on the one that
    * says yes.
    *
@@ -266,7 +277,7 @@ export class LambdaPane {
    * node: the pane went on rendering two `.cm-editor`s stacked in one host, `#editor` named whichever
    * arrived last, and the other was unreachable for `setEditor`, `takeEditor` and `destroy` alike —
    * design §4.3's "two uncoordinated CodeMirror instances over one buffer", reached by the very
-   * mechanism §4.3 introduces to make it impossible. `main.ts`'s `reconcileEditors` is what must never
+   * mechanism §4.3 introduces to make it impossible. `editor-custody.ts`'s `reconcileEditors` is what must never
    * ask for that; this is the check that the invariant is a fact rather than an argument.
    *
    * **AND IT ASKED FOR IT AGAIN, ONE ROUND LATER — WHICH IS WHY THIS PARAGRAPH NO LONGER CLAIMS IT
@@ -299,31 +310,42 @@ export class LambdaPane {
   }
 
   /**
-   * Offer `options` in the binding selector and show `current` as the one in force.
+   * Offer `options` in the pane selector and show `current` as the pair in force.
    *
    * A PUSH FROM THE SLOT RATHER THAN A PULL FROM A REGISTRY, which is what keeps design §3.2b's
    * "neither pane knows what it is bound to" true of the pane's TYPE while making it false of its
    * chrome. This pane still renders `(frame, controls) -> DOM`; what it gained is a control it reports
    * a click from (`PaneEvents.rebind`) and a list it displays. It does not resolve a binding, hold a
-   * `SessionId` of its own, or know that a registry exists — `PaneSlot.render` in `sessions.ts` is the
+   * `Binding` of its own, or know that a registry exists — `PaneSlot.render` in `sessions.ts` is the
    * one place those live.
+   *
+   * `Binding<Leg>` RATHER THAN `Binding<'lambda'>`, THOUGH THIS IS THE λ PANE. The list is pairs for
+   * BOTH legs now (`SessionRegistry.pairs()`), so the pair in force has to be spelled in the same
+   * vocabulary the list is — a `Binding<'lambda'>` here would say the current pair can only ever name
+   * this pane's own leg, which is the claim the widened control exists to stop making. The pane's
+   * frame type is what pins its renderer; this parameter pins nothing.
    *
    * A PURE SETTER, LIKE `setDetached` BELOW: the selector is chrome on the `<h2>`'s row and is
    * unaffected by which text the body is showing.
    */
-  setBindings(options: BindingOption[], current: SessionId): void {
+  setBindings(options: PaneOption[], current: Binding<Leg>): void {
     this.#select.update(options, current)
   }
 
   /**
-   * Which layout gestures this pane currently offers.
+   * Which layout gestures this pane currently offers, and what a split may create.
    *
-   * DRIVEN FROM `main.ts`'s DRAW PASS, not from the pane, because both answers are facts about the
-   * TREE — whether this is the last leaf, and whether this pane's kind may be duplicated — and the
-   * pane holds neither. Same division as `setBindings`, which takes the options rather than computing
-   * them.
+   * DRIVEN FROM `main.ts`'s DRAW PASS, not from the pane, because every answer is a fact about
+   * something the pane does not hold — whether this is the last leaf, whether this pane's kind may be
+   * duplicated, and which `(leg, session)` pairs exist to create. Same division as `setBindings`, which
+   * takes the options rather than computing them.
+   *
+   * `choices` IS STORED AND NOT PASSED ON, because `layoutControls` reads it through the thunk this
+   * pane gave it at construction — see `#choices`, and `PaneView.setLayoutControls` for why the list
+   * arrives here rather than through a setter of its own.
    */
-  setLayoutControls(canClose: boolean, canSplit: boolean): void {
+  setLayoutControls(canClose: boolean, canSplit: boolean, choices: SplitChoices): void {
+    this.#choices = choices
     this.#layout.update(canClose, canSplit)
   }
 

@@ -3,8 +3,7 @@ import type { LinkWiring } from './link-wiring'
 import type { PaneEvents } from './pane-chrome'
 import type { Leg } from './protocol'
 import type { LambdaScratchpad } from './scratch'
-import type { SessionId } from './session-client'
-import type { LegState, PaneSlot, SessionRegistry } from './sessions'
+import type { Binding, LegState, PaneSlot, SessionRegistry } from './sessions'
 
 /**
  * Milliseconds between frames during playback (120 ms ≈ 8 fps). A main-thread `setInterval` walk over
@@ -119,13 +118,56 @@ export function createTransport(deps: {
       draw()
     },
     extend: () => sessions.entryOf(slot.binding.session).client.extend(slot.binding.leg),
-    // THE SELECTOR'S PICK. `PaneSlot.rebind` writes the session and nothing else — the leg is fixed by
-    // `K` and has no writer anywhere in the app, which is what keeps `Binding<K>`'s type property
-    // (see `PaneSlot`'s doc). `draw()` immediately afterwards because a rebind changes what this pane
-    // shows, what its `[detached]` badge says, and what the status line narrates, and none of those
-    // has another path to the DOM.
-    rebind: (session: SessionId) => {
-      slot.rebind(session)
+    // THE SELECTOR'S PICK, ON THE SESSION AXIS. `PaneSlot.rebind` writes the session and nothing else —
+    // the leg is fixed by `K` and has no writer anywhere in the app, which is what keeps `Binding<K>`'s
+    // type property (see `PaneSlot`'s doc). `draw()` immediately afterwards because a rebind changes
+    // what this pane shows, what its `[detached]` badge says, and what the status line narrates, and
+    // none of those has another path to the DOM. The `<select>` is also sitting on the option the user
+    // just chose, and only a repaint puts it back on the pair in force (`paneSelect.update`'s
+    // `select.value = want`).
+    //
+    // **THE LEG COMPARISON THAT USED TO BE ON THIS LINE HAS MOVED UP TO `pane-host.ts`, AND THE ANSWER
+    // MOVED WITH IT: A CROSS-LEG PICK IS NOW ACTED ON RATHER THAN DECLINED.** The history is worth
+    // keeping, because the middle state was a Critical. The line began as `slot.rebind(binding.session)`
+    // unguarded, under a comment claiming a cross-leg pick was "a no-op the next paint undoes": it was
+    // neither. `PaneSlot.render` pushes `reg.pairs()` to EVERY pane, so a TM pane's selector genuinely
+    // lists the λ-only scratch; taking the session half of `λ · λ scratchpad` on a TM slot minted
+    // `{ leg: 'tm', session: 'lambda-scratch' }`, which `legOf` THROWS on — and `draw.ts`'s per-pane
+    // loop has no `try`/`catch`, so the throw took every subsequent frame with it, not just the one.
+    // Three clicks from a fresh page. A guard here then made such a pick a silent no-op, deliberately
+    // shaped so the real branch could take its place: one condition, same-leg arm already isolated.
+    //
+    // **THAT BRANCH LANDED, AND IT COULD NEVER HAVE LANDED HERE.** Following a leg change means
+    // replacing the pane's whole entry — a different `PaneSlot`, a different pane class, its host and
+    // any editor handed to custody — which needs the layout tree, and this file has never seen one.
+    // `pane-host.ts`'s `paneEvents` wraps this handler, compares the picked leg against the slot's, and
+    // delegates ONLY a same-leg pick here; a cross-leg pick changes the leaf's kind and rebuilds the
+    // entry through `applyLayout`. So the pair reaching this line always names this slot's own leg, and
+    // the session half is all there is left to take.
+    //
+    // **SO THE COMPARISON BELOW IS AN ASSERTION, NOT AN ANSWER — and the distinction is what earned it
+    // its place back after one commit without it (IMPORTANT finding, review of that commit).** Deleting
+    // it was argued from "a branch that cannot be taken is a second answer to what a cross-leg pick
+    // means". That holds against a silent refusal, which is an answer — the WRONG one, now that the app
+    // has a real one — and not against a throw: a throw says this layer does not answer the question,
+    // which is exactly the true statement. What deletion actually cost is that the line then PROJECTED
+    // any cross-leg pick onto this slot's leg, re-minting the Critical's own binding for any caller
+    // that wired a pane straight to these handlers — `new LambdaPane(host, transport.events(slot))`
+    // typechecks, and `tests/browser/scratch-fork.test.ts` already writes that shape twice with
+    // hand-built events. One `if` moves the invariant from comment-checked back to machine-checked.
+    //
+    // IT THROWS RATHER THAN DECLINING, FOR `LambdaPane.receiveEditor`'s REASON in as many words: a
+    // silent repair absorbs the finding as normal operation, and this class of mistake is a wiring bug
+    // in a caller rather than a state a user can reach. Unreachable from the app — `pane-host.ts`'s
+    // wrapper is the only production caller and it never delegates a cross-leg pick here — so this
+    // costs one comparison per pick and nothing else. `tests/node/sessions.test.ts` pins both arms.
+    rebind: (binding: Binding<Leg>) => {
+      if (binding.leg !== slot.binding.leg) {
+        throw new Error(
+          `a ${slot.binding.leg} slot cannot take a ${binding.leg} pick: a leg change replaces the pane (pane-host.ts)`,
+        )
+      }
+      slot.rebind(binding.session)
       draw()
     },
     // THE FORK — design §4.3, and the handler that finally puts a second session in the registry
