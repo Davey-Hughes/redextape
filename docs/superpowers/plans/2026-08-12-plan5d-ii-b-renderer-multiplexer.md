@@ -174,13 +174,13 @@ Expected: PASS, **453 passed (453) in 47 files**.
 - [ ] **Step 5: Measure and record**
 
 Run: `wc -l web/src/main.ts web/src/pane-host.ts web/src/editor-custody.ts`
-Note the three numbers in the commit body. roadmap:5834 asked whether 1,115 lines in one file was a problem to inherit; this is the answer with evidence attached.
+Note the three numbers in the commit body. roadmap:5932 asked whether 1,115 lines in one file was a problem to inherit; this is the answer with evidence attached.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add web/src/pane-host.ts web/src/main.ts
-git commit -m "pane lifecycle leaves main.ts, and roadmap:5834's open question gets a number"
+git commit -m "pane lifecycle leaves main.ts, and roadmap:5932's open question gets a number"
 ```
 
 ---
@@ -1338,7 +1338,7 @@ cd web && pnpm test && pnpm test:coverage && pnpm run typecheck
 wc -l src/main.ts src/pane-host.ts src/editor-custody.ts
 ```
 
-Record the test count, the four coverage figures, and the three line counts. **Measure against the live tree; do not copy figures forward** — 5d-iii's entry shipped stale counts and its reviewer had to correct them (roadmap:5488-5495), and 5d-ii-a's own entry carried counts that moved under it twice.
+Record the test count, the four coverage figures, and the three line counts. **Measure against the live tree; do not copy figures forward** — 5d-iii's entry shipped stale counts and its reviewer had to correct them (roadmap:5576-5583), and 5d-ii-a's own entry carried counts that moved under it twice.
 
 - [ ] **Step 2: Decide the floors deliberately**
 
@@ -1346,9 +1346,9 @@ Record the test count, the four coverage figures, and the three line counts. **M
 
 - [ ] **Step 3: Write the roadmap entry**
 
-Append a `#### PLAN 5d-ii-b CLOSES` entry in the style of 5d-ii-a's (roadmap:5542 onward). It must record:
+Append a `#### PLAN 5d-ii-b CLOSES` entry in the style of 5d-ii-a's (roadmap:5640 onward). It must record:
 - The §3.1 decision and the argument that settled it — that widening saves nothing because the view is rebuilt regardless.
-- That `main.ts` left 1,115 lines behind, with the three measured numbers, closing roadmap:5834.
+- That `main.ts` left 1,115 lines behind, with the three measured numbers, closing roadmap:5932.
 - The two accessibility-list additions and the one exception taken (design §6.2).
 - The coverage decision from Step 2, with its argument.
 - 5d-ii-c and 5d-iv keeping their filed positions.

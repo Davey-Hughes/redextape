@@ -271,7 +271,7 @@ yield-triggered abandon check. ~~Keeping sessions alive across messages **length
 blocks the worker and the old handler cannot wake during it~~ — **measured 2026-08-08: the window
 closed to strictly zero instead of widening.** `onRun` calls `dropLive()` before `compile()` runs, so
 two `Session` handles are never simultaneously live (`session-worker.ts`'s module doc;
-`docs/superpowers/plans/2026-07-19-redextape-roadmap.md:3467-3472`) — but the plan must place the
+`docs/superpowers/plans/2026-07-19-redextape-roadmap.md:3483-3488`) — but the plan must place the
 `free()` explicitly and a test must prove no handle leaks across a supersession.
 
 ---
@@ -574,7 +574,7 @@ complete and clippy-clean in its own commit because of the pre-commit gate.
    compile".~~ — **measured 2026-08-08: it closed rather than widened** (§3.6). `onRun` calls
    `dropLive()` before `compile()` runs, so two `Session` handles are never simultaneously live — the
    window PR 3c's review flagged strictly zero rather than merely bounded (`session-worker.ts`'s
-   module doc; `docs/superpowers/plans/2026-07-19-redextape-roadmap.md:3467-3472`).
+   module doc; `docs/superpowers/plans/2026-07-19-redextape-roadmap.md:3483-3488`).
 5. **The virtualized table may be cluttered or slow.** Explicitly an evaluate-and-maybe-cut item; the
    toggle is the fallback and §4.5 names the two honest outcomes.
 6. **`TokenClass`'s hand-copy drift survives another slice.** A variant added to `analysis::TokenClass`

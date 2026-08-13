@@ -37,8 +37,9 @@ import { SessionPool } from '../../src/session-client'
  *   2. **The cure has to be local.** `terminate` + respawn is the only fix for both findings in
  *      `SessionPool`'s doc — a poisoned module cannot be asked to clean itself up, since `free()`
  *      throws too. On a shared thread the cure is worse than the damage: terminating the scratchpad
- *      takes the source session with it, which is precisely §4.3's recompile-from-source path killing
- *      the thing it is supposed to return the user to.
+ *      takes the source session with it, which is precisely §4.3's retire path killing the thing it is
+ *      supposed to return the user to. (That path was recompile-from-source until 5d-ii-c decision 2;
+ *      the retire is what terminates a worker, and the trigger is now the control §4.4 ships.)
  */
 
 const SOURCE: SessionId = 'source'
@@ -165,9 +166,10 @@ describe('SessionPool isolation', () => {
   })
 
   // HALF TWO: the cure is local. `terminate` is the only recovery from a poisoned module (see this
-  // file's header and `SessionPool`'s doc), and §4.3 fires it on every recompile-from-source — so a
-  // pool where terminating one session stops the others has no recovery path at all, it has a way to
-  // kill the app.
+  // file's header and `SessionPool`'s doc), and §4.3 fires it from a retire — so a pool where
+  // terminating one session stops the others has no recovery path at all, it has a way to kill the
+  // app. (This read "on every recompile-from-source", which 5d-ii-c decision 2 ended; a poisoned
+  // buffer is now reclaimed by an explicit retire rather than by the next keystroke.)
   //
   // THE SURVIVORS MUST STEP AFTER THE TERMINATE, NOT MERELY BE LISTED. `pool.size` and `pool.has`
   // both stay correct on a shared worker: the map entry survives, the thread under it does not. Only

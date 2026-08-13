@@ -1251,7 +1251,7 @@ outcome §3.8 rules out. Record the pre-flight correction (`Option<usize>`, not 
 - [ ] **Step 2: Write the roadmap entry**
 
 Append a `#### PLAN 5a-ii CLOSES` section under Plan 5, in the voice of the 5a-i entry
-(`roadmap:3397-3507`). It must carry, because these are the slice's transferable results and nothing
+(`roadmap:3817-3939`). It must carry, because these are the slice's transferable results and nothing
 else records them:
 
 - **The λ tree is cut, with §2's numbers.** 850 MB against a 32 MB ring; 84% of steps refusing at

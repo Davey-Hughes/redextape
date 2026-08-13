@@ -38,6 +38,8 @@ export type EditorCustody = {
   dropClaimsOn(leaf: LeafId): void
   /** The pane currently showing `session`'s editor, or `undefined`. */
   homeFor(session: SessionId): LambdaPane | undefined
+  /** Whether `session` has a `LambdaEditor` at all — mounted on its home pane, or waiting here. */
+  hasEditor(session: SessionId): boolean
   /** Move held editors onto their claimed homes and retire orphans. Throws as it does today. */
   reconcile(): void
 }
@@ -112,9 +114,13 @@ export function createEditorCustody(deps: { panes: PaneCollection; sessions: Ses
    * NOT A SECOND HOME. Nothing renders from here and nothing reads through it — it is exactly the "one
    * instance, unmounted, not destroyed" state design §4.3 describes, made addressable. An entry lives
    * only from the close that produced it to the next `reconcileEditors` that finds a home for it, or to
-   * the retirement of its session, whichever comes first — and BOTH ENDINGS ARE NOW REACHED BY THE SAME
+   * the retirement of its session, whichever comes first — and BOTH ENDINGS ARE REACHED BY THE SAME
    * FUNCTION, which they were not when this sentence was first written: retiring used to happen on a
-   * path that never reconciled, so the second ending never arrived. See `reconcileEditors`' own doc.
+   * path that never reconciled, so the second ending never arrived. **The second ending went briefly
+   * unreachable for a different reason and is reachable again** — 5d-ii-c decision 2 left nothing in
+   * `src/` calling `ScratchBuffers.retire` at all, which did not weaken the arrangement so much as leave
+   * it idle, and §4.2's header list supplied the trigger: `main.ts`'s retire handler calls `retire` and
+   * then `reconcile`, in that order. See `reconcileEditors`' own doc.
    *
    * **AND "THE SAME FUNCTION" WAS NOT ENOUGH ON ITS OWN — IMPORTANT FINDING, THIRD REVIEW ROUND.** That
    * function ran both its passes inside one loop over `editorOwner.keys()`, so it could only reach an
@@ -190,7 +196,10 @@ export function createEditorCustody(deps: { panes: PaneCollection; sessions: Ses
    * again on the fresh `lambda-0` (a second, live editor, mounted legitimately), then split any pane.
    * The custody pass then handed the live pane the dead editor and `receiveEditor` threw. What caught
    * it was concatenating the two tests those two fixes shipped with — neither sequence reaches it alone;
-   * `tests/browser/two-lambda-panes.test.ts`'s concatenation test is the result.
+   * `tests/browser/two-lambda-panes.test.ts`'s concatenation test is the result. **THOSE SIX CLICKS NO
+   * LONGER REPRODUCE IT, AND THE FIX THEY ARGUE FOR IS UNCHANGED**: 5d-ii-c decision 2 makes the fourth
+   * of them — typing in the source editor — retire nothing, so the sequence stops one step short of the
+   * destroy branch. See (1) below for where the retire went.
    *
    * RUN ON EVERY `applyLayout()` CALL RATHER THAN ONLY WHEN `editorOwner` CHANGED. The sweep is cheap
    * (`panes.of('lambda')` is at most a handful of entries, and there is at most one scratch session to
@@ -201,9 +210,33 @@ export function createEditorCustody(deps: { panes: PaneCollection; sessions: Ses
    * A STALE OWNER RESOLVES TO NO HOME, NOT TO A FALLBACK PANE — `editorHomeFor`'s own doc has the two
    * ways it goes stale. Reassigning to some other pane bound to the session would be exactly the
    * "relocating on close puts the editor somewhere the user did not put it" `editorOwner`'s doc refuses.
-   * An editor taken off a pane that is still ON SCREEN and no longer wants it (the REBIND-away case) is
+   * An editor on a pane that is still ON SCREEN and no longer wants it (the REBIND-away case) is
    * destroyed, because the session behind it is one the user has navigated away from; an editor whose
    * pane was CLOSED is a different case and is not destroyed — see the custody pass below.
+   * **WHICH LINE PERFORMS THAT DESTRUCTION MOVED, AND THE OUTCOME DID NOT.** It read "an editor TAKEN
+   * OFF a pane… is destroyed", meaning the `held.destroy()` below; a rebound-away pane no longer names
+   * the session, so the binding predicate on the loop skips it now. `LambdaPane.setDetached`'s own
+   * teardown is what tears that editor down — it fires from `PaneSlot.render` on the very next `draw()`,
+   * which is the same tick, and `scratch-rebind-editor.test.ts` is the test that pins it. The branch
+   * below still answers the case it was written for: a pane that IS on the session while the session
+   * holds no home for it, which is what a claim pointing at a closed leaf leaves behind.
+   *
+   * **AND THAT HANDOVER COVERS ONLY THE REBIND TO SOURCE — A SCRATCH→SCRATCH REBIND LEAKS THE EDITOR,
+   * WHICH IS A LIVE DEFECT RECORDED HERE AND NOT FIXED HERE (Important finding, review of the
+   * deferred-a11y item 11 fix; filed on the roadmap's 5d-ii-c entry).** `setDetached` tears down only on
+   * `!detached`, and both sides of a scratch→scratch rebind are detached, so it does not fire.
+   * `scratch-rebind-editor.test.ts` — the test named above as pinning this — drives the rebind back to
+   * SOURCE and only that, so the gap has never been under a test. The binding predicate on the sweep's
+   * loop then skips the pane for the session it still holds an editor for, and the custody pass never
+   * sees the editor because nothing ever handed it over. **Result: pane P shows buffer B's frames with
+   * buffer A's live CodeMirror mounted above them, permanently** — and `transport.ts`'s `editScratch`
+   * reads `slot.binding.session` at EDIT time, so a keystroke in that stale editor calls
+   * `recompile(B, <A's text>)`. The shape of the fix is the wrapped `detach` in `pane-host.ts`: that
+   * handler already compares the binding before and after and tells this file what happened, and a
+   * wrapped `rebind` that hands the outgoing editor to `hold(oldSession, …)` is the same move — an
+   * editor whose pane navigated away is exactly the "unmounted, not destroyed, waiting for the next pane
+   * to ask" state `heldEditors` exists for. It is left undone deliberately rather than folded into an
+   * a11y fix it has nothing to do with.
    *
    * THE CUSTODY PASS IS SECOND, AND THE ORDER IS LOAD-BEARING. It mounts a `heldEditors` entry onto the
    * home if there now is one, and it runs AFTER the sweep so that a home which has just been handed an
@@ -223,10 +256,15 @@ export function createEditorCustody(deps: { panes: PaneCollection; sessions: Ses
    * pane, the pane pointing at the one over the terminated worker and the live one orphaned in the DOM.
    *
    * **WHAT IS TRUE NOW IS A CONJUNCTION OF THREE THINGS, AND THE ORDER OF THE TWO PASSES IS ONLY THE
-   * WEAKEST OF THEM.** (1) EVERY RETIRE SWEEPS EVERY HELD EDITOR: both retire sites — `compile.ts`'s
-   * recompile-from-source and `replies.ts`'s phantom-fork `no-session` — call this function, AND its
+   * WEAKEST OF THEM.** (1) EVERY RETIRE SWEEPS EVERY HELD EDITOR: a retire calls this function, AND its
    * custody pass iterates `heldEditors` itself, so no custody entry can outlive the incarnation of the
-   * session it is keyed by. **The second half of that sentence is the third round's correction and it is
+   * session it is keyed by. **THAT CLAUSE USED TO NAME TWO CALLERS — "`replies.ts`'s phantom-fork
+   * `no-session`, and until 5d-ii-c decision 2 `compile.ts`'s recompile-from-source beside it" — AND IT
+   * NAMES ONE NOW.** Decision 2 deleted the second of those two as well, leaving nothing in `src/`
+   * retiring at all; design §4.4's header list is what supplies the retire today, and the obligation is
+   * discharged in that list's own handler (`main.ts`), which calls `ScratchBuffers.retire` and then this
+   * function. **The branch was unreachable in between and is unchanged**, and the gesture that drives it
+   * is the list's retire control. **The second half of that sentence is the third round's correction and it is
    * not a detail**: while both passes shared one loop over `editorOwner.keys()`, "every retire sweeps"
    * described a function whose body could not see an entry no claim named, and one existed after every
    * `reset layout`. (2) `receiveEditor` THROWS rather than overwriting, so if the two ever do both fire,
@@ -247,19 +285,105 @@ export function createEditorCustody(deps: { panes: PaneCollection; sessions: Ses
    * `reconcileEditors` can find it again. The destroy branch below is the opposite case and deletes
    * FIRST on purpose: there, losing the reference is the point.
    *
-   * A HELD EDITOR WHOSE SESSION IS GONE IS DESTROYED HERE. `LambdaScratchpad.retire` removes the entry
-   * from the registry and rebinds every pane back to source, so no pane will ever ask for that editor
-   * again — and `replies.ts`'s `editorHome()?.setEditor(null)`, the call that would normally tear an
-   * editor down, resolves to `undefined` for a session whose owning pane is closed and is therefore a
-   * no-op. (It resolves to `undefined` after ANY retire, in fact — `retire` rebinds every slot before it
-   * returns, so `editorHomeFor` can no longer match one — which is why `compile.ts` no longer calls it
-   * at all; that file's own doc has the measurement.) Without this line a retirement during custody
-   * would leak one live `EditorView` with its own pending debounce over a terminated worker.
+   * **TWO THINGS THE SWEEP DID NOT SAY UNTIL BUFFERS WENT PLURAL, BOTH ON THE LOOP BELOW AND BOTH WITH
+   * THEIR OWN COMMENTS THERE.** Its outer walk skips a claim whose SESSION the registry no longer holds,
+   * and its inner walk skips a pane whose own BINDING names a different session. Neither was a
+   * distinction 5d-i could draw: with one fixed scratch id there was one claim at a time and one editor
+   * at a time, so "every claim" and "the live one", "every λ pane" and "the panes that could be holding
+   * this session's editor", were the same sets. A fork that mints its own buffer (5d-ii-c decision 1)
+   * separates both pairs, and each was a live defect on the day it did — a retired buffer's claim
+   * destroying a live buffer's editor, and one buffer's editor being handed to another buffer's home
+   * where `receiveEditor` throws.
+   *
+   * A HELD EDITOR WHOSE SESSION IS GONE IS DESTROYED HERE. `ScratchBuffers.retire` removes the entry
+   * from the registry and rebinds the panes that were on THAT BUFFER back to source (it rebinds no
+   * others — the sentence here said "every pane", which was the singleton's arithmetic rather than
+   * `retire`'s rule), so no pane will ever ask for that editor again — and `replies.ts`'s
+   * `editorHome(session)?.setEditor(null)`, the call that would normally tear an editor down, resolves
+   * to `undefined` for a session whose owning pane is closed and is therefore a no-op. Without this line
+   * a retirement during custody would leak one live `EditorView` with its own pending debounce over a
+   * terminated worker.
+   *
+   * **NO CALLER IN `src/` REACHED THIS BRANCH FOR THREE TASKS, AND THE DEBT THAT LEFT IS PAID HERE.**
+   * It is guarded by `!sessions.has(session)`, and only `retire` removes a session — 5d-ii-c decision 2
+   * deleted both of the app's implicit retires (`compile.ts`'s recompile-from-source, then `replies.ts`'s
+   * phantom-fork `no-session`), and design §4.4's header list then supplied the explicit one. **The
+   * regression guard was lost rather than moved in between**, which `tests/browser/two-lambda-panes.test.ts`
+   * recorded from the layout side. `tests/browser/editor-custody.test.ts` is what pays it back, and it
+   * does so by constructing THIS factory rather than a stand-in: the test that appeared to drive this arm
+   * before was counting a STUBBED `reconcileEditors` and measured its call site, never the destroy. It
+   * covers this branch and the two beside it — the claim drop above and the `held.destroy()` in the
+   * sweep — because all three went dark for the same reason and only one of them had a paragraph.
+   * (This paragraph's parenthesis used to add that the narrow `editorHome` thunk `compile.ts` held was a
+   * no-op on every path that reached it — a fact about a file that has held no retire branch since
+   * decision 2.)
    */
   const reconcileEditors = (): void => {
     for (const session of editorOwner.keys()) {
+      // **A CLAIM FOR A SESSION THAT NO LONGER EXISTS IS DROPPED HERE, AND WITHOUT THIS LINE ONE
+      // BUFFER'S RETIREMENT DESTROYED ANOTHER BUFFER'S LIVE EDITOR.** Nothing else ever erases an entry
+      // for a retired session: `dropClaimsOn` is keyed by LEAF and only fires for a leaf arriving
+      // without a pane, so a claim whose pane simply stayed put outlives the session it names forever.
+      // That was harmless while `main()` had ONE scratch id — the next fork re-registered the same key,
+      // so the stale entry and the live one were the same entry — and it stopped being harmless the
+      // moment a fork minted a fresh id per call (5d-ii-c decision 1): `editorHomeFor` answers
+      // `undefined` for the dead session, and the loop below then takes the editor off EVERY λ pane and
+      // destroys it, including the one a later fork had just legitimately mounted for a different
+      // buffer. Measured as two λ panes both reading `[detached]` with no `.term-editor` between them.
+      //
+      // THE MOUNTED EDITOR OF THE RETIRED SESSION STILL COMES DOWN, WHICH IS WHY SKIPPING IS SAFE
+      // RATHER THAN MERELY NARROWER: `ScratchBuffers.retire` rebinds the panes on that buffer — and no
+      // others, which is its rule rather than the singleton's arithmetic — back to `home`, and the
+      // `draw()` that follows drives `PaneSlot.render` -> `LambdaPane.setDetached(false)`, whose own
+      // teardown calls `setEditor(null)`.
+      //
+      // **THE RETIRE SITE IS WHAT CALLS THIS FUNCTION, AND THIS SENTENCE USED TO READ AS THOUGH
+      // SOMETHING ELSE DID.** It said the rebinding happened "before the retire site calls this
+      // ('either retire site' until 5d-ii-c decision 2 deleted `compile.ts`'s)" — an enumeration left
+      // over from the two implicit retires, kept alive past the deletion of both, and contradicting the
+      // two paragraphs this slice added above. There is one retire in the app: `main.ts`'s header-list
+      // handler, which calls `ScratchBuffers.retire`, then this, then `draw()`, in that order. The
+      // ordering above is a fact about that handler, and the obligation to call this at all is stated
+      // there rather than inferred here.
+      //
+      // The custody pass below owns the other case (an editor with no pane at all) and states the same
+      // fact its own way, through `!sessions.has(session)`.
+      if (!sessions.has(session)) {
+        editorOwner.delete(session)
+        continue
+      }
       const home = editorHomeFor(session)
       for (const p of panes.of('lambda')) {
+        // **THE PANE'S OWN BINDING IS THE PREDICATE THAT SAYS WHOSE EDITOR IT COULD BE HOLDING, AND
+        // WITHOUT IT THIS LOOP HANDED ONE BUFFER'S EDITOR TO ANOTHER BUFFER'S HOME** — Important
+        // finding, review of tasks 1+2 as a unit. A `LambdaPane` does not record which session's editor
+        // it has, so this loop asked EVERY λ pane and gave whatever came back to `home`; that was
+        // equivalent to what the sweep means ("S's editor lives on `home(S)`") only while the app could
+        // hold one scratch editor at a time. 5d-i's singleton produced that by accident rather than by
+        // design — a second fork REBOUND to the existing scratch, so `claim` overwrote one entry instead
+        // of adding a second and no second `scratch-compiled` fired — and a fork that mints its own
+        // buffer (5d-ii-c decision 1) makes two mounted editors ordinary. Five gestures reach it: fork,
+        // split, rebind the new pane to source, fork it, then any layout gesture at all.
+        //
+        // SOUND BECAUSE A PANE ONLY EVER COMES TO HOLD AN EDITOR WHILE BOUND TO ITS SESSION.
+        // `replies.ts`'s `scratch-compiled` arm mounts through `editorHomeFor`, which checks the
+        // binding; `receiveEditor` is only ever handed one by this loop; and both are the whole set of
+        // writers. THE CONTROL THIS SWEEP EXISTS FOR SATISFIES IT BY CONSTRUCTION: "bring the term
+        // editor to this pane" is offered only on a pane that is already `#detached` on the session
+        // (`LambdaPane.#refreshClaim`), so the pane losing the editor and the pane gaining it both name
+        // S — which is why the move is unaffected while the collision becomes unrepresentable.
+        //
+        // AND IT DOES NOT WEAKEN THE DESTROY BRANCH BELOW, whose case is a pane REBOUND AWAY from S: the
+        // rebind is what makes `home` `undefined` in the first place, and `LambdaPane.setDetached`'s own
+        // teardown is what takes that editor down (`scratch-rebind-editor.test.ts` is the test), not
+        // this loop — which could only ever have reached it on the frame between the two.
+        //
+        // **THAT IS TRUE OF THE REBIND TO SOURCE AND FALSE OF A SCRATCH→SCRATCH ONE, WHERE THIS `continue`
+        // IS THE LINE THAT LETS THE EDITOR LEAK.** `setDetached` does not fire its teardown when both
+        // bindings are detached, so nothing takes the editor down and this skip means nothing here does
+        // either. Recorded in full in this function's own doc above, with the shape of the fix; not
+        // fixed on the branch that found it.
+        if (p.slot.binding.session !== session) continue
         const pane = p.pane as LambdaPane
         if (pane === home) continue
         const held = pane.takeEditor()
@@ -300,6 +424,45 @@ export function createEditorCustody(deps: { panes: PaneCollection; sessions: Ses
       for (const [claimed, owner] of editorOwner) if (owner === leaf) editorOwner.delete(claimed)
     },
     homeFor: editorHomeFor,
+    /**
+     * Whether an editor for `session` EXISTS — the fact `LambdaPane.#refreshClaim` was missing, and the
+     * fix for deferred-a11y item 11. `draw()` fans it over every λ pane once a frame.
+     *
+     * **`homeFor(session) !== undefined` IS NOT THIS QUESTION, AND ANSWERING IT THAT WAY WOULD HAVE LEFT
+     * THE DEFECT EXACTLY WHERE IT WAS.** `editorOwner` is a map of CLAIMS, and the claim for a fork is
+     * recorded by `pane-host.ts`'s wrapped `detach` at the moment the binding moves — which is before
+     * the worker has answered and therefore also on the fork that never builds. So the phantom buffer
+     * this method exists to report `false` for has a claim, a live pane, and a matching binding: every
+     * condition `editorHomeFor` checks. What it does not have is an editor, and `holdsEditor` is the
+     * only thing that can say so — `takeEditor` reports the same fact destructively, and a caller that
+     * unmounted the editor to find out whether it was there would break the control it is deciding to
+     * offer.
+     *
+     * THE CUSTODY MAP FIRST, BECAUSE IT IS THE CASE WITH NO PANE TO ASK. An editor whose holder closed
+     * waits in `heldEditors` with its claim pointing at a leaf `panes` no longer holds, so
+     * `editorHomeFor` answers `undefined` for it — and that is precisely the state the control must stay
+     * offered in, since claiming it is how the user gets the editor back (`heldEditors`' own doc, and
+     * the whole-branch finding recorded there).
+     *
+     * **AN EDITOR MOUNTED ON A PANE WHOSE BINDING HAS MOVED AWAY IS NOT COUNTED, AND THIS PARAGRAPH USED
+     * TO JUSTIFY THAT WITH A CLAIM THAT IS FALSE — Important finding, review of this fix.** It read that
+     * such an editor "is an ORPHAN by this file's own definition — `reconcileEditors` takes it down on
+     * the next sweep". The sweep does no such thing: its inner loop opens with `if (p.slot.binding.session
+     * !== session) continue`, which skips exactly the rebound-away pane, and `LambdaPane.setDetached`
+     * tears down only on `!detached`, which a scratch→scratch rebind never reaches because both bindings
+     * are detached. So the editor stays mounted, indefinitely. **That is a live defect and it is not this
+     * one** — see the standing note at the top of `reconcileEditors`, where it is recorded in full.
+     *
+     * NOT COUNTING IT IS STILL RIGHT, AND FOR A REASON THAT DOES NOT DEPEND ON THE FALSE CLAIM: the
+     * question this method answers is "would the click work", and there it would not. Claiming records
+     * `editorOwner.set(session, myLeaf)` and waits for the sweep — which skips the holder for the same
+     * binding reason, so nothing arrives. Withdrawing the control there is item 1's standard applied
+     * correctly to a control that provably cannot work, and it is what the old gate got wrong by
+     * offering it. The stale editor is a separate wrong that a `true` here would not have fixed.
+     */
+    hasEditor(session: SessionId): boolean {
+      return heldEditors.has(session) || editorHomeFor(session)?.holdsEditor() === true
+    },
     reconcile: reconcileEditors,
   }
 }

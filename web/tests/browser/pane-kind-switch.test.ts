@@ -15,10 +15,13 @@ import { LAYOUT_STORAGE_KEY, type LayoutNode, parseLayout, setLeafKind } from '.
  *
  * THE HARNESS IS `two-lambda-panes.test.ts`'s, DELIBERATELY UNMODIFIED — the same shell, the same
  * one-mount-per-file `beforeAll` (ES module imports are cached, so `main()` runs once per page and
- * Vitest gives each test FILE its own page), the same `beforeEach` that undoes BOTH drifts a test can
- * leave behind (the tree shape, through `reset layout`; a live scratchpad, through a source
- * recompile). Its own doc has the argument for each, including why the first compile has to be waited
- * for before any fork click can land. Selectors are that file's verbatim: `.controls .detach` for the
+ * Vitest gives each test FILE its own page), and a `beforeEach` that undoes the tree shape through
+ * `reset layout` and puts the source program back. Its own doc has the argument for each, including why
+ * the first compile has to be waited for before any fork click can land. **THE SECOND HALF OF THAT
+ * SENTENCE USED TO READ "a live scratchpad, through a source recompile"**, which stopped being true
+ * with 5d-ii-c decision 2: a keystroke ends no buffer, so a buffer a test forks outlives it. Only the
+ * last test here forks, and nothing runs after it — where `two-lambda-panes.test.ts`, whose every test
+ * forks, rebinds its λ panes back to `source` explicitly for exactly this reason. Selectors are that file's verbatim: `.controls .detach` for the
  * fork (the button carries real text, not an `aria-label`), `aria-label` for the glyph-only layout
  * controls, and `leg\x00session` for the selector's option values — `\x00` as an escape is
  * `scripts/check-text-bytes.sh`'s rule.
@@ -33,6 +36,7 @@ const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
     <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
+    <button type="button" id="buffers">buffers</button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
   <main></main>
@@ -359,9 +363,10 @@ describe('a pane changes which leg it renders', () => {
 
   /**
    * **THE CRITICAL'S OWN THREE CLICKS, WHOSE ANSWER CHANGED FROM "REFUSE" TO "FOLLOW".** Compile, fork
-   * the λ pane, then pick `λ · λ scratchpad` on the TM pane: `PaneSlot.render` pushes `pairs()` to every
-   * pane, so a TM pane's selector genuinely lists a λ-only session. `transport.ts`'s handler used to take
-   * the session half and keep the slot's leg, minting `{ leg: 'tm', session: 'lambda-scratch' }` —
+   * the λ pane, then pick the buffer's own `λ · …` entry on the TM pane: `PaneSlot.render` pushes
+   * `pairs()` to every pane, so a TM pane's selector genuinely lists a λ-only session. `transport.ts`'s
+   * handler used to take the session half and keep the slot's leg, minting `{ leg: 'tm', session: <the
+   * buffer> }` —
    * which `legOf` throws on, inside `draw.ts`'s per-pane loop, which has no `try`/`catch`: not one
    * dropped frame but every frame after it. A guard in that handler then made the pick a silent no-op.
    *
@@ -382,13 +387,22 @@ describe('a pane changes which leg it renders', () => {
     window.addEventListener('error', onError)
     try {
       document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')?.click()
-      await until(() => editorsIn('lambda-0') > 0, 'the fork to register the λ scratchpad')
+      await until(() => editorsIn('lambda-0') > 0, 'the fork to register a scratch buffer')
       expect(kindOf('tm-0')).toBe('tm')
 
-      pick('tm-0', optionValue('lambda', 'lambda-scratch'))
-      await until(() => kindOf('tm-0') === 'lambda', 'the TM pane to become a λ pane on the scratch')
+      // THE PAIR THE FORK PRODUCED, READ OFF THE PANE THAT PERFORMED IT. This test picked the literal
+      // `optionValue('lambda', 'lambda-scratch')` — 5d-i's one fixed scratch id — and 5d-ii-c decision 1
+      // mints `scratch-N` per fork instead. The number depends on how many forks this FILE ran before
+      // this test (one `main()` per page), so it cannot be written down; the pane that just forked is
+      // where the app itself records it. `pick` throws if the value it is handed is not in the target
+      // selector, which is what keeps this from silently picking nothing.
+      const buffer = selectOf('lambda-0')?.value ?? ''
+      expect(buffer).not.toBe(optionValue('lambda', 'source'))
 
-      expect(selectOf('tm-0')?.value).toBe(optionValue('lambda', 'lambda-scratch'))
+      pick('tm-0', buffer)
+      await until(() => kindOf('tm-0') === 'lambda', 'the TM pane to become a λ pane on the buffer')
+
+      expect(selectOf('tm-0')?.value).toBe(buffer)
       expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('[detached]')
       await until(() => termOf('tm-0') !== '', "the scratch's own term to paint in the switched pane")
       // TWO λ PANES ON THE SCRATCH AND NO TM PANE AT ALL, which is a legal state — `draw.ts` and
@@ -396,25 +410,48 @@ describe('a pane changes which leg it renders', () => {
       expect(lambdaLeaves().sort()).toEqual(['lambda-0', 'tm-0'])
       expect(document.querySelectorAll('[data-kind="tm"]').length).toBe(0)
 
-      // A SECOND FRAME, THROUGH THE KEYSTROKE PATH. **NOT `◀` ON THE SWITCHED PANE, WHICH IS WHAT THIS
-      // WAS UNTIL IT WAS RUN**: the fork seeds the scratch from the λ pane's CURRENT step, and that pane
-      // was at the frontier, so the scratch's own run is a single frame — `canBack` is false and the
-      // click is a silent no-op. A source keystroke drives `draw.ts` and `link-wiring.ts` with no click
-      // at all, and it retires the scratch on the way, so the switched pane is rebound to `source` and
-      // repaints from a session it was never built for. Both λ panes resolve the one source λ leg, so
-      // the two showing the same term is that repaint having reached this pane rather than only the
-      // other one.
+      // A SECOND FRAME, WHICH IS THE WHOLE POINT OF THE STAGE — the Critical's signature was that EVERY
+      // later frame threw. **NOT `◀` ON THE SWITCHED PANE, WHICH IS WHAT THIS WAS UNTIL IT WAS RUN**:
+      // the fork seeds the buffer from the λ pane's CURRENT step, and that pane was at the frontier, so
+      // the buffer's own run is a single frame — `canBack` is false and the click is a silent no-op.
+      //
+      // **AND NOT A SOURCE KEYSTROKE EITHER, WHICH IS WHAT IT WAS UNTIL 5d-ii-c DECISION 2.** That
+      // keystroke used to retire the buffer, so the switched pane was rebound to `source` and repainted
+      // from a session it was never built for — this stage asserted exactly that, ending on
+      // `not.toContain('[detached]')` and on both λ panes showing the source's own leg. A keystroke ends
+      // no buffer now (design §4.3's table), so it moves nothing and there would be nothing to observe.
+      // AN EDIT OF THE BUFFER drives the same per-pane loop `draw.ts` threw in, and says something the
+      // retire could not: the switched pane follows the buffer's OWN later frames, on a binding it
+      // acquired through a cross-leg pick.
       const scratchTerm = termOf('tm-0')
       expect(stepOf('tm-0')).not.toBe('')
+      const editorHost = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .cm-content')
+      if (editorHost === null) throw new Error('the forked pane has no editor host')
+      const bufferView = EditorView.findFromDOM(editorHost)
+      if (bufferView === null) throw new Error('no CodeMirror view mounted under the forked pane')
+      bufferView.dispatch({ changes: { from: 0, to: bufferView.state.doc.length, insert: '(λu. u) (λw. w)' } })
+      await until(
+        () => termOf('tm-0') !== scratchTerm && termOf('tm-0') !== '',
+        "the switched pane to repaint on the buffer's own new frames",
+        10_000,
+      )
+      // Both λ panes resolve the one buffer's λ leg, so the two showing the same term is that repaint
+      // having reached this pane rather than only the one holding the editor.
+      expect(termOf('tm-0')).toBe(termOf('lambda-0'))
+      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('[detached]')
+
+      // AND THE KEYSTROKE PATH, which reaches `link-wiring.ts` from the source editor's own update
+      // listener without going through `draw.ts` first — the other entry point the Critical could be
+      // reached from. The switched pane is still on the buffer afterwards, which is decision 2 read on
+      // the pane the Critical was about.
       view.dispatch({ changes: { from: view.state.doc.length, insert: ' + 0' } })
       await until(
-        () =>
-          document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-          termOf('tm-0') !== scratchTerm &&
-          termOf('tm-0') !== '',
-        'the switched pane to repaint on the source session after the retire',
+        () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle',
+        'the source recompile to settle',
+        10_000,
       )
-      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).not.toContain('[detached]')
+      expect(selectOf('tm-0')?.value).toBe(buffer)
+      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('[detached]')
       expect(termOf('tm-0')).toBe(termOf('lambda-0'))
       expect(errors).toEqual([])
     } finally {

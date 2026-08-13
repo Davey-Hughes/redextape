@@ -2,7 +2,7 @@ import { canRecordFurther } from './controls'
 import type { LinkWiring } from './link-wiring'
 import type { PaneEvents } from './pane-chrome'
 import type { Leg } from './protocol'
-import type { LambdaScratchpad } from './scratch'
+import { BufferCapReached, type ScratchBuffers } from './scratch'
 import type { Binding, LegState, PaneSlot, SessionRegistry } from './sessions'
 
 /**
@@ -35,14 +35,28 @@ const PLAY_MS = 120
  */
 export function createTransport(deps: {
   sessions: SessionRegistry
-  scratchpad: LambdaScratchpad
+  scratchpad: ScratchBuffers
   draw: () => void
   linkWiring: () => LinkWiring
+  /**
+   * A buffer has just been created — the header list's readout is stale until this returns.
+   *
+   * **THE FORK BELOW IS THE ONLY PLACE IN `src/` THAT MAKES A BUFFER, AND THE READOUT IS ON A DIFFERENT
+   * CLOCK FROM `draw`.** `bufferList.update` takes a COUNT rather than reading its own rows, precisely
+   * so the button can be current while the list is CLOSED without any repaint recomputing it (its own
+   * doc); the two moments the count changes are a fork and a retire, and the retire is `main.ts`'s own
+   * handler. This is the other one. Routing it through `draw` instead would put the header's readout on
+   * the playback clock — a `setInterval` at 8 fps — to catch a number that changes on a click.
+   *
+   * `recompile` BELOW DELIBERATELY DOES NOT CALL IT: it rebuilds the term behind a buffer that already
+   * exists, so the count is the one thing an edit cannot change.
+   */
+  onBuffersChanged: () => void
 }): {
   play<T>(leg: LegState<T>): void
   events<K extends Leg>(slot: PaneSlot<K>): PaneEvents
 } {
-  const { sessions, scratchpad, draw, linkWiring } = deps
+  const { sessions, scratchpad, draw, linkWiring, onBuffersChanged } = deps
 
   /**
    * Playback is an interval over recorded frames and stops at the frontier. It never asks the worker
@@ -213,13 +227,46 @@ export function createTransport(deps: {
           detach: (step: number) => {
             const wiring = linkWiring()
             if (wiring.index === null || wiring.index.lambdaText === '') return
-            // A FRESH ATTEMPT RETIRES YESTERDAY'S NEWS. `forkFailed` is a report about the LAST click
-            // on this control; a new click means the user is trying again, and the stale message would
-            // otherwise sit on `#link-status` through a successful fork (nothing on the success path
-            // touches it) or, worse, read like it describes THIS attempt when this one has not even
-            // answered yet. See `forkFailed`'s own doc for the other clear site.
+            // **THE CAP'S REFUSAL IS AN ANSWER TO THE USER AND IS CAUGHT HERE** (design §4.5, and the
+            // Critical this task's review raised). `ScratchBuffers.fork` refuses at `MAX_BUFFERS`
+            // rather than evicting, and this click listener is the last frame before the raw DOM
+            // dispatch (`pane-chrome.ts`'s `detachButton`) — there is no `window` error handler in
+            // `src/` behind it, so an uncaught throw here would reach the console and nothing else.
+            // `#link-status` is where it goes instead, through the same `forkFailed` field `replies.ts`
+            // uses for the sibling refusal (a fork whose BUILD fails) and `link-status.ts` renders as
+            // `fork failed — …`.
+            //
+            // **`BufferCapReached` AND NOT A BARE `catch`.** The other throws reachable from `fork` are
+            // `SessionRegistry.add`'s and `SessionPool.bind`'s guards over their own invariants; those
+            // are wiring bugs, and rendering one as a status line would swallow it. Anything else is
+            // re-thrown unchanged.
+            try {
+              scratchpad.fork(slot, wiring.index.lambdaText, step)
+            } catch (e) {
+              if (!(e instanceof BufferCapReached)) throw e
+              wiring.setForkFailed(e.message)
+              // NO `onBuffersChanged()` ON THIS ARM — the header's count did not move, because that is
+              // the whole content of the refusal. `draw()` still runs: the status line is the one thing
+              // that DID change, and `draw()` ends in `drawLink`.
+              draw()
+              return
+            }
+            // A FRESH ATTEMPT RETIRES YESTERDAY'S NEWS, **AND IT CLEARS ON THE SUCCESS PATH RATHER THAN
+            // AHEAD OF THE CALL**. `forkFailed` is a report about the LAST click on this control, and a
+            // stale message must not sit on `#link-status` through a fork that worked. This line used
+            // to run BEFORE the fork, on the reasoning that "a new click means the user is trying
+            // again" — which was right until the fork could answer synchronously: `setForkFailed` is a
+            // pure state write (`link-wiring.ts`) and nothing repaints between there and here, so a
+            // clear ahead of a REFUSED fork would drop the previous failure from the model while it was
+            // still on screen, and the two would disagree until some unrelated frame repainted. Clearing
+            // here says the same thing about a fork that is now genuinely pending, and the arm above
+            // overwrites rather than clears. See `forkFailed`'s own doc for the other clear site.
             wiring.setForkFailed(null)
-            scratchpad.detach(slot, wiring.index.lambdaText, step)
+            // THE HEADER GAINED A BUFFER, AND ITS READOUT IS THE ONE SURFACE `draw()` BELOW DOES NOT
+            // REACH — `draw.ts` paints panes and pane chrome, and the buffer list is header chrome
+            // beside `reset layout`. See this dependency's own doc for why the count travels on a click
+            // rather than on the frame clock.
+            onBuffersChanged()
             // IMMEDIATELY, NOT ON THE SCRATCHPAD'S FIRST REPLY. The rebind has already happened, so
             // this pane's `[detached]` badge, its selector (which gains a second option the instant a
             // second session is registered) and the status line are all stale until something paints
@@ -227,9 +274,13 @@ export function createTransport(deps: {
             draw()
           },
           // THE EDIT PATH — design §4.3's second gesture, `LambdaEditor`'s debounced `onEdit` wired
-          // through `LambdaPane.setEditor` (`pane-chrome.ts`'s `editScratch` doc). `recompile` REUSES
-          // the existing scratch rather than forking a second one — the singleton is `scratch.ts`'s
-          // to keep, not this handler's to re-derive — so there is nothing else here to decide.
+          // through `LambdaPane.setEditor` (`pane-chrome.ts`'s `editScratch` doc). `recompile` REBUILDS
+          // THE BUFFER THIS PANE IS SHOWING rather than forking a second one, which is the whole of
+          // what this handler decides. It used to say "the singleton is `scratch.ts`'s to keep, not
+          // this handler's to re-derive", and there was no id to pass because there was one scratch;
+          // 5d-ii-c decision 1 makes buffers plural, so the pane's own binding is what says which term
+          // the keystrokes belong to. Reading it here rather than in the callee is the same rule
+          // `detach` above follows: this file is handed what it needs to name, it does not go looking.
           //
           // NO `draw()`, UNLIKE `detach` ABOVE, and the asymmetry is the point rather than an
           // oversight. `detach` draws because it REBINDS the slot synchronously — the badge, the
@@ -241,7 +292,7 @@ export function createTransport(deps: {
           // editor's own `EditorView.updateListener` in `main.ts` already declines to pay on every
           // keystroke — its comment states the reason: `hist` has not changed, so repainting is waste.
           editScratch: (src: string) => {
-            scratchpad.recompile(src)
+            scratchpad.recompile(slot.binding.session, src)
           },
         }
       : {}),

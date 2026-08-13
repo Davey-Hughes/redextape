@@ -39,8 +39,9 @@ import { TmPane } from './tm-pane'
  * outside this module.
  *
  * **`applyLayout` IS THE ONLY THING IN THE APP THAT CREATES OR REMOVES A PANE**, and moving it did not
- * change that — it is why `PaneCollection` can be handed to `link-wiring.ts`, `draw.ts`, `compile.ts`
- * and `replies.ts` empty and read live by all four. Its `try`/`finally` is a fix rather than a style
+ * change that — it is why `PaneCollection` can be handed to `link-wiring.ts`, `draw.ts` and
+ * `replies.ts` empty and read live by all three. (`compile.ts` was a fourth until 5d-ii-c decision 2
+ * deleted the retire it held; a compile touches no pane at all now.) Its `try`/`finally` is a fix rather than a style
  * (see its own doc): an exception escaping `custody.reconcile()` used to take `renderLayout`,
  * `writeLayoutStorage` and `draw()` with it, leaving the tree, the DOM and `localStorage` disagreeing.
  * It crosses the boundary exactly as it was.
@@ -93,14 +94,15 @@ export type PaneHost = {
  * pushed back on the other three; an exported binding would put the current tree in two modules at
  * once. A getter read at every use is the shape with one answer.
  *
- * **`sourceSession`, `lambdaScratch`, `sourceLayout`, `writeLayoutStorage`, `nextLeafId` AND
+ * **`sourceSession`, `sourceLayout`, `writeLayoutStorage`, `nextLeafId` AND
  * `neighbourOf` ARE WHAT THE MOVED BODIES REACHED FOR ACROSS THE NEW BOUNDARY, and naming them is the
  * point of listing them separately.** (Named rather than positioned as "the last six", which is what
  * this said until `tmProgramOf` was added below them. That one is not one of them: it answers a
  * question this module asks on its own account rather than restoring a reference `main()`'s scope used
- * to supply for free, and its own doc carries the argument for its shape.) `sourceSession` and
- * `lambdaScratch` are
- * `main()`'s two session-id constants (`main.ts` names this app's sessions and no other module does);
+ * to supply for free, and its own doc carries the argument for its shape.) `sourceSession` is
+ * `main()`'s one remaining session-id constant — `lambdaScratch` stood beside it until 5d-ii-c decision
+ * 1 made a fork mint its own buffer id, and a session named where it is created is not a constant any
+ * scope can hand over;
  * `sourceLayout` is the source pane's own close control, which `applyLayout` drives because `canClose`
  * changes only at a structural change and the source leaf has no `PaneEntry` for `draw()` to find;
  * `writeLayoutStorage` is `main.ts`'s guarded `localStorage` writer, kept beside the guarded reader
@@ -138,7 +140,6 @@ export function createPaneHost(deps: {
   custody: EditorCustody
   transport: { events<K extends Leg>(slot: PaneSlot<K>): PaneEvents }
   sourceSession: SessionId
-  lambdaScratch: SessionId
   sourceLayout: { update(canClose: boolean, canSplit: boolean): void }
   nextLeafId(): LeafId
   neighbourOf(tree: LayoutNode, id: LeafId): LeafId | null
@@ -164,16 +165,17 @@ export function createPaneHost(deps: {
    */
   tmProgramOf(session: SessionId): TmCompiled | null
 }): PaneHost {
-  // THE TWO SESSION IDS KEEP THEIR `main.ts` SPELLING THROUGH A RENAMING DESTRUCTURE, so the bodies
-  // below read exactly as they did in the scope they came from — `SOURCE_SESSION` and `LAMBDA_SCRATCH`
-  // are the names every comment in this file already refers to them by.
+  // THE SOURCE SESSION ID KEEPS ITS `main.ts` SPELLING THROUGH A RENAMING DESTRUCTURE, so the bodies
+  // below read exactly as they did in the scope they came from — `SOURCE_SESSION` is the name every
+  // comment in this file already refers to it by. `LAMBDA_SCRATCH` used to arrive the same way and is
+  // gone with the singleton it named (5d-ii-c decision 1): a buffer's id is minted per fork, so there
+  // is no scratch-session constant for this module to be handed.
   const {
     root,
     panes,
     custody,
     transport,
     sourceSession: SOURCE_SESSION,
-    lambdaScratch: LAMBDA_SCRATCH,
     sourceLayout,
     nextLeafId,
     neighbourOf,
@@ -334,8 +336,11 @@ export function createPaneHost(deps: {
      * **AND IT REUSES THE LITERAL LEAF ID `'source'` RATHER THAN MINTING ONE, WHICH IS WHAT MAKES THE
      * PROGRAM COME BACK — found by writing the test for it.** `hostFor` returns the host already held
      * under an id and builds a fresh empty `<section>` for one it has not seen, and the source pane's
-     * host is `main.ts`'s own: it holds `#editor`, the live CodeMirror instance, `#link-status` and the
-     * close control, seeded into `hosts` under `'source'` before `applyLayout` ever ran (`seedHost`). A
+     * host is `main.ts`'s own: it holds `#editor`, the live CodeMirror instance, and the close control,
+     * seeded into `hosts` under `'source'` before `applyLayout` ever ran (`seedHost`). (It held
+     * `#link-status` too until deferred-a11y item 12; that element is app chrome outside every host now
+     * — `main.ts` records the argument at the `append`, and the rule this paragraph is about is exactly
+     * what took the status line out of the document when the source pane closed.) A
      * `pane-${n}` leaf would therefore have come back as an EMPTY pane while the user's program sat in a
      * detached host nothing could reach again — `hostFor`'s detach-not-destroy rule kept for a key nobody
      * would ask for. The id is a constant everywhere else for the same reason (`defaultLayout()`'s
@@ -367,13 +372,22 @@ export function createPaneHost(deps: {
         ? {
             // THE FIRST-MOUNT HALF OF `editorOwner`. `base.detach` (when it fires at all — the guards
             // inside `transport.ts`'s own handler can decline) REBINDS `slot` SYNCHRONOUSLY, before this
-            // wrapper resumes, so `slot.binding.session` already names the scratch by the time this
+            // wrapper resumes, so `slot.binding.session` already names the new buffer by the time this
             // line runs — checked rather than assumed, because a declined attempt leaves the binding
             // exactly where it was (still the source session), and recording ownership for a fork that
             // never happened would point `editorOwner` at a session with no editor to come.
+            //
+            // **THE CHECK IS "DID THE BINDING MOVE", WHERE IT USED TO BE "IS IT THE SCRATCH".** It read
+            // `if (slot.binding.session === LAMBDA_SCRATCH) custody.claim(LAMBDA_SCRATCH, id)` against
+            // `main()`'s one scratch-id constant. 5d-ii-c decision 1 mints a buffer id per fork, so
+            // there is no constant left to compare with — and comparing before against after is what
+            // that comparison was really asking, since the only thing `detach` can do to this slot is
+            // move it onto the buffer it just made.
             detach: (step: number) => {
+              const before = slot.binding.session
               base.detach?.(step)
-              if (slot.binding.session === LAMBDA_SCRATCH) custody.claim(LAMBDA_SCRATCH, id)
+              const after = slot.binding.session
+              if (after !== before) custody.claim(after, id)
             },
             // THE MOVE HALF. Only `editorOwner` changes here — `reconcileEditors` (below `applyLayout`)
             // is what actually relocates the mounted `LambdaEditor`, which is what lets this handler stay
@@ -425,6 +439,52 @@ export function createPaneHost(deps: {
       // ahead of every button), so focus lands back on the control the pick was made with.
       rebind: (choice: Binding<Leg>) => {
         if (choice.leg === slot.binding.leg) {
+          /**
+           * **THE SAME-LEG ARM HANDS THE OUTGOING EDITOR TO CUSTODY, AND WITHOUT THIS IT LEAKED —
+           * Important finding, review of the deferred-a11y item 11/12 fix.**
+           *
+           * `LambdaPane.setDetached` tears an editor down only on `!detached`, so it answers the rebind
+           * to SOURCE and nothing else; both sides of a scratch→scratch rebind are detached, so it never
+           * fires. `reconcileEditors` then skips this pane — its inner loop opens `if
+           * (p.slot.binding.session !== session) continue` and the pane no longer names the session whose
+           * editor it holds — and the custody pass never sees the view because nothing put it there. The
+           * pane went on rendering buffer B's frames with buffer A's live CodeMirror mounted above them,
+           * permanently, and `transport.ts`'s `editScratch` reads `slot.binding.session` at EDIT time, so
+           * a keystroke in it called `recompile(B, <A's text>)`.
+           *
+           * DECISION 1 IS WHAT MADE THE GESTURE REACHABLE. While there was one scratch id, "rebound away
+           * from the scratch" and "rebound to source" were the same sentence and the teardown was a
+           * complete answer. `tests/browser/scratch-rebind-editor.test.ts` drives both rebinds now; it
+           * drove only the second, and two doc comments cited it as proof this state was impossible.
+           *
+           * THE SAME THREE LINES `applyLayout`'s DROP LOOP RUNS, for the same reason and with the same
+           * verb: an editor whose pane is going away — by closing, by changing leg, or here by navigating
+           * to another buffer — is unmounted and NOT destroyed, because the user may come back for it.
+           * `heldEditors` is where it waits, and the claim control (`hasEditor` reads that map first) is
+           * how they ask for it.
+           *
+           * **BEFORE `base.rebind`, WHERE `detach`'s WRAPPER ABOVE ACTS AFTER, AND THE ASYMMETRY IS
+           * DELIBERATE.** `detach` checks the binding afterwards because that handler CAN decline (its
+           * own guards in `transport.ts`), so "did it move" is a question only the outcome answers. The
+           * same-leg rebind cannot decline: this arm has already established the legs match, which is the
+           * one thing `transport.ts`'s handler refuses, and what is left is an unconditional
+           * `slot.rebind(choice.session)` — so `choice.session` IS the outcome. Acting first is what
+           * keeps the `draw()` inside `base.rebind` from painting one frame of the wrong pairing.
+           *
+           * `panes.get(id)` RATHER THAN A CAPTURED PANE, because `paneEvents` is built during
+           * `applyLayout`'s creation pass — before `panes.add` for this leaf has run — and resolving at
+           * click time is the only moment the entry is guaranteed to exist. The `kind` check is what
+           * makes the cast sound; `slot.binding.leg` would answer the same today, and the entry's own
+           * kind is the fact the cast is actually about.
+           */
+          const leaving = slot.binding.session
+          if (choice.session !== leaving) {
+            const entry = panes.get(id)
+            if (entry?.kind === 'lambda') {
+              const held = (entry.pane as LambdaPane).takeEditor()
+              if (held !== null) custody.hold(leaving, held)
+            }
+          }
           base.rebind(choice)
           return
         }

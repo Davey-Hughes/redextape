@@ -33,6 +33,7 @@ const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
     <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
+    <button type="button" id="buffers">buffers</button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
   <main></main>
@@ -171,9 +172,17 @@ beforeEach(async () => {
  * both answers are the same and no expectation downstream could fail.
  */
 async function twoDisagreeingLambdaPanes(): Promise<[string, string]> {
-  // 1. Fork `lambda-0` onto the λ scratchpad — the pane that IS outside the correspondence.
+  // 1. Fork `lambda-0` onto a scratch buffer — the pane that IS outside the correspondence.
   document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')?.click()
   await until(() => editorsIn('lambda-0') > 0, 'the fork to mount an editor')
+  // THE BUFFER'S OWN PAIR, READ OFF THE PANE THAT WAS JUST FORKED — where step 3 below used to write
+  // `optionValue('lambda', 'lambda-scratch')`, the fixed id every fork produced under 5d-i's singleton.
+  // 5d-ii-c decision 1 mints `scratch-N` per fork and `main()` runs once per test FILE, so the number
+  // is a function of how many forks ran before this one and is not writable down here. Capturing the
+  // value the fork actually produced is also the stronger statement: step 3 asserts this pane is on THE
+  // BUFFER THIS FORK MADE, not merely on something that is not the source session.
+  const buffer = selectOf('lambda-0')?.value ?? ''
+  expect(buffer).not.toBe(optionValue('lambda', 'source'))
 
   // 2. Split it, so the leg holds two panes. Both are on the scratch at this point.
   splitSame('lambda-0', 'split left and right')
@@ -188,7 +197,7 @@ async function twoDisagreeingLambdaPanes(): Promise<[string, string]> {
   select.value = optionValue('lambda', 'source')
   select.dispatchEvent(new Event('change', { bubbles: true }))
   await until(() => selectOf(second ?? '')?.value === optionValue('lambda', 'source'), 'the rebind to take')
-  expect(selectOf(first ?? '')?.value).toBe(optionValue('lambda', 'lambda-scratch'))
+  expect(selectOf(first ?? '')?.value).toBe(buffer)
 
   return [first ?? '', second ?? '']
 }

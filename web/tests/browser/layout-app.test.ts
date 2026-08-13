@@ -26,6 +26,7 @@ const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
     <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
+    <button type="button" id="buffers">buffers</button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
   <main></main>

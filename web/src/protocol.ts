@@ -282,7 +282,7 @@ export type RunRequest =
    * TEXT anywhere: the TM pane renders a δ-table projected from a compiled program, not the `.tm`
    * source that would have built one. A request kind no surface can produce is the fabricated-state
    * shape `session.rs:257-273` records the cost of, so the variant lands with the surface that can
-   * send it. See `LambdaScratchpad`'s doc in `scratch.ts` for the same line drawn on the session side.
+   * send it. See `ScratchBuffers`'s doc in `scratch.ts` for the same line drawn on the session side.
    *
    * **`step` IS WHICH FRAME THE PANE WAS SHOWING, AND THE WORKER REPLAYS TO IT** (design §4.1). It is
    * not an offset into `src`: `src` is the SOURCE session's step-0 term at `LAMBDA_BYTE_BUDGET`, and

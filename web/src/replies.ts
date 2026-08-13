@@ -7,7 +7,7 @@ import type { LinkWiring } from './link-wiring'
 import type { PaneCollection } from './panes'
 import { lambdaFrameBytes, type RunReply, tmFrameBytes } from './protocol'
 import { noSessionRows, type Row, resultRows } from './results'
-import type { LambdaScratchpad } from './scratch'
+import type { ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
 import { resetLegs, type SessionRegistry, type TmCompiled } from './sessions'
 import type { TmPane } from './tm-pane'
@@ -63,14 +63,32 @@ function renderRows(host: HTMLElement, rows: Row[]): void {
  * caller, not two, so it moved here as a private function instead of threading through the deps object.
  * An injected function with exactly one implementation is a parameter pretending to be a choice.
  *
- * `sourceSession: SessionId` IS NOT IN THE TASK BRIEF'S SIGNATURE, AND IS NEEDED ANYWAY.
- * `onScratchReply`'s `no-session` arm calls `scratchpad.noSessionReply(reply.diagnostics,
- * SOURCE_SESSION, ...)` — the literal source-session id `main.ts` names once at construction
- * (`const SOURCE_SESSION: SessionId = 'source'`) and passes to `noSessionReply` as the session a
- * retiring scratchpad rebinds its slots back to. That is not something either handler can derive from
- * `session`, which names whichever session actually sent THIS reply (that is `onReply`'s whole point —
- * see its own doc). Renamed to `sourceSession` here for the same reason every other dep in this
- * signature is camelCase.
+ * **`sourceSession: SessionId` LEFT WITH THE RETIRE, AND THIS PARAGRAPH IS WHERE IT WAS ARGUED FOR.**
+ * It read: *"IS NOT IN THE TASK BRIEF'S SIGNATURE, AND IS NEEDED ANYWAY. `onScratchReply`'s
+ * `no-session` arm calls `scratchpad.noSessionReply(session, reply.diagnostics, SOURCE_SESSION, ...)` —
+ * the literal source-session id `main.ts` names once at construction and passes to `noSessionReply` as
+ * the session a retiring scratchpad rebinds its slots back to."* Nothing retires here now (5d-ii-c
+ * decision 2), so there is no home for a pane to be sent to and no slots to send; the arm's own comment
+ * below carries what the deletion cost. `panes` stays — two other arms fan out over it — but it is no
+ * longer read as "every slot a retire might have to move".
+ *
+ * **`reconcileEditors: () => void` LEFT WITH IT, FOR THE SAME REASON AND ONE TASK AFTER `compile.ts`
+ * SHED THE IDENTICAL DEPENDENCY.** It made every `LambdaEditor` — mounted on a pane, or waiting in
+ * `editor-custody.ts`'s `heldEditors` — agree with where custody said it belonged, and it was called on
+ * the one arm that retired a session, because a retire must leave no editor behind for a session that
+ * no longer exists. No arm retires. The property it enforced is unchanged and now has no trigger here
+ * at all: its argument, the third review round's correction to it, and the ordering it depends on all
+ * live in `editor-custody.ts`'s `reconcileEditors`, which `pane-host.ts`'s `applyLayout` still calls on
+ * every layout gesture. **WHAT THIS CALL CARRIED WAS ITS OWN EXECUTION; THE BRANCH'S GUARD WENT WITH THE
+ * RECOMPILE DELETION** — and the distinction matters, because "the coverage it carried is lost rather
+ * than moved" (what this read) invites the reading that deleting this line stopped covering
+ * `reconcileEditors`' destroy branch. It never did: that branch is guarded by `!sessions.has(session)`,
+ * which needs a session actually removed, and `tests/browser/scratch-fork.test.ts` was counting a
+ * STUBBED `reconcileEditors` here — a call, not a destroy. What the deletion cost was the producer of
+ * `!sessions.has`, and `tests/browser/editor-custody.test.ts` is what covers the branch now that
+ * `main.ts`'s header-list retire supplies one again. `editorHome` STAYS, because two arms
+ * that are not retires read it: `scratch-compiled` mounts text onto the home pane, and `worker-error`
+ * unmounts from a pane whose session is still live and still bound.
  *
  * `root: HTMLElement` IS IN THE BRIEF'S SIGNATURE AND IS NOT HERE. Neither handler reads it —
  * `showBanner(root, ...)` is `main.ts`'s wasm-load and worker-spawn failure surface (`banner.ts`'s own
@@ -81,16 +99,15 @@ function renderRows(host: HTMLElement, rows: Row[]): void {
  */
 export function createReplies(deps: {
   sessions: SessionRegistry
-  scratchpad: LambdaScratchpad
+  scratchpad: ScratchBuffers
   results: HTMLElement
   view: () => EditorView
   panes: PaneCollection
   links: LinkWiring
   draw: () => void
-  sourceSession: SessionId
   /**
-   * The pane currently holding the λ scratchpad's editor, or `undefined` if none currently is —
-   * replaces a local "THE λ pane" helper this file used to define. `setEditor`'s target was a fact
+   * The pane currently holding `session`'s editor, or `undefined` if none currently is — replaces a
+   * local "THE λ pane" helper this file used to define. `setEditor`'s target was a fact
    * about there being exactly one editor to mount, not about which pane's binding currently names which
    * session (see the `scratch-compiled` and `worker-error` arms below) — true only until wave 3
    * (5d-ii-a)'s editor-moves rule, which is what turns "which pane" into a real question with more than
@@ -98,48 +115,19 @@ export function createReplies(deps: {
    * holds `editorOwner`; `undefined` here replaces the old helper's throw, because the recorded owner
    * can be stale (its pane closed, or rebound away) rather than a wiring bug — a reply landing on a
    * session with nowhere to mount its editor has nothing to do, not an invariant to raise about.
-   */
-  editorHome: () => LambdaPane | undefined
-  /**
-   * Make every `LambdaEditor` agree with where `editor-custody.ts` says it belongs — called on the ONE arm below
-   * that retires a session (`no-session`'s phantom-fork path), for the reason `compile.ts`'s identical
-   * dependency records at length: a retire has to leave no editor behind for a session that no longer
-   * exists, and `editorHome()` above can only ever reach one a pane is still HOLDING, never one in
-   * custody. Both retire paths in the app therefore call this, so "a custody entry cannot outlive its
-   * session's incarnation" is a property of the retire, not of which caller happened to trigger it.
    *
-   * **THAT SENTENCE NEEDED A SECOND HALF, ADDED BY THE THIRD REVIEW ROUND: BOTH CALLERS CALLING IT WAS
-   * NOT SUFFICIENT.** `reconcileEditors` swept the sessions `editor-custody.ts`'s `editorOwner` named, and a
-   * custody entry whose claim had been dropped (which is what `reset layout` does to a closed pane's
-   * claim) appeared in neither pass — so the property held of the CALLERS and not of the app. Its
-   * custody pass now iterates `heldEditors` itself. Nothing changed here, which is the point worth
-   * recording at a dependency: this file's obligation was already discharged, and the invariant was
-   * still false.
-   *
-   * **AND THIS CALL SITE WAS ITSELF UNCOVERED WHEN THE CLAIM ABOVE WAS WRITTEN** — a Minor from the same
-   * round: `onScratchReply`'s `no-session` arm was reported uncovered by `pnpm test:coverage`, so
-   * deleting the call below could not fail a test, and "both retire paths call this" was defended by
-   * argument on exactly the path this file owns. `tests/browser/scratch-fork.test.ts`'s "drives the
-   * phantom `no-session` through `createReplies`" case now executes it against a real failed fork on a
-   * real worker thread.
+   * **IT TAKES THE SESSION NOW, WHERE `main.ts` USED TO BIND IT TO ONE.** The binding read
+   * `custody.homeFor(LAMBDA_SCRATCH)` and its comment said `onScratchReply` "is only ever invoked with
+   * `LAMBDA_SCRATCH`". 5d-ii-c decision 1 makes that false — there is no fixed scratch id, and every
+   * arm below already has the reply's own session in scope — so the id travels with the reply rather
+   * than being assumed by the wiring.
    */
-  reconcileEditors: () => void
+  editorHome: (session: SessionId) => LambdaPane | undefined
 }): {
   onReply(session: SessionId, reply: RunReply): void
   onScratchReply(session: SessionId, reply: RunReply): void
 } {
-  const {
-    sessions,
-    scratchpad,
-    results,
-    view,
-    panes,
-    links: linkWiring,
-    draw,
-    sourceSession,
-    editorHome,
-    reconcileEditors,
-  } = deps
+  const { sessions, scratchpad, results, view, panes, links: linkWiring, draw, editorHome } = deps
 
   /**
    * Tell every TM pane on `session` what machine it is showing, and leave that on the session's entry.
@@ -270,7 +258,9 @@ export function createReplies(deps: {
   }
 
   /**
-   * One λ scratchpad reply, applied to the scratchpad's one leg.
+   * One scratch BUFFER's reply, applied to that buffer's one leg — "the scratchpad's", singular and
+   * definite, until 5d-ii-c decision 1 made a fork mint one buffer per call. The `session` parameter has
+   * always been what says which; the noun is what had not caught up.
    *
    * A SECOND HANDLER RATHER THAN BRANCHES IN `onReply`, for the reason the `scratchpad` construction
    * above gives. What the two share is `lambda-frames`, which is fifteen characters of `hist.push`
@@ -306,19 +296,19 @@ export function createReplies(deps: {
         // `setEditor(null)` here on the strength of an unrelated `no-session` would tear down an
         // editor this reply never touched. `text: string | null` on the wire type is nullable
         // DEFENSIVELY here rather than reachably — `onLambdaScratch` never posts `scratch-compiled`
-        // at all when its own `scratch` came back `null` (`session-worker.ts:531-535`) — the same
+        // at all when its own `scratch` came back `null` (`session-worker.ts:533-537`) — the same
         // "nullable defensively, not reachably" shape `protocol.ts`'s `linkIndex` field states for
         // itself, and the guard costs one `if` against a wire contract that should not assume today's
         // producer forever.
         //
-        // `setEditor` KEEPS EXACTLY ONE TARGET — `editorHome()` above, NOT
+        // `setEditor` KEEPS EXACTLY ONE TARGET — `editorHome` above, NOT
         // `panes.ofSession('lambda', session)` fanned out. Two panes bound to the SAME lambda-scratch
         // session would still mean one buffer; mounting a second live `CodeMirror` instance over it is
         // the desync design §4.3 rejects, and generalising this call in a commit that claims to be
         // behaviour-preserving would ship it silently. Wave 3's editor-moves rule is what makes "which
         // pane" a real question and `editorOwner` is the answer, resolved by the ONE dependency this
         // file now takes instead of picking "the only one there is" for itself.
-        if (reply.text !== null) editorHome()?.setEditor(reply.text)
+        if (reply.text !== null) editorHome(session)?.setEditor(reply.text)
         draw()
         return
       case 'lambda-frames': {
@@ -329,48 +319,56 @@ export function createReplies(deps: {
         return
       }
       case 'no-session': {
-        // WHICH OF TWO REASONS THIS FIRES IS `LambdaScratchpad.noSessionReply`'s QUESTION, NOT THIS
+        // WHICH OF TWO REASONS THIS FIRES IS `ScratchBuffers.noSessionReply`'s QUESTION, NOT THIS
         // FILE'S — see that method's doc for the discriminator (has this session's λ leg ever recorded
-        // a frame) and why retiring is required for one reason and wrong for the other. Everything
-        // below is what THIS reply still has to do once that question is answered.
+        // a frame) and why the two demand different surfaces. Everything below is what THIS reply still
+        // has to do once that question is answered.
         //
-        // EVERY SLOT IN THE COLLECTION, NOT JUST TWO — `panes.all().map((p) => p.slot)` replaces the
-        // literal `[lambdaSlot, tmSlot]`. `retire` (called inside `noSessionReply`) only rebinds a slot
-        // whose OWN binding names this scratchpad's session, so a tm-kind slot — which can never be
-        // bound to a λ-only scratch — is a no-op scan, not a wrong rebind; passing every slot is what
-        // stays correct the day a second λ pane exists to also be homed.
-        const failed = scratchpad.noSessionReply(
-          reply.diagnostics,
-          sourceSession,
-          panes.all().map((p) => p.slot),
-        )
+        // **`session` IS THE FIRST ARGUMENT, AND IT IS THE ONE FACT THIS ARM HAS THAT THE CALLEE COULD
+        // NOT DERIVE.** `noSessionReply` used to read the newest live buffer for itself; a reply belongs
+        // to the session whose worker sent it (§3.2: the port is the id) and this handler has had that
+        // session in scope since wave 1. Passing it is what makes a failed fork answer for the buffer
+        // that failed rather than for whichever one was forked last — see the callee's own doc for why
+        // the newest reading was backwards for exactly this arm.
+        //
+        // **TWO ARGUMENTS WENT WITH THE RETIRE — 5d-ii-c DECISION 2, DESIGN §4.3 — AND THIS IS WHERE
+        // THEY WERE ARGUED FOR.** The call read `noSessionReply(session, reply.diagnostics,
+        // sourceSession, panes.all().map((p) => p.slot))`: a home to send the failed buffer's panes
+        // back to, and every slot in the collection to scan for them, with a comment explaining that
+        // passing every slot rather than the literal `[lambdaSlot, tmSlot]` "stays correct the day a
+        // second λ pane exists to also be homed". Nothing is homed now. The buffer survives its own
+        // failed build, keeps its worker, stays in `list()`, and keeps the pane the fork moved onto it.
+        const failed = scratchpad.noSessionReply(session, reply.diagnostics)
         if (failed !== null) {
-          // THE PHANTOM PATH — CRITICAL finding, plan 5d-iii's ninth task. `detach`'s OWN build never
-          // landed a single frame, so `scratch-compiled` never fired, `lambdaPane.setEditor` was never
-          // called, and `#editor` is still `null` — `lambdaPane.setDiagnostics` below
+          // THE PHANTOM PATH — CRITICAL finding, plan 5d-iii's ninth task. The fork's OWN build never
+          // landed a single frame, so `scratch-compiled` never fired, `setEditor` was never called, and
+          // `#editor` is still `null` — `LambdaPane.setDiagnostics` below
           // (`this.#editor?.setDiagnostics(ds)`) would be exactly the silent no-op the finding names.
-          // `noSessionReply` has already retired the scratchpad: the pane is back on `SOURCE_SESSION`,
-          // `SessionEntry.detached` reads `false` for it again, and `#refreshDetach`'s `!this.#detached`
-          // gate offers the fork control once more — which is design §4.1a's promised remedy ("the pane
-          // keeps offering ✎ — the user can scrub to a smaller step and fork there") actually happening
-          // rather than merely documented. What retiring does NOT do is say why — `#link-status` is the
-          // surface built for exactly that (`link-status.ts`'s `forkFailed`, its own doc has the case
-          // for this surface over the pane).
+          // `#link-status` is the surface built for that case (`link-status.ts`'s `forkFailed`, whose
+          // own doc has the argument for this surface over the pane), and it is the ONLY reason this
+          // branch still exists.
+          //
+          // **WHAT THIS BRANCH USED TO DO BESIDES REPORTING, AND WHAT ITS LOSS COSTS THE USER.**
+          // `noSessionReply` retired the buffer here: the pane went back on the source session,
+          // `SessionEntry.detached` read `false` for it again, and `#refreshDetach`'s `!this.#detached`
+          // gate offered `✎ fork` once more — 5d-i design §4.1a's promised remedy ("the pane keeps
+          // offering ✎ — the user can scrub to a smaller step and fork there") actually happening. The
+          // pane now stays on a buffer that will never produce a frame, reading `building…`, and the
+          // line below is the only thing that says why. **THE ESCAPE MOVED TO DESIGN §4.4's HEADER
+          // LIST**, which is where it has to live anyway: a wedged buffer must be reachable whether or
+          // not a pane is still showing it. `compile.ts`'s `schedule` records the first half of this gap
+          // (a recompile stopped ending buffers); this is the second and last, and between them the app
+          // could create buffers and end none — for three tasks, until `main.ts` built that list.
+          // Retiring the row from it rebinds this pane home and the ✎ control comes back with the
+          // binding, which is §4.1a's remedy reached from the header rather than from a stuck pane.
           linkWiring.setForkFailed(failed.map((d) => d.message).join(' · '))
-          // THE SECOND RETIRE SITE, AND IT SWEEPS EDITORS FOR THE SAME REASON THE FIRST DOES —
-          // `noSessionReply` calls `retire` internally, so this arm kills a session exactly as
-          // `compile.ts`'s recompile-from-source does, and like it reaches for `draw()` rather than
-          // `applyLayout()`. A MOUNTED editor comes down either way, through the `setDetached(false)`
-          // the `draw()` below drives once `retire` has rebound the pane; a HELD one — `editor-custody.ts`'s
-          // `heldEditors`, a closed pane's editor in custody — is what nothing here could reach, and it
-          // is narrow rather than unreachable. Custody needs an editor to have been mounted, which needs
-          // `scratch-compiled` above to have landed; this branch needs the λ leg to hold no FRAME, and
-          // `session-worker.ts` posts `scratch-compiled` BEFORE it records any (`onLambdaScratch`'s
-          // final two lines). Close the holding pane inside that window and a `no-session` arriving
-          // after it retires a session with an editor in custody. Sweeping unconditionally costs a
-          // method call; reasoning about whether the window is currently reachable is exactly what left
-          // the OTHER retire path unswept, and that one was reachable in six clicks.
-          reconcileEditors()
+          // `draw()` REPAINTS THE STATUS LINE, WHICH IS ALL THAT CHANGED. **IT USED TO BE PRECEDED BY
+          // `reconcileEditors()`**, because this was the app's one remaining retire site and a retire
+          // must leave no `LambdaEditor` behind — mounted, or waiting in `editor-custody.ts`'s
+          // `heldEditors` — for a session that no longer exists. It ends no session, so it sweeps
+          // nothing: the factory's own doc above records where that argument lives and what coverage
+          // went with the call. `draw()` rather than `applyLayout()` for the reason it always was — no
+          // leaf changes here — and that reason is now the whole of it rather than the narrower half.
           draw()
           return
         }
@@ -420,7 +418,7 @@ export function createReplies(deps: {
         resetLegs(sessions.entryOf(session).legs, null, null, 'the scratchpad failed')
         // `setEditor(null)` TOO — Important finding, whole-branch review before merge, second instance
         // of the same root as the binding-selector one `LambdaPane.setDetached`'s doc now covers. This
-        // thread is dead and nothing here retires the scratchpad (only `LambdaScratchpad.retire` does
+        // thread is dead and nothing here retires the scratchpad (only `ScratchBuffers.retire` does
         // that, and a worker throwing is not a call to it), so the registry entry keeps
         // `detached: true`, the pane's binding does not move, and `setDetached`'s own new teardown
         // never fires — its input never changes. But the editor this file's own `scratch-compiled` arm
@@ -430,7 +428,7 @@ export function createReplies(deps: {
         // already-unmounted editor costs nothing). ONE TARGET, same as the `scratch-compiled` arm's
         // own comment above — `undefined` here means the owning pane already closed, in which case
         // there is nothing left mounted to unmount.
-        editorHome()?.setEditor(null)
+        editorHome(session)?.setEditor(null)
         showWorkerError(results, new Error(reply.message))
         draw()
         return

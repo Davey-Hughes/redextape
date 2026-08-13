@@ -262,8 +262,10 @@ export class TmPane {
    * THE USER SCROLLED THE δ-TABLE AWAY FROM THE CURRENT ROW, a scroll-position fact about one widget
    * inside this pane, undone by the `follow` button sitting a few lines above the table. §4.5's
    * detached means THIS PANE IS BOUND TO A SCRATCH SESSION and is outside the correspondence
-   * entirely, undone only by a recompile from source (§4.3). They can be true independently and in
-   * any combination.
+   * entirely, undone by rebinding it — through the pane's own selector, or by the retire that ends the
+   * buffer (§4.3). ("undone only by a recompile from source" is what this read while a source keystroke
+   * ended buffers; 5d-ii-c decision 2 removed that, and a recompile now leaves a detached pane
+   * detached.) They can be true independently and in any combination.
    *
    * The badge's text is left as `[detached]` because §4.5 fixes that wording and the two are not
    * confusable ON SCREEN — the badge sits in the `<h2>` and reads "turing machine [detached]", while

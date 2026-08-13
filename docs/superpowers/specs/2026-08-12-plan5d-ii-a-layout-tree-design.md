@@ -8,10 +8,10 @@ dividers resize, panes close, and the arrangement survives a reload. Sessions st
 
 **5d-ii SPLITS INTO THREE, AND THE SPLIT IS THE FIRST DECISION THIS DOCUMENT RECORDS.** The roadmap
 gives 5d-ii three subsystems in one line — *"the pane multiplexer — add/remove panes, layout,
-persistence"* (roadmap:1403) — and brainstorming added a fourth by relaxing 5d-i's singleton
+persistence"* (roadmap:1501) — and brainstorming added a fourth by relaxing 5d-i's singleton
 scratchpad rule. Four independent subsystems in one spec is what 5a and 5d were both split to avoid,
 and the reasoning transfers verbatim: *"two independent subsystems in one spec means the layout engine
-has to be settled before a single session-from-λ-text exists"* (roadmap:1404).
+has to be settled before a single session-from-λ-text exists"* (roadmap:1503).
 
 - **5d-ii-a — the layout tree** (this document). Split, close, resize, persist. Panes keep fixed legs;
   sessions stay ≤3.
@@ -20,7 +20,7 @@ has to be settled before a single session-from-λ-text exists"* (roadmap:1404).
   is decided — see §3.1.
 - **5d-ii-c — N scratch buffers.** Relaxing 5d-i decision 5's singleton rule to one scratch per fork,
   the retire control, a measured session cap, and the worker-affordability probe 5d-i left open
-  (roadmap:5276).
+  (roadmap:5376).
 
 **THE ORDER IS FORCED BY WHAT EACH SLICE MAKES POSSIBLE, NOT BY SIZE.** (a) delivers *two λ sessions
 side by side* — the demo the binding model was chosen for — with no leg-switching at all, because
@@ -80,7 +80,7 @@ pane."*
 `#results` is the one that cannot become a leaf. It is where `showWorkerError` renders, and
 `results.dataset.state` is what `settled(view, src)` polls in roughly twenty browser tests — a helper
 the roadmap already documents as fragile, with the explicit warning that *"changing a helper 20 tests
-depend on, at the end of a 30-commit branch, is how a green suite becomes a mystery"* (roadmap:1553).
+depend on, at the end of a 30-commit branch, is how a green suite becomes a mystery"* (roadmap:1651).
 A results pane that can be absent from the DOM makes `settled` poll an element that may not exist and
 gives `showWorkerError` no guaranteed surface. **Results stays chrome, below the tree.**
 
@@ -120,7 +120,10 @@ test is the one that matters most in this document.
 `lambda-pane.ts:74-76` records that this leaves *"a live CodeMirror instance sitting"* rather than
 unmounting one. §4.3 generalizes exactly this, and adds nothing new to the pane's chrome vocabulary.
 
-`pane-chrome.ts:234` also records why collapse state is not persisted — *"a scratch is retired and
+`pane-chrome.ts:314-316` (`:234` when this was written; `:305-307` after 5d-ii-b grew the file and
+5d-ii-c corrected it; `:314-316` after 5d-ii-c's own commits grew it again — **the same citation has
+now rotted twice, the second time inside the slice that fixed it**) also records why collapse state is
+not persisted — *"a scratch is retired and
 replaced, not resumed, so there is no session for a remembered collapse to describe."* **That premise
 is falsified by 5d-ii-c's buffers, not by this slice**, and it is noted in §6.1 so the question arrives
 with the slice that changes the answer rather than being rediscovered.
@@ -283,7 +286,7 @@ hold exactly two panes.
 keyboard resize), the pane chrome controls, `restore default layout`, and §4.4's persistence.
 
 **THE RULE THAT MAKES THIS SAFE, AND IT IS THE WHOLE SAFETY PROPERTY: waves 1 and 2 add no tests, and
-the 371-test suite (roadmap:5490-5495) is the assertion that the extraction preserved behaviour.**
+the 371-test suite (roadmap:5578-5583) is the assertion that the extraction preserved behaviour.**
 
 An existing test may be edited during those waves, but only within a boundary that keeps the signal
 intact:
@@ -301,7 +304,7 @@ an assertion is a commit that stopped being a refactor** — that is the moment 
 moved, not to update the number.
 
 **Timing is called out separately because it is the one that would look reasonable.** The roadmap
-records `settled()`'s invariant being false and the flakes that followed (roadmap:1504-1553); reaching
+records `settled()`'s invariant being false and the flakes that followed (roadmap:1602-1651); reaching
 for a longer wait to make an extracted module's test pass is exactly how a real ordering change gets
 absorbed into the suite instead of reported by it.
 
@@ -332,7 +335,7 @@ these all imports and setup" rather than "did anything important change in eleve
 - Closing a pane moves focus to the pane that grew (§6.2).
 
 **EVERY NEW TEST IS VERIFIED BY STASHING ITS IMPLEMENTATION AND OBSERVING THE FAILURE.** 5d-iii shipped
-three tests that passed vacuously and the correction is standing (roadmap:5497-5503). A test for a
+three tests that passed vacuously and the correction is standing (roadmap:5595-5601). A test for a
 layout invariant is especially prone to it, because a tree that is never malformed passes a validation
 test that checks nothing.
 
@@ -341,7 +344,7 @@ test that checks nothing.
 ### 6.1 5d-ii-b AND 5d-ii-c, NAMED WITH POSITIONS RATHER THAN LEFT AS GAPS
 
 Filed as a requirement of this slice, for the reason 5d-iii exists at all: the last unnamed capability
-fell between two slices for a whole PR (roadmap:1455-1461).
+fell between two slices for a whole PR (roadmap:1553-1559).
 
 - **5d-ii-b — the renderer multiplexer.** Widening a slot so a pane can change leg, and the
   `(leg, session)` picker that creates a pane of any kind rather than duplicating one. §3.1 is the
@@ -352,13 +355,13 @@ fell between two slices for a whole PR (roadmap:1455-1461).
   control, so closing a pane never destroys work. It owns the measured session cap and the
   worker-affordability probe 5d-i left open — *"three threads cost 2.4153× one thread's wasm baseline,
   measured; the multiplexer makes the session count open, and nothing here says where that stops being
-  a good trade"* (roadmap:5276).
-- **`pane-chrome.ts:234`'s reason for not persisting collapse state is falsified by (c), not by this
+  a good trade"* (roadmap:5376).
+- **`pane-chrome.ts:314-316`'s reason for not persisting collapse state is falsified by (c), not by this
   slice.** It argues *"a scratch is retired and replaced, not resumed, so there is no session for a
   remembered collapse to describe"*; buffers are resumed by definition. (c) inherits the question.
 
 **5d-iv, the TM editable pane, is unaffected and keeps its filed position** — after 5d-ii, before the
-accessibility pass (roadmap:1463-1467).
+accessibility pass (roadmap:1561-1565).
 
 ### 6.2 THE ACCESSIBILITY LIST — TWO DELIBERATE EXCEPTIONS, FOUR ADDITIONS
 

@@ -105,7 +105,12 @@ export type SessionEntry = {
    * A FIELD RATHER THAN A FUNCTION OF `id`, because the id is a map key and the label is UI text, and
    * a `Record<SessionId, string>` beside the registry would be a second place for the pairing to be
    * wrong — the failure `LegState`'s doc refuses one type up. It also keeps `sessions.ts` free of the
-   * app's session names: `main.ts` names its own sessions, here and nowhere else.
+   * app's session names, which is the part of this sentence that is load-bearing. The part that was
+   * not: it used to end "`main.ts` names its own sessions, here and nowhere else", true while every
+   * session in the app was written down before it existed. A λ scratch buffer's name is minted with
+   * its id, per fork, by `ScratchBuffers.fork` — so a name is decided where its session is CREATED,
+   * which is `main.ts` for the source session and `scratch.ts` for a buffer, and is never decided
+   * here.
    */
   readonly label: string
   /**
@@ -244,9 +249,12 @@ export function resetLegs(legs: SessionLegs, lambda: LambdaStatus | null, tm: Tm
  * driven through the DOM by `tests/browser/two-lambda-panes.test.ts`, which is the test this paragraph
  * spent two revisions explaining could not exist. (Design §3.4 of that slice quotes these very lines as
  * the thing it fixes.) **WHAT DID NOT CHANGE IS THE REST OF THE ARGUMENT, AND IT IS WHY THE CONTAINER
- * STILL LIVES HERE**: the singleton §4.3 requires must be asserted on POOL SIZE, which no DOM carries,
- * so a test driven entirely through the app still cannot make that assertion however many panes it can
- * now reach.
+ * STILL LIVES HERE**: how many sessions a fork produces must be asserted on POOL SIZE, which no DOM
+ * carries, so a test driven entirely through the app still cannot make that assertion however many
+ * panes it can now reach. 5d-i required that axis for the singleton it was claiming; 5d-ii-c decision
+ * 1 changed the expected number on it — a fork now adds a session per call — and left the reason the
+ * axis is the only honest one untouched, because two panes on two buffers showing the same term look
+ * exactly like two panes on one.
  *
  * TWO MAPS KEYED BY `SessionId` — THIS ONE AND `SessionPool`'s — AND THEY ARE NOT THE SAME FACT
  * WRITTEN TWICE. `SessionPool`'s own doc states the split from its side: the pool says what a session
@@ -280,9 +288,16 @@ export class SessionRegistry {
    *
    * THROWS ON AN ID ALREADY HELD, mirroring `SessionPool.bind` and for a related reason: an entry owns
    * histories and a play timer, so replacing one silently would strand a running `setInterval` on a
-   * `LegState` nothing can reach any more. §4.3's singleton rebinding ("a second edit rebinds to the
-   * EXISTING scratch") is served by asking `has` first, which is one branch at the call site against a
-   * leak here that nothing would report.
+   * `LegState` nothing can reach any more.
+   *
+   * **THE CALL SITE THIS THROW USED TO NAME AS ITS REASON IS GONE, AND THE THROW IS NOT.** The
+   * sentence here read: *"§4.3's singleton rebinding ('a second edit rebinds to the EXISTING scratch')
+   * is served by asking `has` first, which is one branch at the call site against a leak here that
+   * nothing would report."* 5d-ii-c decision 1 deleted that branch — `ScratchBuffers.fork` mints a
+   * name no entry can already hold, so nothing asks `has` on this method's behalf and no path in the
+   * app reaches this line any more. It stays because the leak is a property of THIS method: whatever
+   * asked, replacing an entry silently would strand its timer, and a container that answered a
+   * duplicate id by overwriting would make that unreportable rather than impossible.
    */
   add(entry: SessionEntry): void {
     if (this.#entries.has(entry.id)) throw new Error(`session is already in the registry: ${entry.id}`)

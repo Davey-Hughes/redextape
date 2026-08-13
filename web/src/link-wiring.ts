@@ -144,12 +144,19 @@ export function createLinkWiring(deps: {
    * `#link-status` is the surface and not the pane `onScratchReply`'s `no-session` arm was trying to
    * reach.
    *
-   * CLEARED ON THE NEXT FORK ATTEMPT (`events(...)`'s `detach` handler) AND ON THE NEXT SOURCE
-   * KEYSTROKE (`schedule`), NOT LEFT TO ACCUMULATE. Neither event means the message stopped being
-   * true — it means it stopped being NEWS: a stale failure from three edits ago sitting on the one
-   * line design §4.5 already uses for live, current-tick narration would be the same silent-wrongness
-   * standard this file refuses everywhere else (`draw()`'s own comments), just aimed at a message
-   * instead of a highlight.
+   * CLEARED WHEN A FORK SUCCEEDS (`events(...)`'s `detach` handler) AND ON THE NEXT SOURCE KEYSTROKE
+   * (`schedule`), NOT LEFT TO ACCUMULATE. Neither event means the message stopped being true — it means
+   * it stopped being NEWS: a stale failure from three edits ago sitting on the one line design §4.5
+   * already uses for live, current-tick narration would be the same silent-wrongness standard this file
+   * refuses everywhere else (`draw()`'s own comments), just aimed at a message instead of a highlight.
+   *
+   * **THAT SENTENCE SAID "ON THE NEXT FORK ATTEMPT", AND 5d-ii-c's CAP MADE THE DIFFERENCE VISIBLE.**
+   * The clear ran AHEAD of `ScratchBuffers.fork` while a fork could only fail later, on a reply — every
+   * attempt that got that far was pending, so clearing and waiting said something true. `MAX_BUFFERS`
+   * (design §4.5) gave a fork a way to be refused on the spot, and a refused attempt must not clear the
+   * previous failure first: this is a pure state write with no repaint, so between the clear and the
+   * handler's `catch` the model would hold `null` while `#link-status` still showed the old message. The
+   * refused arm OVERWRITES instead, which is the same "stopped being news" rule with no window in it.
    */
   let forkFailed: string | null = null
 

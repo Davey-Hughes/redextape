@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 
 /**
  * **THE FORK, DRIVEN THROUGH THE APP** — design §4.3's detach, plan T8, from the control a user
@@ -11,17 +12,25 @@ import { beforeAll, describe, expect, it } from 'vitest'
  * not have, and creating one on edit is §4.3, which is T8." This file is the app doing it.
  *
  * WHAT IT DOES NOT ASSERT, AND WHERE THAT LIVES INSTEAD. Neither `pool.size` nor a worker's liveness
- * is reachable from the DOM, and this app has ONE λ pane, so the singleton (which the plan requires
- * be asserted on pool size, "not on rendering") and the terminate-on-recompile claim are
+ * is reachable from the DOM, and this app has ONE λ pane, so the singleton (which the plan required
+ * be asserted on pool size, "not on rendering") and the terminate-on-retire claim are
  * `tests/node/scratch.test.ts` and `tests/browser/scratch-fork.test.ts` respectively. What is only
  * assertable here is the wiring: that a control exists, that clicking it moves this pane onto a
- * detached session seeded with the term it was showing, and that recompiling brings it home.
+ * detached session seeded with the term it was showing, and how the pane comes home.
+ *
+ * **"AND THAT RECOMPILING BRINGS IT HOME" IS WHAT THAT SENTENCE USED TO END WITH, AND IT IS THE ONE
+ * CLAIM IN THIS FILE 5d-ii-c DECISION 2 REVERSED.** A recompile from source used to retire the buffer
+ * synchronously on the keystroke; nothing but an explicit retire ends a buffer now (design §4.3's
+ * table), so STAGE 4 below asserts the pane STAYS on its buffer and STAGE 5 brings it home through the
+ * selector — the affordance the retire used to pre-empt. `tests/browser/scratch-buffers.test.ts` is
+ * where the lifetime rule itself is pinned.
  */
 
 const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
     <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
+    <button type="button" id="buffers">buffers</button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
   <main></main>
@@ -53,10 +62,10 @@ const selector = () => document.querySelector<HTMLSelectElement>('[data-leaf="la
  * so a fork that added nothing would still look right the moment the source session's TM leg was
  * counted. Reading the group by its own label is what keeps the assertion about λ.
  */
-const lambdaOptions = () =>
-  [...document.querySelectorAll('[data-leaf="lambda-0"] .pane-binding optgroup[label="λ"] option')].map(
-    (o) => o.textContent,
-  )
+const lambdaOptionElements = () => [
+  ...document.querySelectorAll<HTMLOptionElement>('[data-leaf="lambda-0"] .pane-binding optgroup[label="λ"] option'),
+]
+const lambdaOptions = () => lambdaOptionElements().map((o) => o.textContent)
 /**
  * The `<option>` value the pane selector encodes a `(leg, session)` pair as — spelled out here rather
  * than imported from `pane-chrome.ts`, so this pins the DOM contract instead of agreeing with whatever
@@ -188,6 +197,13 @@ describe('the fork control, end to end', () => {
   // ONE MOUNT FOR THE FILE, for `app.test.ts`'s reason: ES module imports are cached, so `main()` runs
   // once per page and Vitest gives each test FILE its own page.
   beforeAll(async () => {
+    // THE LAYOUT KEY IS SHARED ACROSS THE WHOLE BROWSER TIER — every test file gets its own page but
+    // the same origin, so a file that persists a tree leaves it for whichever file mounts next.
+    // `main()` reads this key ONCE, while resolving `let tree`, so it has to be cleared before the
+    // import below and not in a `beforeEach`. `scratch-buffers.test.ts` is where the argument lives:
+    // it is the file that first stored a tree with one of `defaultLayout()`'s own leaves missing, and
+    // this file's `[data-leaf="lambda-0"]` lookups all answered `null` under it.
+    localStorage.removeItem(LAYOUT_STORAGE_KEY)
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     await until(
@@ -204,7 +220,7 @@ describe('the fork control, end to end', () => {
    * `app.test.ts` documents in its own nested-`describe` note. Every stage below asserts before it
    * acts.
    */
-  it('forks the λ pane onto a scratchpad seeded with the term it was showing, and comes home on a recompile', async () => {
+  it('forks the λ pane onto a buffer seeded with the term it was showing, keeps it across a recompile, and comes home through the selector', async () => {
     await settled('let x = 40; x + 2')
 
     // STAGE 1 — attached, and the app looks exactly as T7 left it, modulo one gate T8 removed and one
@@ -260,11 +276,28 @@ describe('the fork control, end to end', () => {
     // THE λ GROUP, NOT `select.options`, WHICH FLATTENS THE GROUPS AWAY. The TM group is beside it and
     // holds the source session's TM leg, which this stage says nothing about; what the fork changed is
     // the λ group, and naming the group is what keeps this assertion about the fork.
-    expect(lambdaOptions()).toEqual(['source', 'λ scratchpad'])
-    expect(select.value).toBe(optionValue('lambda', 'lambda-scratch'))
+    //
+    // **THE SECOND ENTRY IS A MINTED NAME, WHERE THIS LINE USED TO READ `'λ scratchpad'`.** That was
+    // the label `main.ts` gave its one fixed scratch session, written down before the session existed;
+    // 5d-ii-c decision 1 makes a fork mint the buffer AND its name together (`ScratchBuffers.fork`), so
+    // the label is `scratch N` and N counts the forks this page has performed. The shape is asserted
+    // rather than the number for the reason `main()`-per-FILE makes unavoidable: N is a function of
+    // every earlier test's forks, so pinning it would make this test fail for something another test
+    // did. The GROUP'S LENGTH is what carries the claim the old line carried — one fork, one new λ
+    // session, not two and not none.
+    const buffer = lambdaOptionElements()[1]
+    expect(lambdaOptions()).toHaveLength(2)
+    expect(lambdaOptions()[0]).toBe('source')
+    expect(lambdaOptions()[1]).toMatch(/^scratch \d+$/)
+    // AND THE PANE IS ON IT — against the option element the app itself built, not against a name this
+    // file guessed. The second line is what stops that from being satisfied by the pane having stayed
+    // where it was: `optionValue('lambda', 'source')` is the one λ pair whose id this file can still
+    // write down, and it is the value the selector held one line before the fork.
+    expect(select.value).toBe(buffer?.value)
+    expect(select.value).not.toBe(optionValue('lambda', 'source'))
     // BEFORE ANY REPLY: the leg exists and has nothing in it yet, and the step readout says which of
     // those two it is. `controlState` renders `reason` while `!available`, which is what
-    // `LambdaScratchpad` seeds the leg's status with rather than leaving it `''`.
+    // `ScratchBuffers` seeds the leg's status with rather than leaving it `''`.
     expect(step()).toBe('building…')
     expect(term()).toBe('')
 
@@ -288,30 +321,59 @@ describe('the fork control, end to end', () => {
     expect(step()).toBe('step 0 of 5')
     expect(alphaCanonical(term())).toBe(alphaCanonical(seed))
 
-    // STAGE 4 — recompile from source retires it. Synchronous on the keystroke: `schedule` retires
-    // before it debounces the post, so the pane does not sit on a stale scratchpad for `DEBOUNCE_MS`
-    // plus a compile.
+    // STAGE 4 — A RECOMPILE FROM SOURCE LEAVES THE BUFFER ALONE, AND THIS STAGE USED TO ASSERT THE
+    // EXACT OPPOSITE. It read "recompile from source retires it. Synchronous on the keystroke", and
+    // checked `heading()` back to `lambda`, the status line without `detached`, and `lambdaOptions()`
+    // down to `['source']` — the registry having genuinely lost a session. 5d-ii-c decision 2 (design
+    // §4.3's table: "recompile from source: ended it -> **survives**") deletes that retire, so a
+    // keystroke in the source editor is no longer an event in the buffer's life at all. The same three
+    // surfaces are read here, inverted, plus the term — because a buffer that survived the keystroke
+    // and was silently re-seeded from the new program would satisfy all three and still have thrown
+    // the user's work away.
+    const bufferTerm = term()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 5' } })
 
-    expect(heading()).toBe('lambda')
-    expect(statusLine()).not.toContain('detached')
-    // The scratchpad is gone from the λ group too, which is the registry having genuinely lost a
-    // session rather than the pane having merely looked away. This used to be `expect(selector()).
-    // toBeNull()` — the whole control withdrawing — and it cannot be any more: the source session's
-    // two legs keep the control above its two-option threshold on their own. The λ group emptying back
-    // to one entry is the same fact, stated where the retire is actually observable.
-    expect(lambdaOptions()).toEqual(['source'])
+    // SYNCHRONOUSLY, because that is when the retire used to happen — before the debounce was armed.
+    expect(heading()).toContain('[detached]')
+    expect(statusLine()).toContain('λ pane detached')
+    expect(lambdaOptions()).toHaveLength(2)
+    expect(select.value).toBe(buffer?.value)
 
     await until(
       () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText().includes('45'),
       'the recompile',
     )
-    // And the pane is showing the SOURCE session's newly recorded leg — at its frontier, with no
-    // trailing `…`, which is a leg that ran to its end rather than the scratchpad's leftovers. The
-    // fork control is back for the same reason it went away: this pane is attached again.
+    // AND AFTER THE SOURCE HAS ACTUALLY RECOMPILED — 45, which is the new program's own answer, so the
+    // keystroke reached `schedule` rather than doing nothing. The pane is still detached, still on the
+    // same buffer, and still at the buffer's step 0: not the source's newly recorded leg, and not a
+    // re-seed of the buffer from it.
+    expect(heading()).toContain('[detached]')
+    expect(select.value).toBe(buffer?.value)
+    expect(step()).toBe('step 0 of 5')
+    expect(term()).toBe(bufferTerm)
+    // The fork control stays away for the reason it went away: this pane is still on a buffer.
+    expect(forkButton()).toBeNull()
+
+    // STAGE 5 — THE WAY HOME IS THE SELECTOR, which is the affordance STAGE 4's retire used to
+    // pre-empt, and the assertions below are the ones that stage used to make about the source leg.
+    // `scratch-rebind-editor.test.ts` is where the editor's half of this rebind is pinned.
+    select.value = optionValue('lambda', 'source')
+    select.dispatchEvent(new Event('change'))
+
+    expect(heading()).toBe('lambda')
+    expect(statusLine()).not.toContain('detached')
+    // The pane is showing the SOURCE session's newly recorded leg — at its frontier, with no trailing
+    // `…`, which is a leg that ran to its end rather than the buffer's leftovers. The fork control is
+    // back for the same reason it went away: this pane is attached again.
     expect(forkButton()).not.toBeNull()
     expect(step()).toMatch(/^step \d+ of \d+$/)
     expect(term()).not.toBe('')
+    expect(term()).not.toBe(bufferTerm)
+    // **AND THE BUFFER IS STILL THERE, WHICH IS THE HALF A REBIND IS NOT.** Coming home moves the pane;
+    // it ends nothing, so the λ group still offers the buffer to go back to. Under the old behaviour
+    // this list was `['source']` by now and there was nothing to go back to.
+    expect(lambdaOptions()).toHaveLength(2)
+    expect(lambdaOptionElements()[1]?.value).toBe(buffer?.value)
   })
 })
 

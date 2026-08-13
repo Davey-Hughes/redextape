@@ -137,8 +137,19 @@ body {
   cursor: pointer;
 }
 
-/* Same treatment as `.controls button` — chrome, not a new visual language. */
-.layout-control {
+/* Same treatment as `.controls button` — chrome, not a new visual language.
+
+   `.buffer-retire` SHARES THIS RULE RATHER THAN RESTATING IT, AND THAT IS A CORRECTION. It was its own
+   block beside `.buffer-list`, identical declaration for declaration, under a comment claiming "the same
+   treatment as `.layout-control` and `#appearance`" — and those two differ in padding (0.1em/0.45em
+   here, 0.15em/0.6em there), so the claim was true of one and false of the other while the copy silently
+   picked this one. A shared selector cannot disagree with itself, which is the whole of the fix.
+
+   NOT A RED ONE, WHICH IS THE HALF THAT IS ABOUT THE RETIRE CONTROL SPECIFICALLY: no new colour-carried
+   state (§6), so a control that destroys a buffer is told apart by the row it sits in and the word on it
+   rather than by a hue this stylesheet would have to invent. */
+.layout-control,
+.buffer-retire {
   font: inherit;
   font-family: var(--font-mono);
   padding: 0.1em 0.45em;
@@ -493,8 +504,10 @@ body {
 
    THIS BRANCH IS UNTESTABLE IN THIS REPO AND THAT IS THE ARGUMENT FOR IT, NOT AGAINST. The browser tier
    runs Chromium only (`vite.config.ts`'s provider), where `@supports not (...)` never applies, so
-   nothing here can regress the tested path and nothing here will report the untested one either. Four
-   lines that cannot fire in CI beat a comment recording the same risk and doing nothing about it. */
+   nothing here can regress the tested path and nothing here will report the untested one either. A
+   fallback that cannot fire in CI beats a comment recording the same risk and doing nothing about it.
+   (Both this sentence and the one on `.buffer-list`'s copy below priced it at "four lines" for a block
+   that is five; the count was never the argument, so it is gone rather than corrected.) */
 @supports not (position-area: block-end) {
   .pane-picker {
     margin: auto;
@@ -505,6 +518,119 @@ body {
   display: block;
   width: 100%;
   text-align: left;
+}
+
+/* THE HEADER'S BUFFER LIST, ON THE SAME TWO POSITIONING DECLARATIONS AS `.pane-picker` ABOVE — and
+   the argument for them is up there rather than restated here: without `position-area` this list opens
+   in the TOP-LEFT CORNER OF THE VIEWPORT, because `margin: 0` is what leaves the UA's `inset: 0`
+   over-constrained against a definite width. The anchor is `buffer-list.ts`'s button and it is
+   implicit, so there is no `anchor-name` here either, and `position-try-fallbacks` is what keeps a
+   list opened near an edge on screen. `tests/browser/buffer-list.test.ts`'s "where the list opens"
+   measures it, from a fixture that moves the header off the origin — the real bar sits at the top-left
+   of the page, where a corner-pinned list and a correct one are too close to tell apart.
+
+   IT DOES NOT SHARE A SELECTOR WITH `.pane-picker`, DELIBERATELY. `.pane-picker button` above is
+   `display: block; width: 100%`, which is right for a menu whose entries ARE the choices and wrong for
+   a row whose retire control sits beside its text — a shared rule would have to be undone here, which
+   is longer than stating both. The width is wider for the same reason: a row carries a name, a pane
+   count and a control rather than one label.
+
+   NOTHING HERE IS A NEW COLOUR, which §6 requires of every control this slice adds: `--rule` and
+   `--bg` are the tokens `.pane-picker` already uses, and `.buffer-retire` shares `.layout-control`'s own
+   rule ABOVE rather than restating it — this sentence used to say "takes the same chrome `.layout-control`
+   and `#appearance` take", naming two rules that differ in padding. A native popover is in the top layer,
+   so it needs no z-index to clear the header's border or the panes below it. */
+.buffer-list {
+  position-area: block-end span-inline-end;
+  position-try-fallbacks:
+    flip-block,
+    flip-inline,
+    flip-block flip-inline;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  padding: var(--space-1);
+  margin: 0;
+  /* WIDE ENOUGH FOR A TERM TO BE WORTH SHOWING, capped so the list stays a menu rather than a panel.
+     `min-width` was 14rem when a row was a name and a pane count; a row carries the buffer's term now
+     (`buffer-list.ts`'s `BufferRow.term`) and 14rem truncated it to a few tokens, which distinguishes
+     nothing — every buffer on this page is a fork of one program, so the rows agree on their first
+     tokens and differ later. The `max-width` is what keeps `text-overflow: ellipsis` the mechanism
+     rather than an unbounded row: a λ term has no useful upper length, so the row must stop somewhere
+     it was told to rather than somewhere the content happened to end.
+
+     **THE `min()` ON THE MIN-WIDTH IS NOT DECORATION — MEASURED.** `min-width` BEATS `max-width` in CSS,
+     so a bare `min-width: 26rem` beside any `max-width` overflows every viewport narrower than 26rem:
+     the browser cannot honour both and the minimum wins. Measured in the browser tier's own 414px-wide
+     tester page, where a 416px list clamped to `left: 0`, hung 2px past the right edge, and aligned with
+     neither edge of its invoker — `buffer-list.test.ts`'s placement test is what caught it. A phone-width
+     window in the real app does exactly the same thing, which is what makes this a fix and not a test
+     accommodation. */
+  min-width: min(26rem, 90vw);
+  max-width: min(40rem, 90vw);
+}
+/* WITHOUT ANCHOR POSITIONING, GIVE THE MARGIN BACK — `.pane-picker`'s `@supports` block above states
+   this in full, including why the test is written `not (position-area: block-end)` rather than against
+   a feature name, and why a branch that cannot fire in a Chromium-only browser tier is still worth
+   writing. The same two declarations fail the same way, so they take the same fallback. */
+@supports not (position-area: block-end) {
+  .buffer-list {
+    margin: auto;
+  }
+}
+
+/* The retire control sits AT THE ROW'S TRAILING EDGE rather than inline after the text, so every row
+   presents its destructive control in the same place regardless of how long the buffer's name is —
+   a column to aim down, which is what makes "aim at one row" the deliberate act §4.2 relies on in
+   place of a confirmation dialog. */
+.buffer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1);
+}
+
+/* THE NAME AND THE TERM AS ONE FLEX CHILD, so the retire control keeps the trailing edge the comment
+   above argues for whichever of the two lines is longer.
+
+   `min-width: 0` IS THE LOAD-BEARING DECLARATION AND IT LOOKS LIKE NOISE. A flex item's default
+   `min-width: auto` refuses to shrink below its content's intrinsic width, so `text-overflow: ellipsis`
+   on the child below never fires: the row grows instead and a long term pushes the retire button off
+   the popover. This is the standard fix and it is written down because it reads as removable. */
+.buffer-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The buffer's own term — `buffer-list.ts`'s `BufferRow.term` has why the row carries one at all.
+   Monospace because it is a term and the panes print terms in `--font-mono`; dim and one step down
+   because the NAME is what the row is aimed at and this is what tells two names apart.
+
+   TRUNCATED HERE RATHER THAN IN THE BUILDER, which is the other half of that file's argument: the
+   ellipsis lands at whatever width the list has at this zoom and font size, and the whole term stays
+   in the DOM for selection, for `title`, and for a screen reader. */
+.buffer-row-term {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A buffer with no term yet. NOT A NEW COLOUR (§6) and not a hue that would read as an error: this is
+   an ordinary state — a fork the worker has not answered — wearing the same `--fg-dim` as the term it
+   stands in for, italic so a glance down the column can tell prose from a term without reading it. */
+.buffer-row-term.is-absent {
+  font-family: inherit;
+  font-style: italic;
+}
+
+/* THE CONTROL DOES NOT SHRINK. Without this the flex line takes the button's width first when a term is
+   long, which is the same failure `min-width: 0` above prevents on the other side of the row. */
+.buffer-retire {
+  flex: none;
 }
 
 .banner {

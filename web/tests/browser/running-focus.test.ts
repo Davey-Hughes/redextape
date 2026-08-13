@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 
 // DUPLICATED FROM `app.test.ts` ON PURPOSE, exactly as `link-truncated.test.ts` duplicates it. See the
 // `describe` below for why these cases are not `it`s in that file.
@@ -7,6 +8,7 @@ const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
     <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
+    <button type="button" id="buffers">buffers</button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
   <main></main>
@@ -188,6 +190,13 @@ describe('the running focus', () => {
   beforeAll(async () => {
     window.addEventListener('error', (e) => pageErrors.push(`error: ${e.message}`))
     window.addEventListener('unhandledrejection', (e) => pageErrors.push(`rejection: ${String(e.reason)}`))
+    // THE LAYOUT KEY IS SHARED ACROSS THE WHOLE BROWSER TIER — every test file gets its own page but
+    // the same origin, so a file that persists a tree leaves it for whichever file mounts next.
+    // `main()` reads this key ONCE, while resolving `let tree`, so it has to be cleared before the
+    // import below and not in a `beforeEach`. `scratch-buffers.test.ts` is where the argument lives:
+    // it is the file that first stored a tree with one of `defaultLayout()`'s own leaves missing, and
+    // this file's `[data-leaf="lambda-0"]` lookups all answered `null` under it.
+    localStorage.removeItem(LAYOUT_STORAGE_KEY)
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
   })

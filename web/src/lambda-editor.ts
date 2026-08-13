@@ -22,7 +22,7 @@ export type LambdaEditorConfig = {
  * **THE λ TERM EDITOR — design §4.2's upper region and §4.3's recompile trigger.**
  *
  * A CodeMirror 6 instance over a scratch session's term. It is the surface 5d-i's §6 said had no
- * home: `LambdaScratchpad` gave a scratch a life of its own, and this is the thing that can change
+ * home: `ScratchBuffers` gave a scratch a life of its own, and this is the thing that can change
  * its text.
  *
  * **ITS OWN MODULE FOR THE REASON `scratch.ts` IS.** `lambda-pane.ts` is 289 lines and its whole job
@@ -90,6 +90,34 @@ export class LambdaEditor {
     return this.#view.dom
   }
 
+  /**
+   * Re-point where this editor's debounced edits go — `LambdaPane.receiveEditor`'s other half, and the
+   * half that was missing.
+   *
+   * **THE VIEW MOVES AND ITS CALLBACK DID NOT, WHICH ROUTED KEYSTROKES TO ANOTHER BUFFER — found by
+   * driving the app in a browser.** `dom` above is the whole of what a relocation used to move: a
+   * `LambdaEditor` is constructed by the pane that FORKS, closing over that pane's `editScratch`, and
+   * `receiveEditor` re-parents the node without touching this field. So an editor claimed by a second
+   * pane still reported its edits through the FIRST pane's handler — and `transport.ts` resolves
+   * `slot.binding.session` at edit time, so the moment that first pane was rebound anywhere else, typing
+   * in the moved editor recompiled whatever the first pane happened to be showing. Measured in Chromium:
+   * three characters typed into a pane showing `scratch 1` put the parse error on a different pane's
+   * editor, over `scratch 2`.
+   *
+   * A SETTER RATHER THAN A SESSION ID CARRIED ON THIS CLASS. The alternative is to make the editor name
+   * its own buffer and have `recompile` read that — truer in the abstract, and a bigger change than the
+   * defect warrants: it would give this class a second identity to keep in step with custody's, which
+   * already keys editors by session. What is actually wrong is narrower and is exactly what this fixes:
+   * the ONE field a relocation has to carry across was not being carried.
+   *
+   * A PENDING DEBOUNCE FROM BEFORE THE MOVE FIRES THROUGH THE NEW HANDLER, which is correct rather than
+   * merely tolerable: `#schedule` reads this field when the timer expires, and the text it will send is
+   * this editor's text, which belongs to the buffer whichever pane is showing it.
+   */
+  set onEdit(fn: (src: string) => void) {
+    this.#onEdit = fn
+  }
+
   #schedule(): void {
     if (this.#timer !== null) clearTimeout(this.#timer)
     this.#timer = setTimeout(() => {
@@ -135,9 +163,11 @@ export class LambdaEditor {
   /**
    * Tear down the instance and **cancel any pending recompile**.
    *
-   * THE CANCEL IS THE POINT. A retirement (§4.3's recompile-from-source) destroys this while a
-   * debounce may be in flight; firing it afterwards would post a `lambda-scratch` to a session the
-   * pool has already unbound. `SessionClient.scratch` guards on generation, so the message would be
+   * THE CANCEL IS THE POINT. A retirement destroys this while a debounce may be in flight; firing it
+   * afterwards would post a `lambda-scratch` to a session the pool has already unbound. (The
+   * retirement in question was §4.3's recompile-from-source until 5d-ii-c decision 2 deleted it; a
+   * rebind away from the buffer destroys this on the same terms, and the retire control §4.4 puts in
+   * the header list is the other.) `SessionClient.scratch` guards on generation, so the message would be
    * dropped rather than misdelivered — but a message sent to be dropped is a race left in on purpose.
    */
   destroy(): void {

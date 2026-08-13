@@ -27,8 +27,10 @@
  * **LOGIC PUT HERE IS INVISIBLE TO THE COVERAGE GATE** — `vite.config.ts` excludes this module from
  * the `include` set for a measured instrumentation reason (v8 coverage does not attach to a dedicated
  * worker's context), so a new untested branch in this file moves none of the four numbers. That is
- * why the fork's POLICY — singleton, which pane rebinds, when a scratch is retired — lives in
- * `scratch.ts` and only the wasm call it cannot make from the main thread lives here.
+ * why the fork's POLICY — how many buffers a fork makes, which pane rebinds, when a buffer is
+ * retired — lives in `scratch.ts` and only the wasm call it cannot make from the main thread lives
+ * here. (It read "singleton" for the first of those until 5d-ii-c decision 1 made a fork mint a buffer
+ * per call; what did not change is that this file has no opinion either way.)
  */
 import init, { compile, lambdaScratchAt, tapeNames } from '../../pkg/redextape_wasm.js'
 import type { LinkIndexWire } from './link'

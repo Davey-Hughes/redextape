@@ -3,7 +3,7 @@
 ## §1 What is being built, and why the two filed capabilities are one
 
 The second of the three slices 5d-ii-a's §1 splits 5d-ii into. Its filing
-(`2026-08-12-plan5d-ii-a-layout-tree-design.md` §6.1, roadmap:5865-5868) names two capabilities:
+(`2026-08-12-plan5d-ii-a-layout-tree-design.md` §6.1, roadmap:5963-5966) names two capabilities:
 
 > **5d-ii-b — the renderer multiplexer.** Widening a slot so a pane can change leg, and the
 > `(leg, session)` picker that creates a pane of any kind rather than duplicating one. §3.1 is the
@@ -25,7 +25,7 @@ A third question is filed against this slice by the code rather than by the road
 It is answered here (§4.2c, §4.7) because this is the slice that makes several panes on one leg the
 normal case rather than something a user reaches by trying.
 
-**AND ONE SCOPE CALL THE ROADMAP LEFT OPEN IS TAKEN.** roadmap:5834 records *"whether 1,115 lines in
+**AND ONE SCOPE CALL THE ROADMAP LEFT OPEN IS TAKEN.** roadmap:5932 records *"whether 1,115 lines in
 one file is a problem for 5d-ii-b or -c to inherit is not answered here."* It is answered here, as
 wave 1: the pane-lifecycle and editor-custody machinery leaves `main.ts` before the feature is built on
 top of it (§4.1).
@@ -160,7 +160,7 @@ spelling. `dataset.kind` (`main.ts:455`) becomes the one truthful statement of w
 
 ### 4.1 WAVE 1 — THE EXTRACTION, WHICH CHANGES NO BEHAVIOUR
 
-roadmap:5834 left `main.ts`'s size an open question for this slice to inherit. It is answered by
+roadmap:5932 left `main.ts`'s size an open question for this slice to inherit. It is answered by
 extraction rather than by a measurement, because this slice edits `hostFor`, `pendingBinding`,
 `heldEditors`, `editorOwner`, `paneEvents`, `applyLayout` and `reconcileEditors` — which are not seven
 scattered functions but one subsystem with one job.
@@ -174,7 +174,7 @@ scattered functions but one subsystem with one job.
   custody; custody never calls back.
 
 **THE CUSTODY MACHINERY IS ISOLATED BECAUSE IT IS THE PART THAT NEEDED THREE REVIEW ROUNDS**, not
-because it is large. 5d-ii-a's entry records all three (roadmap:5542): a custody entry outliving its
+because it is large. 5d-ii-a's entry records all three (roadmap:5640): a custody entry outliving its
 session, a re-minted leaf id inheriting a claim, and a sweep whose domain could not see what `reset
 layout` had orphaned. A module with a named surface is what makes the fourth such finding a question
 about an API rather than about a closure.
@@ -471,14 +471,15 @@ commit would be a test that could not have failed before the move.
 
 ### 6.1 5d-ii-c AND 5d-iv KEEP THEIR POSITIONS
 
-- **5d-ii-c — N scratch buffers.** Unchanged from 5d-ii-a §6.1 and roadmap:5869-5873. 5d-i decision 5's
+- **5d-ii-c — N scratch buffers.** Unchanged from 5d-ii-a §6.1 and roadmap:5967-5971. 5d-i decision 5's
   singleton rule holds, so today `options('tm')` returns only the source session and the picker's TM
   group has exactly one entry. It still owns the measured session cap and the worker-affordability
   probe.
 - **5d-iv — the TM editable pane.** Unaffected, still after 5d-ii, still before the accessibility pass
-  (roadmap:1463-1467, 5875-5876).
-- **`pane-chrome.ts:234`'s reason for not persisting collapse state is still falsified by (c), not by
-  this slice.** Carried forward unchanged from 5d-ii-a §6.1.
+  (roadmap:1561-1565, roadmap:5973-5974).
+- **`pane-chrome.ts:314-316`'s reason for not persisting collapse state is still falsified by (c), not by
+  this slice.** Carried forward unchanged from 5d-ii-a §6.1. (Cited `:305-307` here until 5d-ii-c's close;
+  that slice's own commits grew the file again. See 5d-ii-a §3.5 for the citation's full history.)
 
 ### 6.2 THE ACCESSIBILITY LIST — TWO ADDITIONS, ONE EXCEPTION TAKEN
 

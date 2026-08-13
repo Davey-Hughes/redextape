@@ -3,7 +3,7 @@ import type { ControlState } from '../../src/controls'
 import { History } from '../../src/history'
 import type { LinkWiring } from '../../src/link-wiring'
 import type { Leg, RunReply, RunRequest } from '../../src/protocol'
-import type { LambdaScratchpad } from '../../src/scratch'
+import { BufferCapReached, type ScratchBuffers } from '../../src/scratch'
 import type { ClientPort, SessionId } from '../../src/session-client'
 import { SessionClient } from '../../src/session-client'
 import type { Binding, LegState, PaneOption, PaneView, SessionEntry } from '../../src/sessions'
@@ -286,9 +286,15 @@ describe('PaneSlot', () => {
       // scratchpad is touched only by `detach`/`editScratch` and `linkWiring` only by
       // `detach`/`linkState`/`linkLambda`; a `rebind` that consulted either would fail here loudly,
       // which is the point of not supplying them.
-      scratchpad: {} as LambdaScratchpad,
+      scratchpad: {} as ScratchBuffers,
       draw: () => draws++,
       linkWiring: () => ({}) as LinkWiring,
+      // A THROW RATHER THAN A NO-OP, FOR THE SAME REASON THE TWO CASTS ABOVE ARE CASTS: only `detach`
+      // announces a new buffer, and a `rebind` that told the header list its count had changed would be
+      // reporting a gesture that creates nothing. This test would say so.
+      onBuffersChanged: () => {
+        throw new Error('a rebind must not report a change to the buffer count')
+      },
     })
     let draws = 0
 
@@ -317,6 +323,80 @@ describe('PaneSlot', () => {
     // rule the old guard followed: that rule was for a decline a user could reach, and this is a
     // wiring bug no user can.
     expect(draws).toBe(1)
+  })
+
+  /**
+   * **THE `catch` AROUND THE FORK LETS A WIRING BUG THROUGH AND KEEPS A REFUSAL — Important-shaped gap
+   * that shipped ARGUED rather than tested, and was named as such before merge.**
+   *
+   * `detach` is the last frame before the raw DOM dispatch of `✎ fork`'s click listener, and there is no
+   * `window` error handler anywhere in `src/` behind it. That is what makes the catch necessary — a cap
+   * refusal reaching the console is the Critical this branch already fixed — and it is also exactly what
+   * makes the `instanceof` load-bearing: a BARE catch would take `SessionRegistry.add`'s and
+   * `SessionPool.bind`'s invariant guards, which are wiring bugs, and render them as a dim status line
+   * that says `fork failed — …`. The bug would look like a refusal, and the user would be told to retire
+   * a buffer.
+   *
+   * **BOTH ARMS IN ONE TEST, BECAUSE EITHER ALONE PASSES ON THE WRONG IMPLEMENTATION.** A bare `catch`
+   * satisfies the cap half; `throw e` with no catch at all satisfies the re-throw half. Only the pair
+   * pins the discrimination, which is the whole content of the line under test.
+   *
+   * DRIVEN THROUGH `transport.events(slot).detach(...)`, NOT BY CALLING `fork` DIRECTLY.
+   * `tests/node/scratch.test.ts` already asserts that `fork` throws `BufferCapReached` and explains this
+   * catch in a comment; what has never been executed is the catch. The seam is the same one the rebind
+   * test above uses and for the same reason: it is the production handler, not a re-statement of it.
+   */
+  it('re-throws a non-cap error out of the fork handler and keeps only the cap refusal', () => {
+    const reg = new SessionRegistry()
+    reg.add(entry('source', { label: 'source', lambda: ['from source'], tm: [0] }))
+
+    let forkFailed: string | null = null
+    let draws = 0
+    let buffersChanged = 0
+    let thrown: unknown = new Error('a pool invariant broke')
+
+    const transport = createTransport({
+      sessions: reg,
+      // THE ONLY METHOD `detach` CALLS ON IT, so a fake with one property is the whole dependency
+      // rather than a stub standing in for an object with a surface.
+      scratchpad: {
+        fork: () => {
+          throw thrown
+        },
+      } as unknown as ScratchBuffers,
+      draw: () => draws++,
+      // `index.lambdaText` IS THE ONE FIELD THE GUARD ABOVE THE `try` READS — an empty string makes
+      // `detach` return before it ever forks, which would pass every assertion below vacuously.
+      linkWiring: () =>
+        ({
+          index: { lambdaText: 'λx. x' },
+          setForkFailed: (r: string | null) => {
+            forkFailed = r
+          },
+        }) as unknown as LinkWiring,
+      onBuffersChanged: () => buffersChanged++,
+    })
+
+    const slot = new PaneSlot('lambda', 'source')
+    const events = transport.events(slot)
+
+    // THE WIRING BUG. It leaves the handler unchanged and reaches nothing that renders — which is the
+    // behaviour that keeps it loud, and the reason `forkFailed` must still be `null` afterwards.
+    expect(() => events.detach?.(0)).toThrow(/a pool invariant broke/)
+    expect(forkFailed).toBeNull()
+    // AND NOTHING WAS REPORTED AS IF IT HAD HAPPENED: no repaint, no count change. A `catch` that
+    // re-threw AFTER calling `setForkFailed` would satisfy the line above and fail here.
+    expect(draws).toBe(0)
+    expect(buffersChanged).toBe(0)
+
+    // THE REFUSAL, THROUGH THE SAME HANDLER — the contrast that makes the assertions above about the
+    // `instanceof` rather than about there being no catch.
+    thrown = new BufferCapReached('all 8 scratch buffers are live; retire one')
+    expect(() => events.detach?.(0)).not.toThrow()
+    expect(forkFailed).toContain('retire one')
+    // THE STATUS LINE IS THE ONE THING THAT CHANGED, so a draw and no buffer-count report.
+    expect(draws).toBe(1)
+    expect(buffersChanged).toBe(0)
   })
 
   /**

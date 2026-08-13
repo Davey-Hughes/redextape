@@ -1374,6 +1374,94 @@ rather than a note saying a11y is on the todo. Known outstanding, all observed r
    and a user who picks `TM · source` on a λ pane is told by nothing but the pixels that the pane they
    were reading has been replaced. Both new controls ship keyboard-*operable* (see 5d-ii-b's entry,
    §6.2's exception) — the gap here is announcement, not reach.
+10. **The buffer list announces neither a retirement nor a refusal** (added 2026-08-13, PR 5d-ii-c —
+    design §6.3's promise that no task was assigned to keep; the retire half corrected by that branch's
+    whole-branch review, which found it describing the control backwards). **Retiring** a buffer
+    DISMISSES the list — `buffer-list.ts` calls `hidePopover()` before `onRetire`, so no row is left
+    naming a buffer that has gone — changes the header button's own `buffers N ▾` readout, and, because
+    retire rebinds every pane bound to that buffer back to the source session, silently changes what
+    panes are showing. Focus moves too: to the invoker, or to `#restore-layout` when the last buffer
+    takes the button with it. Nothing announces any of that, and the surface that would have to is the
+    one the gesture closed. **A refused fork** is the mirror case: nothing on the page moves at all, and
+    the entire outcome is a line of text appearing on `#link-status` — which item 6 already records as
+    announcing nothing. So the one control whose failure mode is *no visible change* reports through the
+    one surface that has no live region. The list ships keyboard-operable, on §6.2's split-picker
+    exception (a mouse-only *reclamation* control is inoperability, and escape from a wedged buffer is
+    the last thing needing a mouse) — so, as with item 9, the gap is announcement, not reach. Only this
+    item's PRESENCE was verified before the closing entry claimed it, not its CONTENT, which is how two
+    clauses describing its opposite survived.
+11. **FIXED before merge, 2026-08-13, in the branch that filed it — "bring the term editor to this pane"
+    is offered on a pane with no editor to bring** (added 2026-08-13, PR 5d-ii-c's whole-branch review;
+    fixed the same day, on the reading below unchanged). `LambdaPane`'s `#refreshClaim` gates that
+    control on `#detached && #editor === null`, which is meant to read *"this pane's session has an
+    editor and it is mounted somewhere else"* — `claimEditorButton`'s own doc says exactly that. It is
+    no longer what those two booleans mean. A fork whose BUILD fails never reaches `scratch-compiled`,
+    so `setEditor` is never called and `#editor` stays `null` permanently; and 5d-ii-c decision 2
+    deleted the retire that used to put `#detached` back to `false`, so the pane stays bound to the
+    buffer that failed. Both conjuncts are now permanently true on a phantom-forked or worker-errored
+    pane, the control is permanently offered, and the click is a no-op: `showEditor` records a claim and
+    `reconcileEditors` finds no editor anywhere to move. That is item 1's standard read backwards — a
+    control that provably cannot work, offered. The gate wants a third input, *does this session have an
+    editor anywhere*, and there is nothing in `LambdaPane` that knows.
+
+    **THE SLICE WENT TO REAL TROUBLE ON THE SIBLING CONTROL AND NEVER REVISITED THIS ONE**, which is the
+    part worth filing. `lambda-pane.ts` and `pane-chrome.ts` each gained a paragraph tracing precisely
+    this consequence for `✎ fork`: the deleted retire leaves `#detached` true, so ✎ stays correctly
+    WITHDRAWN on a failed-fork pane, §4.1a's *"the pane keeps offering ✎"* is unmet there, and the way
+    out moved to the header list. Two files reasoned decision 2 through to one control's gate.
+    `#refreshClaim` sits a few method definitions away, reads the same two fields, and was not asked.
+
+    **THE FIX IS THE THIRD INPUT THIS ENTRY ASKS FOR, AND IT CAME FROM CUSTODY BECAUSE NOTHING ELSE
+    KNOWS.** `editor-custody.ts` gained `hasEditor(session)` — `heldEditors.has(session) ||
+    homeFor(session)?.holdsEditor() === true` — and `draw()` fans it over every λ pane once a frame into
+    a new `LambdaPane.setEditorAvailable`, alongside the `renderLink` call that was already the
+    "λ panes, and only λ panes" pass. Per-frame rather than on `#refreshClaim`'s four transitions,
+    because it is the one input of the three that is a fact about OTHER panes: a buffer that finally
+    builds mounts an editor through `replies.ts`, and a close hands one to custody, neither of which
+    calls the pane whose control has to change.
+
+    **`homeFor(session) !== undefined` WOULD HAVE LEFT THE DEFECT WHERE IT WAS, which is the part of
+    this fix worth writing down.** `editorOwner` is a map of CLAIMS, and `pane-host.ts`'s wrapped
+    `detach` records one the moment the binding moves — before the worker has answered, therefore also
+    on the fork that never builds. The phantom buffer has a claim, a live pane and a matching binding:
+    every condition `editorHomeFor` checks. `holdsEditor` — `takeEditor`'s question without
+    `takeEditor`'s destructive answer — is the only thing that separates them, and
+    `editor-custody.test.ts`'s first item-11 test is written to fail against the `homeFor` version
+    specifically. Six app-level assertions across `two-lambda-panes.test.ts` and
+    `pane-kind-switch.test.ts` fail if `hasEditor` is stubbed to `false`, which is what makes the wiring
+    a fact rather than an argument.
+
+    **WHAT IS NOT FIXED: the click still announces nothing when it DOES work.** This entry was filed
+    under item 1's standard — a control that provably cannot work, offered — and that is the half that
+    is closed. The editor moving between panes is a silent DOM change like every other on this list, and
+    it belongs to the deferred pass with items 9 and 10.
+12. **FIXED before merge, 2026-08-13, in the branch that filed it — the fork refusal's only channel can
+    be off the page** (added 2026-08-13, PR 5d-ii-c's whole-branch review; fixed the same day). Item 10
+    names `#link-status` as the entire outcome of a refused fork without
+    noting that it is not always there to name. `main.ts` appends it INTO the source pane's host, and
+    that pane ships a close control. **Measured rather than reasoned:** after closing the source pane,
+    `document.getElementById('link-status')` returns `null` — the node has left the document with its
+    host — while the λ pane still offers `✎ fork`, visible and enabled. So the next fork past the buffer
+    cap has `transport.ts` catch `BufferCapReached` and call `setForkFailed`, which writes into the
+    element `createLinkWiring` captured at construction and nothing on the page moves at all. Narrower
+    than the Critical this slice's own review fixed — that one refused correctly and rendered nowhere
+    for anybody — and the same outcome for the user who reaches it.
+
+    **THE FIX IS ONE DELETION: `#link-status` LEFT THE `append`.** `main.ts` no longer moves it into the
+    source pane's host, so it stays where `index.html` declares it — between the pane tree and
+    `#results`, outside every host `hostFor` can detach. Nothing else moved: the element, the capture in
+    `createLinkWiring`, and every write to it are unchanged. **The line's own contract is what decides
+    where it belongs**, and it was already written down: `link-status.ts` says of `forkFailed` that this
+    is *"the surface that exists whether or not a pane can show anything"* — a promise a node inside a
+    closeable pane cannot keep. Two of its three live jobs (detached panes, a failed fork) are app-wide,
+    and the third (what is pinned) is about a construct lit in three panes rather than about this one, so
+    the containment was never earned by the content. `scratch-cap.test.ts` gained a stage that closes the
+    source pane at the cap and reads the refusal off the page; it fails with `expected null not to be
+    null` on the line the fix restores, which is this entry's own measurement inverted.
+
+    **WHAT IS NOT FIXED: item 10's half.** The status line still announces nothing to a screen reader,
+    which is the reason a refused fork is on this list at all. This entry was about the sighted user
+    getting nothing either; that is the half that is closed.
 
 What already exists, so the pass starts from the right baseline: the appearance control is a real
 `<button type="button">` with an `aria-label` naming its current state, updated on every change
@@ -5927,7 +6015,7 @@ Every one of the four metrics moved UP across both, rather than any of them bein
 are deliberately NOT re-run through `floor(measured) - 1` for a review-fix delta of half a point;
 `vite.config.ts` carries that decision beside the numbers. `tsc --noEmit` clean. Every figure here was measured
 against the live tree for this entry rather than copied forward — 5d-iii's own entry shipped stale
-counts and its reviewer had to correct them (roadmap:5488-5495), and the ledger for this branch
+counts and its reviewer had to correct them (roadmap:5576-5583), and the ledger for this branch
 recorded the same risk before this task ran. **The figures above are the post-review ones**: the
 whole-branch review's fixes added seven tests — one for the closed-λ-pane Critical, two for the
 restore-then-split Critical (in a new `layout-restore.test.ts`, the first file to mount `main()` against
@@ -5982,7 +6070,7 @@ split leaf which session to start on, answers the identical question for a leaf 
 changed, unmodified. **The kind change added no teardown code and no new code path**, which is the
 concrete payoff of answering §3.1 this way rather than the other.
 
-##### roadmap:5834's OPEN QUESTION CLOSES WITH A NUMBER
+##### roadmap:5932's OPEN QUESTION CLOSES WITH A NUMBER
 
 That line asked *"whether 1,115 lines in one file is a problem for 5d-ii-b or -c to inherit"* and
 declined to answer. This slice answered it as wave 1, before building anything.
@@ -6215,7 +6303,7 @@ claim rests on the helper being shared rather than on a test.
 
 ##### 5d-ii-c AND 5d-iv KEEP THEIR FILED POSITIONS
 
-- **5d-ii-c — N scratch buffers.** Unchanged from 5d-ii-a §6.1 and roadmap:5869-5873. It still owns the
+- **5d-ii-c — N scratch buffers.** Unchanged from 5d-ii-a §6.1 and roadmap:5967-5971. It still owns the
   measured session cap and the worker-affordability probe 5d-i left open. **It also still inherits
   `pane-chrome.ts`'s collapse-state question, unchanged**: that file's reason for not persisting collapse
   state is *"a scratch is retired and replaced, not resumed, so there is no session for a remembered
@@ -6259,7 +6347,7 @@ that mistake in this same config block.
 
 **Every figure below was measured against the live tree at `eee8862` for this entry. None is copied
 forward.** This is stated because the repo has been burned twice: 5d-iii's entry shipped stale counts
-its reviewer had to correct (roadmap:5488-5495), and 5d-ii-a's own entry carried counts that moved under
+its reviewer had to correct (roadmap:5576-5583), and 5d-ii-a's own entry carried counts that moved under
 it twice and says so.
 
 `pnpm test` → **498 passed (498) in 51 files**, from a baseline of 453 in 47 files at the plan commit.
@@ -6287,3 +6375,638 @@ held a port during the suite run, and Vitest reported `Port 63315 is in use, try
 moved on. Both runs completed green with identical counts, and no test in this repo binds a fixed port —
 but the branch's own rule is that only one lane runs the browser tier at a time, and that rule does not
 extend to other projects on the same machine.
+
+#### PLAN 5d-ii-c CLOSES — a fork mints its own buffer, and the singleton had been concealing a defect that stripped the editor off every λ pane (2026-08-13, branch `plan5d-ii-c`, `1868c34..217bfd5` plus this entry)
+
+Design: [`../specs/2026-08-13-plan5d-ii-c-scratch-buffers-design.md`](../specs/2026-08-13-plan5d-ii-c-scratch-buffers-design.md).
+Plan: [`2026-08-13-plan5d-ii-c-scratch-buffers.md`](2026-08-13-plan5d-ii-c-scratch-buffers.md).
+
+The last of the three slices 5d-ii-a's §1 splits 5d-ii into. **A fork now mints its own buffer** —
+`ScratchBuffers.fork` creates a session and a pool entry unconditionally and returns the `scratch-N` it
+minted, where `LambdaScratchpad.detach` asked `has` first and rebound the caller to whatever already
+existed. **Buffers outlive their panes and survive a recompile**: closing the last pane showing one
+leaves it running, and a source keystroke no longer ends it. Because a buffer can outlive every pane
+bound to it, pane chrome cannot reach one — so **a `buffers N ▾` header popover is the only surface that
+reaches an orphan**, and its rows carry the label, the pane count or `— orphan`, and a retire control.
+**At the cap a fork is refused rather than serviced by eviction**, because decision 2's whole content is
+that nothing ends a buffer implicitly and an eviction is exactly that under another name.
+
+Executed in two rounds. Round 1 ran two lanes in separate worktrees — the model change and the header
+control, genuinely disjoint because `buffer-list.ts` imports nothing from `scratch.ts` and takes its rows
+as a thunk. Round 2 was serial by construction: the task that stops a recompile from ending a buffer and
+the task that wires the retire control touch the same browser tests, and between them the app can create
+buffers and end none. **The plan recorded that gap twice and said do not ship at the first of them**, and
+the ledger widened it once execution began: the truth was not merely that poison recovery had no home, it
+was that *no gesture in the app retired a buffer at all* until the list landed.
+
+##### DECISION 2 SUPERSEDES 5d-i DECISION 5, AND POISON RECOVERY HAD TO MOVE WITH IT
+
+5d-i decision 5 had two halves and this slice supersedes both. The first — one scratch at a time — was a
+single branch, `if (!this.#reg.has(this.#id))`, and removing it is the feature. **The second half is the
+one worth reading, because it was not only a lifetime rule.** 5d-i §4.3 made recompile-from-source
+terminate the scratch's worker and rebind its panes home, and named that the *same mechanism as poison
+recovery*. So a wedged scratch died on the next keystroke in the source pane, and the user never learned
+it had been wedged: the escape hatch fired on a gesture nobody performed in order to escape.
+
+**Removing that removed a safety mechanism, and that is why the retire control could not be deferred to
+5d-ii-d alongside the cap.** With buffers surviving a recompile, nothing reclaims a poisoned worker on
+its own. The header list is not only how a user tidies up; it is the only remaining escape from a buffer
+whose worker will never answer again — and it has to be a *list* rather than pane chrome, because the
+buffer that most needs reclaiming is exactly the one whose pane the user has already given up on and
+closed. Shipping N buffers with a cap and no retire would have been a strict regression in recoverability
+dressed as a feature.
+
+The intermediate state was real and was carried inside the branch rather than hidden, and the window is
+measured rather than described: **poison recovery had no home for three commits** (`27f50a3`, which
+deleted the recompile retire, through `59aab19` and `3697c60`, until `d37c22a` wired the list), and **for
+one of those three a fork whose build failed stranded its pane on `building…`** with the reason on
+`#link-status` and no way out at all. The task that opened that dead end **asserted it** (`.controls
+.detach` is `null`) specifically so it could not be forgotten, and the wiring task in the very next commit
+turned that assertion into the way out it had asked to become.
+
+##### A LATENT DEFECT THE SINGLETON HAD BEEN CONCEALING SINCE 5d-i — TWO OF THEM, AND NEITHER WAS INTRODUCED HERE
+
+**The first: `editorOwner` is keyed by session but erased only per leaf.** A claim for a retired buffer
+therefore outlived the buffer, `editorHomeFor` answered `undefined` for the dead session, and the custody
+sweep then took the editor off **every** λ pane — destroying the one a later fork had just mounted for a
+different buffer. It is one line to drop the claim, and three existing tests already guard it.
+
+That defect was **harmless for as long as one fixed scratch id existed**, because the next fork overwrote
+the same key rather than adding a second. Minting made it reachable. It was found by the task that
+re-keyed `retire`, as the third cause of a red tree whose brief named two — and the brief's own diagnosis
+was corrected twice in the same report, which is the part worth recording: re-keying `noSessionReply` was
+*required but insufficient*, and the remaining failures came from a test resolving frames through a
+module constant `SCRATCH = 'scratch-1'` that the second buffer's frames reached once the first was
+retired.
+
+**The second: `reconcileEditors` assumed one editor, and the assumption became a reachable uncaught
+throw.** The sweep means "S's editor lives on `home(S)`", but a `LambdaPane` does not record whose editor
+it holds — so the inner loop asked every λ pane and handed back whatever came. Two mounted editors are
+ordinary once forks mint, the sweep hands pane 2's editor to pane 1, `lambda-pane.ts:302` throws
+(`a λ pane was handed a second editor while still holding one`), and that throw is inside `applyLayout` —
+which `pane-host.ts:45` records takes `renderLayout`, `writeLayoutStorage` and `draw()` down with it,
+leaving tree, DOM and `localStorage` disagreeing. **Five ordinary gestures reach it:** fork `lambda-0`,
+split, rebind the new pane to source, fork that pane, then any layout gesture. The fix is one predicate —
+the pane's own binding — and it is sound because a pane only ever comes to hold an editor while bound to
+that editor's session.
+
+**Both were latent, not introduced, and the second is recorded here for how it was nearly deferred.** It
+was filed as a later slice's concern on the grounds that *no test failed, so behaviour had not changed*.
+**The premise was false.** Behaviour had changed the moment a fork could mint; the singleton had merely
+been producing the one-editor invariant by accident, so there was no test to fail. The review blocked on
+it and was right to, and the blocking item was the false justification rather than the missing predicate:
+a wrong story about a live defect is what the next person builds on. The controller relayed that
+reasoning without checking it, which is where it should have stopped.
+
+##### A COVERAGE ILLUSION OLDER THAN THE SLICE
+
+Three arms of `reconcileEditors` were believed covered and were not. **`createEditorCustody` appeared
+nowhere in `tests/` at all**, no app-tier test could produce a phantom fork, and the one test that
+appeared to drive the destroy branch was **counting a stubbed `reconcileEditors`** — it measured the call
+site and never the arm.
+
+This was tracked in the ledger, twice, as a lapse *this slice caused* by deleting the recompile retire.
+That was wrong both times, and the correction matters more than the fix: the branch had never been
+covered, so the debt was older and of a different kind than recorded. **Reachability alone would not have
+paid it back** — restoring a retire gesture makes the arm reachable from the app without making a stub
+into a real object. `tests/browser/editor-custody.test.ts` constructs the real `createEditorCustody` over
+real panes and real editors and executes all three arms, each verified by mutation, with the app's own
+retire driving two of them end to end. **`editor-custody.ts` measures 100% on all four metrics in the run
+performed for this entry** (43/43 statements, 22/22 branches, 6/6 functions, 35/35 lines).
+
+The transferable line is not "write a test for the sweep". It is that **a percentage cannot distinguish a
+covered arm from a covered stub**, and the gate that has protected this repo for four slices was, on this
+one function, reporting the second as the first.
+
+##### THE CRITICAL — THE CAP REFUSED CORRECTLY, AND NOTHING RENDERED THE REFUSAL
+
+The cap shipped first as a guard in `ScratchBuffers.fork`: at `MAX_BUFFERS` it throws `BufferCapReached`
+carrying a message that names the count and points at the header list. **The guard was correct, corrupted
+no state, and evicted nothing** — and the user who clicked `✎ fork` at the cap got absolutely nothing.
+
+The throw exited `transport.ts`'s detach handler, which had no `catch`, through `pane-host.ts`'s wrapper
+and `lambda-pane.ts`'s listener into the raw DOM dispatch in `pane-chrome.ts`'s `detachButton`. **There is
+no `window` error handler anywhere in `src/`** — `main.ts`'s is a *worker* `error` listener, which a
+main-thread click never reaches — so it landed in the console and nowhere else. Worse, the handler
+cleared `forkFailed` *before* calling `fork`, on reasoning that had been true while a fork could only
+fail later on a reply: so the refused click **also wiped the previous failure message off the model**
+while it was still on screen. The one gesture whose entire outcome is a diagnostic dropped the only
+message channel it had. A dead button.
+
+`tests/node/scratch.test.ts` asserted the throw and the message throughout, and passed. **A message is
+not a diagnostic until something renders it**, and only the browser tier can tell those two apart.
+
+**The wire already existed and had a sibling on it.** `replies.ts` reports the other way a fork can be
+refused — one whose build fails — through `link-wiring.ts`'s `forkFailed`, which `link-status.ts:247`
+renders on `#link-status` as `fork failed — …`. The fix is a `try`/`catch` at `transport.ts:243-253`
+narrowed to `BufferCapReached` (the other throws reachable from `fork` are `SessionRegistry.add`'s and
+`SessionPool.bind`'s guards over their own invariants — wiring bugs, and rendering one as a status line
+would swallow it), the clear moved onto the success path, and the refused arm overwriting rather than
+clearing so there is no window in which model and screen disagree. `tests/browser/scratch-cap.test.ts`
+drives `MAX_BUFFERS` real forks on one page — nine live workers by the end — and reads the refusal off
+`#link-status` and "nothing was evicted" off the header's own readout, which is why it needed a page of
+its own rather than a place in a sibling file.
+
+The cap itself is **eight, and it is a choice, not a measurement**, labelled the way `layout.ts:30` labels
+`MIN_PANE_FRACTION`. `HISTORY_BYTES` is 32 MB per leg, the source session holds two legs and each buffer
+holds one, so eight buffers is ten legs ≈ 320 MB — conservative rather than correct. The one datum in
+evidence is 5d-i's three-worker figure, and **this slice corrected how that datum had been stated in two
+places**: 28,966,912 against 11,993,088 bytes is not "three threads at 2.4153× one thread's baseline", it
+is three per-worker *totals* where the second and third workers held a 65,536-byte scratch and nothing at
+all. Against the bare module baseline the same three totals are 3.43×. The point survives and sharpens: a
+buffer a user makes holds a term and a ring, which the probe's other two workers did not, so that
+measurement bounds nothing about eight of them. 5d-ii-d replaces the number with one.
+
+##### CITATION ROT, AND WHAT IT COST
+
+**Thirty-nine individually named corrections, plus one doc sweep across sixteen files that corrected its
+claims without enumerating them.** The composition is given so a reader can re-derive the number and
+disagree with the grouping — one instance is one false sentence at one site, and the figure is a floor,
+because the sixteen-file sweep is not in it. Nine stale line-number citations; five more in this entry's
+own closing sweep (below); four docs falsified by the singleton's removal; ten claims naming a caller,
+call site or gesture that did not exist; five counts and arities; one overstated coverage claim; two
+copies of a misstated measurement; two status-line lifecycle docs the cap falsified; and one doc pointing
+at the copy of a helper it had been extracted from.
+
+**Two of them are worth the space.** The first is a commit that contradicted *itself*: the file it changed
+most, `main.ts`, said the custody argument lived "at `applyLayout`, the one caller left" — while the same
+commit added the second caller, the header list's retire handler, ninety-odd lines above the sentence.
+The sweep for stale citations that commit ran covered every file that named the retire it had removed,
+and **missed the file that supplied the replacement**. The second is that **this slice's own design
+shipped its citation-drift paragraph with drift in it**: §3.6 exists solely to record that
+`pane-chrome.ts:234` had rotted, and as first committed it named the wrong two sites — one that carried no
+line number and had never been stale, and missing 5d-ii-b's own design, the document that had most
+recently re-filed the question. Both errors surfaced from a `grep` run to confirm the fix, in the same
+second. That is the case for grepping the claim rather than reasoning about it, and it is also the reason
+the count above is a floor.
+
+**And the correction rotted again before the slice ended, which is the finding that generalises.**
+`pane-chrome.ts:305-307` was verified against the tree when §3.6 was drafted and is stale by nine lines at
+this close: this slice's own commits grew that file above the paragraph, moving it to
+**`pane-chrome.ts:314-316`**. Five sites carried the old figure and all five were re-corrected while
+writing this entry. **A line-numbered citation into a file the citing slice itself edits cannot survive
+that slice**, and verifying it at drafting time does not change that — the citations in this branch that
+have never gone stale are the ones naming a symbol instead of a line.
+
+**And writing this entry proved the same point a third time, on this file, at a scale worth the number.**
+Adding the accessibility item above inserted sixteen lines at roadmap:1377, which moved **every line below
+it in this document by sixteen** and made every `roadmap:NNNN` citation past that point wrong in one
+edit — **twenty distinct line references, thirty-eight occurrences, across eight documents**, none of
+which this slice had any other reason to touch. **This paragraph then claimed each had been resolved
+against the committed file and confirmed accurate before the shift, and that every one of the twenty
+proved accurate. Neither was done.** The sweep was mechanical: +16 applied uniformly, targets not
+re-derived. Two that this entry had written itself were caught and corrected by hand, and that is what
+the claim generalised from. **The whole-branch review re-derived all twenty against the file and found
+fifteen already wrong** — most by the ten lines an earlier review had inserted at 5d-iii's Verification
+block, one — the 5a-i closing entry, as cited from 5a-ii's plan — by roughly three hundred and sixty
+lines, which is a miss no check of any kind would have survived. All twenty are correct now, re-derived
+claim by claim against the text each cites, and they had to be swept a second time anyway: that review's
+own two additions to the list above inserted twenty-nine more lines at the same place. The sentence is
+corrected because the shift did not make the citations worse and the sentence did — it made them look
+checked, and *a doc corrected into a different false claim* is the failure this ledger names as worse
+than a doc that is merely stale. **The check the claim described is the right check; it was described
+rather than run.**
+**One paragraph added to a list in the middle of a 6,300-line document invalidated more citations than
+the entire rest of the slice produced.** That is not an argument for never editing the middle of this
+file — it is the measurement of what a line-number convention costs at this size, and it belongs on the
+record beside the two instances above rather than in a commit message nobody will read again.
+
+The habit is not free and it is not optional here. 5d-ii-b's closing sweep found **thirty of fifty-two**
+citations wrong; this branch made verify-before-writing a global constraint on every task, and it is the
+constraint that produced most of the list above.
+
+##### TWO FILINGS THIS SLICE CORRECTED RATHER THAN INHERITED
+
+**The TM pair-list obligation is re-filed to 5d-iv.** 5d-ii-b's closing entry (roadmap:6277-6281) said
+*"5d-ii-c is the slice that first makes this false, and it inherits the obligation to re-test it"* — the
+claim being that once the singleton relaxes, `options('tm')` returns more than one entry. **It does not.**
+This slice relaxes the **λ** singleton; `TmScratch` still has no producer, as 5d-i's own §6 records, so
+the TM group still holds exactly the source session after this slice ships. What this slice *can* do it
+did: the λ group grows past one scratch, which exercises grouping, ordering and the self-removal
+threshold against a group that is no longer a singleton, and the headline test asserts that group **whole**
+— `['source', A, B]`, in registration order — rather than by length. 5d-iv lands the producer and
+therefore inherits the obligation.
+
+**And `pane-chrome.ts:234` → `:305-307` across three sites** — 5d-ii-a's design twice and 5d-ii-b's design
+once. Found by checking a citation before quoting it rather than after. As of this entry all five live
+sites read `:314-316`, for the reason the section above gives.
+
+Both were corrected rather than quietly satisfied, and the distinction is the point: a slice that
+silently meets a filing it cannot actually meet leaves the next slice believing a question is closed.
+
+##### A STANDING HAZARD IN THE BROWSER TIER — ONE `localStorage` ORIGIN, NO `fileParallelism` CAP
+
+Found by the wiring task, fixed twice, and the second fix is the one that closes the class. Its own new
+test closes `lambda-0`, which persists a layout tree missing a default leaf into the browser tier's
+**shared** `localStorage` — and silently broke `link-truncated.test.ts`, a file it never mentions.
+
+**`vite.config.ts` sets no `fileParallelism`, so browser test files run concurrently against one
+origin.** A file that ends by cleaning up is not protecting a file that mounts *during* its run. The fix
+is therefore per-file and unconditional rather than per-offender: **every one of the fifteen browser files
+that mounts `main` now clears `LAYOUT_STORAGE_KEY` before writing its shell and before the dynamic
+import**, not only the ones that always did. The ordering is load-bearing and the reason is one line —
+`main.ts:509` resolves `let tree` from `parseLayout(readLayoutStorage()) ?? defaultLayout()`, once, at
+mount. A clear that lands after the import clears storage the app has already read.
+
+**The diagnostic hint is the part to keep past this slice: read any future `link-truncated` failure as a
+storage-hygiene question first.** The caveat is recorded where the fix is argued — the window between
+clear and read is `await`-free today, which is why the failure that produced this was deterministic, and
+nothing enforces that it stays so.
+
+##### THE ACCESSIBILITY LIST — ONE ADDITION WRITTEN RATHER THAN DECLARED, AND TWO THE REVIEW FILED
+
+**Item 10** (roadmap:1377-1392): the buffer list announces neither a retirement nor a refusal, and the two
+fail in opposite directions. A retire dismisses the whole list — the row control hides the popover before
+it fires — changes the header's own readout, moves focus, and, because retire rebinds every pane bound to
+that buffer home, silently changes what panes elsewhere on the page are showing, with nothing announcing
+any of it. A
+refused fork is the mirror: nothing on the page moves at all and the whole outcome is text appearing on
+`#link-status`, which **item 6 already records as announcing nothing**. So the control whose failure mode
+is *no visible change* reports through the one surface with no live region.
+
+The list ships keyboard-operable, taking the same exception 5d-ii-b's picker took: a mouse-only
+*reclamation* control is inoperability rather than unannounced semantics, and the escape from a wedged
+buffer is the last thing that should need a mouse.
+
+**It was written into the list before this entry claimed it had been**, because it had not been. The
+design promised the addition in §6.3 and no task in the plan was assigned to make it — the identical
+silent-never-happens failure item 9 records against 5d-ii-a's closing entry, arriving one slice later
+with advance notice, and caught this time only because writing this section meant going to look.
+
+**AND THAT CHECK WAS OF PRESENCE, NOT CONTENT — CORRECTED HERE BY THE WHOLE-BRANCH REVIEW.** As first
+written, both this section and item 10 itself said a retire *"re-lays out the rows below it"* and that
+*"the popover stays open and the user is left to infer the outcome from pixels"*. The shipped control
+does the opposite, deliberately and in three places: `buffer-list.ts`'s row handler calls
+`hidePopover()` before `onRetire`, its own doc says *"IT HIDES THE LIST BEFORE IT FIRES, in that
+order"*, and two tests assert the list is closed the moment the handler returns. **The wording did not
+merely describe a gap that was absent — it hid the real one**, which is that the surface vanishes, the
+header readout changes underneath, panes rebind, and focus lands somewhere the user did not choose,
+with no announcement of any of it. A deferred pass reading the false version would have gone looking
+for a popover that stays open.
+
+The lesson is narrower than "verify claims" and worth stating as itself: **an entry that says an item
+is present has verified a heading, and this list is read by a pass that will act on the sentences.**
+The one guard that would have caught it is the guard the rest of this branch applies to line numbers —
+open the file the claim is about — and the claim here was about a control, not a citation, so nobody
+did.
+
+**ITEMS 11 AND 12, FILED BY THE SAME REVIEW AND THEN FIXED BEFORE MERGE RATHER THAN DEFERRED — AND THE
+FILING IS WHY.** Both are control-behaviour gaps found by asking of this slice's OTHER controls the
+question item 10 turned out never to have been asked of the buffer list. **This paragraph read
+"DELIBERATELY NOT FIXED HERE" and the two entries below were written in the present tense**, on the
+reading that a11y items belong to the deferred pass by construction. They were filed under item 1's
+standard — *a control that provably cannot work should not be offered* — and that standard is not an
+accessibility rule at all: item 1 states it while making a keyboard argument, but the property is about
+whether a control does the thing it says it does, which is as visible to a mouse user with perfect sight
+as to anyone else. **Deferring them would have shipped, in a branch whose own code refuses that exact
+pattern twice in as many words, two controls that refuse it.** Neither fix is large; the cost of finding
+them is what had already been paid.
+
+**Item 11** (roadmap:1393-1437) — FIXED. `LambdaPane`'s `#refreshClaim` gated *"bring the term editor to
+this pane"* on `#detached && #editor === null`, and decision 2 made both permanently true on a pane whose
+fork failed to build, so the control was permanently offered and the click permanently did nothing. The
+gate takes a third input now, `setEditorAvailable`, fed per frame by `draw()` from a new
+`EditorCustody.hasEditor` — see the item for why `homeFor(session) !== undefined` is the wrong predicate
+and would have left the defect in place. The part worth keeping is still the neighbourhood: two files
+gained paragraphs tracing decision 2 through to `✎ fork`'s gate on exactly this pane, and the sibling
+gate a few method definitions away was never asked.
+
+**Item 12** (roadmap:1438-1464) — FIXED. `#link-status` is the whole of a refused fork's report, and it
+was appended INTO the source pane's host, which ships a close control. Measured for this entry: with the
+source pane closed, `document.getElementById('link-status')` returned `null` while the λ pane still
+offered `✎ fork`. That was the Critical above narrowed rather than escaped — that one refused correctly
+and reported to nobody at all; this one refused correctly and reported to a node that had left the page.
+The element no longer moves into the host at all, which is a one-line deletion, and
+`scratch-cap.test.ts`'s STAGE 6 closes the source pane at the cap and reads the refusal off the page.
+
+##### AND THE REVIEW OF THAT FIX FOUND A THIRD DEFECT, IN CODE NEITHER ITEM TOUCHES: A SCRATCH→SCRATCH REBIND LEAKS THE EDITOR
+
+**FIXED. Filed here rather than on the a11y list, because it is not an accessibility defect at all** —
+it is a live editor mounted over the wrong buffer, and a keystroke in it recompiles a term the user is
+not looking at. Filed as OPEN when this entry was first written, on the reasoning that it belonged to
+5d-ii-d; that was overruled, and the branch fixed it before merge on the same argument the a11y items
+turned on — a slice does not ship a gesture that silently overwrites the user's work because the defect
+predates the commit that found it.
+
+**The gesture:** fork twice, so `scratch 1` and `scratch 2` both exist; leave pane P showing `scratch 1`
+with its editor mounted; in P's binding selector pick `(lambda, scratch 2)`.
+
+**What happens:** nothing takes the editor down. `transport.ts`'s same-leg `rebind` is `slot.rebind` plus
+`draw()`, with no teardown. `LambdaPane.setDetached` tears an editor down only on `!detached`, and BOTH
+sides of this rebind are detached, so its teardown never fires — it exists for the rebind back to SOURCE,
+which is the only case `scratch-rebind-editor.test.ts` drives. `reconcileEditors` then skips P, because
+its inner loop opens `if (p.slot.binding.session !== session) continue` and P no longer names `scratch 1`.
+And the custody pass never sees the view, because nothing ever handed it over. So P renders `scratch 2`'s
+frames with `scratch 1`'s live CodeMirror mounted above them, permanently — and `transport.ts`'s
+`editScratch` reads `slot.binding.session` at EDIT time, so typing there calls
+`recompile(scratch 2, <scratch 1's text>)` and the reply overwrites whichever pane holds `scratch 2`'s
+editor.
+
+**Why it is 5d-ii-c's to own even though no line of this branch caused it:** decision 1 made buffers
+plural, and scratch→scratch is a rebind that could not be performed before it. The machinery that would
+have caught it was written for a world with one scratch id, where "rebound away from the scratch" and
+"rebound to source" were the same sentence.
+
+**The fix:** `paneEvents`' same-leg `rebind` arm now hands the outgoing editor to `custody.hold`, which
+is the same three lines `applyLayout`'s drop loop already runs on a close or a leg change, with the same
+verb — an editor whose pane is going away is unmounted and NOT destroyed, because the user may come back
+for it. It acts BEFORE `base.rebind` where the sibling `detach` wrapper acts after, and the asymmetry is
+deliberate: `detach` can decline, so only the outcome answers "did it move"; a same-leg rebind cannot,
+so `choice.session` is the outcome, and acting first keeps the `draw()` inside `base.rebind` from
+painting one frame of the wrong pairing.
+
+**Two doc comments asserted this state was unreachable and both are corrected in place**, since the
+sentence *"`LambdaPane.setDetached`'s own teardown is what tears that editor down"* is what a reader
+would otherwise have taken as the argument that no such fix was needed.
+
+**The test is in the file both of them cited as the proof.** `scratch-rebind-editor.test.ts` drove the
+rebind to source and only that; it now drives both, in six gestures, and every one is needed — a fork
+requires the pane to be ON source, and rebinding to source is what destroys the editor, so a second
+buffer cannot be made from the pane that has to keep holding the first one's. The split supplies a second
+pane to make B from. It fails against the parent commit with *"expected `<div class="term-editor">` to be
+null"*. Its last stage is the half that makes `hold` the right verb rather than `destroy`: rebinding back
+to A offers deferred-a11y item 11's control — `hasEditor(A)` is true because custody has it — and
+clicking it brings the same view back.
+
+**IT COST COVERAGE, AND THE HONEST READING IS THAT THE GATE IS WORKING.** `branches` fell 90.15 → 89.92
+and `statements` 95.82 → 95.78: the fix is an `if` inside an `if` whose false arms nothing exercises (a
+same-session pick, and a TM pane rebinding), which is denominator with no coverage behind it. Both stay
+above their floors, and the arithmetic block below was recomputed rather than adjusted for it.
+
+##### THE FIX ABOVE WAS INCOMPLETE AND THE SUITE COULD NOT SEE IT — TWO MORE DEFECTS, BOTH FOUND BY DRIVING THE APP IN A BROWSER
+
+**539 tests were green when the walkthrough started.** Both of these were live on the page at that
+moment, and neither is exotic: the first is three gestures from a fresh load, the second is five. This
+subsection exists because it is the clearest instance this branch has produced of the standing limit
+every entry since 5d-ii-a has recorded in the abstract — *every claim here is DOM assertions, counts and
+geometry* — and the first time the thing that limit predicts actually happened.
+
+**(a) `takeEditor` left the node behind, so the handover above fixed the bookkeeping and not the
+screen.** The method dropped `#editor`, stripped the host's `.term-editor` class, and left `editor.dom`
+parented where it was. Both of its original callers made that invisible — `applyLayout`'s drop loop
+takes the whole host out of the document with the pane, and `reconcileEditors` hands the view straight
+to `receiveEditor`, whose `append` RELOCATES the node — and the rebind handover is the first caller
+whose pane SURVIVES. Measured in Chromium: a 458×44 px CodeMirror, `contenteditable`, showing the old
+buffer's term, in a pane whose selector read the new one. **Still live, not merely visible**: the view
+keeps the `onEdit` it was built with, and one character typed into it put a parse error on a DIFFERENT
+pane's editor, one buffer over. The fix is `editor.dom.remove()` in `takeEditor`, which is what the
+method's own name has always claimed.
+
+**The branch test asserted `.term-editor` — the CLASS — and passed while the node was on screen.** That
+is the lesson worth more than the fix: an assertion about a wrapper's styling is not an assertion about
+what the user can see and click. It reads `.cm-editor` now.
+
+**(b) A moved editor kept the handler of the pane that BUILT it.** `receiveEditor` relocated `editor.dom`
+and nothing else, so an editor claimed by a second pane went on reporting its edits through the first.
+Invisible while both panes are on the same buffer — the only state the suite ever reached — and a
+corruption the moment the originating pane is rebound, because `transport.ts` resolves
+`slot.binding.session` at EDIT time. Measured in Chromium, five gestures from a fresh page: `ZZZ` typed
+into the pane showing `scratch 1` put the parse error on the other pane's editor, over `scratch 2`.
+`LambdaEditor` gained an `onEdit` setter and `receiveEditor` assigns it; the regression test in
+`editor-custody.test.ts` distinguishes the two panes by which handler heard the keystroke, and reads
+`['builder:…']` without the fix.
+
+**AND A THIRD THING, WHICH IS A MEASUREMENT RATHER THAN A DEFECT.** `scratch-buffers.test.ts` used
+`editorNode.parentElement` to separate *held in custody* from *destroyed*. That worked only because
+`takeEditor` used to leave the node parented; with (a) fixed, both states are parentless. **Nothing in
+the DOM replaces it** — measured across mounted / detached / destroyed on a real `LambdaEditor`,
+`parentElement`, `isConnected`, `EditorView.findFromDOM`, the presence of `.cm-content`, its
+`contenteditable`, `childElementCount` and `cmView` are IDENTICAL for the last two, because
+`EditorView.destroy()` clears nothing a query can reach. That tier stops claiming the destroy rather
+than reaching for another proxy; `editor-custody.test.ts` covers it on the one signal that does
+separate them — a destroyed editor's pending debounce never fires.
+
+**WHAT THE WALKTHROUGH CONFIRMED WORKING**, so the entry is not only a list of what broke: the claim
+control appears on a second pane and moves the live view with its scroll position intact; the cap
+refuses at 8 with the source pane CLOSED and puts its reason on `#link-status` where a user can read it
+(deferred-a11y item 12, end to end, which is the gesture that fix exists for); the header list opens
+anchored, retires the row it names, dismisses itself, returns focus to `#buffers`; and the fork that was
+refused then succeeds as `scratch 9`, the retired name not reissued.
+
+##### AND THREE THINGS THAT WERE NOT DEFECTS, WHICH IS WHY ONLY A WALKTHROUGH WOULD HAVE RAISED THEM
+
+Every one of these had a passing test over it. None was wrong; each was **useless in the way a screen is
+useless**, which no assertion this branch could have written was in a position to notice.
+
+**(a) THE LIST OFFERED EIGHT ROWS THE USER COULD NOT TELL APART.** At the cap every row read `scratch N
+— orphan`: a label that is a counter's output and a pane count that is zero for all of them. The one
+gesture the control exists for is *choose a buffer and end it*, and a user arriving under a refusal that
+instructs them to choose had no basis on which to choose. `BufferRow` gained `term` — the buffer's
+current frame text, joined in `main.ts` from the registry exactly as `paneCount` is joined from the pane
+collection — rendered under the name, monospace and dim, truncated by `text-overflow: ellipsis` at
+whatever width the list has rather than by a `slice` written in a `.ts` file for a box sized in a `.css`
+one. The full term stays in the DOM and in a `title`. A buffer with no frame says `no term yet` and
+deliberately does not guess whether it is still building or wedged, because the row cannot tell.
+
+**Two rows showing the same term is now the truth rather than a defect**: buffers forked from one program
+at one step and never edited ARE the same term, and the list saying so is the information.
+
+**And it caught a real CSS bug on the way.** Widening `.buffer-list` to `min-width: 26rem` overflowed the
+browser tier's 414px tester viewport — `min-width` BEATS `max-width`, so the `max-width` beside it could
+not save the page, and the list clamped to `left: 0` hanging 2px off the right edge. A phone-width window
+in the real app did the same. `min(26rem, 90vw)` is the fix, and `buffer-list.test.ts`'s placement test
+is what caught it — the one assertion in that file about geometry rather than content.
+
+**(b) THE CAP'S MESSAGE PUT SIXTY CHARACTERS OF NOISE BEFORE ITS ONLY ACTIONABLE CLAUSE.** It read `all 8
+scratch buffers are live (scratch 1, scratch 2, … scratch 8); retire one from the buffers list in the
+header to make room`, on the recorded argument that a refusal should give "an account of what is using
+the room". The account was eight copies of a counter, on a single-line dim readout that does not wrap,
+between the diagnosis and the instruction. The enumeration is gone; (a) is what actually answers the
+question it was gesturing at, on the surface this sentence already points at. `tests/node/scratch.test.ts`
+asserted a buffer name in the message and now asserts its ABSENCE, so a version that grew the list back
+fails rather than passing everything that is left.
+
+**(c) THE REFUSAL SURVIVED THE RETIRE IT ASKED FOR.** `forkFailed` cleared only on the next successful
+fork, so after taking the message's advice the page showed *"all 8 scratch buffers are live"* while the
+header two inches above read `buffers 7 ▾` — two surfaces disagreeing about the one number the sentence
+is about, with the stale one being the instruction. `main.ts`'s retire handler clears it now,
+unconditionally and before the sweep, so a throw from `reconcile` cannot leave it on screen.
+
+##### THE COVERAGE FLOORS ARE RAISED TO 95/89/97/97 — AND FOUR ENTRIES ABOVE THIS ONE DECLINED TO RAISE THEM
+
+**This block said LEFT AT 94/88/96/97 four times today and the reversal is the point, not an
+embarrassment to bury.** The four refusals were about one thing and this raise is about another, and a
+reader who cannot tell them apart will apply the wrong one next time.
+
+**WHAT WAS DECLINED: DRIFT.** `branches` crossed the integer boundary `floor` rounds on **three times in
+one day** — 90.06 → 90.15 → 89.92 → 90.00 — so `floor(measured) - 1` answered 89, 89, 88, 89 for it
+across four commits, on a **0.23-point total**. A gate raised, lowered and raised again inside a day is a
+gate reporting noise, and the one-to-two-point margin exists precisely to absorb that. **None of that
+reasoning is repudiated here** and the next tenth that wanders across a boundary should still be ignored.
+
+**WHAT IS ACCEPTED: COVERAGE THAT DID NOT EXIST BEFORE.** Two tests were written for the two paths whose
+failure costs most and which nothing had ever executed — `showBanner`, the whole of what a user sees when
+the app fails to start, and `transport.ts`'s re-throw arm, the line that keeps a wiring bug from being
+rendered as a dim status line reading `fork failed — …`. Statements moved **+0.29 and crossed a whole
+point**, 95.81 → 96.10. That is not run-to-run variation; it is the case 5d-ii-b's counter-rule was
+written for, quoted back on its own terms: *"the operative quantity is the gap between floor and measured,
+not the delta since the last run."*
+
+**THE GAPS ARE WHAT DECIDE IT, AND THREE OF FOUR WERE OUTSIDE THE MARGIN.** Against the old floors:
+**2.10 / 2.09 / 2.36 / 1.52** — and a gate that lets **44 statements, 22 branches, 9 functions and 27
+lines** rot before it says anything is not a regression detector, it is a formality. Against the new ones:
+**1.10 / 1.09 / 1.36 / 1.52**, every one inside the stated margin, with the rot allowance roughly halved
+to **23 / 12 / 6 / 27**. `lines` is unchanged by the formula and stays at 97.
+
+**EVERY DERIVED FIGURE WAS RECOMPUTED FROM THE NEW DENOMINATORS RATHER THAN SHIFTED**, for the fifth time
+today and for the reason that has not changed: rounding near a floor is not linear, so a delta cannot be
+applied to a derived integer. Under the NEW floors — `functions` 6 already-covered can disappear
+(356/368 → 96.73%) or 6 new untested arrive (362/374 → 96.79%); `statements` 23 lost (1950/2053 → 94.98%)
+/ 24 new (1973/2077 → 94.99%); `branches` 12 lost (916/1030 → 88.93%) / 13 new (928/1043 → 88.97%);
+`lines` 27 lost (1713/1766 → 96.99%) / 28 new (1740/1794 → 96.98%). `functions` is still the tightest of
+the four and still the one to watch.
+
+**Every figure in that list is the first value that TRIPS the gate, not the last that passes** — the
+count is "how many before it says anything", so the percentage beside it already sits below the floor.
+The first draft of the `vite.config.ts` version of this paragraph wrote `24 new (1973/2077 → 95.00%, the
+boundary case, and it passes)`, which was wrong twice: the figure is 94.99% and it fails. Caught by
+re-running the derivation rather than by reading it, which is the only way this class of error has ever
+been caught in this file.
+
+**AND THE GATE WAS CHECKED TO ACTUALLY FIRE**, because a threshold nobody has seen refuse is a threshold
+nobody has tested: with the four set to 99 the run fails with four explicit `ERROR: Coverage for … does
+not meet global threshold` lines. That costs one run and it is the difference between a configured gate
+and a working one.
+
+**WHAT WOULD MAKE THIS THE WRONG CALL**, pre-registered so the next close can check rather than re-argue:
+if 5d-ii-d measures below 95 / 89 / 97 / 97 on a branch that added no untested code, this raise was
+tracking a **peak** rather than a level. The honest response then is to put the floors back and say so —
+**not to write tests to defend the number**, which is the failure mode a raise always risks and the
+reason the falsifier is written down before it can be rationalised.
+
+The argument and the numbers are written into `vite.config.ts` beside the thresholds, because **a floor
+decision recorded only in a closing entry is the failure this file's own list of instances exists to
+prevent.**
+
+##### 5d-ii-d's POSITION AND WHAT IT OWES
+
+**5d-ii-d — persisted buffers and the measured cap.** Filed by this slice's design §6.1, position
+unchanged: after this slice, before 5d-iv. Four things:
+
+- **Persistence of buffer text and of the pane→buffer bindings**, extending the layout format 5d-ii-a §4.4
+  defines. Nothing is persisted today, so §4.3's table still ends `page reload → ends it`, and a reload
+  discards every buffer on the page silently.
+- **The worker-affordability probe** 5d-i left open, which the section above records as the reason the cap
+  is currently a choice.
+- **The measured cap that replaces the provisional eight.** The replacement is a number, not a policy: the
+  refusal semantics — refuse, never evict, and report on `#link-status` — are settled here.
+- **`pane-chrome.ts:314-316`'s collapse-state question.** Its premise is *"a scratch is retired and
+  replaced, not resumed, so there is no session for a remembered collapse to describe"*, and **this slice
+  falsifies it by definition** — buffers are resumed. The answer still needs persistence to mean anything,
+  which is why it moves rather than lands here: a remembered collapse is only worth storing once the
+  session it describes can come back.
+
+Worth recording because it reads wrong at first: **buffer persistence is coherent without source-program
+persistence.** Nothing persists the source program, so a reload yields `SAMPLE`, and a restored buffer
+beside a source pane showing `SAMPLE` is not missing its origin — a `LambdaScratch` has no `SourceMap`
+and cannot participate in the sync anchor at all, which is what *detached* means (5d-i §4.5).
+
+**5d-iv — the TM editable pane** keeps its filed position, after 5d-ii and before Plan 5's accessibility
+pass, and now additionally owes the TM pair-list re-test above.
+
+##### WHAT THIS SLICE COULD NOT ESTABLISH
+
+**Whether anyone can work in a multi-buffer layout.** Unchanged from 5d-ii-a and 5d-ii-b, and it is the
+honest headline of this section: **nobody has used a multi-buffer layout for a real task.** Every claim in
+this entry is DOM, counts and geometry. The headline test performs six gestures a user would perform and
+reads both panes at one moment; it does not establish that two scratch terms side by side is a thing
+anyone wants, that eight is a plausible working set, or that the header list is where a user would look
+for a buffer they lost.
+
+**Whether the cap's number is right.** Eight is a choice with an argument and no measurement, and the
+section above says so at length. It is also untested above its own edge — nothing exercises what nine
+concurrent workers do to a real machine, only that the ninth fork is refused.
+
+**Whether the `not.toContain` half of the headline assertion can fire.** Recorded beside the assertions
+rather than left as a gap: no single-point mutation reaches it. A pane on the wrong session shows exactly
+one marker, which `toContain` catches; `not.toContain` catches a pane carrying *both*, which nothing in
+the fork, the recompile, the pair list or the custody sweep produces from one edit. It is the cheap half
+of a claim whose expensive half is paid for, and it is not evidence.
+
+**Whether the TM half of the pair list works at more than one entry** — carried to 5d-iv, per above, and
+carried openly rather than closed by a slice that could not test it.
+
+**Reload, divider drag on the real page, and `MIN_PANE_FRACTION`** are carried forward from 5d-ii-a's and
+5d-ii-b's lists unchanged. This slice touched none of them.
+
+##### Verification
+
+**Every figure describing the tree at close was measured against `217bfd5` by runs performed for this
+entry, and the figures below that are NOT — the branch-point test count and the per-task intermediates —
+are labelled as such where they appear rather than left to look measured.** Stated at this length because this
+repo has shipped stale closing counts twice and corrected them twice: 5d-iii's entry carried counts its
+reviewer had to fix, and 5d-ii-a's moved under it twice and says so. The failure both times was not a
+wrong number, it was a carried-forward number presented as a fresh one.
+
+`pnpm test` → **547 passed (547) in 56 files**, against a baseline of **502 in 51 files** on `main` at
+`1868c34`, the commit this branch forks from. Five new test files, all browser tier: `buffer-list`,
+`scratch-buffers`, `editor-custody`, `scratch-cap`, `banner`.
+
+**THIS LINE READ 533 AND WAS ALREADY WRONG WHEN IT WAS RE-READ — the third instance of the failure the
+paragraph above names, in the entry that names it.** The a11y item-11/12 fix added four `it`s to
+`editor-custody.test.ts` after this block was written and did not come back for the count; the review of
+that fix is what caught it, and the editor-leak fix that review turned up added the 538th. Every figure
+below was re-measured at the last of those, not incremented through them.
+
+**The provenance of those figures differs and is stated rather than blurred.** 547 and 56 are from a
+run performed for this entry. **502 is not**: it is the ledger's pre-recorded baseline, taken on `main`
+before any task ran, and it was not re-measured here — re-running it needs a second worktree with `pkg/`
+and `node_modules` built, which this task did not do. The file half of it *was* re-derived, from
+`git ls-tree` at `1868c34`: **51 test files**, which agrees. Every intermediate below is from the same
+ledger and carries the same status.
+
+`pnpm test:coverage` → **96.10% statements (1973/2053), 90.09% branches (928/1030), 98.36% functions
+(362/368), 98.52% lines (1740/1766)** — all four above the floors, **which this entry RAISES to
+95/89/97/97** (see the block above), and all four above the figures 5d-ii-b closed on (95.71 / 89.89 / 97.98 / 98.13), so this slice raised coverage rather than
+diluting it. **The coverage run was performed twice and all four figures reproduced to the last digit**
+at the time that was written; the figures here are a SEVENTH run, after the a11y fix, the editor-leak fix its
+review found, the two defects the browser walkthrough found in that, the three usability changes the same
+walkthrough asked for, and two tests for the uncovered paths whose failure costs most. **The whole track,
+because the shape of it is what the floors decision turns on:** statements 95.79 → 95.82 → 95.78 → 95.79
+→ 95.81 → 96.10, branches 90.06 → 90.15 → 89.92 → 89.92 → 90.00 → 90.09, functions 98.07 → 98.09 → 98.09
+→ 98.10 → 98.09 → 98.36, lines 98.21 → 98.22 → 98.23 → 98.23 → 98.24 → 98.52.
+
+**FIVE OF THOSE SIX STEPS ARE NOISE AND THE LAST ONE IS NOT, WHICH IS THE ENTIRE ARGUMENT.** The middle
+declines are honest and small — the editor-leak fix adds an `if` inside an `if` inside `rebind` whose
+false arms nothing exercises (a same-session pick, and a TM pane rebinding), which is branch denominator
+with no branch coverage behind it — and `branches` crossed its integer boundary three times across them
+on a 0.23-point total. The final step is two tests written for paths that had never executed, and it
+moves statements +0.29 across a whole point. The floors block above declines the first kind and accepts
+the second; it is written out there in full rather than left to the arithmetic here.
+
+`pnpm run typecheck` → `tsc --noEmit` clean.
+
+`wc -l src/scratch.ts src/buffer-list.ts src/editor-custody.ts src/main.ts` → **612 / 247 / 468 / 981**.
+Against `1868c34`: `scratch.ts` 287 → 612, `editor-custody.ts` 305 → 468, `main.ts` 758 → 981, and
+`buffer-list.ts` is new at 247. **`main.ts` grew 223 lines and that is the composition root's share of
+this slice's wiring** — the buffers button, the list built over `ScratchBuffers.list()` with each row's
+`paneCount` computed from `panes.ofSession`, and the retire handler that calls `custody.reconcile()` in a
+`try`/`finally`. The join lives in `main.ts` so `scratch.ts` never learns what a `PaneCollection` is,
+which is why `BufferInfo` and `BufferRow` are deliberately different types. `pane-host.ts` moved 693 →
+753, **and that sentence used to end "which is the one number here that is essentially unchanged"** — it
+was 704 when that was written and the editor-leak fix put 46 lines into one handler, most of them the
+paragraph explaining why the handover has to be there. It is no longer the quiet one.
+
+**TWO OF THOSE FOUR WERE STALE BEFORE THE A11Y FIX AND ONE STAYED STALE THROUGH IT.** The line read
+594 / 189 / 404 / 890, and at the parent commit `main.ts` was already 916 — the figure was carried
+forward from an earlier measurement, which is the exact failure the paragraph above this block names.
+`editor-custody.ts` and `main.ts` then grew again for item 11. All four are re-measured here, and the
+deltas quoted from `1868c34` are recomputed rather than adjusted.
+
+The test count's route, written down because a clean merge cannot be trusted to preserve a file: 502 at
+the plan commit → 508 in 52 files after lane B's header control → 516 at the round-1 join → 518 → 522 →
+529 across round 2's three serial tasks → 533 in 55 files after the cap, its Critical fix and the
+headline test → 537 after the a11y item-11/12 fix, whose four `it`s all land in
+`editor-custody.test.ts` → 538 after the editor leak that fix's review turned up → 539 after the two
+defects the browser walkthrough found in that leak fix → 541 after the three usability changes that
+walkthrough asked for → **547 in 56 files** after two tests written for the two uncovered paths whose
+failure costs most. The round-1 join arithmetic was recorded in the ledger
+**before** the merge so it could not be rationalised afterwards.
+
+Two measurement caveats, stated rather than buried. An **unrelated** vitest process from a different repo
+was resident on this machine during both runs; Vitest reported no port collision this time and both runs
+completed green with identical counts, but the branch's rule that only one lane runs the browser tier at a
+time does not extend to other projects on the same box — the same caveat 5d-ii-b's entry recorded, and it
+has now applied to two consecutive closes. And the coverage text reporter omits files at 100%, so the
+per-file figures quoted in this entry for `editor-custody.ts` were read out of the HTML report from the
+same run rather than off the terminal summary.

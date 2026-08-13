@@ -243,12 +243,21 @@ export function detachedBadge(title: HTMLElement): { update(detached: boolean): 
  * mounted at all.** That was this paragraph's own claim once, and it was wrong: a build this refusal
  * answers never reaches `scratch-compiled`, so `LambdaPane.setEditor` is never called and there is no
  * editor to put anything in — found in code review against a real worker, alongside the matching claim
- * on `LambdaPane.#refreshDetach`'s doc. `LambdaScratchpad.noSessionReply` (`scratch.ts`) retires the
- * failed attempt instead, which is what makes THIS control reappear, and `main.ts` puts the diagnostic
- * on `#link-status` (`link-status.ts`'s `forkFailed`) — the surface that survives a rebind rather than
- * one this refusal never gets to create. §4.5's standard — a thing that provably cannot work should not
+ * on `LambdaPane.#refreshDetach`'s doc. `replies.ts` puts the diagnostic on `#link-status`
+ * (`link-status.ts`'s `forkFailed`) instead — a surface that exists whether or not this pane can show
+ * anything. §4.5's standard — a thing that provably cannot work should not
  * be presented as though it might, the same one that deleted `node_to_lambda` — now cuts the other way
  * here: hiding this button for a truncated FRAME was presenting a working control as broken.
+ *
+ * **AND THE SENTENCE ABOVE USED TO SAY WHAT BROUGHT THIS CONTROL BACK AFTERWARDS**: that
+ * `ScratchBuffers.noSessionReply` "retires the failed attempt instead, which is what makes THIS control
+ * reappear". 5d-ii-c decision 2 deleted that retire — nothing ends a buffer implicitly — so a pane whose
+ * fork failed stays on the buffer that failed and this control stays withdrawn, correctly: forking a
+ * session that never built is not something it could do. **§4.5's standard therefore falls on the way
+ * OUT rather than on this button**, and the way out is design §4.4's header list, which reaches a wedged
+ * buffer whether or not a pane still shows it. That list is wired (`main.ts`), so the way out exists:
+ * retiring the row rebinds this pane home, and this control comes back with the binding rather than
+ * with anything here. (This sentence read "Until that list is wired there is none.")
  *
  * THE PARENT IS PASSED IN AND IS THE CONTROL STRIP, which is why this takes an element like
  * `detachedBadge` does rather than returning one to place. The strip is already a flex row of
@@ -364,10 +373,17 @@ export function collapseButton(
  * A SEPARATE BUTTON FROM `collapseButton`, NOT A THIRD STATE BOLTED ONTO IT, though the two glyphs
  * (`⌄`) match while both could apply. `collapseButton` toggles the LOCAL host's visibility and is
  * offered only while THIS pane already holds the mounted editor (`LambdaPane.setEditor`'s mount branch
- * is its only caller that shows it); this button is offered only while the pane's session is detached
- * and this pane does NOT hold the editor (`LambdaPane`'s `#refreshClaim`). The two conditions are
- * mutually exclusive — holding it is exactly what disqualifies this one — so a pane never offers both
- * controls at once, and there is no selector ambiguity between them.
+ * is its only caller that shows it); this button is offered only while the pane's session is detached,
+ * this pane does NOT hold the editor, AND an editor for that session exists somewhere (`LambdaPane`'s
+ * `#refreshClaim`, all three). The first two conditions are mutually exclusive with `collapseButton`'s —
+ * holding the editor is exactly what disqualifies this one — so a pane never offers both controls at
+ * once, and there is no selector ambiguity between them.
+ *
+ * **THE THIRD CONDITION IS DEFERRED-A11Y ITEM 11 AND WAS ABSENT UNTIL 5d-ii-c's LAST COMMITS**, which
+ * is why this paragraph used to name two. Without it the gate read "detached, and not showing it" and
+ * called that "the session's editor is elsewhere" — an approximation that held only while every
+ * detached pane's session had built at least once. `LambdaPane.#editorAvailable` carries the missing
+ * fact and `editor-custody.ts`'s `hasEditor` computes it; both docs have the argument.
  *
  * `aria-label` DELIBERATELY DOES NOT REUSE `collapseButton`'s "show the term editor" — IMPORTANT
  * finding, whole-branch review before merge: the two controls are mutually exclusive by construction
@@ -386,7 +402,12 @@ export function claimEditorButton(parent: HTMLElement, onClaim: () => void): { u
   el.className = 'claim-editor'
   el.textContent = '⌄'
   el.setAttribute('aria-label', 'bring the term editor to this pane')
-  el.title = 'bring the term editor to this pane — it is currently mounted on another pane'
+  // THE `title` NAMES BOTH PLACES THE EDITOR CAN BE, WHERE IT USED TO NAME ONE. It read "— it is
+  // currently mounted on another pane", which is false in the case this control matters most for: the
+  // pane that held the editor was CLOSED, the view is waiting in `editor-custody.ts`'s `heldEditors`,
+  // and clicking here is how it comes back. `hasEditor` is true on both, so the tooltip now says both.
+  // The `aria-label` is untouched — it names the ACTION, which never varied.
+  el.title = 'bring the term editor to this pane — it is mounted on another pane, or waiting for one'
   el.addEventListener('click', onClaim)
   // The same no-op guard every control in this file states, for the same reason: this runs on every
   // recorded frame during playback.

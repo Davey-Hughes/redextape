@@ -118,6 +118,37 @@ export class LambdaPane {
    * state another's input.
    */
   #detached = false
+  /**
+   * Whether this pane's session has an editor to bring here at all — `#refreshClaim`'s THIRD input, and
+   * the one whose absence made "bring the term editor to this pane" a control that provably could not
+   * work (deferred-a11y item 11, fixed here).
+   *
+   * **THE TWO INPUTS IT JOINS ONLY APPROXIMATED THIS, AND 5d-ii-c's DECISION 2 IS WHAT SEPARATED THEM.**
+   * `#detached && #editor === null` was read as "this session has an editor, mounted elsewhere" — true
+   * while a detached pane with no editor anywhere was a state the app cleaned up rather than one it
+   * left. A fork whose build failed used to END the buffer, putting `#detached` back to `false` within
+   * the same reply. Nothing ends a buffer implicitly now, so a pane stranded on a phantom fork sits with
+   * both conjuncts permanently true and no editor in existence: the control was offered forever and the
+   * click recorded a claim `reconcileEditors` could find nothing for.
+   *
+   * **TWO ROUTES REACH THAT STATE, NOT ONE — this paragraph said "the one path" and the paragraph's own
+   * last sentence contradicted it (Minor finding, review of this fix).** `replies.ts`'s `worker-error`
+   * arm calls `editorHome(session)?.setEditor(null)`, which DESTROYS the editor and retires nothing, so
+   * a pane whose worker died is left in exactly the same shape as one whose fork never built. That route
+   * has existed since 5d-ii-a and was never covered by the retire the sentence above rests on, so the
+   * approximation was already imperfect before decision 2 widened the gap.
+   *
+   * PUSHED PER FRAME BY `draw()`, NOT ASKED FOR ON THE FOUR TRANSITIONS `#refreshClaim` ALREADY RUNS ON.
+   * The other two inputs are facts about THIS pane and change only when this pane is called; this one is
+   * a fact about a session that other panes and the reply switch move — `scratch-compiled` on a buffer
+   * that finally built mounts an editor through `editorHome`, and a close hands one to custody — so a
+   * value read at those four moments would be stale in exactly the cases the field exists for.
+   * `setDetached` is driven the same way and for the same reason (`PaneSlot.render`).
+   *
+   * FALSE UNTIL TOLD OTHERWISE, which is what makes a pane built outside `main.ts` — every direct-layer
+   * test in `tests/browser/` — withhold the control rather than offer one nothing behind it can answer.
+   */
+  #editorAvailable = false
 
   constructor(host: HTMLElement, on: PaneEvents) {
     const title = document.createElement('h2')
@@ -206,13 +237,16 @@ export class LambdaPane {
    * A RE-SEED WITH THE SAME TEXT IS A NO-OP INSIDE `LambdaEditor.setText`, so this is safe on the
    * per-frame path — which, since the whole-branch review before merge, it genuinely sits on:
    * `setDetached` below now calls `setEditor(null)` itself whenever the pane it reports for stops
-   * being detached, and `setDetached` is driven every frame by `PaneSlot.render`. `main.ts` still
+   * being detached, and `setDetached` is driven every frame by `PaneSlot.render`. `replies.ts` still
    * calls this method directly for the two things only a caller outside this class can know — the
    * text a freshly-built scratch replied with (`scratch-compiled`) and a scratch whose worker just
-   * died with nothing left to recompile against (`worker-error`) — and still explicitly at retire,
-   * ahead of the draw that would reach the same answer one tick later anyway. What `main.ts` no
-   * longer has to remember is every OTHER way a pane can stop being detached: that used to require a
-   * matching `setEditor(null)` at each one, and was found missing at a third exit with no click
+   * died with nothing left to recompile against (`worker-error`). **IT ALSO SAID "and still explicitly
+   * at retire, ahead of the draw", AND THAT CALL SITE IS GONE**: it was `compile.ts`'s
+   * `editorHome()?.setEditor(null)`, already a no-op on every path that reached it (a retire rebinds
+   * its panes first, so nothing resolves), and 5d-ii-c decision 2 deleted the branch around it. A
+   * retire's editors come down through the sweep instead (`editor-custody.ts`'s `reconcileEditors`).
+   * What no caller has to remember is every OTHER way a pane can stop being detached: that used to
+   * require a matching `setEditor(null)` at each one, and was found missing at a third exit with no click
    * handler of its own to add one to (the binding selector) and briefly at a fourth that has one but
    * had not called it (`worker-error`, fixed alongside this) — see `setDetached`'s own doc.
    */
@@ -258,6 +292,27 @@ export class LambdaPane {
     const editor = this.#editor
     if (editor === null) return null
     this.#editor = null
+    // **THE NODE LEAVES TOO, AND FOR TWO CALLERS IT NEVER USED TO HAVE TO — found by driving the app in
+    // a browser, which is the only thing that could have found it.** This method dropped the reference
+    // and stripped the host's class and left `editor.dom` parented where it was, because both original
+    // callers made that invisible: `applyLayout`'s drop loop takes the whole host out of the document
+    // with the pane, and `reconcileEditors`' sweep hands the view straight to `receiveEditor`, whose
+    // `append` RELOCATES the node. The `rebind` handover in `pane-host.ts` is the first caller where the
+    // pane SURVIVES and nothing re-parents — and without this line the view stayed mounted, visible and
+    // `contenteditable`, in a pane now bound to a different buffer, with only the `.term-editor` class
+    // gone. Measured in Chromium: 458x44 px, showing the OLD buffer's term, accepting keystrokes.
+    //
+    // WORSE THAN COSMETIC, WHICH IS WHY IT IS A `remove()` AND NOT A `display: none`. The view keeps the
+    // `onEdit` it was constructed with, so a keystroke in that stray editor still reached
+    // `ScratchBuffers.recompile` — the parse error from a half-edited term was painted as a diagnostic
+    // on a DIFFERENT pane's editor, one buffer over. That is the same class of defect the handover
+    // exists to prevent, reintroduced by the handover itself.
+    //
+    // SAFE FOR THE OTHER TWO CALLERS AND FOR CODEMIRROR. Removing a node then appending it elsewhere is
+    // what `receiveEditor` already does in one step (its doc: "appending an already-mounted node
+    // relocates it"), and a view whose `dom` is out of the document is the state custody already puts
+    // every closed pane's editor in. `destroy()` is the only thing that ends a view, and this is not it.
+    editor.dom.remove()
     this.#editorHost.className = ''
     this.#collapse.update(false)
     this.#refreshClaim()
@@ -299,8 +354,45 @@ export class LambdaPane {
     if (this.#editor !== null) throw new Error('a λ pane was handed a second editor while still holding one')
     this.#editorHost.className = 'term-editor'
     this.#editorHost.append(editor.dom)
+    // **THE EDITS FOLLOW THE VIEW, AND THIS LINE IS WHY — found by driving the app, not by the suite.**
+    // A `LambdaEditor` is built by the pane that FORKS (`setEditor`'s mount branch), closing over THAT
+    // pane's `editScratch`; moving `editor.dom` here does not move the callback. So a claimed editor
+    // went on reporting through the pane that made it, and `transport.ts` resolves
+    // `slot.binding.session` at edit time — meaning the instant that pane was rebound elsewhere,
+    // keystrokes in the moved editor recompiled whatever IT was showing. `LambdaEditor.onEdit`'s own doc
+    // carries the measurement. `this.#onEdit` may be `undefined` on a pane built without the handler,
+    // which is the same "an edit that goes nowhere is invisible" split `#onEdit` already documents — and
+    // is why this assigns the same wrapper `setEditor` does rather than the field itself.
+    const onEdit = this.#onEdit
+    editor.onEdit = (src) => onEdit?.(src)
     this.#editor = editor
     this.#collapse.update(true)
+    this.#refreshClaim()
+  }
+
+  /**
+   * Whether this pane is currently showing an editor.
+   *
+   * `takeEditor`'s QUESTION WITHOUT `takeEditor`'s ANSWER — that method reports the same fact by handing
+   * the editor over, which is exactly what a caller only asking cannot afford. `editor-custody.ts`'s
+   * `hasEditor` is the caller: it resolves a session's home pane and needs to know whether that pane is
+   * holding anything, and a `takeEditor()` there would unmount the editor to find out.
+   */
+  holdsEditor(): boolean {
+    return this.#editor !== null
+  }
+
+  /**
+   * Report whether this pane's session has an editor anywhere — see `#editorAvailable` for why this is a
+   * third input rather than something this class could work out for itself.
+   *
+   * THE NO-OP GUARD IS THE SAME ONE EVERY PER-FRAME SETTER IN THIS FILE STATES, and here it also keeps
+   * `#refreshClaim` — and so `claimEditorButton.update`'s DOM write — off the hot path on the frames
+   * where nothing moved, which is most of them during playback.
+   */
+  setEditorAvailable(available: boolean): void {
+    if (available === this.#editorAvailable) return
+    this.#editorAvailable = available
     this.#refreshClaim()
   }
 
@@ -393,7 +485,7 @@ export class LambdaPane {
    * times a second for a pane that has never been forked at all.
    *
    * WHAT THIS DOES NOT COVER: a scratch whose WORKER DIES without the pane ever leaving it. Its
-   * registry entry keeps `detached: true` (nothing here retires it — only `LambdaScratchpad.retire`
+   * registry entry keeps `detached: true` (nothing here retires it — only `ScratchBuffers.retire`
    * does, and a dead worker is not that), so this method's own input never changes and this branch
    * never fires. `main.ts`'s `worker-error` arm for a scratch calls `setEditor(null)` directly for
    * exactly that reason — see its own comment there.
@@ -418,9 +510,14 @@ export class LambdaPane {
    * THE SAME "PAIR OF INPUTS ARRIVE THROUGH TWO DIFFERENT CALLS" SHAPE AS `#refreshDetach`: `#detached`
    * moves through `setDetached`, `#editor` through `setEditor`/`takeEditor`/`receiveEditor`, and
    * whichever arrives second has to see the first — so this is called from all four.
+   *
+   * **THERE ARE THREE INPUTS NOW, AND THE THIRD IS THE ONLY ONE THAT IS NOT ABOUT THIS PANE** —
+   * `#editorAvailable`, arriving through `setEditorAvailable` on the per-frame path, with the whole
+   * argument for its existence on the field's own doc. The first two say "I am on a scratch and I am not
+   * the one showing its editor"; without the third that sentence quietly assumes the editor exists.
    */
   #refreshClaim(): void {
-    this.#claim?.update(this.#detached && this.#editor === null)
+    this.#claim?.update(this.#detached && this.#editor === null && this.#editorAvailable)
   }
 
   /**
@@ -446,11 +543,21 @@ export class LambdaPane {
    * refusal that never mounts an editor at all: a failed build never reaches `scratch-compiled`, so
    * `setEditor` is never called and `#editor` stays `null` — `setDiagnostics`'s own doc already says
    * that call is a no-op with no editor mounted, which is what a diagnostic routed there would have
-   * silently hit. `onScratchReply`'s `no-session` arm instead asks `LambdaScratchpad.noSessionReply`
-   * (`scratch.ts`) to retire the failed attempt — which is what actually keeps this control offered,
-   * by putting `#detached` back to `false` rather than by anything in this method — and `main.ts` puts
-   * the diagnostic on `#link-status` (`link-status.ts`'s `forkFailed`), the surface built to survive
-   * exactly this rebind.
+   * silently hit. `onScratchReply`'s `no-session` arm puts the diagnostic on `#link-status`
+   * (`link-status.ts`'s `forkFailed`) instead, which is a surface this pane does not have to be able to
+   * show anything for.
+   *
+   * **AND THE CONTROL DOES NOT COME BACK AFTERWARDS, WHICH THIS PARAGRAPH USED TO PROMISE.** It said
+   * the arm "asks `ScratchBuffers.noSessionReply` (`scratch.ts`) to retire the failed attempt — which is
+   * what actually keeps this control offered, by putting `#detached` back to `false` rather than by
+   * anything in this method". 5d-ii-c decision 2 deleted that retire: nothing ends a buffer implicitly,
+   * so a pane whose fork failed stays bound to the buffer that failed, `#detached` stays `true`, and the
+   * gate below withholds ✎ — correctly, since that buffer has no term to fork. §4.1a's "the pane keeps
+   * offering ✎" is therefore unmet at this pane, and design §4.4 relocates the way out to the header
+   * list, which can reach a buffer no pane is showing and is wired in `main.ts`. Retiring that buffer
+   * rebinds this pane to source, which is what makes `#detached` false again and this control offered
+   * again — through the binding, exactly as the deleted retire did, and never through this method.
+   * Nothing in this method changes either way.
    *
    * WHAT STILL GATES IT: a detached pane is already on the scratchpad and has nothing to fork, and an
    * absent frame — `render(null, …)`, what a declined or not-yet-compiled leg produces — has no term

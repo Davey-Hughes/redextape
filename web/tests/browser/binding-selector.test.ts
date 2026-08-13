@@ -217,8 +217,10 @@ describe('the binding selector', () => {
    * presented as though it might). It is also today's app exactly: one session, so no selector.
    *
    * ASSERTED IN BOTH DIRECTIONS AND BACK. A control that appears and never leaves passes the middle
-   * assertion; the third is what catches it, and it is reachable — §4.3's recompile-from-source
-   * retires a scratch, which takes the λ options back down to one.
+   * assertion; the third is what catches it, and it is reachable — retiring a buffer takes the λ
+   * options back down to one. (That named `§4.3's recompile-from-source` as the gesture that does it,
+   * which 5d-ii-c decision 2 removed; what makes the third direction reachable is the retire itself,
+   * whichever surface triggers one.)
    */
   it('appears only once a second session offers this leg, and leaves again when one is retired', () => {
     const reg = new SessionRegistry()

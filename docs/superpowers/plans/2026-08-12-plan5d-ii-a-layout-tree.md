@@ -52,7 +52,7 @@ Waves 1 and 2 **add no tests**. The existing 371-test suite is the assertion tha
 | **setup and construction** — a thing built inline now comes from a factory | **the set of tests** — nothing deleted, skipped, or renamed away |
 | | **waits and timing** — no new or lengthened `until`/`settled` calls |
 
-**A wave-1 or wave-2 commit whose test diff touches an assertion is a commit that stopped being a refactor.** Stop and find what moved. Timing is listed separately because it is the one that would look reasonable: the roadmap records `settled()`'s invariant being false and the flakes that followed (roadmap:1504-1553), and reaching for a longer wait is how a real ordering change gets absorbed into the suite instead of reported by it.
+**A wave-1 or wave-2 commit whose test diff touches an assertion is a commit that stopped being a refactor.** Stop and find what moved. Timing is listed separately because it is the one that would look reasonable: the roadmap records `settled()`'s invariant being false and the flakes that followed (roadmap:1602-1651), and reaching for a longer wait is how a real ordering change gets absorbed into the suite instead of reported by it.
 
 **Every such edit is named in its commit message with its category** — `test edits: imports only (5 files)` — so review asks "are these all imports and setup", not "did anything change in eleven files".
 
@@ -459,7 +459,7 @@ EOF
 
 Create `web/src/compile.ts`. `DEBOUNCE_MS` (`main.ts:28`) moves with them; it has no other reader.
 
-**`supersede()` semantics must not change.** `schedule` claims the generation synchronously at dispatch, which is what closed the `settled()` flake (roadmap:1504-1514). Moving the function must not reorder the `supersede` call relative to the `setTimeout`.
+**`supersede()` semantics must not change.** `schedule` claims the generation synchronously at dispatch, which is what closed the `settled()` flake (roadmap:1602-1608). Moving the function must not reorder the `supersede` call relative to the `setTimeout`.
 
 - [ ] **Step 2: Rewire `main.ts`**
 
@@ -495,7 +495,7 @@ compile: the debounce pipeline, and the supersede order that had to survive
 `schedule`, its timer, DEBOUNCE_MS and the encoding picker's listener move
 together. The `supersede()` call keeps its position relative to the setTimeout:
 claiming the generation synchronously at dispatch is what closed the settled()
-flake (roadmap:1504-1514), and reordering it while moving the function would
+flake (roadmap:1602-1608), and reordering it while moving the function would
 reopen it silently.
 
 Wave 1 complete. main.ts is now wiring.
@@ -792,7 +792,7 @@ Expected: 9 passed.
 
 Temporarily change `ofSession` to ignore its `session` argument (return `this.of(leg)`), re-run, and confirm **"selects by leg AND session"** and **"follows a rebind"** both fail. Restore. Record both failure messages in the task report.
 
-This step is not optional. 5d-iii shipped three tests that passed vacuously (roadmap:5497-5503) and this is the standing correction.
+This step is not optional. 5d-iii shipped three tests that passed vacuously (roadmap:5595-5601) and this is the standing correction.
 
 - [ ] **Step 6: Commit**
 
@@ -2809,7 +2809,7 @@ Expected: all four thresholds met — `lines 94, functions 93, branches 85, stat
 
 - [ ] **Step 2: Record the real numbers**
 
-Write the four measured percentages and the test count into the task report. They go into the roadmap entry, and they must be this run's figures — 5d-iii's entry shipped stale counts and had to be corrected by its own reviewer (roadmap:5488-5495).
+Write the four measured percentages and the test count into the task report. They go into the roadmap entry, and they must be this run's figures — 5d-iii's entry shipped stale counts and had to be corrected by its own reviewer (roadmap:5576-5583).
 
 - [ ] **Step 3: Write the roadmap entry**
 

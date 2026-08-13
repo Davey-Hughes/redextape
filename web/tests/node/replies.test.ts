@@ -2,15 +2,15 @@ import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { History } from '../../src/history'
 import type { LinkWiring } from '../../src/link-wiring'
-import { PaneCollection } from '../../src/panes'
+import { PaneCollection, type PaneEntry } from '../../src/panes'
 import type { RunReply, RunRequest } from '../../src/protocol'
 import { createReplies } from '../../src/replies'
-import type { LambdaScratchpad } from '../../src/scratch'
-import type { ClientPort, SessionId } from '../../src/session-client'
-import { SessionClient } from '../../src/session-client'
+import { ScratchBuffers } from '../../src/scratch'
+import type { ClientPort, PoolPort, SessionId } from '../../src/session-client'
+import { SessionClient, SessionPool } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
-import { SessionRegistry } from '../../src/sessions'
-import type { LambdaState, TmProgram, TmState } from '../../src/types'
+import { PaneSlot, SessionRegistry } from '../../src/sessions'
+import type { Diagnostic, LambdaState, TmProgram, TmState } from '../../src/types'
 
 /**
  * **WHAT A SESSION KEEPS FROM ITS OWN `compiled` REPLY** — the retention a TM pane created later is
@@ -29,17 +29,24 @@ import type { LambdaState, TmProgram, TmState } from '../../src/types'
  * pane could not tell "the entry was written" from "the pane was pushed to".
  *
  * **EVERY INJECTED DEPENDENCY IS STOOD IN FOR, AND THEY DIVIDE IN THREE.** (Said without a count, having
- * been written as "the four injected dependencies" and been wrong: `editorHome` and `reconcileEditors`
- * are no-ops here too, and `draw` is a counter — a false arity, in a doc, about arities.) `view` and
+ * been written as "the four injected dependencies" and been wrong — a false arity, in a doc, about
+ * arities. It named `reconcileEditors` among them, which 5d-ii-c decision 2 has since deleted from the
+ * signature along with the retire it swept for.) `view` and
  * `links` are REACHED by the arm under test — the `compiled` arm dispatches two CodeMirror effects and
  * installs a link index — so they record, and their calls are asserted below, together with `draw`'s:
- * a green retention over a switch that fell through somewhere else is not a green test. `editorHome` and
- * `reconcileEditors` are honest no-ops, both belonging to `onScratchReply`'s arms, which this file does
- * not drive. `scratchpad` and `results` are not reached by the `compiled` arm at all and are `undefined`
+ * a green retention over a switch that fell through somewhere else is not a green test. `editorHome` is
+ * an honest no-op, belonging to `onScratchReply`'s arms, which `driver` does not drive. `scratchpad` and
+ * `results` are not reached by the `compiled` arm at all and are `undefined`
  * behind a cast, deliberately: an arm that starts touching either crashes this test loudly rather than
  * passing over a fake that quietly absorbs the call. There is no honester option in the node tier — an
  * `EditorView` and an `HTMLElement` both need a document, which is exactly why the browser tier owns
  * everything about this repair that can be seen.
+ *
+ * **`onScratchReply` IS DRIVEN AT THE FOOT OF THIS FILE, WHICH THE PARAGRAPH ABOVE USED TO SAY IT WAS
+ * NOT.** Its `no-session` arm needs neither a document nor a worker — the buffer collection, the
+ * registry and the pool are all reachable in this tier — so `scratchDriver` below stands `scratchpad` up
+ * for real rather than casting it away. The two harnesses are separate on purpose: `driver`'s
+ * `undefined` is an assertion about which arms may touch what, and reusing it would spend that.
  *
  * **THE CLEARING ARMS ARE NOT HERE, AND THE REASON IS THAT SAME MISSING DOCUMENT.** `no-session` and
  * `worker-error` clear the retention exactly as they clear every TM pane on the session, and both start
@@ -107,7 +114,7 @@ function driver(entry: SessionEntry) {
   const links = { setIndex: (i: unknown) => indexed.push(i) } as unknown as LinkWiring
   const replies = createReplies({
     sessions: reg,
-    scratchpad: undefined as unknown as LambdaScratchpad,
+    scratchpad: undefined as unknown as ScratchBuffers,
     results: undefined as unknown as HTMLElement,
     view: () => view,
     panes: new PaneCollection(),
@@ -115,9 +122,7 @@ function driver(entry: SessionEntry) {
     draw: () => {
       drawn += 1
     },
-    sourceSession: SOURCE,
     editorHome: () => undefined,
-    reconcileEditors: () => undefined,
   })
   return { replies, dispatched, indexed, drawn: () => drawn }
 }
@@ -179,5 +184,201 @@ describe('a session retains its last compiled machine', () => {
 
     expect(entry.tmProgram?.program).toBe(second)
     expect(entry.tmProgram?.tapeNames).toEqual(['REG'])
+  })
+})
+
+/** A `PoolPort` with no thread behind it, recording what a `retire` would have done to it. */
+function fakePort(): PoolPort & { terminated: number } {
+  const p = {
+    terminated: 0,
+    postMessage: (_m: RunRequest) => undefined,
+    addEventListener: (_t: 'message', _h: (e: { data: RunReply }) => void) => undefined,
+    terminate: () => {
+      p.terminated += 1
+    },
+  }
+  return p
+}
+
+const DIAGNOSTIC: Diagnostic = { span: { start: 0, end: 3 }, severity: 'Error', message: 'unexpected `(`' }
+
+const noSession = (diagnostics: Diagnostic[]): RunReply => ({ kind: 'no-session', gen: 1, diagnostics })
+
+/**
+ * The scratch arm's own driver: `createReplies` over a REAL `ScratchBuffers`, a real `SessionRegistry`
+ * and a real `SessionPool` with fake threads.
+ *
+ * **`driver` ABOVE CANNOT BE REUSED, AND ITS `scratchpad: undefined` IS THE REASON — deliberately, per
+ * this file's own doc**: an arm that starts touching the buffer collection is meant to crash there
+ * rather than pass over a fake. The `no-session` arm touches it on purpose, so it needs the real thing;
+ * everything except the thread is the app's own object, which is what makes "the buffer is still
+ * listed" a claim about `ScratchBuffers` rather than about a stub that agreed to say so.
+ *
+ * `links` RECORDS `setForkFailed` BECAUSE THAT IS WHERE THE DIAGNOSTICS SURFACE on the path where no
+ * editor was ever mounted (`link-status.ts`'s `forkFailed`). `results` and `view` stay `undefined`
+ * behind a cast for the reason the file's doc gives — this arm reaches neither, and an arm that starts
+ * to should say so loudly.
+ *
+ * **THE SLOT IS IN THE PANE COLLECTION, AND THAT IS NOT DECORATION.** The retire this task removes was
+ * handed `panes.all().map((p) => p.slot)`, so it could only ever move a pane the COLLECTION held: with
+ * an empty collection, "the pane stayed on the buffer" is satisfied by the old behaviour too, and the
+ * assertion that reads best is the one that would have been vacuous. It also gives the live-edit branch
+ * somewhere to deliver diagnostics to. The pane itself is a recording stub of the two members these arms
+ * touch, in `panes.test.ts`'s own idiom — a real `LambdaPane` needs a document, which is the browser
+ * tier's business (`tests/browser/scratch-edit.test.ts`).
+ */
+function scratchDriver() {
+  const reg = new SessionRegistry()
+  const ports: (PoolPort & { terminated: number })[] = []
+  const pool = new SessionPool(() => {
+    const p = fakePort()
+    ports.push(p)
+    return p
+  })
+  let forkFailed: string | null = null
+  const buffers = new ScratchBuffers({
+    registry: reg,
+    pool,
+    historyBytes: 1_000_000,
+    onReply: () => undefined,
+  })
+  const links = {
+    setForkFailed: (reason: string | null) => {
+      forkFailed = reason
+    },
+  } as unknown as LinkWiring
+  const gutter: Diagnostic[][] = []
+  const slot = new PaneSlot('lambda', SOURCE)
+  const panes = new PaneCollection()
+  panes.add({
+    id: 'lambda-0',
+    kind: 'lambda',
+    slot,
+    pane: {
+      render: () => undefined,
+      setBindings: () => undefined,
+      setDetached: () => undefined,
+      setLayoutControls: () => undefined,
+      setDiagnostics: (ds: readonly Diagnostic[]) => gutter.push([...ds]),
+    } as unknown as PaneEntry<'lambda'>['pane'],
+    host: {} as HTMLElement,
+  })
+  const replies = createReplies({
+    sessions: reg,
+    scratchpad: buffers,
+    results: undefined as unknown as HTMLElement,
+    view: () => undefined as unknown as EditorView,
+    panes,
+    links,
+    draw: () => undefined,
+    editorHome: () => undefined,
+  })
+  return { reg, pool, buffers, ports, replies, slot, gutter, forkFailed: () => forkFailed }
+}
+
+const lambdaFrame = (text: string): LambdaState => ({
+  text,
+  spans: [],
+  cut: null,
+  step: 0,
+  redex_span: null,
+  owner: 'None',
+})
+
+/**
+ * **A BUFFER THAT FAILED TO BUILD IS STILL A BUFFER** — 5d-ii-c decision 2, design §4.3's row for
+ * "worker error / poison": *ended it* -> **survives; retire is the escape**.
+ *
+ * **WHAT THIS ARM USED TO DO.** `ScratchBuffers.noSessionReply` retired the buffer synchronously on the
+ * path where its fork's build never succeeded even once — terminating its worker, dropping it from the
+ * registry and the pool, and rebinding every pane on it back to the source session — and handed the
+ * diagnostics back so the caller could report them on a surface that survived the rebind. The
+ * diagnostics half is unchanged. The retire is gone: the governing rule is that nothing ends a buffer
+ * implicitly, and a build that failed is not a user asking for the buffer to end.
+ *
+ * **WHAT THAT COSTS, SAID HERE RATHER THAN ONLY IN A PLAN.** The retire was also what put the pane back
+ * on the source session and so made `✎ fork` offerable again (design §4.1a's promised remedy). It is
+ * not offerable now: the pane stays on a buffer that will never produce a frame, reading `building…`,
+ * until the user retires it from the header list (design §4.2/§4.4), which is wired and is where that
+ * gesture lives. Retiring rebinds the pane to source and `✎ fork` comes back with the binding. That gap
+ * is the same one `compile.ts`'s `schedule` records for the recompile path, widened — and the escape is
+ * the same escape, moved from a keystroke nobody aimed to a control they do.
+ */
+describe('a poisoned buffer survives its own no-session reply', () => {
+  /**
+   * THE TASK'S OWN ASSERTION: the buffer is still in `list()`, which is the header control's input and
+   * therefore the only place a user could reach it from. A retire deletes the entry `list()` reads
+   * (`retire`'s own "the collection's own entry goes last of all"), so this fails against the old
+   * behaviour rather than describing it.
+   *
+   * THE POOL AND THE REGISTRY ARE ASSERTED BESIDE IT, AND `terminated` IS THE ONE THAT CANNOT BE
+   * SATISFIED BY ACCIDENT. A `list()` that kept its row while `retire` still ran underneath would leave
+   * a name pointing at a dead thread — the phantom `buffer-list.ts` is written to refuse — so the claim
+   * is made on the thread as well as on the menu, the same axis `scratch.test.ts` uses for the retire.
+   */
+  it('keeps the buffer listed, registered and running after a no-session reply', () => {
+    const { reg, pool, buffers, ports, replies, slot } = scratchDriver()
+    const id = buffers.fork(slot, 'not a term (((', 0)
+
+    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
+
+    expect(buffers.list().map((b) => b.id)).toContain(id)
+    expect(reg.has(id)).toBe(true)
+    expect(pool.has(id)).toBe(true)
+    expect(ports[0]?.terminated).toBe(0)
+  })
+
+  /**
+   * THE PANE STAYS WHERE THE FORK PUT IT. Rebinding it home was the retire's other visible effect, and
+   * it is the one a reader is most likely to assume survived — the pane is showing a buffer that will
+   * never build, so "put it back" is the intuitive repair. It is exactly the implicit ending decision 2
+   * refuses: the buffer would still be live and the pane would have left it without being asked to.
+   */
+  it('leaves the pane on the buffer rather than dragging it home', () => {
+    const { buffers, replies, slot } = scratchDriver()
+    const id = buffers.fork(slot, 'not a term (((', 0)
+
+    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
+
+    expect(slot.binding.session).toBe(id)
+  })
+
+  /**
+   * **THE DIAGNOSTICS STILL SURFACE, WHICH IS THE HALF THAT DID NOT CHANGE.** `#link-status` is the
+   * surface for this path because no editor was ever mounted to hold a gutter: `scratch-compiled` never
+   * fired for a build that never succeeded, so `LambdaPane.setDiagnostics` is a silent no-op. That
+   * argument used to end "…and the retire has just moved the pane anyway"; the rebind is gone and the
+   * no-editor half is what carries it now, unchanged.
+   */
+  it('reports the reason on the fork-failed surface', () => {
+    const { buffers, replies, slot, gutter, forkFailed } = scratchDriver()
+    const id = buffers.fork(slot, 'not a term (((', 0)
+
+    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
+
+    expect(forkFailed()).toContain('unexpected `(`')
+    // AND NOT INTO THE PANE, which is the branch's other half: there is no editor behind
+    // `setDiagnostics` on a build that never reached `scratch-compiled`, so routing it there is the
+    // silent no-op `#link-status` exists to replace.
+    expect(gutter).toEqual([])
+  })
+
+  /**
+   * THE LIVE-EDIT PATH IS UNTOUCHED AND STILL DISTINGUISHED. A buffer with a frame behind it takes the
+   * other branch — the diagnostics go to the pane's own gutter and nothing is reported as a failed fork
+   * — and that discrimination is the whole reason `noSessionReply` still returns something rather than
+   * nothing. Without this case the arm could report every parse failure as a fork failure and every
+   * assertion above would still pass.
+   */
+  it('does not report a mid-edit parse failure as a failed fork', () => {
+    const { reg, buffers, replies, slot, gutter, forkFailed } = scratchDriver()
+    const id = buffers.fork(slot, 'λx. x', 0)
+    reg.legOf({ session: id, leg: 'lambda' }).hist.push(lambdaFrame('λx. x'), 1)
+
+    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
+
+    expect(forkFailed()).toBeNull()
+    expect(gutter).toEqual([[DIAGNOSTIC]])
+    expect(buffers.list().map((b) => b.id)).toContain(id)
   })
 })

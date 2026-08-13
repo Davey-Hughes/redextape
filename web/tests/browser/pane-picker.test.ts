@@ -27,6 +27,7 @@ const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
     <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
+    <button type="button" id="buffers">buffers</button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
   <main></main>
@@ -264,6 +265,14 @@ describe('a split creates what the picker was asked for', () => {
   it('starts the new pane on the session that was picked, not on the one that was split', async () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')?.click()
     await until(() => editorsIn('lambda-0') > 0, 'the fork to mount an editor')
+    // THE PAIR THIS FORK LANDED ON, CAPTURED BEFORE THE SPLIT. The last assertion below named
+    // `optionValue('lambda', 'lambda-scratch')` — 5d-i's one fixed scratch id, which 5d-ii-c decision 1
+    // replaces with a name minted per fork; the number depends on how many forks ran earlier in this
+    // FILE (one `main()` per page), so it is not a constant a test can write. Reading it here also
+    // sharpens the claim: the splitting pane is unmoved from THE BUFFER IT WAS ON, not merely still on
+    // something detached.
+    const buffer = selectOf('lambda-0')?.value ?? ''
+    expect(buffer).not.toBe(optionValue('lambda', 'source'))
 
     const before = leafIds()
     pickSplit('lambda-0', 'split left and right', 'λ · source')
@@ -274,9 +283,9 @@ describe('a split creates what the picker was asked for', () => {
     expect(kindOf(created)).toBe('lambda')
     expect(selectOf(created)?.value).toBe(optionValue('lambda', 'source'))
     expect(document.querySelector(`[data-leaf="${created}"] h2`)?.textContent).not.toContain('[detached]')
-    // The pane the split was performed ON is still on the scratch — this created a pane, it did not
-    // rebind one.
-    expect(selectOf('lambda-0')?.value).toBe(optionValue('lambda', 'lambda-scratch'))
+    // The pane the split was performed ON is still on the buffer it forked — this created a pane, it
+    // did not rebind one.
+    expect(selectOf('lambda-0')?.value).toBe(buffer)
     expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('[detached]')
   })
 })

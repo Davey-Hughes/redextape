@@ -1,13 +1,19 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 
 /**
  * **THE SECOND EDIT GESTURE, DRIVEN THROUGH THE APP** — design §4.3's `editScratch`, plan T8's last
  * obligation. `scratch-fork.test.ts`'s new DOM `describe` proves the FIRST gesture (a truncated frame
  * forks and seeds an editor); this file proves the second one works on what that editor becomes: a
- * real CodeMirror buffer whose keystrokes recompile the SAME scratch (`LambdaScratchpad.recompile`,
- * not a second fork), leave the source session's own result alone, and disappear the moment a source
- * recompile retires the scratchpad underneath them.
+ * real CodeMirror buffer whose keystrokes recompile the SAME scratch (`ScratchBuffers.recompile`,
+ * not a second fork), and leave the source session's own result alone.
+ *
+ * **THIS SENTENCE USED TO END "and disappear the moment a source recompile retires the scratchpad
+ * underneath them", AND STAGE 4 ASSERTED IT.** 5d-ii-c decision 2 (design §4.3's table) removes that
+ * retire: a source keystroke ends no buffer, so the editor stays mounted over a session that is still
+ * running, and STAGE 5 — new with the rewrite — types into it afterwards to prove the buffer's own
+ * worker is still answering rather than merely that its box is still on screen.
  *
  * **ONE SEQUENCED `it`, NOT THREE INDEPENDENT ONES, AND THAT IS A DELIBERATE DEPARTURE FROM THE
  * BRIEF'S SKETCH.** `scratch-app.test.ts` already states the house rule this follows: the states here
@@ -27,6 +33,7 @@ const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
     <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
+    <button type="button" id="buffers">buffers</button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
   <main></main>
@@ -70,12 +77,19 @@ function typeIntoScratchEditor(text: string): void {
 
 describe('editing the scratch, through the app', () => {
   beforeAll(async () => {
+    // THE LAYOUT KEY IS SHARED ACROSS THE WHOLE BROWSER TIER — every test file gets its own page but
+    // the same origin, so a file that persists a tree leaves it for whichever file mounts next.
+    // `main()` reads this key ONCE, while resolving `let tree`, so it has to be cleared before the
+    // import below and not in a `beforeEach`. `scratch-buffers.test.ts` is where the argument lives:
+    // it is the file that first stored a tree with one of `defaultLayout()`'s own leaves missing, and
+    // this file's `[data-leaf="lambda-0"]` lookups all answered `null` under it.
+    localStorage.removeItem(LAYOUT_STORAGE_KEY)
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     await until(idle, 'the first compile')
   })
 
-  it('edits recompile the scratch, leave the source result untouched, report bad text without losing the last good frames, and vanish on a source recompile', async () => {
+  it('edits recompile the scratch, leave the source result untouched, report bad text without losing the last good frames, and survive a source recompile', async () => {
     // STAGE 0 — settled on the sample program, which never truncates at either budget, so the fork
     // control is available at the frontier with no scrubbing needed.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
@@ -113,11 +127,33 @@ describe('editing the scratch, through the app', () => {
     )
     expect(term()).toBe(lastGood)
 
-    // STAGE 4 — recompiling from source retires the scratchpad and takes the editor with it (design
-    // §4.3: "the same mechanism as poison recovery"; §4.2: "mounted and unmounted, never hidden").
+    // STAGE 4 — RECOMPILING FROM SOURCE LEAVES BOTH THE BUFFER AND THE BOX ALONE, WHERE THIS STAGE
+    // USED TO ASSERT THAT IT "retires the scratchpad and takes the editor with it" (5d-i design §4.3:
+    // "the same mechanism as poison recovery"). 5d-ii-c decision 2 ends that: `compile.ts` no longer
+    // retires anything, so `editorHost()` — which this stage checked was `null` — must still be there,
+    // and the pane must still be `[detached]` on the buffer it was editing.
+    //
+    // **IT IS ASSERTED FROM THE MIDDLE OF A BAD EDIT ON PURPOSE.** The editor is holding `(λa.` from
+    // STAGE 3, which is the state the old behaviour was most defensible in: a keystroke in the source
+    // editor threw away a buffer whose text did not parse, and the user got no say. Now the diagnostics
+    // stay, the last good frames stay, and STAGE 5 recovers the buffer by fixing the text.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let y = 1; y + 1' } })
-    expect(editorHost()).toBeNull()
-    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).not.toContain('[detached]')
+    expect(editorHost()).not.toBeNull()
+    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('[detached]')
+    expect(term()).toBe(lastGood)
+    // AND THE SOURCE REALLY DID RECOMPILE, so none of the four lines above passed on a keystroke that
+    // never reached `schedule`.
     await until(() => idle() && resultsText().includes('2'), 'the recompile from source')
+    expect(editorHost()).not.toBeNull()
+    expect(term()).toBe(lastGood)
+
+    // STAGE 5 — THE BUFFER'S OWN THREAD IS STILL ANSWERING, which is the half a mounted `.term-editor`
+    // cannot show: the box would look identical over a session `pool.unbind` had terminated. A real
+    // keystroke into it recompiles the SAME buffer (`ScratchBuffers.recompile`), and the frames region
+    // moving to the new term is that worker replying after the source recompile that used to kill it.
+    typeIntoScratchEditor('(λm. m) (λn. n)')
+    await until(() => term() !== lastGood, 'the buffer to recompile after the source did')
+    expect(term()).toContain('n')
+    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('[detached]')
   })
 })

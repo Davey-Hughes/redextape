@@ -4,6 +4,7 @@ import type { LambdaPane } from './lambda-pane'
 import { isCoincident, type Link, runningFocus, sourceNodeOwner } from './link'
 import type { LinkWiring } from './link-wiring'
 import type { PaneCollection } from './panes'
+import type { SessionId } from './session-client'
 import type { SessionRegistry } from './sessions'
 import type { TmPane } from './tm-pane'
 
@@ -40,6 +41,12 @@ import type { TmPane } from './tm-pane'
  * tree rather than as a `layout.ts` import here for the reason above. It is the one input the split
  * picker needs that this module cannot already see: `SessionRegistry.pairs()` and each pane's own
  * binding, which are the rest of a `SplitChoices`, are both already in the loop below's hands.
+ *
+ * `hasEditor: (session) => boolean` IS THE SAME SHAPE AGAIN, over the OTHER thing `main.ts` owns and
+ * this module has no other route to: `editor-custody.ts`'s two maps. A λ pane cannot work out whether
+ * its session has an editor anywhere — that is a fact about other panes and about the editors waiting
+ * between them — so `LambdaPane.setEditorAvailable` is fed from here, per frame, alongside `renderLink`.
+ * A thunk for the same reason as its two siblings: custody moves under a `draw()` that did not cause it.
  */
 export function createDraw(deps: {
   view: () => EditorView
@@ -48,8 +55,9 @@ export function createDraw(deps: {
   links: LinkWiring
   leaves: () => number
   sourceAvailable: () => boolean
+  hasEditor: (session: SessionId) => boolean
 }): () => void {
-  const { view, sessions, panes, links: linkWiring, leaves, sourceAvailable } = deps
+  const { view, sessions, panes, links: linkWiring, leaves, sourceAvailable, hasEditor } = deps
   return () => {
     // "THE" λ AND TM PANES, RESOLVED THROUGH THE COLLECTION RATHER THAN CLOSED OVER — AND EITHER MAY
     // BE ABSENT. This block used to destructure `of(leg)[0]` and throw when it came back `undefined`,
@@ -154,7 +162,20 @@ export function createDraw(deps: {
     // withdraw the window without a click, and every stepping control routes through `draw()` rather
     // than through `setLinkTo`.
     const lambdaWin = linkWiring.lambdaLinkWindow(l)
-    for (const p of panes.of('lambda')) (p.pane as LambdaPane).renderLink(lambdaWin)
+    // THE λ-ONLY PER-FRAME PASS, AND IT CARRIES TWO FACTS NOW. `renderLink` is per-leg (one window,
+    // fanned out); `setEditorAvailable` is PER PANE, because it is a question about each pane's own
+    // binding — two λ panes on two different buffers get two different answers, and two on the SAME
+    // buffer get the same one, which is exactly the state the control exists to resolve.
+    //
+    // WHY IT IS HERE AND NOT IN `PaneSlot.render` BESIDE `setDetached`, which it otherwise resembles in
+    // every way: that call is leg-agnostic (`PaneView`), and an editor-availability setter on `TmPane`
+    // would be a method that could only ever be ignored. The loop above is the render pass for BOTH
+    // legs; this one is already the place where "λ panes, and only λ panes" is said.
+    for (const p of panes.of('lambda')) {
+      const pane = p.pane as LambdaPane
+      pane.renderLink(lambdaWin)
+      pane.setEditorAvailable(hasEditor(p.slot.binding.session))
+    }
 
     // THE RUNNING FOCUS: a SECOND, INDEPENDENT layer from `l`/`link` above, computed here rather than
     // fed by `l` — `link` is the pin a click set, `focus` is the marker that moves every β-step, and

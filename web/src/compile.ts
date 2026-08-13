@@ -1,7 +1,5 @@
 import type { EditorView } from '@codemirror/view'
 import type { LinkWiring } from './link-wiring'
-import type { PaneCollection } from './panes'
-import type { LambdaScratchpad } from './scratch'
 import type { SessionId } from './session-client'
 import type { SessionRegistry } from './sessions'
 
@@ -20,15 +18,19 @@ const DEBOUNCE_MS = 300
  * `view` IS A THUNK, NOT A VALUE, SAME REASON AS `link-wiring.ts`, `draw.ts` AND `replies.ts`. The
  * picker's `change` listener is wired here, at construction, but `main.ts` does not assign `let view:
  * EditorView` until the `EditorView` itself is constructed — which happens AFTER this factory runs, so
- * a value parameter would capture `undefined` forever. `links` and `draw`, by contrast, are real values
- * by the point `main.ts` calls this factory: both are already-assigned, same as they are for
- * `createReplies`.
+ * a value parameter would capture `undefined` forever. `links`, by contrast, is a real value by the
+ * point `main.ts` calls this factory — already assigned, same as it is for `createReplies`.
  *
- * `panes: PaneCollection` REPLACES `lambdaPane`/`lambdaSlot`/`tmSlot` (T7). `schedule`'s body calls
- * `scratchpad.retire(sourceSession, panes.all().map((p) => p.slot))` — every slot in the collection,
- * not the literal `[lambdaSlot, tmSlot]`; `retire` only rebinds a slot whose own binding names the
- * scratchpad's session, so passing every slot stays correct once a second λ pane exists to also be
- * homed, same as `replies.ts`'s identical conversion of the sibling call in `noSessionReply`.
+ * **FOUR DEPENDENCIES LEFT WITH THE RETIRE, AND THIS PARAGRAPH IS WHERE THEY USED TO BE ARGUED FOR.**
+ * `scratchpad: ScratchBuffers`, `panes: PaneCollection`, `draw: () => void` and `reconcileEditors:
+ * () => void` were all here to serve ONE branch — the retire a source keystroke used to perform — and
+ * 5d-ii-c decision 2 deletes it; `schedule`'s own comment has that argument and the gap it opens.
+ * Nothing else in this file ever read them, because a compile is a `supersede` and a `request` against
+ * the source session's own client and nothing more. What stood here justified handing `retire`
+ * `panes.all().map((p) => p.slot)` rather than the literal `[lambdaSlot, tmSlot]` (T7) — **and the
+ * sibling call this pointed at, "`replies.ts` makes the identical conversion for the sibling call in
+ * `noSessionReply`", is gone too**: the next task took the retire out of that arm as well, so neither
+ * file passes slots to anything any more. `replies.ts`'s own `no-session` arm records what went with it.
  *
  * `sourceSession` IS NOT IN THE TASK BRIEF'S SIGNATURE, AND IS NEEDED ANYWAY. It is the literal
  * source-session id `main.ts` names once at construction, and is not derivable from anything else this
@@ -36,56 +38,36 @@ const DEBOUNCE_MS = 300
  * `createReplies`'s own dependency of the same name and for the same reason: every other dep in this
  * signature is camelCase.
  *
- * `tmPane` IS IN THE BRIEF'S SIGNATURE AND IS NOT HERE. `schedule` never reads it — the only pane it
- * touches is `setEditor(null)`, on the branch where a scratchpad retires; the TM leg has no scratchpad
- * to reflect and nothing in this file's moved body ever mentions a TM pane. Grepping the moved code for
- * it turns up nothing.
+ * `tmPane` IS IN THE BRIEF'S SIGNATURE AND IS NOT HERE, and no pane of any leg is here now. `schedule`
+ * never read it — the only pane this file ever touched was `setEditor(null)` on the branch where a
+ * scratchpad retired, and that branch is gone; the TM leg never had a scratchpad to reflect and nothing
+ * in this file's moved body ever mentioned a TM pane. Grepping the moved code for it turns up nothing.
  *
- * `reconcileEditors: () => void` REPLACES AN `editorHome: () => LambdaPane | undefined` THUNK THIS FILE
- * USED TO CALL `setEditor(null)` THROUGH — IMPORTANT finding, re-review of the whole-branch review's own
- * custody fix. Both spellings are about the same moment (a retire has to leave no `LambdaEditor` behind
- * for a session that no longer exists), and the narrow one could only ever reach an editor a pane was
- * still HOLDING. It could not reach one in CUSTODY — `editor-custody.ts`'s `heldEditors`, where a closed pane's
- * editor waits — and a custody entry is keyed by SESSION while the scratch session's id is a constant
- * the next fork re-registers, so the entry outlived the incarnation that produced it and was handed to
- * the next pane to legitimately hold one. See `editor-custody.ts`'s `reconcileEditors` for the fix's own account
- * — INCLUDING THE THIRD ROUND'S CORRECTION TO IT: that sweep visited the sessions `editorOwner` named,
- * so it could not see a custody entry with no CLAIM against it either, until its custody pass was given
- * `heldEditors` as its own domain. That is a fact about the callee, not about this call site, and the
- * dependency was already the right one — a narrower reading of "what could this call not reach" is
- * exactly what left the second gap open. What matters here is that unmounting is not a thing this file
- * should be describing pane by pane.
- * `undefined` HAD ALREADY MADE THE OLD CALL DEAD, WHICH IS WORTH SAYING BECAUSE IT IS WHY NOTHING
- * NOTICED: `retire` rebinds every slot in the collection back to `home` SYNCHRONOUSLY, before it
- * returns, so by the line below `editorHomeFor` could no longer resolve any pane to the retiring session
- * and `editorHome()?.setEditor(null)` was `undefined?.` on every path that reached it. The mounted
- * editor came down one tick later through `LambdaPane.setDetached`'s teardown instead — which is exactly
- * why a broken line here reported nothing.
+ * **THE EDITOR SWEEP AND THE FINDING BEHIND IT ARE RECORDED WHERE THE SWEEP STILL HAPPENS, NOT HERE.**
+ * This file took `reconcileEditors: () => void` — and, before that, a narrow `editorHome: () =>
+ * LambdaPane | undefined` thunk it called `setEditor(null)` through — because a retire must leave no
+ * `LambdaEditor` behind for a session that no longer exists, including one in CUSTODY
+ * (`editor-custody.ts`'s `heldEditors`, where a closed pane's editor waits) which the narrow thunk could
+ * not reach at all. Both spellings went with the retire. The account of that IMPORTANT finding, and of
+ * the third round's correction to it — the sweep visited the sessions `editorOwner` named, so a custody
+ * entry with no CLAIM against it stayed invisible until `heldEditors` became its own domain — lives in
+ * `editor-custody.ts`'s `reconcileEditors`. **THIS SENTENCE ALSO NAMED "`replies.ts`'s call site, which
+ * is the app's remaining retire path", AND THAT PATH IS GONE TOO**: the task after this one removed that
+ * arm's retire and its `reconcileEditors` dependency with it. The sweep is called from `applyLayout`, on
+ * every layout gesture, and from `main.ts`'s header-list retire handler, which is the one place in
+ * `src/` that ends a buffer (design §4.2/§4.4). (Written without the arity it opened with — "the sweep
+ * has two callers now" — for the reason this slice has now applied twice elsewhere: a count is the part
+ * of a sentence that rots first, and naming both callers says strictly more.)
  */
 export function createCompile(deps: {
   sessions: SessionRegistry
-  scratchpad: LambdaScratchpad
   results: HTMLElement
   picker: HTMLSelectElement
   view: () => EditorView
-  panes: PaneCollection
   links: LinkWiring
-  draw: () => void
   sourceSession: SessionId
-  reconcileEditors: () => void
 }): { schedule(src: string): void } {
-  const {
-    sessions,
-    scratchpad,
-    results,
-    picker,
-    view,
-    panes,
-    links: linkWiring,
-    draw,
-    sourceSession,
-    reconcileEditors,
-  } = deps
+  const { sessions, results, picker, view, links: linkWiring, sourceSession } = deps
 
   let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -109,63 +91,36 @@ export function createCompile(deps: {
     results.dataset.state = 'running'
     // A SOURCE KEYSTROKE IS ALSO THE OTHER CLEAR SITE FOR `forkFailed` — see its own doc. `schedule`
     // runs on every keystroke, unconditionally, which is what makes this the right place: a report
-    // about a click on the OLD program is not news about whatever the user is typing now, whether or
-    // not this particular keystroke happens to retire a scratchpad.
+    // about a click on the OLD program is not news about whatever the user is typing now. That was the
+    // argument while this keystroke could also end a buffer, and it is unchanged now that it cannot.
     linkWiring.setForkFailed(null)
-    // RECOMPILE-FROM-SOURCE RETIRES THE SCRATCHPAD AND TERMINATES ITS WORKER — design §4.3,
-    // deliberately the same mechanism as §4.2's poison recovery so the app has ONE recovery path.
+    // **A SOURCE KEYSTROKE ENDS NO BUFFER, AND THIS IS WHERE THE CALL THAT ENDED ONE WAS DELETED —
+    // 5d-ii-c decision 2, design §4.3.** `schedule` used to call `scratchpad.retire(...)` on this line,
+    // synchronously at dispatch: it terminated the buffer's worker and rebound every pane bound to it
+    // back to `sourceSession`, so the pane came home on the keystroke that invalidated the buffer's
+    // provenance rather than `DEBOUNCE_MS` plus a compile later. §4.3's table is the whole change —
+    // "recompile from source: ended it -> **survives**" — and a scratch buffer is now an independent λ
+    // session the user edits, which nothing but an explicit retire ends.
     //
-    // AT DISPATCH, NOT ON THE `compiled` REPLY, and the difference is a second of stale screen. This
-    // runs synchronously on the keystroke that invalidates the scratchpad's provenance, so the pane
-    // is back on the source session immediately; waiting for the reply would leave a detached pane
-    // showing a scratch term for `DEBOUNCE_MS` plus a compile — and `no-session` and `worker-error`
-    // are recompiles too, so the reply-side version is three call sites where this is one.
+    // **IT WAS ALSO THE APP'S POISON RECOVERY, AND THE HEADER LIST HAS INHERITED THAT ROLE — design
+    // §3.4 and §4.4.** 5d-i §4.3 made this call the recovery path on purpose ("the same mechanism as
+    // poison recovery"), so a wedged buffer died on the next keystroke without the user ever learning it
+    // was wedged. Removing it removed a safety mechanism, and **this paragraph read "until the header
+    // list is mounted beside `reset layout` there is no way to reclaim a poisoned buffer at all"** while
+    // `buffer-list.ts` was written, tested and imported by nobody. `main.ts` builds it now, beside
+    // `reset layout`, and its retire is the escape — reachable whether or not a pane still shows the
+    // buffer, which is why §4.4 put it in the header rather than in pane chrome. Recorded here rather
+    // than only in a plan, because this file is where a reader asks what a recompile does to a buffer.
     //
-    // GUARDED BY ITS OWN RETURN VALUE RATHER THAN BY A `has` HERE. `schedule` runs on EVERY keystroke
-    // while the post itself is debounced, and the editor's update listener says why it does not call
-    // `draw()` on a keystroke: `hist` has not changed, so repainting both panes is pure waste.
-    // `retire` answers whether anything moved, so the repaint happens on the one keystroke that
-    // retired a scratchpad.
+    // THREE MORE THINGS WENT WITH THE CALL, and all three existed only to serve it. The
+    // `scratchpad.list().at(-1)` placeholder that picked WHICH buffer a keystroke ended — deliberately
+    // visible in a caller that could not justify the choice, rather than hidden as a rule inside a
+    // collection that has ids for everything else. The `reconcileEditors()` that had to leave no
+    // `LambdaEditor` behind, mounted or in custody, for the session the retire killed. And the `draw()`
+    // beside it, which repainted the panes the rebind had just moved: nothing here changes a binding
+    // now, so there is nothing for this path to repaint, and the source's own frames arrive through
+    // `replies.ts` and drive their own.
     //
-    // `reconcileEditors()` IN THE SAME BRANCH, BEFORE `draw()`. A retired scratchpad has no term left
-    // to show in the box that was editing it — `retire`'s own doc: "the text in the box is lost"
-    // (design §4.3) — and no `LambdaEditor` for it may survive this line, whether it is MOUNTED on a
-    // pane or WAITING in `editor-custody.ts`'s `heldEditors` after the pane holding it was closed. Both are one
-    // live CodeMirror instance with its own pending debounce over a session `pool.unbind` has just
-    // terminated; the second one is what a `setEditor(null)` through a single pane could not reach, and
-    // is the Important finding this call replaces (see the `reconcileEditors` dependency's own doc).
-    //
-    // **THE WAITING HALF OF THAT SENTENCE WAS STILL FALSE FOR ONE ROUND AFTER IT WAS WRITTEN, AND THE
-    // FIX IS IN THE CALLEE RATHER THAN HERE.** `reconcileEditors` swept the sessions `editorOwner`
-    // named, so a held editor whose claim had been dropped — which is what `reset layout` does to a
-    // closed pane's claim — was invisible to this call, and this branch retired its session while it
-    // went on living. The line here did not change; its domain did. Recorded at this call site anyway,
-    // because "a retire leaves no editor behind" is the claim THIS file makes and the one a reader
-    // checks from here.
-    //
-    // THE SWEEP HAPPENS AT THE RETIRE SITE, AND NOT BY MAKING THIS PATH CALL `applyLayout()` — the
-    // deliberate half of the choice, recorded because both would have worked. The asymmetry that caused
-    // the finding is that this path calls `draw()` while every layout gesture calls `applyLayout()`, and
-    // only the latter reconciles editors; the cheap-looking repair is to call `applyLayout()` here too.
-    // It is the wrong one. `applyLayout`'s own doc opens with "panes are created and removed here and
-    // nowhere else", and it also re-renders the tree and re-serialises it into `localStorage` — none of
-    // which a retire has any business doing, because a retire changes no leaf. Calling
-    // `reconcileEditors` directly says exactly what changed (a session died, so its editor has nowhere
-    // to be) without claiming the tree moved, and keeps ONE place that decides where every editor lives
-    // rather than adding a second teardown for `applyLayout`'s to be kept in step with.
-    //
-    // Guarded by the same boolean as `draw()`, for the same reason: most recompiles retire nothing, and
-    // an unguarded sweep on every keystroke would iterate `panes.of('lambda')` finding `null` every time
-    // it already did.
-    if (
-      scratchpad.retire(
-        sourceSession,
-        panes.all().map((p) => p.slot),
-      )
-    ) {
-      reconcileEditors()
-      draw()
-    }
     // THE SOURCE SESSION BY NAME, NOT THROUGH A PANE'S BINDING. Recompiling is what the editor does to
     // the session it is the source of; it is not something a pane slot points at, so this stays
     // addressed to `sourceSession` however the three panes end up bound. Resolved inside `schedule`

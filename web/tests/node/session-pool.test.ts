@@ -145,9 +145,11 @@ describe('SessionPool', () => {
   // handles. `tests/browser/pool-isolation.test.ts` is the half that shows the separation is real at
   // the thread level, which no fake can.
   //
-  // THIS IS ALSO §4.3's RECOMPILE PATH IN MINIATURE — recompile-from-source terminates the scratch's
-  // worker while the source session keeps running, so "unbind one, the rest live" is not a tidiness
-  // property, it is the mechanism that path is built on.
+  // THIS IS ALSO §4.3's RETIRE PATH IN MINIATURE — retiring a buffer terminates its worker while the
+  // source session keeps running, so "unbind one, the rest live" is not a tidiness property, it is the
+  // mechanism that path is built on. (It said "recompile-from-source terminates the scratch's worker",
+  // which was the trigger until 5d-ii-c decision 2; the mechanism it names is unchanged, and with
+  // buffers plural the surviving sessions include the other buffers.)
   it('unbinding one session leaves every other session running', () => {
     const { pool, ports } = harness()
     const source = pool.bind('source', () => {})
@@ -168,8 +170,10 @@ describe('SessionPool', () => {
     expect(ports[0]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'still here', encoding: 'unary' })
   })
 
-  // §4.3 calls `unbind` on every recompile-from-source, and most recompiles happen with no scratch
-  // in the pool at all. See `unbind`'s doc for why this is idempotent where `bind` throws.
+  // §4.3 calls `unbind` from a retire, and a retire can name a buffer whose worker is already gone —
+  // this was "on every recompile-from-source, and most recompiles happen with no scratch in the pool at
+  // all" until 5d-ii-c decision 2 removed that caller. See `unbind`'s doc for why this is idempotent
+  // where `bind` throws.
   it('unbinding a session that has no worker does nothing', () => {
     const { pool, ports } = harness()
     pool.bind('source', () => {})

@@ -5,6 +5,7 @@ import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirro
 import init, { analyze, classifySource, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
 import { APPEARANCE_LABEL, applyAppearance, nextAppearance, readStored, STORAGE_KEY } from './appearance'
 import { showBanner } from './banner'
+import { bufferList } from './buffer-list'
 import { createCompile } from './compile'
 import { createDraw } from './draw'
 import { createEditorCustody } from './editor-custody'
@@ -28,7 +29,7 @@ import { type LeafId, PaneCollection } from './panes'
 import type { RunReply } from './protocol'
 import { HISTORY_BYTES } from './protocol'
 import { createReplies } from './replies'
-import { LambdaScratchpad } from './scratch'
+import { ScratchBuffers } from './scratch'
 import { type SessionId, SessionPool } from './session-client'
 import { SessionRegistry } from './sessions'
 import type { TmPane } from './tm-pane'
@@ -118,8 +119,31 @@ async function main(): Promise<EditorView> {
   const picker = document.querySelector<HTMLSelectElement>('#encoding')
   const appearanceButton = document.querySelector<HTMLButtonElement>('#appearance')
   const restoreLayoutButton = document.querySelector<HTMLButtonElement>('#restore-layout')
+  /**
+   * THE BUFFER LIST'S BUTTON — design §4.2's `[buffers 3 ▾]`, queried here exactly as `#appearance` and
+   * `#restore-layout` are, because `bufferList` takes a button rather than building one (its own doc).
+   *
+   * **NO `aria-label`, WHERE THE TASK BRIEF'S MARKUP CARRIED `aria-label="scratch buffers"`.** An
+   * `aria-label` REPLACES an element's contents as its accessible name, and the contents here are the
+   * readout: `bufferList.update` writes `buffers 3 ▾` into them at every moment the count changes,
+   * precisely so the header states how many buffers exist while the list is closed. A label naming the
+   * control and not the count would make that readout inaudible to the one reader who cannot see it —
+   * the opposite of what `#restore-layout`'s label does, which EXPANDS a terse visible word rather than
+   * hiding a number. `aria-haspopup`/`aria-expanded` (both `bufferList`'s) are what announce that it
+   * opens something.
+   */
+  const buffersButton = document.querySelector<HTMLButtonElement>('#buffers')
   const root = document.querySelector<HTMLElement>('main')
-  if (!results || !editorHost || !linkStatusHost || !picker || !appearanceButton || !restoreLayoutButton || !root) {
+  if (
+    !results ||
+    !editorHost ||
+    !linkStatusHost ||
+    !picker ||
+    !appearanceButton ||
+    !restoreLayoutButton ||
+    !buffersButton ||
+    !root
+  ) {
     throw new Error('the page is missing a mount point')
   }
 
@@ -197,16 +221,18 @@ async function main(): Promise<EditorView> {
    * **T8 HAS LANDED AND THE APP CAN NOW HOLD TWO, WHICH RETIRES THE SECOND HALF OF THE PARAGRAPH
    * ABOVE BUT NOT THE FIRST.** The λ pane's fork control registers a second entry (`scratchpad`
    * below, `scratch.ts`), so the selector this app draws is no longer hypothetical. The reason the
-   * registry is a module survives it: the singleton must be asserted on POOL SIZE, which is not
-   * reachable from the DOM, and this app has ONE λ pane — so "two panes on two λ sessions" still
-   * cannot be performed here, whatever the registry can hold.
+   * registry is a module survives it: how many sessions a fork produces must be asserted on POOL SIZE,
+   * which is not reachable from the DOM, and this app has ONE λ pane — so "two panes on two λ
+   * sessions" still cannot be performed here, whatever the registry can hold.
    *
    * **T12 (5d-ii-a) RETIRES THE LAST CLAUSE TOO.** `applyLayout` (`pane-host.ts`) can now put a second
    * `'lambda'`-kind pane on screen from a layout split, and the binding selector already lets either
    * one point at a different registered session — so "two panes on two λ sessions" is mechanically
    * reachable through the UI, not only through `tests/node/sessions.test.ts`'s hand-built panes. What
-   * survives is the reason the registry is a module: the SINGLETON is still asserted on pool size,
-   * which no DOM query reaches regardless of how many panes exist to watch it.
+   * survives is the reason the registry is a module: HOW MANY SESSIONS A FORK PRODUCES is still
+   * asserted on pool size, which no DOM query reaches regardless of how many panes exist to watch it.
+   * 5d-ii-c decision 1 changed the number that assertion expects — a fork mints a buffer per call
+   * rather than reusing one — and left the axis exactly where 5d-i put it.
    */
   const sessions = new SessionRegistry()
 
@@ -217,16 +243,22 @@ async function main(): Promise<EditorView> {
    */
   const SOURCE_SESSION: SessionId = 'source'
 
-  /**
-   * The one λ scratchpad — design §4.3's singleton, named here for the reason `SessionEntry.label`'s
-   * doc gives: `main.ts` names the app's sessions, `sessions.ts` and `scratch.ts` never do.
-   *
-   * THE LABEL IS WHAT THE BINDING SELECTOR PUTS IN FRONT OF A USER, so it is words rather than the id
-   * — `tests/browser/binding-selector.test.ts` already asserts the options are told apart by their
-   * labels and not by colour or position (§6).
-   */
-  const LAMBDA_SCRATCH: SessionId = 'lambda-scratch'
-  const LAMBDA_SCRATCH_LABEL = 'λ scratchpad'
+  // **THE λ SCRATCH ID AND LABEL USED TO BE DECLARED HERE, AND THEY ARE NOT ANY MORE.** They read
+  // `const LAMBDA_SCRATCH: SessionId = 'lambda-scratch'` / `'λ scratchpad'`, named in this file for the
+  // reason `SessionEntry.label`'s doc gave: `main.ts` names the app's sessions and `sessions.ts` never
+  // does. 5d-ii-c decision 1 makes a fork mint a buffer per call, so there is no fixed name for this
+  // file to write down before the session exists — `ScratchBuffers.fork` mints id and label together,
+  // and `SessionEntry.label`'s doc now draws the line where it was always really drawn: a session is
+  // named where it is CREATED, never in the registry that holds it.
+  //
+  // THE LABEL IS STILL WHAT THE BINDING SELECTOR PUTS IN FRONT OF A USER, which is why a buffer's is
+  // words (`scratch 2`) rather than its id — `tests/browser/binding-selector.test.ts` asserts the
+  // options are told apart by their labels and not by colour or position.
+  //
+  // A `//` BLOCK RATHER THAN `/** */`, WHICH IS THE WHOLE OF WHY THIS PARAGRAPH WAS REWRITTEN: it
+  // documents a declaration that is GONE, and a doc comment with nothing under it is read as documenting
+  // whatever comes next — here `let draw`, which it says nothing about. Two consecutive `/** */` blocks
+  // before one symbol is the shape that made it noticeable.
 
   /**
    * BOTH `let`, NOT `const` — DECLARED HERE SO `transport` BELOW CAN CLOSE OVER THEM THROUGH THUNKS
@@ -272,34 +304,45 @@ async function main(): Promise<EditorView> {
   })
 
   /**
-   * THE λ SCRATCHPAD — design §4.3's fork, and the thing that makes a second session reachable.
+   * THE λ SCRATCH BUFFERS — design §4.3's fork, and the thing that makes a second session reachable.
    *
-   * ONE OBJECT RATHER THAN A `detach`/`retire` PAIR OF CLOSURES HERE, and the reason is the test the
-   * plan names: the singleton claim has to be asserted on POOL SIZE, which is not reachable from the
-   * DOM. Before T12 this app had ONE λ pane, so "two source-derived λ panes edited in turn" could not
-   * be performed through it at all; a layout split now puts a second one on screen, and the argument
-   * for one object survives unchanged — the pool-size assertion still needs `tests/node`, whatever the
-   * DOM can now show. `scratch.ts` is a module a test can drive with two slots and fake ports; this
-   * line is the app taking the same object.
+   * ONE OBJECT RATHER THAN A `fork`/`retire` PAIR OF CLOSURES HERE, and the reason is the test the
+   * plan names: how many sessions a fork produces has to be asserted on POOL SIZE, which is not
+   * reachable from the DOM. Before T12 this app had ONE λ pane, so "two source-derived λ panes edited
+   * in turn" could not be performed through it at all; a layout split now puts a second one on screen,
+   * and the argument for one object survives unchanged — the pool-size assertion still needs
+   * `tests/node`, whatever the DOM can now show. `scratch.ts` is a module a test can drive with two
+   * slots and fake ports; this line is the app taking the same object.
    *
-   * THE REPLY HANDLER IS THE SCRATCHPAD'S OWN, NOT `onReply`. A scratchpad has one leg, no results
-   * pane, no link index and no `tmProgram`, so every branch of `onReply` (`replies.ts`) except
-   * `lambda-frames` is about state it does not have — routing it there would mean five `if (session ===
-   * …)` guards inside a function whose whole point (see its doc) is that a reply belongs to the session
-   * whose worker sent it. Two handlers, one per session kind, is the same split §3.2 draws at the port.
+   * THE REPLY HANDLER IS THE BUFFERS' OWN, NOT `onReply`. A buffer has one leg, no results pane, no
+   * link index and no `tmProgram`, so every branch of `onReply` (`replies.ts`) except `lambda-frames`
+   * is about state it does not have — routing it there would mean five `if (session === …)` guards
+   * inside a function whose whole point (see its doc) is that a reply belongs to the session whose
+   * worker sent it. Two handlers, one per session kind, is the same split §3.2 draws at the port.
+   *
+   * IT NAMES THE BUFFER THE REPLY CAME FROM, WHICH IS WHAT THIS LINE USED TO HARD-CODE. It read
+   * `replies.onScratchReply(LAMBDA_SCRATCH, reply)`, correct while one id was the only one a buffer
+   * could have; `ScratchBuffers` curries each buffer's own id in at `pool.bind`, so the name arrives
+   * with the reply and this file no longer has one to supply.
    */
-  const scratchpad = new LambdaScratchpad({
+  const scratchpad = new ScratchBuffers({
     registry: sessions,
     pool,
-    id: LAMBDA_SCRATCH,
-    label: LAMBDA_SCRATCH_LABEL,
     historyBytes: HISTORY_BYTES,
-    onReply: (reply: RunReply) => replies.onScratchReply(LAMBDA_SCRATCH, reply),
+    onReply: (session: SessionId, reply: RunReply) => replies.onScratchReply(session, reply),
   })
 
   // THE SOURCE SESSION, AND NO LONGER THE ONLY ENTRY THE APP EVER HOLDS. It is the only one created
-  // at start-up: §4.3's scratchpad is created by a click (`scratchpad` above) and retired by the next
-  // recompile.
+  // at start-up: a §4.3 buffer is created by a click (`scratchpad` above) and ends only where
+  // `ScratchBuffers.retire` is called — **which is the header list's retire handler below, and nothing
+  // else in `src/`**. That is 5d-ii-c decision 2 complete: one ending, explicit, on a control the user
+  // aims at. **THIS SENTENCE ENDED "and retired by the next recompile"** until that decision deleted
+  // the first of the two implicit retires (`compile.ts` records what went with it); it then read "today
+  // that is `replies.ts`'s phantom-fork `no-session` and nothing else" until the second went too
+  // (`replies.ts`'s own `no-session` arm records that one); and it then said the app could create
+  // buffers and end none, which was the deliberate window §4.2's list closes — so that "what ends a
+  // buffer" landed as one reviewable change rather than as a residue of two, and knowingly, since §4.4
+  // makes that list the poison recovery as well as the ordinary way out.
   //
   // **THE SELECTOR IS ON SCREEN FROM THE FIRST PAINT, AND THAT REVERSES WHAT THIS COMMENT USED TO
   // SAY** — it read "the selector has one option to offer until someone forks — which is why
@@ -318,8 +361,8 @@ async function main(): Promise<EditorView> {
   // fired first.
   //
   // `detached: false`, AND IT IS THE ONLY ENTRY THAT MAY SAY SO. This is the session with a
-  // `SourceMap` behind it; §3.3 puts `linkIndex` and `sourceSpan` on neither scratch type, so the
-  // scratchpad entry is `detached: true` by construction — `LambdaScratchpad.detach` writes the
+  // `SourceMap` behind it; §3.3 puts `linkIndex` and `sourceSpan` on neither scratch type, so every
+  // buffer's entry is `detached: true` by construction — `ScratchBuffers.fork` writes the
   // literal and nothing derives it, for the reason `SessionEntry.detached`'s own doc gives.
   //
   // THE REPLY HANDLER NAMES ITS SESSION. Nothing on the wire does (§3.2 — the port is the id), so the
@@ -359,6 +402,10 @@ async function main(): Promise<EditorView> {
     scratchpad,
     draw: () => draw(),
     linkWiring: () => linkWiring,
+    // A THUNK FOR THE SAME REASON `draw` IS ONE, one step further down the file: `refreshBuffers` is
+    // declared below, after the header list it refreshes, which is itself declared after `paneHost`.
+    // The body is not evaluated until a fork actually happens.
+    onBuffersChanged: () => refreshBuffers(),
   })
 
   /**
@@ -385,14 +432,27 @@ async function main(): Promise<EditorView> {
   const custody = createEditorCustody({ panes, sessions })
 
   /**
-   * THE SOURCE PANE'S HOST, PRE-SEEDED RATHER THAN LEFT TO `hostFor`'s GENERIC BRANCH. `#editor` and
-   * `#link-status` are the same two elements `view` and `linkWiring` are constructed against below —
-   * `index.html` ships them as bare top-level nodes rather than nested under a `#source` section,
-   * because that section no longer exists in the markup at all (the tree builds it). Moving them here,
-   * once, before `applyLayout` ever runs, is what lets `hostFor('source', 'source')` find this entry
-   * already in `hosts` and return it rather than building an empty section with nothing inside it —
-   * the source leaf is chrome around an editor `main.ts` already owns, not a `PaneView` `applyLayout`
-   * constructs.
+   * THE SOURCE PANE'S HOST, PRE-SEEDED RATHER THAN LEFT TO `hostFor`'s GENERIC BRANCH. `#editor` is the
+   * element `view` is constructed against below — `index.html` ships it as a bare top-level node rather
+   * than nested under a `#source` section, because that section no longer exists in the markup at all
+   * (the tree builds it). Moving it here, once, before `applyLayout` ever runs, is what lets
+   * `hostFor('source', 'source')` find this entry already in `hosts` and return it rather than building
+   * an empty section with nothing inside it — the source leaf is chrome around an editor `main.ts`
+   * already owns, not a `PaneView` `applyLayout` constructs.
+   *
+   * **`#link-status` USED TO MOVE IN HERE BESIDE IT, AND THAT WAS DEFERRED-A11Y ITEM 12 — fixed by
+   * deleting it from the `append` below rather than by anything more elaborate.** This host ships a
+   * close control, and `hostFor`'s detach-not-destroy rule takes the whole subtree out of the document
+   * when the source leaf closes; `createLinkWiring` captures the status element once at construction, so
+   * every write after that close landed in a node that had left the page. `✎ fork` stays offered on the
+   * λ pane throughout — closing the source PANE ends no session — so a refusal past the buffer cap
+   * reported to nobody, which is the Critical this branch already fixed arriving again by a narrower
+   * road. The line's own contract is what settles where it belongs: `link-status.ts` says of `forkFailed`
+   * that this is *"the surface that exists whether or not a pane can show anything"*, and a surface
+   * inside a closeable pane cannot keep that promise. Two of its three live jobs (detached panes, a
+   * failed fork) are app-wide anyway; the third (what is pinned) is about a construct lit in three panes
+   * rather than about this one. So it stays where `index.html` declares it — between the pane tree and
+   * `#results`, outside every host `hostFor` can detach.
    */
   const sourceHost = document.createElement('section')
   sourceHost.className = 'pane'
@@ -436,7 +496,7 @@ async function main(): Promise<EditorView> {
       paneHost.focusPane(grew)
     },
   })
-  sourceHost.append(sourceTitle, editorHost, linkStatusHost, sourceControls)
+  sourceHost.append(sourceTitle, editorHost, sourceControls)
 
   // `localStorage` ACCESS IS GUARDED, same reason and same shape as `readAppearanceStorage`/
   // `writeAppearanceStorage` above: it throws in some privacy modes, and a layout is a preference —
@@ -496,7 +556,6 @@ async function main(): Promise<EditorView> {
     custody,
     transport,
     sourceSession: SOURCE_SESSION,
-    lambdaScratch: LAMBDA_SCRATCH,
     sourceLayout,
     nextLeafId,
     neighbourOf,
@@ -522,6 +581,157 @@ async function main(): Promise<EditorView> {
     tree = defaultLayout()
     paneHost.applyLayout()
   })
+
+  /**
+   * **THE HEADER'S BUFFER LIST — design §4.2's surface, and §4.4's poison recovery arriving with it.**
+   * This is the call that closes the window decision 2 opened: until it existed the app could create
+   * buffers and end none, so a wedged worker could not be reclaimed, a failed fork left its pane reading
+   * `building…` forever, and `buffer-list.ts` was a tested module nothing imported.
+   *
+   * **`paneCount` IS COMPUTED HERE AND LIVES ON NO OTHER TYPE, WHICH IS WHY `BufferInfo` AND
+   * `BufferRow` ARE TWO TYPES.** `ScratchBuffers` answers what buffers exist; `PaneCollection` answers
+   * which panes are bound to one. Putting the count on `BufferInfo` would give `scratch.ts` a
+   * `PaneCollection` dependency for a number only the header renders — and this file already holds both
+   * objects, so the join costs one `map` at the one place that is not a second reader of either.
+   *
+   * A THUNK BUILT PER OPEN, NOT A VALUE: `bufferList` calls this on `beforetoggle` (its own doc), so
+   * the `ofSession` scan runs once per gesture rather than on every frame that repaints the header.
+   *
+   * `panes.all().map(...)` HANDS OVER EVERY SLOT ON THE PAGE, NOT THE λ ONES. `retire` rebinds only the
+   * slots whose binding names the buffer it is ending (`scratch.ts`'s own rule, and
+   * `tests/node/scratch.test.ts` pins it against a TM slot that must not be dragged home), so filtering
+   * here would be this file restating a rule the callee enforces — and getting it wrong would be
+   * invisible, since the buffer would end either way.
+   *
+   * **THE `custody.reconcile()` IS THIS HANDLER'S OWN OBLIGATION AND NOTHING ELSE WILL DISCHARGE IT.**
+   * A retire is the one event that makes `!sessions.has(session)` true, and `editor-custody.ts`'s
+   * `reconcileEditors` is what then drops the retired session's claim and destroys an editor waiting in
+   * custody for it — the last reference to a live `EditorView`, with its own pending debounce, over a
+   * terminated worker. Both retire sites used to call it; 5d-ii-c decision 2 deleted both, and
+   * `createReplies` shed the dependency on the stated reasoning that the header list's retire would live
+   * in the list's own handler, "so that is where the sweep obligation belongs". This is that handler.
+   *
+   * `try`/`finally` FOR `applyLayout`'s REASON, IN ONE SENTENCE: `reconcile` throws deliberately
+   * (`LambdaPane.receiveEditor` refuses a second editor), and a throw escaping here would leave the
+   * header advertising a buffer that has gone and the rebound panes unpainted — a disagreement worse
+   * than the one being reported. The exception still leaves this handler.
+   */
+  const buffers = bufferList(
+    buffersButton,
+    () =>
+      scratchpad.list().map((b) => ({
+        id: b.id,
+        label: b.label,
+        paneCount: panes.ofSession('lambda', b.id).length,
+        /**
+         * **THE ROW'S ONE DISTINGUISHING FACT, JOINED HERE FOR `paneCount`'s REASON** — see
+         * `BufferRow.term` for what the list looked like without it (eight rows reading `scratch N —
+         * orphan`, under a refusal telling the user to pick one). `ScratchBuffers` answers what buffers
+         * exist and the registry answers what each one currently holds; this file is the one place that
+         * holds both, so the join costs one property on a thunk that already runs once per open.
+         *
+         * `hist.current`, WHICH IS THE FRAME A PANE BOUND TO THIS BUFFER WOULD BE SHOWING — the head of
+         * the ring, not step 0 — so a row and a pane never disagree about the same buffer, and scrubbing
+         * a buffer's history changes what its row says next time the list opens.
+         *
+         * `legOf` CANNOT THROW HERE, AND THE REASON IS THE GOVERNING RULE RATHER THAN AN ASSUMPTION: a
+         * buffer is in `#buffers` and in the registry together or in neither, because `#reg.remove` and
+         * `#buffers.delete` appear exactly once in `src/` and both are inside `retire`. Every id
+         * `list()` returns is therefore registered at the moment this runs.
+         *
+         * `?? null` FOR A BUFFER WITH NO FRAME — a fork the worker has not answered, or one whose build
+         * failed. The row says which of those it cannot tell; `BufferRow.term` has that argument.
+         */
+        term: sessions.legOf({ session: b.id, leg: 'lambda' }).hist.current?.text ?? null,
+      })),
+    (id) => {
+      scratchpad.retire(
+        id,
+        SOURCE_SESSION,
+        panes.all().map((p) => p.slot),
+      )
+      /**
+       * **A RETIRE ANSWERS THE CAP REFUSAL, SO THE REFUSAL STOPS BEING TRUE HERE — found by driving the
+       * app, not by a test.** The message reads *"all 8 scratch buffers are live; retire one from the
+       * buffers list in the header to make room"*, and until this line the page went on showing it after
+       * the user had done exactly that. `#link-status` said all eight were live while the header two
+       * inches above it read `buffers 7 ▾` — two surfaces disagreeing about the one number the sentence
+       * is about, with the stale one being the advice.
+       *
+       * IT CLEARED ONLY ON THE NEXT SUCCESSFUL FORK (`transport.ts`'s success path), which is one
+       * gesture too late: the whole point of the retire is that the fork can now be RE-ATTEMPTED, and a
+       * user who reads the line before re-attempting is told their own action did not happen.
+       *
+       * UNCONDITIONAL, NOT GUARDED ON THERE BEING A REFUSAL TO CLEAR. `setForkFailed(null)` on a model
+       * already holding `null` is a field write and a repaint this handler performs anyway, and a guard
+       * would be this file deciding which refusals a retire answers — it answers the cap one, and the
+       * sibling (a fork whose BUILD failed) names a buffer the user may have just retired. Both are
+       * stale after this call for the same reason.
+       *
+       * BEFORE `custody.reconcile()`'s `try`, so a throw from the sweep cannot leave the message on
+       * screen — the `finally` below already draws, and this is the state that draw should paint.
+       */
+      linkWiring.setForkFailed(null)
+      try {
+        custody.reconcile()
+      } finally {
+        refreshBuffers()
+        draw()
+      }
+    },
+  )
+
+  /**
+   * Put the header's readout back in step with how many buffers there are — called at the two moments
+   * that number can change, a fork and a retire, and at no other.
+   *
+   * **THE BUTTON IS NOT OFFERED AT ZERO, AND THAT IS A DECISION.** A list with no rows is a gesture with
+   * no possible outcome: there is nothing to reclaim, nothing to name and nothing a click could do —
+   * which is this slice's own standard ("a control that provably cannot work must not be offered",
+   * `editor-custody.ts`), and the standard `detachButton`, `collapseButton` and `paneSelect`'s
+   * below-two-options self-removal already apply in pane chrome. The counter-argument is real and is
+   * rejected: an always-present `buffers 0 ▾` would advertise that the capability exists, at the price of
+   * a control whose only reachable state is an empty bordered box.
+   *
+   * `hidden` RATHER THAN `remove()`, WHICH IS WHERE THIS DEPARTS FROM THOSE THREE. The popover is
+   * inserted BESIDE this button (`button.after(menu)`, once, at construction) and takes it as its
+   * implicit anchor, so detaching the button would strand the list in the header and leave re-insertion
+   * to guess the header's order. `hidden` takes the control out of the layout, out of the tab order and
+   * out of the accessibility tree while leaving that pairing intact — the same mechanism
+   * `controlStrip` uses for `extend`.
+   *
+   * **AND WITHDRAWING IT IS WHERE THE TWO CORRECT DECISIONS ABOVE MEET AND STRAND THE KEYBOARD.**
+   * Measured, not reasoned from the spec: retiring the last buffer left `document.activeElement` as
+   * `<body>`. `buffer-list.ts`'s row control dismisses the popover before it fires, and the popover hide
+   * algorithm hands focus back to the invoker when focus is inside the popover — so by the time this
+   * runs, focus is on the very button the next line takes out of the tab order, and focus on a
+   * `display: none` element falls to the document body. Neither half is wrong on its own: the list
+   * autofocuses its first row so the control is reachable, and the button withdraws because at zero it
+   * provably cannot work. It is the accessibility list's own item 1 — *"a control that hides itself on
+   * click strands the keyboard"* — assembled out of two parts that each pass review, and item 1's stated
+   * remedy is to move focus deliberately rather than to stop hiding things.
+   *
+   * **`#restore-layout` RATHER THAN A PANE, WHICH IS WHERE THIS DIVERGES FROM `pane-host.ts`'s
+   * `focusPane`.** That helper names "the place the user is looking" as a leaf the gesture acted on, and
+   * a retire has no such leaf to offer in the case that reaches this branch: the buffer whose retire
+   * empties the header is very often an orphan — the state this whole list exists to reach — so nothing
+   * was rebound and there is no pane the gesture touched. What survives, in the strip the gesture was
+   * made in and immediately beside the control that has just gone, is `#restore-layout`; it is never
+   * itself withheld, so this cannot hand focus to a second hidden element.
+   *
+   * IT IS GUARDED ON THE BUTTON ACTUALLY HOLDING FOCUS, because a retire is not the only caller. A fork
+   * reaches here too, and so does the initial call below, and neither should move a caret out of the
+   * source editor. The guard is also what keeps a mouse user's focus where the pointer left it: a click
+   * that never focused the invoker never gets focus back from `hidePopover`, so there is nothing here to
+   * move.
+   */
+  const refreshBuffers = (): void => {
+    const live = scratchpad.list().length
+    if (live === 0 && document.activeElement === buffersButton) restoreLayoutButton.focus()
+    buffersButton.hidden = live === 0
+    buffers.update(live)
+  }
+  refreshBuffers()
 
   /**
    * THE LINK STATE — `link-wiring.ts`'s own doc has the argument for why `index`/`linkable`/`link`/
@@ -566,39 +776,47 @@ async function main(): Promise<EditorView> {
     links: linkWiring,
     leaves: () => leaves(tree).length,
     sourceAvailable: () => !leaves(tree).some((l) => l.pane === 'source'),
+    // WRAPPED RATHER THAN PASSED AS `custody.hasEditor`, the same shape `editorHome` below uses for
+    // `custody.homeFor`: the methods read `panes`, `sessions` and the two custody maps through the
+    // closure `createEditorCustody` returns, and handing the reference over bare would work today only
+    // because that object is not built with `this` in mind. This is the one call site that decides
+    // whether "bring the term editor to this pane" appears at all — deferred-a11y item 11.
+    hasEditor: (session) => custody.hasEditor(session),
   })
 
   /**
    * THE DEBOUNCE PIPELINE — `compile.ts`'s own doc has the case for `schedule`'s dependencies and for
    * the `supersede()`-before-`setTimeout` ordering that must not move; this is only the construction
-   * site. A PLAIN `const`, SAME REASON `replies` BELOW IS ONE: `draw` and `linkWiring` are both real
-   * values by this line, so this needs none of the `let` + thunk indirection `draw`/`linkWiring`
-   * themselves used two blocks up. `view` is still passed as a thunk — the picker's `change` listener
-   * `compile.ts` wires at construction reads it, and `main.ts` does not assign `view` until the
-   * `EditorView` construction below.
+   * site. A PLAIN `const`, SAME REASON `replies` BELOW IS ONE: `linkWiring` is a real value by this
+   * line, so this needs none of the `let` + thunk indirection `draw`/`linkWiring` themselves used two
+   * blocks up. `view` is still passed as a thunk — the picker's `change` listener `compile.ts` wires at
+   * construction reads it, and `main.ts` does not assign `view` until the `EditorView` construction
+   * below.
+   *
+   * **IT PASSED `scratchpad`, `panes`, `draw` AND `reconcileEditors` UNTIL 5d-ii-c DECISION 2, and all
+   * four served the retire a source keystroke used to perform.** A recompile ends no buffer now
+   * (`compile.ts`'s `schedule` records what the deletion cost and what replaced it), and a compile needs
+   * nothing but the source session's own client — so this call site shrank with the signature rather
+   * than going on handing over dependencies nothing reads. **THE CUSTODY ARGUMENT FOR `reconcileEditors`
+   * WAS SAID TO LIVE AT `createReplies`'s CALL BELOW, "WHICH STILL SWEEPS AT THE APP'S REMAINING RETIRE
+   * SITE"** — that site is gone too, so the argument lives at `editor-custody.ts`'s `reconcileEditors`
+   * and at its callers: `applyLayout`, and the buffer list's retire handler above in this file.
+   *
+   * **BOTH SENTENCES ABOVE WERE FALSIFIED BY THE COMMIT THAT WIRED THAT HANDLER, WHICH IS WHY THE
+   * CORRECTION IS ITSELF RECORDED.** They read "what has not yet replaced it" and "`applyLayout`, the one
+   * caller left" — while the same commit was editing `compile.ts` to say the sweep had gained a second
+   * caller, and adding that caller ninety-odd lines above this paragraph. A file can contradict itself
+   * across two of its own paragraphs in one diff, and this is the instance that proves it: the sweep for
+   * stale citations ran over every file that named the missing retire and missed the file that supplied
+   * it.
    */
   const compile = createCompile({
     sessions,
-    scratchpad,
     results,
     picker,
     view: () => view,
-    panes,
     links: linkWiring,
-    draw,
     sourceSession: SOURCE_SESSION,
-    // THE WHOLE SWEEP, NOT A THUNK OVER `editorHomeFor(LAMBDA_SCRATCH)` — Important finding, re-review
-    // of the whole-branch review's own custody fix, and `compile.ts`'s own dependency doc has the
-    // argument. The narrow version resolved ONE pane, so it could not see a `heldEditors` entry at all,
-    // and a custody entry keyed by this constant session id outlived the incarnation that produced it.
-    // Passed as the function itself rather than wrapped: `reconcileEditors` takes no session because it
-    // sweeps TWO exact domains — `editorOwner` for mounted editors and `heldEditors` for those in
-    // custody — which is the generality the narrow thunk was deliberately avoiding and the reason it
-    // could not answer this. **`editorOwner` ALONE IS NOT ENOUGH, and saying so here is the point.**
-    // The third review round proved it: `reset layout` re-mints `defaultLayout()`'s literal ids, the
-    // arriving-leaf sweep drops the stale claim, and a custody entry with no claim then became
-    // unreachable from a loop keyed on claims — so the retire swept nothing and the held editor leaked.
-    reconcileEditors: custody.reconcile,
   })
 
   /**
@@ -612,8 +830,8 @@ async function main(): Promise<EditorView> {
    *
    * `scratchpad` AND `sessions.add(...)` ABOVE ALREADY BUILT THEIR REPLY CALLBACKS AGAINST A NAME —
    * `replies` — THAT DID NOT EXIST YET AT THAT POINT IN THE FILE, and that is the same forward
-   * reference this file already relies on for `draw`/`linkWiring` themselves: `(reply) =>
-   * replies.onScratchReply(LAMBDA_SCRATCH, reply)` and `(reply) => replies.onReply(SOURCE_SESSION,
+   * reference this file already relies on for `draw`/`linkWiring` themselves: `(session, reply) =>
+   * replies.onScratchReply(session, reply)` and `(reply) => replies.onReply(SOURCE_SESSION,
    * reply)` are arrow function BODIES, not evaluated until a reply actually arrives, by which time this
    * assignment has long since run.
    */
@@ -625,17 +843,22 @@ async function main(): Promise<EditorView> {
     panes,
     links: linkWiring,
     draw,
-    sourceSession: SOURCE_SESSION,
-    // SAME BINDING AS `compile`'s USED TO BE, AND THE SAME REASON: `onScratchReply` is only ever invoked
-    // with `LAMBDA_SCRATCH` (see `scratchpad`'s construction above), so this is bound once here rather
-    // than threading a `SessionId` parameter through every call site in `replies.ts`. THIS FILE KEEPS
-    // BOTH DEPENDENCIES WHERE `compile.ts` NOW TAKES ONLY THE SWEEP, because `replies.ts` has two uses
-    // that are not retires and that a sweep cannot express: `scratch-compiled` MOUNTS text onto the home
-    // pane, and `worker-error` unmounts from a pane whose session is still live and still bound.
-    editorHome: () => custody.homeFor(LAMBDA_SCRATCH),
-    // THE RETIRE INSIDE `noSessionReply`'s PHANTOM PATH — the app's second retire site, swept for the
-    // same reason `compile`'s is.
-    reconcileEditors: custody.reconcile,
+    // **IT TAKES THE REPLY'S OWN SESSION, WHERE IT USED TO BE BOUND TO ONE.** This read `() =>
+    // custody.homeFor(LAMBDA_SCRATCH)` and argued that `onScratchReply` "is only ever invoked with
+    // `LAMBDA_SCRATCH`", so binding it here saved threading a `SessionId` through every call site in
+    // `replies.ts`. 5d-ii-c decision 1 removes the constant that sentence rested on; both call sites
+    // over there already hold the session the reply named, so the parameter costs nothing it was
+    // avoiding. THIS FILE KEEPS IT WHERE `compile.ts` TAKES NOTHING OF THE KIND, because `replies.ts`
+    // has two uses that are not retires: `scratch-compiled` MOUNTS text onto the home pane, and
+    // `worker-error` unmounts from a pane whose session is still live and still bound.
+    //
+    // **`sourceSession` AND `reconcileEditors` WERE PASSED HERE UNTIL DECISION 2's SECOND DELETION**,
+    // and both served the retire inside `noSessionReply`'s phantom-fork path — a home for its panes to
+    // be sent back to, and a sweep so no `LambdaEditor` outlived the session it killed. That path ends
+    // no buffer now (`replies.ts`'s own arm records what the user loses with it), so both arguments
+    // followed the same four `compile.ts` shed one task earlier. `custody.reconcile` is unchanged and
+    // still reached on every layout gesture through `applyLayout`.
+    editorHome: (session: SessionId) => custody.homeFor(session),
   })
 
   view = new EditorView({

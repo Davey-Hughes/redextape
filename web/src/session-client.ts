@@ -158,8 +158,10 @@ type Pooled = { readonly client: SessionClient; readonly port: PoolPort }
  * holding three sessions shares both: a borrow left taken by the λ scratchpad poisons the source
  * session with it, and a ceiling pulled down by the scratchpad's deep print stays down for every
  * session on that thread. Separate workers keep each local, and `terminate` + respawn resets both —
- * which is also the mechanism §4.3 reuses for recompile-from-source, so there is ONE recovery path
- * and not two.
+ * which is also the mechanism §4.3 reused for recompile-from-source, so the app had ONE recovery path
+ * and not two. **5d-ii-c decision 2 took the recompile out of that sentence**: a buffer survives a
+ * source keystroke now, so the mechanism is the same and the trigger is a retire (design §4.4) — see
+ * `compile.ts`, which records what the deletion cost.
  *
  * `session-worker.ts` IS UNTOUCHED, AND ITS ONE-LIVE-SESSION INVARIANT IS WHAT MAKES THIS SAFE
  * (§4.2). It frees the live handle at the top of every `run` (`dropLive`, called before `compile`),
@@ -228,9 +230,16 @@ export class SessionPool {
    * `SessionClient` is constructed with exactly one `onReply` (`:18`) and there is no way to honour a
    * second one — returning the existing client would silently land this caller's frames in the
    * previous caller's legs, which is the same "two places to be wrong" failure `main.ts`'s `LegState`
-   * doc refuses one layer up. §4.3's singleton rebinding ("a second edit rebinds to the EXISTING
-   * scratch") is served by asking `has` first: one branch at the call site, against a misdelivery
-   * here that nothing would report.
+   * doc refuses one layer up.
+   *
+   * **THE CALL SITE THIS THROW USED TO NAME AS ITS REASON IS GONE, AND THE THROW IS NOT.** The
+   * sentence here read: *"§4.3's singleton rebinding ('a second edit rebinds to the EXISTING scratch')
+   * is served by asking `has` first: one branch at the call site, against a misdelivery here that
+   * nothing would report."* 5d-ii-c decision 1 deleted that branch — `ScratchBuffers.fork` mints a
+   * name no session has held, so nothing asks `has` on this method's behalf and no path in the app
+   * reaches this line any more. The misdelivery it names is a property of THIS method rather than of
+   * that caller: one client, one `onReply`, so any second binding of a live id is frames landing under
+   * the wrong name whoever asked for it.
    */
   bind(id: SessionId, onReply: (r: RunReply) => void): SessionClient {
     if (this.#live.has(id)) throw new Error(`session already has a worker: ${id}`)
@@ -245,10 +254,12 @@ export class SessionPool {
    *
    * IDEMPOTENT WHERE `bind` THROWS, AND THE ASYMMETRY IS DELIBERATE. A second `bind` asks for
    * something that cannot be honoured; a second `unbind` asks for a state that is already true.
-   * §4.3's recompile-from-source is the caller that makes this matter — it terminates the scratch's
-   * worker on every recompile, and most recompiles happen when no scratch exists at all. Throwing
-   * there would force every caller to ask first, and a guard every caller must write is a guard the
-   * callee should have.
+   * §4.3's recompile-from-source was the caller that made this matter — it terminated the scratch's
+   * worker on every recompile, and most recompiles happened when no scratch existed at all — and
+   * 5d-ii-c decision 2 deleted it, leaving `ScratchBuffers.retire` as the only caller in the app (its
+   * own membership check answers the same question one layer up; nothing unbinds at page teardown, and
+   * this doc briefly claimed something did). The asymmetry is kept on its general ground rather than on
+   * that caller's: a guard every caller must write is a guard the callee should have.
    *
    * DELETED BEFORE TERMINATED, in that order, mirroring `session-worker.ts`'s `dropLive` ("NULLED
    * BEFORE FREED"): no caller may reach a client whose worker is gone, not even on the path where

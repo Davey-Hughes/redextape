@@ -178,7 +178,69 @@ export default defineConfig({
       // `functions` still differs by one between the two scenarios and `branches` by three.
       //
       // See roadmap.md, "PLAN 5d-ii-b CLOSES", for the argument in full.
-      thresholds: { lines: 97, functions: 96, branches: 88, statements: 94 },
+      //
+      // RE-MEASURED 2026-08-13 (plan 5d-ii-c's close), THE FORMULA RE-RUN, AND THE FLOORS LEFT WHERE
+      // THEY ARE: lines 98.24 (1735/1766), functions 98.09 (361/368), branches 90.00 (927/1030),
+      // statements 95.81 (1967/2053), over 541 tests in 55 files. Every figure is above the 5d-ii-b close
+      // recorded above (98.13 / 97.98 / 89.89 / 95.71), so this slice raised coverage too.
+      //
+      // RE-MEASURED FIVE TIMES THE SAME DAY: after the deferred-a11y item 11/12 fix added four tests,
+      // after the editor-leak fix its review turned up added a fifth, after a browser walkthrough found
+      // two defects in that leak fix and added a sixth, after the three usability changes that
+      // walkthrough asked for added two more, and after two tests written for the two uncovered paths
+      // whose failure costs most.
+      //
+      // **AND THIS TIME THE FLOORS MOVE. THE FOUR ENTRIES BEFORE IT DECLINED TO MOVE THEM AND THAT WAS
+      // RIGHT; THIS IS NOT THE SAME SITUATION, WHICH IS WHY IT IS WRITTEN OUT RATHER THAN JUST DONE.**
+      //
+      // WHAT THOSE FOUR DECLINED TO CHASE WAS DRIFT. `branches` crossed the integer boundary `floor`
+      // rounds on THREE TIMES in one day — 90.06 -> 90.15 -> 89.92 -> 90.00 — so the formula's answer
+      // for it read 89, 89, 88, 89 across four commits on a 0.23-point total. A gate raised, lowered and
+      // raised again inside a day is a gate reporting noise, and the one-to-two-point margin exists
+      // precisely to absorb that. Nothing about that reasoning is repudiated here.
+      //
+      // WHAT THIS IS INSTEAD: two tests deliberately written for paths that had never executed —
+      // `showBanner`, the app's entire "did not start" surface, and `transport.ts`'s re-throw arm, the
+      // line that keeps a wiring bug from being rendered as a dim status line saying `fork failed`.
+      // Statements moved +0.29 and crossed a WHOLE point (95.81 -> 96.10). That is not run-to-run
+      // variation; it is coverage that did not exist before and does now, and it is exactly the case
+      // 5d-ii-b's counter-rule was written for: "the operative quantity is the gap between floor and
+      // measured, not the delta since the last run."
+      //
+      // THE GAPS ARE WHAT DECIDE IT. Against the OLD floors they were 2.10 / 2.09 / 2.36 / 1.52 — three
+      // of four outside the margin this convention states, and the gate would have let 44 statements,
+      // 22 branches, 9 functions and 27 lines rot before saying anything. Against the new ones they are
+      // 1.10 / 1.09 / 1.36 / 1.52, every one inside it, and the rot allowance roughly halves: 23 / 12 /
+      // 6 / 27. `lines` is unchanged by the formula and stays at 97.
+      //
+      // THE CONCRETE TEST, RECOMPUTED FROM THE NEW DENOMINATORS RATHER THAN SHIFTED — rounding near a
+      // floor is not linear, which is why every one of these is derived and not adjusted. Under the NEW
+      // floors: `functions` 6 already-covered can disappear (356/368 -> 96.73%) or 6 new untested arrive
+      // (362/374 -> 96.79%); `statements` 23 lost (1950/2053 -> 94.98%) / 24 new (1973/2077 -> 94.99%);
+      // `branches` 12 lost (916/1030 -> 88.93%) / 13 new (928/1043 -> 88.97%); `lines` 27 lost
+      // (1713/1766 -> 96.99%) / 28 new (1740/1794 -> 96.98%). `functions` is still the tightest of the
+      // four and still the one to watch.
+      //
+      // (EVERY FIGURE IN THAT LIST IS THE FIRST VALUE THAT *TRIPS* THE GATE, NOT THE LAST THAT PASSES —
+      // the count is "how many can be lost/arrive BEFORE it says anything", so the percentage beside it
+      // is already below the floor. This paragraph first read `24 new (1973/2077 -> 95.00%, the boundary
+      // case, and it passes)`, which was wrong twice over: the figure is 94.99%, and it fails. Written
+      // down because a threshold comment that quietly mixes the two conventions is unreadable, and
+      // because it was caught by re-running the derivation rather than by reading it.)
+      //
+      // WHAT WOULD MAKE THIS THE WRONG CALL, stated so the next close can check rather than re-argue: if
+      // 5d-ii-d's measured coverage comes in below 95 / 89 / 97 / 97 on a branch that added no untested
+      // code, then this raise was tracking a peak rather than a level, and the honest response is to put
+      // them back and say so — not to write tests to defend the number.
+      // Every percentage above is TRUNCATED, not rounded, per the rule two blocks up.
+      //
+      // WHAT WOULD CHANGE THE ANSWER, stated so the next close does not have to re-derive it: if
+      // `branches` and `functions` still read 90.xx and 98.xx at 5d-ii-d's close, the crossing will have
+      // held across a slice rather than being a boundary artifact of one, and the raise to 89/97 should
+      // be made there on that evidence. The place to re-run the formula remains a slice's close.
+      //
+      // See roadmap.md, "PLAN 5d-ii-c CLOSES", for the argument in full.
+      thresholds: { lines: 97, functions: 97, branches: 89, statements: 95 },
     },
     projects: [
       {

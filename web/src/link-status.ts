@@ -133,18 +133,37 @@ export type LinkStatus = {
     }
 ) & {
     /**
-     * A fork that just failed and put the pane back on the source session, or absent — CRITICAL
-     * finding, plan 5d-iii's ninth task, and `#link-status`'s THIRD live-updating job.
+     * A fork that just failed, or absent — CRITICAL finding, plan 5d-iii's ninth task, and
+     * `#link-status`'s THIRD live-updating job.
      *
      * WHY THIS LINE AND NOT THE PANE'S OWN EDITOR. `onScratchReply`'s `no-session` arm can be answering
-     * a `detach` whose build never succeeded even once — `LambdaScratchpad.noSessionReply` retires that
+     * a fork whose build never succeeded even once, and there is no editor to put a diagnostic in:
+     * `scratch-compiled` never fired, so `LambdaPane.setEditor` was never called and `setDiagnostics`
+     * (`this.#editor?.setDiagnostics(ds)`) is a silent no-op against `#editor === null`. This line is
+     * the surface that exists whether or not a pane can show anything — the same argument `detached`
+     * above makes for why detachment belongs here and not only on the pane's own badge, one step
+     * further: there is no pane-local surface to put it on at all.
+     *
+     * **AND THAT SENTENCE WAS FALSE OF THE APP FOR AS LONG AS IT HAS BEEN WRITTEN DOWN — deferred-a11y
+     * item 12, fixed before 5d-ii-c merged.** `main.ts` appended `#link-status` INTO the source pane's
+     * host, and that host ships a close control, so from 5d-ii-a onward "the surface that exists whether
+     * or not a pane can show anything" was a surface one click could take out of the document. `✎ fork`
+     * stays offered after that click — closing the source PANE ends no session — so a refusal past the
+     * buffer cap composed its message and wrote it into a detached node. The element no longer moves into
+     * any host; it stays where `index.html` declares it, between the pane tree and `#results`. The claim
+     * is left standing rather than softened because it is the right claim: what changed is that the code
+     * now honours it, and the value of writing a contract down is that the day it stops being true is
+     * findable. Nothing here reads any differently — this field's producers and consumers are unchanged.
+     *
+     * **THIS FIELD'S NAME USED TO END "…AND PUT THE PANE BACK ON THE SOURCE SESSION", AND THE REST OF
+     * THIS PARAGRAPH RESTED ON THAT.** It read that `ScratchBuffers.noSessionReply` "retires that
      * phantom scratchpad synchronously, which is what makes the pane's fork control reappear at all
-     * (design §4.1a). Retiring is also what makes `LambdaPane.setDiagnostics` unusable for the answer:
-     * `scratch-compiled` never fired for a build that never succeeded, so no editor was ever mounted,
-     * and `setDiagnostics` (`this.#editor?.setDiagnostics(ds)`) is a silent no-op against `#editor ===
-     * null`. This field is the surface that survives the rebind the retirement just performed — the
-     * same argument `detached` above makes for why detachment belongs on this line and not only on the
-     * pane's own badge, one step further: there is no pane-local surface left to put it on at all.
+     * (design §4.1a)", that retiring "is also what makes `LambdaPane.setDiagnostics` unusable", and that
+     * this was "the surface that survives the rebind the retirement just performed". 5d-ii-c decision 2
+     * deletes the retire: nothing ends a buffer implicitly, so the pane stays on the buffer that failed
+     * and the fork control stays hidden. **Only the middle claim was ever load-bearing here**, and it
+     * never depended on the retire — the no-op is a consequence of no editor having been mounted, which
+     * is true of a failed build however the app responds to one.
      *
      * A TOP-LEVEL FIELD, LIKE `detached`, NOT A FOURTH `state` ARM — same reasoning as `LinkStatus`'s
      * own doc gives for `detached`: this answers a different question (what did a recent FORK ATTEMPT
@@ -153,16 +172,22 @@ export type LinkStatus = {
      * `state` would be the three-way duplication that field's doc already refuses once.
      *
      * LEADS, AHEAD OF `detached` — the one exception to "most-global first" `linkStatus`'s own doc
-     * states for `detached`'s position, and deliberately so. By the time this renders, `detached.lambda`
-     * already reads `false` (the retirement that produced this value ran before `draw()`), so there is
-     * no scoping conflict to get backwards; what earns this the front of the line is that it is the
-     * most RECENT thing that happened, not the most global fact currently true.
+     * states for `detached`'s position, and deliberately so: what earns this the front of the line is
+     * that it is the most RECENT thing that happened, not the most global fact currently true.
+     *
+     * **THE SECOND REASON GIVEN FOR THAT ORDER EXPIRED WITH THE RETIRE, AND THE ORDER DID NOT.** It ran
+     * "by the time this renders, `detached.lambda` already reads `false` (the retirement that produced
+     * this value ran before `draw()`), so there is no scoping conflict to get backwards" — the pane
+     * stays on the failed buffer now, so both clauses are true at once and the line reads `fork failed —
+     * … · λ pane detached — not linked to source`. That is a truer sentence than the one that argument
+     * was protecting: the pane really is detached, onto the buffer this message is about.
      *
      * CLEARED BY THE CALLER, NOT BY THIS FUNCTION — `linkStatus` is a pure read of whatever `main.ts`
      * passes in on the current tick, same as every other field here; deciding how long a stale fork
-     * failure stays on screen is `main.ts`'s own lifecycle question (a new fork attempt or a source
-     * keystroke retires the message), and answering it here would make this function stateful, which
-     * the whole rest of the file goes out of its way not to be.
+     * failure stays on screen is `main.ts`'s own lifecycle question (a fork that succeeds and a source
+     * keystroke both clear it; a fork refused at the cap replaces it — `link-wiring.ts`'s field doc has
+     * the ordering argument), and answering it here would make this function stateful, which the whole
+     * rest of the file goes out of its way not to be.
      */
     forkFailed?: string
   }
@@ -234,9 +259,13 @@ export function linkStatus(s: LinkStatus): string {
   const detachment = detachedText(detached)
   if (detachment !== '') parts.push(detachment)
   if (s.state === 'stale') {
-    // STILL TRUE OF A DETACHED PANE, and not by accident: §4.3 says a recompile from source terminates
-    // the scratch's worker and rebinds its panes back, so "linking resumes when this compiles" is a
-    // promise the detached case keeps too — it is the same event that reattaches the pane.
+    // STILL TRUE OF A DETACHED PANE, AND THE ARGUMENT FOR IT CHANGED WITH 5d-ii-c DECISION 2. It ran:
+    // §4.3 says a recompile from source terminates the scratch's worker and rebinds its panes back, so
+    // the sentence is a promise the detached case keeps because the compile is the same event that
+    // reattaches the pane. A compile ends no buffer now, so it reattaches nothing — and the promise
+    // holds for the plainer reason that linking is a fact about the SOURCE program's index: it resumes
+    // when this compiles, for whichever pane is showing that session then, and a detached pane is one
+    // rebind away from being one.
     parts.push('linking resumes when this compiles')
   } else if (s.state === 'linked') {
     if (!detached.tm) {
