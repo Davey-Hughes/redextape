@@ -3,10 +3,12 @@ import { LambdaEditor } from './lambda-editor'
 import type { LambdaWindow } from './lambda-window'
 import {
   bindingSelect,
+  claimEditorButton,
   collapseButton,
   controlStrip,
   detachButton,
   detachedBadge,
+  layoutControls,
   type PaneEvents,
 } from './pane-chrome'
 import type { SessionId } from './session-client'
@@ -80,6 +82,14 @@ export class LambdaPane {
   #editor: LambdaEditor | null = null
   #collapse: ReturnType<typeof collapseButton>
   /**
+   * The "bring the term editor to this pane" control, or `null` on a pane whose events carry no `showEditor` handler
+   * — the same "built only when the handler exists" idiom `#detach` states above, and for the same
+   * reason: a caller with no `showEditor` gets a pane that never offers to claim an editor rather than
+   * one that offers to and swallows the click.
+   */
+  #claim: ReturnType<typeof claimEditorButton> | null = null
+  #layout: ReturnType<typeof layoutControls>
+  /**
    * `on.editScratch`, captured once at construction — `setEditor` reads it per mount rather than
    * closing over `on` directly, so a pane built with no handler mounts an editor that simply drops
    * its edits, the same "control that cannot work is still absent, an edit that goes nowhere is
@@ -110,6 +120,7 @@ export class LambdaPane {
     this.#text = document.createElement('pre')
     this.#text.className = 'term'
     this.#strip = controlStrip(on)
+    this.#layout = layoutControls(this.#strip.el, on)
     // IN THE CONTROL STRIP, NOT ON THE `<h2>`'s ROW BESIDE THE SELECTOR. The heading already carries
     // two things — the pane's name and §4.5's `[detached]` badge — and both are STATEMENTS about the
     // pane; the strip is where its verbs live. It is also why no stylesheet rule was needed: the
@@ -139,6 +150,10 @@ export class LambdaPane {
     this.#collapse = collapseButton(this.#strip.el, (collapsed) => {
       this.#editorHost.classList.toggle('is-collapsed', collapsed)
     })
+    const showEditor = on.showEditor
+    if (showEditor !== undefined) {
+      this.#claim = claimEditorButton(this.#strip.el, showEditor)
+    }
     host.replaceChildren(title, this.#editorHost, this.#text, this.#strip.el)
 
     // λ TEXT -> SOURCE, the third direction. Delegated from the `<pre>` rather than bound per token,
@@ -196,6 +211,7 @@ export class LambdaPane {
       this.#editor = null
       this.#editorHost.className = ''
       this.#collapse.update(false)
+      this.#refreshClaim()
       return
     }
     const onEdit = this.#onEdit
@@ -208,9 +224,73 @@ export class LambdaPane {
         onEdit: (src) => onEdit?.(src),
       })
       this.#collapse.update(true)
+      this.#refreshClaim()
       return
     }
     this.#editor.setText(text)
+  }
+
+  /**
+   * Detach this pane's mounted editor WITHOUT DESTROYING IT, for a caller about to remount it on a
+   * different pane — the editor-moves rule's other half of `receiveEditor`, and together the two are
+   * what `main.ts`'s `reconcileEditors` uses to answer the "bring the term editor to this pane" control. `null` if
+   * this pane holds none, so a caller can call this on every lambda pane and only act on the one that
+   * says yes.
+   *
+   * LEAVES `#detached` UNTOUCHED. This pane may still be bound to the scratch session that just lost
+   * its editor — the binding did not change, only which pane renders the editor for it — so the fork
+   * control's own refusal (`#refreshDetach`'s `!this.#detached`) must not flip, and `#refreshClaim`
+   * below is what re-offers "bring the term editor to this pane" here the instant this method makes `#editor === null`
+   * true while `#detached` is still true.
+   */
+  takeEditor(): LambdaEditor | null {
+    const editor = this.#editor
+    if (editor === null) return null
+    this.#editor = null
+    this.#editorHost.className = ''
+    this.#collapse.update(false)
+    this.#refreshClaim()
+    return editor
+  }
+
+  /**
+   * Mount an editor this pane did not build — `takeEditor`'s other half, and what makes "the editor
+   * moves" true rather than "a new one seeded with the same text appears here". `editor.dom` is
+   * CodeMirror's own node (`LambdaEditor.dom`'s doc); appending an already-mounted node relocates it
+   * rather than duplicating it, so the SAME `EditorView` — cursor, selection and undo history included —
+   * is what ends up inside this pane's host.
+   *
+   * **IT THROWS ON A PANE THAT ALREADY HOLDS ONE, AND THE UNCONDITIONAL OVERWRITE IT REPLACES IS HALF
+   * OF AN IMPORTANT FINDING (re-review of the whole-branch review's own custody fix).** Assigning
+   * `#editor` over a live value dropped the only reference to the previous view WITHOUT removing its
+   * node: the pane went on rendering two `.cm-editor`s stacked in one host, `#editor` named whichever
+   * arrived last, and the other was unreachable for `setEditor`, `takeEditor` and `destroy` alike —
+   * design §4.3's "two uncoordinated CodeMirror instances over one buffer", reached by the very
+   * mechanism §4.3 introduces to make it impossible. `main.ts`'s `reconcileEditors` is what must never
+   * ask for that; this is the check that the invariant is a fact rather than an argument.
+   *
+   * **AND IT ASKED FOR IT AGAIN, ONE ROUND LATER — WHICH IS WHY THIS PARAGRAPH NO LONGER CLAIMS IT
+   * "CANNOT".** That sentence read "and it no longer can (see its doc for the root fix)". A third review
+   * round then reached this throw in six clicks (`fork`, `close`, `reset layout`, type in the source,
+   * fork again, split), because the root fix's sweep ran over the CLAIM map while the entry that
+   * outlived its session sat in the CUSTODY map with no claim naming it — see `reconcileEditors`' own
+   * doc for the interaction. The fix is there, in the caller's domains, and it is a better fix than a
+   * promise here would have been: **this throw is not a backstop for an argument, it is the only reason
+   * either round's defect announced itself at all.** A method that cannot state an invariant about its
+   * callers should not try to; it should refuse, loudly, and let the caller be the thing that is
+   * corrected. THROWING RATHER THAN QUIETLY DESTROYING THE INCUMBENT:
+   * a silent repair would have absorbed the finding as normal operation, and the choice between the two
+   * editors — which text, whose cursor, whose undo — is not one this class has any basis to make.
+   * `PaneCollection.add` and `SessionRegistry.add` refuse a duplicate id in exactly the same words for
+   * exactly the same reason.
+   */
+  receiveEditor(editor: LambdaEditor): void {
+    if (this.#editor !== null) throw new Error('a λ pane was handed a second editor while still holding one')
+    this.#editorHost.className = 'term-editor'
+    this.#editorHost.append(editor.dom)
+    this.#editor = editor
+    this.#collapse.update(true)
+    this.#refreshClaim()
   }
 
   /** Diagnostics for the editor's own buffer — design §4.4. A no-op with no editor mounted. */
@@ -233,6 +313,18 @@ export class LambdaPane {
    */
   setBindings(options: BindingOption[], current: SessionId): void {
     this.#select.update(options, current)
+  }
+
+  /**
+   * Which layout gestures this pane currently offers.
+   *
+   * DRIVEN FROM `main.ts`'s DRAW PASS, not from the pane, because both answers are facts about the
+   * TREE — whether this is the last leaf, and whether this pane's kind may be duplicated — and the
+   * pane holds neither. Same division as `setBindings`, which takes the options rather than computing
+   * them.
+   */
+  setLayoutControls(canClose: boolean, canSplit: boolean): void {
+    this.#layout.update(canClose, canSplit)
   }
 
   /**
@@ -289,6 +381,24 @@ export class LambdaPane {
     this.#badge.update(detached)
     if (!detached && this.#editor !== null) this.setEditor(null)
     this.#refreshDetach()
+    // `setEditor(null)` ABOVE ALREADY CALLS `#refreshClaim` WHEN IT FIRES, but that branch is
+    // conditional on `#editor !== null` and this call is not: a pane freshly bound to a scratch (still
+    // `#editor === null`, never having held one) needs "bring the term editor to this pane" offered the first time
+    // `#detached` turns true, which is a transition `setEditor(null)` never sees because there was
+    // never an editor here to unmount.
+    this.#refreshClaim()
+  }
+
+  /**
+   * Offer "bring the term editor to this pane" exactly when this pane's session has one to show and this pane is not
+   * already showing it — wave 3 (5d-ii-a)'s editor-moves rule.
+   *
+   * THE SAME "PAIR OF INPUTS ARRIVE THROUGH TWO DIFFERENT CALLS" SHAPE AS `#refreshDetach`: `#detached`
+   * moves through `setDetached`, `#editor` through `setEditor`/`takeEditor`/`receiveEditor`, and
+   * whichever arrives second has to see the first — so this is called from all four.
+   */
+  #refreshClaim(): void {
+    this.#claim?.update(this.#detached && this.#editor === null)
   }
 
   /**

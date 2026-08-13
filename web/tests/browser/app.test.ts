@@ -6,14 +6,13 @@ import { OVERSCAN, ROW_HEIGHT } from '../../src/tm-pane'
 const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
+    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
-  <main>
-    <section id="source" class="pane"><div id="editor"></div><div id="link-status" class="link-status"></div></section>
-    <section id="lambda" class="pane"></section>
-    <section id="tm" class="pane wide"></section>
-    <section id="results" class="pane results wide"></section>
-  </main>`
+  <main></main>
+  <div id="editor"></div>
+  <div id="link-status" class="link-status"></div>
+  <section id="results" class="pane results"></section>`
 
 const LAMBDA_DECLINES = 'let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)'
 
@@ -43,7 +42,7 @@ const linkStatusText = () => document.querySelector('#link-status')?.textContent
 /** The text of whichever source construct is currently marked `.linked`, or `''` if none is. */
 const linkedSource = () => document.querySelector('.cm-editor .linked')?.textContent ?? ''
 /** How many δ-table rows are currently painted `.is-linked`. Zero is a real answer, not an absence. */
-const linkedRowCount = () => document.querySelectorAll('#tm .state-row.is-linked').length
+const linkedRowCount = () => document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-linked').length
 
 /**
  * Yield to the event loop once.
@@ -116,11 +115,11 @@ describe('the app, end to end', () => {
   // (`print_lambda_capped`'s doc), and `λ` is 2 bytes but 1 UTF-16 code unit. Slicing `frame.text` by
   // byte offset instead of converting first renders this span as `"λf"` (the binder glyph plus its
   // name) rather than `"λ"` alone — nothing before this test asserted the CONTENTS of any token class
-  // inside `#lambda`, so 114 tests and six eye checks all missed it.
+  // inside `[data-leaf="lambda-0"]`, so 114 tests and six eye checks all missed it.
   it('renders the λ pane’s first binder span as exactly "λ", not "λ" plus its name', async () => {
     await until(() => resultsText().includes('β-steps'))
-    await until(() => document.querySelector('#lambda .tok-binder') !== null)
-    const first = document.querySelector('#lambda .tok-binder')
+    await until(() => document.querySelector('[data-leaf="lambda-0"] .tok-binder') !== null)
+    const first = document.querySelector('[data-leaf="lambda-0"] .tok-binder')
     expect(first?.textContent).toBe('λ')
   })
 
@@ -226,10 +225,10 @@ describe('the app, end to end', () => {
 
     await until(() => resultsText().includes('recovered'))
     // THE PAGE MUST STILL BE THE PAGE. A `showBanner(root, ...)` call here would have torn `#editor`
-    // (and `#lambda`, `#tm`) out of `<main>` along with everything else.
+    // (and `[data-leaf="lambda-0"]`, `[data-leaf="tm-0"]`) out of `<main>` along with everything else.
     expect(document.querySelector('#editor .cm-content')).not.toBeNull()
-    expect(document.querySelector('#lambda')).not.toBeNull()
-    expect(document.querySelector('#tm')).not.toBeNull()
+    expect(document.querySelector('[data-leaf="lambda-0"]')).not.toBeNull()
+    expect(document.querySelector('[data-leaf="tm-0"]')).not.toBeNull()
 
     // And the editor must still be LIVE, not merely present: typing after the crash must still reach
     // a compile. Restore a real encoding first — the picker itself is not what this branch is about.
@@ -295,7 +294,7 @@ describe('the app, end to end', () => {
 
   it('clicking a state row lights the source construct that produced it', async () => {
     await settled(view, 'let x = 40; x + 2')
-    const table = document.querySelector<HTMLElement>('#tm .state-table')
+    const table = document.querySelector<HTMLElement>('[data-leaf="tm-0"] .state-table')
     expect(table).not.toBeNull()
     if (!table) return
 
@@ -310,7 +309,7 @@ describe('the app, end to end', () => {
     for (let s = 0; lit === '' && s <= SLICES; s += 1) {
       table.scrollTop = (table.scrollHeight * s) / SLICES
       table.dispatchEvent(new Event('scroll'))
-      const rows = [...document.querySelectorAll<HTMLElement>('#tm .state-row')]
+      const rows = [...document.querySelectorAll<HTMLElement>('[data-leaf="tm-0"] .state-row')]
       for (const row of rows) {
         row.click()
         await tick()
@@ -337,7 +336,7 @@ describe('the app, end to end', () => {
   // whose name was clicked, not merely that some row lit.
   it('a linked row is the row it claims to be, through the virtualized offset', async () => {
     await settled(view, 'let x = 40; x + 2')
-    const table = document.querySelector<HTMLElement>('#tm .state-table')
+    const table = document.querySelector<HTMLElement>('[data-leaf="tm-0"] .state-table')
     expect(table).not.toBeNull()
     if (!table) return
 
@@ -347,7 +346,7 @@ describe('the app, end to end', () => {
     table.scrollTop = table.scrollHeight / 2
     table.dispatchEvent(new Event('scroll'))
 
-    const rows = [...document.querySelectorAll<HTMLElement>('#tm .state-row.is-state')]
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-leaf="tm-0"] .state-row.is-state')]
     expect(rows.length, 'the scrolled window must contain at least one state header row').toBeGreaterThan(0)
     const target = rows[Math.floor(rows.length / 2)]
     expect(target).toBeDefined()
@@ -366,7 +365,7 @@ describe('the app, end to end', () => {
     // row near the TOP of the whole table instead, which (still scrolled to the middle) would not even
     // be in the rendered window — so a wrong offset fails this either on the name mismatch below or on
     // the `until` above timing out, never by accident matching.
-    const relit = [...document.querySelectorAll<HTMLElement>('#tm .state-row.is-state')].find(
+    const relit = [...document.querySelectorAll<HTMLElement>('[data-leaf="tm-0"] .state-row.is-state')].find(
       (r) => r.textContent === name,
     )
     expect(relit, `the clicked row (${JSON.stringify(name)}) is no longer rendered after the click`).toBeDefined()
@@ -412,8 +411,8 @@ describe('the app, end to end', () => {
   // would blow away the DOM CodeMirror and the panes already mounted into. This block reuses the one
   // `view` the outer `beforeAll` produced rather than re-triggering any of that.
   describe('stepping', () => {
-    const paneText = (id: string) => document.querySelector(`#${id} .term`)?.textContent ?? ''
-    const stepText = (id: string) => document.querySelector(`#${id} .step`)?.textContent ?? ''
+    const paneText = (id: string) => document.querySelector(`[data-leaf="${id}-0"] .term`)?.textContent ?? ''
+    const stepText = (id: string) => document.querySelector(`[data-leaf="${id}-0"] .step`)?.textContent ?? ''
     /**
      * Pulls the current-step figure out of a `stepText` reading, e.g. `75,025` from `'step 75,025
      * of 129,300 — history is full'`. `NaN` if the text does not contain a step reading at all.
@@ -423,7 +422,7 @@ describe('the app, end to end', () => {
       return Number((m?.[1] ?? '').replaceAll(',', ''))
     }
     const click = (id: string, label: string) => {
-      const b = [...document.querySelectorAll<HTMLButtonElement>(`#${id} .controls button`)].find(
+      const b = [...document.querySelectorAll<HTMLButtonElement>(`[data-leaf="${id}-0"] .controls button`)].find(
         (x) => x.textContent === label,
       )
       b?.click()
@@ -431,8 +430,8 @@ describe('the app, end to end', () => {
     }
     // Hoisted above the tests that use `BIG` for scroll assertions (Fix 4's regression guard, below),
     // not only the ones further down this file that originally declared them.
-    const table = () => document.querySelector('#tm .state-table') as HTMLElement
-    const spacer = () => document.querySelector('#tm .state-spacer') as HTMLElement
+    const table = () => document.querySelector('[data-leaf="tm-0"] .state-table') as HTMLElement
+    const spacer = () => document.querySelector('[data-leaf="tm-0"] .state-spacer') as HTMLElement
     /** `BIG`'s whole table, and the readiness signal for it: unique to this program among the fixtures. */
     const BIG_SPACER = `${25_852 * ROW_HEIGHT}px`
 
@@ -504,7 +503,7 @@ describe('the app, end to end', () => {
       click('lambda', '◀')
       expect(stepText('lambda')).toContain('step 6')
 
-      const lit = [...document.querySelectorAll('#lambda .term .is-redex')]
+      const lit = [...document.querySelectorAll('[data-leaf="lambda-0"] .term .is-redex')]
       // Non-empty first, and separately: a `join('')` over an empty list is `''`, which would compare
       // equal to nothing useful and hide a feature that paints no token at all.
       expect(lit.length).toBeGreaterThan(0)
@@ -521,14 +520,14 @@ describe('the app, end to end', () => {
       // every token of every frame.
       click('lambda', '↺')
       expect(stepText('lambda')).toContain('step 0')
-      expect(document.querySelector('#lambda .term .is-redex')).toBeNull()
+      expect(document.querySelector('[data-leaf="lambda-0"] .term .is-redex')).toBeNull()
     })
 
     it('shows five labelled tape rows with the head inside the window', async () => {
       await settled(view, 'let x = 40; x + 2')
-      const labels = [...document.querySelectorAll('#tm .tape-label')].map((e) => e.textContent)
+      const labels = [...document.querySelectorAll('[data-leaf="tm-0"] .tape-label')].map((e) => e.textContent)
       expect(labels).toEqual(['REG', 'WORK', 'STACK', 'HEAP', 'BOX'])
-      expect(document.querySelectorAll('#tm .cell.head').length).toBe(5)
+      expect(document.querySelectorAll('[data-leaf="tm-0"] .cell.head').length).toBe(5)
     })
 
     it('clears both panes when the program stops compiling, and says so rather than reading blank', async () => {
@@ -536,7 +535,7 @@ describe('the app, end to end', () => {
       expect(paneText('lambda')).not.toBe('')
       await settled(view, 'let x = ;')
       expect(paneText('lambda')).toBe('')
-      expect(document.querySelectorAll('#tm .tape').length).toBe(0)
+      expect(document.querySelectorAll('[data-leaf="tm-0"] .tape').length).toBe(0)
       // Design §6's error table: "panes read 'not compiled'". `main.ts`'s `resetLegs` used to leave
       // `reason: ''` here, so the control strip's step readout (`controls.ts`'s `controlState`, via
       // `pane-chrome.ts`'s `.step`) was blank too, not merely the term/tape area above it.
@@ -548,13 +547,13 @@ describe('the app, end to end', () => {
     it('leaves the TM pane steppable when the λ backend declines', async () => {
       await settled(view, LAMBDA_DECLINES)
       expect(stepText('lambda')).toContain('does not support')
-      expect(document.querySelectorAll('#tm .tape').length).toBe(5)
+      expect(document.querySelectorAll('[data-leaf="tm-0"] .tape').length).toBe(5)
       expect(click('tm', '◀')?.disabled).toBe(false)
     })
 
     it('leaves the λ pane steppable when the TM backend declines', async () => {
       await settled(view, 'let x = 200; x + 1')
-      expect(document.querySelectorAll('#tm .tape').length).toBe(0)
+      expect(document.querySelectorAll('[data-leaf="tm-0"] .tape').length).toBe(0)
       expect(paneText('lambda')).not.toBe('')
       expect(click('lambda', '◀')?.disabled).toBe(false)
     })
@@ -609,7 +608,7 @@ describe('the app, end to end', () => {
     // that provably cannot work. There must be no button, not a disabled one.
     it('offers no continue affordance once a run has ended', async () => {
       await settled(view, 'let x = 40; x + 2')
-      const extend = document.querySelector<HTMLButtonElement>('#lambda .controls .extend')
+      const extend = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .extend')
       expect(extend?.hidden).toBe(true)
     })
 
@@ -621,7 +620,7 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = 40; x + 2')
       const before = stepText('lambda')
       expect(before).toContain('step 7')
-      const extend = document.querySelector<HTMLButtonElement>('#lambda .controls .extend')
+      const extend = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .extend')
       expect(extend?.hidden).toBe(true)
       click('lambda', '▶')
       // `client.extend` would post to the worker and come back asynchronously; give a stray call a
@@ -645,7 +644,7 @@ describe('the app, end to end', () => {
 
       const stoppedStep = stepNumber(stepText('tm'))
       expect(stoppedStep).toBeGreaterThan(0)
-      const extend = document.querySelector<HTMLButtonElement>('#tm .controls .extend')
+      const extend = document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] .controls .extend')
       expect(extend?.hidden).toBe(false)
       expect(extend?.textContent).toBe('keep recording')
 
@@ -796,7 +795,7 @@ describe('the app, end to end', () => {
       // Sanity: following put the table somewhere real — if this were 0, the assertion below could not
       // tell "the link moved it" from "nothing here ever moves".
       expect(followedTop).toBeGreaterThan(0)
-      const reattach = document.querySelector('#tm .table-reattach') as HTMLButtonElement
+      const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
       // Nothing has scrolled manually yet, so `Follow` is still attached.
       expect(reattach.hidden).toBe(true)
 
@@ -811,7 +810,7 @@ describe('the app, end to end', () => {
       // THE BUG, DIRECTLY: a linked block must actually be ON SCREEN, which virtualization only renders
       // once the table has actually scrolled there. Under the reverted-scroll bug `scrollTop` never
       // leaves `followedTop` and this stays null.
-      expect(document.querySelector('#tm .state-row.is-linked')).not.toBeNull()
+      expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-linked')).not.toBeNull()
       expect(table().scrollTop).not.toBe(followedTop)
 
       // FOLLOWING ITSELF WAS NOT DISTURBED — the other half of design §5.1 and `setLink`'s own doc: a
@@ -834,7 +833,7 @@ describe('the app, end to end', () => {
       // table and the geometry below is read against the wrong program. The readiness signal has to
       // be specific to `BIG` — its spacer is exactly 25,852 rows x ROW_HEIGHT.
       await until(() => spacer().style.height === BIG_SPACER)
-      const rows = document.querySelectorAll('#tm .state-row')
+      const rows = document.querySelectorAll('[data-leaf="tm-0"] .state-row')
       // THE SCROLL CONTAINER MUST ACTUALLY BE BOUNDED, and this asserts it rather than assuming it.
       // `.state-table`'s `max-height: 40vh` is what bounds it, and Vitest serves its own tester HTML —
       // `tests/browser/setup.ts` is what gets `style.css` onto that page. If that setup ever breaks, the
@@ -872,8 +871,8 @@ describe('the app, end to end', () => {
       // frame. `◀` once steps back to the frame whose rule fires INTO halt, which is where a rule is
       // actually about to fire.
       click('tm', '◀')
-      expect(document.querySelectorAll('#tm .state-row.is-current').length).toBe(1)
-      expect(document.querySelectorAll('#tm .state-row.is-firing').length).toBe(1)
+      expect(document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-current').length).toBe(1)
+      expect(document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-firing').length).toBe(1)
     })
 
     it('moves the highlight as the machine steps', async () => {
@@ -881,10 +880,10 @@ describe('the app, end to end', () => {
       // Same frontier fact as above: `▶` is a no-op here (`main.ts`'s `forward`, mirroring the λ
       // leg's already-tested "does nothing at the frontier of a run that already ended"), so stepping
       // must go backward to move at all.
-      const before = document.querySelector('#tm .state-row.is-current')?.textContent
+      const before = document.querySelector('[data-leaf="tm-0"] .state-row.is-current')?.textContent
       // Several steps, not one: a machine can re-enter the same state, so a single ◀ proves nothing.
       for (let i = 0; i < 8; i += 1) click('tm', '◀')
-      expect(document.querySelector('#tm .state-row.is-current')?.textContent).not.toBe(before)
+      expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-current')?.textContent).not.toBe(before)
     })
 
     // NOTHING ELSE IN THIS SUITE EXERCISES THE POSITIVE CASE. `stops following once the user scrolls`
@@ -896,7 +895,7 @@ describe('the app, end to end', () => {
     it('follows the machine into view with no user scroll at all', async () => {
       await settled(view, BIG)
       expect(table().scrollTop).toBeGreaterThan(0)
-      expect(document.querySelector('#tm .state-row.is-current')).not.toBeNull()
+      expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-current')).not.toBeNull()
     })
 
     it('stops following once the user scrolls', async () => {
@@ -921,7 +920,7 @@ describe('the app, end to end', () => {
     // present only while detached, and clicking it must redraw immediately rather than wait for a step.
     it('reattaches through its own control, which exists only while detached', async () => {
       await settled(view, BIG)
-      const reattach = document.querySelector('#tm .table-reattach') as HTMLButtonElement
+      const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
       expect(reattach).not.toBeNull()
       expect(reattach.hidden).toBe(true)
       const followedTop = table().scrollTop
@@ -952,8 +951,8 @@ describe('the app, end to end', () => {
     // fails whenever the guard is removed instead of whenever the timing happens to line up.
     it('ignores a scroll that arrives while the table is hidden', async () => {
       await settled(view, BIG)
-      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
-      const reattach = document.querySelector('#tm .table-reattach') as HTMLButtonElement
+      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
+      const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
       expect(reattach.hidden).toBe(true)
 
       toggle.click()
@@ -961,7 +960,7 @@ describe('the app, end to end', () => {
       toggle.click()
 
       expect(reattach.hidden).toBe(true)
-      expect(document.querySelector('#tm .state-row.is-current')).not.toBeNull()
+      expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-current')).not.toBeNull()
     })
 
     // THE CONTROL GOES AWAY WITH THE THING IT CONTROLS. `#reattach.hidden` is maintained inside
@@ -972,8 +971,8 @@ describe('the app, end to end', () => {
     // that reads it does not run on the way down.
     it('takes the reattach control away with the table it belongs to', async () => {
       await settled(view, BIG)
-      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
-      const reattach = document.querySelector('#tm .table-reattach') as HTMLButtonElement
+      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
+      const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
 
       table().scrollTop = 0
       table().dispatchEvent(new Event('scroll'))
@@ -996,8 +995,8 @@ describe('the app, end to end', () => {
     // zero-viewport movement rather than a clamped one.
     it('still detaches on a user scroll after the table has been hidden and shown', async () => {
       await settled(view, BIG)
-      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
-      const reattach = document.querySelector('#tm .table-reattach') as HTMLButtonElement
+      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
+      const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
       expect(reattach.hidden).toBe(true)
 
       // The poisoned value, computed the way the bug computes it rather than hardcoded.
@@ -1022,8 +1021,8 @@ describe('the app, end to end', () => {
     // scroll event fires at all: parked at row 0, still nominally following, no reattach offered.
     it('keeps the scroll range honest across a compile with the table hidden', async () => {
       await settled(view, 'let x = 40; x + 2')
-      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
-      const reattach = document.querySelector('#tm .table-reattach') as HTMLButtonElement
+      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
+      const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
 
       toggle.click()
       await settled(view, BIG)
@@ -1032,7 +1031,7 @@ describe('the app, end to end', () => {
 
       // The echo lands a frame or two after the reopen write, so give it time to do its damage.
       await new Promise((r) => setTimeout(r, 150))
-      expect(document.querySelector('#tm .state-row.is-current')).not.toBeNull()
+      expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-current')).not.toBeNull()
       expect(reattach.hidden).toBe(true)
     })
 
@@ -1040,7 +1039,7 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = 40; x + 2')
       for (let i = 0; i < 4; i += 1) click('tm', '◀')
       const step = stepText('tm')
-      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
+      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
       toggle.click()
       expect(table().hidden).toBe(true)
       toggle.click()
@@ -1050,11 +1049,11 @@ describe('the app, end to end', () => {
     it('shows no table for a program that declines the TM leg', async () => {
       // §11.9's known one-leg program: `200` under unary overflows the TM leg and leaves λ steppable.
       await settled(view, 'let x = 200; x + 1')
-      expect(document.querySelectorAll('#tm .state-row').length).toBe(0)
+      expect(document.querySelectorAll('[data-leaf="tm-0"] .state-row').length).toBe(0)
       // A row count of zero alone would also be satisfied by the app failing to render at all, or by
-      // `#tm` not existing. Pin that the page IS alive and the OTHER leg did compile, so this test
+      // `[data-leaf="tm-0"]` not existing. Pin that the page IS alive and the OTHER leg did compile, so this test
       // fails for a missing table rather than for a missing app.
-      expect(document.querySelector('#tm .state-table')).not.toBeNull()
+      expect(document.querySelector('[data-leaf="tm-0"] .state-table')).not.toBeNull()
       expect(paneText('lambda')).not.toBe('')
     })
 
@@ -1063,13 +1062,13 @@ describe('the app, end to end', () => {
     it('keeps the highlight across a hide and show', async () => {
       await settled(view, 'let x = 40; x + 2')
       click('tm', '◀')
-      const current = document.querySelector('#tm .state-row.is-current')?.textContent
+      const current = document.querySelector('[data-leaf="tm-0"] .state-row.is-current')?.textContent
       expect(current).toBeDefined()
-      const toggle = document.querySelector('#tm .table-toggle') as HTMLButtonElement
+      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
       toggle.click()
       toggle.click()
-      expect(document.querySelector('#tm .state-row.is-current')?.textContent).toBe(current)
-      expect(document.querySelectorAll('#tm .state-row.is-firing').length).toBe(1)
+      expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-current')?.textContent).toBe(current)
+      expect(document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-firing').length).toBe(1)
     })
   })
 })

@@ -103,6 +103,7 @@ function recorder<T>() {
     },
     setBindings: (options, current) => bindings.push({ options, current }),
     setDetached: (d) => detached.push(d),
+    setLayoutControls: (_canClose, _canSplit) => {},
   }
   return { view, frames, controls, bindings, detached }
 }

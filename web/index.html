@@ -23,21 +23,16 @@
     <header class="bar">
       <span class="wordmark">redextape</span>
       <button type="button" id="appearance"></button>
+      <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
       <label class="encoding">
         encoding
         <select id="encoding"></select>
       </label>
     </header>
-    <main>
-      <section id="source" class="pane">
-        <h2>source</h2>
-        <div id="editor"></div>
-        <div id="link-status" class="link-status"></div>
-      </section>
-      <section id="lambda" class="pane"></section>
-      <section id="tm" class="pane wide"></section>
-      <section id="results" class="pane results wide"></section>
-    </main>
+    <main></main>
+    <div id="editor"></div>
+    <div id="link-status" class="link-status"></div>
+    <section id="results" class="pane results"></section>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

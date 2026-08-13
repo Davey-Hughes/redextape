@@ -57,10 +57,37 @@ export type PaneEvents = {
    * `main.ts`'s wiring, same as `detach` above.
    */
   editScratch?: (src: string) => void
+  /**
+   * This pane asks to hold its scratch session's editor — wave 3 (5d-ii-a)'s editor-moves rule, and
+   * `claimEditorButton`'s only caller.
+   *
+   * OPTIONAL, FOR `detach`'s REASON: it exists only on a pane whose slot may be bound to a scratch,
+   * which today means the λ leg. IT CARRIES NOTHING, same as `splitRow`/`splitColumn`/`close` below —
+   * the pane knows it was asked; it does not know its own `LeafId` or which session it is bound to.
+   * `main.ts` holds both and is what makes the request into `editorOwner.set(session, id)` followed by
+   * `applyLayout()`, which is where the actual DOM move happens (`main.ts`'s `reconcileEditors`) — this
+   * handler only reports the click.
+   */
+  showEditor?: () => void
   /** A state row was clicked. Absent on panes that have no table. */
   linkState?: (stateId: number) => void
   /** A token in the λ link window was clicked, at this byte offset into the full `lambdaText`. */
   linkLambda?: (byteOffset: number) => void
+  /**
+   * This pane's split and close gestures — 5d-ii-a.
+   *
+   * OPTIONAL, LIKE `detach` AND UNLIKE `rebind`, and the same test applies: a pane has these handlers
+   * when it has the affordance. A pane rendered outside a layout tree — which is every pane in
+   * `binding-selector.test.ts` and in `tests/node/sessions.test.ts` — has no tree to split.
+   *
+   * THEY CARRY NOTHING. A pane knows it was asked to split; it does not know its own `LeafId`, its
+   * path in the tree, or whether it is the last leaf. `main.ts` holds the tree and answers all three,
+   * which keeps the pane classes free of the layout entirely — the same division `rebind` already
+   * makes by taking a `SessionId` and not a binding.
+   */
+  splitRow?: () => void
+  splitColumn?: () => void
+  close?: () => void
 }
 
 function button(label: string, title: string, onClick: () => void): HTMLButtonElement {
@@ -285,6 +312,51 @@ export function collapseButton(
 }
 
 /**
+ * The "bring the term editor to this pane" control on a pane bound to a scratch WHOSE editor is mounted somewhere
+ * else — wave 3 (5d-ii-a)'s editor-moves rule, and the control that makes moving it a user gesture
+ * rather than only a reply-driven side effect.
+ *
+ * A SEPARATE BUTTON FROM `collapseButton`, NOT A THIRD STATE BOLTED ONTO IT, though the two glyphs
+ * (`⌄`) match while both could apply. `collapseButton` toggles the LOCAL host's visibility and is
+ * offered only while THIS pane already holds the mounted editor (`LambdaPane.setEditor`'s mount branch
+ * is its only caller that shows it); this button is offered only while the pane's session is detached
+ * and this pane does NOT hold the editor (`LambdaPane`'s `#refreshClaim`). The two conditions are
+ * mutually exclusive — holding it is exactly what disqualifies this one — so a pane never offers both
+ * controls at once, and there is no selector ambiguity between them.
+ *
+ * `aria-label` DELIBERATELY DOES NOT REUSE `collapseButton`'s "show the term editor" — IMPORTANT
+ * finding, whole-branch review before merge: the two controls are mutually exclusive by construction
+ * (above), so no SELECTOR is ever ambiguous, but a screen-reader user hears one spoken name for two
+ * semantically different actions — "uncollapse THIS pane's own editor" versus "pull the editor here
+ * FROM ANOTHER pane" — which is exactly the ambiguity `aria-label`'s whole job is to prevent, selector
+ * clashes or not. This button's name states what it does: bring the editor here.
+ *
+ * ADDED AND REMOVED, NEVER DISABLED, this file's stated idiom. IT CARRIES NO LOCAL STATE, unlike
+ * `collapseButton`: a click here is always the same request ("bring the editor to this pane"), so there
+ * is no toggle to relabel and no "current state survives a removal" hazard to guard against.
+ */
+export function claimEditorButton(parent: HTMLElement, onClaim: () => void): { update(available: boolean): void } {
+  const el = document.createElement('button')
+  el.type = 'button'
+  el.className = 'claim-editor'
+  el.textContent = '⌄'
+  el.setAttribute('aria-label', 'bring the term editor to this pane')
+  el.title = 'bring the term editor to this pane — it is currently mounted on another pane'
+  el.addEventListener('click', onClaim)
+  // The same no-op guard every control in this file states, for the same reason: this runs on every
+  // recorded frame during playback.
+  let on = false
+  return {
+    update(available: boolean) {
+      if (available === on) return
+      on = available
+      if (available) parent.append(el)
+      else el.remove()
+    },
+  }
+}
+
+/**
  * The binding selector: which session this pane's slot is showing — decision 1's control (design §2,
  * plan T7), shared by both panes.
  *
@@ -413,6 +485,76 @@ export function controlStrip(on: PaneEvents): { el: HTMLElement; update(c: Contr
       } else {
         extend.hidden = false
         extend.textContent = c.continueLabel
+      }
+    },
+  }
+}
+
+/**
+ * The split and close controls on a pane's chrome — 5d-ii-a.
+ *
+ * BUILT ONCE, ADDED AND REMOVED, NEVER DISABLED — the idiom `detachedBadge` and `detachButton` already
+ * state, and here it carries the design's two absences. The source pane offers no split because there
+ * is one editor to duplicate into, and the last remaining leaf offers no close because an empty tree
+ * has no honest rendering. Both are the accessibility list's item 1: a control that provably cannot
+ * work should not be offered, which is why neither is a greyed button.
+ *
+ * HANDLERS ARE WIRED IN THE CONSTRUCTOR AND NEVER REWIRED, because `update` is on the per-frame path —
+ * `draw()` repaints every pane on every recorded frame — and re-adding a listener sixty times a second
+ * is how one click becomes sixty.
+ *
+ * `on: Pick<PaneEvents, 'splitRow' | 'splitColumn' | 'close'>`, NOT THE FULL `PaneEvents` — T13's own
+ * addition, and a narrowing rather than a new type: this function never read the other six members, so
+ * the parameter only ever needed the three it uses. What it makes possible is `main.ts`'s SOURCE pane,
+ * which has a close gesture (the paragraph above: source is refused only a SPLIT, not a close) but none
+ * of `PaneEvents`'s transport or binding members — there is no leg to step through and no session to
+ * rebind, so a caller offering only `{ close }` is a caller telling the truth about what the source pane
+ * can do, rather than one padding out five no-op stubs to satisfy a type that asked for more than this
+ * function reads.
+ */
+export function layoutControls(
+  parent: HTMLElement,
+  on: Pick<PaneEvents, 'splitRow' | 'splitColumn' | 'close'>,
+): { update(canClose: boolean, canSplit: boolean): void } {
+  const mk = (label: string, glyph: string, handler?: () => void) => {
+    const b = button(glyph, label, () => handler?.())
+    b.setAttribute('aria-label', label)
+    b.className = 'layout-control'
+    return b
+  }
+
+  const splitRow = mk('split left and right', '⇥', on.splitRow)
+  const splitColumn = mk('split top and bottom', '⤓', on.splitColumn)
+  const close = mk('close this pane', '×', on.close)
+
+  let shownClose = false
+  let shownSplit = false
+
+  return {
+    update(canClose: boolean, canSplit: boolean) {
+      if (canSplit !== shownSplit) {
+        shownSplit = canSplit
+        if (canSplit) {
+          parent.append(splitRow, splitColumn)
+          // `Node.append` MOVES A NODE ALREADY IN THE DOM rather than duplicating it — that is the
+          // whole bug this line closes. If `close` is already mounted (a prior `update` showed it)
+          // and splitting turns back on, `parent.append(splitRow, splitColumn)` above drops the two
+          // split buttons at the END of `parent`, shoving `close` in front of them: `update(true,true)
+          // -> update(true,false) -> update(true,true)` produced close, split-row, split-column
+          // instead of the required split-row, split-column, close. Re-appending `close` here — a
+          // no-op move when it is already last — restores the order every time the splits reappear,
+          // regardless of how many times close was toggled in between. `pane-layout-controls.test.ts`'s
+          // "keeps split-row, split-column, close in order across a canSplit toggle" pins this.
+          if (shownClose) parent.append(close)
+        } else {
+          splitRow.remove()
+          splitColumn.remove()
+        }
+      }
+      if (canClose !== shownClose) {
+        shownClose = canClose
+        if (canClose) parent.append(close)
+        else close.remove()
       }
     },
   }

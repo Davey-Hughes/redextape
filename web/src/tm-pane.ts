@@ -1,6 +1,6 @@
 import type { ControlState } from './controls'
 import { n } from './format'
-import { bindingSelect, controlStrip, detachedBadge, type PaneEvents } from './pane-chrome'
+import { bindingSelect, controlStrip, detachedBadge, layoutControls, type PaneEvents } from './pane-chrome'
 import type { SessionId } from './session-client'
 import type { BindingOption } from './sessions'
 import { centredScrollTop, Follow, focusedRows, highlight, linkedRows, ROW_HEIGHT, StateIndex } from './state-table'
@@ -28,6 +28,7 @@ export class TmPane {
   #strip: ReturnType<typeof controlStrip>
   #badge: ReturnType<typeof detachedBadge>
   #select: ReturnType<typeof bindingSelect>
+  #layout: ReturnType<typeof layoutControls>
   #program: TmProgram | null = null
   #names: string[] = []
   #frame: TmState | null = null
@@ -68,6 +69,7 @@ export class TmPane {
     this.#tapes = document.createElement('div')
     this.#tapes.className = 'tapes'
     this.#strip = controlStrip(on)
+    this.#layout = layoutControls(this.#strip.el, on)
 
     this.#toggle = document.createElement('button')
     this.#toggle.type = 'button'
@@ -268,6 +270,15 @@ export class TmPane {
    */
   setBindings(options: BindingOption[], current: SessionId): void {
     this.#select.update(options, current)
+  }
+
+  /**
+   * Which layout gestures this pane currently offers. Same shape and same contract as
+   * `LambdaPane.setLayoutControls`; that method's doc carries the argument for driving this from
+   * `main.ts`'s draw pass rather than from the pane, and it is not repeated here.
+   */
+  setLayoutControls(canClose: boolean, canSplit: boolean): void {
+    this.#layout.update(canClose, canSplit)
   }
 
   render(frame: TmState | null, controls: ControlState): void {

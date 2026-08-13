@@ -6,14 +6,13 @@ import { beforeAll, describe, expect, it } from 'vitest'
 const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
+    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
-  <main>
-    <section id="source" class="pane"><div id="editor"></div><div id="link-status" class="link-status"></div></section>
-    <section id="lambda" class="pane"></section>
-    <section id="tm" class="pane wide"></section>
-    <section id="results" class="pane results wide"></section>
-  </main>`
+  <main></main>
+  <div id="editor"></div>
+  <div id="link-status" class="link-status"></div>
+  <section id="results" class="pane results"></section>`
 
 let view: EditorView
 
@@ -84,11 +83,11 @@ describe('the λ pane, truncated', () => {
     // truncation (see its doc in `main.ts`: "a play head off step 0 makes truncation irrelevant"), so
     // clicking after the run — which leaves the λ pane mid-playback — reports `'not-step-0'` and never
     // reaches the branch this test exists for.
-    const restart = [...document.querySelectorAll<HTMLButtonElement>('#lambda button')].find((b) =>
+    const restart = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] button')].find((b) =>
       b.textContent?.includes('↺'),
     )
     restart?.click()
-    await until(() => (document.querySelector('#lambda .step')?.textContent ?? '').includes('step 0'))
+    await until(() => (document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? '').includes('step 0'))
 
     // THE LITERAL, NOT THE TRAILING `x`. The literal's λ node is the one whose span was cut by the
     // printer's depth cap; the trailing `x` still resolves to a span inside the printed prefix and would

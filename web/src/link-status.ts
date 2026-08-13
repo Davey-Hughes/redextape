@@ -8,6 +8,10 @@
  * block, so a substantial remainder — the transparent `let`/`seq` binders, the `Lambda`s, and the
  * statically-resolved callee `Var`s that `sourcemap.rs`'s module doc names — do not, and reporting
  * that absence has to be built as a first-class path rather than an edge case.
+ *
+ * `'absent'` IS OUTSIDE THAT COUNT AND IS DELIBERATELY THE ONE THAT SAYS NOTHING. The four above are
+ * reasons a λ pane on screen shows no link; `'absent'` is the layout tree's own addition and means
+ * there is no λ pane on screen to say anything about. Its own doc has the argument.
  */
 export type LambdaLinkState =
   /** Shown: the play head is at step 0, the term reaches this construct, and the backend lowered it. */
@@ -27,6 +31,23 @@ export type LambdaLinkState =
   | 'not-step-0'
   /** The λ backend declined this PROGRAM, so no construct has a λ link. */
   | 'declined'
+  /**
+   * THERE IS NO λ PANE ON SCREEN AT ALL — not an absence of a link, an absence of the surface every
+   * other member describes. Reachable since the layout tree: `closeLeaf` refuses only the last leaf in
+   * the tree, so closing the one λ pane a fresh page ships is an ordinary gesture.
+   *
+   * IT RENDERS AS NOTHING, and that is the same uniform-suppression rule `linkStatus` already applies
+   * to a DETACHED λ pane rather than a new exception: every λ clause explains why a term on screen
+   * does not show the link, and with no pane there is no term on screen for any of them to be about.
+   * `'declined'` is the member that could be argued to survive — it is a property of the program's
+   * lowering rather than of a pane — and it is suppressed here for the reason `linkStatus`'s own note
+   * gives for suppressing it under detachment: splitting the rule would put "is there a λ pane" in two
+   * places, and the sentence would still be read as an explanation of an empty pane that is not there.
+   *
+   * NOT SPELLED AS `detached`. A pane that does not exist is not a pane that is outside the source
+   * correspondence — `DetachedPanes` is read off a BINDING, and there is no binding to read.
+   */
+  | 'absent'
 
 /**
  * WHICH PANES ARE OUTSIDE THE CORRESPONDENCE — a record, not a boolean, because they detach
@@ -149,6 +170,7 @@ const LAMBDA_TEXT: Record<LambdaLinkState, string> = {
   unmapped: 'this construct has no recorded position in the λ term',
   'not-step-0': 'the λ link is only defined at step 0 — restart the λ pane to see it',
   declined: 'this program has no λ lowering, so no construct has a λ link',
+  absent: '',
 }
 
 const ATTACHED: DetachedPanes = { lambda: false, tm: false }

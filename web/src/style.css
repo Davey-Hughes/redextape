@@ -63,11 +63,45 @@
   box-sizing: border-box;
 }
 
+/* `display: flex; flex-direction: column; min-height: 100vh` — FOUND WHILE VERIFYING T12'S CSS
+   CONSOLIDATION VISUALLY, NOT NAMED IN THE BRIEF, AND NOT OPTIONAL ONCE FOUND. Every automated test in
+   this suite drives `main.ts` through jsdom-less Playwright pages that never assert `<main>`'s own
+   pixel height — `layout-view.test.ts` is the one file that would care, and it gives its own container
+   an explicit `600px` (`root.style.height = '600px'`) before ever calling `renderLayout`, which the
+   real page never gets. So 438 passing tests, including six new ones that click real buttons inside
+   real panes, never saw that `<main>` computed to `height: 0px` — confirmed with
+   `getBoundingClientRect()` against the running dev server, the same standard this project's other
+   "measured, not suspected" notes hold to.
+
+   THE MECHANISM IS THE SAME COLLAPSE `layout-view.ts`'s OWN DOC WARNS AGAINST, ONE LEVEL UP. Every host
+   and split box `layout-view.ts` builds carries `flex: <sizes[i]> 1 0` and an explicit `min-height: 0`
+   — deliberately, so a flex item can shrink below its content's min-content size, which is what makes a
+   user-draggable divider able to squeeze a pane down at all. That trick only produces a REAL pane size
+   when the flex-grow it relies on has real space to distribute into. Before this task, `<main>` was a
+   CSS GRID sized by its own content (`.pane` had no height rule either), so nothing was resizable and
+   nothing needed a bounded ancestor. The layout tree's whole premise — a divider drags a FRACTION of a
+   REAL extent (`layout-view.ts`'s own `divider()`: `box.getBoundingClientRect()` is what a drag divides
+   by) — requires a bounded container above the tree, and nothing before this task ever supplied one:
+   `<html>`/`<body>` had no height rule anywhere in this file, so `<main>`'s single child (the root
+   `.layout-split`, `flex: 1 1 0`, `min-height: 0`) had nothing to grow into and rendered at 0px, and
+   every pane beneath it did too — not shrunk to 12px like the `align-items: start` defect this task was
+   told to look for, but to nothing, invisibly, because nothing on screen or in a test ever measured it.
+
+   `min-height: 100vh`, NOT `height: 100vh`. A fixed `height` would clip `#results` (`min-height: 12rem`,
+   no maximum — a long run's output can exceed one screen) against `overflow` neither this rule nor any
+   other sets; `min-height` gives `<main>`'s flex-grow a REAL number to distribute into on an ordinary
+   page (the common case, where the header, the tree and a modest results panel together fall short of
+   the viewport) while letting the page grow past 100vh and scroll, exactly as it already did before this
+   task, whenever `#results` is tall enough to want that. This is the standard full-height-shell pattern
+   (header/footer sized to content, one flexible middle region) and not specific to this app. */
 body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
   font: var(--step-0) / 1.5 var(--font-ui);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
 .bar {
@@ -96,6 +130,18 @@ body {
   font: inherit;
   font-family: var(--font-mono);
   padding: 0.15em 0.6em;
+  border-radius: var(--radius);
+  border: 1px solid var(--fg-dim);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* Same treatment as `.controls button` — chrome, not a new visual language. */
+.layout-control {
+  font: inherit;
+  font-family: var(--font-mono);
+  padding: 0.1em 0.45em;
   border-radius: var(--radius);
   border: 1px solid var(--fg-dim);
   background: transparent;
@@ -203,18 +249,13 @@ body {
   caret-color: var(--fg);
 }
 
-/* §6.1's arrangement: source and λ side by side, the TM across the bottom. Two columns because the
-   two panes being compared are the two the divergence principle is about; the TM's five tapes need
-   the full width and get their own row. */
-main {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
-  align-items: start;
-}
-.pane.wide {
-  grid-column: 1 / -1;
-}
+/* §6.1's original arrangement — source and λ side by side, the TM across the bottom — used to live
+   here as a two-column grid with `.pane.wide` spanning the TM/results row. Both are artefacts of the
+   fixed four-section layout the layout tree (T12, 5d-ii-a) replaced: the tree supplies its own nested
+   flex boxes and sizes every pane with `flex-grow`, and DELETING this block (not adding a fourth `main`
+   override) is what closed the defect the layout tree's own rule below used to carry a long note about
+   — see that rule's doc for the measurement. `.pane h2` still applies to every pane's title regardless
+   of how it is laid out, so it stays here rather than moving. */
 .pane h2 {
   font-size: var(--step--1);
   text-transform: lowercase;
@@ -579,4 +620,71 @@ main {
 .term .is-redex {
   background: color-mix(in oklab, var(--tok-operator) 22%, transparent);
   box-shadow: inset 0 -2px 0 var(--tok-operator);
+}
+
+/* The layout tree's containers and dividers.
+
+   ONE `main` RULE, WHERE THERE USED TO BE THREE. A grid-era block (`display: grid`, two columns,
+   `gap`, `align-items: start`) and a later `align-items: stretch` override both targeted the same bare
+   `main` selector, so the cascade MERGED them property-by-property instead of one replacing the other
+   — deleting the grid block on its own (T12, 5d-ii-a) is what closed that, rather than adding a fourth
+   rule on top of the pile.
+
+   TWO SEPARATE BUGS WERE HIDING IN THAT MERGE, ONE FOUND AND FIXED BEFORE THIS TASK, ONE LATENT UNTIL
+   IT. `align-items: start` survived visibly: with it in force the row split holding the source/λ
+   divider measured 12px — exactly the divider's own `flex-basis` plus its transparent border — instead
+   of the tree's full width, because every pane host is `flex-basis: 0` / `min-width: 0` and so
+   contributes nothing to a shrink-to-fit size. `gap: var(--space-3)` survived INVISIBLY: `renderLayout`
+   appends exactly one child to `main` in every tree this app has shipped so far, and a flex `gap` needs
+   two items to show at all — so nothing on screen or in a passing test suite ever depended on it being
+   there, and nothing would have depended on it going away either, until a second top-level split makes
+   it a second, unaccounted-for source of spacing next to every divider's own width. It is deleted here
+   rather than carried forward.
+
+   `align-items: stretch` is flexbox's own initial value, restored explicitly because leaving it implicit
+   would have relied on nothing else ever setting `start` again — which is exactly the failure mode this
+   whole rule just came from. It is what makes a split box fill the width its children are meant to
+   divide, which is what every divider's pixel-to-fraction conversion assumes. The default tree
+   reproduces the old arrangement exactly, so nothing about the shipped layout changes.
+
+   `flex: 1 1 auto` IS `main`'S OWN SIZE AS `body`'S FLEX ITEM, NOT ITS CHILDREN'S — see `body`'s own
+   doc for why `<main>` needed a bounded ancestor at all (a second, deeper collapse this same
+   consolidation surfaced) and why `min-height: 0` here is still required rather than redundant with
+   the auto-height fallback: without it `main`'s own automatic minimum size (its content's min-content
+   height) would win over `body`'s `min-height: 100vh`-derived extra space the moment the tree's content
+   ever wanted to be taller than that, defeating the shrink `layout-view.ts`'s hosts rely on one level
+   up. */
+main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.layout-divider {
+  flex: 0 0 var(--divider-size, 4px);
+  background: var(--rule);
+  /* `background-clip` plus a transparent border gives a 4px visual line with a 12px hit target,
+     which is the difference between a divider you can grab and one you chase. */
+  border: 4px solid transparent;
+  background-clip: content-box;
+  box-sizing: content-box;
+}
+
+.layout-split[data-dir="row"] > .layout-divider {
+  cursor: col-resize;
+}
+
+.layout-split[data-dir="column"] > .layout-divider {
+  cursor: row-resize;
+}
+
+/* THE ONLY FOCUS-VISIBLE RULE IN THE STYLESHEET, and it is here rather than as part of the deferred
+   accessibility pass because a divider that takes focus with no ring is a control a keyboard user
+   cannot locate — item 5 of that list is about rings nobody specified, and this would be a ring
+   nobody could have. */
+.layout-divider:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: -2px;
 }

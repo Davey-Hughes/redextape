@@ -179,9 +179,17 @@ export function resetLegs(legs: SessionLegs, lambda: LambdaStatus | null, tm: Tm
  *
  * **T8 BUILT THAT MESSAGE, SO THE SENTENCE ABOVE IS NOW HISTORY AND THE ARGUMENT IS NOT.** `scratch.ts`
  * registers a second entry from a click, and `protocol.ts`'s `lambda-scratch` is the worker message
- * this paragraph says did not exist. What did not change is why the container lives here: the app has
- * ONE λ pane, so "two panes on two λ sessions" is still unperformable through it, and the singleton
- * §4.3 requires must be asserted on POOL SIZE, which no DOM carries.
+ * this paragraph says did not exist.
+ *
+ * **AND 5d-ii-a'S LAYOUT TREE RETIRED THE OTHER HALF: "the app has ONE λ pane, so two panes on two λ
+ * sessions is still unperformable through it" IS NO LONGER TRUE.** A λ leaf splits, the new pane
+ * inherits its session, and 5d-i's binding selector points it somewhere else — the whole route is
+ * driven through the DOM by `tests/browser/two-lambda-panes.test.ts`, which is the test this paragraph
+ * spent two revisions explaining could not exist. (Design §3.4 of that slice quotes these very lines as
+ * the thing it fixes.) **WHAT DID NOT CHANGE IS THE REST OF THE ARGUMENT, AND IT IS WHY THE CONTAINER
+ * STILL LIVES HERE**: the singleton §4.3 requires must be asserted on POOL SIZE, which no DOM carries,
+ * so a test driven entirely through the app still cannot make that assertion however many panes it can
+ * now reach.
  *
  * TWO MAPS KEYED BY `SessionId` — THIS ONE AND `SessionPool`'s — AND THEY ARE NOT THE SAME FACT
  * WRITTEN TWICE. `SessionPool`'s own doc states the split from its side: the pool says what a session
@@ -313,6 +321,7 @@ export type PaneView<T> = {
   render(frame: T | null, controls: ControlState): void
   setBindings(options: BindingOption[], current: SessionId): void
   setDetached(detached: boolean): void
+  setLayoutControls(canClose: boolean, canSplit: boolean): void
 }
 
 /**

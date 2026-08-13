@@ -1,10 +1,13 @@
-import type { EditorView } from '@codemirror/view'
+import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { History } from '../../src/history'
 import { LambdaPane } from '../../src/lambda-pane'
 import { linkStatus } from '../../src/link-status'
+import { createLinkWiring } from '../../src/link-wiring'
+import { PaneCollection } from '../../src/panes'
 import type { RunReply } from '../../src/protocol'
 import { HISTORY_BYTES, lambdaFrameBytes, tmFrameBytes } from '../../src/protocol'
+import { createReplies } from '../../src/replies'
 import { LambdaScratchpad } from '../../src/scratch'
 import type { PoolPort, SessionId } from '../../src/session-client'
 import { SessionPool } from '../../src/session-client'
@@ -312,9 +315,20 @@ describe('detach is a fork', () => {
  * always sends `index.lambdaText` — the SOURCE compile's own step-0 print, which round-trips by
  * construction (`lambda/syntax.rs`'s guarantee) unless it is itself cut at `LAMBDA_BYTE_BUDGET`, which
  * only a genuinely enormous program reaches. There is no seam in the mounted app to hand `detach` a
- * deliberately broken string instead, and `onScratchReply` is a closure with no export — so a test
+ * deliberately broken string instead, and ~~`onScratchReply` is a closure with no export~~ — so a test
  * that needed BOTH a cheap unparseable seed AND the exact production code path had nowhere to go
- * through `main.ts` at all. This file's own siblings already establish the alternative this test
+ * through `main.ts` at all.
+ *
+ * **THE STRUCK CLAUSE EXPIRED IN WAVE 1 AND NOBODY NOTICED FOR TWENTY-SEVEN COMMITS.** `replies.ts`
+ * now exports `createReplies`, whose return type includes `onScratchReply`, so the seam this paragraph
+ * says does not exist has existed since the extraction. **The counterexample is in this very file**, 130
+ * lines below: the third-round test drives that exact production path. The reasoning above still holds
+ * for the *seed* half — there is genuinely no way to hand `detach` a broken string — and only the
+ * no-export half is dead.
+ *
+ * Recorded struck-through rather than deleted because this is the third instance on this branch of an
+ * impossibility claim outliving the change that falsified it, and the pattern is worth more than the
+ * sentence. This file's own siblings already establish the alternative this test
  * follows: `PaneSlot.render` is written to be "the SAME resolution the app's `draw()` does rather than
  * a re-implementation of it" (`sessions.ts`'s own doc), and the `describe` above drives
  * `LambdaScratchpad` directly over real `session-worker.ts` threads for the identical reason. Nothing
@@ -422,6 +436,134 @@ describe('the no-session remedy for a failed fork', () => {
       host.remove()
     }
   })
+
+  /**
+   * **MINOR FINDING, THIRD REVIEW ROUND — THE APP'S SECOND RETIRE PATH WAS DEFENDED BY ARGUMENT ALONE.**
+   *
+   * Four doc comments assert that BOTH retire sites call `reconcileEditors`, so "a custody entry cannot
+   * outlive its session's incarnation" is a property of the retire rather than of which caller happened
+   * to trigger it. `pnpm test:coverage` reported the whole phantom-fork arm of `onScratchReply` — the
+   * arm that fires when a scratch compile returns no session, `reconcileEditors()` included — as never
+   * executed: **deleting that line could not fail a test**,
+   * which is the shape this branch has now produced four times. `compile.ts`'s half is driven by
+   * `two-lambda-panes.test.ts`; this is the other half, and it is the half the app's own comments claim
+   * hardest.
+   *
+   * **IT DRIVES `createReplies` RATHER THAN `main()`, AND THAT SEAM DID NOT EXIST WHEN THE `describe`
+   * ABOVE EXPLAINED WHY IT COULD NOT.** That test's doc says a test needing both a cheap unparseable
+   * seed and the production code path "had nowhere to go through `main.ts` at all", because
+   * `onScratchReply` was a closure with no export. Wave 1 moved it into `replies.ts` behind an exported
+   * factory, so the production switch is now constructible over the same hand-built registry, pool and
+   * pane the tests above use. Everything here except three injected dependencies is the app's own
+   * object: the reply comes off a REAL `session-worker.ts` thread that really failed to build, and the
+   * retire, the rebind and the fork-failed report are the production ones.
+   *
+   * **THE THREE STUBS ARE THE THREE DEPENDENCIES `main.ts` INJECTS, AND `reconcileEditors` IS THE
+   * ASSERTION.** It is a `() => void` closed over `main()`'s own maps, so nothing outside that function
+   * can build the real one — which is exactly why it is a parameter. Counting its calls is what makes
+   * the deleted-line mutation fail, and `expect(swept).toBe(0)` before the reply is what stops the
+   * count from being satisfied by anything earlier in the sequence.
+   */
+  it('sweeps editors on the phantom no-session, through `createReplies` rather than around it', {
+    timeout: 120_000,
+  }, async () => {
+    const { pool } = realPool()
+    const reg = new SessionRegistry()
+    const seen: RunReply[] = []
+    const pad = new LambdaScratchpad({
+      registry: reg,
+      pool,
+      id: SCRATCH,
+      label: 'λ scratchpad',
+      historyBytes: HISTORY_BYTES,
+      onReply: (r) => seen.push(r),
+    })
+
+    const host = document.createElement('div')
+    document.body.append(host)
+    const statusHost = document.createElement('div')
+    const results = document.createElement('div')
+    // A REAL `EditorView` WITH NO PARENT — `createReplies` takes it as a thunk and the arm under test
+    // never calls it, but a stub would be a cast, and this costs one unattached DOM node.
+    const view = new EditorView()
+    const panes = new PaneCollection()
+    try {
+      reg.add(sourceSession(pool, []))
+      const slot = new PaneSlot('lambda', SOURCE)
+      const pane = new LambdaPane(host, {
+        back: () => undefined,
+        forward: () => undefined,
+        play: () => undefined,
+        restart: () => undefined,
+        extend: () => undefined,
+        rebind: (session) => slot.rebind(session),
+        detach: () => undefined,
+      })
+      // IN THE COLLECTION, BECAUSE THAT IS WHERE THE PRODUCTION ARM LOOKS FOR SLOTS TO REBIND
+      // (`panes.all().map((p) => p.slot)`). A registry entry alone would leave the retire nothing to
+      // move, and the rebind assertion below would pass vacuously.
+      panes.add({ id: 'lambda-0', kind: 'lambda', slot, pane, host })
+
+      let drawn = 0
+      let swept = 0
+      const links = createLinkWiring({
+        view: () => view,
+        statusHost,
+        sessions: reg,
+        panes,
+        draw: () => {
+          drawn += 1
+        },
+      })
+      const replies = createReplies({
+        sessions: reg,
+        scratchpad: pad,
+        results,
+        view: () => view,
+        panes,
+        links,
+        draw: () => {
+          drawn += 1
+        },
+        sourceSession: SOURCE,
+        // `undefined` IS THE HONEST ANSWER HERE AND THE REASON THIS ARM NEEDS THE SWEEP AT ALL: after a
+        // retire, `main.ts`'s `editorHomeFor` can no longer resolve any pane to the dead session, so the
+        // narrow dependency is a no-op on exactly this path (`compile.ts`'s own doc has the measurement).
+        editorHome: () => undefined,
+        reconcileEditors: () => {
+          swept += 1
+        },
+      })
+
+      // THE PHANTOM BUILD — an unparseable seed, for the reason the test above records: it reaches the
+      // identical `scratch === null` branch of `onLambdaScratch` as a genuinely over-budget term without
+      // needing an enormous fixture.
+      pad.detach(slot, 'not a valid lambda term (((', 0)
+      expect(slot.binding.session).toBe(SCRATCH)
+      await until(() => seen.some((r) => r.kind === 'no-session'), 'the failed build to answer')
+      const failReply = seen.find((r) => r.kind === 'no-session')
+      if (failReply === undefined || failReply.kind !== 'no-session') throw new Error('expected a no-session reply')
+
+      expect(swept).toBe(0)
+      replies.onScratchReply(SCRATCH, failReply)
+
+      // THE ASSERTION THE UNCOVERED LINE OWNS.
+      expect(swept).toBe(1)
+      // AND THE REST OF THE ARM RAN, so a green `swept` is not a green test over a switch that fell
+      // through somewhere else: the session is retired, the pane is home, and the reason is on the
+      // surface built to carry it.
+      expect(reg.has(SCRATCH)).toBe(false)
+      expect(slot.binding.session).toBe(SOURCE)
+      expect(links.forkFailed).not.toBeNull()
+      for (const d of failReply.diagnostics) expect(links.forkFailed ?? '').toContain(d.message)
+      expect(drawn).toBeGreaterThan(0)
+    } finally {
+      view.destroy()
+      pool.unbind(SOURCE)
+      pool.unbind(SCRATCH)
+      host.remove()
+    }
+  })
 })
 
 /**
@@ -451,24 +593,23 @@ describe('the fork control forks a truncated frame, through the app', () => {
   const SHELL = `
     <header class="bar"><span class="wordmark">redextape</span>
       <button type="button" id="appearance"></button>
+      <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
       <label class="encoding">encoding <select id="encoding"></select></label>
     </header>
-    <main>
-      <section id="source" class="pane"><div id="editor"></div><div id="link-status" class="link-status"></div></section>
-      <section id="lambda" class="pane"></section>
-      <section id="tm" class="pane wide"></section>
-      <section id="results" class="pane results wide"></section>
-    </main>`
+    <main></main>
+    <div id="editor"></div>
+    <div id="link-status" class="link-status"></div>
+    <section id="results" class="pane results"></section>`
 
   let view: EditorView
 
   const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-  const stepText = () => document.querySelector('#lambda .step')?.textContent ?? ''
+  const stepText = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''
 
   const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
 
   const clickLambda = (label: string) => {
-    const b = [...document.querySelectorAll<HTMLButtonElement>('#lambda .controls button')].find(
+    const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')].find(
       (x) => x.textContent === label,
     )
     if (b === undefined) throw new Error(`no \`${label}\` button in the λ pane`)
@@ -498,14 +639,14 @@ describe('the fork control forks a truncated frame, through the app', () => {
     // THE CAPABILITY THIS SLICE EXISTS FOR. Before T8's fix to `#refreshDetach`, a frame this
     // truncated hid the fork control outright — `lambda-pane.ts`'s own module doc calls this shape
     // "most non-trivial terms".
-    expect(document.querySelector('#lambda .truncated')).not.toBeNull()
-    const fork = document.querySelector<HTMLButtonElement>('#lambda .controls .detach')
+    expect(document.querySelector('[data-leaf="lambda-0"] .truncated')).not.toBeNull()
+    const fork = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')
     expect(fork).not.toBeNull()
 
     fork?.click()
 
-    await until(() => document.querySelector('#lambda .term-editor') !== null, 'the editor to mount')
-    const editorText = document.querySelector('#lambda .term-editor')?.textContent ?? ''
+    await until(() => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null, 'the editor to mount')
+    const editorText = document.querySelector('[data-leaf="lambda-0"] .term-editor')?.textContent ?? ''
     expect(editorText).not.toBe('')
     // NOT A PREFIX. A truncated frame's own text ends mid-token, with no closing paren or binder; the
     // editor's seed is the worker's full-fidelity re-print (`index.lambdaText`, replayed to step 2
@@ -516,6 +657,6 @@ describe('the fork control forks a truncated frame, through the app', () => {
     // AND THE SOURCE SESSION IS STILL THE ONE THE PANE LEFT — the scratch is a second session, not a
     // mutation of the first (§4.3, and this file's first `describe` proves the mechanism directly).
     // `[detached]` is the DOM's own witness that a second session now exists at all.
-    expect(document.querySelector('#lambda h2')?.textContent).toContain('[detached]')
+    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('[detached]')
   })
 })

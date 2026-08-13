@@ -30,6 +30,17 @@ describe('linkStatus', () => {
     )
   })
 
+  // `'absent'` IS THE ONE MEMBER THAT SAYS NOTHING, and it is checked against the case where every
+  // other member would have spoken: a fully resolved TM leg and a λ state that is not `'shown'` would
+  // normally contribute a clause. There is no λ pane on screen to contribute one about — see
+  // `LambdaLinkState`'s own doc for why that suppresses `'declined'` along with the rest.
+  it('says nothing about λ when there is no λ pane to say it about', () => {
+    expect(linkStatus({ state: 'linked', tm: true, lambda: 'absent', focus: false })).toBe('')
+    expect(linkStatus({ state: 'linked', tm: false, lambda: 'absent', focus: false })).toBe(
+      'this construct emits no machine states',
+    )
+  })
+
   it('says nothing extra when both legs resolved and the focus is elsewhere', () => {
     expect(linkStatus({ state: 'linked', tm: true, lambda: 'shown', focus: false })).toBe('')
   })

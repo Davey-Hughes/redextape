@@ -26,14 +26,13 @@ import { beforeAll, describe, expect, it } from 'vitest'
 const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
+    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
-  <main>
-    <section id="source" class="pane"><div id="editor"></div><div id="link-status" class="link-status"></div></section>
-    <section id="lambda" class="pane"></section>
-    <section id="tm" class="pane wide"></section>
-    <section id="results" class="pane results wide"></section>
-  </main>`
+  <main></main>
+  <div id="editor"></div>
+  <div id="link-status" class="link-status"></div>
+  <section id="results" class="pane results"></section>`
 
 const SAMPLE = 'let x = 40; x + 2'
 
@@ -48,12 +47,12 @@ async function until(predicate: () => boolean, what: string, timeoutMs = 60_000)
 }
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-const term = () => document.querySelector('#lambda .term')?.textContent ?? ''
-const editorHost = () => document.querySelector<HTMLElement>('#lambda .term-editor')
+const term = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
+const editorHost = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
 const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
 
 const clickLambda = (label: string) => {
-  const b = [...document.querySelectorAll<HTMLButtonElement>('#lambda .controls button')].find(
+  const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')].find(
     (x) => x.textContent === label,
   )
   if (b === undefined) throw new Error(`no \`${label}\` button in the λ pane`)
@@ -63,7 +62,7 @@ const clickLambda = (label: string) => {
 /** A real keystroke into the scratch's own editor — see the file doc for why not `setText`. */
 function typeIntoScratchEditor(text: string): void {
   const host = editorHost()
-  if (host === null) throw new Error('no scratch editor mounted under #lambda')
+  if (host === null) throw new Error('no scratch editor mounted under [data-leaf="lambda-0"]')
   const cmView = EditorView.findFromDOM(host)
   if (cmView === null) throw new Error('no CodeMirror view mounted under the editor host')
   cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: text } })
@@ -86,7 +85,7 @@ describe('editing the scratch, through the app', () => {
 
     // STAGE 1 — fork. Synchronous up to the rebind; `[detached]` and the editor arrive over the wire.
     clickLambda('✎ fork')
-    expect(document.querySelector('#lambda h2')?.textContent).toContain('[detached]')
+    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('[detached]')
     await until(() => editorHost() !== null, 'the editor to mount')
     await until(() => term() !== '', 'the scratchpad to produce its first frame')
 
@@ -107,7 +106,9 @@ describe('editing the scratch, through the app', () => {
     const lastGood = term()
     typeIntoScratchEditor('(λa.')
     await until(
-      () => document.querySelectorAll('#lambda .cm-lintRange, #lambda .cm-lint-marker').length > 0,
+      () =>
+        document.querySelectorAll('[data-leaf="lambda-0"] .cm-lintRange, [data-leaf="lambda-0"] .cm-lint-marker')
+          .length > 0,
       'the scratch editor to mark the parse error',
     )
     expect(term()).toBe(lastGood)
@@ -116,7 +117,7 @@ describe('editing the scratch, through the app', () => {
     // §4.3: "the same mechanism as poison recovery"; §4.2: "mounted and unmounted, never hidden").
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let y = 1; y + 1' } })
     expect(editorHost()).toBeNull()
-    expect(document.querySelector('#lambda h2')?.textContent).not.toContain('[detached]')
+    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).not.toContain('[detached]')
     await until(() => idle() && resultsText().includes('2'), 'the recompile from source')
   })
 })

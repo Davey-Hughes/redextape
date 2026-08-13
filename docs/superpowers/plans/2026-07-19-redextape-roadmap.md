@@ -5538,3 +5538,390 @@ this slice's own design §6.1 and not a courtesy.
 
 **Written before the final whole-branch review**, which is the last item on this branch's endgame list;
 eight Minors are queued for it to triage, including the T1 clamp comment above.
+
+#### PLAN 5d-ii-a CLOSES — panes become a recursive tree, and a green suite that could not see its own invisible app is the finding that outranks the feature (2026-08-12, branch `plan5d-ii-a`, `0886e82..a8f79e0` plus the whole-branch review's fixes and TWO further review rounds of those fixes)
+
+Design: [`../specs/2026-08-12-plan5d-ii-a-layout-tree-design.md`](../specs/2026-08-12-plan5d-ii-a-layout-tree-design.md).
+Plan: [`2026-08-12-plan5d-ii-a-layout-tree.md`](2026-08-12-plan5d-ii-a-layout-tree.md).
+
+The first of the three slices §1 splits 5d-ii into. Panes are now a recursive split tree
+(`layout.ts`'s pure model, `layout-view.ts`'s DOM) rather than four hardcoded sections over a
+two-column grid: λ and TM leaves split row-wise or column-wise, dividers resize by drag or by arrow
+key, panes close, and the arrangement is persisted and restored, with `parseLayout` validating every
+invariant §4.1 states rather than merely the shape a `localStorage` value happens to have. **Three of
+those verbs are more thinly covered than this sentence reads, and the gaps are itemised under "what
+this slice could not establish" rather than left inside the summary** — the column split, the divider
+drag, and (until the review's own fix) the reload. The last remaining
+leaf and the source leaf's split control are withheld rather than offered disabled — the accessibility
+list's own item 1, applied to a subsystem that did not exist when the list was written. `main.ts` was
+decomposed into five wave-1 modules (`link-wiring.ts`, `transport.ts`, `replies.ts`, `compile.ts`,
+`draw.ts`) and a `panes.ts` collection that thirty hand-converted call sites now iterate instead of
+addressing two singleton `let`s by name.
+
+**The headline capability, and the reason this slice ships before -b or -c**: two λ panes, on two
+different λ sessions, side by side, reached entirely through the UI — the demonstration 5d-i's binding
+model was built for, and which that design's own §3.4 records as unperformable through the app before
+this slice landed. The mechanism behind it is decision 4: there is exactly one `EditorView` per scratch
+session, and it *moves* between panes rather than being duplicated, so splitting a pane bound to a
+scratch cannot desynchronize two editors the way two independent CodeMirror instances over one buffer
+would. The same one-instance-moves rule closes the failure mode on the source pane: closing it detaches
+`view.dom` rather than destroying the view, so a program whose text is never persisted anywhere survives being
+closed and restored by `reset layout`.
+
+Executed across three lanes against one shared tree: Lane A ran `main.ts`'s five sequential extractions
+plus the join tasks; Lane B built `panes.ts`, `layout.ts` and `layout-view.ts` in a worktree, node-tier
+only; Lane C built the pane split/close chrome in a second worktree. Both merges were clean — lane B's
+on the first attempt, lane C's after a re-review closed three findings — and the arithmetic across both
+is the check that a clean merge cannot silently drop a test file: 371 (5d-iii's closing figure) → 422
+(+51, lane B) → 432 (+10, lane C), each figure reproduced against the live tree rather than assumed.
+
+##### THE FINDING THAT MATTERS MOST — a green suite was not evidence the app worked
+
+**After the layout tree's suite was green, loading the real dev server and taking a screenshot showed
+`<main>` computed to `height: 0px`.** The header and the results pane rendered; the entire pane tree
+did not. Every pane in the shipped app was invisible, and no assertion in 432 passing tests said so —
+the bug was found by looking at the page, not by any test.
+
+The reason the suite could not see it is mechanical, not a gap in coverage: `layout-view.test.ts` gives
+its own test container an explicit `600px` height that the real page never has, so the tree's flex
+machinery always had a bounded ancestor to grow into under test and never had one in the app. `main`
+carried a leftover `display: grid` rule from the pre-tree layout that a newly appended `main { display:
+flex }` only partially overrode — same selector, so the declarations merged property-by-property rather
+than one replacing the other — and nothing in the suite measured `<main>`'s own height at all. It was
+fixed with a full-height-shell pattern (`body` a flex column at `min-height: 100vh`, `main` `flex: 1 1
+auto`), and the fix was checked the only way that means anything here: the CSS was reverted while
+keeping the new layout wiring, and the existing suite — `layout-app.test.ts`, `layout-view.test.ts`,
+`app.test.ts`, 56 tests — **stayed green against the reintroduced bug.** A regression test
+(`layout-app.test.ts`'s seventh case, up from six) was then written to measure `<main>`'s real computed height rather
+than an inline style or a synthetic container, and verified the only way a new test earns trust here:
+stash the CSS fix, watch the new test fail (`AssertionError: expected 0 to be greater than 0`) while
+the other six stay green, then restore it.
+
+**The standing rule this produces: a green suite is not evidence an app works, and a test container
+given a size the real page never gets is a test measuring a fiction of its own making.**
+
+##### THE RELATED PATTERN — three tasks shipped green suites over broken code, for the same underlying reason
+
+Stated once and generally because naming it three times as three unrelated defects would understate
+what they share. In each case the suite was green and the code beneath it was wrong:
+
+- **A magnitude the suite never checked.** The layout tree's divider-drag test asserted only the SIGN
+  of a reported resize delta. Mutating `pointermove` to drop the division that converts pixels to a
+  fraction of the split — reporting raw pixels as though they were the fraction — left all eight tests
+  green. Writing the magnitude assertion the sign-only test should have been is what then surfaced the
+  `main`/`display: grid` merge bug above: with the real distance measured, panes were collapsing to
+  12px, and nothing had been able to tell.
+- **Controls asserted absent that were merely never added.** The pane-chrome split/close controls'
+  `.remove()` branches had zero call sites reached by the suite; every test starts a fresh instance, so
+  "removes the controls on a `canSplit` toggle" and "never added" are indistinguishable to a suite that
+  never toggles. Deleting both `.remove()` calls left all five of that task's tests green.
+- **"Moved" indistinguishable from "destroyed and rebuilt".** The two-λ-panes headline test counted
+  `.cm-editor` DOM nodes to check the editor moved between panes rather than duplicating. A
+  destroy-and-rebuild `receiveEditor` — which throws away cursor, selection and undo, the entire point
+  of decision 4 — passes every count-based assertion, because the count is the same either way. Fixed
+  with an `EditorView.findFromDOM` identity check (`toBe`, not `toEqual`) across the move, plus a
+  cursor position set before and checked after — state a rebuild resets to zero and a real move does
+  not.
+
+**Two of the three were caught only because a reviewer designed a sharper mutation than the one the
+task was given.** The pane-chrome brief prescribed `splitRow.disabled = true` in place of removal — a
+mutation that cannot fail, because the removal branch sits behind a guard (`canSplit !== shownSplit`)
+the prescribed check never trips. The headline test's brief prescribed a destroy-and-rebuild mutation
+that the DOM-count assertions already caught, which is why it looked like proof rather than a probe of
+the assertion's weakest edge. **A mutation that fails to fail proves nothing; one that fails for the
+wrong reason is worse, because it manufactures confidence** — the transferable rule this branch's own
+process record settles on.
+
+##### THE WHOLE-BRANCH REVIEW FOUND TWO CRITICALS AND AN IMPORTANT AFTER THIRTEEN CLEAN PER-TASK REVIEWS, AND ALL THREE HAVE ONE SHAPE
+
+Every task on this branch was reviewed as it landed, and thirteen of those reviews closed clean. The
+review that read the branch **as a whole** then blocked the merge on three defects none of them could
+have seen, because **every one of them is a wave-1 invariant meeting a wave-3 capability** — two facts
+that were each correct when written, in files a per-task diff never shows together.
+
+- **Closing the last λ or TM pane broke the app, and the breakage persisted.** `draw.ts` and
+  `link-wiring.ts` both threw on an empty leg, each justifying it in a comment with "`main.ts` always
+  registers one pane of each leg before this can be called" — true through Task 7, false from Task 12,
+  when panes began being derived from the layout tree. `closeLeaf` refuses only the last leaf in the
+  TREE, so `close` was offered on the single λ pane a fresh page ships. And `applyLayout` persists the
+  tree *before* it calls `draw()`, so the λ-less arrangement was already in `localStorage` when the
+  throw landed: a reload came back to the same dead app, and only `reset layout` escaped.
+- **The first split after a reload silently did nothing.** `leafCounter` started at 1 and its comment
+  reasoned only about `defaultLayout()`'s ids — but a restored tree can already hold `lambda-1`, and
+  `splitLeaf`'s (correct, deliberate) collision guard refused it. The second click always worked,
+  because the refused attempt still incremented the counter, which is what made it read as flaky.
+- **Closing the pane holding the scratch editor stranded it, while the control to retrieve it stayed
+  offered.** `reconcileEditors` iterates `panes.of('lambda')`, and a closed pane has already left the
+  collection — so the editor sat in an orphaned host, unreachable, while the survivor went on offering
+  "bring the term editor to this pane" and clicking it did nothing. **The slice that codified "a control
+  that provably cannot work should not be offered" shipped one.**
+
+**The transferable finding is about review granularity, not about these three bugs.** A per-task review
+reads a diff; a comment stating an invariant is not in the diff of the task that falsifies it. The
+falsifying change here was `applyLayout` deriving panes from a tree — a Task 12 diff that touches
+neither `draw.ts` nor `link-wiring.ts` — so no reviewer of any single task was ever shown both halves.
+**A branch executed in waves needs a review at the wave boundary that reads the invariants wave 1 wrote
+against the capabilities wave 3 added**, and asking "which comments in this file are now false" is a
+different exercise from reviewing any diff. The corollary is the one this branch had already learned
+once, at `sessions.ts`: a comment amended in one place is not amended, and this branch produced a second
+instance of that too.
+
+##### AND THEN THAT REVIEW'S OWN FIX INTRODUCED A FURTHER IMPORTANT, CAUGHT ONLY BY RE-REVIEW
+
+**The custody mechanism written to close the third finding above made design §4.3's impossible state
+representable.** `heldEditors` holds a closed pane's editor keyed by SESSION — correctly, because that
+is the key the next claim arrives under — but the λ scratch's session id is a CONSTANT that the next
+fork re-registers, and nothing swept the entry when the session died. The retire path
+(`compile.ts`'s recompile-from-source) calls `draw()`, while every layout gesture calls `applyLayout()`,
+and only the latter reconciles editors — so the destroy-a-held-editor branch never ran. Six clicks
+reach it: fork, split, close the holder, type in the SOURCE editor, fork again on the survivor, then
+any layout gesture. The second fork's editor mounts legitimately; the gesture then hands the pane the
+stale one on top, and `receiveEditor` overwrote `#editor` unconditionally without removing the previous
+node. **Measured in the running app: two `.cm-editor`s inside one λ pane, the pane pointing at the view
+over a worker `retire` had terminated, and the live one orphaned in the DOM where neither `setEditor`
+nor `destroy` could reach it** — "two uncoordinated CodeMirror instances over one buffer", reached
+through the very mechanism §4.3 introduces to make it impossible. Before custody existed a closed pane's
+editor was merely unreachable; the fix made it resurrectable onto an occupied pane, so the regression
+is new.
+
+Fixed at all three layers rather than at the symptom: both retire sites now call `reconcileEditors()`
+(not `applyLayout()` — a retire changes no leaf, and `applyLayout` is documented as the one place panes
+are created and removed); `LambdaPane.receiveEditor` THROWS on a pane already holding an editor, in the
+same words `PaneCollection.add` refuses a duplicate id, so the state is noisy rather than silent; and
+`reconcileEditors`' own doc claim — "the two can never both fire for one session" — is corrected rather
+than narrowed, because the six steps falsify it as written.
+
+A **Minor** from the same re-review is worth keeping beside it because it is the same class of error in
+a comment rather than in code: `heldEditors` and `applyLayout` both justified keying by session with
+"the closed leaf's id is never reused (`nextLeafId` only counts up)". `nextLeafId` does only count up,
+but `defaultLayout()` writes `source`, `lambda-0` and `tm-0` down as **literals** and `reset layout`
+re-mints all three — so a closed `lambda-0` does come back, `editorOwner` was still naming it, and a
+pane that merely inherited the id was silently handed the held editor while its claim control withdrew
+itself. The conclusion (key by session) was right and its stated premise was false, which is the exact
+failure this entry's own review section names. Both docs now argue from something true, and
+`applyLayout`'s pane-creation loop drops any `editorOwner` claim recorded against an arriving id, so the
+editor waits in custody until someone clicks for it.
+
+**The transferable line, and the most honest one in this entry: the whole-branch review that found
+three defects thirteen per-task reviews missed then shipped a fourth in its own fix, and only a review
+OF THAT FIX caught it.** Both of the re-review's findings were found by driving the real app, not by
+the suite — which was green through all of it, four separate times on this branch. A fix written under
+a merge deadline gets no more presumption of correctness than the code it repairs, and "the review
+found it" is not a claim about the review's output.
+
+##### AND A THIRD ROUND FOUND A THIRD INSTANCE OF THE SAME SHAPE — TWO INDEPENDENTLY-CORRECT FIXES, INTERACTING
+
+**Same shape a third consecutive time: an invariant asserted in a doc comment — here in five places at
+once — falsified by a sequence a user can perform.** What is new is the cause. Neither fix in the
+re-review's own commit is wrong. The retire fix makes both retire sites call `reconcileEditors`, so no
+custody entry outlives its session. The Minor fix makes `applyLayout` drop an `editorOwner` claim
+recorded against a leaf id that arrives fresh, so a re-minted `lambda-0` cannot inherit the previous
+one's editor. **`reconcileEditors` then iterated `editorOwner.keys()` for both of its passes — so the
+second fix deleted the only key through which the first could see the custody entry, and the retire
+sweep became a no-op for exactly the entry it exists to destroy.**
+
+Six clicks: fork `lambda-0`, close it, `reset layout` (re-mints the id, dropping the claim), type in
+the SOURCE editor (retires the scratch — and sweeps nothing), fork again on the fresh `lambda-0` (a
+second editor, mounted legitimately), split `tm-0`. **Measured in the running app, and it is three
+failures from one cause.** The first editor survived the retire, live over a terminated worker. The
+split then handed it to the pane already holding the live one, `LambdaPane.receiveEditor` threw as
+designed — and the throw escaped `reconcileEditors` -> `applyLayout` -> `splitColumn` -> the click
+handler, so `renderLayout`, `writeLayoutStorage` and `draw` never ran: **the model gained a leaf, the
+DOM did not, and `localStorage` kept the old tree** (three leaves before and after). And the editor
+LEAKED permanently, because `heldEditors.delete(session)` ran on the line *above* the
+`home.receiveEditor(waiting)` that threw — the guard raised for the invariant violation dropped the
+app's last reference to a live `EditorView` with its own pending debounce.
+
+Fixed at the three places those three failures live, and the guard was not touched. The sweep is a
+statement about CLAIMS and iterates `editorOwner`; custody is a statement about an editor with nowhere
+to be and iterates `heldEditors` — two passes over two domains, which also strengthens the ordering the
+old doc called load-bearing (every sweep now precedes every custody mount, not just the same session's).
+The `heldEditors` entry is deleted AFTER a successful mount, so a throw leaves it recoverable. And
+`applyLayout` wraps the reconcile in `try`/`finally`, so the render, the persist and the draw happen
+whichever way it goes: **the throw still reaches `window`'s `error` event and is still what the tests
+assert on, it just no longer takes the tree/DOM/storage agreement down with it.** A guard whose cost is
+a desynchronized app is a guard people route around.
+
+**THE TRANSFERABLE FINDING, AND IT IS ABOUT TESTS RATHER THAN ABOUT THIS BUG: what caught it was
+CONCATENATING TWO TESTS' SEQUENCES, NOT ANY SINGLE TEST.** Each of the two fixes shipped with a browser
+test that drives its own defect end to end, and both are good tests. The retire one never calls `reset
+layout`; the claim one never retires after the drop. **Neither reaches the interaction, and their
+concatenation reaches it in one run** — verified in both directions: with the fix reverted, the new
+sixth-step test fails with the exact throw while all seven others, including the two it is built from,
+stay green; with the `try`/`finally` also reverted, it fails instead by timing out on a leaf count the
+DOM never gained, which is the pre-fix symptom exactly. Per-task review was the granularity that missed
+round one's defects; **per-fix testing is the granularity that missed this one.** When two fixes touch
+one mechanism, the test worth writing is the one that performs both of their sequences in a row.
+
+**A Minor from the same round, and it is a fourth instance of a shape this branch keeps producing — a
+mutation that cannot fail.** `replies.ts`'s phantom-fork retire path calls `reconcileEditors()` at a
+line `pnpm test:coverage` reported as never executed, so deleting it could not fail a test — while four
+doc comments asserted that **both** retire paths call it, "a property of the retire, not of which caller
+happened to trigger it". Half of that was defended by argument. It is now covered by driving
+`createReplies`'s production switch over a real `session-worker.ts` thread that really failed to build,
+with the three dependencies `main()` injects stubbed and the call count asserted; deleting the line
+fails it. Worth noting how the seam appeared: `scratch-fork.test.ts`'s existing phantom test explains at
+length that it cannot use the production path because "`onScratchReply` is a closure with no export" —
+true when written, and wave 1's extraction of `replies.ts` made it false without anyone noticing that a
+test's stated impossibility had expired.
+
+##### THE PER-SESSION/PER-LEG FAN-OUT IS UNDEFENDED BY TESTS, AND THIS IS RECORDED RATHER THAN ASSUMED CLOSED
+
+Task 7 hand-converted roughly thirty call sites from addressing two named singleton panes to iterating
+`panes.of(leg)` or `panes.ofSession(leg, session)` — the distinction that matters the moment two λ
+panes can exist. **Swapping `panes.ofSession('tm', session)` for `panes.of('tm')` at the conversion
+site still passed the full browser tier, 128 of 128.** With one session and one TM pane in every test
+the app runs, per-session and per-leg fan-out are behaviourally identical, so no assertion in the suite
+can tell them apart. The correctness of the roughly thirty conversions rests on the review argument —
+two independent readings, one at implementation and one at review, that agree on every site — not on
+any test. That is weaker than a passing suite normally implies, and it is recorded here rather than
+left for a reader to assume the green tier settled it.
+
+##### WHAT THIS SLICE COULD NOT ESTABLISH
+
+**Whether anyone can work in a split layout.** Panes can be split, resized, closed and restored, and
+every mechanism behind those four verbs has a test. Nobody has yet sat in front of a split arrangement
+and used it for a real task. Every claim in this entry is about DOM, geometry and counts.
+
+**Whether the per-session/per-leg fan-out is complete**, as distinct from reviewed. See above: the
+suite cannot currently distinguish the two, so this is a review-only guarantee wearing a green suite's
+clothes.
+
+**That the arrangement survives a reload — this was claimed with more confidence than the evidence
+carried, and is only partly closed now.** No test restored a tree through `main()` at all until the
+whole-branch review found the collision below and forced one: both existing browser files clear
+`localStorage` before mounting, by design, so `parseLayout(readLayoutStorage()) ?? defaultLayout()` had
+only ever taken the fallback. What is covered now (`layout-restore.test.ts`) is that a stored split tree
+mounts as itself and that the first split after that mount mints a fresh id. What is still not covered
+is a genuine page reload — that file, like every other, seeds storage and mounts once in a single page
+— nor the sizes a resized tree persists, nor any tree written by one page load and read by the next.
+`parseLayout`'s validation is unit-tested against fourteen cases; its wiring is tested against one.
+
+**That λ and TM leaves "split row-wise or column-wise".** Only the ROW path is tested end to end.
+The other two tiers are covered — `layout.ts`'s node tests split with `dir: 'column'` as a value, and
+`pane-layout-controls.test.ts` asserts the `split ↓` control exists and reports its click into a stub —
+but nothing joins them: `main.ts`'s own `splitColumn` handler, four lines from `splitRow` and differing
+from it in one string literal, is never reached by any test. Two of this branch's three green-suite
+defects were in exactly that position, a near-duplicate of a covered path.
+
+**That "dividers resize by drag or by arrow key" on the real page.** Both routes are tested, and both
+are tested against `layout-view.test.ts`'s own container with an explicit `600px` height. **That is the
+container this entry's own headline rule indicts** — a test container given a size the real page never
+gets is a test measuring a fiction — so this claim currently rests on the fiction the rule was written
+about. The app's own `resize -> applyLayout -> persist` wiring in `main.ts` is not covered at all: no
+test drags a divider on a tree `main()` mounted and then reads back what was stored.
+
+**`MIN_PANE_FRACTION = 0.1` is a choice, not a measurement**, and `layout.ts`'s own doc comment says so
+in as many words: at a 1,200px window a 10% floor is roughly 120px, wider than the δ-table's narrowest
+column and about four characters of λ text, and nothing was measured to arrive at it. If a pane turns
+out to be unusable at the floor, the number moves — but nothing here says whether it will.
+
+**`main.ts` ended Wave 1 at 465 lines against the plan's own 250–300 target**, with three clusters the
+task explicitly declined to extract into a sixth module: session/pool/scratchpad bootstrap, `EditorView`
+construction and its extensions, and appearance-toggle wiring. That was the right call for a
+composition root rather than a shortfall to correct later, and it is not the whole story: Wave 3 then
+added the layout tree's own mount points, construction and event wiring back into `main.ts` by design
+(§4.5 names this as Wave 3's job), and the headline capability's source-pane close wiring and editor-move
+plumbing added more on top. `main.ts` stood at 874 lines when this entry was first written, **and at
+1,115 at the branch's actual close** — 874 → 982 for the whole-branch review's three fixes, 982 → 1,051
+for the re-review's, 1,051 → 1,115 for the third round's. That number has now moved three times after
+the sentence claiming it was written, which is the same defect this entry indicts elsewhere and is
+corrected here each time rather than left to be noticed. Not a
+regression from 465, but not evidence the composition root got smaller either, and the growth is
+overwhelmingly the reasoning the three review rounds attached to existing code rather than new
+statements — the third round's 64 lines are one restructured loop and a `try`/`finally` against roughly
+fifty lines of corrected and added doc comment.
+Whether 1,115 lines in one file is a problem for 5d-ii-b or -c to inherit is not answered here.
+
+##### THE ACCESSIBILITY LIST — four additions, two exceptions taken rather than deferred
+
+**Added to the standing list** (roadmap:1297 onward), because this slice's own controls are new and the
+list's preamble exists precisely so a slice does not leave its debt unrecorded: `split →`, `split ↓`,
+`close` and `reset layout` announce nothing when the layout changes underneath them, and `reset layout`
+is the largest of the four — it rebuilds the tree's DOM wholesale on click with no live-region report
+of what the new arrangement is.
+
+**Two exceptions were taken here rather than deferred to the pass**, and they are recorded as decisions
+rather than left for a later reader to wonder whether they were noticed:
+
+1. **Dividers ship keyboard-resizable** — `role="separator"`, `aria-orientation`,
+   `aria-valuenow`/`aria-valuemin`/`aria-valuemax`, and arrow-key adjustment, with a visible focus ring.
+   A drag-only divider would make an entire subsystem mouse-only, which the design's §6.2 argues is a
+   different class of gap from a colour-carried state — inoperability rather than unannounced semantics
+   — and the list's own item 1 says the fix for inoperability is to build the control, not to defer it.
+2. **Focus after close is set explicitly**, to the pane that grew into the closed pane's space. Left
+   alone this would have been the list's worst instance of item 1's hazard: `[continue]` survives its
+   own click in the common case because `controls.ts` keeps the button when a run hits `budget` again,
+   where close removes the clicked control unconditionally, every single time. Shipping the control
+   without this would add the list's sharpest case in the same slice that wrote the list's newest
+   entries.
+
+##### 5d-ii-b AND 5d-ii-c, NAMED WITH POSITIONS
+
+Filed as a requirement of this slice's own design (§6.1), for the reason 5d-iv exists at all — the last
+unnamed capability fell between two slices for a whole PR, and naming positions now is what a loose
+paragraph could not have prevented last time.
+
+- **5d-ii-b — the renderer multiplexer.** Widening a slot so a pane can change leg, and the `(leg,
+  session)` picker that creates a pane of any kind rather than duplicating one — the decision §3.1
+  deferred. Position: after this slice, before 5d-ii-c, because a picker that can create a TM pane
+  wants somewhere to put it.
+- **5d-ii-c — N scratch buffers.** Relaxing 5d-i decision 5's singleton rule to one scratch per fork,
+  with scratches as *buffers* that outlive the panes bound to them and are retired by an explicit
+  control rather than by closing a pane. It owns the measured session cap and the worker-affordability
+  probe 5d-i left open — three threads already cost 2.4153× one thread's wasm baseline, measured, and
+  nothing in that entry said where the multiplexer's open session count stops being a good trade.
+
+**5d-iv, the TM editable pane, is unaffected by this slice and keeps its filed position** — after
+5d-ii, before Plan 5's accessibility pass.
+
+##### THE COVERAGE FLOORS WERE RAISED, AND THAT WAS A DECISION RATHER THAN THE DEFAULT
+
+`vite.config.ts`'s stated convention is a formula — each floor is `floor(measured) - 1` — not a
+one-way ratchet that only moves when coverage falls. Measured at this slice's close (statements 94.68,
+branches 88.96, functions 96.81, lines 97.30 — every figure above the 2026-08-09 baseline the file
+previously recorded), the formula gives 93/87/95/96 against the standing 92/85/93/94. **The floors were
+raised to match**, and the argument is concrete rather than a preference: with the OLD floors left in
+place, `functions` — already the tightest of the four by the file's own margin analysis — could lose
+twelve already-covered functions, or take on thirteen new untested ones, before the gate noticed —
+twice the six-or-seven margin the raised floor restores. (Those four integers were "eleven / twelve"
+and "five-or-six" as first written; they are recomputed here, as the config's own margin analysis was,
+because the whole-branch review found the same block's illustrative fractions were the other scenario's
+arithmetic.) A floor that drifts that far from measured
+coverage stops doing the job the comment says it exists to do, which is catch a regression close to
+where it happens rather than several points later. **Both 5d-i and 5d-iii raised measured coverage
+above this same 2026-08-09 baseline and left the floors exactly where they were**, without either
+slice's entry arguing the case one way or the other — the option this task's own brief named as having
+no argument behind it. Raising them here is the first time in three slices that the decision was made
+rather than defaulted into.
+`functions` remains the tightest floor of the four under the new numbers too: six lost or seven new
+untested functions trips it, against twenty-plus for each of the other three.
+
+**The review's own fixes then moved branches from 88.96 to 89.17, which crosses the integer `floor`
+rounds on and would read out as a floor of 88. It was left at 87**, and the reason is stated in
+`vite.config.ts` beside the number: a gate that moves on a 0.21-point drift across a rounding boundary
+is tracking noise, which is the exact variation the one-to-two-point margin exists to absorb. The
+formula is the convention, not an obligation to re-run it after every commit.
+
+##### Verification
+
+`pnpm test` **453 passed (453) in 47 files**. `pnpm test:coverage` **95.37% statements (1713/1796),
+89.52% branches (829/926), 97.77% functions (308/315), 97.99% lines (1513/1544)**, against the raised
+thresholds 93/87/95/96 — all four measured figures above their new floors, and all four above the
+2026-08-09 baseline this file previously carried. **Those are the THIRD round's figures, and the
+arithmetic between rounds is spelled out because this entry twice carried counts that had moved under
+it**: 449 tests at 94.80 / 89.17 / 96.83 / 97.40 when the second round's findings were written up (the
+figures this paragraph used to carry), 451 after that round's own fix landed its two tests, 453 after
+the third round's two — the concatenation test above and its `createReplies` phantom-retire sibling.
+Every one of the four metrics moved UP across both, rather than any of them being diluted. The floors
+are deliberately NOT re-run through `floor(measured) - 1` for a review-fix delta of half a point;
+`vite.config.ts` carries that decision beside the numbers. `tsc --noEmit` clean. Every figure here was measured
+against the live tree for this entry rather than copied forward — 5d-iii's own entry shipped stale
+counts and its reviewer had to correct them (roadmap:5488-5495), and the ledger for this branch
+recorded the same risk before this task ran. **The figures above are the post-review ones**: the
+whole-branch review's fixes added seven tests — one for the closed-λ-pane Critical, two for the
+restore-then-split Critical (in a new `layout-restore.test.ts`, the first file to mount `main()` against
+a seeded layout), one for the stranded-editor Important, two for `PaneCollection.first`, and one for
+`LambdaLinkState`'s new `absent` member — and moved all four metrics up. The figures this entry first
+carried, 442 in 46 files at 94.68 / 88.96 / 96.81 / 97.30, describe the tree at the point the review
+began rather than the tree that merged.

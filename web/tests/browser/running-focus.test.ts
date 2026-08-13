@@ -6,14 +6,13 @@ import { beforeAll, describe, expect, it } from 'vitest'
 const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
+    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
     <label class="encoding">encoding <select id="encoding"></select></label>
   </header>
-  <main>
-    <section id="source" class="pane"><div id="editor"></div><div id="link-status" class="link-status"></div></section>
-    <section id="lambda" class="pane"></section>
-    <section id="tm" class="pane wide"></section>
-    <section id="results" class="pane results wide"></section>
-  </main>`
+  <main></main>
+  <div id="editor"></div>
+  <div id="link-status" class="link-status"></div>
+  <section id="results" class="pane results"></section>`
 
 /**
  * `let x = 40; x + 2` — the app's own sample, and the only corpus program whose entire `Owner`
@@ -110,7 +109,7 @@ async function until(predicate: () => boolean, timeoutMs = 30_000): Promise<void
 }
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-const stepText = () => document.querySelector('#lambda .step')?.textContent ?? ''
+const stepText = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''
 /** The text of whichever source construct is currently pinned by a click — `app.test.ts`'s own helper. */
 const linkedSource = () => document.querySelector('.cm-editor .linked')?.textContent ?? ''
 
@@ -130,7 +129,7 @@ const focusReading = () => {
 }
 
 const click = (label: string) => {
-  const b = [...document.querySelectorAll<HTMLButtonElement>('#lambda .controls button')].find(
+  const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')].find(
     (x) => x.textContent === label,
   )
   b?.click()
@@ -139,20 +138,20 @@ const click = (label: string) => {
 
 /** `click`, but on the TM pane's own control strip — the δ leg has a play head of its own. */
 const tmClick = (label: string) => {
-  const b = [...document.querySelectorAll<HTMLButtonElement>('#tm .controls button')].find(
+  const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="tm-0"] .controls button')].find(
     (x) => x.textContent === label,
   )
   b?.click()
   return b
 }
 
-const tmStepText = () => document.querySelector('#tm .step')?.textContent ?? ''
+const tmStepText = () => document.querySelector('[data-leaf="tm-0"] .step')?.textContent ?? ''
 const linkStatusText = () => document.querySelector('#link-status')?.textContent ?? ''
 /** The δ-table rows carrying the TM leg's running focus. `focusedRows` marks state HEADERS only. */
-const tmFocusRows = () => [...document.querySelectorAll<HTMLElement>('#tm .state-row.is-focus')]
+const tmFocusRows = () => [...document.querySelectorAll<HTMLElement>('[data-leaf="tm-0"] .state-row.is-focus')]
 const tmFocusNames = () => tmFocusRows().map((e) => e.textContent ?? '')
 /** The row the machine is standing on, which `#drawTable` also scrolls into view. */
-const tmCurrentRow = () => document.querySelector<HTMLElement>('#tm .state-row.is-current')
+const tmCurrentRow = () => document.querySelector<HTMLElement>('[data-leaf="tm-0"] .state-row.is-current')
 
 /**
  * Link the source construct at `pos`, via the keyboard route `main.ts` binds to `Mod-'`. Same helper
@@ -373,7 +372,7 @@ describe('the running focus', () => {
   // nothing observed. `focusedRows`, `sourceNodeOwner`, `isCoincident` and `linkStatus({focus: true})`
   // are each unit-tested in `tests/node/`, but until this case existed `main.ts`'s
   // `tmFocus`/`tmFocusLink` block could be replaced wholesale by `tmPane.setFocus([])` and the entire
-  // suite still passed — no assertion anywhere reached `#tm .state-row.is-focus` at all. Verified by
+  // suite still passed — no assertion anywhere reached `[data-leaf="tm-0"] .state-row.is-focus` at all. Verified by
   // making exactly that mutation while writing this: every assertion below the frontier fails under it,
   // and nothing else in the suite moves.
   //
@@ -471,6 +470,6 @@ describe('the running focus', () => {
 
     // The λ pane is still rendering frames throughout, on both the tagged and the untagged steps, so
     // neither "no focus" nor "a focus" is a dead pane.
-    expect(document.querySelector('#lambda .term')?.textContent).not.toBe('')
+    expect(document.querySelector('[data-leaf="lambda-0"] .term')?.textContent).not.toBe('')
   }, 30_000)
 })

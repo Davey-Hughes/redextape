@@ -84,23 +84,56 @@ export default defineConfig({
       // when Vitest gains worker coverage.
       exclude: ['src/session-worker.ts'],
       reporter: ['text', 'html'],
-      // MEASURED 2026-08-09: lines 95.9, functions 94.4, branches 86.66, statements 93.35.
-      // Each floor is `floor(measured) - 1` — a margin of one to two points, sized for the genuine
+      // MEASURED 2026-08-12 (plan 5d-ii-a's close, after the whole-branch review's fixes): lines 97.40
+      // (1501/1541), functions 96.83 (306/316), branches 89.17 (824/924), statements 94.80
+      // (1698/1791) — every figure above the 2026-08-09 baseline this file previously recorded
+      // (95.9 / 94.4 / 86.66 / 93.35), so the slice raised coverage rather than diluting it. Each
+      // floor is `floor(measured) - 1` — a margin of one to two points, sized for the genuine
       // run-to-run variation in a merged browser+node report (which arm of a timing-dependent branch
       // runs is not fixed). A PR that legitimately lowers one of these edits the floor in the same
       // diff, where a reviewer sees it, rather than the floor drifting years behind the tree.
       //
-      // THE TIGHTEST OF THE FOUR IS `functions`, NOT `branches`, and the nominal margins say the
-      // opposite. Computed from the committed figures, the number of NEW UNTESTED entries needed to
-      // trip each floor is: functions **3** (135/146 -> 92.47%), branches 10 (416/490 -> 84.90%),
-      // statements 14 (857/932 -> 91.95%), lines 17 (772/822 -> 93.92%). Losing already-covered
-      // entries instead takes 3 / 9 / 13 / 16.
+      // `branches` IS THE ONE FLOOR THE FORMULA NO LONGER REPRODUCES EXACTLY, AND IT IS LEFT ALONE
+      // DELIBERATELY. The floors were set when branches measured 88.96 (`floor(88.96) - 1 = 87`); the
+      // review fixes above moved it to 89.17, which crosses the integer `floor` rounds on and would
+      // read out as 88. Chasing a 0.21-point drift across a rounding boundary would be the gate
+      // tracking noise — exactly what the one-to-two-point margin exists to absorb — so 87 stands.
       //
-      // Branches' 1.66-point margin looks like the thin one and is not: its denominator is 480, so
-      // a point costs many branches. `functions` has 143 entries, so three untested ones fail the
-      // build. That is the gate working as designed, and it is the floor that will produce friction
-      // first — expect it on a new helper module before you see it anywhere else.
-      thresholds: { lines: 94, functions: 93, branches: 85, statements: 92 },
+      // RAISED HERE RATHER THAN LEFT, AND THAT WAS A DECISION, NOT THE DEFAULT. The convention above
+      // is stated as a formula, not as a one-way ratchet that only fires when coverage falls — and
+      // the two prior slices (5d-i, 5d-ii-a's own earlier commits) left these floors unmoved while
+      // measured coverage climbed past them without anyone arguing the case either way. Leaving them
+      // stale a third time would let the gap between floor and measured keep widening for no reason
+      // anyone decided. See roadmap.md, "PLAN 5d-ii-a CLOSES", for the argument in full.
+      //
+      // RE-MEASURED 2026-08-12, AFTER THE THIRD REVIEW ROUND'S FIXES, AND THE FLOORS ARE LEFT WHERE
+      // THEY ARE: lines 97.99 (1513/1544), functions 97.77 (308/315), branches 89.52 (829/926),
+      // statements 95.37 (1713/1796). Every figure moved UP — the two tests that round added executed
+      // `replies.ts`'s phantom-fork retire arm, which nothing had reached before. The formula would now
+      // read 96/96/88/94; **it is not re-run here, and that is the same decision the `branches`
+      // paragraph above records rather than a lapse.** These are review-fix deltas of a half point or
+      // less on a gate whose stated margin is one to two points, and a floor that moves on every commit
+      // is a floor nobody can read a regression against. The place to re-run the formula is a slice's
+      // close, where a reviewer sees the argument beside the number.
+      //
+      // THE TIGHTEST OF THE FOUR IS STILL `functions`, NOT `branches`. Computed from the RE-MEASURED
+      // figures against these floors, the number of NEW UNTESTED entries needed to trip each is:
+      // functions **10** (308/325 -> 94.77%), branches 27 (829/953 -> 86.99%), statements 46
+      // (1713/1842 -> 92.99%), lines 33 (1513/1577 -> 95.94%). LOSING already-covered entries instead
+      // takes: functions 9 (299/315 -> 94.92%), branches 24 (805/926 -> 86.93%), statements 43
+      // (1670/1796 -> 92.98%), lines 31 (1482/1544 -> 95.98%).
+      //
+      // BOTH LISTS ARE SPELLED OUT RATHER THAN ONE BEING DERIVED FROM THE OTHER BY A RULE. This block
+      // used to say the losing counts were "one fewer each, since the denominator doesn't grow with
+      // them" — true of functions and lines, false of branches (three fewer) and statements (two), and
+      // it came paired with parenthetical fractions that were the LOSING scenario's arithmetic printed
+      // against the NEW-UNTESTED scenario's integers. Both were found in the whole-branch review. The
+      // integers above are computed, not reasoned about: the rounding is not linear near a floor and
+      // the two scenarios differ by however many entries that rounding swallows.
+      //
+      // `functions` has 315 entries against a 95% floor, so nine lost or ten new-and-untested trips
+      // it — still the floor that will produce friction first, same as before the raise.
+      thresholds: { lines: 96, functions: 95, branches: 87, statements: 93 },
     },
     projects: [
       {
