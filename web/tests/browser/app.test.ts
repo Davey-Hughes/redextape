@@ -134,7 +134,18 @@ describe('the app, end to end', () => {
   it('lints a broken program and says it did not compile', async () => {
     retype('let x = ;')
     await until(() => resultsText().includes('not compiled'))
-    expect(resultsText()).toContain('not compiled')
+    // **THE WAIT IS THE ASSERTION, AND THIS LINE USED TO RESTATE THE WAIT'S OWN PREDICATE.** It read
+    // `expect(resultsText()).toContain('not compiled')` directly under a wait for that same substring, so
+    // it could not fail on any run.
+    //
+    // WHAT THE WAIT CANNOT SAY IS THAT THE LAST GOOD RUN'S READOUT IS GONE. `#results` is rebuilt per
+    // reply, and a rebuild that ADDED the failure row rather than replacing the rows would satisfy the
+    // wait while still reporting the previous program's β-steps beside it — two contradictory answers on
+    // one screen, which is the failure this test's name ("says it did not compile") is written to
+    // exclude. `lambdaRows` (`results.ts`) is the only producer of that string and it needs a compiled
+    // `state` to reach the line that emits it, so a non-compiling program cannot honestly show it. The
+    // test above this one leaves those β-steps on screen, so the string really is there to lose.
+    expect(resultsText()).not.toContain('β-steps')
     // `lintGutter` renders its marker asynchronously, after the lint source resolves. Verified against
     // the rendered DOM (not just read off `@codemirror/lint`'s source): `cm-lintRange` is the underline
     // mark in the document and `cm-lint-marker` is the gutter dot `lintGutter()` adds — both classes are

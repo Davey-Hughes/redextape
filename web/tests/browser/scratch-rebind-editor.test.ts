@@ -1,4 +1,4 @@
-import type { EditorView } from '@codemirror/view'
+import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 /**
@@ -121,7 +121,22 @@ describe('rebinding a forked λ pane through the binding selector', () => {
     expect(heading()).toContain('[detached]')
 
     await until(() => editor() !== null, 'the editor to mount')
-    expect(editor()).not.toBeNull()
+    // **THE WAIT IS THE ASSERTION, AND THIS LINE USED TO RESTATE THE WAIT'S OWN PREDICATE.** It read
+    // `expect(editor()).not.toBeNull()` — green on every run forever, because `until` had already proved
+    // the one thing it checked, and a line that cannot fail is green in exactly the same way as a line
+    // that passes.
+    //
+    // WHAT THE WAIT CANNOT SAY IS THAT ANYTHING LIVE IS UNDER THE HOST, and that is precisely what makes
+    // this test's closing `expect(editor()).toBeNull()` mean something. `.term-editor` is a CLASS that
+    // `setEditor` writes onto a host which always exists — `LambdaPane`'s own doc: "an empty class means
+    // `.term-editor` selects nothing". So a bare classed host with no view inside would satisfy the wait
+    // above AND the teardown below, and the file would still report the regression fixed while nothing
+    // had ever been mounted or destroyed. `.cm-editor` IS the `EditorView`'s `dom`, which is how
+    // `scratch-buffers.test.ts` reads the same fact, and `findFromDOM` returning null over a node that is
+    // still in the document is exactly the "destroyed but left behind" state this cannot afford to miss.
+    const mounted = editor()?.querySelector<HTMLElement>('.cm-editor') ?? null
+    if (mounted === null) throw new Error('the fork left .term-editor on the pane with no CodeMirror in it')
+    expect(EditorView.findFromDOM(mounted)).not.toBeNull()
 
     const select = selector()
     // NOT "a second λ session should have produced a selector", which this message used to say: the

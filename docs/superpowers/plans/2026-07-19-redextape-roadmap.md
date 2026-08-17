@@ -7745,3 +7745,98 @@ branch.
 
 `pnpm test` and `pnpm test:coverage` were **not re-run for this entry** — see the section above for the
 figures and the reason.
+
+#### THE THREE DEFERRED ASSERTIONS CLOSE, AND A FOURTH WAS SITTING NEXT TO ONE OF THEM (2026-08-17, branch `dead-assertions`, `08b3442..98e556e` plus this entry)
+
+5d-ii-d's entry above records eight assertions that could not fail, five fixed and **three left alone** —
+pre-existing, in files that branch touched only incidentally, and not worth widening a 31-commit diff for.
+This is that follow-up, on the branch where the diff is exactly them. **The deferral was the right call
+and the reason is visible in the size of this diff: three files, no source change, and a decision per site
+a reader can check in one screen.**
+
+##### ALL THREE HAD ONE SHAPE, AND THE REPLACEMENTS DO NOT
+
+Every one was `await until(P)` followed immediately by `expect(...)` restating `P`. The project owner's
+rule for this branch was **replace, never delete** — a dead assertion marks a seam somebody thought worth
+guarding, and deleting it discards the seam along with the defect. Each replacement had to state something
+the wait could not.
+
+**`scratch-rebind-editor.test.ts`.** The wait proved `.term-editor` is in the DOM. It cannot say anything
+**live** is under it — and that is exactly what makes the test's closing `expect(editor()).toBeNull()` mean
+something. `.term-editor` is a *class* `setEditor` writes onto a host that always exists (`LambdaPane`'s
+own doc: *"an empty class means `.term-editor` selects nothing"*), so a bare classed host with no view
+inside would satisfy the wait **and** the teardown while nothing was ever mounted or destroyed, and the
+file would go on reporting the regression fixed. Now resolves `.cm-editor` — the `EditorView`'s own `dom`
+— and asserts `findFromDOM` returns a view, which is null over a node that was destroyed but left in the
+document.
+
+**`app.test.ts`.** The wait proved `#results` says *"not compiled"*. It cannot say the **last good run's
+readout is gone**. `#results` is rebuilt per reply, and a rebuild that ADDED the failure row rather than
+replacing the rows would satisfy the wait while still reporting the previous program's β-steps beside it:
+two contradictory answers on one screen, which is the failure the test's own name is written to exclude.
+Now asserts those β-steps are absent.
+
+**`two-lambda-panes.test.ts`.** The wait proved the first pane's text changed. The doc above the dead line
+drew a real distinction — *changed what it shows*, not merely *differs from the other pane* — but
+`toContain('u v')` below already draws it, and draws it harder. **What nothing checked was the structural
+half of the describe's own name: that the two panes are on two SESSIONS at the moment of the edit.**
+`splitSame` duplicates a pane on its own session, so both panes leave step 2 bound to the buffer and one
+`change` event is supposed to move exactly one of them. Had it moved both, the keystroke would have landed
+on an editor over the source session — voiding the premise of every assertion below — while the wait still
+fired, on the re-render that followed. Now asserts each pane's binding by name.
+
+##### THE FOURTH ONE, AND THE ONE CASE WHERE DELETE WAS THE HONEST ANSWER
+
+Fixing the third surfaced a fourth in the same test: `expect(textOf(first)).not.toBe('')` was the same
+wait's **second** conjunct restated, and dead twice over, since `toContain('u v')` two lines up cannot pass
+on an empty string either. **It is the one site in this sweep with no stronger claim available** — every
+adjacent fact about `first` is already asserted above it — so it was deleted, with the reasoning recorded
+at the site rather than only here. The `second` line beside it is *not* the same case and stays: `second`
+never appears in that wait, and `beforeEditSecond` could itself be `''`, which is the reading of *"they
+differ"* that line rules out.
+
+**That the fourth was found by working on the third, and not by the sweep that filed the other three, is
+the finding.** The sweep read for the pattern and reported one site per file. Sitting in the file long
+enough to write a replacement is what surfaced the neighbour.
+
+##### WHAT THIS SLICE COULD NOT ESTABLISH
+
+**That these are the last of them.** The three came from a sweep of files 5d-ii-d touched; the fourth came
+from reading around one of those three. Neither is a search of the tree. **Nothing here licenses the claim
+that `web/tests/` holds no more, and the honest position is that no one has looked.**
+
+**That the replacements are the *best* available claims, as opposed to live ones.** Each is verified able
+to fail — the property the old lines lacked, and the whole point — but *"this is the strongest thing worth
+asserting at this seam"* is a judgement, four times over, and only as good as the reading behind it.
+
+##### Verification
+
+`pnpm test` → **606 passed in 63 files**, identical to the branch point. No source file changed; the counts
+are unmoved because assertions are not tests, which is also why no suite figure could ever have caught the
+original defect.
+
+**Every replacement was mutation-tested and every one failed when inverted** — the property the lines it
+replaced did not have:
+
+| replacement | inverted to | what the run reported |
+| --- | --- | --- |
+| `findFromDOM(mounted)` is not null | `.toBeNull()` | `expected EditorView{ plugins: [ …(4) ], …(20) } to be null` |
+| `#results` has no β-steps | `.toContain(…)` | `expected 'not compiled — 1 error' to contain 'β-steps'` |
+| `first` is not on source | `.toBe(…)` | `expected 'lambda\u0000scratch-1' to be 'lambda\u0000source'` |
+| `second` is on source | `.not.toBe(…)` | `expected 'lambda\u0000source' not to be 'lambda\u0000source'` |
+
+The last two share a test, so **the second was re-run alone** rather than inferred from a run the first had
+already failed. The `\u0000` in those two is Vitest's own rendering of the `(leg, session)` value the
+selector encodes — `optionValue`'s NUL separator, which the reporter prints as an escape and which is
+quoted here exactly as it printed. That is also the only form it can take in this file:
+`scripts/check-text-bytes.sh` rejects the byte itself in tracked text — and this entry did carry a literal
+NUL for one draft, caught before it reached the tree.
+
+**One further probe, because a replacement can be trivially true instead of dead.** `app.test.ts`'s new
+line asserts an *absence*, which is vacuous if the string was never there. A temporary
+`expect(resultsText()).toContain('β-steps')` placed before the `retype` **passed**, so the preceding test
+really does leave that readout on screen and there really is something to lose. The comment at the site
+states this; the probe is what makes stating it honest.
+
+`pnpm exec tsc --noEmit` and `biome ci --error-on-warnings` → clean, run by the pre-commit hook on every
+commit of this branch. One pre-existing `info` about a Biome config migration, unrelated and unchanged.

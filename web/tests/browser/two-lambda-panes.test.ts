@@ -324,10 +324,21 @@ describe('two λ panes on two λ sessions', () => {
 
     await until(() => textOf(first ?? '') !== beforeEditFirst && textOf(first ?? '') !== '')
 
-    // The edit reached the pane and changed WHAT IT SHOWS, not merely "differs from the other pane" —
-    // which was already true before any edit, from the fork's own alpha-renaming (`x0` vs `x`). A test
-    // that only checked the latter would pass even if the edit above did nothing at all.
-    expect(textOf(first ?? '')).not.toBe(beforeEditFirst)
+    // **THIS LINE USED TO RE-ASSERT THE WAIT'S OWN FIRST CONJUNCT AND COULD NOT FAIL.** It read
+    // `expect(textOf(first)).not.toBe(beforeEditFirst)` under a doc arguing that the edit "changed WHAT
+    // IT SHOWS, not merely differs from the other pane — which was already true before any edit, from the
+    // fork's own alpha-renaming (`x0` vs `x`)". That distinction is real and still worth drawing; it is
+    // just that `toContain('u v')` below draws it, and draws it harder, while this line only repeated the
+    // wait one statement above it.
+    //
+    // WHAT NOTHING HERE CHECKED IS THE STRUCTURAL HALF OF THIS DESCRIBE'S OWN NAME — that the two panes
+    // are on two SESSIONS at the moment of the edit. `splitSame` duplicates a pane ON ITS OWN SESSION, so
+    // both panes leave step 2 bound to the buffer, and step 3's one `change` event is what is supposed to
+    // move exactly one of them. Had it moved both, `typeInto` would have landed the keystroke on an editor
+    // over the SOURCE session — voiding the premise of every assertion below — and the wait above would
+    // still have fired, on the re-render that followed.
+    expect(selectOf(first ?? '')?.value).not.toBe(optionValue('lambda', 'source'))
+    expect(selectOf(second ?? '')?.value).toBe(optionValue('lambda', 'source'))
     // **AND THE MARKER IS SEED-FREE, WHICH IT WAS NOT.** This term was `λf.λx. f x` and this line read
     // `toContain('f x')` — but the buffer is seeded from `beforeEach`'s `let x = 40; x + 2`, whose λ
     // term is a Church numeral over `f` and `x0` in which `f x0` CONTAINS `f x`. The line was not
@@ -339,8 +350,14 @@ describe('two λ panes on two λ sessions', () => {
     // The source-bound pane is unaffected by an edit to the scratch's own buffer.
     expect(textOf(second ?? '')).toBe(beforeEditSecond)
 
+    // **A FOURTH INSTANCE OF THE SAME SHAPE, FOUND WHILE FIXING THE ONE ABOVE AND DELETED RATHER THAN
+    // STRENGTHENED.** `expect(textOf(first)).not.toBe('')` stood between these two lines. It was the
+    // wait's SECOND conjunct restated — and dead twice over, since `toContain('u v')` above cannot pass on
+    // an empty string either. Unlike the other three in this sweep it had no stronger claim to become:
+    // every adjacent fact about `first` is already asserted above it, so the honest disposition was to
+    // drop it. The line below is NOT the same case and stays: `second` never appears in that wait, and
+    // `beforeEditSecond` could itself be `''`, which is the reading of "they differ" this rules out.
     expect(textOf(first ?? '')).not.toBe(textOf(second ?? ''))
-    expect(textOf(first ?? '')).not.toBe('')
     expect(textOf(second ?? '')).not.toBe('')
   })
 
