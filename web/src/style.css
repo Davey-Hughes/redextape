@@ -147,9 +147,16 @@ body {
 
    NOT A RED ONE, WHICH IS THE HALF THAT IS ABOUT THE RETIRE CONTROL SPECIFICALLY: no new colour-carried
    state (§6), so a control that destroys a buffer is told apart by the row it sits in and the word on it
-   rather than by a hue this stylesheet would have to invent. */
+   rather than by a hue this stylesheet would have to invent.
+
+   `.buffer-temperature` JOINS THE SELECTOR HERE RATHER THAN GETTING A RULE OF ITS OWN — 5d-ii-d review,
+   Finding 2. `buffer-list.ts`'s temperature button shipped with no class at all, so nothing in this file
+   matched it and it rendered as a native grey sans-serif button beside a monospace bordered one in the
+   same row; adding it to THIS selector rather than writing a fourth block is the same reasoning that put
+   `.buffer-retire` here — one declaration, not a second copy to drift out of step with it. */
 .layout-control,
-.buffer-retire {
+.buffer-retire,
+.buffer-temperature {
   font: inherit;
   font-family: var(--font-mono);
   padding: 0.1em 0.45em;
@@ -628,8 +635,13 @@ body {
 }
 
 /* THE CONTROL DOES NOT SHRINK. Without this the flex line takes the button's width first when a term is
-   long, which is the same failure `min-width: 0` above prevents on the other side of the row. */
-.buffer-retire {
+   long, which is the same failure `min-width: 0` above prevents on the other side of the row.
+
+   `.buffer-temperature` GETS THE SAME RULE FOR THE SAME REASON (5d-ii-d review, Finding 2): it shipped
+   with no class and so no rule at all, which reintroduced exactly this failure — a control that shrinks
+   under a long term is subject to the bug this comment already documents, just on the newer button. */
+.buffer-retire,
+.buffer-temperature {
   flex: none;
 }
 

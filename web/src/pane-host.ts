@@ -40,8 +40,7 @@ import { TmPane } from './tm-pane'
  *
  * **`applyLayout` IS THE ONLY THING IN THE APP THAT CREATES OR REMOVES A PANE**, and moving it did not
  * change that — it is why `PaneCollection` can be handed to `link-wiring.ts`, `draw.ts` and
- * `replies.ts` empty and read live by all three. (`compile.ts` was a fourth until 5d-ii-c decision 2
- * deleted the retire it held; a compile touches no pane at all now.) Its `try`/`finally` is a fix rather than a style
+ * `replies.ts` empty and read live by all three. Its `try`/`finally` is a fix rather than a style
  * (see its own doc): an exception escaping `custody.reconcile()` used to take `renderLayout`,
  * `writeLayoutStorage` and `draw()` with it, leaving the tree, the DOM and `localStorage` disagreeing.
  * It crosses the boundary exactly as it was.
@@ -52,8 +51,8 @@ import { TmPane } from './tm-pane'
  * through the setter, so `main.ts` remains the one owner even though nothing else there mutates it.
  *
  * THREE MEMBERS, WHICH IS WHAT `main.ts` ACTUALLY CALLS — and the shorter list is a decision rather
- * than an oversight. The extraction first exported five, adding `hostFor` and `paneEvents`; no caller
- * outside this module ever reached either, because both are used only from inside `applyLayout`.
+ * than an oversight. No caller outside this module reaches `hostFor` or `paneEvents`, because both are
+ * used only from inside `applyLayout`.
  *
  * IT IS THE SAME ARGUMENT `deps` MAKES BELOW, POINTED THE OTHER WAY. That doc refuses an unread
  * `SessionRegistry` on the grounds that a dependency taken and never read is a claim about this
@@ -63,6 +62,8 @@ import { TmPane } from './tm-pane'
  *
  * BOTH REMAIN IN SCOPE AS CLOSURES, so nothing inside this file changed and later work is free to
  * modify either. A task editing `hostFor`'s body is not a caller needing `hostFor` exported.
+ *
+ * For what this doc used to claim and why it changed, see the history note under `PaneHost`.
  */
 export type PaneHost = {
   /** Reconcile panes to leaves, re-render the tree, persist it, and draw. */
@@ -75,6 +76,8 @@ export type PaneHost = {
   focusPane(id: LeafId | null): void
   /** Pre-seed the source pane's host, which `main.ts` owns the contents of. */
   seedHost(id: LeafId, host: HTMLElement): void
+  /** Record the session a leaf should start on — see the implementation for who asks and when. */
+  seedBinding(leaf: LeafId, session: SessionId): void
 }
 
 /**
@@ -96,13 +99,10 @@ export type PaneHost = {
  *
  * **`sourceSession`, `sourceLayout`, `writeLayoutStorage`, `nextLeafId` AND
  * `neighbourOf` ARE WHAT THE MOVED BODIES REACHED FOR ACROSS THE NEW BOUNDARY, and naming them is the
- * point of listing them separately.** (Named rather than positioned as "the last six", which is what
- * this said until `tmProgramOf` was added below them. That one is not one of them: it answers a
- * question this module asks on its own account rather than restoring a reference `main()`'s scope used
- * to supply for free, and its own doc carries the argument for its shape.) `sourceSession` is
- * `main()`'s one remaining session-id constant — `lambdaScratch` stood beside it until 5d-ii-c decision
- * 1 made a fork mint its own buffer id, and a session named where it is created is not a constant any
- * scope can hand over;
+ * point of listing them separately.** (`tmProgramOf` is not one of them: it answers a question this
+ * module asks on its own account rather than restoring a reference `main()`'s scope used to supply for
+ * free, and its own doc carries the argument for its shape.) `sourceSession` is `main()`'s one
+ * remaining session-id constant;
  * `sourceLayout` is the source pane's own close control, which `applyLayout` drives because `canClose`
  * changes only at a structural change and the source leaf has no `PaneEntry` for `draw()` to find;
  * `writeLayoutStorage` is `main.ts`'s guarded `localStorage` writer, kept beside the guarded reader
@@ -111,28 +111,26 @@ export type PaneHost = {
  * `main.ts`'s own source-pane close control is `neighbourOf`'s other caller.
  *
  * `SessionRegistry` IS NOT A DEPENDENCY, AND THE ABSENCE IS EVIDENCE RATHER THAN AN OVERSIGHT. **NOT
- * BECAUSE NOTHING HERE WOULD READ ONE — `tmProgramOf` below is precisely a read a registry would serve,
- * and this sentence used to rest on the counterfactual that no read existed at all.** Because a
- * registry serves EVERY read: handed one, this module could ask whether a session exists, what legs it
- * has and what it is called, and its dependency list would stop being able to say that it does not. A
- * parameter carries the authority of its TYPE, not of the call sites that happen to exist today, so the
- * absence is only evidence while the thing absent is the general instrument rather than the one answer.
+ * BECAUSE NOTHING HERE WOULD READ ONE — `tmProgramOf` below is precisely a read a registry would
+ * serve.** Because a registry serves EVERY read: handed one, this module could ask whether a session
+ * exists, what legs it has and what it is called, and its dependency list would stop being able to say
+ * that it does not. A parameter carries the authority of its TYPE, not of the call sites that happen to
+ * exist today, so the absence is only evidence while the thing absent is the general instrument rather
+ * than the one answer.
  *
  * **WHICH IS WHY THE MODULE ASKS EXACTLY ONE QUESTION ABOUT A SESSION, AND `tmProgramOf` IS THAT
- * QUESTION RATHER THAN A WAY TO ASK OTHERS.** The paragraph above used to open "Nothing in this module
- * asks a question about a session — a slot carries the binding, `custody` answers the editor questions,
- * and `sessions.has` is `editor-custody.ts`'s call", which stopped being true the moment a newly built
- * `TmPane` had to be seeded with the machine its session already compiled. What did NOT change is the
- * conclusion: the dependency is a function from a `SessionId` to that one retained value, so the body
- * still cannot ask anything else.
+ * QUESTION RATHER THAN A WAY TO ASK OTHERS.** The dependency is a function from a `SessionId` to that
+ * one retained value, so the body cannot ask anything else.
  *
- * (Phrased as "this module" rather than as a count of MEMBERS, deliberately: this sentence said "the
- * five members below" until the exported surface became three, and a doc that restates an arity has to
- * be re-read every time the arity moves. The claim is about the body, not the list. **"Exactly one
- * session question" one paragraph up is the exception that shows the rule, and the two only look like a
- * contradiction until the difference is named**: that number is not a description of what happens to be
- * here, it is the CLAIM — the second such question is the thing that has to argue for itself, and a
- * reader who finds the number stale has found a decision rather than a drifted description.)
+ * (Phrased as "this module" rather than as a count of MEMBERS, deliberately: a doc that restates an
+ * arity has to be re-read every time the arity moves. The claim is about the body, not the list.
+ * **"Exactly one session question" one paragraph up is the exception that shows the rule, and the two
+ * only look like a contradiction until the difference is named**: that number is not a description of
+ * what happens to be here, it is the CLAIM — the second such question is the thing that has to argue for
+ * itself, and a reader who finds the number stale has found a decision rather than a drifted
+ * description.)
+ *
+ * For what this doc used to claim and why it changed, see the history note under `createPaneHost`.
  */
 export function createPaneHost(deps: {
   root: HTMLElement
@@ -164,12 +162,26 @@ export function createPaneHost(deps: {
    * something; the pane is built here, so the push belongs here too.
    */
   tmProgramOf(session: SessionId): TmCompiled | null
+  /**
+   * The text and collapse flag a λ pane newly bound to `session` should mount its editor from, or
+   * `null` when `session` is not a warm scratch buffer — `mountScratchEditor` below is the one caller.
+   *
+   * **THE λ HALF OF `tmProgramOf`, AND IT IS THE SAME REPAIR ONE LEG OVER.** That dependency exists
+   * because "the reply that would have told this pane has already been and gone" (its call site's own
+   * comment); `replies.ts`'s `scratch-compiled` arm is the λ reply with exactly that property — it fires
+   * once per build, and a pane that arrives at the buffer afterwards has nothing to mount from. Adding
+   * a second session question is what the module doc above says has to argue for itself, and this is the
+   * argument: the alternative is a pane bound to a buffer whose term it renders and whose text it can
+   * never edit, which is the state `ScratchBuffers.editorSeed`'s own doc records in full.
+   *
+   * A QUESTION, NOT A REGISTRY AND NOT A `ScratchBuffers` — same shape and same reason as `tmProgramOf`:
+   * one `SessionId` in, one seed out. `main.ts` answers it with `scratchpad.editorSeed(session)`.
+   */
+  scratchSeedOf(session: SessionId): { text: string; collapsed: boolean } | null
 }): PaneHost {
   // THE SOURCE SESSION ID KEEPS ITS `main.ts` SPELLING THROUGH A RENAMING DESTRUCTURE, so the bodies
   // below read exactly as they did in the scope they came from — `SOURCE_SESSION` is the name every
-  // comment in this file already refers to it by. `LAMBDA_SCRATCH` used to arrive the same way and is
-  // gone with the singleton it named (5d-ii-c decision 1): a buffer's id is minted per fork, so there
-  // is no scratch-session constant for this module to be handed.
+  // comment in this file already refers to it by.
   const {
     root,
     panes,
@@ -184,7 +196,60 @@ export function createPaneHost(deps: {
     writeLayoutStorage,
     draw,
     tmProgramOf,
+    scratchSeedOf,
   } = deps
+
+  /**
+   * Give a λ pane that has just come to be bound to a warm buffer an editor, if nothing else holds one.
+   *
+   * **WITHOUT THIS, A `cool` FOLLOWED BY A `warm` LEAVES A BUFFER THAT CAN NEVER BE EDITED AGAIN.**
+   * `ScratchBuffers.cool` rebinds every pane away from the buffer it sleeps (that is the invariant the
+   * whole cold/warm split rests on), so `PaneSlot.render` -> `LambdaPane.setDetached(false)` tears the
+   * editor down; `warm` then spawns and posts a build that lands with NO pane claiming a leaf, so
+   * `replies.ts`'s `scratch-compiled` arm resolves `editorHome(session)` to `undefined` and mounts
+   * nothing. Binding a pane back through the selector afterwards re-posts no build and claims no leaf,
+   * and "bring the term editor to this pane" is correctly withheld because `custody.hasEditor` is false —
+   * there is genuinely no editor to bring. Frames render; the text is unreachable, permanently.
+   *
+   * **`custody.hasEditor` IS THE GATE, AND USING THE CLAIM CONTROL'S OWN PREDICATE IS THE POINT.**
+   * `LambdaPane.#editorAvailable` is fed `custody.hasEditor(session)` every frame (`draw.ts`), so the
+   * claim control is offered exactly when this returns early. The two are complementary by construction:
+   * an editor that EXISTS is moved by the user's click, and one that does not exist is built here. Between
+   * them, every pane bound to a warm buffer has a route to an editor — which is what "a control that
+   * provably cannot work must not be offered" requires on the other side, since withdrawing the control
+   * was only honest while some other route existed.
+   *
+   * **IT MOUNTS FROM THE TEXT OF RECORD RATHER THAN RE-POSTING A BUILD, AND THE ALTERNATIVE WAS
+   * CONSIDERED.** `recompile(session, <its text>)` would arrive at the same mount through the existing
+   * `scratch-compiled` arm and add no new call to `setEditor` — but it supersedes the buffer's generation
+   * and rebuilds it at step 0, so an ordinary rebind would silently discard the ring and the play head.
+   * Design §4.5 weighs exactly that loss when it declines to auto-cool an orphan ("a close stays cheap"),
+   * and paying it again on a rebind would re-introduce it at a gesture the design calls cheaper still.
+   * Seeding directly is synchronous, costs no worker round trip, and reads the same string the reply arm
+   * would have re-derived: `scratch-compiled` writes the worker's own term through `setText`, so the text
+   * of record IS the last authoritative term (design §4.3).
+   *
+   * **THE CLAIM IS RECORDED BEFORE THE MOUNT AND BOTH HAPPEN ON A PANE THAT ALREADY EXISTS**, which is
+   * the same ordering rule `main.ts`'s restore sequence follows and states: a claim made for a leaf that
+   * has no pane yet is deleted as stale by `applyLayout`'s own `dropClaimsOn`. Both call sites below
+   * satisfy it — the creation pass has already run `dropClaimsOn(l.id)` for this leaf and is holding the
+   * pane it just built, and the rebind arm is acting on a pane that has been on screen since before the
+   * click.
+   *
+   * **IT CANNOT MOUNT TWICE.** `LambdaPane.setEditor`'s second branch re-seeds a live editor rather than
+   * building another (`receiveEditor` is the method that throws, and this is not it), and the pane
+   * reaching either call site is holding nothing anyway: a pane one statement old has `#editor === null`,
+   * and the rebind arm hands its outgoing editor to custody before it delegates.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `mountScratchEditor`.
+   */
+  const mountScratchEditor = (leaf: LeafId, pane: LambdaPane, session: SessionId): void => {
+    if (custody.hasEditor(session)) return
+    const seed = scratchSeedOf(session)
+    if (seed === null) return
+    custody.claim(session, leaf)
+    pane.setEditor(seed.text, seed.collapsed)
+  }
 
   /**
    * The session a leaf with no pane yet should be bound to, consulted once by `applyLayout`'s
@@ -196,13 +261,20 @@ export function createPaneHost(deps: {
    * to know which pair the user picked. Without an entry here the second case would land on
    * `SOURCE_SESSION`, which is the session the user was on only by coincidence.
    *
+   * **A THIRD ASKER ARRIVED WITHOUT BEING A GESTURE AT ALL — 5d-ii-d's RESTORE.** `main.ts` reads the
+   * bindings out of `redextape.buffers` at start-up and writes them here through `seedBinding` below,
+   * for a leaf the RESTORED tree already holds and no pane has been built for yet. That is the same
+   * question the two gestures ask, one page load earlier, which is why it needed no second mechanism
+   * and no reconciliation pass: `applyLayout`'s creation loop consults this map exactly as it always
+   * did, and every way a restore can fail lands on the `?? SOURCE_SESSION` that was already there.
+   *
    * **A SPLIT CARRIES THE SESSION THAT WAS PICKED, WHICH IS A CORRECTION TO WHAT THIS PARAGRAPH USED TO
-   * SAY.** It read "A SPLIT INHERITS THE SESSION OF THE PANE IT CAME FROM", true while a split had one
-   * possible outcome; the control is a menu of `(leg, session)` pairs now, so `split` below writes
-   * `choice.session` and the inherited case is the entry labelled `(same)` rather than the only entry
-   * there is. What has not changed is why the map exists: the layout tree cannot carry a binding
-   * (`layout.ts`'s own doc: "no binding is persistable... the runtime pairing lives in `panes.ts`, keyed
-   * by `LeafId`"), so this is what lets a gesture name a session before `applyLayout` constructs the
+   * SAY.** The control is a menu of `(leg, session)` pairs, so `split` below writes `choice.session` and
+   * the inherited case is the entry labelled `(same)` rather than the only entry there is. What has not
+   * changed is why the map exists: the layout tree does not carry a binding
+   * (`layout.ts`'s own doc: "the runtime pairing lives in `panes.ts`, keyed by `LeafId`" — and since
+   * 5d-ii-d, the PERSISTED pairing lives beside the buffers it names rather than in the tree), so this
+   * is what lets a gesture name a session before `applyLayout` constructs the
    * `PaneSlot` that holds that fact for real. Without it every split would land on `SOURCE_SESSION`
    * regardless of what was asked for — which would make "split a forked λ pane" produce a SECOND pane on
    * the SOURCE session rather than a second view onto the same scratch, and
@@ -211,6 +283,8 @@ export function createPaneHost(deps: {
    *
    * A `'source'` SPLIT WRITES NOTHING HERE, and `split`'s own doc says why: that leaf has no `PaneSlot`
    * for a session to belong to.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `pendingBinding`.
    */
   const pendingBinding = new Map<LeafId, SessionId>()
 
@@ -222,6 +296,14 @@ export function createPaneHost(deps: {
    * and the user's program — with it. `renderLayout` only ever appends, so a host that leaves the tree
    * is simply not appended and its live view waits in this map.
    *
+   * **"NOT PERSISTED ANYWHERE" IS NOW ABOUT THE SOURCE PROGRAM ONLY, AND THE RULE IS UNCHANGED FOR
+   * A NARROWER REASON.** 5d-ii-d persists every scratch BUFFER's text (`buffers-store.ts`), so a λ pane's
+   * editor is no longer the only copy of what it holds. Two things keep this paragraph's conclusion:
+   * the SOURCE editor's document is still stored nowhere at all, and a buffer's stored text is whatever
+   * `ScratchBuffers.setText` last wrote — driven by `LambdaEditor`'s 300ms debounce, not by every
+   * keystroke (`cool`'s own doc has the measurement of what that window costs). Destroying a live view
+   * would therefore still discard work; it would just discard less of it than it used to.
+   *
    * **`kind` IS READ ONLY ON THE CREATING CALL, AND THAT IS WHY `applyLayout` WRITES `dataset.kind`
    * ITSELF.** A leaf that changes leg arrives here with a different kind and gets the SAME element back
    * — returning the existing host is the whole point of this function — so an attribute set only in the
@@ -232,6 +314,8 @@ export function createPaneHost(deps: {
    * describe once a leg holds more than one — reads a mark that nothing in the app was setting, so it
    * degenerated to the insertion-order `first` it replaced and those two surfaces narrated whichever pane
    * happened to exist earliest. The listener below is that mark's only writer.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `hostFor`.
    */
   const hosts = new Map<LeafId, HTMLElement>()
   const hostFor = (id: LeafId, kind: PaneKind): HTMLElement => {
@@ -250,11 +334,8 @@ export function createPaneHost(deps: {
     // **ON THE CREATION BRANCH, NOT BELOW THE EARLY RETURN.** Hosts are kept forever and `hostFor` is
     // called for every leaf on every `applyLayout` — from the `finally`, unconditionally, and from the
     // creation pass for the leaves that have no pane yet, so a leaf that already has one is reached once
-    // per gesture and a leaf being built is reached twice. (This said "twice per call, in fact" of every
-    // leaf, which the creation pass's own `if (panes.get(l.id) !== undefined) continue` contradicts;
-    // harmless, since the early return above makes any number of calls register one listener, but it
-    // misdescribed the pattern.) Wiring here rather than after that `return` is what makes it one
-    // listener per pane instead of one per layout gesture.
+    // per gesture and a leaf being built is reached twice. Wiring here rather than after that `return`
+    // is what makes it one listener per pane instead of one per layout gesture.
     //
     // THE SOURCE PANE NEVER GETS ONE, AND THAT IS THE RIGHT ABSENCE RATHER THAN AN ACCIDENT OF
     // `seedHost` RUNNING FIRST. Clicking into the source editor must not blank out which λ pane the
@@ -293,6 +374,8 @@ export function createPaneHost(deps: {
    * `transport.ts` resolves a fork against the registry and the source index, neither of which knows a
    * `LeafId` exists; `editorOwner` is keyed by one, so pairing the two has to happen here, the same
    * division `splitRow`/`splitColumn`/`close` already draw for the layout gestures below them.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `paneEvents`.
    */
   const paneEvents = <K extends Leg>(id: LeafId, slot: PaneSlot<K>): PaneEvents => {
     const base = transport.events(slot)
@@ -303,15 +386,10 @@ export function createPaneHost(deps: {
      * tree, let `applyLayout` build the pane the tree now names.
      *
      * **IT ENDS IN `focusPane` TOO NOW, AND THIS PARAGRAPH USED TO ARGUE THE OPPOSITE — IMPORTANT
-     * FINDING, REVIEW OF THE COMMIT THAT ADDED THE PICKER.** It read: a split leaves every control it was
-     * performed with in the DOM (`layoutControls` builds its buttons once and `renderLayout` MOVES hosts
-     * rather than rebuilding them), so there is no DESTROYED control to answer for, which is the
-     * condition `focusPane`'s doc states for its other callers; the `<body>` focus a split leaves behind
-     * — `renderLayout`'s `replaceChildren()` detaches the subtree the clicked button is in and the
-     * browser blurs it on the way out, then re-appends the same element unfocused — predates the picker
-     * and was the accessibility list's item 1 owed a rescue of its own.
+     * FINDING, REVIEW OF THE COMMIT THAT ADDED THE PICKER.** A split's own controls survive it —
+     * `layoutControls` builds its buttons once and `renderLayout` MOVES hosts rather than rebuilding
+     * them — and surviving the gesture is not the same as answering it, which is the whole finding.
      *
-     * Surviving the gesture is not the same as answering it, and the distinction is the whole finding.
      * Every other gesture in this closure now ends with focus somewhere the user asked to be: `close`
      * names the pane that grew, `rebind`'s cross-leg arm names the leaf itself. A split was the one left
      * dropping the user on `<body>`, one Tab from the top of the document, having just asked for a pane —
@@ -337,10 +415,7 @@ export function createPaneHost(deps: {
      * PROGRAM COME BACK — found by writing the test for it.** `hostFor` returns the host already held
      * under an id and builds a fresh empty `<section>` for one it has not seen, and the source pane's
      * host is `main.ts`'s own: it holds `#editor`, the live CodeMirror instance, and the close control,
-     * seeded into `hosts` under `'source'` before `applyLayout` ever ran (`seedHost`). (It held
-     * `#link-status` too until deferred-a11y item 12; that element is app chrome outside every host now
-     * — `main.ts` records the argument at the `append`, and the rule this paragraph is about is exactly
-     * what took the status line out of the document when the source pane closed.) A
+     * seeded into `hosts` under `'source'` before `applyLayout` ever ran (`seedHost`). A
      * `pane-${n}` leaf would therefore have come back as an EMPTY pane while the user's program sat in a
      * detached host nothing could reach again — `hostFor`'s detach-not-destroy rule kept for a key nobody
      * would ask for. The id is a constant everywhere else for the same reason (`defaultLayout()`'s
@@ -351,6 +426,8 @@ export function createPaneHost(deps: {
      *
      * NO `draw()`: `applyLayout` ends in one, after the panes and the tree agree. Same as every other
      * handler here.
+     *
+     * For what this doc used to claim and why it changed, see the history note under `split`.
      */
     const split = (dir: Dir, choice: PaneChoice): void => {
       let created: LeafId
@@ -377,12 +454,10 @@ export function createPaneHost(deps: {
             // exactly where it was (still the source session), and recording ownership for a fork that
             // never happened would point `editorOwner` at a session with no editor to come.
             //
-            // **THE CHECK IS "DID THE BINDING MOVE", WHERE IT USED TO BE "IS IT THE SCRATCH".** It read
-            // `if (slot.binding.session === LAMBDA_SCRATCH) custody.claim(LAMBDA_SCRATCH, id)` against
-            // `main()`'s one scratch-id constant. 5d-ii-c decision 1 mints a buffer id per fork, so
-            // there is no constant left to compare with — and comparing before against after is what
-            // that comparison was really asking, since the only thing `detach` can do to this slot is
-            // move it onto the buffer it just made.
+            // **THE CHECK IS "DID THE BINDING MOVE", WHERE IT USED TO BE "IS IT THE SCRATCH".** 5d-ii-c
+            // decision 1 mints a buffer id per fork, so there is no constant left to compare with — and
+            // comparing before against after is what that comparison was really asking, since the only
+            // thing `detach` can do to this slot is move it onto the buffer it just made.
             detach: (step: number) => {
               const before = slot.binding.session
               base.detach?.(step)
@@ -454,8 +529,7 @@ export function createPaneHost(deps: {
            *
            * DECISION 1 IS WHAT MADE THE GESTURE REACHABLE. While there was one scratch id, "rebound away
            * from the scratch" and "rebound to source" were the same sentence and the teardown was a
-           * complete answer. `tests/browser/scratch-rebind-editor.test.ts` drives both rebinds now; it
-           * drove only the second, and two doc comments cited it as proof this state was impossible.
+           * complete answer. `tests/browser/scratch-rebind-editor.test.ts` drives both rebinds now.
            *
            * THE SAME THREE LINES `applyLayout`'s DROP LOOP RUNS, for the same reason and with the same
            * verb: an editor whose pane is going away — by closing, by changing leg, or here by navigating
@@ -476,16 +550,34 @@ export function createPaneHost(deps: {
            * click time is the only moment the entry is guaranteed to exist. The `kind` check is what
            * makes the cast sound; `slot.binding.leg` would answer the same today, and the entry's own
            * kind is the fact the cast is actually about.
+           *
+           * **RESOLVED ONCE INTO `moved` AND READ ON BOTH SIDES OF `base.rebind`** — the outgoing
+           * handover above it and the arriving mount below it are the same pane under the same two
+           * conditions, and `base.rebind` neither adds nor removes a `PaneEntry` (it writes the slot,
+           * persists, and draws), so one read answers both. A second `panes.get(id)` after the delegate
+           * would be a second place for the pair of conditions to be spelled, which is the shape a later
+           * change gets to disagree with itself in.
+           *
+           * For what this doc used to claim and why it changed, see the history note under `rebind`.
            */
           const leaving = slot.binding.session
-          if (choice.session !== leaving) {
-            const entry = panes.get(id)
-            if (entry?.kind === 'lambda') {
-              const held = (entry.pane as LambdaPane).takeEditor()
-              if (held !== null) custody.hold(leaving, held)
-            }
+          const entry = panes.get(id)
+          const moved = choice.session !== leaving && entry?.kind === 'lambda' ? (entry.pane as LambdaPane) : null
+          if (moved !== null) {
+            const held = moved.takeEditor()
+            if (held !== null) custody.hold(leaving, held)
           }
           base.rebind(choice)
+          // **AND THE ARRIVING SIDE GETS AN EDITOR IF ITS BUFFER HAS NONE — the flow design §4.5 names
+          // ("warm from the header list, then bind a pane through the selector"), which until this line
+          // ended in a pane that rendered the buffer's frames and could never edit its text.**
+          // `mountScratchEditor`'s own doc has the finding and the argument for seeding directly rather
+          // than re-posting a build. AFTER `base.rebind`, not before: the seed is chosen from the session
+          // the slot has moved ONTO, and `slot.rebind` is what moves it. The `draw()` inside `base.rebind`
+          // has already painted this pane as detached with no editor, which is the state one statement
+          // before the mount — `setEditor`'s own `#refreshClaim` settles the claim control, and nothing
+          // else on screen depends on the editor's presence, so no second draw is owed.
+          if (moved !== null) mountScratchEditor(id, moved, choice.session)
           return
         }
         pendingBinding.set(id, choice.session)
@@ -511,11 +603,8 @@ export function createPaneHost(deps: {
    * GREW, because the pane the user clicked in is gone; `rebind`'s cross-leg arm passes the leaf ITSELF,
    * because that pane is still exactly where it was and only its contents were replaced; `split` passes
    * what it CREATED, which is the thing the gesture was asking for. Each is "the place the user is
-   * looking", resolved from what the gesture did to the tree. (This doc has been narrowed twice by its
-   * own wording — first "after a close", then "after a gesture that destroyed the control it was clicked
-   * with" — and the second was already too narrow for `split`, whose controls survive; see that handler's
-   * own doc for why surviving the gesture is not the same as answering it. Stated without a count of
-   * callers, deliberately, per this module's own rule above.)
+   * looking", resolved from what the gesture did to the tree. (Stated without a count of callers,
+   * deliberately, per this module's own rule above.)
    *
    * THE ACCESSIBILITY LIST'S ITEM 1, AGGRAVATED PAST EVERYTHING ON IT AND THEREFORE FIXED HERE RATHER
    * THAN FILED. That item's measured instance is `tm-pane.ts`'s reattach, which strands focus on
@@ -537,6 +626,8 @@ export function createPaneHost(deps: {
    * stays `<body>` even though the call ran. `[hidden]` gets the same treatment for the same reason —
    * the continue button (`controls.ts`'s `extend`) is hidden rather than disabled when there is nothing
    * to continue, and a hidden element cannot take focus either.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `focusPane`.
    */
   const focusPane = (id: LeafId | null): void => {
     if (id === null) return
@@ -578,22 +669,22 @@ export function createPaneHost(deps: {
    * the term editor to this pane" control was previously offered on a promise it could not keep.
    *
    * A NEW LEAF'S SESSION COMES FROM `pendingBinding`, NOT ALWAYS `SOURCE_SESSION` — see that map's own
-   * doc. Consulted and cleared in the same pass. The reason this used to give for the clearing being
-   * merely belt-and-braces was "ids are minted once by `nextLeafId` and never reused within a page's
-   * life", AND THAT IS FALSE: `reset layout` re-mints `defaultLayout()`'s three literal ids, so an id
-   * genuinely can arrive here having been used before (`heldEditors` has the correction in full). What
-   * still makes a stale entry unreachable is timing rather than uniqueness — all three writers
-   * (`splitRow`, `splitColumn`, and `rebind`'s cross-leg arm) write the entry and call `applyLayout` in
-   * the next statement, so every entry is consumed by the pass that follows the write. The clearing is
-   * what keeps that a local fact instead of an invariant a future caller has to know. The re-minting
-   * itself is answered directly, one line into the loop below: an arriving id drops any `editorOwner`
-   * claim recorded against it.
+   * doc. Consulted and cleared in the same pass. The clearing is belt-and-braces, and what makes a stale
+   * entry unreachable is timing rather than uniqueness: `reset layout` re-mints `defaultLayout()`'s three
+   * literal ids, so an id genuinely can arrive here having been used before (`heldEditors` has the
+   * correction in full), and all three writers (`splitRow`, `splitColumn`, and `rebind`'s cross-leg arm)
+   * write the entry and call `applyLayout` in the next statement, so every entry is consumed by the pass
+   * that follows the write. The clearing is what keeps that a local fact instead of an invariant a
+   * future caller has to know. The re-minting itself is answered directly, one line into the loop below:
+   * an arriving id drops any `editorOwner` claim recorded against it.
    *
    * `reconcileEditors()` RUNS AFTER PANES EXIST AND BEFORE THE TREE PAINTS — after, because it needs
    * `panes.get` to resolve the panes `editorOwner` names; before painting, though the two are otherwise
    * independent (one moves a `LambdaEditor` inside a host, the other moves hosts inside `<main>`),
    * simply so a split that both creates a new pane AND moves the editor onto it settles in one pass
    * rather than a visible one-frame lag.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `applyLayout`.
    */
   const applyLayout = (): void => {
     // WHAT EACH LIVE LEAF RENDERS, NOT MERELY WHICH LEAVES ARE LIVE — a `Map` where this was a `Set`,
@@ -647,10 +738,13 @@ export function createPaneHost(deps: {
       // and every such leaf is visited before `custody.reconcile()` is called at all — which is the
       // first of the two facts `editor-custody.ts`'s `editorHomeFor` cites at its `as LambdaPane` cast.
       //
-      // A PANE BUILT HERE IS BY DEFINITION NOT THE PANE THAT CLAIMED ANYTHING: every writer of
-      // `editorOwner` (`paneEvents`'s wrapped `detach` and `showEditor`) records the id of a pane that
-      // already existed when the click landed, so an id reaching this loop can only be inheriting a
-      // claim, never restating one. The entry is dropped rather than repointed for the reason
+      // A PANE BUILT HERE IS BY DEFINITION NOT THE PANE THAT CLAIMED ANYTHING, AND THAT NOW COVERS
+      // THREE WRITERS RATHER THAN THE TWO THIS USED TO NAME. `paneEvents`'s wrapped `detach` and
+      // `showEditor` record the id of a pane that already existed when the CLICK landed; `main.ts`'s
+      // restore sequence — 5d-ii-d T9's third writer, `editorOwner`'s own doc has the full list — claims
+      // AFTER its own first `applyLayout()` call for the identical reason, so it too only ever names a
+      // pane already in `panes`. So an id reaching this loop can only be inheriting a claim, never
+      // restating one. The entry is dropped rather than repointed for the reason
       // `editorOwner`'s own doc gives for never relocating on close: the editor waits in custody, the
       // claim control stays offered on any pane bound to the session, and a click is what moves it.
       // Deleting the current key mid-iteration is defined behaviour for a `Map` — the iterator visits
@@ -667,8 +761,7 @@ export function createPaneHost(deps: {
       // only thing keeping `data-kind` truthful.** It is not decoration: leaf ids stopped naming a leg
       // (`main.ts`'s `nextLeafId` mints `pane-${n}` precisely because a pane can change what it renders),
       // so this attribute is the app's one statement of what a leaf actually shows, and every browser
-      // test that asks what a leaf renders selects on it. (Stated without a count, deliberately — this
-      // said "three browser test files" and was four by the time the kind change shipped its own; the
+      // test that asks what a leaf renders selects on it. (Stated without a count, deliberately — the
       // module doc above makes the same argument about restating an arity.) Redundant on the creation
       // path and load-bearing on the change path, which is why it is unconditional rather than guarded
       // on a kind that "changed".
@@ -684,7 +777,23 @@ export function createPaneHost(deps: {
       pendingBinding.delete(l.id)
       if (l.pane === 'lambda') {
         const slot = new PaneSlot('lambda', session)
-        panes.add({ id: l.id, kind: 'lambda', slot, pane: new LambdaPane(host, paneEvents(l.id, slot)), host })
+        const pane = new LambdaPane(host, paneEvents(l.id, slot))
+        // **A NEW λ PANE IS SEEDED FROM ITS SESSION FOR THE IDENTICAL REASON THE TM BRANCH BELOW IS**,
+        // and this line is the λ half of a repair that shipped with only its TM half. `scratch-compiled`
+        // is the reply that mounts a scratch editor and it fires once per build, so a pane created after
+        // that reply — a split onto an existing buffer, a cross-leg pick back to λ, `reset layout`, or a
+        // restored layout whose buffer the warming loop above `applyLayout()` has already warmed — never
+        // gets one from that reply. ONLY THE LAST OF THOSE FOUR IS A BUFFER WITH NO EDITOR ANYWHERE: the
+        // other three name a buffer whose editor is already mounted on a sibling pane or waiting in
+        // `heldEditors`, so `mountScratchEditor` is a no-op for them (its `hasEditor` gate below), and the
+        // route to that editor is the claim control, correctly offered. `mountScratchEditor`'s own doc
+        // carries the whole finding.
+        //
+        // AFTER `dropClaimsOn(l.id)` ABOVE AND BEFORE `custody.reconcile()` BELOW, which is the only
+        // ordering it needs: the drop cannot delete a claim this line has not made yet, and the sweep
+        // finds this pane already installed as its session's home and so takes nothing off it.
+        mountScratchEditor(l.id, pane, session)
+        panes.add({ id: l.id, kind: 'lambda', slot, pane, host })
       } else {
         const slot = new PaneSlot('tm', session)
         const pane = new TmPane(host, paneEvents(l.id, slot))
@@ -748,6 +857,30 @@ export function createPaneHost(deps: {
     focusPane,
     seedHost(id: LeafId, host: HTMLElement): void {
       hosts.set(id, host)
+    },
+    /**
+     * Record that `leaf` should start on `session`, for a leaf that has no pane yet.
+     *
+     * **THIS IS `pendingBinding` ANSWERING THE QUESTION IT WAS BUILT FOR, ONE PAGE LOAD EARLIER**
+     * (5d-ii-d design §3.3). That map exists to tell a freshly split leaf which session to start on; a
+     * RESTORED leaf asks the identical question about an id the tree already holds, and the creation
+     * pass's `pendingBinding.get(l.id) ?? SOURCE_SESSION` is already the right answer for every way a
+     * restore can fail — a leaf the tree no longer holds, a buffer that failed validation, a buffer the
+     * cap would not let warm. No second mechanism, and no repair pass.
+     *
+     * **THE CAP CASE NEEDS ONE MORE THING FROM ITS CALLER THAN THAT `??` CAN GIVE, AND THIS METHOD IS
+     * WHAT SUPPLIES IT.** The `??` only chooses for a leaf with NO entry, so a binding already seeded
+     * for a buffer that then failed to warm would still land its pane on a session the registry does not
+     * hold — the one thing 5d-ii-d's cold-buffer invariant forbids. `main.ts`'s warming loop answers a
+     * refusal by calling this AGAIN with `SOURCE_SESSION`, overwriting the seed rather than needing a
+     * delete: the map is last-write-wins and the result is byte-for-byte what the `??` would have
+     * produced. That is why this is a plain setter and why `PaneHost` gained no `dropBinding`.
+     *
+     * SEEDED BEFORE THE FIRST `applyLayout()`, for the same reason and at the same moment as
+     * `seedLeafCounter`: it is the one point at which ids the app did not mint itself enter.
+     */
+    seedBinding(leaf: LeafId, session: SessionId): void {
+      pendingBinding.set(leaf, session)
     },
   }
 }

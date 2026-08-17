@@ -98,6 +98,18 @@ export type PaneEvents = {
    * not about the tree — which the pane still knows nothing of.)
    */
   showEditor?: () => void
+  /**
+   * This pane's editor was collapsed or expanded.
+   *
+   * OPTIONAL, LIKE `detach` AND `showEditor` BESIDE IT, because a TM pane has no editor to collapse
+   * and a handler it can never fire is a parameter pretending to be a capability.
+   *
+   * IT REPORTS THE GESTURE AND DOES NOT PERFORM IT. `collapseButton`'s own callback still toggles
+   * `.is-collapsed` on the editor host — the presentation is unchanged and stays local — and this is
+   * the app being told, so it can record the state against the BUFFER (5d-ii-d §4.7) rather than
+   * against the pane the editor happens to be mounted in today.
+   */
+  collapse?: (collapsed: boolean) => void
   /** A state row was clicked. Absent on panes that have no table. */
   linkState?: (stateId: number) => void
   /** A token in the λ link window was clicked, at this byte offset into the full `lambdaText`. */
@@ -306,28 +318,52 @@ export function detachButton(parent: HTMLElement, onDetach: () => void): { updat
  * **THE "CURRENT STATE" SURVIVES A REMOVAL, WHICH MEANS IT RESETS ON ONE — found and fixed after a
  * reviewer walked the exact cycle this note now pins.** Mount an editor, click collapse (label ->
  * "show the term editor", host gains `.is-collapsed`), `setEditor(null)` to unmount, `setEditor(text)`
- * to remount: the fresh mount is expanded (`LambdaPane.setEditor` sets `#editorHost.className =
- * 'term-editor'` with no `.is-collapsed`, and calls `update(true)` here), but the button that used to
- * only detach `el` from `parent` on `update(false)` left the closure's `collapsed` flag untouched, so
- * it came back still reading "show the term editor" over an editor that was already showing. The label
- * named the PREVIOUS pane's state, not the one on screen — exactly what the paragraph above forbids.
- * Design §4.2 is explicit that this cannot be read as a feature: "THE STATE IS NOT PERSISTED... a
- * persisted collapse preference would outlive every session it described" — a scratch is retired and
- * replaced, not resumed, so there is no session for a remembered collapse to describe.
+ * to remount: the fresh mount came back expanded (`LambdaPane.setEditor` set `#editorHost.className =
+ * 'term-editor'` UNCONDITIONALLY back then, with no `.is-collapsed`, and called `update(true)` here with
+ * no second argument — **BOTH HALVES ARE CONDITIONAL NOW, see the paragraph below on what changed and
+ * why**), but the button that used to only detach `el` from `parent` on `update(false)` left the
+ * closure's `collapsed` flag untouched, so it came back still reading "show the term editor" over an
+ * editor that was already showing. The label named the PREVIOUS pane's state, not the one on screen —
+ * exactly what the paragraph above forbids.
+ * **THE STATE IS PERSISTED NOW, PER BUFFER, AND THE PARAGRAPH THAT USED TO BE HERE IS WHY IT TOOK
+ * THREE SLICES.** It read: *"a persisted collapse preference would outlive every session it described
+ * — a scratch is retired and replaced, not resumed, so there is no session for a remembered collapse
+ * to describe."* 5d-ii-c made buffers resumable and falsified the premise without answering the
+ * question; 5d-ii-d §4.7 answers it. **PER BUFFER AND NOT PER PANE**, because the editor MOVES: a
+ * collapse remembered against a leaf would describe whichever buffer landed there next, which is the
+ * same class of error the reviewer caught on this control once already, when a remounted editor came
+ * back reading "show the term editor" over an editor that was already showing. The flag rides with the
+ * term, and the reset below still fires on an unmount — a buffer that comes back collapsed is told so
+ * by its own record, not by a flag that survived in a closure.
+ *
+ * **`update`'S SECOND PARAMETER IS HOW THAT RECORD REACHES THIS CLOSURE.** `initial` is read only on
+ * the `false -> true` transition — the same transition the no-op guard below already isolates — and is
+ * what lets `collapsed` START where the buffer's own record says, instead of always at `false` the way
+ * every earlier mount did. `LambdaPane.setEditor`'s mount branch is the one caller that ever passes
+ * anything but the default: `scratchpad.collapsedOf(session)`, read at the same call that decides the
+ * host's own `.is-collapsed` class, so the closure's flag and the host's class are set from the same
+ * value and cannot arrive disagreeing with each other — the exact disagreement this whole doc is about.
  *
  * THE RESET LIVES INSIDE `update`, NOT A SEPARATE METHOD, because `available` going false already IS
- * the unmount signal — this control's only caller ever hides it for that one reason
- * (`LambdaPane.setEditor`'s `text === null` branch) — and the existing no-op guard above (`available
- * === on`) already fires exactly once per real transition. Piggybacking on that guard is what keeps
- * this safe on the per-frame path every control here is written for: the reset cannot fire twice for
- * one unmount, and cannot fire at all while the control sits hidden across repeated calls with the same
- * `available`. A second exported method would have needed that same guard rebuilt beside this one
- * instead of reusing it.
+ * the unmount signal — and the existing no-op guard above (`available === on`) already fires exactly
+ * once per real transition. Piggybacking on that guard is what keeps this safe on the per-frame path
+ * every control here is written for: the reset cannot fire twice for one unmount, and cannot fire at all
+ * while the control sits hidden across repeated calls with the same `available`. A second exported
+ * method would have needed that same guard rebuilt beside this one instead of reusing it.
+ *
+ * **TWO CALLERS HIDE IT, NOT ONE — a narrower claim used to stand here and named only the first
+ * (5d-ii-d T9 fix round 1).** It read "this control's only caller ever hides it for that one reason
+ * (`LambdaPane.setEditor`'s `text === null` branch)". `LambdaPane.takeEditor` calls `update(false)` too,
+ * for the same unmount reason on the OTHER half of the editor-moves rule — a pane giving its editor up
+ * to custody rather than destroying it. Pre-existing and harmless on its own (both callers hide the
+ * control for the same fact, so the guard above answers either the same way), but the custody move is
+ * now load-bearing for what this control shows on arrival (`receiveEditor`'s own doc, 5d-ii-d T9 fix
+ * round 1), which is exactly what a reader relying on "only caller" would have missed.
  */
 export function collapseButton(
   parent: HTMLElement,
   onToggle: (collapsed: boolean) => void,
-): { update(available: boolean): void } {
+): { update(available: boolean, initial?: boolean): void } {
   const el = document.createElement('button')
   el.type = 'button'
   el.className = 'collapse'
@@ -347,10 +383,15 @@ export function collapseButton(
   // recorded frame during playback.
   let on = false
   return {
-    update(available: boolean) {
+    update(available: boolean, initial = false) {
       if (available === on) return
       on = available
       if (available) {
+        // THE INCOMING BUFFER'S OWN RECORD, NOT ALWAYS `false` — see this function's doc, "`update`'S
+        // SECOND PARAMETER". `relabel` runs unconditionally so a caller that mounts already-collapsed
+        // reads "show the term editor" from the first frame, not from the first click.
+        collapsed = initial
+        relabel()
         parent.append(el)
         return
       }

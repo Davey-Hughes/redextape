@@ -6,9 +6,9 @@ import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout, splitLeaf } from '.
  *
  * `main()` resolves its tree with `parseLayout(readLayoutStorage()) ?? defaultLayout()`, and until this
  * file that expression had only ever taken the fallback: `layout-app.test.ts` and
- * `two-lambda-panes.test.ts` both clear `localStorage` before mounting, by design, so every browser
- * test in the suite booted from `defaultLayout()`. Everything a restored tree can carry that a default
- * one cannot was therefore untested wiring.
+ * `two-lambda-panes.test.ts` both mount onto an empty `Storage`, by design, so every browser test in the
+ * suite booted from `defaultLayout()`. Everything a restored tree can carry that a default one cannot was
+ * therefore untested wiring.
  *
  * **CRITICAL FINDING, WHOLE-BRANCH REVIEW BEFORE MERGE: THE FIRST SPLIT AFTER A RELOAD SILENTLY DID
  * NOTHING.** `main.ts`'s `leafCounter` started at 1 and its comment reasoned only about
@@ -18,17 +18,11 @@ import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout, splitLeaf } from '.
  * SECOND click worked, because the refused attempt had still incremented the counter — which is what
  * made it look intermittent rather than systematic.
  *
- * IT SUBSTITUTES ITS OWN `Storage` RATHER THAN WRITING THE SHARED ONE, AND THAT IS FORCED RATHER THAN
- * FASTIDIOUS. `localStorage` is scoped to an ORIGIN, not to a test file, and Vitest runs browser files
- * concurrently in one origin (the suite's wall-clock duration is less than half the sum of its per-file
- * test time). Writing a split tree into the real store would be visible to every sibling that mounts
- * `main()` without clearing the key first — `app.test.ts`, `running-focus.test.ts`, `scratch-fork.test.ts`
- * and the rest all assume the shipped three-pane arrangement — and the reverse race is just as real:
- * those two files clear this key from their own `beforeEach`, at points spread across the whole run, so
- * a value seeded here could be deleted between this file's write and `main()`'s read. Replacing
- * `window.localStorage` for THIS IFRAME ONLY (each browser test file gets its own window; the backing
- * store is what they share) makes what `main()` reads at mount a fact this file owns. The shim is a
- * complete in-memory `Storage`, so `appearance.ts`'s own reads and writes work normally through it.
+ * IT NO LONGER SUBSTITUTES ITS OWN `Storage` — every browser test file gets one automatically now,
+ * installed in `tests/browser/setup.ts` before this file's own module body runs. That file's doc carries
+ * the argument this paragraph used to make in full: why a private `Storage` is forced rather than
+ * fastidious, and why clearing the shared key was not enough. What is left here is just the seeding,
+ * straight through `localStorage`, which is that per-file shim by the time this line runs.
  */
 
 const SHELL = `
@@ -42,23 +36,6 @@ const SHELL = `
   <div id="editor"></div>
   <div id="link-status" class="link-status"></div>
   <section id="results" class="pane results"></section>`
-
-const cell = new Map<string, string>()
-const shim: Storage = {
-  get length() {
-    return cell.size
-  },
-  clear: () => cell.clear(),
-  getItem: (k: string) => cell.get(k) ?? null,
-  key: (i: number) => [...cell.keys()][i] ?? null,
-  removeItem: (k: string) => {
-    cell.delete(k)
-  },
-  setItem: (k: string, v: string) => {
-    cell.set(k, v)
-  },
-}
-Object.defineProperty(window, 'localStorage', { value: shim, configurable: true })
 
 /**
  * A once-split tree, built with the app's OWN `splitLeaf` and `serializeLayout` rather than a
@@ -117,7 +94,7 @@ const splitRow = (leaf: string): void => {
 // while resolving `let tree`, so anything written after that read is never seen. Same reason every
 // sibling file gives for clearing it here rather than there.
 beforeAll(async () => {
-  cell.set(LAYOUT_STORAGE_KEY, STORED)
+  localStorage.setItem(LAYOUT_STORAGE_KEY, STORED)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
 })

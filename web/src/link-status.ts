@@ -133,8 +133,21 @@ export type LinkStatus = {
     }
 ) & {
     /**
-     * A fork that just failed, or absent — CRITICAL finding, plan 5d-iii's ninth task, and
-     * `#link-status`'s THIRD live-updating job.
+     * The most recent thing `#link-status` has to report that is not part of the CURRENT pin, or
+     * absent — CRITICAL finding, plan 5d-iii's ninth task, and `#link-status`'s THIRD live-updating job.
+     *
+     * **NAMED FOR ITS FIRST WRITER, AND THAT NAME OUTLIVED BEING THE ONLY ONE — 5d-ii-d review round 2,
+     * Finding 3.** A fork that failed at the cap or on a bad build was this field's only tenant when it
+     * was named, and this function used to add a hardcoded `fork failed — ` prefix to whatever it held
+     * as a consequence — every writer got the same words whether or not a fork was what it was reporting
+     * on. Two more writers now compose a message through this exact field without ever having forked
+     * anything: `main.ts`'s storage-quota report ("buffers are not being saved — …") and its
+     * restore-time cap refusal (a `warm`, not a `fork`, refused at `MAX_WARM_BUFFERS`). The field kept its
+     * name — renaming it ripples through `link-wiring.ts`, `main.ts`, `transport.ts` and `replies.ts` for
+     * no behavioural gain — but `linkStatus` no longer assumes what it holds: this string is rendered
+     * verbatim, and it is each WRITER's own job to say `fork failed — ` when, and only when, a fork is
+     * what failed. `scratch.ts`'s `BufferCapReached`/`#refuseAtCap` have the argument for the one place
+     * that call is made two different ways depending on which of `fork`/`warm` is asking.
      *
      * WHY THIS LINE AND NOT THE PANE'S OWN EDITOR. `onScratchReply`'s `no-session` arm can be answering
      * a fork whose build never succeeded even once, and there is no editor to put a diagnostic in:
@@ -166,10 +179,12 @@ export type LinkStatus = {
      * is true of a failed build however the app responds to one.
      *
      * A TOP-LEVEL FIELD, LIKE `detached`, NOT A FOURTH `state` ARM — same reasoning as `LinkStatus`'s
-     * own doc gives for `detached`: this answers a different question (what did a recent FORK ATTEMPT
-     * do) from the one `state` answers (what is currently pinned), and the two are independent — a
-     * fork can fail with nothing pinned, with a stale index, or with a live link, so folding it into
-     * `state` would be the three-way duplication that field's doc already refuses once.
+     * own doc gives for `detached`: this answers a different question (what is the most recent thing
+     * this page needs to say that is not part of the current pin — a failed fork, a storage refusal, a
+     * warm refused at restore) from the one `state` answers (what is currently pinned), and the two are
+     * independent — any of them can coincide with nothing pinned, a stale index, or a live link, so
+     * folding this into `state` would be the same three-way duplication that field's doc already refuses
+     * once, for however many kinds of report end up living here.
      *
      * LEADS, AHEAD OF `detached` — the one exception to "most-global first" `linkStatus`'s own doc
      * states for `detached`'s position, and deliberately so: what earns this the front of the line is
@@ -183,10 +198,13 @@ export type LinkStatus = {
      * was protecting: the pane really is detached, onto the buffer this message is about.
      *
      * CLEARED BY THE CALLER, NOT BY THIS FUNCTION — `linkStatus` is a pure read of whatever `main.ts`
-     * passes in on the current tick, same as every other field here; deciding how long a stale fork
-     * failure stays on screen is `main.ts`'s own lifecycle question (a fork that succeeds and a source
-     * keystroke both clear it; a fork refused at the cap replaces it — `link-wiring.ts`'s field doc has
-     * the ordering argument), and answering it here would make this function stateful, which the whole
+     * passes in on the current tick, same as every other field here; deciding how long a stale report
+     * stays on screen is `main.ts`'s own lifecycle question for every writer, not only the fork one (a
+     * fork that succeeds and a source keystroke both clear it; a fork refused at the cap replaces it;
+     * a storage-quota report and a restore-time cap refusal have their own once-per-load and
+     * once-per-restore rules, `main.ts`'s own call sites have the arguments) — `link-wiring.ts`'s field
+     * doc has the fork case's ordering argument in full, and answering any of this here would make this
+     * function stateful, which the whole
      * rest of the file goes out of its way not to be.
      */
     forkFailed?: string
@@ -254,8 +272,10 @@ export function linkStatus(s: LinkStatus): string {
   const detached = s.detached ?? ATTACHED
   const parts: string[] = []
   // FIRST — see `forkFailed`'s own doc for why this is the one field that leads ahead of detachment
-  // rather than after it.
-  if (s.forkFailed !== undefined) parts.push(`fork failed — ${s.forkFailed}`)
+  // rather than after it. RENDERED VERBATIM, WITH NO PREFIX ADDED HERE — see that same doc (5d-ii-d
+  // review round 2, Finding 3) for why the words a fork-refusal message carries are the message's own
+  // and not this function's to add: this field also carries reports that are not about a fork at all.
+  if (s.forkFailed !== undefined) parts.push(s.forkFailed)
   const detachment = detachedText(detached)
   if (detachment !== '') parts.push(detachment)
   if (s.state === 'stale') {

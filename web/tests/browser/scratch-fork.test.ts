@@ -3,7 +3,6 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { createEditorCustody } from '../../src/editor-custody'
 import { History } from '../../src/history'
 import { LambdaPane } from '../../src/lambda-pane'
-import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { linkStatus } from '../../src/link-status'
 import { createLinkWiring } from '../../src/link-wiring'
 import { PaneCollection } from '../../src/panes'
@@ -453,10 +452,13 @@ describe('the no-session report for a failed fork', () => {
       expect(slot.binding.session).toBe(SOURCE)
       expect(host.querySelector('.controls .detach')).not.toBeNull()
 
-      // THE DIAGNOSTIC IS VISIBLE — composed exactly as `main.ts`'s `drawLink` composes `#link-status`.
-      // This is the half that did not change: the surface was chosen because no editor is ever mounted
-      // on this path, not because of the rebind that has now gone away.
-      const message = (failed ?? []).map((d) => d.message).join(' · ')
+      // THE DIAGNOSTIC IS VISIBLE — composed exactly as `replies.ts`'s `onScratchReply` composes the
+      // `forkFailed` field it hands `link-wiring.ts`, `fork failed — ` prefix included (5d-ii-d review
+      // round 2, Finding 3: that prefix is this call's own text now, not something `linkStatus` adds —
+      // see `link-status.ts`'s `forkFailed` field doc). This is the half that did not change: the
+      // surface was chosen because no editor is ever mounted on this path, not because of the rebind
+      // that has now gone away.
+      const message = `fork failed — ${(failed ?? []).map((d) => d.message).join(' · ')}`
       const line = linkStatus({ state: 'none', forkFailed: message })
       expect(line).toContain('fork failed')
       for (const d of failReply.diagnostics) expect(line).toContain(d.message)
@@ -642,6 +644,10 @@ describe('the no-session report for a failed fork', () => {
         // parameter; `editor-custody.ts`'s own doc holds the sweep's argument, and its callers are
         // `applyLayout` and `main.ts`'s header-list retire handler — neither of them this file.
         editorHome: () => undefined,
+        // A NO-OP FOR `editorHome`'s REASON, ONE FIELD ALONG: the reply this test drives is a
+        // `no-session` for a fork whose build never reached `scratch-compiled`, and that is the only arm
+        // that persists. Nothing here would fire it, and a fake that counted would be counting zero.
+        onBuffersPersist: () => undefined,
       })
 
       // THE PHANTOM BUILD — an unparseable seed, for the reason the test above records: it reaches the
@@ -683,7 +689,16 @@ describe('the no-session report for a failed fork', () => {
       // builds — so a test that omitted it would delete the whole difficulty: `homeFor` would answer
       // `undefined` and a `hasEditor` written the wrong way would pass. `main.ts` is not driven here, so
       // the line that handler runs is restated rather than reached.
-      const custody = createEditorCustody({ panes, sessions: reg })
+      // `collapsedOf` IS NEVER ASKED — this reconstruction never reaches a `receiveEditor` call (the
+      // fork failed, so there is no editor to move), so a stub that would fail loudly if it ever were
+      // called is more honest than a real reader over a buffer this test never collapses.
+      const custody = createEditorCustody({
+        panes,
+        sessions: reg,
+        collapsedOf: () => {
+          throw new Error('collapsedOf should not be read: no editor ever mounts on this path')
+        },
+      })
       custody.claim(SCRATCH, 'lambda-0')
       expect(custody.homeFor(SCRATCH)).toBe(pane)
       expect(custody.hasEditor(SCRATCH)).toBe(false)
@@ -758,13 +773,9 @@ describe('the fork control forks a truncated frame, through the app', () => {
   // `main()` runs once per page. The three `describe` blocks above never import `../../src/main` at
   // all, so this is the first and only mount in this file; nothing above shares a page with it.
   beforeAll(async () => {
-    // THE LAYOUT KEY IS SHARED ACROSS THE WHOLE BROWSER TIER — every test file gets its own page but
-    // the same origin, so a file that persists a tree leaves it for whichever file mounts next.
-    // `main()` reads this key ONCE, while resolving `let tree`, so it has to be cleared before the
-    // import below and not in a `beforeEach`. `scratch-buffers.test.ts` is where the argument lives:
-    // it is the file that first stored a tree with one of `defaultLayout()`'s own leaves missing, and
-    // this file's `[data-leaf="lambda-0"]` lookups all answered `null` under it.
-    localStorage.removeItem(LAYOUT_STORAGE_KEY)
+    // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
+    // before this file's own module body runs — see that file's doc for why clearing a shared key was
+    // not enough. Neither key needs clearing here any more.
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     await until(idle, 'the first compile')

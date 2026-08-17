@@ -150,8 +150,9 @@ const typeInto = (leaf: string, text: string): void => {
 /**
  * Retire every buffer on the page, through the header list — the app's own retire, one row at a time.
  *
- * **THE RESET NEEDS THIS BECAUSE THE APP REFUSES A FORK WHILE `MAX_BUFFERS` OF THEM ARE LIVE**
- * (`scratch.ts`, design §4.5's provisional cap), and this file performs more forks across the one page
+ * **THE RESET NEEDS THIS BECAUSE THE APP REFUSES A FORK WHILE `MAX_WARM_BUFFERS` OF THEM ARE LIVE**
+ * (`scratch.ts`, design §4.4/§4.6's measured cap — provisional when this comment was written, measured
+ * now), and this file performs more forks across the one page
  * it mounts than the cap admits — every one of them outliving its test unless something here ends it.
  * The reset's own doc has the full account of what that changed; what this helper is, is
  * a loop rather than a sweep, because the app offers no sweep: `ScratchBuffers.retire` takes the buffer
@@ -193,10 +194,9 @@ const until = async (p: () => boolean, ms = 5000) => {
 }
 
 // ONE MOUNT FOR THE FILE, the same reason every sibling file gives: ES module imports are cached, so
-// `main()` runs once per page and Vitest gives each test FILE its own page. `localStorage` is cleared
-// BEFORE the mount, not (only) in `beforeEach` — `main()` reads it exactly once, synchronously, while
-// resolving `let tree`, so a clear written only in `beforeEach` (which runs AFTER `beforeAll`) would
-// never be seen by that read.
+// `main()` runs once per page and Vitest gives each test FILE its own page. Neither storage key needs
+// clearing before the mount any more — each browser test file gets its own in-memory `Storage`, installed
+// in `tests/browser/setup.ts` before this file's own module body runs; see that file's doc for why.
 //
 // WAITS FOR THE FIRST COMPILE TO SETTLE, WHICH THE PLAN'S ILLUSTRATIVE SNIPPET DID NOT — found by
 // running it: the very first test's fork click landed while `main()`'s own `compile.schedule(SAMPLE)`
@@ -209,7 +209,6 @@ const until = async (p: () => boolean, ms = 5000) => {
 let view: EditorView
 
 beforeAll(async () => {
-  localStorage.removeItem(LAYOUT_STORAGE_KEY)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle')
@@ -241,7 +240,8 @@ beforeAll(async () => {
  * and deliberately does not: the state these tests need undone is the TREE, the BINDINGS and the
  * PROGRAM, and retiring the buffers as well would make every one of them start from a page that has
  * never forked, which is not the page the failures this file guards were found on."* **What falsified
- * it is `scratch.ts`'s `MAX_BUFFERS`**, design §4.5's provisional cap: this file forks more times on
+ * it is `scratch.ts`'s cap** (`MAX_WARM_BUFFERS` now — design §4.4/§4.6's measured figure, `MAX_BUFFERS`
+ * and design §4.5's provisional one when this paragraph was written): this file forks more times on
  * the one page it mounts than the cap admits, so without the reclamation below the fork past it is
  * refused and the refusal reaches the click handler as a throw — which is how this was found. So
  * "never clean up" was not a choice about how much state a test inherits; it was an assumption that
@@ -615,8 +615,9 @@ describe('two λ panes on two λ sessions', () => {
    * `lambda-0` does come back, and `editorOwner` still named it.
    *
    * The two docs that justified keying custody by session argued from "the closed leaf's id is never
-   * reused (`nextLeafId` only counts up)", which is true of the ids `nextLeafId` mints and false of the
-   * three `defaultLayout` writes down. A pane that merely INHERITED the id was resolved as the editor's
+   * reused (`nextLeafId` only counts up)" — the history note under `heldEditors` and under `applyLayout`
+   * holds that premise now, since both docs state the corrected one — and it is true of the ids
+   * `nextLeafId` mints and false of the three `defaultLayout` writes down. A pane that merely INHERITED the id was resolved as the editor's
    * home the moment it was rebound to the scratch, and the next layout gesture delivered the held editor
    * onto it — the silent relocation §4.2 and §4.3 both refuse, with the claim control withdrawing itself
    * as the editor appeared where nobody had asked for it.
@@ -980,9 +981,9 @@ describe('two λ panes on two λ sessions', () => {
    * **IT IS THIS FILE'S FIRST TEST ONE STEP ON, AND THE STEP IS THE WHOLE SLICE.** That one reaches two
    * λ SESSIONS — a buffer beside the source session — which 5d-i's singleton already allowed. Two
    * BUFFERS is the state the singleton made unreachable: a second fork REBOUND the forking pane to the
-   * buffer the first one built rather than minting another (`scratch.ts`'s `fork` doc records the `has`
-   * branch that did it), so however many λ panes the layout tree could reach, the app could never show
-   * two scratch terms at once. Decision 1 mints one per fork, and this is that claim on screen.
+   * buffer the first one built rather than minting another (`scratch.ts`'s `fork` doc now states only
+   * that the `has` branch is gone; the history note under `fork` has what it did), so however many λ
+   * panes the layout tree could reach, the app could never show two scratch terms at once. Decision 1 mints one per fork, and this is that claim on screen.
    *
    * **IT ASSERTS ON WHAT EACH PANE RENDERS RATHER THAN ON WHAT ITS SELECTOR IS LABELLED** — §5's rule,
    * and here the rule has teeth in a way a label check cannot reproduce: two panes bound to ONE buffer

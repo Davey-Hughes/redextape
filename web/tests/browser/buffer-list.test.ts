@@ -42,9 +42,9 @@ beforeEach(() => {
  * — the case the renderer must write a sentence for rather than leaving a blank line under a name.
  */
 const THREE: readonly BufferRow[] = [
-  { id: 'scratch-1', label: 'scratch 1', paneCount: 2, term: '\\x. x' },
-  { id: 'scratch-2', label: 'scratch 2', paneCount: 1, term: '\\y. y y' },
-  { id: 'scratch-3', label: 'scratch 3', paneCount: 0, term: null },
+  { id: 'scratch-1', label: 'scratch 1', paneCount: 2, term: '\\x. x', warm: true },
+  { id: 'scratch-2', label: 'scratch 2', paneCount: 1, term: '\\y. y y', warm: true },
+  { id: 'scratch-3', label: 'scratch 3', paneCount: 0, term: null, warm: true },
 ]
 
 const menu = () => bar.querySelector<HTMLElement>('.buffer-list')
@@ -64,7 +64,7 @@ const retire = (label: string) => bar.querySelector<HTMLButtonElement>(`button[a
 
 describe('bufferList', () => {
   it('lists each buffer with its pane count, and marks an orphan', () => {
-    bufferList(button, () => THREE, noop)
+    bufferList(button, () => THREE, noop, noop)
     button.click()
     expect(rowText()).toEqual(['scratch 1 — 2 panes', 'scratch 2 — 1 pane', 'scratch 3 — orphan'])
   })
@@ -75,15 +75,22 @@ describe('bufferList', () => {
    * before `BufferRow.term` the list rendered eight identical rows under a refusal instructing the user
    * to choose one of them. Found by opening the list on a real page; this is that page's assertion.
    *
-   * ASSERTED AS DISTINCT STRINGS RATHER THAN AGAINST A LITERAL LIST, because what the field buys is
-   * DIFFERENCE. A test reading `toEqual([...])` passes just as well on a renderer that prints the same
-   * term three times, which is the state being fixed.
+   * **THE `toEqual` BELOW IS WHAT ASSERTS THE DIFFERENCE, AND A SECOND LINE THAT COUNTED IT SEPARATELY
+   * COULD NOT FAIL — whole-branch review before merge, finding 3c.** This paragraph read "ASSERTED AS
+   * DISTINCT STRINGS RATHER THAN AGAINST A LITERAL LIST, because what the field buys is DIFFERENCE. A
+   * test reading `toEqual([...])` passes just as well on a renderer that prints the same term three
+   * times" — and the line it was written above was a `toEqual([...])`, of three literals that are
+   * pairwise distinct. So the claim was false of the very assertion it sat on, and the
+   * `expect(new Set(termText()).size).toBe(THREE.length)` it justified was dead: a renderer printing one
+   * term three times fails the `toEqual` first, and nothing that passes the `toEqual` can fail the count.
+   * The list literal is kept and the count is dropped, because the literal says everything the count did
+   * and also says WHICH term belongs to which row — which is the fact `paneCount` and `label` cannot
+   * supply and this field exists for.
    */
   it('shows each buffer’s own term, so two rows can be told apart', () => {
-    bufferList(button, () => THREE, noop)
+    bufferList(button, () => THREE, noop, noop)
     button.click()
     expect(termText()).toEqual(['\\x. x', '\\y. y y', 'no term yet'])
-    expect(new Set(termText()).size).toBe(THREE.length)
   })
 
   /**
@@ -97,7 +104,7 @@ describe('bufferList', () => {
    * hovering it would produce an empty tooltip — a control reporting something it does not have.
    */
   it('marks a buffer with no term, and carries the full term as a title only when there is one', () => {
-    bufferList(button, () => THREE, noop)
+    bufferList(button, () => THREE, noop, noop)
     button.click()
     const terms = [...bar.querySelectorAll<HTMLElement>('.buffer-row-term')]
     expect(terms.map((e) => e.classList.contains('is-absent'))).toEqual([false, false, true])
@@ -124,6 +131,7 @@ describe('bufferList', () => {
         fired.push(id)
         live = live.filter((r) => r.id !== id)
       },
+      noop,
     )
 
     button.click()
@@ -143,7 +151,7 @@ describe('bufferList', () => {
    * for them — which is why there is no separate test for those two paths.
    */
   it('opens on the button and keeps aria-expanded true while open', () => {
-    bufferList(button, () => THREE, noop)
+    bufferList(button, () => THREE, noop, noop)
     expect(button.getAttribute('aria-haspopup')).toBe('menu')
     expect(button.getAttribute('aria-expanded')).toBe('false')
 
@@ -165,7 +173,7 @@ describe('bufferList', () => {
    * different control from the one this describes.
    */
   it('moves focus into the list on open', () => {
-    bufferList(button, () => THREE, noop)
+    bufferList(button, () => THREE, noop, noop)
     button.click()
     const active = document.activeElement
     expect(menu()?.contains(active)).toBe(true)
@@ -187,8 +195,8 @@ describe('bufferList', () => {
     const second = document.createElement('button')
     second.type = 'button'
     bar.append(second)
-    bufferList(button, () => THREE, noop)
-    bufferList(second, () => [], noop)
+    bufferList(button, () => THREE, noop, noop)
+    bufferList(second, () => [], noop, noop)
 
     const mine = button.getAttribute('aria-controls') ?? ''
     const theirs = second.getAttribute('aria-controls') ?? ''
@@ -211,11 +219,139 @@ describe('bufferList', () => {
    * been retired.
    */
   it('names how many buffers there are on its own button', () => {
-    const list = bufferList(button, () => THREE, noop)
+    const list = bufferList(button, () => THREE, noop, noop)
     list.update(3)
     expect(button.textContent).toBe('buffers 3 ▾')
     list.update(1)
     expect(button.textContent).toBe('buffers 1 ▾')
+  })
+})
+
+/**
+ * TEMPERATURE — design §4.2, and the reason this file's crash-site history matters here: `main.ts`'s
+ * row builder used to call `legOf` unconditionally, an id `SessionRegistry.entryOf` throws for once a
+ * buffer is cold. This is the control that MAKES a cold buffer reachable from the list at all, so it is
+ * tested for the same two facts every other row fact gets — what it reads, and what a click reports —
+ * plus the one fact unique to it: a cold row must read as ASLEEP rather than as a row with nothing to
+ * show, which is a different claim from `BufferRow.term`'s "no term yet".
+ *
+ * A ROW OFFERS EXACTLY ONE OF `warm`/`cool`, NEVER BOTH AND NEVER NEITHER — `bufferRow`'s own comment
+ * has the argument (`pane-chrome.ts`'s "added and removed, never disabled" idiom): there is no `cool`
+ * for a buffer already cold and no `warm` for one already running, so offering the wrong one would be a
+ * control a click could not honour.
+ */
+describe('bufferList: temperature', () => {
+  const COLD: readonly BufferRow[] = [{ id: 'scratch-1', label: 'scratch 1', paneCount: 0, term: null, warm: false }]
+  const WARM: readonly BufferRow[] = [{ id: 'scratch-1', label: 'scratch 1', paneCount: 1, term: '\\x. x', warm: true }]
+
+  /**
+   * A row's temperature control, reached by the ACCESSIBLE NAME that names its buffer and the action it
+   * offers — mirroring `retire`'s own helper above and for the same reason, now that the control carries
+   * one (5d-ii-d review, Finding 3: it shipped with none, so a screen-reader user at eight buffers heard
+   * an indistinguishable column of `warm`/`cool` buttons). Found by text-and-position is exactly what
+   * that gap made invisible — this file's own convention is the name, not the position.
+   */
+  const temperature = (action: 'warm' | 'cool', label: string): HTMLButtonElement | null =>
+    bar.querySelector<HTMLButtonElement>(`button[aria-label="${action} ${label}"]`)
+
+  const row = () => bar.querySelector<HTMLElement>('.buffer-row')
+
+  it('a cold row offers warm and not cool', () => {
+    bufferList(button, () => COLD, noop, noop)
+    button.click()
+    expect(row()?.textContent).toContain('asleep')
+    expect(temperature('warm', 'scratch 1')).not.toBeNull()
+    expect(temperature('cool', 'scratch 1')).toBeNull()
+  })
+
+  it('a warm row offers cool and not warm', () => {
+    bufferList(button, () => WARM, noop, noop)
+    button.click()
+    expect(temperature('cool', 'scratch 1')).not.toBeNull()
+    expect(temperature('warm', 'scratch 1')).toBeNull()
+  })
+
+  it('clicking warm reports the id and the temperature asked for', () => {
+    const seen: [SessionId, boolean][] = []
+    bufferList(
+      button,
+      () => COLD,
+      noop,
+      (id, warm) => seen.push([id, warm]),
+    )
+    button.click()
+    temperature('warm', 'scratch 1')?.click()
+    expect(seen).toEqual([['scratch-1', true]])
+  })
+
+  /**
+   * THE OTHER DIRECTION (5d-ii-d review, Finding 5). Only `warm → true` was asserted above, which an
+   * implementation that hardcoded `onTemperature(row.id, true)` would also pass — every row in that test
+   * is cold, so the callback's second argument was never exercised against a fixture where the correct
+   * answer is `false`. This pins `!row.warm` rather than a constant, against a WARM fixture.
+   */
+  it('clicking cool reports the id and false', () => {
+    const seen: [SessionId, boolean][] = []
+    bufferList(
+      button,
+      () => WARM,
+      noop,
+      (id, warm) => seen.push([id, warm]),
+    )
+    button.click()
+    temperature('cool', 'scratch 1')?.click()
+    expect(seen).toEqual([['scratch-1', false]])
+  })
+
+  // A COLD BUFFER HAS NO SESSION, so a row must not claim it holds a term it cannot read.
+  it('a cold row says it is asleep rather than showing no term', () => {
+    bufferList(button, () => COLD, noop, noop)
+    button.click()
+    expect(row()?.textContent).not.toContain('no term')
+  })
+
+  /**
+   * **THE STRANDED-FOCUS REGRESSION (5d-ii-d review round 2, Finding 1).** `rebuildRows`'s
+   * `replaceChildren` throws away the very button the click landed on, and unlike `retire` — which
+   * calls `hidePopover()` first and gets focus handed back to the invoker by the popover's own hide
+   * algorithm — a temperature click never closes the popover, so nothing puts focus anywhere in its
+   * place. Left unfixed, `document.activeElement` here is `<body>`, still inside a popover that is
+   * still open: the deferred-accessibility list's item 1, "a control that hides itself on click strands
+   * the keyboard," reached by a rebuild instead of a hide.
+   *
+   * **THE FIXTURE REORDERS ON EVERY CLICK, WHICH IS WHAT MAKES THIS A MATCH-BY-`id` TEST AND NOT A
+   * MATCH-BY-POSITION ONE.** `scratch 2` is clicked while it sits second; the handler below then
+   * reverses the list, so the rebuilt row for `scratch 2` lands FIRST. An implementation that re-focused
+   * "whatever is now at the clicked index" would land on `scratch 1`'s control instead — this is the
+   * case that catches it.
+   *
+   * ASSERTED BY ACCESSIBLE NAME, so the same assertion also pins that the label flipped: cooling
+   * `scratch 2` turns its control from `cool scratch 2` into `warm scratch 2`, and the control focus
+   * lands on has to be the one now reading that flipped state, not a stale one still reading `cool`.
+   */
+  it('keeps focus on the same buffer’s temperature control after the rebuild, not <body>', () => {
+    const rows: readonly BufferRow[] = [
+      { id: 'scratch-1', label: 'scratch 1', paneCount: 1, term: '\\x. x', warm: true },
+      { id: 'scratch-2', label: 'scratch 2', paneCount: 1, term: '\\y. y', warm: true },
+    ]
+    let live = rows
+    bufferList(
+      button,
+      () => live,
+      noop,
+      (id, warm) => {
+        const updated = live.map((r) => (r.id === id ? { ...r, warm } : r))
+        live = [...updated].reverse()
+      },
+    )
+
+    button.click()
+    temperature('cool', 'scratch 2')?.click()
+
+    const active = document.activeElement
+    expect(active).not.toBe(document.body)
+    expect(menu()?.contains(active)).toBe(true)
+    expect(active?.getAttribute('aria-label')).toBe('warm scratch 2')
   })
 })
 
@@ -252,7 +388,7 @@ describe('bufferList: where the list opens', () => {
     // still fails `sharesEdge`.
     bar.style.left = '20px'
     bar.style.top = '150px'
-    bufferList(button, () => THREE, noop)
+    bufferList(button, () => THREE, noop, noop)
     button.click()
 
     const list = menu()?.getBoundingClientRect() ?? new DOMRect()

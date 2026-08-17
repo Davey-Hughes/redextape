@@ -132,7 +132,9 @@ async function until(predicate: () => boolean, what: string, timeoutMs = 3000): 
 let view: EditorView
 
 beforeAll(async () => {
-  localStorage.removeItem(LAYOUT_STORAGE_KEY)
+  // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
+  // before this file's own module body runs — see that file's doc for why clearing a shared key was not
+  // enough. Neither key needs clearing here any more.
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   await until(

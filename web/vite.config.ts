@@ -12,7 +12,7 @@ import { playwright } from '@vitest/browser-playwright'
 // fine (Vite ignores the extra `test` key at runtime either way) but fails `tsc --noEmit` with
 // TS2769 because the `test` property is invisible to the checker. `vitest/config` re-exports the
 // same Vite `defineConfig` plus that import path.
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 // `pkg/` is built to the REPO ROOT, one level above this Vite root, because the Dockerfile places
 // stage 1's output at /app/pkg beside /app/web. Vite's dev server refuses to serve outside its root
@@ -24,6 +24,32 @@ import { defineConfig } from 'vitest/config'
 // somewhere else and the wasm fetch dies with "outside of Vite serving allow list" — while the same
 // config serves the same file correctly under a plain `vite dev`.
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
+
+/**
+ * The affordability probe's own file, excluded from the browser project's default set unless
+ * `REDEXTAPE_PROBE` is set — `pnpm test:probe` is what sets it.
+ *
+ * **IT IS A MEASUREMENT WHOSE CONSOLE OUTPUT IS THE DELIVERABLE (its own header says so), AND A
+ * DELIVERABLE NOBODY READS ON EVERY PUSH IS PURE COST.** Design §4.6's probe runs eleven real wasm
+ * workers and builds eleven 32 MiB rings, deserialising every frame onto the main thread — the peak is
+ * roughly half a gigabyte inside one page, which is the threshold it exists to measure. The browser
+ * project has no `fileParallelism: false`, so under the default `include` that peak could land
+ * concurrently with `session-memory.test.ts`'s and `frame-cost.test.ts`'s, in one origin, on every
+ * push. This repo's history already records a λ probe taking 60 GiB of RAM and all of swap.
+ *
+ * **AN ENV FLAG RATHER THAN A BARE `exclude`, BECAUSE A FILE OUTSIDE `include` CANNOT BE NAMED BACK IN.**
+ * Vitest's positional filters select WITHIN the resolved include set, so `vitest run <path>` on an
+ * excluded file reports no test files rather than running it — which under `passWithNoTests: false`
+ * (see the `test` block below for why that is off) is an error, not a probe run. Gating the exclusion
+ * makes `pnpm test:probe` the one way in and keeps the default suite free of it.
+ *
+ * NOT DELETED, NOT SKIPPED, AND NOT MOVED OUT OF `tests/browser/`: it is a real test file that must keep
+ * running against the real app under the same harness and the same Chromium flags — §4.6's whole
+ * argument is that the cap is a measurement rather than an extrapolation, and a measurement that cannot
+ * be re-run is an extrapolation with a date on it.
+ */
+const PROBE_FILE = 'tests/browser/buffer-affordability.test.ts'
+const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? [PROBE_FILE] : []
 
 export default defineConfig({
   server: { fs: { allow: [REPO_ROOT] } },
@@ -255,6 +281,15 @@ export default defineConfig({
         test: {
           name: 'browser',
           include: ['tests/browser/**/*.test.ts'],
+          // THE PROBE IS NOT IN THE DEFAULT SET — see `PROBE_EXCLUDE` above for the whole argument.
+          // `pnpm test:probe` sets `REDEXTAPE_PROBE` and this list is then empty.
+          //
+          // `...configDefaults.exclude` FIRST, BECAUSE A BARE `exclude: PROBE_EXCLUDE` REPLACES
+          // VITEST'S DEFAULT LIST RATHER THAN ADDING TO IT — `**/node_modules/**` and `**/.git/**` would
+          // silently drop out. Harmless today only because `include` above is already confined to
+          // `tests/browser/`, so nothing under `node_modules` or `.git` could match it anyway; the
+          // moment that glob widens, the omission bites without a test to catch it.
+          exclude: [...configDefaults.exclude, ...PROBE_EXCLUDE],
           // Vitest serves its own tester HTML, so this project's `index.html` — and therefore its
           // `<link>` to `style.css` — never reaches the page. See `tests/browser/setup.ts`: without it
           // the state table's `max-height: 40vh` never applies and the browser tier measures a

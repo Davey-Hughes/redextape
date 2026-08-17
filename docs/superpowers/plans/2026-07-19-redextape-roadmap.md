@@ -1462,6 +1462,40 @@ rather than a note saying a11y is on the todo. Known outstanding, all observed r
     **WHAT IS NOT FIXED: item 10's half.** The status line still announces nothing to a screen reader,
     which is the reason a refused fork is on this list at all. This entry was about the sighted user
     getting nothing either; that is the half that is closed.
+13. **Temperature is carried in a row's text and in its control, and in nothing else** (added
+    2026-08-17, PR 5d-ii-d — design §6.3's promise, written into this list before the closing entry
+    claimed it, and its CONTENT checked against the shipped control, which is the correction item 10
+    records against itself). A cold row's name line reads `scratch N — orphan — asleep` and its button
+    reads `warm`; a warm row drops the ` — asleep`, gains a term line under the name, and offers
+    `cool`. Both buttons carry an `aria-label` naming the buffer — `cool scratch 2` — which
+    `bufferRow` added for item 10's own reason, that a column of controls all reading the same two
+    words announces as nothing a reader can choose between. **So the state IS reachable to a reader who
+    goes back and re-reads the row; what is missing is any announcement that it changed** — and this
+    control changes it underneath a list that deliberately stays open. `buffer-list.ts`'s
+    `handleTemperature` calls `rebuildRows()` where the retire path calls `hidePopover()` first, on the
+    argument that cooling several buffers to get under the cap is one gesture and a dismiss-per-click
+    would turn it into three open-click cycles. On a successful cool, therefore, the row's name line,
+    its term line and its button's accessible name all change under a popover that never closed, focus
+    is moved onto the freshly built control for the same buffer (matched by `id`, not by position,
+    because the rebuild destroys the button the click landed on), and nothing says any of it happened.
+
+    **AND THE REFUSAL IS THE MIRROR, EXACTLY AS IT IS FOR A FORK.** At the cap `ScratchBuffers.warm`
+    raises `BufferCapReached`; `main.ts`'s temperature handler puts the message on `#link-status` and
+    returns, and `handleTemperature` then rebuilds an identical list. Nothing on the page moves, and
+    the whole outcome is a line of text on the one surface item 6 records as announcing nothing. Like
+    items 9 and 10 the control ships keyboard-operable, so the gap here is announcement and not reach.
+14. **`cool` changes what other panes show, and announces it no more than retire does** (added
+    2026-08-17, PR 5d-ii-d). `ScratchBuffers.cool` walks the slots it is handed and calls
+    `slot.rebind(home)` for every one naming the buffer it is putting to sleep. That is not *like*
+    retire's loop, it **is** retire's loop: `retire` is `cool` followed by forgetting the record, and
+    `main.ts`'s temperature handler hands `cool` every slot on the page
+    (`panes.all().map((p) => p.slot)`) for the same reason the retire handler does — a partial set
+    strands exactly the panes it omits. So one click on a row control can silently change what any
+    number of panes elsewhere on the page are showing, and it also takes that buffer's editor down on
+    the next frame (`draw()` → `LambdaPane.setDetached(false)`'s teardown). Item 10 already records
+    that retire announces neither its rebinds nor anything else; this is the same rebind, reached from
+    the same list, behind a button that reads `cool` rather than `retire` — and the one fact that makes
+    the two different, that the buffer is still there and can be warmed again, is not conveyed either.
 
 What already exists, so the pass starts from the right baseline: the appearance control is a real
 `<button type="button">` with an `aria-label` naming its current state, updated on every change
@@ -7010,3 +7044,704 @@ time does not extend to other projects on the same box — the same caveat 5d-ii
 has now applied to two consecutive closes. And the coverage text reporter omits files at 100%, so the
 per-file figures quoted in this entry for `editor-custody.ts` were read out of the HTML report from the
 same run rather than off the terminal summary.
+
+#### PLAN 5d-ii-d CLOSES — a buffer survives the page and the provisional eight becomes a measured eleven, and the measurement that first derived thirteen was invalid in two independent ways which both inflated it (2026-08-17, branch `plan5d-ii-d`, `560d465..ae42a04` plus this entry)
+
+Design: [`../specs/2026-08-16-plan5d-ii-d-persisted-buffers-design.md`](../specs/2026-08-16-plan5d-ii-d-persisted-buffers-design.md).
+Plan: [`2026-08-16-plan5d-ii-d-persisted-buffers.md`](2026-08-16-plan5d-ii-d-persisted-buffers.md).
+
+The slice 5d-ii-c filed at itself, and the first one in this sub-plan whose headline deliverable is a
+number. **Buffers survive the page**: a new `redextape.buffers` key carries each buffer's text, label,
+mint counter and collapse flag, plus the pane→buffer bindings, and `redextape.layout` stays at
+`version: 1` and stays small — §3.1 measured the layout being re-serialised and written synchronously
+at pointer rate for the length of a divider drag, which decided the two-key split before taste could.
+**A restored buffer a restored pane names comes back warm; one nobody is showing comes back cold** —
+text with no session at all — which makes *cold* a new state and `cool` a new gesture, the
+non-destructive escape from a cap that refuses rather than evicting. **And the cap is measured**:
+`MAX_BUFFERS = 8` is now `MAX_WARM_BUFFERS = 11`, renamed because after the cold/warm split it bounds
+threads and every reader of the old name believed it bounded buffers.
+
+Executed serially throughout — nine planned tasks plus one added during execution (5b), then a
+whole-branch review and two fix rounds. Thirty-four commits, forty-eight files, +7,371 / −467.
+
+##### THE FINDING THAT OUTRANKS THE FEATURE — THE FIRST PROBE WAS INVALID IN TWO INDEPENDENT WAYS, AND BOTH OF THEM INFLATED THE CAP
+
+The probe landed at `419497b` and derived **13**. It was reviewed and found invalid, and the two errors
+have nothing to do with each other except that they point the same way.
+
+**(1) THE RINGS WERE FILLED WITH FRAMES THAT ARE NOT λ FRAMES.** The fixture pushed synthetic
+`spans: []` records — roughly 381,000 of them at ~88 bytes each to charge a 32 MiB ring — where a real λ
+ring holds ~3,200 frames at ~10 KB. The two are not interchangeable at the only property the probe was
+measuring: the synthetic fill retained **0.9293×** the bytes it was charged, against the **1.071922×**
+`protocol.ts` had independently recorded for a real λ leg. A ring that retains less than it is charged
+is a ring that costs less than it costs, eleven times over.
+
+**(2) THE MODEL PRICED A ZERO-BUFFER PAGE AT ZERO BYTES.** `ringBytesFor` returned a *delta* while the
+pre-registered threshold names **resident** heap. So the fit had no intercept worth the name: the app
+baseline, the source session's own worker and its two rings were all outside it. A cap is
+`(budget − intercept) / marginal`, and an intercept of zero is the single most generous error the
+arithmetic admits.
+
+**The corrected probe fills its rings from the worker's own real frames and prints a decomposed
+intercept.** Its λ retention ratio comes out at **1.0710455×** in two runs and **1.0713606×** in the
+third against `protocol.ts`'s **1.071922×** — agreeing to within ~0.1%, which is a cross-check rather
+than a restatement, because the two were produced by different code, on different terms, at different
+times, and neither was derived from the other. **That agreement figure is itself a correction**: fix round 1
+of the same task claimed 0.07%, on a denominator (`HISTORY_BYTES` exactly) that undercounts the charged
+total by up to one frame and against a heap-side reading carrying small non-ring overhead the comparison
+never accounted for. ~0.1% is the honest number and the conclusion does not turn on it.
+
+**A SECOND BUG SURFACED WHILE FIXING THE FIRST, AND IT IS THE ONE WORTH STEALING.** The "before" heap
+snapshot was being taken *after* the workers' frames had already been structured-cloned into the main
+thread, so the ring delta read **~91 KB where the truth was ~36 MB** — a four-hundred-fold error, in a
+reading that looked entirely plausible on the way past. It was found only because the retention
+cross-check above had a number to disagree with. A measurement with no independently recorded quantity
+to check itself against would have shipped it.
+
+**AND A THIRD, IN THE FIX'S OWN REVIEW: A FIFTH INTERCEPT COMPONENT.** `main.ts` calls `init()` on the
+**main thread** as well as in every worker, and `usedJSHeapSize` charges only ~0.6 MB of glue for a wasm
+module whose linear memory is 8,454,144 bytes — the same baseline every other thread pays, invisible to
+the same reading for the same reason. Adding it moved cap (b) from 9 to 8 and left cap (a) at 11. The
+five components, printed by the probe every run:
+
+| intercept component | bytes | where it comes from |
+| --- | --- | --- |
+| page/app baseline | 17,825,792 | `session-memory.test.ts`'s floor — the harness's own live reading was below it every run |
+| main-thread wasm module | 8,454,144 | the same module baseline every thread pays; a separate line item because `heapNow()` cannot see it |
+| source session fixed cost (module + arena) | 11,993,088 | `protocol.ts`'s `DROP_HISTORY_ON_UNFOCUS` doc |
+| source λ ring at exhaustion | 35,939,888 – 35,950,460 | measured directly, this probe's own n=1 round |
+| source TM ring at exhaustion | 68,634,933.44 | `protocol.ts`'s `TM_LEG_RETENTION_RATIO × HISTORY_BYTES` — still extrapolated, no TM leg is measured here |
+
+**The transferable line is not "review your probes".** It is that all three errors were *conservative
+in the wrong direction*: a ring that retains less, an intercept of zero, a module that is not counted.
+Nothing about a measurement makes its mistakes symmetric, and a probe whose entire output is a
+permission — *how many of these may the page hold* — has a direction its errors will tend to run in
+unless something outside it is holding still. Here that something was the threshold.
+
+##### THE THRESHOLD DID NOT MOVE, WHICH IS THE ONLY REASON THE CORRECTION LANDED ON A NUMBER RATHER THAN ON A JUSTIFICATION
+
+Written into the design before any measurement existed, and unmoved from that day to this one:
+
+> **THE THRESHOLD: a page at the cap, with every warm buffer holding a real term and its ring driven to
+> exhaustion, must sit at or below 512 MiB — main-thread resident heap plus summed per-thread wasm
+> linear memory. The cap is the largest count that satisfies it. The threshold does not move.**
+
+The corrected probe derives **11** under exactly that sentence, and 13 → 11 is the whole visible
+consequence of the section above. **It is worth being explicit about what could have happened instead**,
+because this repo has the instance on file: #28 records a pre-registered threshold quietly relaxed after
+it bound, and #30 records a gate nobody had shown capable of failing. A threshold that moves absorbs a
+bad measurement silently and reports the same cap either way.
+
+**TWO READINGS OF THAT SENTENCE, AND THE PROJECT OWNER TOOK THE LITERAL ONE.** Read (a) — *every warm
+**buffer** at exhaustion* — puts the source session's own two rings outside the count and derives **11**.
+Read (b) — everything on the page at exhaustion, source rings included — derives **8**, which is
+coincidentally the provisional number this slice exists to replace. **Davey's decision, 2026-08-16:
+reading (a) governs**, on the ground that the discipline which stops a threshold being loosened after it
+binds equally stops it being tightened. The stricter figure is recorded in the constant's own doc so its
+reader sees the sensitivity rather than inheriting a number with no spread.
+
+**BOTH CAPS ARE UPPER BOUNDS, AND THE PROBE PRINTS THEM LABELLED AS SUCH.** The page-baseline component
+is a *floor* — a byte-conversion of a prose figure, and `session-memory.test.ts` says outright that the
+real figure is larger — so the true intercept can only be larger and the true safe cap only smaller,
+never the reverse. That asymmetry is stated at every site the number appears, because "derived cap: 11"
+read without it is a claim the measurement never made.
+
+##### THE VERIFICATION AT n=11, WHICH IS WHAT KEEPS 11 A MEASUREMENT AND NOT AN EXTRAPOLATION
+
+The design's last step — *measure at 1, 2, 4; derive; then re-measure at the derived N* — is the step
+that would have caught a non-linearity between four buffers and eleven, and it is the step that turns
+this cap from arithmetic into a reading. It was run four times.
+
+**Every run fits.** Intercept (a) plus the measured n=11 total landed at **503.56–503.57 MiB** against
+the 536,870,912-byte budget — **~8.4 MiB of headroom**, never closer — and the direct measurement agreed
+with what the n=1/n=4 marginal predicted to within **0.000–0.011%**. Derived cap (a) = 11 and cap (b) = 8
+were identical in all four. Marginal cost per buffer **44,522,565–44,528,023 bytes** (~44.53 MB), a
+three-run spread of **5,457.34 bytes ≈ 0.012%**.
+
+**THAT SPREAD FIGURE IS A CORRECTION MADE INSIDE THE BRANCH AND IT IS RESTATED HERE BECAUSE THE
+SUPERSEDED ONE IS STILL IN CIRCULATION.** ≈0.015% is fix round 1's number, from the pass whose intercept
+was later found to be missing its fifth component; Task 8's own review caught the constant's doc quoting
+it and replaced it with ≈0.012%. Task 7's report carries `SUPERSEDED` banners on every section of the
+earlier derivation for the same reason — the file is read top-down, and the first cap a reader meets in
+it is 13.
+
+The deterministic half of the probe is worth recording as evidence the harness is sound: `ringCharged`
+(33,555,892 bytes) and `ringFrames` (8,326) are **bit-identical at every n across every run**, because
+the same term stepped for the same capped budget always produces the same frames — while the retained
+heap deltas beside them vary by ~0.03% on GC schedule. A probe whose deterministic quantities are
+deterministic and whose noisy quantities are noisy is a probe reading what it thinks it is reading.
+
+**AND IT NO LONGER RUNS ON EVERY PUSH.** The n=11 round costs ~490 MB of frames and eleven concurrent
+wasm workers, and it had been sitting in the browser project's default include — so every PR was paying
+for it, on a runner with no configured memory cap. `vite.config.ts` gains `PROBE_EXCLUDE` and
+`package.json` gains `test:probe`. **An env flag rather than a bare `exclude`, for a reason worth
+keeping**: Vitest's positional filters select *within* the resolved include set, so a file outside
+`include` cannot be named back in — `vitest run <excluded path>` reports no test files, which under
+`passWithNoTests: false` is an error rather than a probe run. Verified by reading the config and by
+`vitest list` in both directions, never by running the probe.
+
+##### TWO CRASHES: ONE THE DESIGN PREDICTED BEFORE ANY CODE EXISTED, AND ONE NO PER-TASK GATE COULD SEE
+
+**THE PREDICTED ONE: `main.ts`'s row builder called `legOf` on the authority of an invariant this slice
+falsifies by construction.** The paragraph that justified the unguarded call is quoted in full in the
+design and in the commit that deleted it — *"a buffer is in `#buffers` and in the registry together or
+in neither, because `#reg.remove` and `#buffers.delete` appear exactly once in `src/` and both are
+inside `retire`"* — and a cold buffer is precisely a buffer in `#buffers` and in neither container
+behind `legOf`. `SessionRegistry.entryOf` throws for an id it does not hold, deliberately. So the first
+time a user opened the buffer list on a page that had restored an orphan, the row builder threw out of a
+`beforetoggle` handler, which is a click.
+
+**It is on the record as this slice's own §3.2 because it was found by reading the tree before writing
+any code, and that is the unusual part rather than the crash.** The finding cost nothing and it changed
+the shape of the work: the row builder needed a temperature branch, not a restated invariant, and **the
+branch is on `warm` and not on a `try`** — a cold buffer is a state this app produces on purpose, so
+catching would be treating a designed state as an exception *and* swallowing the genuine wiring bug the
+throw exists to report.
+
+**THE ONE NOTHING COULD SEE: cool → warm produced a buffer that could never be edited again.** Ten
+per-task reviews passed. The whole-branch review found it, and the reason is that three tasks each did
+their part correctly and the gap lived between all three. `cool` rebinds its panes, so `draw()` →
+`LambdaPane.setDetached(false)`'s teardown destroys the editor. `warm` spawns and posts a build, but no
+pane is bound to the buffer, so `replies.ts`'s `scratch-compiled` arm resolves `editorHome` to
+`undefined` and mounts nothing. Binding a pane afterwards through the selector re-posts no build and
+claims no leaf. And *"bring the term editor to this pane"* is gated on `EditorCustody.hasEditor`, which
+is correctly `false` — so the control is correctly withheld and there is no other route. The buffer's
+frames rendered and its text was permanently unreachable.
+
+**`cool` EXISTS SOLELY AS THE NON-DESTRUCTIVE ESCAPE FROM THE CAP, AND IT WAS DESTROYING EDITABILITY
+WHILE CARRYING THAT NAME IN ITS OWN DOC.** Design §4.5 said the opposite in its own words. **Davey's
+decision, 2026-08-16: fix it now, not file it** — on the argument the a11y items of the previous slice
+turned on, that a slice does not ship a gesture which silently costs the user their work because the
+defect predates the commit that found it. The fix is `pane-host.ts`'s `mountScratchEditor`, gated on
+`hasEditor` so it can never race the claim control, seeded from `ScratchBuffers.editorSeed` so the text
+and the §4.7 collapse flag arrive together, and **seeding directly rather than re-posting a build** —
+`recompile` would reach the same mount through the existing arm and add no new call site, but it
+supersedes the buffer's generation and rebuilds at step 0, discarding the ring and the play head on an
+ordinary rebind. That is exactly the loss §4.5 weighs when it declines to auto-cool an orphan; paying it
+again at a cheaper gesture would have re-introduced it one level down.
+
+**It is the λ half of a repair the TM leg already had**, which is the part that generalises:
+`applyLayout`'s creation pass already seeds a fresh `TmPane` from `tmProgramOf` because *"the reply that
+would have told this pane has already been and gone"*, and `scratch-compiled` is the λ reply with the
+identical property. The λ side had gone four slices without noticing it needed the same sentence.
+
+##### THREE DECISIONS THE PROJECT OWNER TOOK MID-BRANCH, EACH WITH WHAT FORCED IT
+
+**1. `cool` REBINDS ITS PANES, EXACTLY AS `retire` DOES — the plan said the opposite and the opposite is
+unimplementable.** The deleted sentence promised a convenience: *"a pane bound to a cooled buffer keeps
+naming it, which is what makes warming it again put the pane back in front of its own term."* `retire`'s
+own doc had already written down why that cannot be — *"`legOf` and `entryOf` throw for a session the
+registry does not hold, and `draw()` resolves through both, so a slot still pointing at a removed entry
+is an exception on the next frame rather than a blank pane"* — and cooling removes the registry entry.
+So the signature became `cool(id, home, slots)` and the invariant became **a cold buffer has no panes
+bound to it**, which is what the rest of the design was already assuming: §4.2's restore policy makes
+orphans exactly the buffers that come back cold, and this makes the runtime agree with the reload. It is
+also why §3.2's row builder is the *only* site that has to branch on temperature — with no panes there
+is no other path that reaches a cold buffer.
+
+**The correction had a tail, and it was the controller's own error.** Twelve one-argument `cool(id)`
+call sites survived the signature change, **including the plan's own Task 4 wiring** — `cool`'s only
+real caller in the app, and the one place where the slots argument is what makes the no-panes invariant
+true rather than merely stated. Found by the re-review of fix round 1, corrected in the plan rather than
+in one task's head, and Task 2's superseded block was marked rather than rewritten.
+
+**2. ONE `Storage` PER BROWSER TEST FILE — a task added mid-branch (5b) rather than a fix folded into
+another.** Task 5 made every browser file that mounts `main` write `redextape.buffers`; `localStorage`
+is scoped to an **origin** and Vitest runs browser files concurrently in one. Per-file clearing was the
+mitigation already in the tree and it leaves a race whose window is the `await init()` wasm load — two
+flakes were reproduced through it (`scratch-cap`, `link-truncated`) before the shim existed. The shim
+goes in `tests/browser/setup.ts`, which is already wired as `setupFiles`, and the reviewer independently
+re-traced `@vitest/runner` to confirm `runSetupFiles` is awaited before `importFile` for the same spec —
+so the substitution lands before a seeding file's module body runs. **Five browser runs, all 215/215
+identical**, because one green run is not evidence about a non-deterministic defect. This is 5d-ii-c's
+standing hazard — *one `localStorage` origin, no `fileParallelism` cap* — closed by construction rather
+than by per-offender hygiene.
+
+**3. THE CAP THRESHOLD READ LITERALLY.** Covered above: *every warm **buffer***, so the source session's
+own rings need not be simultaneously exhausted, so 11 rather than 8.
+
+**And two the controller took without escalating, recorded because they shape controls a user touches.**
+The buffer list **rebuilds in place** after a warm or a cool rather than dismissing the way retire does —
+retire removes the row so there is nothing left to show, while warm and cool change the one fact the row
+exists to report, and cooling several buffers to get under the cap is a real gesture a dismiss would turn
+into three open-click cycles. And a user who never forked gets no storage-failure report at all, because
+`hasBuffers` guards it: a lost buffer is work, and no buffers means no work.
+
+##### A PATTERN WORTH RECORDING AS ITS OWN FINDING — ELEVEN COMMENTS ASSERTING SOMETHING UNTRUE, AND THE LARGEST SUB-CLASS WAS LINE NUMBERS
+
+**Eleven findings on this branch were comments asserting something untrue.** The ledger filed this
+pattern at ten while the branch was still running; the whole-branch review added to it, which is itself
+the shape of the thing. The largest sub-class was **stale `file:line` citations**, and the whole-branch
+review resolved every one of them against the tree by script rather than by reading: **fifteen were
+stale, and every single one undershot.** The ledger recorded the denominator as fifty-three and the fix
+report's script-resolved count is forty-nine; the numerator agrees in both, and forty-nine is the figure
+that came from resolving each citation rather than from counting at review time.
+
+**They undershoot because a file grows above the line it cites, and the commonest way for that to happen
+is the citing commit itself.** Several on this branch were invalidated by line insertions made in the
+same commit that wrote them. One had become a **false instruction** — *"Delete `main.ts:1240` and this
+line sees `{}`"* named an unrelated `setFocus([])` comment, and that sentence was the only record of what
+the test protected, so the reader following it would have deleted the wrong thing and learned nothing.
+Two restore test files disagreed with each other about the same two call sites and **both were wrong**.
+
+**THE CONVENTION THIS ENTRY PROPOSES: CITE SYMBOLS, NEVER LINES, FOR ANYTHING IN THIS REPO.** The
+evidence is in the branch rather than in the argument. Late tasks moved to symbol-name citations on their
+own initiative once the pattern was visible. And `buffer-affordability.test.ts` — which cites **24
+times** — had **zero drift**, for the reason that makes the rule general: most of its citations name
+*other* files, and another file does not shift when the citing file grows. A symbol name survives every
+edit that does not rename it, and a rename is a `grep` the compiler will usually run for you; a line
+number survives no edit above it, including edits made in the same breath. The sweep left **zero**
+`file:line` citations in the branch's changed files, converting the already-correct ones too —
+`buffer-affordability.test.ts`'s 24 included — so a future sweep has nothing to re-check.
+
+Four classes were deliberately left as `file:line`: Rust sources under `crates/` (read-only for this
+branch), `sessions.ts` (which this slice was constrained not to modify), and three test files this
+branch did not otherwise change — all three targets verified correct today, so nothing there is stale,
+only unconverted.
+
+**THE REJECTED ALTERNATIVE, NAMED SO IT IS NOT RE-PROPOSED AS NEW.** A mechanical pre-commit citation
+checker was considered and declined. It is the right instrument and this was the wrong moment: a new gate
+introduced at the end of a thirty-four-commit branch risks its own findings landing on top of a review
+that is already complete, and a gate that fires spuriously in its first week is a gate someone disables.
+It is filed, not refused. The convention above needs no tooling to start paying — a symbol citation is
+correct the day it is written and stays correct — and a checker over a tree that has already converted is
+a much smaller thing to get right.
+
+##### ASSERTIONS THAT COULD NOT FAIL — AND EVERY ONE WAS CAUGHT BY SOMEBODY READING IT, NEVER BY A RUN
+
+**Three were found while the tasks were running**, the last of which the ledger records as *"the THIRD
+assertion-that-cannot-fail in this slice"*: a "reports once" test that passed with or without the guard
+it existed for, because `#link-status` recomposes its line from a single field, so a doubled message
+writes an identical string. It was replaced with a second-fork discriminator.
+
+**The whole-branch review found four more, then a fifth by turning the pattern back on the branch's own
+files.** The five, briefly, because the shapes repeat: a wait's exact predicate re-asserted after the
+wait had already proved it (twice — and the second instance was inside the very test written to pin
+Task 9's fix); a `.not.toContain` over a string already pinned to `''`; a `new Set(...).size` count above
+a `toEqual` of three pairwise-distinct literals, sitting under a doc arguing the count was needed because
+the `toEqual` could not catch a duplicate — a claim false of its own assertion; and a probe statement kept
+but re-pointed at total retained frame count, the one quantity `History#push`'s eviction can break and the
+`buildRings` exhaustion gate cannot see, since that gate counts bytes *charged*, before eviction.
+
+**The whole point is the detection mechanism.** An assertion that cannot fail is green in exactly the
+same way as an assertion that passes, on every run, forever. No suite, no coverage figure and no
+mutation run over the *implementation* distinguishes them — the line is executed and it is satisfied.
+Every one of the eight came from a person reading the assertion beside the thing it claimed to defend.
+Three further pre-existing instances were found in files this branch touched only incidentally and were
+**not** fixed: they pre-date the branch, and widening the diff for them buys a review surface rather
+than a behaviour.
+
+##### `scratch.ts` IS NOW 84% COMMENT, AND THIS SLICE DELIBERATELY DOES NOT ADDRESS IT
+
+Measured for this entry, by counting lines whose first non-space character opens or continues a
+comment: **1,004 of 1,193** — against a file that was 612 lines in total at `560d465`, so the comment
+mass alone is now larger than the whole file was at the branch point. The ledger's estimate of 85% was
+close and this is the count. Much of it is retracted-claim history — the paragraph that used to justify the unguarded
+`legOf`, the argument that eight was a choice and not a measurement, the superseded `cool` semantics,
+each kept and corrected in place because this file's house rule is that a doc corrected into silence
+teaches the next reader nothing about why the obvious thing is wrong.
+
+**That rule is right and its bill is now visible.** A reader arriving at `ScratchBuffers` meets more
+history than code, and the ratio is real comprehensibility debt rather than a stylistic complaint. It is
+recorded here and **deliberately not paid in this branch**: a comment-ratio reduction is an editing pass
+over the single file this slice changed most, at the end of thirty-four commits, and the risk is
+deleting the sentence that turns out to have been the only record of something. It wants its own change,
+with its own review, and a rule for what history earns its space — which this entry does not have.
+
+##### THE ACCESSIBILITY LIST — TWO ADDITIONS, WRITTEN AND THEN CHECKED AGAINST THE CONTROLS THEY DESCRIBE
+
+**Items 13 and 14**, both promised by design §6.3. They were written into the list *before* this section
+claimed they existed, which is item 9's failure; and their **content** was then read back against the
+shipped code, which is item 10's — that entry described the buffer list's retire backwards while
+correctly reporting that the item was present.
+
+**Item 13 — temperature has no announcement, and the surface it changes on is one that stays open.** A
+cold row reads `scratch N — orphan — asleep` and offers `warm`; a warm row drops the marker, gains a
+term line, and offers `cool`. Verified in `bufferRow`: both buttons carry an `aria-label` naming the
+buffer, so the *state* is reachable to a reader who re-reads the row — **the gap is the change**.
+`handleTemperature` calls `rebuildRows()` where the retire path calls `hidePopover()` first, so the row's
+name, its term line and its button's accessible name all change under a popover that never closed, with
+focus moved onto the freshly built control for the same buffer (matched by `id`, because the rebuild
+destroys the button the click landed on). At the cap the mirror case: `warm` raises, the message goes to
+`#link-status`, `rebuildRows()` produces an identical list, and nothing on the page moves at all.
+
+**Item 14 — `cool` changes what other panes show.** Verified in `ScratchBuffers.cool`: it walks the slots
+it is handed and rebinds every one naming the buffer. That is not analogous to retire's loop, it **is**
+retire's loop — `retire` is `cool` plus forgetting the record — and `main.ts` hands it every slot on the
+page. Item 10 already records that retire announces none of its rebinds; this reaches the same rebind
+from the same list behind a button reading `cool`.
+
+Both ship keyboard-operable, on the exception 5d-ii-b took and 5d-ii-c extended: a mouse-only
+*reclamation* control is inoperability rather than unannounced semantics. As with items 9 and 10, the gap
+is announcement and not reach.
+
+##### FIVE MORE THINGS THE BRANCH FOUND, EACH IN ONE PARAGRAPH
+
+**A FIFTH PERSIST SITE WAS NEEDED AND THE PLAN'S FOUR WERE WRONG.** Start-up's `refreshBuffers()` writes
+before any pane exists, so the four persist sites lost every binding on the **second** reload — a bug
+that is invisible to a test that reloads once. A write-back was added after the first `applyLayout()`.
+
+**A STORED BINDING ON A NON-λ LEAF KILLED THE PAGE AT `main()`.** Found by an implementer's own
+self-review: the restore built `PaneSlot('tm', 'scratch-N')` from a payload that carries no leg by
+design, so `parseBuffers` structurally cannot catch it. Reachable without hand-editing storage — bind a
+λ pane to a buffer, switch that pane to TM, reload. Fixed by seeding only the λ leaves the tree holds.
+
+**THE STORAGE-FAILURE REPORTER CRASHED ON EXACTLY THE PAGES IT WAS FOR.** `reportStorageFailure` called
+`linkWiring` and `draw`, both unassigned at the start-up write. The `hasBuffers` guard made a fresh page
+safe and a **restored** page not, because restore populates buffers first — so a failed write threw a
+TypeError out of `main()` and killed the page. Same shape as an earlier task's `noSessionReply`: a safety
+argument that held for one caller and silently did not transfer. The fix had to move the start-up
+`refreshBuffers()` past `linkWiring`, `draw`, `view` **and** `compile.schedule(SAMPLE)`, the last of which
+clears `forkFailed` unconditionally and would have wiped the report; the last two obstacles were found by
+testing, after a first attempt crashed one function deeper.
+
+**A RESTORED BOUND BUFFER CAME BACK PERMANENTLY READ-ONLY**, and Task 5's tests missed it because they
+asserted the restored **term text**, not the editor: `editorOwner` had only click-driven writers and none
+fire on restore, and the claim control was gated on `hasEditor`, false when no editor was ever built.
+Fixing it exposed a gap the controller's own brief had created — design §4.7 says the collapse flag
+*"follows it as custody moves the editor between panes"*, the brief scoped only `setEditor`, and
+`receiveEditor` — the actual custody-move path — went unseeded. A doc sentence written in the same commit
+asserted `setEditor` was the only class writer, which is how it survived.
+
+**A FORK WHOSE BUILD NEVER SUCCEEDS PERSISTS THE SOURCE'S STEP-0 TERM, AND A RELOAD WARMS IT
+SUCCESSFULLY.** `fork` seeds `text: src` — the string §3.4 itself calls "the wrong string anyway" — and
+`transport.ts`'s `detach` persists on its success path, synchronously, before any reply. So a failed fork
+silently becomes a working buffer holding a different term. **Documented rather than deferred, because
+deferring is not a fix**: the record carries the seed either way and four other sites persist the whole
+collection, so any later gesture writes the same bytes. Removing the consequence means not seeding `text`
+with `src` at all, and the honest alternative — an empty seed — restores a failed fork as an *empty*
+buffer, trading a wrong term for lost work against a design whose §4.8 rests on "a lost buffer is work".
+That is a design change, not a repair, and not one to make in a final-review pass.
+
+##### 5d-iv KEEPS ITS POSITION, AND WHAT THIS SLICE HANDS IT
+
+**5d-iv — the TM editable pane** is unchanged: after 5d-ii, before Plan 5's accessibility pass. It still
+owes the TM pair-list re-test 5d-ii-c re-filed at it, and this slice could not discharge any of it —
+`TmScratch` still has no producer, so the TM group still holds exactly the source session.
+
+**The per-frame layout write is filed and not fixed** (§6.2). `layout-view.ts`'s `pointermove` reaches
+`applyLayout`'s tail, which writes `localStorage` synchronously at pointer rate for the length of a
+divider drag. Two keys keep the payload small enough that this slice does not make it worse, which is
+exactly why it is out of scope and not why it is acceptable. The fix is a commit-on-`pointerup` or a
+debounce, and it belongs to whoever next touches that path.
+
+**The pre-commit citation checker** above, and **`scratch.ts`'s comment ratio**, are the two other things
+this branch names and declines.
+
+##### WHAT THIS SLICE COULD NOT ESTABLISH
+
+**Whether anyone can work in a multi-buffer layout. Nobody has used one for a real task.** Carried
+unchanged from 5d-ii-a, 5d-ii-b and 5d-ii-c, and it is still the honest headline of this section — and it
+is sharper here than in any of them, because this slice's central deliverable is a *permission* to hold
+eleven of something no one has yet held two of for a purpose. Every claim in this entry is DOM
+assertions, counts, geometry and bytes. That eleven is affordable is now measured. That eleven is
+*useful* is not evidence this branch produced or could have produced.
+
+**Whether cooling loses work, and how much.** It can lose up to **300 ms of typing**, and the mechanism
+is known rather than suspected: `warm` rebuilds from the recorded text, `recompile` writes that text on
+the editor's 300 ms debounce, and `LambdaEditor.destroy()` cancels a pending debounce — which `cool`'s
+rebind triggers. It is barely reachable (a last keystroke plus two gestures inside 300 ms) and it is not
+fixed, so it is stated here rather than left for someone to rediscover from the outside.
+
+**Whether the refusal message is true.** It reads *"all 11 scratch buffers are live"*, and a page can
+hold 15 buffers of which 11 are warm — the `warm` path is reachable in exactly that state and refuses
+with that exact sentence. `BufferCapReached` is "unchanged in kind" for this slice by design §4.4, so the
+confusion is recorded in `MAX_WARM_BUFFERS`'s own doc rather than reworded. It is a wrong sentence on the
+page today.
+
+**Whether a corrupt payload is actually refused by the reader.** `buffer-restore-invalid.test.ts` pins
+the **writer**, not the reader, and its own doc now says so at length: both its assertions are satisfied
+by an implementation that never reads `redextape.buffers` at all. The button being hidden is vacuously
+true whenever nothing restores, and the stored value it checks is produced by the unconditional start-up
+write on every page load. It pins that a refused restore leaves the app in the state a fresh page starts
+in — not that the refusal happened. Closing that needs a spy on the read path or a payload that is
+well-formed and should still be refused, and this file has neither.
+
+**Whether the cap holds on a real app page.** The probe's eleven are probe workers each holding a bare
+`LambdaScratch` — no CodeMirror, no app DOM, no source session, no clients, no panes, no play timers —
+and three of the five intercept components are cited constants rather than readings taken on that page.
+`total = wasm + rings` also sums two quantities that are never simultaneously resident, which the probe's
+own comment states verbatim. The conclusion (11 fits, with margin, and both caps are upper bounds) is
+unaffected; the claim that 11 was "directly measured on a real page holding eleven live buffers" was in
+the constant's doc for one round and is corrected.
+
+**Reload's interaction with divider drag, and `MIN_PANE_FRACTION`**, are carried forward from 5d-ii-a,
+5d-ii-b and 5d-ii-c unchanged. This slice touched neither.
+
+##### Verification
+
+**Every figure describing the tree at close was measured against `ae42a04` by runs performed for this
+entry, except the branch-point test count, which is carried and is labelled where it appears.** Stated at
+this length because the last two closes both shipped a carried-forward count presented as a fresh one and
+both had to correct it — 5d-ii-c's entry says so of itself twice, and 5d-iii's counts had to be fixed by
+its reviewer. The failure was never a wrong number; it was a carried number wearing a measured one's
+clothes.
+
+`pnpm test` → **606 passed in 63 files**. **The baseline is 547 in 56 files and it was NOT re-measured
+here**: it is the ledger's pre-recorded figure, taken from 5d-ii-c's closing entry at the branch point.
+Re-running it needs a second worktree with `pkg/` and `node_modules` built, which this entry did not do.
+Seven new test files across the branch; the delta is +59 tests.
+
+`pnpm test:coverage` → **95.57% statements (2162/2262), 89.88% branches (1040/1157), 98.51% functions
+(397/403), 98.08% lines (1891/1928)**, against floors **95 / 89 / 97 / 97**. All four clear. The margins
+are **0.57 / 0.88 / 1.51 / 1.08**.
+
+**AND THREE OF THE FOUR ARE BELOW WHERE 5d-ii-c CLOSED, WHICH THAT ENTRY PRE-REGISTERED A TEST FOR AND
+THIS ONE IS OBLIGED TO RUN.** 5d-ii-c closed at 96.10 / 90.09 / 98.36 / 98.52 and raised the floors to
+95/89/97/97 in the same breath, writing down the falsifier: *"if 5d-ii-d measures below 95 / 89 / 97 / 97
+on a branch that added no untested code, this raise was tracking a peak rather than a level."* **It does
+not.** All four are above the floors, so the raise stands and the floors are left where they are. But
+statements fell 0.53, branches 0.21 and lines 0.44 against that close, while functions rose 0.15 — and
+the honest reading is that this branch added a large amount of code (+7,371 lines) of which the
+defensive-validation arms in `buffers-store.ts` and the cold/warm branches are the least exercised.
+`statements` at 0.57 above its floor is the tightest this gate has been since it was raised, and it is
+`statements` rather than `functions` that is now the one to watch. **The four figures rose within the
+branch** — the final review's own fix wave moved them 95.45 → 95.57, 89.76 → 89.88, 98.25 → 98.51,
+97.96 → 98.08 — and that is a different measurement from the one above, so both are given rather than
+the flattering one.
+
+`pnpm exec tsc --noEmit` → clean. `pnpm exec biome check --error-on-warnings` → clean, one pre-existing
+unrelated deprecation notice.
+
+`wc -l` at close, against `560d465`: `scratch.ts` **612 → 1193**, `main.ts` **981 → 1540**,
+`buffer-list.ts` **247 → 393**, `pane-host.ts` **753 → 898**, `editor-custody.ts` **468 → 511**, and
+`buffers-store.ts` is new at **139**. **`scratch.ts` nearly doubled and 84% of it is comment** — see the
+section above, which measures it rather than estimating. **`main.ts` grew 559 lines, and that is the
+composition root paying for two subsystems at once**: the restore order (seed `#minted`, insert every
+buffer cold, seed `pendingBinding`, then `applyLayout`), five persist sites, the temperature handler with
+its `BufferCapReached` arm, and the row builder's temperature branch. `buffers-store.ts` at 139 lines is
+the whole of the format and its validation, and it knows nothing about the probe — the two halves this
+slice deliberately kept in one branch share no code, exactly as §1 promised.
+
+**The probe was NOT run for this entry**, and that is a deliberate departure from the "measure it here"
+rule the Verification blocks otherwise follow. Its figures above are from Task 7's fix round 2 (three
+runs) and Task 8 (four runs), which is where the n=11 verification was performed; it now sits outside the
+default browser project, and re-running an eleven-worker memory probe to re-print a number two reports
+already carry in full would spend ~490 MB and eleven wasm workers on nothing. The file's own header
+records when it must be re-run: **any change to the cap, the threshold, the ring budget or the frame
+accounting.**
+
+The measurement caveat this branch inherits and does not escape: an unrelated vitest process from a
+different repo on this machine sits outside the branch's rule that only one lane runs the browser tier at
+a time. It has now applied to three consecutive closes, and it applies to a memory probe more than to
+anything else, which is the reason the probe's own runs were taken with nothing else running and
+`free -h` checked between each.
+
+**One recorded measurement was restored rather than lost.** `layout-restore.test.ts`'s deleted doc had
+carried empirical evidence for the browser tier's concurrency — *the suite's wall-clock duration is less
+than half the sum of its per-file test time* — and 5b's replacement argued concurrency from the
+`await init()` window instead, which is more precise and is not a measurement. Both are in
+`tests/browser/setup.ts` now, and the figure was **re-measured on this branch rather than quoted: 53.9 s
+of wall clock against 149.8 s of summed test time, across 38 files.**
+
+#### THE DOC-HISTORY NOTE CLOSES — 5d-ii-d's largest filed risk paid down by moving 221 lines of retracted claim out of five files, the code identical to the line, and the smallest of the five got LONGER (2026-08-17, branch `web-doc-history`, `da863c3..cbaf52a` plus this entry)
+
+Design: [`../specs/2026-08-17-web-doc-history-design.md`](../specs/2026-08-17-web-doc-history-design.md).
+Plan: [`2026-08-17-web-doc-history.md`](2026-08-17-web-doc-history.md).
+The note itself: [`../notes/2026-08-17-web-doc-history.md`](../notes/2026-08-17-web-doc-history.md).
+
+The item the entry above filed and declined to pay — *"`scratch.ts` IS NOW 84% COMMENT, AND THIS SLICE
+DELIBERATELY DOES NOT ADDRESS IT"* — with the rule that entry said it did not have. **The problem was
+never length.** This repo's docs are long on purpose and none of that is reversed here; the problem is
+that a reader had to walk through paragraphs of *retracted* claims to reach each current fact.
+`scratch.ts` carried 27 retracted-claim markers, `noSessionReply` spent ~125 lines on a 6-line body,
+`MAX_WARM_BUFFERS` 113 lines on one integer.
+
+**THE RULE IS THREE CATEGORIES AND THE BOUNDARY BETWEEN THEM IS THE WHOLE DESIGN** (spec §4.1). *Live
+argument* — what a reader needs while reading the code, to understand what it does or why it is this
+way rather than a plausible alternative — **stays**. A *retracted claim* — what the doc, the code or
+the design USED TO say or do — **moves**. A *measurement transcript* — raw run figures, byte counts,
+per-round readings — **moves, and the conclusion drawn from it stays**. A paragraph that resists the
+test stays where it is: the rule is deliberately biased so that ambiguity resolves toward *stay*,
+because the failure mode with the highest cost is a live argument leaving with the history.
+
+**No target percentage was set, and the review's suggested one was declined with arithmetic before any
+code was written.** 961 lines of code against ~3,400 of comment means "under 50%" requires moving
+~2,300 lines; the retracted and transcript material is 600–900. A number to hit would have put pressure
+on exactly the judgement call the rule biases toward *stay*, which is the one place this pass could do
+real damage. **The ratio is a result, not a goal**, and it is reported below without being argued
+against a target nobody set.
+
+##### THE FIVE FILES, AND THE ONE THAT GOT LONGER
+
+| file | lines before | comment | lines after | comment | code |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `scratch.ts` | 1193 | 84.2% | **1082** | **82.5%** | 163 → 163 |
+| `main.ts` | 1540 | 69.7% | **1493** | **68.7%** | 421 → 421 |
+| `pane-host.ts` | 898 | 76.1% | **886** | **75.7%** | 201 → 201 |
+| `editor-custody.ts` | 511 | 84.1% | **462** | **82.5%** | 73 → 73 |
+| `buffer-list.ts` | 393 | 69.7% | **394** | **69.8%** | 103 → 103 |
+
+**`buffer-list.ts` WENT UP, AND THAT IS THE RULE WORKING RATHER THAN A MISTAKE.** It is the smallest and
+newest of the five and it had almost no history to lose: six lines of it, all in `BufferRow.term`'s
+account of what the list read before that field existed — *"EIGHT ROWS READ `scratch 1 — orphan` THROUGH
+`scratch 8 — orphan` AND NOTHING ELSE"*, a reading taken on a page the app can no longer produce, since
+5d-ii-d raised the cap from 8 to 11. Six lines left. **Restating what that observation still argues —
+that a row without a term is a counter's output and a pane count, all pane counts alike at the cap —
+took five**, because the argument survives the observation and the call site is where it belongs. The
+pointer to the note costs two more. Six out, seven in. **A file that is nearly all live argument has
+nothing for this pass to do, and the honest report of that is a number that moves the wrong way.**
+
+Across the five: **4,535 → 4,317 lines**, 221 relocated by the pass and three added back by the
+whole-branch review as repaired prose. The note is **1,397 lines across 40 entries**, organised
+file → symbol. **39 distinct symbols carry a pointer** — 42 occurrences in `web/src/`, three of them
+cross-references between call sites, plus two the whole-branch review added in `web/tests/` — and
+**every one resolves** to a heading in the note.
+
+##### THE STRONGEST EVIDENCE ON THIS BRANCH IS A SET OF NUMBERS THAT DID NOT MOVE
+
+The slice's central claim is that it changes no executable code, and a prose pass is exactly the
+operation for which "I only touched comments" is an assertion rather than a fact. Four things check it,
+none of them an opinion:
+
+**The per-file gate.** Strip every `/** */` block and every `//` line from the base file and from the
+current file, and `diff` the remainders. `NO CODE CHANGED` for all five, run again after the
+whole-branch review's fixes.
+
+**The code-line count, identical to the digit, per file.** Non-comment, non-blank lines at `da863c3`, at
+the end of the pass, and after the review's fixes: **163 / 421 / 201 / 73 / 103**. Measured by the same
+counter that reproduces every "before" ratio in the ledger's baseline table exactly, which is what makes
+it a check rather than a restatement.
+
+**The suite and coverage, unmoved.** `pnpm test` → **606 passed in 63 files**; `pnpm test:coverage` →
+**95.57 / 89.88 / 98.51 / 98.08** — the four figures 5d-ii-d closed on, identical to the digit. The plan
+pre-registered them as a falsifier rather than as an expectation: *"a moved coverage figure means code
+was touched — investigate before proceeding."* **Not re-run for this entry**, in the same departure the
+entry above made for its probe: the figures are from the per-task verifications, this branch's final
+change is documentation only, and CI runs the suite post-rebase.
+
+**The `file:line` citation count, still 7.** Six are `session.rs:257-273` and one is
+`session-client.ts:15`. A relocation pass is precisely the operation that invalidates line citations, so
+the spec required this pass to introduce none and required the note to cite **symbols** from the first
+entry. It does: every pointer names a symbol, which survives every edit that does not rename it.
+
+##### TWO CONVENTIONS WERE ABANDONED MID-SLICE, AND EACH WAS ABANDONED FOR PRODUCING A WRONG NUMBER
+
+**(1) THE PER-REPAIR ENUMERATION — MISCOUNTED FOUR TIMES ON ONE FILE.** Moving a paragraph out leaves
+dangling references in the prose that stays: a pronoun whose antecedent went, a tense word whose
+referent went, a count that named the list that just left. Task 1 undertook to enumerate every such
+repair in the note. Its count came out **10 → 11 → 14 → 17** across four rounds, each one confident it
+was complete, and the third correction came *after* the method had already been changed from sweeping
+the file to deriving the list from the diff. The cause is structural rather than careless: a sweep finds
+one repair per paragraph and walks past the second one sitting beside it. **Replaced by one categorical
+sentence per entry** — *the surviving prose was repaired where it referenced the moved text; the
+pre-move original is quoted above* — which is always true and cannot miscount, over a blockquote a
+reader can diff against the file directly. **The safety of dropping the enumeration rests entirely on
+that blockquote being complete**, which is why the whole-branch review traced every elision in it before
+merge and why the sentence now states its own exception rather than overclaiming.
+
+**(2) THE DELETION-FREEDOM CHECK MUST REPORT THE LIST, NEVER THE COUNT — AND IT CAUGHT REAL LOSS TWICE
+AFTER THE CHANGE.** Every line removed from a source file is checked, by sliding five-word window, to
+appear either in the file's new text or in the note. Task 2's report said *"exactly one window in one
+line is uncovered"*; reproducing its own described method gave **twelve, across four lines**. Nothing was
+lost — all four were sentence-boundary seams with both halves present — but a normalisation loose enough
+to produce that number on a 511-line file could swallow a real gap on `main.ts`'s 1,540. The rule became
+**list every uncovered window and trace each one to where both halves live**, and it paid on the next two
+tasks running:
+
+- **Task 3** — first run 52 windows, of which exactly one failed the prefix-plus-suffix trace: its middle
+  was in neither document, because the `applyLayout` blockquote had been **cut mid-sentence**, stopping
+  at *"…is timing rather than uniqueness"* while the original sentence ran on. Extended to the sentence
+  end, the count fell to 48 and **the other 47 windows were unchanged** — which is what makes the seam
+  explanation evidence rather than a story fitted to a number. A bare count would have reported "52, all
+  seams" and shipped the loss.
+- **Task 4** — first run 34 windows, of which **fifteen were a genuine gap**: three passages had been
+  repaired in the file but never quoted into the note, leaving `now`, `(below)` and two cross-reference
+  clauses in NEITHER document. Fixed before commit; the second run's 15 were all seams, each traced.
+
+**The transferable line is that a count is a summary of a check, and summarising a check is how a check
+stops working.** Both conventions failed the same way: they reported a number where the evidence was a
+list, and the number was wrong in a direction nobody could see from the number.
+
+##### A SHELL HAZARD WORTH RECORDING FOR THE WHOLE REPO — THE `>` REDIRECT REPORTED A FALSE PASS
+
+Task 1's no-code-changed gate wrote its two stripped snapshots to temp files with `>`. **This shell runs
+with `noclobber`, which silently refuses `>` onto an existing path** — it prints `file exists` to stderr
+and leaves the previous contents where they were. The gate therefore
+`diff`ed a snapshot taken several edits earlier against another snapshot taken several edits earlier,
+found no difference, and printed **`NO CODE CHANGED` for a tree it had not read**. On a slice whose one
+claim is "no executable line changed", that is the gate failing in the exact direction that makes it
+useless.
+
+**The fix is that the gate creates no files at all** — process substitution, `diff <(...) <(...)` — so
+there is nothing that can be stale. **The general rule this earns: a verification command that writes
+an intermediate file can pass on the previous run's input, and under `noclobber` it will do so
+silently.** `file exists` anywhere near a gate means the gate is not measuring the current tree.
+
+##### THE DEFECT CLASS A PER-FILE PASS CANNOT SEE, FOUND BY THE WHOLE-BRANCH REVIEW
+
+Each task read one file and repaired the prose left behind in it. **A pointer in file A that
+characterises what a doc in file B says is invisible to both halves of that arrangement.**
+`main.ts`'s row builder said *"see `BufferRow.term` for what the list looked like without it (eight rows
+reading `scratch N — orphan`, under a refusal telling the user to pick one)"*. Task 5 rewrote
+`BufferRow.term` to drop the eight-rows observation, **and repaired the sibling cross-reference inside
+`buffer-list.ts`** — missing only the one that crossed a file boundary, because the sweep that found the
+sibling ran per file. The pointer was true when written and false when merged, with no diff line
+anywhere near it.
+
+**A SWEEP FOR THE WHOLE CLASS FOUND TWO MORE, BOTH IN `web/tests/` — WHICH THIS SLICE NEVER TOUCHED AND
+THEREFORE NEVER READ.** `two-lambda-panes.test.ts` said *"`scratch.ts`'s `fork` doc records the `has`
+branch that did it"* — `fork`'s doc now states only that the branch is gone — and it quoted *"the closed
+leaf's id is never reused (`nextLeafId` only counts up)"* as what "the two docs that justified keying
+custody by session argued from", a string that no longer exists anywhere in `web/`. Both now name the
+note. **The test tier being out of scope for the relocation did not put it out of scope for the
+relocation's consequences**, and nothing in a per-file pass over `web/src/` could have surfaced either.
+
+Four further findings of the same family were repaired inside `web/src/` before merge: a promise of *"the positions that
+were tried and rejected first"* whose target now splits them between the note and the call site, where
+two of three siblings had already been fixed and one had not; a *"what changed is what it counts"* whose
+antecedent had left; and a stale leaf id — `leafCounter`'s doc named `lambda-1` as the collision hazard
+when `nextLeafId` mints `` `pane-${leafCounter++}` ``, so a restored `lambda-1` advances the counter and
+cannot collide while `pane-1` can. **That last one was stale before this slice began, and the slice
+rewrote the paragraph and reproduced it, then wrote it into the note as well** — one stale fact becoming
+two, which is the specific cost of copying prose rather than rederiving it.
+
+##### WHAT THIS SLICE COULD NOT ESTABLISH
+
+**That the note will be read.** It is reachable from 44 citations across `web/` and, as of this entry,
+from the roadmap. Nothing establishes that a reader arriving at a symbol follows the pointer, and the
+counterfactual — how many readers were previously helped by the retracted paragraph they had to walk
+through — is not measurable either. **The claim being made is narrower than "this is better": it is that
+a reader looking for the current fact now reaches it sooner, and a reader looking for the history can
+still find it.** Only the second half is verifiable, and it is verified.
+
+**That the classification was right, as opposed to defensible.** Every block was read and classified by
+hand against §4.1; nothing was moved by pattern match. But there is no test tier for prose, and the
+three failure modes the spec names — a live argument left with the history, a pointer naming a symbol
+that does not exist, material lost rather than moved — were checked by review and by the coverage
+windows, not by anything that runs. **The second and third are mechanically checkable and were checked.
+The first is a judgement, five times over per file, and it is only as good as the reviewers who read it.**
+
+**That the ratios mean anything.** 84.2% → 82.5% on `scratch.ts` is 111 lines out of a file whose
+comment mass is still larger than the whole file was at 5d-ii-d's branch point. The debt this entry's
+predecessor filed is **reduced and not retired**, and the residual is live argument, which the rule says
+stays. A future pass that wants a smaller number will have to argue with §4.1 rather than with this
+result.
+
+**Whether `web/tests/` carries the same debt.** Out of scope by design §6, untouched, unmeasured. The
+rule and the note are both ready to take it under the same conventions, and no one has looked.
+
+##### Verification
+
+The no-code-changed gate, per file, base `da863c3` against the working tree — `scratch.ts`, `main.ts`,
+`pane-host.ts`, `editor-custody.ts`, `buffer-list.ts`: **`NO CODE CHANGED`** for all five.
+
+`rg -o '[a-z-]+\.(ts|rs):[0-9]+' web/src/` → **7** — six `session.rs:257`, one `session-client.ts:15`.
+Unchanged from the fork.
+
+Every *history note under `<symbol>`* pointer in `web/` resolved against the note's `###` headings:
+**44 occurrences, 39 distinct symbols, zero unresolved.**
+
+The no-code-changed gate also run against `web/tests/browser/two-lambda-panes.test.ts`, the one test
+file the whole-branch review's cross-file sweep touched: **`NO CODE CHANGED`**.
+
+Every blockquote in the note split on its elision markers and each fragment matched by substring against
+the base text of the file it is attributed to: **zero fragments that are not verbatim base text.** The
+elisions themselves were traced individually — **every one covers text that stayed at the call site**,
+which is what the softened claim in each entry now says.
+
+`pnpm exec tsc --noEmit` and `biome ci` → clean, run by the pre-commit hook on every commit of this
+branch.
+
+`pnpm test` and `pnpm test:coverage` were **not re-run for this entry** — see the section above for the
+figures and the reason.

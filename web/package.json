@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:node": "vitest run --project node",
     "test:browser": "vitest run --project browser",
+    "test:probe": "REDEXTAPE_PROBE=1 vitest run --project browser tests/browser/buffer-affordability.test.ts",
     "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {

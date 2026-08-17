@@ -67,6 +67,14 @@ function lambdaSession(id: SessionId): SessionEntry {
 let panes: PaneCollection
 let sessions: SessionRegistry
 let custody: ReturnType<typeof createEditorCustody>
+/**
+ * A STAND-IN FOR `ScratchBuffers`' OWN `collapsed` FIELD, keyed the same way `ScratchBuffers.setCollapsed`
+ * would write it — this file reconstructs custody's inputs rather than driving a real `ScratchBuffers`
+ * (`lambdaSession`'s own doc states the idiom), and this is that reconstruction for the one field
+ * `receiveEditor` now reads. Absent from a session entirely reads `false`, matching
+ * `ScratchBuffers.collapsedOf`'s own default for an id it has never seen.
+ */
+let collapsedFlags: Map<SessionId, boolean>
 
 /**
  * A FRESH COLLECTION, REGISTRY AND CUSTODY PER TEST, and a body cleared with them. `createEditorCustody`
@@ -77,7 +85,8 @@ beforeEach(() => {
   document.body.replaceChildren()
   panes = new PaneCollection()
   sessions = new SessionRegistry()
-  custody = createEditorCustody({ panes, sessions })
+  collapsedFlags = new Map()
+  custody = createEditorCustody({ panes, sessions, collapsedOf: (id) => collapsedFlags.get(id) ?? false })
 })
 
 /**
@@ -94,6 +103,7 @@ function addPane(
   session: SessionId,
   showEditor?: () => void,
   editScratch?: (src: string) => void,
+  collapse?: (collapsed: boolean) => void,
 ): { pane: LambdaPane; slot: PaneSlot<'lambda'>; host: HTMLElement } {
   const host = document.createElement('div')
   document.body.append(host)
@@ -112,6 +122,7 @@ function addPane(
     // that — so a handler set any later way would not reproduce the field the moved-editor defect is
     // about.
     ...(editScratch === undefined ? {} : { editScratch }),
+    ...(collapse === undefined ? {} : { collapse }),
   })
   panes.add({ id: leaf, kind: 'lambda', slot, pane, host })
   return { pane, slot, host }
@@ -468,5 +479,54 @@ describe('receiveEditor: where a moved editor sends its edits', () => {
     // WITHOUT THE REASSIGNMENT THIS READS `['builder:\\y. y']` — the pane that no longer shows the
     // editor, and in the app the pane whose binding has since moved somewhere else entirely.
     expect(heard).toEqual(['claimer:\\y. y'])
+  })
+})
+
+/**
+ * **THE COLLAPSE FLAG MUST FOLLOW THE EDITOR ACROSS A CUSTODY MOVE — Important finding, review of
+ * 5d-ii-d T9.** `pane-chrome.ts`'s `collapseButton` doc states the design outright: the flag "rides with
+ * the buffer and follows it as custody moves the editor between panes". Only `LambdaPane.setEditor`'s
+ * mount was ever seeded with it (`replies.ts`'s `scratch-compiled` arm passes `scratchpad.collapsedOf(session)`);
+ * the custody-move path — `receiveEditor`, called from `reconcileEditors`' own sweep — mounted expanded
+ * unconditionally.
+ *
+ * **THE REACHABLE SEQUENCE, DRIVEN AT THE SEAM `reconcileEditors` OWNS RATHER THAN THROUGH `main()`:**
+ * collapse the editor on one pane (the user's own click on `.collapse`, which is what
+ * `transport.ts`'s `collapse` handler reports to `ScratchBuffers.setCollapsed` in the app — `collapsedFlags`
+ * stands in for that record, per its own doc above), then claim it onto a second pane bound to the same
+ * buffer (`custody.claim` + `custody.reconcile()`, exactly `pane-host.ts`'s `showEditor` wrapper followed
+ * by its own `applyLayout`'s `custody.reconcile()`). Closing the holding pane and re-claiming out of
+ * `heldEditors` is the other route through the same missing seed; both call sites take the same
+ * `collapsedOf` reader (`createEditorCustody`'s deps), so one test on the sweep path stands for both.
+ */
+describe('reconcileEditors: the collapse flag follows a custody move', () => {
+  it('a pane claiming another pane’s collapsed editor receives it collapsed', () => {
+    sessions.add(lambdaSession(S))
+    const holder = addPane('pane-1', S, undefined, undefined, (c) => collapsedFlags.set(S, c))
+    const claimer = addPane('pane-2', S, () => undefined)
+
+    holder.pane.setEditor('\\x. x')
+    // THE USER'S OWN GESTURE — clicking `.collapse` on the holder toggles the host's class locally AND
+    // reports the buffer-level flag through `on.collapse`, exactly as `LambdaPane`'s constructor wires it
+    // (`collapseButton`'s callback in `lambda-pane.ts`).
+    const holderCollapse = holder.host.querySelector<HTMLButtonElement>('button.collapse')
+    holderCollapse?.click()
+    expect(collapsedFlags.get(S)).toBe(true)
+    expect(holder.host.querySelector('.term-editor')?.classList.contains('is-collapsed')).toBe(true)
+
+    // THE CLAIM — `pane-host.ts`'s `showEditor` wrapper records the claim; `applyLayout`'s own
+    // `custody.reconcile()` is what actually performs the move via the sweep in `reconcileEditors`.
+    custody.claim(S, 'pane-2')
+    custody.reconcile()
+
+    const mounted = claimer.host.querySelector('.term-editor')
+    expect(mounted).not.toBeNull()
+    // THE FIX: without it, this reads `false` — the class `receiveEditor` used to write unconditionally.
+    expect(mounted?.classList.contains('is-collapsed')).toBe(true)
+    // CHECK BOTH DIRECTIONS — `collapseButton`'s own doc names the exact fault a mismatch here would be:
+    // the label naming a state the host contradicts. `update`'s `initial` argument is what keeps the
+    // button's closure flag and the host's class agreeing.
+    const claimerCollapse = claimer.host.querySelector<HTMLButtonElement>('button.collapse')
+    expect(claimerCollapse?.getAttribute('aria-label')).toBe('show the term editor')
   })
 })

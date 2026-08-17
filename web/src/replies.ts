@@ -123,11 +123,25 @@ export function createReplies(deps: {
    * than being assumed by the wiring.
    */
   editorHome: (session: SessionId) => LambdaPane | undefined
+  /**
+   * A buffer's text of record has just changed — the stored payload is stale until this returns.
+   *
+   * **THE `scratch-compiled` ARM IS WHERE A FORKED BUFFER'S TEXT FIRST EXISTS AT ALL**, so without this
+   * dependency a term the user forked would live in `ScratchBuffers` and never reach `localStorage`.
+   * `ScratchBuffers.setText`'s own doc names its two writers: `recompile`, which the user reaches by
+   * typing, and this arm, which the worker reaches by answering. Both must persist, and this is the one
+   * of the two that `main.ts` cannot see from a call site it already owns.
+   *
+   * A CALLBACK RATHER THAN THIS FILE WRITING STORAGE. `main.ts` holds the guarded writer and the
+   * `PaneCollection` the `bindings` are read off; a `localStorage` call here would be a second place
+   * the key, the envelope and the quota-failure policy are decided.
+   */
+  onBuffersPersist: () => void
 }): {
   onReply(session: SessionId, reply: RunReply): void
   onScratchReply(session: SessionId, reply: RunReply): void
 } {
-  const { sessions, scratchpad, results, view, panes, links: linkWiring, draw, editorHome } = deps
+  const { sessions, scratchpad, results, view, panes, links: linkWiring, draw, editorHome, onBuffersPersist } = deps
 
   /**
    * Tell every TM pane on `session` what machine it is showing, and leave that on the session's entry.
@@ -286,6 +300,16 @@ export function createReplies(deps: {
         // ONE STATUS, AND THE `null` IS NOT A FABRICATION. `resetLegs` drops a status for a leg the
         // session does not have rather than writing one so the record is square — its own doc, and
         // this is the caller it was written for.
+        //
+        // **`entryOf` IS UNGUARDED HERE AND SO IS `legOf` IN THE ARM BELOW, AND A COOLED BUFFER CANNOT
+        // REACH EITHER — 5d-ii-d whole-branch review, finding 8.** `ScratchBuffers.cool` drops the
+        // registry entry, so both calls would throw for a reply that arrived after one; what makes that
+        // unreachable is that `cool` also calls `SessionPool.unbind`, whose `port.terminate()` empties
+        // the parent side of the message port (the HTML spec's *terminate a worker* algorithm empties
+        // the port message queue of the port a dedicated worker is entangled with), synchronously,
+        // before `cool` returns. `ScratchBuffers.noSessionReply` carries the full argument, including
+        // why its own `warm` check is belt-and-braces rather than the guarantee its doc used to claim —
+        // it is stated once, there, rather than three times across this switch.
         resetLegs(sessions.entryOf(session).legs, reply.lambda, null)
         // THE EDITOR IS SEEDED FROM THE REPLY'S OWN TEXT, NOT FROM THE FRAME THAT ARRIVES NEXT
         // (design §4.1: `text` "travels back so `main.ts` can seed the editor from the same string
@@ -296,7 +320,8 @@ export function createReplies(deps: {
         // `setEditor(null)` here on the strength of an unrelated `no-session` would tear down an
         // editor this reply never touched. `text: string | null` on the wire type is nullable
         // DEFENSIVELY here rather than reachably — `onLambdaScratch` never posts `scratch-compiled`
-        // at all when its own `scratch` came back `null` (`session-worker.ts:533-537`) — the same
+        // at all when its own `scratch` came back `null` (`session-worker.ts`'s `onLambdaScratch`, its
+        // `scratch === null` arm, which posts `no-session` and returns) — the same
         // "nullable defensively, not reachably" shape `protocol.ts`'s `linkIndex` field states for
         // itself, and the guard costs one `if` against a wire contract that should not assume today's
         // producer forever.
@@ -308,10 +333,48 @@ export function createReplies(deps: {
         // behaviour-preserving would ship it silently. Wave 3's editor-moves rule is what makes "which
         // pane" a real question and `editorOwner` is the answer, resolved by the ONE dependency this
         // file now takes instead of picking "the only one there is" for itself.
-        if (reply.text !== null) editorHome(session)?.setEditor(reply.text)
+        //
+        // **THE SECOND ARGUMENT IS THE COLLAPSE SEED — 5d-ii-d T9, design §4.7.** This arm is where a
+        // build's own reply mounts an editor: a fresh `fork` reaches it with a buffer `collapsedOf` has
+        // never seen written (answers `false`, `fork`'s own seed), and a restored buffer's `warm`
+        // reaches it too — `#spawn` posts a build at step 0 for both callers alike, so this is also
+        // where a buffer that came back cold and collapsed gets its editor mounted already collapsed,
+        // rather than expanded for one frame and then corrected.
+        //
+        // **IT IS NO LONGER THE ONE PLACE `LambdaPane.setEditor`'s MOUNT BRANCH RUNS, WHICH IS WHAT THIS
+        // PARAGRAPH USED TO CLAIM — whole-branch review before merge.** `pane-host.ts`'s
+        // `mountScratchEditor` is the second, and the reason it had to exist is the limit of this one: a
+        // reply fires ONCE per build, so a pane that comes to be bound to the buffer afterwards has no
+        // reply left to mount from. A `cool` (which destroys the editor) followed by a `warm` (whose
+        // build lands with no pane claiming a leaf, so `editorHome` answers `undefined` right here) and
+        // then a bind through the selector produced a buffer whose text could never be edited again. The
+        // pairing this line makes is unchanged and that site makes the identical one from
+        // `ScratchBuffers.editorSeed`, which returns the text and the flag together precisely so the two
+        // mount sites cannot drift apart on it.
+        if (reply.text !== null) editorHome(session)?.setEditor(reply.text, scratchpad.collapsedOf(session))
+        // **THE BUFFER'S TEXT OF RECORD (design §4.3), AND IT IS NOT `setEditor`'s ARGUMENT BY
+        // COINCIDENCE.** For a fork, the term the worker derived at the requested step is the first
+        // moment this app knows what the buffer holds — `ScratchBuffers.fork` posts the SOURCE's
+        // step-0 text and a step, and the worker re-derives between them. Recording it here rather
+        // than reading it back off the `LambdaEditor` later is what lets a buffer whose editor was
+        // never mounted — a fork whose build failed, or one custody retired — still be persisted.
+        if (reply.text !== null) scratchpad.setText(session, reply.text)
+        // AND THEN INTO STORAGE — 5d-ii-d design §4.9. The paragraph above ends "still be persisted",
+        // and this is the line that makes that true rather than merely possible. A THIRD SIBLING UNDER
+        // THE SAME GUARD rather than an unconditional call: `text: null` means no scratch was built
+        // (§4.1a), so the line above wrote nothing and there is nothing here for a write to carry. The
+        // fork that created this buffer was persisted by its own path — `transport.ts`'s
+        // `onBuffersChanged` reaches `main.ts`'s `refreshBuffers`, which persists — so the record
+        // already exists in storage with the seed text; what this arm adds is the term the worker
+        // derived.
+        if (reply.text !== null) onBuffersPersist()
         draw()
         return
       case 'lambda-frames': {
+        // UNGUARDED FOR THE REASON THE `scratch-compiled` ARM ABOVE STATES: `legOf` throws for a session
+        // the registry no longer holds, and a cooled buffer's worker cannot deliver a reply at all
+        // because `cool`'s `terminate()` empties the parent side of the port. See
+        // `ScratchBuffers.noSessionReply` for the argument in full.
         const leg = sessions.legOf({ session, leg: 'lambda' })
         for (const f of reply.frames) leg.hist.push(f, lambdaFrameBytes(f))
         leg.done = reply.done
@@ -361,7 +424,13 @@ export function createReplies(deps: {
           // could create buffers and end none — for three tasks, until `main.ts` built that list.
           // Retiring the row from it rebinds this pane home and the ✎ control comes back with the
           // binding, which is §4.1a's remedy reached from the header rather than from a stuck pane.
-          linkWiring.setForkFailed(failed.map((d) => d.message).join(' · '))
+          // `fork failed — ` IS COMPOSED HERE, NOT SUPPLIED BY `link-status.ts` — 5d-ii-d review round
+          // 2, Finding 3. This IS a fork failing (the build the fork posted never landed), so this call
+          // site is one of the two places in `src/` that earns the words; `scratch.ts`'s
+          // `BufferCapReached`/`#refuseAtCap` doc has the argument for the other, and `link-wiring.ts`'s
+          // `forkFailed` field doc has the argument for why the renderer stopped adding this on every
+          // caller's behalf.
+          linkWiring.setForkFailed(`fork failed — ${failed.map((d) => d.message).join(' · ')}`)
           // `draw()` REPAINTS THE STATUS LINE, WHICH IS ALL THAT CHANGED. **IT USED TO BE PRECEDED BY
           // `reconcileEditors()`**, because this was the app's one remaining retire site and a retire
           // must leave no `LambdaEditor` behind — mounted, or waiting in `editor-custody.ts`'s

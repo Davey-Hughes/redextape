@@ -1,7 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { STORAGE_KEY } from '../../src/appearance'
-import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { OVERSCAN, ROW_HEIGHT } from '../../src/tm-pane'
 
 const SHELL = `
@@ -94,16 +93,10 @@ describe('the app, end to end', () => {
   // ONE MOUNT FOR THE FILE. ES module imports are cached, so `main()` runs once per page and Vitest
   // gives each test FILE its own page — mounting per test would silently reuse the first app.
   beforeAll(async () => {
-    // Cleared before `main.ts` ever reads it, so the appearance toggle's tests below start from a
-    // known `system` state regardless of what an earlier run in this browser context left behind.
-    localStorage.removeItem(STORAGE_KEY)
-    // THE LAYOUT KEY IS SHARED ACROSS THE WHOLE BROWSER TIER — every test file gets its own page but
-    // the same origin, so a file that persists a tree leaves it for whichever file mounts next.
-    // `main()` reads this key ONCE, while resolving `let tree`, so it has to be cleared before the
-    // import below and not in a `beforeEach`. `scratch-buffers.test.ts` is where the argument lives:
-    // it is the file that first stored a tree with one of `defaultLayout()`'s own leaves missing, and
-    // this file's `[data-leaf="lambda-0"]` lookups all answered `null` under it.
-    localStorage.removeItem(LAYOUT_STORAGE_KEY)
+    // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
+    // before this file's own module body runs — every key starts empty for this page regardless of what
+    // an earlier run left behind, so none of the three keys this file used to clear (appearance, layout,
+    // buffers) needs clearing here any more; see that file's doc for why.
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
   })
@@ -391,8 +384,8 @@ describe('the app, end to end', () => {
       expect(button).not.toBeNull()
       if (!button) return
 
-      // `beforeAll` cleared `localStorage`'s appearance key before importing `main.ts`, so the
-      // button mounted reading `system` — no `data-theme` attribute, since `system` is its absence,
+      // This file's `Storage` starts empty (`tests/browser/setup.ts` installs a fresh one per file), so
+      // the button mounted reading `system` — no `data-theme` attribute, since `system` is its absence,
       // not the literal string `"system"`.
       expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
       expect(button.getAttribute('aria-label')).toBe('appearance: system')

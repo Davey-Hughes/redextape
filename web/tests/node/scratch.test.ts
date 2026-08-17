@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { History } from '../../src/history'
 import type { RunReply, RunRequest } from '../../src/protocol'
-import { BufferCapReached, MAX_BUFFERS, ScratchBuffers } from '../../src/scratch'
+import { BufferCapReached, MAX_WARM_BUFFERS, ScratchBuffers } from '../../src/scratch'
 import type { ClientPort, PoolPort, SessionId } from '../../src/session-client'
 import { SessionClient, SessionPool } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
@@ -21,7 +21,7 @@ import type { LambdaState } from '../../src/types'
  *
  * FAKE PORTS, REAL EVERYTHING ELSE. The registry, the pool, the clients, the slots and the buffers are
  * the app's own objects; only the thread is a recording fake, which is what `ClientPort` is structural
- * for (`session-client.ts:9-12`). `tests/browser/scratch-fork.test.ts` drives the same class over real
+ * for (`session-client.ts`'s `ClientPort`). `tests/browser/scratch-fork.test.ts` drives the same class over real
  * `session-worker.ts` threads for the two claims a fake port cannot make: that the source session goes
  * on stepping across a fork, and that a retired buffer's worker is GONE.
  */
@@ -67,6 +67,7 @@ function harness(): {
   buffers: ScratchBuffers
   ports: FakePort[]
   replies: { session: SessionId; reply: RunReply }[]
+  lastScratchPost: () => { src: string; step: number } | undefined
 } {
   const ports: FakePort[] = []
   const replies: { session: SessionId; reply: RunReply }[] = []
@@ -82,7 +83,15 @@ function harness(): {
     historyBytes: 1_000_000,
     onReply: (session, reply) => replies.push({ session, reply }),
   })
-  return { reg, pool, buffers, ports, replies }
+  // THE MOST RECENT PORT'S MOST RECENT `lambda-scratch` REQUEST, trimmed to the two fields a test
+  // cares about — `cool`/`warm`'s round trip opens a NEW port (`SessionPool.bind` asks the factory
+  // again), so "most recent port" is what "the build `warm` just posted" means once a buffer can be
+  // spawned more than once.
+  const lastScratchPost = (): { src: string; step: number } | undefined => {
+    const req = ports.at(-1)?.sent.at(-1)
+    return req?.kind === 'lambda-scratch' ? { src: req.src, step: req.step } : undefined
+  }
+  return { reg, pool, buffers, ports, replies, lastScratchPost }
 }
 
 const lambdaFrame = (text: string, step = 0): LambdaState => ({
@@ -258,8 +267,8 @@ describe('ScratchBuffers.fork', () => {
     const second = buffers.fork(new PaneSlot('lambda', SOURCE), 'y', 0)
 
     expect(buffers.list()).toEqual([
-      { id: first, label: 'scratch 1' },
-      { id: second, label: 'scratch 2' },
+      { id: first, label: 'scratch 1', warm: true },
+      { id: second, label: 'scratch 2', warm: true },
     ])
   })
 
@@ -375,19 +384,19 @@ describe('ScratchBuffers.fork', () => {
     const { reg, pool, buffers, ports } = harness()
     reg.add(sourceEntry())
     const oldest = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0)
-    for (let i = 1; i < MAX_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0)
+    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0)
     const refused = new PaneSlot('lambda', SOURCE)
 
     expect(() => buffers.fork(refused, 'one too many', 0)).toThrow(BufferCapReached)
     expect(() => buffers.fork(refused, 'one too many', 0)).toThrow(/retire/)
-    expect(() => buffers.fork(refused, 'one too many', 0)).toThrow(new RegExp(`${MAX_BUFFERS}`))
+    expect(() => buffers.fork(refused, 'one too many', 0)).toThrow(new RegExp(`${MAX_WARM_BUFFERS}`))
     expect(() => buffers.fork(refused, 'one too many', 0)).not.toThrow(/scratch 1/)
 
-    expect(buffers.list()).toHaveLength(MAX_BUFFERS)
+    expect(buffers.list()).toHaveLength(MAX_WARM_BUFFERS)
     expect(buffers.list()[0]?.id).toBe(oldest)
-    expect(pool.size).toBe(MAX_BUFFERS)
-    expect(ports.length).toBe(MAX_BUFFERS)
-    expect(reg.size).toBe(MAX_BUFFERS + 1)
+    expect(pool.size).toBe(MAX_WARM_BUFFERS)
+    expect(ports.length).toBe(MAX_WARM_BUFFERS)
+    expect(reg.size).toBe(MAX_WARM_BUFFERS + 1)
     expect(refused.binding).toEqual({ session: SOURCE, leg: 'lambda' })
   })
 
@@ -398,20 +407,20 @@ describe('ScratchBuffers.fork', () => {
    * diagnostic's advice — retire one — a lie.
    *
    * THE NAME IS STILL NOT REISSUED. `#minted`'s own doc is why the fork that fits in the reclaimed room
-   * is `scratch-9` rather than `scratch-1`, and asserting it here is what keeps "the cap reads the map"
+   * is `scratch-${MAX_WARM_BUFFERS + 1}` rather than `scratch-1`, and asserting it here is what keeps "the cap reads the map"
    * from being implemented by winding the counter back.
    */
   it('takes a fork again after a retire, because the cap counts live buffers rather than minted ones', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
     const oldest = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0)
-    for (let i = 1; i < MAX_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0)
+    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0)
 
     expect(buffers.retire(oldest, SOURCE, [])).toBe(true)
     const again = buffers.fork(new PaneSlot('lambda', SOURCE), 'room now', 0)
 
-    expect(again).toBe(`scratch-${MAX_BUFFERS + 1}`)
-    expect(buffers.list()).toHaveLength(MAX_BUFFERS)
+    expect(again).toBe(`scratch-${MAX_WARM_BUFFERS + 1}`)
+    expect(buffers.list()).toHaveLength(MAX_WARM_BUFFERS)
     expect(buffers.list().map((b) => b.id)).toContain(again)
     expect(buffers.list().map((b) => b.id)).not.toContain(oldest)
   })
@@ -626,7 +635,7 @@ describe('ScratchBuffers.retire', () => {
     expect(ports[1]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'second', step: 0 }])
     expect(ports[1]?.terminated).toBe(0)
     expect(slot.binding.session).toBe(second)
-    expect(buffers.list()).toEqual([{ id: second, label: 'scratch 2' }])
+    expect(buffers.list()).toEqual([{ id: second, label: 'scratch 2', warm: true }])
   })
 })
 
@@ -729,6 +738,22 @@ describe('ScratchBuffers.noSessionReply', () => {
     expect(buffers.noSessionReply(id, [])).toBe(null)
     expect(slot.binding.session).toBe(SOURCE)
   })
+
+  // A REPLY THAT ARRIVES AFTER ITS BUFFER WAS COOLED RATHER THAN RETIRED — the record survives in
+  // `#buffers` (unlike the retired case above), but `cool` has already removed the registry entry
+  // `entryOf` would need to answer the old, unkeyed way. The `warm` guard added ahead of `entryOf` is
+  // what turns that into `null` instead of a throw; if the guard were ever dropped or inverted,
+  // `this.#reg.entryOf(id)` would throw here and this test would fail on the throw rather than pass.
+  it('answers null for a buffer that has been cooled', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const slot = new PaneSlot('lambda', SOURCE)
+    const id = buffers.fork(slot, 'λx. x', 0)
+
+    expect(buffers.cool(id, SOURCE, [slot])).toBe(true)
+
+    expect(buffers.noSessionReply(id, [])).toBe(null)
+  })
 })
 
 describe('ScratchBuffers.recompile', () => {
@@ -785,5 +810,326 @@ describe('ScratchBuffers.recompile', () => {
     expect(buffers.recompile('scratch-9', 'λz. z')).toBe(false)
     expect(ports.length).toBe(0)
     expect(pool.size).toBe(0)
+  })
+})
+
+/**
+ * **`setCollapsed`/`collapsedOf` — design §4.7, WITH NO DIRECT TEST UPSTREAM OF THIS ONE (review
+ * finding 6).** Both are exercised end to end through `main.ts`'s wiring (`transport.ts`'s `collapse`
+ * handler writes, `replies.ts`'s `scratch-compiled` arm reads) and through the browser tier's
+ * `buffer-restore.test.ts`, but neither method has ever been called directly against a real
+ * `ScratchBuffers`. `setCollapsed`'s `state !== undefined` guard and `collapsedOf`'s `?? false` fallback
+ * are reachable only with an id that never named a buffer at all — `setText`'s own doc states the reason
+ * neither throws the way `warm` does: the one caller each has always resolves an id off a live pane's
+ * own binding, which can never name a buffer this map does not hold, so the guard exists for
+ * correctness under a hypothetical caller rather than for a path this app's own wiring reaches. Both
+ * arms are the whole of this task's branch-coverage margin (~6 branches above the floor), so leaving
+ * them unexercised was the entire cushion.
+ */
+describe('ScratchBuffers.setCollapsed / collapsedOf', () => {
+  it('collapsedOf answers false for a freshly forked buffer', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+
+    expect(buffers.collapsedOf(id)).toBe(false)
+  })
+
+  it('setCollapsed records the flag and collapsedOf reads it back', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+
+    buffers.setCollapsed(id, true)
+    expect(buffers.collapsedOf(id)).toBe(true)
+
+    // AND BACK, because the flag is a toggle, not a latch — the one gesture that clears it
+    // (`transport.ts`'s `collapse` handler on an expand click) has to be representable too.
+    buffers.setCollapsed(id, false)
+    expect(buffers.collapsedOf(id)).toBe(false)
+  })
+
+  // THE DEFENSIVE ARM ON THE WRITER — an id that never named a buffer records nothing and throws
+  // nothing, unlike `warm`'s `not a buffer` throw, because `setCollapsed`'s one caller resolves the id
+  // off a live pane's own binding (`setText`'s own doc carries the argument for why that reading can
+  // never name a buffer this map does not hold).
+  it('setCollapsed on an id that is not a buffer is a silent no-op', () => {
+    const { buffers } = harness()
+
+    expect(() => buffers.setCollapsed('scratch-9', true)).not.toThrow()
+    expect(buffers.collapsedOf('scratch-9')).toBe(false)
+  })
+
+  // THE DEFENSIVE ARM ON THE READER — `collapsedOf`'s own doc states why this is `false` rather than
+  // `undefined`: `LambdaPane.setEditor`'s second parameter defaults to `false`, and an `undefined` here
+  // would agree with that default by coincidence rather than by the type saying so.
+  it('collapsedOf answers false, not undefined, for an id that is not a buffer', () => {
+    const { buffers } = harness()
+
+    expect(buffers.collapsedOf('scratch-9')).toBe(false)
+  })
+})
+
+describe('cold and warm buffers', () => {
+  it('cool terminates the worker and keeps the record', () => {
+    const { reg, pool, buffers, ports } = harness()
+    reg.add(sourceEntry())
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+    expect(pool.has(id)).toBe(true)
+
+    expect(buffers.cool(id, SOURCE, [])).toBe(true)
+
+    // THE RECORD SURVIVES AND THE THREAD DOES NOT — the whole content of a cool. `terminated` is the
+    // assertion that actually says the worker is gone; `pool.has` alone would pass just as well if
+    // `cool` forgot `pool.unbind` but the fake pool happened to answer `false` for other reasons, the
+    // same gap `retire`'s own tests close with the same field.
+    expect(ports[0]?.terminated).toBe(1)
+    expect(buffers.list().map((b) => b.id)).toEqual([id])
+    expect(buffers.list()[0]?.warm).toBe(false)
+    expect(pool.has(id)).toBe(false)
+    expect(reg.has(id)).toBe(false)
+  })
+
+  // FINDING 0 — cooling now rebinds exactly as retiring does, which is the whole content of the
+  // design change: a cold buffer must have no pane still naming it.
+  it('cool rebinds a bound pane to home', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const s = new PaneSlot('lambda', SOURCE)
+    const id = buffers.fork(s, '(\\x. x)', 0)
+
+    expect(buffers.cool(id, SOURCE, [s])).toBe(true)
+
+    expect(s.binding.session).toBe(SOURCE)
+  })
+
+  it('cool answers false for a buffer that is already cold', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+    buffers.cool(id, SOURCE, [])
+    expect(buffers.cool(id, SOURCE, [])).toBe(false)
+  })
+
+  // FINDING 3 (5d-ii-d review round 2) — an id that was never a buffer at all returns `false` BEFORE the
+  // rebind loop runs, which is a different path from the already-cold case above: that one still walks
+  // `slots` and finds nothing to rebind (`cool`'s own doc calls that "a pass that finds nothing to do"),
+  // while this one never walks `slots` at all. Binding a slot to the unknown id directly is what tells
+  // the two apart — if the early return ever moved to after the loop, this test would start failing
+  // where the already-cold test above would not.
+  it('cool answers false for an id that was never a buffer, and never reaches the rebind loop', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const stray = new PaneSlot('lambda', 'scratch-9')
+
+    expect(buffers.cool('scratch-9', SOURCE, [stray])).toBe(false)
+
+    expect(stray.binding.session).toBe('scratch-9')
+  })
+
+  it('warm gives a cold buffer a worker again and posts its text', () => {
+    const { reg, pool, buffers } = harness()
+    reg.add(sourceEntry())
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+    buffers.cool(id, SOURCE, [])
+
+    buffers.warm(id)
+
+    expect(pool.has(id)).toBe(true)
+    expect(reg.has(id)).toBe(true)
+    expect(buffers.list()[0]?.warm).toBe(true)
+  })
+
+  // AT STEP 0, NOT AT THE STEP THE FORK USED. The text IS the term after a build, which is what
+  // `recompile` already means; there is nothing to replay to.
+  it('warm posts the buffer text at step 0', () => {
+    const { reg, buffers, ports, lastScratchPost } = harness()
+    reg.add(sourceEntry())
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), 'seed-text', 3)
+    buffers.setText(id, 'the-term')
+    buffers.cool(id, SOURCE, [])
+    ports.length = 0
+
+    buffers.warm(id)
+
+    expect(lastScratchPost()).toEqual({ src: 'the-term', step: 0 })
+  })
+
+  it('warm throws for an id that is not a buffer', () => {
+    const { buffers } = harness()
+    expect(() => buffers.warm('scratch-9')).toThrow(/not a buffer/)
+  })
+
+  // TASK 3 — `recompile` IS THE FIRST OF `setText`'S TWO REAL CALLERS (design §4.3): the text of
+  // record is the user's own typed text, written at the point a rebuild is posted. Read back the same
+  // way `warm posts the buffer text at step 0` above reads back an explicit `setText` call — cool,
+  // clear the recorded posts, warm, and check what got posted — because there is no accessor onto a
+  // buffer's text directly.
+  it('recompile records the text it posts', () => {
+    const { reg, buffers, ports, lastScratchPost } = harness()
+    reg.add(sourceEntry())
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), 'seed', 0)
+
+    buffers.recompile(id, 'typed-term')
+    buffers.cool(id, SOURCE, [])
+    ports.length = 0
+
+    buffers.warm(id)
+
+    expect(lastScratchPost()).toEqual({ src: 'typed-term', step: 0 })
+  })
+
+  // FINDING 3.1 — the cap's new meaning (threads, not records) is easiest to get wrong on this path:
+  // `>=` vs `>`, or checking the cap before the already-warm early return would both let this through.
+  // `cooled` is COLD here (so the already-warm return does not short-circuit the cap check) while
+  // `warmCount()` is still at `MAX_WARM_BUFFERS` (because a fresh fork replaced the room `cooled` gave up),
+  // which is the one state that actually drives the check.
+  it('warm throws BufferCapReached when the cap is already spent', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const cooled = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0)
+    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0)
+    buffers.cool(cooled, SOURCE, [])
+    buffers.fork(new PaneSlot('lambda', SOURCE), 'refill', 0)
+    expect(buffers.warmCount()).toBe(MAX_WARM_BUFFERS)
+
+    expect(() => buffers.warm(cooled)).toThrow(BufferCapReached)
+    expect(buffers.warmCount()).toBe(MAX_WARM_BUFFERS)
+    expect(buffers.list().find((b) => b.id === cooled)?.warm).toBe(false)
+  })
+
+  // NOT `reg.has(id)` — `cool` already removes that entry two lines up, so that assertion would pass
+  // before `retire` even runs and could not fail for any implementation (5d-ii-d review round 2,
+  // Minor 1). `reg.has(SOURCE)` names a real defect instead: a `retire` that touched the registry beyond
+  // the one entry `cool` already forgot — e.g. by sweeping instead of keying — would strand the source
+  // session too. `expect(retire(...)).toBe(true)` above already covers "does not throw through `entryOf`".
+  it('retire ends a cold buffer without touching the registry', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+    buffers.cool(id, SOURCE, [])
+
+    expect(buffers.retire(id, SOURCE, [])).toBe(true)
+    expect(buffers.list()).toEqual([])
+    expect(reg.has(SOURCE)).toBe(true)
+  })
+
+  it('retire rebinds a cold buffer’s panes home, same as a warm one', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const s = new PaneSlot('lambda', SOURCE)
+    const id = buffers.fork(s, '(\\x. x)', 0)
+    // COOLED WITHOUT `s`, so the pane is left pointing at the buffer the way a caller that forgot to
+    // pass it would leave it — this is what makes the assertion below about `retire`'s own rebind pass
+    // rather than about the one `cool` already ran (see `cool rebinds a bound pane to home` above for
+    // that one).
+    buffers.cool(id, SOURCE, [])
+
+    buffers.retire(id, SOURCE, [s])
+
+    expect(s.binding.session).toBe(SOURCE)
+  })
+
+  it('warmCount counts threads and not records', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const a = buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0)
+    buffers.fork(new PaneSlot('lambda', SOURCE), 'b', 0)
+    expect(buffers.warmCount()).toBe(2)
+
+    buffers.cool(a, SOURCE, [])
+
+    expect(buffers.warmCount()).toBe(1)
+    expect(buffers.list()).toHaveLength(2)
+  })
+
+  // FINDING 3.2 — THE SENTENCE THE WHOLE TASK EXISTS FOR: a cooled buffer's empty seat is exactly what
+  // a later fork may spend, without evicting the cooled buffer's own record. Nothing before this test
+  // drove a fork past the cap that a cool, rather than a retire, had made room for.
+  it('forking after cooling one of MAX_WARM_BUFFERS spends the room the cooled buffer gave up', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const first = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0)
+    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0)
+    expect(buffers.warmCount()).toBe(MAX_WARM_BUFFERS)
+
+    expect(buffers.cool(first, SOURCE, [])).toBe(true)
+    expect(buffers.warmCount()).toBe(MAX_WARM_BUFFERS - 1)
+
+    const again = buffers.fork(new PaneSlot('lambda', SOURCE), 'room now', 0)
+
+    expect(buffers.warmCount()).toBe(MAX_WARM_BUFFERS)
+    expect(buffers.list()).toHaveLength(MAX_WARM_BUFFERS + 1)
+    expect(buffers.list().map((b) => b.id)).toContain(again)
+    // THE COOLED RECORD IS STILL THERE, COLD — a fork spending its cap room must not be an eviction
+    // wearing another name (decision 2's rule, `fork`'s own doc).
+    expect(buffers.list().find((b) => b.id === first)?.warm).toBe(false)
+  })
+})
+
+/**
+ * **WHAT SURVIVES A RELOAD, AT THE LAYER THAT DECIDES IT** — design §4.9, and the pair `main.ts` puts
+ * either side of `localStorage`.
+ *
+ * EVERY TEST HERE BUILDS A SECOND `harness()` AND RESTORES INTO IT, rather than restoring into the one
+ * that produced the snapshot. A restore is a statement about a page that has just started, and a
+ * collection that already holds the buffers cannot tell "restored it" from "still had it" — the second
+ * harness has its own registry and its own pool, so `pool.size` and `list()` below are answers about
+ * the restore and nothing else.
+ */
+describe('snapshot and restore', () => {
+  it('round-trips buffers through a snapshot', () => {
+    const h = harness()
+    const a = h.buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0)
+    h.buffers.setText(a, 'term-a')
+
+    const snap = h.buffers.snapshot({ 'lambda-0': a })
+    const fresh = harness()
+    fresh.buffers.restore(snap)
+
+    expect(fresh.buffers.list()).toEqual([{ id: a, label: 'scratch 1', warm: false }])
+    // THE BINDINGS ARE CARRIED, NOT COMPUTED — `snapshot`'s one parameter exists because this class
+    // cannot see a pane, so the only claim it can make about `bindings` is that what went in comes out.
+    expect(snap.bindings).toEqual({ 'lambda-0': a })
+  })
+
+  // EVERY RESTORED BUFFER IS COLD. Warming is the app's decision, taken per pane in main.ts.
+  it('restores every buffer cold, spawning nothing', () => {
+    const h = harness()
+    h.buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0)
+    const snap = h.buffers.snapshot({})
+
+    const fresh = harness()
+    fresh.buffers.restore(snap)
+
+    expect(fresh.pool.size).toBe(0)
+    expect(fresh.buffers.warmCount()).toBe(0)
+  })
+
+  // THE COUNTER, NOT THE COUNT — a restored page must not reissue a retired buffer's name.
+  it('a fork after a restore mints past every restored id', () => {
+    const h = harness()
+    h.buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0)
+    h.buffers.fork(new PaneSlot('lambda', SOURCE), 'b', 0)
+    const snap = h.buffers.snapshot({})
+
+    const fresh = harness()
+    fresh.buffers.restore(snap)
+    const next = fresh.buffers.fork(new PaneSlot('lambda', SOURCE), 'c', 0)
+
+    expect(next).toBe('scratch-3')
+  })
+
+  it('a restored buffer warms from its persisted text', () => {
+    const h = harness()
+    const a = h.buffers.fork(new PaneSlot('lambda', SOURCE), 'seed', 0)
+    h.buffers.setText(a, 'persisted-term')
+    const snap = h.buffers.snapshot({})
+
+    const fresh = harness()
+    fresh.buffers.restore(snap)
+    fresh.buffers.warm(a)
+
+    expect(fresh.lastScratchPost()).toEqual({ src: 'persisted-term', step: 0 })
   })
 })

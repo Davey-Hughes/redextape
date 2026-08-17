@@ -1,6 +1,5 @@
 import { EditorView } from '@codemirror/view'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { LAYOUT_STORAGE_KEY } from '../../src/layout'
+import { beforeAll, describe, expect, it } from 'vitest'
 
 /**
  * **WHAT ENDS A BUFFER, DRIVEN THROUGH THE APP** — design §4.3's table, and the row this task changes:
@@ -144,44 +143,25 @@ function typeIntoBufferEditor(text: string): void {
 }
 
 /**
- * **THE LAYOUT KEY IS SHARED ACROSS THE WHOLE BROWSER TIER, AND THIS FILE IS THE FIRST ONE THAT CAN
- * LEAVE IT UNMOUNTABLE FOR ITS NEIGHBOURS.** Vitest gives each test FILE its own page, but every page
- * is the same origin and therefore the same `localStorage` — which is why several sibling files open
- * with `localStorage.removeItem(LAYOUT_STORAGE_KEY)` (`pane-kind-switch.test.ts`, `pane-picker.test.ts`,
- * `layout-app.test.ts`, `active-pane.test.ts`). The `beforeAll` below is this file taking that same
- * precaution for itself.
+ * **THIS FILE USED TO GUARD THE SHARED-ORIGIN RACE ITSELF, WITH A `beforeAll` CLEAR ON ENTRY AND AN
+ * `afterAll` CLEAR ON EXIT — BOTH ARE GONE NOW.** Every browser test file gets its own in-memory
+ * `Storage`, installed in `tests/browser/setup.ts` before this file's own module body runs; that file's
+ * doc carries the argument in full, including why a clear-on-mount mitigation could not close the race by
+ * itself.
  *
- * **THE SECOND HOOK IS THE ONE THAT IS NEW, AND IT IS NOT SYMMETRY.** `applyLayout` persists the tree on
- * every structural change, and the retire test below CLOSES `lambda-0` — so this file is the first in
- * the tier to store a tree with one of `defaultLayout()`'s own leaves MISSING. Every file that mounts
- * afterwards without clearing gets that tree, and `[data-leaf="lambda-0"]` — which most of them select
- * on — is then not in the document at all. Measured, not theorised: it left
- * `link-truncated.test.ts`'s `↺` lookup answering `undefined`, whose `?.click()` is a silent no-op, and
- * that file then waited out its whole timeout for a step readout nothing was ever going to change.
- * (Splits do not have this effect — an extra leaf is extra, and `reset layout` puts it back.)
- *
- * `afterAll` AT FILE LEVEL RATHER THAN A LAST LINE IN THE TEST — it runs after the LAST `describe`
- * below rather than after the first, and it still runs when a test part-way through the sequence
- * throws, so a failure here cannot poison the tier's shared storage as well as reporting itself.
- *
- * **THE `afterAll` IS THE WEAKER HALF OF THE FIX, AND THE CLEAR ON ENTRY IS THE STRONGER ONE — said
- * here because the asymmetry is not obvious.** `vite.config.ts` sets no `fileParallelism` or
- * `maxWorkers`, so browser files run CONCURRENTLY in one origin: cleaning up when this file ends
- * protects a file that mounts after it, and not one that mounts inside the window between the close
- * below and that hook. That window is `await`-free today, which is why the failure this fixed is
- * deterministic rather than intermittent — and it reopens the moment an `await` lands between the close
- * and the end of the file. **The durable fix is therefore every file that mounts `main` clearing the key
- * before it does**, which is what `app`, `link-truncated`, `running-focus`, `scratch-app`, `scratch-edit`,
- * `scratch-fork` and `scratch-rebind-editor` now do alongside the siblings that always did. This hook
- * stays as the courtesy it is: a file should not leave the tier in a state it would not want to find.
+ * TWO MEASURED INCIDENTS ARE WORTH KEEPING ON RECORD, BOTH FOUND THROUGH THIS FILE. First: the retire
+ * test below closes `lambda-0`, so this was the first file in the tier to persist a layout tree with one
+ * of `defaultLayout()`'s own leaves MISSING — it left `link-truncated.test.ts`'s `↺` lookup answering
+ * `undefined` (a silent no-op `?.click()`), which then waited out its whole timeout for a step readout
+ * nothing was ever going to change. Second: `redextape.buffers` survives a reload, so a page that forks —
+ * this file does — leaves the next file's `main()` RESTORING those buffers; it broke
+ * `scratch-cap.test.ts`'s stage-0 assertion (`expected 'buffers 1 ▾' to be 'buffers 0 ▾'`) and, on a
+ * different interleaving, `link-truncated.test.ts` instead. Neither incident needed a hand-edited
+ * fixture — both came from this file's own ordinary use of the app.
  */
-afterAll(() => {
-  localStorage.removeItem(LAYOUT_STORAGE_KEY)
-})
 
 describe('a scratch buffer across a recompile of the source', () => {
   beforeAll(async () => {
-    localStorage.removeItem(LAYOUT_STORAGE_KEY)
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     await until(idle, 'the first compile')

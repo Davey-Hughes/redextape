@@ -139,20 +139,32 @@ export function createLinkWiring(deps: {
   let link: Pin | null = null
 
   /**
-   * The most recent fork attempt's failure, or `null` — CRITICAL finding, plan 5d-iii's ninth task.
-   * `link-status.ts`'s `forkFailed` field is what this feeds; see that field's own doc for why
-   * `#link-status` is the surface and not the pane `onScratchReply`'s `no-session` arm was trying to
-   * reach.
+   * The most recent report `#link-status` owes the user that is not part of the current pin, or `null`
+   * — CRITICAL finding, plan 5d-iii's ninth task. `link-status.ts`'s `forkFailed` field is what this
+   * feeds; see that field's own doc for why `#link-status` is the surface and not the pane
+   * `onScratchReply`'s `no-session` arm was trying to reach.
+   *
+   * **NAMED FOR A FORK ATTEMPT'S FAILURE, WHICH WAS ONCE THE ONLY THING THIS EVER HELD — 5d-ii-d review
+   * round 2, Finding 3.** `main.ts` now also writes here on a buffers-storage quota failure and on a
+   * `warm` refused at the cap during a page restore, neither of which is a fork. The name stayed
+   * (renaming would ripple through every caller of `setForkFailed` for no behavioural gain) and so did
+   * the shape — one string, or nothing — because every one of these is the same kind of fact: the most
+   * recent thing that happened outside the current pin that the user has to be told about. What changed
+   * with the finding is that `link-status.ts` no longer assumes every value here is a fork's own words;
+   * a writer that IS reporting a fork says so in the string it hands to `setForkFailed`, and a writer
+   * that is not (the storage report, the restore refusal) does not.
    *
    * CLEARED WHEN A FORK SUCCEEDS (`events(...)`'s `detach` handler) AND ON THE NEXT SOURCE KEYSTROKE
    * (`schedule`), NOT LEFT TO ACCUMULATE. Neither event means the message stopped being true — it means
    * it stopped being NEWS: a stale failure from three edits ago sitting on the one line design §4.5
    * already uses for live, current-tick narration would be the same silent-wrongness standard this file
    * refuses everywhere else (`draw()`'s own comments), just aimed at a message instead of a highlight.
+   * The storage report and the restore refusal answer this same question on their own terms — see their
+   * call sites in `main.ts`.
    *
    * **THAT SENTENCE SAID "ON THE NEXT FORK ATTEMPT", AND 5d-ii-c's CAP MADE THE DIFFERENCE VISIBLE.**
    * The clear ran AHEAD of `ScratchBuffers.fork` while a fork could only fail later, on a reply — every
-   * attempt that got that far was pending, so clearing and waiting said something true. `MAX_BUFFERS`
+   * attempt that got that far was pending, so clearing and waiting said something true. `MAX_WARM_BUFFERS`
    * (design §4.5) gave a fork a way to be refused on the spot, and a refused attempt must not clear the
    * previous failure first: this is a pure state write with no repaint, so between the clear and the
    * handler's `catch` the model would hold `null` while `#link-status` still showed the old message. The

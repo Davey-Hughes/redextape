@@ -1,6 +1,5 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 
 /**
  * **THE BINDING SELECTOR UNMOUNTS THE EDITOR TOO — regression for the Important finding from the
@@ -102,13 +101,9 @@ describe('rebinding a forked λ pane through the binding selector', () => {
   // ONE MOUNT FOR THE FILE, `scratch-app.test.ts`'s own reason: ES module imports are cached, so
   // `main()` runs once per page and Vitest gives each test FILE its own page.
   beforeAll(async () => {
-    // THE LAYOUT KEY IS SHARED ACROSS THE WHOLE BROWSER TIER — every test file gets its own page but
-    // the same origin, so a file that persists a tree leaves it for whichever file mounts next.
-    // `main()` reads this key ONCE, while resolving `let tree`, so it has to be cleared before the
-    // import below and not in a `beforeEach`. `scratch-buffers.test.ts` is where the argument lives:
-    // it is the file that first stored a tree with one of `defaultLayout()`'s own leaves missing, and
-    // this file's `[data-leaf="lambda-0"]` lookups all answered `null` under it.
-    localStorage.removeItem(LAYOUT_STORAGE_KEY)
+    // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
+    // before this file's own module body runs — see that file's doc for why clearing a shared key was
+    // not enough. Neither key needs clearing here any more.
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     await until(

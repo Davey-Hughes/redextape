@@ -1,4 +1,6 @@
+import type { PersistedBuffers } from './buffers-store'
 import { History } from './history'
+import type { LeafId } from './panes'
 import type { RunReply } from './protocol'
 import type { SessionId, SessionPool } from './session-client'
 import { resetLegs, type SessionRegistry } from './sessions'
@@ -33,67 +35,152 @@ export type Detachable = {
  * would make every reader of that menu a reader of the session model. `SessionEntry.label`'s doc draws
  * the same line from the other side — the label is UI text, the id is a map key.
  */
-export type BufferInfo = { readonly id: SessionId; readonly label: string }
+export type BufferInfo = { readonly id: SessionId; readonly label: string; readonly warm: boolean }
 
 /**
- * How many buffers may be live at once. **EIGHT IS A CHOICE, NOT A MEASUREMENT, and is recorded as
- * such** — design §4.5, which takes that sentence from `layout.ts`'s `MIN_PANE_FRACTION` and asks for
- * the same honesty here.
+ * What this class holds per buffer — `BufferInfo` plus the facts no surface outside renders.
  *
- * **THE ARITHMETIC IS THE WHOLE OF WHAT IS BEHIND THE FIGURE.** `protocol.ts`'s `HISTORY_BYTES` is the
- * ring's cap PER LEG, at 32 MiB. The source session holds two legs and each buffer holds one, so eight
- * buffers is ten legs — 320 MiB of ring budget, against the 64 MiB a page that has never forked can
- * reach. Each buffer is also a thread, and a thread costs a wasm module baseline of 8,454,144 bytes
- * before it holds a term at all (`DROP_HISTORY_ON_UNFOCUS`'s measurement, `protocol.ts`), so the cap
- * admits nine of those as well. **CONSERVATIVE RATHER THAN CORRECT**: no page reaches ten full rings
- * without ten legs recording to exhaustion, and nothing here claims the app is comfortable at eight
- * buffers or unusable at nine.
+ * **`collapsed` HAS A WRITER AND A READER NOW — `setCollapsed`/`collapsedOf` BELOW — WHICH REVERSES
+ * WHAT THIS PARAGRAPH USED TO SAY.** `PersistedBuffer` carries the field (design §4.1), so `snapshot`
+ * reads it and `restore` writes it exactly as before; what changed is that something now writes it
+ * BETWEEN those two moments — `transport.ts`'s `collapse` handler, reached from `pane-chrome.ts`'s
+ * `collapseButton` — and something reads it back to seed a remount — `replies.ts`'s `scratch-compiled`
+ * arm, through `LambdaPane.setEditor`'s second parameter. `fork` still seeds it `false`: a freshly
+ * forked buffer has never been collapsed by anyone.
  *
- * **THE ONE DATUM IN EVIDENCE IS NOT A MEASUREMENT OF THIS, AND IT IS WEAKER THAN ITS SHAPE SUGGESTS.**
- * 5d-i's T9 probe read three workers' wasm memory at 2.4153× one worker's — 28,966,912 bytes against
- * 11,993,088 (`protocol.ts` again, `DROP_HISTORY_ON_UNFOCUS`). **BOTH FIGURES ARE PER-WORKER TOTALS
- * RATHER THAN BASELINES**, which is what a ratio under 3× is actually reporting: the first worker held
- * the probe's whole `Session` and the other two held a `LambdaScratch` of 65,536 bytes and nothing at
- * all, so the sum is one loaded worker plus two nearly empty ones — `11,993,088 + 8,454,144 + 65,536 +
- * 8,454,144`, the measured figure exactly. Against the bare module baseline the same three totals are
- * 3.43×, and three BARE baselines against one would of course be 3×. Nothing there is shared
- * between threads, and a buffer a user made holds a term and a ring where the probe's second and third
- * workers held neither. So the datum makes "a thread is not free" a fact instead of an intuition and
- * says nothing about where eight should be. **Nothing has measured where the trade actually turns for
- * buffers**, and this constant is not that measurement. (This paragraph read "three threads at 2.4153×
- * one thread's wasm baseline", inherited verbatim from design §4.5 — corrected in both places, and the
- * point it was making is sharper for it, not softer.)
- *
- * **A LATER SLICE REPLACES IT WITH A MEASURED CAP.** Design §6.1 files 5d-ii-d for exactly that — the
- * worker-affordability probe 5d-i left open, and "the measured cap that replaces §4.5's provisional
- * eight" — positioned after this slice and before 5d-iv. Until then the figure moves the way
- * `MIN_PANE_FRACTION` moves: if a user runs into it doing something reasonable, the number changes.
- *
- * **WHAT RIDES ON THE FIGURE, SO THAT MOVING IT IS A DECISION AND NOT A DISCOVERY.** The tests that
- * exercise the cap import this constant rather than spelling eight, so they follow it wherever it goes.
- * One thing does not follow: `tests/browser/two-lambda-panes.test.ts` needs the cap to be **at least
- * two**, because several of its tests fork twice inside a single test — its reset reclaims buffers between
- * tests (`retireEveryBuffer`) precisely so that it needs no more than that. Nothing else in `src/`
- * reads this constant except `fork` below.
+ * For what this doc used to claim and why it changed, see the history note under `BufferState`.
  */
-export const MAX_BUFFERS = 8
+type BufferState = {
+  readonly id: SessionId
+  readonly label: string
+  text: string
+  collapsed: boolean
+  warm: boolean
+}
 
 /**
- * The refusal `fork` raises at `MAX_BUFFERS` — design §4.5's "refused with a diagnostic naming the
- * list", as a type its caller can act on.
+ * How many buffers may be WARM at once — hold a worker, not merely a record. Design §4.4/§4.6.
+ *
+ * **RENAMED FROM `MAX_BUFFERS`, AND THE RENAME IS THE POINT — 5d-ii-d T8.** Every reader of the old
+ * name believed it bounded buffers; it has actually bounded THREADS since the cold/warm split gave
+ * `warm` its own refusal at this figure (`warmCount()` below counts warm buffers, not `#buffers.size`)
+ * — a name that kept meaning "buffers" while what it counted changed underneath it is exactly the
+ * hazard a rename exists to close. **A COLD buffer costs no thread and is UNBOUNDED BY THIS CONSTANT**:
+ * `#buffers` can hold as many cooled, retired-in-all-but-name records as a user leaves lying around;
+ * only forking a new buffer, or `warm`-ing a cold one back up, spends a seat here.
+ *
+ * **THE THRESHOLD, PRE-REGISTERED BEFORE ANY NUMBER EXISTED, AND UNCHANGED SINCE** (design §4.6): *a
+ * page at the cap, with every warm buffer holding a real term and its ring driven to exhaustion, must
+ * sit at or below 512 MiB — main-thread resident heap plus summed per-thread wasm linear memory. The
+ * cap is the largest count that satisfies it. The threshold does not move.*
+ *
+ * **MEASURED BY `tests/browser/buffer-affordability.test.ts`** (5d-ii-d T7/T8) — a real-Chromium probe
+ * that spawns 1, 2, 4 and 11 wasm workers, each stepping a genuinely divergent term 20,000 times and
+ * each driving a real λ ring to exhaustion, heap read via forced `gc()` around a task boundary
+ * (`session-memory.test.ts`'s own discipline, cited by name in that file's header).
+ *
+ * **MARGINAL COST PER BUFFER: ~44.53 MB** (44,522,565–44,528,023 bytes across Task 7's three FIX
+ * ROUND 2 runs — the superseding pass, not fix round 1's own now-superseded figures — spread
+ * 5,457.34 bytes on a ~44.5 MB figure, ≈0.012%) — 8,585,216 bytes of wasm, exactly linear in thread
+ * count with zero shared baseline, plus a real λ ring driven to exhaustion (~35.94 MB, ≈1.07112×
+ * `HISTORY_BYTES` — the probe's own printed ratio against charged bytes: 1.07105 — agreeing with
+ * `protocol.ts`'s own measured λ retention ratio to within ~0.1%).
+ *
+ * **TWO READINGS, ONE INTERCEPT COMPONENT APART — THE PROJECT OWNER PICKED THE LITERAL ONE.** The
+ * threshold's own words are "every warm BUFFER"; the source session's two rings are not a buffer's, so
+ * whether they count is a reading of the sentence, not a fact the probe can settle on its own:
+ *
+ *   * **(a) buffers-only-at-exhaustion — GOVERNS, and SHIPS.** The literal reading: the source
+ *     session's fixed thread cost counts (module + arena, 11,993,088 bytes) but its two rings do not,
+ *     because they are not simultaneously exhausted the instant every buffer's is — the source session
+ *     is ordinarily mid-recording or idle, not pinned at its own ring cap at the same moment N buffers
+ *     are all pinned at theirs. Intercept = page/app baseline (17,825,792 bytes, a FLOOR — see below) +
+ *     the main thread's own wasm module (8,454,144 bytes, `main.ts`'s `init()`, invisible to a heap
+ *     reading the same way every worker's module is) + that source fixed cost. **Derived cap: 11.**
+ *   * **(b) everything-at-exhaustion — reference only, NOT what ships.** The stricter reading: the
+ *     source session's own λ and TM rings ALSO driven to exhaustion at the same instant every buffer's
+ *     is, which the threshold's words do not require, since the source session's legs are not
+ *     "buffers". **Derived cap: 8** — the same number as the old provisional eight, and coincidence
+ *     rather than agreement: the old eight was arithmetic over a budget nobody had measured, and this
+ *     eight is what the stricter reading of a now-measured budget happens to also allow.
+ *
+ * **BOTH NUMBERS ARE UPPER BOUNDS, NEVER MEASURED CEILINGS.** `pageBaseline` (17,825,792 bytes) is a
+ * FLOOR — a byte-conversion of `session-memory.test.ts`'s own prose figure for the real app's baseline
+ * (CodeMirror, the DOM), not a reading either probe ever took of the real app, and that file says
+ * outright the true figure "is larger still". A floor on one intercept component can only push the
+ * TRUE intercept UP and the true safe cap DOWN from what is derived here — never the reverse. 11 is the
+ * most this budget can be SHOWN to afford, not a guarantee that it affords exactly that many.
+ *
+ * **VERIFIED AT n = 11 DIRECTLY, NOT ONLY EXTRAPOLATED — 5d-ii-d T8.** The probe's sweep grew a fourth
+ * point at exactly the derived count, `[1, 2, 4, 11]`, precisely because a two-point (n=1, n=4)
+ * marginal projected seven buffers further is an extrapolation and eleven concurrent workers is exactly
+ * the range where a non-linearity (GC pressure, allocator fragmentation, scheduler contention) would
+ * first show. Three runs, real n=11 readings, intercept (a) plus the measured total against the 512 MiB
+ * budget: all three **fit**, at ≈503.6 MiB with ≈8.4 MiB of headroom — the per-run figures are in the
+ * history note under `MAX_WARM_BUFFERS` — transcript.
+ *
+ * All three runs land within 0.007–0.011% of what the n=1/n=4 marginal predicted for n=11 — the
+ * extrapolation and the direct reading agree, so no non-linearity showed up between four buffers and
+ * eleven. **11 IS THEREFORE A MEASUREMENT, NOT ONLY AN EXTRAPOLATION**: it is both the largest count
+ * the pre-registered budget's arithmetic derives AND the count eleven probe workers — each holding a
+ * bare `LambdaScratch`, not an app buffer with a client, a pane or a play timer — were measured to fit
+ * under, with margin to spare, once their summed wasm linear memory and their eleven exhausted rings'
+ * summed retained heap (two readings never simultaneously resident, so the total is arithmetic rather
+ * than one reading — see `buffer-affordability.test.ts`'s "never resident simultaneously" comment in
+ * its main loop) are added to a COMPUTED intercept. **NOT A READING OF A REAL APP PAGE.** The probe page has no CodeMirror, no app
+ * DOM, no source session and no main-thread wasm module; all three of the last are added to the
+ * intercept as constants cited from elsewhere, never observed resident on this page at once. Had any
+ * run exceeded the budget, this doc would record both the derived and the verified number, with the
+ * discrepancy named, and ship the lower one — it did not come to that.
+ *
+ * **THE CAP COUNTS THREADS, NOT BUFFER RECORDS.** `warmCount()` below, not `#buffers.size` — a cold
+ * buffer holds no worker and costs nothing this constant prices, so `#buffers` can grow without bound
+ * as buffers cool; only `fork` (which always warms) and `warm` (which re-warms a cold one) spend a
+ * seat. This is unchanged from the provisional doc's own point, restated because it is the one fact
+ * about this constant a rename cannot fix by itself — a reader still has to know it.
+ *
+ * **THE REFUSAL'S OWN WORDING THEREFORE UNDERSTATES ITS SCOPE, RECORDED HERE RATHER THAN FIXED.**
+ * `#refuseAtCap`'s message reads "all `MAX_WARM_BUFFERS` scratch buffers are live" — true of every WARM
+ * buffer, the only kind this constant prices, but readable as a claim about every buffer on the page.
+ * A page can hold more buffers than that: a cold buffer costs nothing (the paragraph above), so a page
+ * with, say, 15 buffers total and 11 of them warm sits exactly at the cap, and `warm` below (asking for
+ * one of the four cold ones back) refuses with the identical sentence a `fork` would, on a page that is
+ * visibly not "all live". `BufferCapReached` is out of scope for 5d-ii-d — design §4.4 keeps it
+ * "unchanged in kind" — so this is noted rather than reworded.
+ *
+ * **WHAT RIDES ON THE FIGURE.** The tests that exercise the cap import this constant rather than
+ * spelling a number, so they follow it wherever it goes. `tests/browser/two-lambda-panes.test.ts`
+ * needs the cap to be **at least two** — several of its tests fork twice inside a single test, and its
+ * reset reclaims buffers between tests (`retireEveryBuffer`) precisely so it needs no more than that;
+ * 11 satisfies it with room to spare. `tests/browser/scratch-cap.test.ts` exercises the refusal AT the
+ * cap, so moving from 8 to 11 means it now forks 11 times where it forked 8 — slower by a few real
+ * worker spin-ups per run, not by an order of magnitude; see that file's own measured runtime.
+ *
+ * For what this doc used to claim and why it changed, see the history note under `MAX_WARM_BUFFERS`.
+ */
+export const MAX_WARM_BUFFERS = 11
+
+/**
+ * The refusal `fork` and `warm` raise at `MAX_WARM_BUFFERS` — design §4.5's "refused with a diagnostic
+ * naming the list", as a type its caller can act on.
  *
  * **A CLASS RATHER THAN A PLAIN `Error`, BECAUSE THE CALLER HAS TO TELL THIS FROM A BUG.**
- * `transport.ts`'s detach handler catches this one and puts its message on `#link-status`; the other
- * things `fork` can raise are `SessionRegistry.add`'s and `SessionPool.bind`'s guards over their own
- * invariants (a replaced entry strands a running `setInterval`; a replaced client misdelivers frames),
- * and those are wiring bugs rather than answers to a user. A bare `catch` at that call site would
- * render one of them as a status line and swallow it. `instanceof` is what keeps a refusal a refusal
- * and lets everything else go on being loud.
+ * `transport.ts`'s detach handler and `main.ts`'s temperature/restore handlers catch this one and put
+ * its message on `#link-status`; the other things `fork`/`warm` can raise are `SessionRegistry.add`'s
+ * and `SessionPool.bind`'s guards over their own invariants (a replaced entry strands a running
+ * `setInterval`; a replaced client misdelivers frames), and those are wiring bugs rather than answers
+ * to a user. A bare `catch` at either call site would render one of them as a status line and swallow
+ * it. `instanceof` is what keeps a refusal a refusal and lets everything else go on being loud.
  *
  * **THE MESSAGE IS THE PAYLOAD AND THERE IS NO SECOND FIELD.** It is composed here because this is the
- * only place that holds both the cap and the labels, and it is rendered verbatim after
- * `link-status.ts`'s `fork failed — ` prefix. A `live: BufferInfo[]` field would let the caller compose
- * a second wording of the same fact, which is the fan-out `BufferInfo`'s own doc exists to prevent.
+ * only place that holds both the cap and the labels. **IT CARRIES NO FIXED PREFIX OF ITS OWN — 5d-ii-d
+ * REVIEW ROUND 2, FINDING 3, AND A CHANGE FROM HOW THIS USED TO READ.** `#refuseAtCap`'s own doc has
+ * the fix: the prefix now travels with the CALLER, not with this class, so `fork`'s refusal reads as a
+ * fork failing and `warm`'s reads as a plain statement of the cap. A `live: BufferInfo[]` field would
+ * let a caller compose a second wording of the cap-and-labels fact, which is the fan-out `BufferInfo`'s
+ * own doc exists to prevent — a different axis from the prefix, and not what that argument is about.
+ *
+ * For what this doc used to claim and why it changed, see the history note under `BufferCapReached`.
  */
 export class BufferCapReached extends Error {
   constructor(message: string) {
@@ -106,19 +193,18 @@ export class BufferCapReached extends Error {
  * What the buffer collection needs to exist: the two containers its buffers live in, and where their
  * replies go.
  *
- * **NO `id` AND NO `label`, AND THIS PARAGRAPH USED TO ARGUE THE OPPOSITE.** It read: *"THE ID AND THE
- * LABEL ARE PASSED IN, NOT DECLARED HERE, because `SessionEntry.label`'s doc puts the app's session
- * names in `main.ts` 'here and nowhere else' — a module that named its own session would be the second
- * place a name could be wrong"*. That held while there was one buffer with one fixed name, which
- * `main.ts` could write down before the session existed. A fork mints a name per call now (`fork`
- * below), so the name is a function of the counter that mints the id and the two cannot be written in
- * different places without being able to disagree. What that sentence was actually protecting survives
- * unchanged: a session's name is decided where the session is CREATED — `main.ts` for the source
- * session, here for a buffer — and never in `sessions.ts`, which holds no name of the app's at all.
+ * **NO `id` AND NO `label`, AND THIS PARAGRAPH USED TO ARGUE THE OPPOSITE.** A fork mints a name per
+ * call now (`fork` below), so the name is a function of the counter that mints the id and the two
+ * cannot be written in different places without being able to disagree. What it was actually
+ * protecting survives unchanged: a session's name is decided where the session is CREATED — `main.ts`
+ * for the source session, here for a buffer — and never in `sessions.ts`, which holds no name of the
+ * app's at all.
  *
  * `onReply` NAMES ITS SESSION, WHERE IT USED TO BE BOUND TO ONE. One collection binds many workers
  * through one dependency, so the id is curried in per buffer at `pool.bind` and arrives with the
  * reply; a callback that closed over "the" scratch would deliver every buffer's frames under one name.
+ *
+ * For what this doc used to claim and why it changed, see the history note under `ScratchBuffersConfig`.
  */
 export type ScratchBuffersConfig = {
   registry: SessionRegistry
@@ -138,14 +224,6 @@ export type ScratchBuffersConfig = {
  * `tests/browser/scratch-fork.test.ts` asserts by watching the source's step count advance across a
  * fork. Nothing in this class reads or writes the source session's entry, its client or its legs;
  * `fork` touches the registry, the pool and ONE slot.
- *
- * **A FORK MAKES A BUFFER, WHERE 5d-i's DECISION 5 MADE AT MOST ONE.** This class was
- * `LambdaScratchpad` and held one fixed id: a second fork rebound the second pane to the scratch the
- * first one built, so two panes shared one term and the second pane's seed was discarded. 5d-ii-c
- * decision 1 removes that — the `has` branch that implemented it is gone from `fork`, and what
- * replaces it is a map keyed by the ids this class mints. **A buffer also stops dying by accident**
- * (decision 2), but that is a change to the CALLERS, and the tasks are split so that "what is a
- * buffer" and "what ends one" are reviewable apart.
  *
  * **A CLASS IN ITS OWN MODULE RATHER THAN CLOSURES IN `main()`, AND THE REASON IS THE TEST.** The
  * claim under test is now "two forks produce two buffers" where it was "two forks produce one", and
@@ -169,6 +247,8 @@ export type ScratchBuffersConfig = {
  * the other end: `options('tm')` still returns exactly the source session after this slice, which is
  * why the TM half of the pair list cannot be exercised here. `protocol.ts`'s `lambda-scratch` request
  * carries the same line on the wire.
+ *
+ * For what this doc used to claim and why it changed, see the history note under `ScratchBuffers`.
  */
 export class ScratchBuffers {
   #reg: SessionRegistry
@@ -190,8 +270,28 @@ export class ScratchBuffers {
    * already did; this holds the two facts the registry cannot answer as a set — WHICH of its sessions
    * are buffers, and in what order they were made. `detached` is a property of a session and cannot
    * distinguish a λ buffer from a future `TmScratch`; nothing else in an entry records provenance.
+   *
+   * **A RECORD MAY OUTLIVE ITS SESSION NOW, WHICH FALSIFIES A SENTENCE THIS DOC USED TO RELY ON.** A
+   * cold buffer is in this map and in neither container behind `legOf`, by construction (design §4.2),
+   * and `SessionRegistry.entryOf` throws for an id it does not hold. **5d-ii-d T4 CLOSED THAT HAZARD.**
+   * The row builder reads `sessions.legOf(...)` only when `b.warm` is true and reads `null` for a cold
+   * row otherwise, so a cold buffer's row no longer throws when the header list opens — it reads
+   * "asleep" (`buffer-list.ts`'s `BufferRow.warm` has the argument for why that reads differently from
+   * "no term"). The header list's temperature control has its own call to `cool` (`main.ts`'s
+   * `onTemperature` handler), so a buffer goes cold on a gesture with no retire anywhere in it — the row
+   * builder's `warm` branch is what makes that safe, not this map's record-keeping.
+   *
+   * **A SECOND SITE DEPENDS ON THE SAME RETIRED INVARIANT, AND IS SAFE FOR A REASON THIS CLASS NOW
+   * ENFORCES RATHER THAN ASSUMES.** `recompile`'s `if (!this.#buffers.has(id)) return false` no longer
+   * implies a registry entry either, so `this.#reg.entryOf(id)` on its very next line would throw for a
+   * cold buffer's id. `cool` rebinding its panes to `home` (5d-ii-d review, Finding 0) is what makes
+   * that unreachable: a cold buffer has no panes bound to it, and `recompile`'s only caller reaches it
+   * through a pane's own binding (`slot.binding.session`), so there is no binding left pointing at a
+   * cold buffer to call it with. `recompile`'s own doc carries the argument in full.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `#buffers`.
    */
-  #buffers = new Map<SessionId, BufferInfo>()
+  #buffers = new Map<SessionId, BufferState>()
 
   /**
    * How many buffers have EVER been minted, which is deliberately not how many are live.
@@ -200,6 +300,14 @@ export class ScratchBuffers {
    * one was retired would put two different terms under one name inside a single session — and the
    * name is the only handle a user has on a buffer no pane is showing (design §4.2's list). A counter
    * that only goes up costs nothing and cannot produce that.
+   *
+   * **"INSIDE A SINGLE SESSION" USED TO BE THE WHOLE SCOPE OF THAT CLAIM, AND `restore` BELOW WIDENS
+   * IT TO SPAN RELOADS.** This counter is what `snapshot` persists and what `restore` sets, so the
+   * name a page mints after a reload is past every name the previous page minted — including buffers
+   * that were retired before it closed and are therefore in no restored record. That is why the stored
+   * payload carries the COUNTER and not the count; `buffers-store.ts`'s `PersistedBuffers` has the
+   * argument from the format's side. `restore` is the one writer here that does not increment, and its
+   * own doc says why assigning is safe.
    */
   #minted = 0
 
@@ -213,24 +321,11 @@ export class ScratchBuffers {
   /**
    * Fork `slot` onto a NEW λ scratch buffer seeded with `src`, and answer the buffer's id.
    *
-   * **THERE IS NO `has` BRANCH, AND ITS ABSENCE IS THE WHOLE OF DECISION 1.** This method used to open
-   * with `if (!this.#reg.has(this.#id))` and its doc called that "THE SINGLETON... AND BOTH CONTAINERS
-   * ANSWER IT AT ONCE": a second fork rebound to the EXISTING scratch rather than making another, so
-   * nothing here spawned a second worker or overwrote the first seed. Every line of that is now
-   * false — a fork that happens spawns, seeds, and names its own buffer. (That sentence read "a fork
-   * ALWAYS spawns, always seeds, and always names its own buffer", and the cap below is what took the
-   * word back: there is a state in which a fork does none of the three. It is not the branch this
-   * paragraph is about — the singleton's branch chose between two things a fork could mean, and this one
-   * chooses between doing all of it and doing none of it.)
-   *
-   * **THE TWO THROWS THAT BRANCH EXISTED FOR ARE STILL THERE, AND NO LONGER NAME THIS CALL SITE.**
-   * `SessionRegistry.add` and `SessionPool.bind` both refuse an id they already hold, and both of their
-   * docs used to justify that by pointing here — *"§4.3's singleton rebinding is served by asking `has`
-   * first, which is one branch at the call site against a leak here that nothing would report"*. There
-   * is no rebinding for a branch to serve: `#minted` only ever goes up, so the id below is one neither
-   * container has seen. Both throws stay as guards over their own invariants (a replaced entry strands
-   * a running `setInterval`; a replaced client misdelivers frames), and both docs now say so on their
-   * own account rather than on this one's.
+   * **THERE IS NO `has` BRANCH, AND ITS ABSENCE IS THE WHOLE OF DECISION 1.** A fork that happens
+   * spawns, seeds, and names its own buffer. `SessionRegistry.add` and `SessionPool.bind` both refuse
+   * an id they already hold, and both stay as guards over their own invariants (a replaced entry
+   * strands a running `setInterval`; a replaced client misdelivers frames) rather than over anything
+   * this call site does: `#minted` only ever goes up, so the id below is one neither container has seen.
    *
    * **THE SEED IS THE SOURCE'S STEP-0 TEXT PLUS A STEP, AND THIS FUNCTION DOES NOT GO LOOKING FOR
    * EITHER.** It was "that pane's current text" when the pane's own 512-byte frame was the seed; 5d-i
@@ -245,18 +340,12 @@ export class ScratchBuffers {
    * and returning it is what keeps minting in ONE place rather than having a caller derive the next
    * name and be wrong the first time two of them run.
    *
-   * **THE ONE CONDITIONAL IS A REFUSAL, WHICH IS WHERE THE OLD "REBINDING IS UNCONDITIONAL AND CREATION
-   * IS NOT" PARAGRAPH ENDS UP.** Its point was that a pane already bound to the scratchpad rebinding to
-   * it is a harmless no-op, and that branching to avoid it would be a SECOND place the singleton rule was
-   * written down. There is no rule left to write down twice; what survives is the shape it was
-   * protecting, and the cap below does not spend it. **This paragraph opened "NOTHING HERE IS
-   * CONDITIONAL" and ended "there is no state in which a fork means something else"**, which the cap
-   * makes false as written and true as intended: every call that returns does the same things in the same
-   * order, and the added branch decides whether this method runs at all rather than what a fork means
-   * when it does. A second outcome that returned an id would be the thing the sentence was guarding
-   * against; a throw is not one, because no caller can mistake it for a fork.
+   * **THE ONE CONDITIONAL IS A REFUSAL, AND IT DOES NOT MAKE A FORK MEAN TWO THINGS.** Every call that
+   * returns does the same things in the same order; the branch decides whether this method runs at all
+   * rather than what a fork means when it does. A second outcome that RETURNED AN ID would be the thing
+   * to guard against; a throw is not one, because no caller can mistake it for a fork.
    *
-   * **AT `MAX_BUFFERS` IT REFUSES, AND REFUSING IS THE ONLY THING A CAP MAY DO HERE** (design §4.5).
+   * **AT `MAX_WARM_BUFFERS` IT REFUSES, AND REFUSING IS THE ONLY THING A CAP MAY DO HERE** (design §4.5).
    * Making room by retiring the oldest buffer would end a buffer nobody named, which is precisely what
    * decision 2 forbids — an eviction is that rule broken under the name of a limit, and the work it
    * would throw away is a term the user typed. So the count is a refusal and never a policy about which
@@ -269,25 +358,47 @@ export class ScratchBuffers {
    * `SessionPool.bind` in particular would leave a running worker for a buffer `#buffers` never
    * recorded, so nothing could ever retire it: the leak the cap exists to bound, created by the cap.
    *
+   * **THE RECORD IS INSERTED AFTER `#spawn` RETURNS, WHERE IT USED TO GO IN BEFORE — A REVIEW FIX.** A
+   * `this.#buffers.set(id, …)` used to sit between minting `id` and calling `#spawn`, so a throw from
+   * `SessionPool.bind` or `SessionRegistry.add` inside `#spawn` left a COLD record in `#buffers` for a
+   * buffer that was never warm and never will be — the exact hazard this class's own invariant (a
+   * record's temperature must match whether it has a thread) exists to rule out, self-inflicted by the
+   * one method that is supposed to keep it true. `#spawn` now takes the `BufferState` object directly
+   * (see its own doc) and mutates it in place, so this line only runs once `#spawn` has already bound
+   * the client and registered the session without throwing — nothing is recorded until it is real.
+   *
+   * **THE NEW ORDER REINSTATES THE SHAPE OF THE OTHER HAZARD, AND THAT IS ACCEPTABLE HERE RATHER THAN
+   * OVERLOOKED — 5d-ii-d review round 2, Minor 2.** Moving the record after `#spawn` returns means a
+   * throw INSIDE `#spawn` — after `#pool.bind` has already bound a client but before `#reg.add` returns —
+   * would leave a running worker with no `#buffers` record at all, which is exactly the hazard four
+   * paragraphs up calls "the leak the cap exists to bound, created by the cap." Fixing the cold-record
+   * hazard by reordering cannot also rule out this one by ordering alone; only one of the two throws this
+   * class can actually reach mattered here. `SessionPool.bind` and `SessionRegistry.add` both throw on
+   * exactly one condition — a duplicate id — and `#minted` only ever counts up, so the id `fork` mints on
+   * this call has never been seen by either container; nothing in `#spawn` can trigger that throw for it.
+   * The ordering also happens to match what this method did before cold buffers existed at all, when
+   * there was only ever the one record to place and no "cold" for it to be. Trading a real, reachable
+   * hazard for one neither container can raise against a freshly minted id is the trade worth making, not
+   * a hazard newly created by the fix.
+   *
+   * **THE REFUSAL ITSELF IS ONE CALL NOW, NOT FIVE DUPLICATED LINES.** `warm` below refuses at the same
+   * cap with the same message. `#refuseAtCap` is the one place the throw is written now; see its own
+   * doc for the message itself.
+   *
    * **THE MESSAGE NAMES THE CONTROL THAT ENDS ONE**, because "no" on its own would leave a user holding
    * a pane with no account of how to get the room back.
    *
    * **IT USED TO NAME THE BUFFERS TOO, AND THAT WAS WORSE THAN SAYING NOTHING — changed after reading
-   * the line on a real page.** It read `all 8 scratch buffers are live (scratch 1, scratch 2, scratch 3,
-   * scratch 4, scratch 5, scratch 6, scratch 7, scratch 8); retire one from…`, on the argument that
-   * "the buffers it lists are exactly the rows design §4.2's header list offers a retire on, so the
-   * sentence and the gesture name the same things". Both halves of that hold and neither helps: the
-   * names are `scratch 1` through `scratch 8` BY CONSTRUCTION — a counter's output, carrying nothing
-   * that distinguishes one buffer from another — so the enumeration is sixty characters of noise
-   * standing between the diagnosis and the only actionable clause in the sentence, on a one-line dim
-   * status readout with no wrap. The user has to read past every name to reach the instruction, and the
-   * names tell them nothing they could act on when they get there.
+   * the line on a real page.** The names are `scratch 1` through `scratch N` BY CONSTRUCTION — a
+   * counter's output, carrying nothing that distinguishes one buffer from another — so the enumeration
+   * it carried ran to sixty characters of noise, and grows with the cap, standing between the diagnosis
+   * and the only actionable clause in the sentence, on a one-line dim status readout with no wrap.
    *
    * **WHAT REPLACED IT IS THE LIST ITSELF, WHICH NOW ANSWERS THE QUESTION THE ENUMERATION WAS PRETENDING
    * TO.** `buffer-list.ts` gives every row its buffer's current TERM, so "what is using the room" is a
    * glance at the surface this sentence already points at — and it is answered with the one fact that
-   * differs between buffers rather than with eight copies of a counter. Naming them here as well would
-   * be the fan-out `BufferInfo`'s own doc exists to prevent, now that there is something real to fan out.
+   * differs between buffers rather than with one copy of a counter per buffer. Naming them here as
+   * well would be the fan-out `BufferInfo`'s own doc exists to prevent, now that there is something real to fan out.
    *
    * THE COUNT STAYS, because it is the thing the user cannot see from the button (`buffers 8 ▾` says how
    * many exist, not that eight is the limit) and it is what makes the refusal a rule rather than a
@@ -296,9 +407,15 @@ export class ScratchBuffers {
    * **AND IT REACHES A SURFACE, WHICH IS THE HALF OF §4.5 A THROW ON ITS OWN DOES NOT DELIVER.** The
    * only caller in `src/` is `transport.ts`'s detach handler, running inside the `✎ fork` button's own
    * click listener (`pane-chrome.ts`'s `detachButton`); it catches `BufferCapReached`, hands the message
-   * to `link-wiring.ts`'s `setForkFailed` and repaints, so `link-status.ts` renders it as
-   * `fork failed — …` on `#link-status`. That is the same field `replies.ts` writes for the SIBLING
-   * refusal — a fork whose build fails — which is what makes this a wire being connected rather than a
+   * to `link-wiring.ts`'s `setForkFailed` and repaints, so `link-status.ts` renders it on
+   * `#link-status`. **THE `fork failed — ` WORDS ARE PART OF THIS THROW'S OWN MESSAGE, NOT SOMETHING
+   * `link-status.ts` ADDS** (5d-ii-d review round 2, Finding 3) — `this.#refuseAtCap('fork failed — ')`
+   * is the call this method makes, and `#refuseAtCap`'s own doc has the argument for why the prefix
+   * lives at the call site rather than in the renderer or in `BufferCapReached` itself: `warm`'s
+   * refusal reaches the identical field and is not a fork, so a prefix baked into either of those two
+   * would have named a gesture that did not happen for one of this class's two callers. `replies.ts`
+   * writes the same field for the SIBLING refusal — a fork whose build fails — with the same words in
+   * its own text for the same reason, which is what makes this a wire being connected rather than a
    * surface being invented. **Uncaught, it would have reached nothing**: there is no `window` error
    * handler in `src/` (`main.ts`'s is a WORKER `error` listener, which a main-thread click never
    * reaches), so the message would have gone to the console and the user would have seen no answer at
@@ -311,26 +428,322 @@ export class ScratchBuffers {
    * failure out of the model while leaving it on screen. That last one is a fix rather than a
    * description — the clear ran before the call in the first commit, and this sentence was untrue by a
    * frame until it moved.
+   *
+   * **`text: src` BELOW IS A PROVISIONAL SEED, IT IS THE WRONG TERM, AND IT IS DURABLE BEFORE THE WORKER
+   * ANSWERS — said plainly here because design §4.3's "one owner and two writers" reads as though it
+   * were not (whole-branch review before merge, finding 7; §4.3 is corrected to match).** `src` is the
+   * SOURCE session's step-0 term, which design §3.4 itself calls "the wrong string anyway": the worker
+   * re-derives this buffer's term at `step` from it, and `replies.ts`'s `scratch-compiled` arm is what
+   * replaces the seed with that. The gap between the two is not private, because the caller
+   * (`transport.ts`'s `detach`) calls `onBuffersChanged` on its success path, which reaches `main.ts`'s
+   * `refreshBuffers` and therefore `persistBuffers` — synchronously, in the same click, before any reply
+   * can land. So the seed is written to `redextape.buffers` as this buffer's text.
+   *
+   * **THE CONSEQUENCE, STATED RATHER THAN LEFT TO BE DISCOVERED: A FORK WHOSE BUILD NEVER SUCCEEDS
+   * PERSISTS THE SOURCE'S STEP-0 TERM, AND A RELOAD WARMS IT SUCCESSFULLY AT STEP 0.** A build can fail
+   * (the term at `step` is over `LAMBDA_BYTE_BUDGET`, or the source's own step-0 print was itself cut —
+   * `noSessionReply`'s doc has both), and 5d-ii-c decision 2 means nothing retires the buffer for it. Its
+   * record keeps the seed forever, so the next page load restores a buffer that builds and runs while
+   * holding a DIFFERENT term from the one the user forked. The buffer is still theirs and still named
+   * `scratch N`; what it contains is the program they forked FROM rather than the point they forked AT.
+   *
+   * **DEFERRING THIS PERSIST WAS CONSIDERED AND IS NOT A FIX, WHICH IS WHY THIS IS DOCUMENTED RATHER THAN
+   * CHANGED.** Moving the write to the `scratch-compiled` arm that already persists would only narrow the
+   * window: the RECORD carries `text: src` from this line either way, and four other sites persist the
+   * whole collection (a recorded term, a rebind, a collapse, and `main()`'s own write-back), so any later
+   * gesture writes the same seed out. Actually removing the consequence means not seeding `text` with
+   * `src` at all — and the honest alternative, an empty seed, makes a failed fork restore as an EMPTY
+   * buffer, which trades a wrong term for lost work and is a design decision rather than a repair. The
+   * seed stays because it is also what makes the record non-empty for every fork that DOES build, in the
+   * round trip before the arm replaces it.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `fork`.
    */
   fork(slot: Detachable, src: string, step: number): SessionId {
-    if (this.#buffers.size >= MAX_BUFFERS) {
-      // READS AS A SENTENCE AFTER `fork failed — `, which is the only way it is ever shown
-      // (`link-status.ts`). Hence a semicolon rather than a second dash, and no "the fork was refused"
-      // clause: the prefix already says which gesture this is about.
-      throw new BufferCapReached(
-        `all ${MAX_BUFFERS} scratch buffers are live; retire one from the buffers list in the header to make room`,
-      )
-    }
+    // `'fork failed — '` — THIS CALL IS THE ONE OF THE TWO CALLERS FOR WHICH THAT IS TRUE. See
+    // `#refuseAtCap`'s own doc for why the prefix is a call-site argument rather than baked into the
+    // shared message.
+    if (this.warmCount() >= MAX_WARM_BUFFERS) this.#refuseAtCap('fork failed — ')
     this.#minted += 1
     const id: SessionId = `scratch-${this.#minted}`
-    const label = `scratch ${this.#minted}`
+    const state: BufferState = { id, label: `scratch ${this.#minted}`, text: src, collapsed: false, warm: false }
+    this.#spawn(state, src, step)
+    this.#buffers.set(id, state)
+    slot.rebind(id)
+    return id
+  }
+
+  /**
+   * Give a cold buffer a worker again and rebuild it from its text.
+   *
+   * **AT STEP 0, WHERE `fork` PASSES THE STEP THE PANE WAS SHOWING.** After a build the text IS the
+   * term — which is exactly what `recompile` already means and why it posts 0 — so there is nothing to
+   * replay to. A restored buffer therefore comes back at the head of a fresh run rather than where its
+   * play head was, and the ring it had is gone: that is the cost design §4.5 weighs when it declines to
+   * auto-cool an orphan.
+   *
+   * THROWS FOR AN UNKNOWN ID rather than answering `false` like `cool` does. A cool asks for a state
+   * that may already be true; a warm names a buffer whose text this class is being asked to rebuild,
+   * and there is no honest rebuild of a buffer that does not exist.
+   */
+  warm(id: SessionId): void {
+    const state = this.#buffers.get(id)
+    if (state === undefined) throw new Error(`not a buffer: ${id}`)
+    if (state.warm) return
+    // NO PREFIX — a warm is never a fork, whether it is asked for from the header list's warm control
+    // (`main.ts`'s temperature handler) or from a restore rebuilding what a previous page left cold
+    // (`main.ts`'s restore loop). `#refuseAtCap`'s own doc has the argument in full.
+    if (this.warmCount() >= MAX_WARM_BUFFERS) this.#refuseAtCap('')
+    this.#spawn(state, state.text, 0)
+  }
+
+  /**
+   * Put buffer `id` to sleep: rebind any pane still on it to `home`, terminate its worker, forget its
+   * session, keep its text. Answers whether it went from warm to cold.
+   *
+   * **THE NON-DESTRUCTIVE ESCAPE FROM THE CAP, AND THAT IS WHY IT EXISTS** (design §4.5). With the cap
+   * counting threads, a user who reaches it would otherwise have exactly one way out — an explicit
+   * retire, which ends a buffer and its text. A cap that never evicts but leaves no other exit would
+   * destroy work by omission, which is 5d-ii-c decision 2 defeated rather than honoured.
+   *
+   * **REBINDS ITS PANES NOW, WHERE THE FIRST VERSION OF THIS METHOD NEVER DID — A DESIGN CHANGE,
+   * DECIDED BY THE PROJECT OWNER, NOT A BUG FIX.** It used to leave a pane bound to the buffer it put
+   * to sleep, on the argument that "a pane bound to a cooled buffer keeps naming it, which is what
+   * makes warming it again put the pane back in front of its own term." That held for the term and
+   * cost too much elsewhere: a pane pointed at a cold buffer sits on a session `legOf`/`entryOf` cannot
+   * resolve, so every caller downstream of a binding — `draw()`, `recompile`, and `main.ts`'s row
+   * builder, which grew the `warm` guard the `#buffers` map's own doc argues for in 5d-ii-d T4 — would
+   * have had to special-case "cold" or crash on it. `retire` already rebound for exactly this reason;
+   * `cool` now does the identical thing. Warming the buffer again no longer puts the pane back on it —
+   * a user who wants that back rebinds through the selector, the same gesture that reaches any other
+   * session.
+   *
+   * **AND THAT REBIND USED TO ARRIVE AT A BUFFER THAT COULD NEVER BE EDITED AGAIN, WHICH MADE THIS
+   * METHOD'S OWN "NON-DESTRUCTIVE" DESTRUCTIVE OF EDITABILITY — whole-branch review before merge, fixed
+   * rather than filed.** The rebind above is what takes the editor down (`draw()` reaches
+   * `LambdaPane.setDetached(false)`, whose teardown calls `setEditor(null)`). `pane-host.ts`'s
+   * `mountScratchEditor` restores editability, seeding from `editorSeed` below;
+   * `tests/browser/buffer-cool-warm.test.ts` drives the whole round trip and is what fails without it.
+   * WHAT THIS METHOD DOES IS UNCHANGED — the editor still comes down here, and it is the ARRIVING side
+   * that now builds a new one.
+   *
+   * **THE INVARIANT THIS BUYS: A COLD BUFFER HAS NO PANES BOUND TO IT.** That is what turns every other
+   * cold-buffer hazard unreachable rather than merely handled. `recompile`'s `this.#reg.entryOf(id)`
+   * would throw for a cold id, and there is no binding left on a cold buffer to call `recompile`
+   * with — see `recompile`'s own doc. It holds as long as a caller hands this method every slot that
+   * MIGHT be bound to `id`: `main.ts`'s `panes.all()` is what the real app passes, the same set
+   * `retire` is handed for the same reason.
+   *
+   * **THE REBIND RUNS EVEN WHEN THE BUFFER IS ALREADY COLD, AND THE RETURN VALUE DOES NOT SAY SO.** A
+   * second `cool` on an already-cold buffer still walks `slots` and still rebinds anything it finds
+   * still pointing at `id` — which, by the invariant above, should be nothing, so this is a pass that
+   * finds nothing to do rather than one that is skipped. `retire` relies on exactly that: it is
+   * `cool(...)` followed by forgetting the record, and if `id` arrives already cold that call still
+   * catches a straggling pane the invariant says should not exist. `retire`'s own doc has the argument
+   * in full. The `false` this answers for an already-cold buffer is about the TEMPERATURE — nothing
+   * left to warm-to-cold — not about whether any rebinding happened.
+   *
+   * THE ORDER AFTER THE REBIND IS `retire`'s ORDER, FOR `retire`'s REASON: legs before registry
+   * (through `resetLegs`, ahead of the entry that owns them being deleted), registry before pool
+   * (`SessionRegistry.remove`'s own doc — terminating a thread is never the registry's job).
+   *
+   * **"KEEP ITS TEXT" IN THE SUMMARY LINE IS ALMOST ALWAYS TRUE, NOT QUITE ALWAYS — THE REBIND ABOVE CAN
+   * COST THE LAST KEYSTROKE (5d-ii-d review, Finding 7).** The text `warm` later rebuilds from is
+   * whatever `setText` last wrote, and `setText`'s own doc names its callers: `recompile`, driven by
+   * `LambdaEditor`'s own 300ms debounce (`lambda-pane.ts`'s `EDITOR_DEBOUNCE_MS`), not by every
+   * keystroke. The rebind a few lines up is what makes `editor-custody.ts`'s `reconcileEditors` call
+   * `LambdaEditor.destroy()` on the editor that just lost its pane, and `destroy()`'s whole point is to
+   * CANCEL a pending debounce rather than let it fire against a session about to be unbound (its own
+   * doc). A keystroke typed inside that 300ms window, immediately followed by the two gestures needed to
+   * cool this buffer before the timer would have fired, never reaches `setText` and is lost. Narrow —
+   * the window is 300ms and both gestures have to land inside it — and no code change is wanted for it;
+   * this paragraph exists so "keep its text" stops being a claim the last keystroke can falsify silently.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `cool`.
+   */
+  cool(id: SessionId, home: SessionId, slots: readonly Detachable[]): boolean {
+    const state = this.#buffers.get(id)
+    if (state === undefined) return false
+    for (const slot of slots) {
+      if (slot.binding.session === id) slot.rebind(home)
+    }
+    if (!state.warm) return false
+    // 'not compiled' IS THE REASON THE PANE READS FOR THE INSTANT BETWEEN THIS AND THE REBOUND
+    // SESSION'S NEXT FRAME — the same wording `main.ts` gives a source session with no program, and
+    // true here for the same reason: there is nothing behind this leg any more.
+    resetLegs(this.#reg.entryOf(id).legs, null, null, 'not compiled')
+    this.#reg.remove(id)
+    this.#pool.unbind(id)
+    state.warm = false
+    return true
+  }
+
+  /** How many buffers hold a worker — the quantity `MAX_WARM_BUFFERS` bounds (design §4.4). */
+  warmCount(): number {
+    let n = 0
+    for (const b of this.#buffers.values()) if (b.warm) n += 1
+    return n
+  }
+
+  /**
+   * Record the term buffer `id` now holds — design §4.3's "text of record", read back by `warm` on
+   * every restart and by `snapshot` for the field a page reload rebuilds a buffer from, PROVIDED the
+   * write this method makes is followed by a `persistBuffers()`/`onBuffersPersist()`; see below. This
+   * method itself only ever touches memory — it has no idea whether either caller pairs it with one.
+   *
+   * **TWO CALLERS, BOTH ALREADY-EXISTING CALL SITES, AND NO THIRD — AND ONLY ONE OF THEM IS A
+   * DURABILITY MOMENT, NOT BOTH, A CLAIM A PRIOR REVISION OF THIS DOC GOT WRONG.** `recompile` above
+   * calls it with the user's own just-typed text, at the point a rebuild is POSTED, not answered —
+   * nothing persists there, and `recompile`'s own doc has the argument in full. `replies.ts`'s
+   * `scratch-compiled` arm calls it with the worker's re-derived term — for a FORK, the first moment
+   * this app can know what a forked buffer holds at all, since `fork` posts the SOURCE session's step-0
+   * text plus a step and the worker replays between them; for a `recompile`'s own reply, the re-derived
+   * term replacing the raw text `recompile` wrote above — and, under the SAME `reply.text !== null`
+   * guard, immediately calls `onBuffersPersist()` (both lines are in `replies.ts`'s `scratch-compiled`
+   * arm, the `setText` and the persist directly below it). That PAIRING, not the call to this method
+   * alone, is what makes it a durability moment; `recompile`'s call has no such pairing anywhere in its
+   * body.
+   *
+   * **SO A `recompile` WHOSE REPLY ANSWERS `text: null` LEAVES THIS METHOD'S WRITE STRANDED IN
+   * MEMORY.** Unparseable input and a term over `LAMBDA_BYTE_BUDGET` both answer `text: null` (§4.1a);
+   * when that happens the `scratch-compiled` arm's own `setText`/persist pair is skipped by the same
+   * guard, so nothing ever persists the text `recompile` wrote. The typed text stays live in this
+   * record — a caller reading `text` back before the next reload still sees it — but a reload restores
+   * whatever WAS durable before the edit, not what the user just typed. The behaviour is correct
+   * (design's persist sites do not include a bare edit); only the old sentence claiming both callers
+   * were durability moments was wrong.
+   *
+   * Neither writer could read the field back off the `LambdaEditor` instead: `editor-custody.ts` owns
+   * that editor's lifetime and retires orphans, so a buffer whose editor was never mounted — a fork
+   * whose build failed — would have no text to read.
+   */
+  setText(id: SessionId, text: string): void {
+    const state = this.#buffers.get(id)
+    if (state !== undefined) state.text = text
+  }
+
+  /**
+   * Remember whether buffer `id`'s editor is collapsed — design §4.7, and the answer to the question
+   * `pane-chrome.ts`'s `collapseButton` doc has carried since 5d-i: PER BUFFER, because the editor
+   * MOVES between panes under `editor-custody.ts`, and a flag remembered against a leaf would describe
+   * whichever buffer landed there next.
+   *
+   * **A NO-OP FOR AN UNKNOWN `id`, LIKE `setText` ABOVE, NOT A THROW LIKE `warm`'s.** The one caller,
+   * `transport.ts`'s `collapse` handler, reads `slot.binding.session` off a live pane's slot the same
+   * way `setText`'s callers do — see `setText`'s own doc for why that reading can never name a buffer
+   * this map does not hold.
+   */
+  setCollapsed(id: SessionId, collapsed: boolean): void {
+    const state = this.#buffers.get(id)
+    if (state !== undefined) state.collapsed = collapsed
+  }
+
+  /**
+   * Whether buffer `id`'s editor was collapsed. `false` for an id that is not a buffer.
+   *
+   * **`false` RATHER THAN `undefined`, FOR `replies.ts`'s `scratch-compiled` ARM.** That call site hands
+   * this straight to `LambdaPane.setEditor`'s second parameter, which itself defaults to `false` for
+   * every OTHER caller — an `undefined` here would agree with that default by coincidence rather than
+   * by the type saying so, and a caller that ever stopped relying on the default would be handed a value
+   * this method never actually observed a buffer holding.
+   */
+  collapsedOf(id: SessionId): boolean {
+    return this.#buffers.get(id)?.collapsed ?? false
+  }
+
+  /**
+   * Everything a pane needs to mount buffer `id`'s editor without waiting for a worker: the text of
+   * record and the collapse flag, together. `null` for anything that is not a WARM buffer.
+   *
+   * **THIS EXISTS BECAUSE A PANE CAN ARRIVE AT A BUFFER LONG AFTER THE REPLY THAT WOULD HAVE SEEDED IT
+   * — the λ half of the repair `pane-host.ts`'s `tmProgramOf` already performs for the other leg.**
+   * `replies.ts`'s `scratch-compiled` arm mounts the editor, and it fires once per build; a pane that
+   * binds to the buffer afterwards has nothing to mount from, because the arm has been and gone. A
+   * `cool` followed by a `warm` is the path that reaches that state: `cool` rebinds every pane away (its
+   * own invariant), so the editor is destroyed by `setDetached(false)`'s teardown, and `warm` posts a
+   * build that lands with no pane claiming a leaf, so `editorHome` answers `undefined` and nothing
+   * mounts. Without a seed to mount from, `cool` — "the non-destructive escape from the cap" (see its
+   * own doc) — would be destructive of editability.
+   *
+   * **BOTH FIELDS IN ONE ANSWER, NOT `textOf` PLUS `collapsedOf`.** `LambdaPane.setEditor` takes them
+   * together and its mount branch reads both in the same statement, so two accessors would be two reads
+   * a caller has to remember to pair — the same pairing `replies.ts`'s arm already makes by hand and the
+   * one thing a second mount site could get wrong silently (design §4.7: the flag "takes effect when the
+   * buffer warms and mounts an editor"). `collapsedOf` stays for the caller that genuinely has only that
+   * question.
+   *
+   * **`null` FOR A COLD BUFFER, WHICH IS THE INVARIANT RESTATED RATHER THAN A MISSING CASE.** A cold
+   * buffer has no panes bound to it (`cool`'s own doc), so no pane can ask this about one; answering
+   * with text anyway would hand a caller a seed for a session `entryOf` cannot resolve, which is the
+   * state `draw()` throws on. `null` is also the honest answer for the source session and for any id no
+   * fork ever minted — the same answer, for the same reason: there is no buffer here to edit.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `editorSeed`.
+   */
+  editorSeed(id: SessionId): { text: string; collapsed: boolean } | null {
+    const state = this.#buffers.get(id)
+    if (state === undefined || !state.warm) return null
+    return { text: state.text, collapsed: state.collapsed }
+  }
+
+  /**
+   * Refuse a fork or a warm at the cap — the one throw `fork` and `warm` share.
+   *
+   * **EXTRACTED AFTER REVIEW FOUND FIVE IDENTICAL LINES AT TWO CALL SITES, INCLUDING A
+   * HUNDRED-CHARACTER MESSAGE.** The drift that duplication invites had already happened once: Minor 1
+   * of the same review found `main.ts` quoting this message from BEFORE a wording change, because
+   * nothing forced the two copies (nor the quotation) to move together. One method fixes that by
+   * construction rather than by discipline — there is now exactly one string to get right and one
+   * place a future wording change has to reach. `never` rather than `boolean` because both call sites
+   * throw immediately and never branch on a return value; the type says what the control flow already
+   * does.
+   *
+   * READS AS A SENTENCE ON ITS OWN, WITH ROOM FOR A CALLER'S OWN PREFIX AHEAD OF IT — no "the fork was
+   * refused" clause, because the sentence itself must stay honest for a caller that never attempted one.
+   *
+   * **`prefix` IS THE ONE THING `fork` AND `warm` DO NOT SHARE, AND IT IS A PARAMETER RATHER THAN
+   * SOMETHING BAKED IN HERE OR IN `link-status.ts` — 5d-ii-d review round 2, Finding 3.** A renderer
+   * that cannot tell its callers apart has no honest way to prefix only some of them, and `warm`'s
+   * refusal reaches the same field as `fork`'s over restore/header-list paths that are not forks.
+   * `fork` passes `'fork failed — '`, because that call genuinely is a fork failing. `warm` passes
+   * `''`: warming a cold buffer back up — whether the user
+   * asked for that from the header list or a restore is doing it on their behalf — is a different
+   * gesture, and the plain sentence (cap and remedy, no gesture named) is exactly what is true of it.
+   * Hence a semicolon rather than a second dash in the body: the body still has to read correctly with
+   * nothing in front of it.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `#refuseAtCap`.
+   */
+  #refuseAtCap(prefix: string): never {
+    throw new BufferCapReached(
+      `${prefix}all ${MAX_WARM_BUFFERS} scratch buffers are live; retire or cool one from the buffers list in the header to make room`,
+    )
+  }
+
+  /**
+   * Bind a worker, register the session, and post the build. The half of `fork` a `warm` repeats.
+   *
+   * **TAKES THE RECORD ITSELF, NOT ITS ID — A REVIEW FIX, AND THE ORIGINAL SHAPE WAS A WIRING HAZARD
+   * RATHER THAN MERELY AWKWARD.** It used to take `id` and read `this.#buffers.get(id)` twice inside
+   * this method: once for the label (falling back to `?? id` when the record was missing) and once to
+   * flip `warm` to `true` (a silent no-op when it was missing). Both reads assumed the caller had
+   * already put the record into `#buffers` before calling this — true for `warm`, and no longer
+   * guaranteed for `fork` once the record's insertion moved to AFTER this method returns (`fork`'s own
+   * doc has the reason). Had this kept reading `#buffers` by id, a wiring bug that called it before the
+   * record existed would not have thrown: `reg.add` would have registered the session under the
+   * fallback label `id`, and `state.warm = true` would have silently done nothing — so `warmCount()`
+   * would under-count a live, running thread FOREVER, with nothing anywhere to report it. Taking the
+   * record removes the possibility rather than guarding against it: both lookups are gone, the `?? id`
+   * fallback and the `!== undefined` check with it, and this method never reads `#buffers` at all.
+   */
+  #spawn(state: BufferState, src: string, step: number): void {
     // THE REPLY CARRIES THE ID BECAUSE THE WIRE DOES NOT (5d-i §3.2: the port is the id). One
     // collection, one `onReply`, many threads — so the name is closed over HERE, per buffer, at the
     // one place that knows which thread it just made.
-    const client = this.#pool.bind(id, (reply) => this.#onReply(id, reply))
+    const client = this.#pool.bind(state.id, (reply) => this.#onReply(state.id, reply))
     this.#reg.add({
-      id,
-      label,
+      id: state.id,
+      label: state.label,
       // `detached: true` BY CONSTRUCTION, AND NOTHING CAN SET IT OTHERWISE. 5d-i §3.3 is why it is
       // knowable at creation: `linkIndex` and `sourceSpan` exist on neither scratch type, so a
       // scratch session can never participate in the sync anchor. `main.ts`'s source entry is the
@@ -356,34 +769,88 @@ export class ScratchBuffers {
       // `null` is what makes that a fact the type carries rather than one the reader has to derive.
       tmProgram: null,
     })
-    this.#buffers.set(id, { id, label })
+    state.warm = true
     // SUPERSEDE THEN POST, the pattern `main.ts`'s `schedule` uses and for the same reason
     // (`SessionClient.supersede`'s doc): a fresh client is at generation 0, which matches nothing,
     // so the claim has to happen before the post or `scratch` would drop its own message.
     client.scratch(client.supersede(), src, step)
-    slot.rebind(id)
-    return id
   }
 
   /**
    * Every live buffer, oldest first — design §4.2's header list is the caller this exists for.
    *
-   * **THE ACCESSOR THIS CLASS SPENT A TASK REFUSING, ARRIVING WHEN IT HAD SOMETHING TO ANSWER.** The
-   * paragraph here read "NO `id` OR `live` ACCESSOR, AND THE ABSENCE IS DELIBERATE. Both were written
-   * and both had exactly one caller: a test... a getter here would be a third spelling of a fact two
-   * containers already hold". That argument was correct and it was about a SINGLETON: `reg.has(id)`
-   * and `pool.has(id)` answered "does the scratchpad exist" because the id was a constant the caller
-   * already had. Neither container answers THIS question — the registry holds sessions of every kind
-   * and the pool holds threads, and neither records which of its keys are buffers or in what order
-   * they were forked. The refusal stands as written for the accessor it refused.
+   * **THE ACCESSOR THIS CLASS SPENT A TASK REFUSING, ARRIVING WHEN IT HAD SOMETHING TO ANSWER.**
+   * Neither container answers THIS question — the registry holds sessions of every kind and the pool
+   * holds threads, and neither records which of its keys are buffers or in what order they were forked.
    *
    * `BufferInfo`, NOT `SessionEntry`, and not `SessionId[]` either: a list keyed only by id would send
    * every caller back to the registry for the label, which is the fan-out the type exists to prevent.
    * A COPY RATHER THAN THE MAP'S OWN ITERATOR, so a caller cannot hold a view that changes underneath
    * it between the moment the list is built and the moment a row is clicked.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `list`.
    */
   list(): readonly BufferInfo[] {
-    return [...this.#buffers.values()]
+    return [...this.#buffers.values()].map((b) => ({ id: b.id, label: b.label, warm: b.warm }))
+  }
+
+  /**
+   * Everything about these buffers that survives a reload, with `bindings` supplied by the caller.
+   *
+   * **THE BINDINGS ARE A PARAMETER BECAUSE THIS CLASS DOES NOT KNOW WHAT A PANE IS**, which is the
+   * same line `BufferInfo` draws and the reason `main.ts` computes `paneCount` rather than this file.
+   * `PaneCollection` answers which leaf is on which session; this answers what the sessions hold.
+   *
+   * `warm` IS NOT IN THE PAYLOAD, AND ITS ABSENCE IS THE RESTORE POLICY WRITTEN INTO THE FORMAT
+   * (design §4.2). A buffer's temperature on the next page load is decided by which PANES came back,
+   * not by which buffers happened to hold a thread when this one was closed — so persisting it would
+   * store an answer to a question the next load asks differently. `restore` below inserts everything
+   * cold for the same reason.
+   */
+  snapshot(bindings: Record<LeafId, SessionId>): PersistedBuffers {
+    return {
+      minted: this.#minted,
+      buffers: [...this.#buffers.values()].map((b) => ({
+        id: b.id,
+        label: b.label,
+        text: b.text,
+        collapsed: b.collapsed,
+      })),
+      bindings,
+    }
+  }
+
+  /**
+   * Insert every buffer in `value` as COLD and set the mint counter — design §4.9 steps 1–2.
+   *
+   * **NOTHING SPAWNS HERE, AND THAT IS THE RESTORE POLICY RATHER THAN AN OPTIMISATION** (design §4.2).
+   * Which buffers deserve a thread is a question about which PANES came back, which this class cannot
+   * see; `main.ts` warms the ones its restored bindings name and leaves the orphans asleep.
+   *
+   * `#minted` TAKES THE STORED COUNTER RATHER THAN THE RESTORED COUNT. A page that forked three
+   * buffers and retired two persists `minted: 3` and one buffer, and reissuing `scratch 2` for the
+   * next fork would put two different terms under one name across a reload — the exact thing `#minted`
+   * only ever counting up exists to prevent.
+   *
+   * **IT ASSIGNS RATHER THAN TAKES A MAXIMUM, AND THE VALIDATION THAT MAKES THAT SAFE IS SOMEWHERE
+   * ELSE.** `parseBuffers` refuses a payload whose `minted` is below any id it carries
+   * (`buffers-store.ts`'s own doc: "the counter must dominate every name it claims to have minted"),
+   * so by the time a value reaches here the counter is already known to be past every restored id. The
+   * one caller in `src/` is `main.ts`'s restore block, which reads through exactly that function; a
+   * caller that hand-built a `PersistedBuffers` would be handing this class a state its only producer
+   * cannot produce.
+   *
+   * **CALLED BEFORE ANY FORK, AND NOTHING ENFORCES THAT HERE.** `main.ts` restores while resolving its
+   * layout, which is before a pane exists to carry the `✎ fork` control, so `#minted` cannot already
+   * have moved. A guard would be this class asserting an ordering its one caller establishes by
+   * construction — and the honest version of it (refusing a restore into a non-empty collection) would
+   * have no caller to refuse.
+   */
+  restore(value: PersistedBuffers): void {
+    this.#minted = value.minted
+    for (const b of value.buffers) {
+      this.#buffers.set(b.id, { id: b.id, label: b.label, text: b.text, collapsed: b.collapsed, warm: false })
+    }
   }
 
   /**
@@ -398,9 +865,19 @@ export class ScratchBuffers {
    * Under the singleton there was nothing to name. Its caller is `transport.ts`'s `editScratch`, one
    * per λ pane, and the pane knows which buffer it is showing — so passing `slot.binding.session` costs
    * one argument and removes the only reading under which typing into one pane could rebuild a term
-   * another pane is showing. `retire` and `noSessionReply` below arrived here one task later and are
-   * keyed the same way now; this method's doc used to say they were "deliberately NOT keyed yet", which
-   * is the sentence that task deleted.
+   * another pane is showing. `retire` and `noSessionReply` below are keyed the same way.
+   *
+   * **`this.#reg.entryOf(id)` BELOW WOULD THROW FOR A COLD BUFFER'S ID, AND THAT IS UNREACHABLE RATHER
+   * THAN GUARDED AGAINST.** `#buffers.has(id)` used to imply a registry entry — a buffer was in
+   * `#buffers` and in the registry together or in neither — and that invariant is exactly what 5d-ii-d's
+   * cold buffers falsified (`#buffers`'s own doc records it). What makes the throw unreachable here is a
+   * narrower invariant `cool` now maintains instead: **a cold buffer has no panes bound to it**, because
+   * `cool` rebinds every pane on `id` to `home` before it forgets the session (`cool`'s own doc). This
+   * method's only caller, `transport.ts`'s `editScratch`, is reached from a pane's own binding —
+   * `slot.binding.session` — so calling it with a cold buffer's id would require a pane still bound to
+   * one to call it from, and there is none left to hold. The membership check above still answers
+   * `false` for an id no fork ever minted, or a buffer already retired; it does not need to, and does
+   * not, distinguish warm from cold.
    *
    * **IT DOES NOT REBIND AND DOES NOT TOUCH THE REGISTRY.** The pane is already on this session and
    * stays on it; what changes is the term behind the leg. `resetLegs` is NOT called here either — the
@@ -410,12 +887,16 @@ export class ScratchBuffers {
    * ANSWERS A BOOLEAN FOR `retire`'s REASON, INVERTED: `retire` returns one because it can be handed
    * the name of a buffer that has already ended, and this returns one because an editor cannot exist
    * without the buffer behind it — so `false` is a caller bug rather than the common case, and a caller
-   * that ignores it has a pane bound to nothing. (`retire`'s half of that sentence read "because most
-   * recompiles happen with no buffer at all" while a source keystroke called it on every keystroke;
-   * decision 2 deleted that caller, and `retire`'s own doc records what is left.)
+   * that ignores it has a pane bound to nothing.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `recompile`.
    */
   recompile(id: SessionId, src: string): boolean {
     if (!this.#buffers.has(id)) return false
+    // THE TEXT OF RECORD, WRITTEN AT THE POINT IT BECOMES TRUE (design §4.3). This is the user's own
+    // text; the other writer is `replies.ts`'s `scratch-compiled` arm, which carries the worker's
+    // answer for a fork. Two writers, both already-existing call sites, and no third.
+    this.setText(id, src)
     const client = this.#reg.entryOf(id).client
     client.scratch(client.supersede(), src, 0)
     return true
@@ -424,17 +905,6 @@ export class ScratchBuffers {
   /**
    * Retire buffer `id`: rebind its panes to `home`, stop its playback, forget it, and **terminate its
    * worker**. Answers whether that buffer was live.
-   *
-   * **IT TAKES THE BUFFER IT ENDS, AND THE PARAGRAPH HERE USED TO EXPLAIN WHY IT COULD NOT.** That
-   * paragraph read: *"WHICH BUFFER, WHEN THE SIGNATURE NAMES NONE — TRANSITIONAL... It means the
-   * buffer forked most recently, which is the singleton's exact behaviour in every state a caller
-   * reaches with one fork, and a placeholder in every other."* Every word of it is now spent. The
-   * newest-buffer reading is gone from this class entirely — the `#newest()` helper that held it is
-   * deleted — and with it the state it warned about, where a second fork followed by a recompile left
-   * the older buffer running with nothing pointing at it. **What the two tasks bought by splitting is
-   * still worth stating**: this one changes only the KEY, and the two callers below go on firing at
-   * exactly the moments they fired before, so a review of the trigger (Task 3 for recompile, Task 4 for
-   * poison) reads a diff that changes nothing else.
    *
    * **IT DOES NOT SWEEP, AND THAT NEVER WAS TRANSITIONAL.** Retiring every buffer would end buffers the
    * caller never named, and design decision 2's governing rule is that nothing ends a buffer implicitly
@@ -449,61 +919,48 @@ export class ScratchBuffers {
    * records the gap it opened**: design §4.4 is where the recovery goes instead — the header list,
    * because a wedged buffer has to be reachable whether or not a pane is still showing it.
    *
-   * **ONE CALLER IN `src/`, AND THE SENTENCE ABOVE USED TO END "…EXCEPT `noSessionReply`'s PHANTOM-FORK
-   * PATH".** That was the second of decision 2's two deletions and it closed the table in design §4.3: a
-   * recompile no longer ends a buffer, a failed build no longer ends a buffer, and the only row left
-   * with "ends it" in it is the explicit retire. **The window where the app could create buffers and end
-   * none was TOTAL for three tasks** — deliberately, so that "what ends a buffer" was reviewable as one
-   * change rather than as a residue of two — and §4.2's header list closed it. That caller is
-   * `main.ts`'s retire handler, which hands over every pane's slot and then sweeps custody itself; this
-   * method is unchanged and did not need to change, since `buffer-list.ts`'s rows already called an
+   * **ONE CALLER IN `src/`, AND DESIGN §4.3's TABLE IS CLOSED AROUND IT:** a recompile does not end a
+   * buffer, a failed build does not end a buffer, and the only row left with "ends it" in it is the
+   * explicit retire. That caller is `main.ts`'s retire handler, which hands over every pane's slot and
+   * then sweeps custody itself; this method is unchanged and did not need to change, since
+   * `buffer-list.ts`'s rows already called an
    * `onRetire: (id: SessionId) => void` this was written to be the argument for. `tests/node/scratch.test.ts`
    * and `tests/browser/scratch-fork.test.ts` drive it directly as well, at the layer the list drives it
    * from.
    *
-   * **THE ORDER IS LOAD-BEARING AND IT IS PANES, LEGS, REGISTRY, POOL.** Panes first: `legOf` and
-   * `entryOf` throw for a session the registry does not hold, and `draw()` resolves through both, so a
-   * slot still pointing at a removed entry is an exception on the next frame rather than a blank pane.
-   * Legs second, through `resetLegs`, and that call is the one that is easy to leave out —
-   * `SessionRegistry.remove` deletes a map key and cannot see a running `setInterval`, and `add`'s doc
-   * names exactly this leak ("a stranded `setInterval` on a `LegState` nothing can reach any more").
-   * Registry third and pool last, because `remove`'s own doc says a caller retiring a session calls
-   * both and that terminating a thread is never the registry's job. The collection's own entry goes
-   * last of all: it is what `list()` reads, and a buffer must not be listed after its thread is gone.
+   * **IT IS `cool` PLUS FORGETTING THE RECORD NOW, WHICH IS WHERE THE ORDER ARGUMENT THAT USED TO LIVE
+   * HERE WENT.** `retire` is now `this.cool(id, home, slots)` followed by
+   * `this.#buffers.delete(id)`; **`cool` owns the panes/legs/registry/pool order and the reasoning for
+   * it now — read it there.** Nothing here rebinds twice: a buffer that arrives warm is rebound and
+   * cooled in that one call inside `cool`; a buffer that arrives already cold was rebound by whichever
+   * `cool` cooled it, so THIS call's rebind pass runs again (`cool`'s doc calls it "a pass that finds
+   * nothing to do") and finds nothing, by the same invariant.
    *
-   * **IT RETURNS A BOOLEAN BECAUSE ITS CALLER RAN ON EVERY KEYSTROKE, AND THAT CALLER IS THE ONE
-   * DECISION 2 DELETED.** `compile.ts`'s `schedule` fired this per keystroke while the post itself was
-   * debounced, and a repaint per keystroke is the waste the editor's update listener explicitly
-   * declines to pay — so "did anything move" told it which single keystroke had retired a buffer. There
-   * is no caller in `src/` to read the answer today (the sentence here named `noSessionReply` below as
-   * the one that discarded it, and that call is gone too). **THIS PARAGRAPH SAID §4.4's RETIRE CONTROL
-   * WOULD BE "THE READER IT IS KEPT FOR"; THAT CONTROL IS WIRED NOW, AND IT DISCARDS THE ANSWER.** The
-   * reason offered — "a list rebuilt around a row that ended nothing would be reporting a gesture that
-   * did not happen" — describes a list that KEEPS its rows. `bufferList` builds them on `beforetoggle`,
-   * so a row could name a spent buffer only if something had retired it between the open and the click,
-   * and there is exactly one retire in the app: that click. A guard on this answer at that call site
-   * would be a branch nothing can take. **What the answer is genuinely kept for is the stale-name
-   * contract below**, and the tests are what read it: `tests/node/scratch.test.ts` asserts both arms and
+   * **IT RETURNS A BOOLEAN AND NOTHING IN `src/` READS THE ANSWER TODAY.** §4.4's retire control is
+   * wired and DISCARDS it: `bufferList` builds its rows on `beforetoggle`, so a row could name a spent
+   * buffer only if something had retired it between the open and the click, and there is exactly one
+   * retire in the app: that click. A guard on this answer at that call site would be a branch nothing
+   * can take. **What the answer is genuinely kept for is the stale-name contract below**, and the tests
+   * are what read it: `tests/node/scratch.test.ts` asserts both arms and
    * `tests/browser/scratch-fork.test.ts` asserts the `true` at the layer the list drives this from.
    *
    * IDEMPOTENT, MIRRORING `SessionPool.unbind` AND `SessionRegistry.remove`: a guard every caller must
-   * write is a guard the callee should have. **THE MEMBERSHIP CHECK IS ALSO WHAT KEEPS A STALE NAME
-   * FROM THROWING** — `entryOf` below raises for an id the registry does not hold, and a caller that
-   * kept a buffer's name across the retire that spent it is exactly the caller `false` is the answer
-   * for. (That was justified by "most recompiles happen when no buffer exists at all" while a source
-   * keystroke was the caller; the stale-name case is what remains, and it was always the sharper one.)
+   * write is a guard the callee should have. **THE MEMBERSHIP CHECK STAYS, AND WHAT IT GUARDS AGAINST
+   * IS NOT WHAT IT USED TO GUARD AGAINST.** `entryOf` is not below any more — it is inside `cool`,
+   * behind `cool`'s own `state === undefined` guard, which
+   * answers `false` rather than throwing. Delete this check today and a stale name no longer throws: it
+   * falls through to `this.cool(id, home, slots)` (`false`, no record for `cool` to touch), then
+   * `this.#buffers.delete(id)` (a no-op on a key that is not present), and returns `true` — a caller
+   * holding a name that never existed, or was already spent, is told it just ended a buffer. The
+   * guard's job moved from SAFETY (stopping a throw) to CORRECTNESS (stopping a wrong `true`); it is
+   * exactly as necessary either way, and it answers for the same caller it always did — one that kept a
+   * buffer's name across the retire that spent it.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `retire`.
    */
   retire(id: SessionId, home: SessionId, slots: readonly Detachable[]): boolean {
     if (!this.#buffers.has(id)) return false
-    for (const slot of slots) {
-      if (slot.binding.session === id) slot.rebind(home)
-    }
-    // 'not compiled' IS THE REASON THE PANE READS FOR THE INSTANT BETWEEN THIS AND THE REBOUND
-    // SESSION'S NEXT FRAME — the same wording `main.ts` gives a source session with no program, and
-    // true here for the same reason: there is nothing behind this leg any more.
-    resetLegs(this.#reg.entryOf(id).legs, null, null, 'not compiled')
-    this.#reg.remove(id)
-    this.#pool.unbind(id)
+    this.cool(id, home, slots)
     this.#buffers.delete(id)
     return true
   }
@@ -512,43 +969,23 @@ export class ScratchBuffers {
    * A `no-session` reply naming a buffer: the diagnostics to report as a FAILED FORK, or `null` when
    * this buffer's own editor is the right place for them — CRITICAL finding, plan 5d-iii's ninth task.
    *
-   * **THIS LINE ENDED "…AND 5d-i DESIGN §4.1a's REMEDY MADE REAL RATHER THAN MERELY PROMISED", AND
-   * 5d-ii-c DECISION 2 TOOK THAT BACK.** §4.1a's remedy is "the pane keeps offering ✎ — the user can
-   * scrub to a smaller step and fork there", and it was the RETIRE below that delivered it, by putting
-   * the pane back on a session it was not stuck on. Reporting the reason is what survives; the way out
-   * moves to §4.4's header list, and the paragraph two below is where that debt is recorded.
-   *
    * **IT TAKES THE BUFFER THE REPLY NAMED, WHERE IT USED TO READ WHATEVER `retire` WOULD HAVE ENDED.**
-   * Its doc said "UNKEYED FOR THE SAME REASON `retire` IS, AND IT READS THE SAME BUFFER `retire`
-   * WOULD" — the most recently forked one. That reading was not merely imprecise, it was backwards for
-   * the case this method exists to serve: a fork that fails to build is answered by a `no-session` for
-   * a buffer with NO frame, and any buffer forked after it has one, so the newest reading looked at a
-   * healthy buffer, returned `null`, and left the pane stranded on the phantom — the CRITICAL finding
-   * this method was written to close, reopened by a second fork. The reply arrives with its session
-   * (`ScratchBuffersConfig.onReply` curries it in per buffer) and that is the buffer this answers for.
+   * The reply arrives with its session (`ScratchBuffersConfig.onReply` curries it in per buffer) and
+   * that is the buffer this answers for.
    *
-   * **AND THE NEXT TASK TOOK THE RETIRE AWAY, WHICH THE PARAGRAPH ABOVE PROMISED IN THESE WORDS**:
-   * *"WHAT DOES NOT MOVE IS WHEN THIS FIRES: Task 4 is where this arm stops retiring at all (decision 2:
-   * a buffer that failed to build is still a buffer), and doing that here would fold the key and the
-   * trigger back into one diff."* The key landed in one task and the trigger in the next; what remains
-   * below is the discriminator and the answer. `home: SessionId` and `slots: readonly Detachable[]` went
-   * with the call that used them — nothing here moves a pane or ends a session any more, so a signature
-   * that still asked for somewhere to send panes would be describing a job this method no longer has.
+   * **NOTHING HERE MOVES A PANE OR ENDS A SESSION**, which is why the signature carries neither
+   * `home: SessionId` nor `slots: readonly Detachable[]`: they went with the call that used them, and a
+   * signature that still asked for somewhere to send panes would be describing a job this method no
+   * longer has. What remains below is the discriminator and the answer.
    *
-   * **WHAT THE RETIRE WAS ALSO DOING, SAID PLAINLY RATHER THAN LEFT TO BE MISSED.** It terminated the
-   * phantom's worker, forgot the buffer, and rebound the pane back to `home` — and that rebind is what
-   * made `SessionEntry.detached` read `false` for that pane again, so `LambdaPane.#refreshDetach`
-   * offered `✎ fork` once more, which is 5d-i §4.1a's promised remedy actually happening. **The pane now stays
-   * on a buffer that will never produce a frame**, reading the `building…` placeholder `fork` seeded,
-   * with the reason on `#link-status` and no PANE-LOCAL way out. That is the same gap `compile.ts`'s
-   * `schedule` records for the recompile path, widened to cover every way a buffer can end up wedged:
-   * design §4.4 puts poison recovery in the header list precisely because a wedged buffer has to be
-   * reachable whether or not a pane is still showing it. **THAT LIST IS WIRED, AND THIS SENTENCE USED TO
-   * END "…until that list is wired there is no way to reclaim one at all".** The way out is one gesture
-   * away from any state: open `buffers` and retire the row, which rebinds this pane home and offers
-   * `✎ fork` again — the remedy 5d-i §4.1a promises, delivered from the header instead of from the pane
-   * that is stuck. `tests/browser/scratch-fork.test.ts` asserts exactly that sequence, on the line that
-   * used to assert the dead end.
+   * **THE PANE STAYS ON A BUFFER THAT WILL NEVER PRODUCE A FRAME**, reading the `building…` placeholder
+   * `fork` seeded, with the reason on `#link-status` and no PANE-LOCAL way out. That is the same gap
+   * `compile.ts`'s `schedule` records for the recompile path, widened to cover every way a buffer can
+   * end up wedged: design §4.4 puts poison recovery in the header list precisely because a wedged buffer
+   * has to be reachable whether or not a pane is still showing it. **THAT LIST IS WIRED**, so the way
+   * out is one gesture away from any state: open `buffers` and retire the row, which rebinds this pane
+   * home and offers `✎ fork` again — the remedy 5d-i §4.1a promises, delivered from the header instead
+   * of from the pane that is stuck. `tests/browser/scratch-fork.test.ts` asserts exactly that sequence.
    *
    * `null` FOR AN ID THAT IS NOT A LIVE BUFFER, which is the same answer the no-buffer case always
    * gave. A `no-session` for the SOURCE session never reaches this method (`replies.ts` routes source
@@ -577,21 +1014,16 @@ export class ScratchBuffers {
    * surface left; a buffer mid-edit has a mounted editor with a gutter built for exactly this. Reporting
    * a mid-edit parse failure as a failed FORK would also be a lie about which gesture failed.
    *
-   * **THE DISCRIMINATOR IS WHETHER THE λ LEG HAS EVER RECORDED A FRAME, AND ITS ARGUMENT CHANGED
-   * SHAPE WITH THE SINGLETON.** It used to run: `detach` posts a build only when the scratch does not
-   * already exist, so a session with no frame yet can only be mid-`detach`'s first and only build. The
-   * premise is gone — every fork posts a build — but the conclusion holds for a simpler reason: a fork
-   * posts exactly one build per buffer and posts it at creation, so a buffer with no frame yet has had
-   * nothing but that build addressed to it. A buffer that already holds a frame can only be
+   * **THE DISCRIMINATOR IS WHETHER THE λ LEG HAS EVER RECORDED A FRAME.** A fork posts exactly one
+   * build per buffer and posts it at creation, so a buffer with no frame yet has had nothing but that
+   * build addressed to it. A buffer that already holds a frame can only be
    * mid-`recompile`, because that is the only other message this class ever posts to an existing
    * buffer. The two cases are still exhaustive and mutually exclusive by construction, not by
    * inspecting which caller happened to trigger this reply.
    *
    * RETURNS THE DIAGNOSTICS ON THE PHANTOM PATH, so the caller has the reason to put on the surface
-   * built for it. **THAT SENTENCE OPENED "RETIRES AND RETURNS"**, and the clause it lost is the whole
-   * of this task: `retire` did the job (panes home, legs reset, registry and pool forgotten) and no
-   * longer runs, so what is handed back is a routing decision rather than a report on something that
-   * has already happened. `null` ON THE LIVE-EDIT PATH, where the caller's existing
+   * built for it — a routing decision rather than a report on something that has already happened.
+   * `null` ON THE LIVE-EDIT PATH, where the caller's existing
    * `setDiagnostics`-into-the-editor handling is exactly what 5d-i design §4.4 asks for and this method
    * has nothing to add to it. `null` ALSO WHEN THERE IS NO BUFFER AT ALL, where the singleton's
    * `entryOf` threw: there is no fork to report a failure for, and the caller's editor path is a no-op
@@ -602,9 +1034,47 @@ export class ScratchBuffers {
    * exactly the same — but the caller would then hold two things that must agree (which branch it is on,
    * and which diagnostics belong to it) where it now holds one. The parameter is what the answer is made
    * of, not decoration on a flag.
+   *
+   * **A COLD BUFFER REACHES THIS METHOD TOO, AND THE ARGUMENT THAT MAKES `recompile` SAFE FOR THE SAME
+   * SHAPE OF GUARD DOES NOT TRANSFER — 5d-ii-d review round 2, Finding 1.** `recompile`'s
+   * `if (!this.#buffers.has(id)) return false` followed immediately by `this.#reg.entryOf(id)` is safe
+   * because its only caller is reached through a pane's own binding (`slot.binding.session`), and the
+   * invariant `cool` maintains — a cold buffer has no panes bound to it — means no binding can name one
+   * (`recompile`'s own doc has the argument in full). This method's caller is not a binding at all:
+   * `replies.ts`'s `no-session` arm calls it from a WORKER REPLY, routed by `session` alone, and nothing
+   * about a reply's arrival is gated on any pane still pointing at the buffer it names.
+   *
+   * **THE RACE THAT PARAGRAPH DESCRIBES DOES NOT EXIST, AND THIS IS THE CORRECTION — whole-branch review
+   * before merge, finding 8.** **The HTML specification writes down what `Worker.terminate()` does with
+   * queued messages**: the *terminate a worker* algorithm, applied to a dedicated worker, empties the port
+   * message queue of the port the worker is entangled with — the PARENT side — after discarding the
+   * worker's own queued tasks and aborting its script. `cool` calls `#pool.unbind(id)`, which calls
+   * `held.port.terminate()` (`session-client.ts`'s `unbind`), synchronously, before it returns. So a
+   * reply for a cooled buffer cannot be dispatched, and the guard below is belt-and-braces after all.
+   *
+   * **WHICH IS WHY THIS FILE AND `replies.ts` ARE NOW CONSISTENT INSTEAD OF ONE ARM DEEP.** The same
+   * switch's `scratch-compiled` arm resolves `sessions.entryOf(session).legs` and its `lambda-frames` arm
+   * resolves `sessions.legOf({ session, leg: 'lambda' })`, and both throw for a session the registry no
+   * longer holds. If the race were real, those two were exposed to it exactly as this method is, and
+   * guarding one of three arms would have been the worst of both readings — a defence that reads as
+   * necessary while two identical exposures went unmentioned. It is not real, so neither of them needs a
+   * guard and this doc no longer claims one is load-bearing. `replies.ts`'s own arms carry the same fact
+   * where a reader meets them.
+   *
+   * **THE CHECK STAYS ANYWAY, AND ON ITS OWN TERMS RATHER THAN THE RACE'S.** It is one field read on a
+   * path that already does a map lookup, it makes this method total over every `BufferState` rather than
+   * over the warm ones its caller happens to produce, and the answer it gives is the one this method
+   * already gives for an id that was never a buffer: `null`, meaning "there is nothing here to report a
+   * fork failure for." What it must NOT be read as is a guard against a state the app can reach — the
+   * fake-port tier records `terminate()` as a COUNT rather than as message-discarding (`FakePort.terminated`,
+   * `tests/node/scratch.test.ts`), so no node test can distinguish the two readings, and only a real
+   * worker ever could. Nothing in `tests/browser/` aims at it, because there is nothing there to aim at.
+   *
+   * For what this doc used to claim and why it changed, see the history note under `noSessionReply`.
    */
   noSessionReply(id: SessionId, diagnostics: readonly Diagnostic[]): readonly Diagnostic[] | null {
-    if (!this.#buffers.has(id)) return null
+    const state = this.#buffers.get(id)
+    if (state === undefined || !state.warm) return null
     const leg = this.#reg.entryOf(id).legs.lambda
     if (leg !== undefined && leg.hist.current !== undefined) return null
     return diagnostics

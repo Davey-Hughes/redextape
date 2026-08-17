@@ -7,10 +7,18 @@ export type Dir = 'row' | 'column'
  *
  * A LEAF CARRIES A `PaneKind`, NOT A `Leg`, AND NOT A SESSION. `'source'` is not a `Leg` — the source
  * pane renders an editor rather than a leg's frames — so a `Leg`-typed field could not name it. The
- * session is absent because no binding is persistable (design §3.3: no scratch survives a reload, so a
- * stored binding has exactly one value that could ever resolve) and because the runtime pairing lives
- * in `panes.ts`, keyed by `LeafId`. That absence is what keeps this module free of `SessionRegistry`
- * and therefore testable as a value.
+ * session is absent because the runtime pairing lives in `panes.ts`, keyed by `LeafId`, and that
+ * absence is what keeps this module free of `SessionRegistry` and therefore testable as a value.
+ *
+ * **THE OTHER HALF OF THAT SENTENCE IS SPENT, AND THE CONCLUSION SURVIVES IT.** It read "no binding is
+ * persistable (design §3.3: no scratch survives a reload, so a stored binding has exactly one value
+ * that could ever resolve)". 5d-ii-d makes scratch buffers survive a reload, so a stored binding now
+ * has as many resolvable values as there are buffers — but it still does not belong HERE. A binding is
+ * meaningless without the buffer it names, so the two are persisted together under
+ * `redextape.buffers` (`buffers-store.ts`'s `PersistedBuffers`, design §4.1): "this key is absent or
+ * garbage" then degrades to no bindings at all rather than to a tree full of names nothing can
+ * resolve, and no reconciliation pass has to exist. `redextape.layout` stays at `version: 1` because
+ * this shape did not change — which is the practical dividend of having kept the session out of it.
  *
  * EVERY OPERATION RETURNS A NEW TREE. Nothing here mutates its argument — the caller holds one tree
  * and replaces it, which is what makes an undo or a persistence write a matter of keeping the old
@@ -290,8 +298,8 @@ export function resize(root: LayoutNode, path: number[], index: number, delta: n
 /**
  * The `localStorage` key the layout is stored under.
  *
- * NAMESPACED, for the reason `appearance.ts:10-12` gives: `localStorage` is scoped to an origin and
- * not to an app, so every dev server on the same host shares one store.
+ * NAMESPACED, for the reason `appearance.ts`'s `STORAGE_KEY` gives: `localStorage` is scoped to an
+ * origin and not to an app, so every dev server on the same host shares one store.
  */
 export const LAYOUT_STORAGE_KEY = 'redextape.layout'
 

@@ -52,11 +52,23 @@ export function createTransport(deps: {
    * exists, so the count is the one thing an edit cannot change.
    */
   onBuffersChanged: () => void
+  /**
+   * A pane has moved between sessions — the stored `bindings` are stale until this returns.
+   *
+   * **THE ONE MOMENT THE PAYLOAD CHANGES WITHOUT ANY BUFFER CHANGING**, which is why it is a second
+   * dependency and not a second caller of `onBuffersChanged` above. That one is about the header's
+   * COUNT, and a rebind moves no count: it takes a pane off one session and puts it on another, so the
+   * `bindings` half of `PersistedBuffers` is different and the `buffers` half is identical. Routing a
+   * rebind through `onBuffersChanged` would repaint the header for a number that did not move, and
+   * naming this separately is what keeps "what changed" readable at the call site (`main.ts`'s
+   * `persistBuffers` / `refreshBuffers` pair).
+   */
+  onBuffersPersist: () => void
 }): {
   play<T>(leg: LegState<T>): void
   events<K extends Leg>(slot: PaneSlot<K>): PaneEvents
 } {
-  const { sessions, scratchpad, draw, linkWiring, onBuffersChanged } = deps
+  const { sessions, scratchpad, draw, linkWiring, onBuffersChanged, onBuffersPersist } = deps
 
   /**
    * Playback is an interval over recorded frames and stops at the frontier. It never asks the worker
@@ -182,6 +194,10 @@ export function createTransport(deps: {
         )
       }
       slot.rebind(binding.session)
+      // THE STORED BINDINGS ARE READ OFF THE PANES, so the write has to happen after the slot moves and
+      // not before (`main.ts`'s `persistBuffers`). AFTER `slot.rebind` AND BEFORE `draw()` for no reason
+      // beyond reading in the order the two facts become true; neither call reads the other's work.
+      onBuffersPersist()
       draw()
     },
     // THE FORK — design §4.3, and the handler that finally puts a second session in the registry
@@ -228,13 +244,16 @@ export function createTransport(deps: {
             const wiring = linkWiring()
             if (wiring.index === null || wiring.index.lambdaText === '') return
             // **THE CAP'S REFUSAL IS AN ANSWER TO THE USER AND IS CAUGHT HERE** (design §4.5, and the
-            // Critical this task's review raised). `ScratchBuffers.fork` refuses at `MAX_BUFFERS`
+            // Critical this task's review raised). `ScratchBuffers.fork` refuses at `MAX_WARM_BUFFERS`
             // rather than evicting, and this click listener is the last frame before the raw DOM
             // dispatch (`pane-chrome.ts`'s `detachButton`) — there is no `window` error handler in
             // `src/` behind it, so an uncaught throw here would reach the console and nothing else.
             // `#link-status` is where it goes instead, through the same `forkFailed` field `replies.ts`
-            // uses for the sibling refusal (a fork whose BUILD fails) and `link-status.ts` renders as
-            // `fork failed — …`.
+            // uses for the sibling refusal (a fork whose BUILD fails). `e.message` already reads
+            // `fork failed — …` by the time it gets here — `scratch.ts`'s `fork` passes that prefix to
+            // `#refuseAtCap` itself (5d-ii-d review round 2, Finding 3: `link-status.ts` used to add it
+            // for every caller of `setForkFailed`, which was wrong for the two that are not forks) — so
+            // this handler hands the message through unchanged, same as `replies.ts` does for its own.
             //
             // **`BufferCapReached` AND NOT A BARE `catch`.** The other throws reachable from `fork` are
             // `SessionRegistry.add`'s and `SessionPool.bind`'s guards over their own invariants; those
@@ -293,6 +312,36 @@ export function createTransport(deps: {
           // keystroke — its comment states the reason: `hist` has not changed, so repainting is waste.
           editScratch: (src: string) => {
             scratchpad.recompile(slot.binding.session, src)
+          },
+          // THE COLLAPSE REPORT — 5d-ii-d T9, design §4.7. LAMBDA-ONLY, LIKE `detach` AND `editScratch`
+          // BESIDE IT: `PaneEvents.collapse`'s own doc states the rule ("a handler it can never fire is
+          // a parameter pretending to be a capability"), and `TmPane` never builds a `collapseButton` to
+          // fire it. THE SESSION IS ALREADY IN SCOPE HERE, which is the whole reason this lives in
+          // `transport.ts` rather than behind a callback threaded through `pane-host.ts` the way
+          // `detach`/`showEditor` are — those two need a `LeafId` this file does not have (`editorOwner`
+          // is keyed by one); this handler needs nothing beyond `slot.binding.session`, which every
+          // other handler above already resolves the same way.
+          //
+          // **`slot.binding.session` USED TO NOT BE SAFE THE WAY "EVERY OTHER HANDLER" IMPLIES — THE SAME
+          // GAP `editScratch` USED TO HAVE, NOW CLOSED AT ITS SOURCE.** `editor-custody.ts`'s
+          // `reconcileEditors` doc used to record a live gap: `pane-host.ts`'s same-leg `rebind` arm did
+          // not hand a scratch→scratch rebind's outgoing editor to custody, so a pane could go on showing
+          // buffer A's live editor above buffer B's frames once its binding had moved to B, and
+          // `editScratch` — read at edit time, exactly as this handler reads at click time — would write
+          // THROUGH that stale editor to B rather than to A. `collapse` resolves the buffer the identical
+          // way and shared the same shape: clicking collapse in that window would have recorded the flag
+          // against B while the editor on screen was A's. **Fixed where this paragraph always said it
+          // belonged** — `pane-host.ts`'s rebind wrapper now takes the outgoing editor into custody before
+          // the binding moves, so by the time either handler here reads `slot.binding.session`, the
+          // editor actually mounted on the pane agrees with it. Neither handler needed to change; the
+          // stale binding they used to inherit is what stopped being possible.
+          collapse: (collapsed: boolean) => {
+            // NO `draw()`. The class toggle already happened in the pane — `collapseButton`'s own
+            // callback performs it before this ever runs — and nothing else on screen depends on this
+            // flag. `onBuffersPersist()` is the entire consequence: Task 5's writer, called here for the
+            // same reason `rebind` above calls it after a `slot.rebind`.
+            scratchpad.setCollapsed(slot.binding.session, collapsed)
+            onBuffersPersist()
           },
         }
       : {}),

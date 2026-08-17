@@ -123,6 +123,11 @@ function driver(entry: SessionEntry) {
       drawn += 1
     },
     editorHome: () => undefined,
+    // NO SCRATCH REPLY REACHES THIS DRIVER — every test built on it sends `compiled`, `error` or
+    // `worker-error` through `onReply`, and `onBuffersPersist` is called from the `scratch-compiled`
+    // arm of the OTHER switch. A no-op rather than a throw, because "this driver does not exercise
+    // that arm" is a fact about the fixture and not a claim any test here is making.
+    onBuffersPersist: () => undefined,
   })
   return { replies, dispatched, indexed, drawn: () => drawn }
 }
@@ -187,11 +192,19 @@ describe('a session retains its last compiled machine', () => {
   })
 })
 
-/** A `PoolPort` with no thread behind it, recording what a `retire` would have done to it. */
-function fakePort(): PoolPort & { terminated: number } {
-  const p = {
+/**
+ * A `PoolPort` with no thread behind it, recording what was posted and what a `retire` would have done
+ * to it.
+ *
+ * `sent` ARRIVED WITH TASK 3, matching `scratch.test.ts`'s own `FakePort` rather than inventing a
+ * second shape for the same recording — this file's `scratch-compiled` test needs to read back a
+ * post the same way that file's `warm posts the buffer text at step 0` does.
+ */
+function fakePort(): PoolPort & { sent: RunRequest[]; terminated: number } {
+  const p: PoolPort & { sent: RunRequest[]; terminated: number } = {
+    sent: [],
     terminated: 0,
-    postMessage: (_m: RunRequest) => undefined,
+    postMessage: (m: RunRequest) => p.sent.push(m),
     addEventListener: (_t: 'message', _h: (e: { data: RunReply }) => void) => undefined,
     terminate: () => {
       p.terminated += 1
@@ -229,13 +242,17 @@ const noSession = (diagnostics: Diagnostic[]): RunReply => ({ kind: 'no-session'
  */
 function scratchDriver() {
   const reg = new SessionRegistry()
-  const ports: (PoolPort & { terminated: number })[] = []
+  const ports: (PoolPort & { sent: RunRequest[]; terminated: number })[] = []
   const pool = new SessionPool(() => {
     const p = fakePort()
     ports.push(p)
     return p
   })
   let forkFailed: string | null = null
+  // COUNTED RATHER THAN STUBBED OUT, because the text of record and the write of it are two claims:
+  // `setText` puts a term in memory and only this callback puts it where a reload can find it, and the
+  // arm below can satisfy the first while dropping the second (5d-ii-d T5).
+  let persists = 0
   const buffers = new ScratchBuffers({
     registry: reg,
     pool,
@@ -272,8 +289,29 @@ function scratchDriver() {
     links,
     draw: () => undefined,
     editorHome: () => undefined,
+    onBuffersPersist: () => {
+      persists += 1
+    },
   })
-  return { reg, pool, buffers, ports, replies, slot, gutter, forkFailed: () => forkFailed }
+  // THE MOST RECENT PORT'S MOST RECENT `lambda-scratch` REQUEST — `scratch.test.ts`'s `harness()`
+  // defines the identical helper under the identical name, for the identical reason: `cool`/`warm`'s
+  // round trip opens a NEW port, so "most recent port" is what "the build `warm` just posted" means.
+  const lastScratchPost = (): { src: string; step: number } | undefined => {
+    const req = ports.at(-1)?.sent.at(-1)
+    return req?.kind === 'lambda-scratch' ? { src: req.src, step: req.step } : undefined
+  }
+  return {
+    reg,
+    pool,
+    buffers,
+    ports,
+    replies,
+    slot,
+    gutter,
+    forkFailed: () => forkFailed,
+    lastScratchPost,
+    persists: () => persists,
+  }
 }
 
 const lambdaFrame = (text: string): LambdaState => ({
@@ -380,5 +418,62 @@ describe('a poisoned buffer survives its own no-session reply', () => {
     expect(forkFailed()).toBeNull()
     expect(gutter).toEqual([[DIAGNOSTIC]])
     expect(buffers.list().map((b) => b.id)).toContain(id)
+  })
+})
+
+/**
+ * **THE FORK'S WRITER OF THE TEXT OF RECORD** (design §4.3) — `scratch.test.ts`'s `recompile records
+ * the text it posts` covers the OTHER writer, the user's own typed text. This is the worker's, and it
+ * is the only one that can record a term for a buffer whose editor never mounts at all (a fork whose
+ * build failed never reaches `setEditor`).
+ *
+ * READ BACK THE SAME WAY, because there is no `textOf` accessor: cool the buffer, clear the recorded
+ * posts, warm it again, and check what the rebuild posted.
+ */
+describe('onScratchReply records a buffer’s text from its own scratch-compiled reply', () => {
+  it('records the built term as the buffer’s text and asks for it to be persisted', () => {
+    const { buffers, ports, replies, slot, lastScratchPost, persists } = scratchDriver()
+    const id = buffers.fork(slot, 'seed', 0)
+
+    replies.onScratchReply(id, {
+      kind: 'scratch-compiled',
+      gen: 1,
+      lambda: { available: true, reason: '', node: null, run: null },
+      text: 'built-term',
+    })
+
+    expect(buffers.cool(id, SOURCE, [])).toBe(true)
+    ports.length = 0
+    buffers.warm(id)
+
+    expect(lastScratchPost()).toEqual({ src: 'built-term', step: 0 })
+    // **THE WRITE IS A SECOND CLAIM FROM THE RECORDING** (5d-ii-d T5, design §4.9). `setText` alone
+    // leaves the term in memory: this is the only moment a FORKED buffer's term exists at all, and
+    // without this call it would reach `localStorage` only if the user later typed into it. An
+    // implementation that kept the `setText` and dropped this line passes every other assertion here.
+    expect(persists()).toBe(1)
+  })
+
+  /**
+   * THE `null` ARM — a build that produced no scratch (design §4.1a: unparseable text, or a term over
+   * `LAMBDA_BYTE_BUDGET`). `setText` is skipped for it, so there is nothing new for a write to carry,
+   * and an unconditional persist here would be a `localStorage` round trip per failed fork.
+   *
+   * IT ALSO PINS WHICH GUARD THE WRITE SITS UNDER. `text: null` is the one reachable reply that
+   * distinguishes "persist whenever this arm runs" from "persist when the text changed"; both pass the
+   * test above.
+   */
+  it('does not ask for a write when the build produced no scratch', () => {
+    const { buffers, replies, slot, persists } = scratchDriver()
+    const id = buffers.fork(slot, 'not a term (((', 0)
+
+    replies.onScratchReply(id, {
+      kind: 'scratch-compiled',
+      gen: 1,
+      lambda: { available: false, reason: 'no scratch', node: null, run: null },
+      text: null,
+    })
+
+    expect(persists()).toBe(0)
   })
 })

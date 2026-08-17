@@ -1,7 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { MAX_BUFFERS } from '../../src/scratch'
+import { MAX_WARM_BUFFERS } from '../../src/scratch'
 
 /**
  * **THE CAP'S REFUSAL, ON THE SURFACE A USER READS IT FROM** — design §4.5's second clause, which is
@@ -17,7 +16,8 @@ import { MAX_BUFFERS } from '../../src/scratch'
  * renders it**, and only this tier can tell those apart.
  *
  * **IT DRIVES THE CAP THROUGH THE APP, WHICH IS WHY IT IS ITS OWN FILE.** Reaching the refusal means
- * `MAX_BUFFERS` real forks on one page — nine live workers by the end — and every sibling browser file
+ * `MAX_WARM_BUFFERS` real forks on one page — `${MAX_WARM_BUFFERS + 1}` live workers by the end (`MAX_WARM_BUFFERS` scratch
+ * buffers plus the one source session every page always has) — and every sibling browser file
  * mounts once and shares that page across its tests, so this in any of them would leave every later
  * test running against a page at the cap. A file of its own gets a page of its own.
  *
@@ -64,7 +64,7 @@ const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
  * `!this.#detached` gate), so reaching the cap means alternating a fork with this. It is the same
  * gesture `two-lambda-panes.test.ts`'s reset uses and the same one a user has: the binding selector.
  * The buffer left behind stays live — nothing ends a buffer implicitly (decision 2) — which is exactly
- * how eight of them accumulate.
+ * how `MAX_WARM_BUFFERS` of them accumulate.
  */
 async function backToSource(): Promise<void> {
   const select = document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')
@@ -76,11 +76,11 @@ async function backToSource(): Promise<void> {
 
 describe('the buffer cap, from the control that hits it', () => {
   // ONE MOUNT FOR THE FILE, the idiom every sibling states: ES module imports are cached, so `main()`
-  // runs once per page and Vitest gives each test FILE its own page. The layout key is shared across the
-  // whole browser tier and `main()` reads it once while resolving `let tree`, so it is cleared before
-  // the import rather than in a hook that would run after it.
+  // runs once per page and Vitest gives each test FILE its own page.
   beforeAll(async () => {
-    localStorage.removeItem(LAYOUT_STORAGE_KEY)
+    // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
+    // before this file's own module body runs — this file is one of the two the old clear-on-mount
+    // mitigation still let through (see that file's doc). Neither key needs clearing here any more.
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
@@ -94,7 +94,7 @@ describe('the buffer cap, from the control that hits it', () => {
 
   /**
    * THE WHOLE ARC IN ONE `it`, for `scratch-app.test.ts`'s reason: the states are ordered — there is no
-   * cap to hit until `MAX_BUFFERS` buffers exist, and nothing to reclaim until the refusal has happened
+   * cap to hit until `MAX_WARM_BUFFERS` buffers exist, and nothing to reclaim until the refusal has happened
    * — and one mount serves the file, so splitting them would make each stage depend on the previous
    * having run rather than on what it asserts.
    */
@@ -107,7 +107,7 @@ describe('the buffer cap, from the control that hits it', () => {
     // STAGE 1 — fill to the cap through the control, alternating with the selector that makes the pane
     // forkable again. The count is read from the header after every one: a fork that silently did
     // nothing would leave the loop asserting against a page it never changed.
-    for (let n = 1; n <= MAX_BUFFERS; n++) {
+    for (let n = 1; n <= MAX_WARM_BUFFERS; n++) {
       forkButton()?.click()
       expect(buffersButton()?.textContent).toBe(`buffers ${n} ▾`)
       expect(heading()).toContain('[detached]')
@@ -122,10 +122,10 @@ describe('the buffer cap, from the control that hits it', () => {
     forkButton()?.click()
 
     expect(statusLine()).toContain('fork failed — ')
-    expect(statusLine()).toContain(`all ${MAX_BUFFERS} scratch buffers are live`)
-    expect(statusLine()).toContain('retire one from the buffers list in the header')
+    expect(statusLine()).toContain(`all ${MAX_WARM_BUFFERS} scratch buffers are live`)
+    expect(statusLine()).toContain('retire or cool one from the buffers list in the header')
     // **AND IT DOES NOT ENUMERATE THE BUFFERS, WHICH IS A REVERSAL — these two lines read
-    // `toContain('scratch 1')` and ``toContain(`scratch ${MAX_BUFFERS}`)``.** The message named all eight
+    // `toContain('scratch 1')` and ``toContain(`scratch ${MAX_WARM_BUFFERS}`)``.** The message named all eight
     // on the argument that it should give "an account of what is using the room". Read on a real page,
     // that account is sixty characters of `scratch 1, scratch 2, …` — a counter's output, identical in
     // shape for every buffer — standing between the diagnosis and the one actionable clause, on a
@@ -136,13 +136,13 @@ describe('the buffer cap, from the control that hits it', () => {
     // ASSERTED AS AN ABSENCE, because a message that merely reordered its clauses would satisfy the
     // three lines above and leave the noise exactly where it was.
     expect(statusLine()).not.toContain('scratch 1')
-    expect(statusLine()).not.toContain(`scratch ${MAX_BUFFERS}`)
+    expect(statusLine()).not.toContain(`scratch ${MAX_WARM_BUFFERS}`)
 
     // STAGE 3 — NOTHING WAS EVICTED AND THE PANE DID NOT MOVE, read off the two surfaces a user has.
     // An implementation that made room by retiring the oldest buffer would satisfy STAGE 2 exactly and
     // fail here, which is the discriminator design §4.5 turns on: an eviction is decision 2's rule
     // broken under the name of a limit.
-    expect(buffersButton()?.textContent).toBe(`buffers ${MAX_BUFFERS} ▾`)
+    expect(buffersButton()?.textContent).toBe(`buffers ${MAX_WARM_BUFFERS} ▾`)
     expect(heading()).not.toContain('[detached]')
     expect(forkButton()).not.toBeNull()
 
@@ -154,15 +154,15 @@ describe('the buffer cap, from the control that hits it', () => {
     // row here is `scratch N — orphan` on its first line and identical to its neighbours; the second
     // line is the buffer's own term, and it is the only thing on this surface a user could pick BY.
     // Asserted here rather than only in `buffer-list.test.ts` because that file's fixture supplies the
-    // terms and this one gets them from eight real workers through `main.ts`'s join.
+    // terms and this one gets them from `MAX_WARM_BUFFERS` real workers through `main.ts`'s join.
     const terms = [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-term')]
-    expect(terms).toHaveLength(MAX_BUFFERS)
+    expect(terms).toHaveLength(MAX_WARM_BUFFERS)
     for (const t of terms) expect(t.textContent ?? '').not.toBe('')
 
     const row = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label="retire scratch 1"]')
     if (row === null) throw new Error('the buffer the refusal named has no row in the header list')
     row.click()
-    expect(buffersButton()?.textContent).toBe(`buffers ${MAX_BUFFERS - 1} ▾`)
+    expect(buffersButton()?.textContent).toBe(`buffers ${MAX_WARM_BUFFERS - 1} ▾`)
     // **AND THE REFUSAL IS GONE THE MOMENT ITS ADVICE IS TAKEN.** It used to survive the retire and clear
     // only on the next successful fork, so the page said "all 8 scratch buffers are live" while the
     // header above it read `buffers 7 ▾` — two surfaces disagreeing about the one number the sentence is
@@ -171,18 +171,18 @@ describe('the buffer cap, from the control that hits it', () => {
     expect(statusLine()).not.toContain('fork failed')
 
     // STAGE 5 — the fork the cap refused now works, and **the refusal clears with it**. The clear lives
-    // on `transport.ts`'s success path; deleting it leaves `fork failed — all 8 …` sitting on the status
-    // line of a page that has just forked successfully, which is this line's failure.
+    // on `transport.ts`'s success path; deleting it leaves `fork failed — all ${MAX_WARM_BUFFERS} …`
+    // sitting on the status line of a page that has just forked successfully, which is this line's failure.
     forkButton()?.click()
 
     expect(statusLine()).not.toContain('fork failed')
     expect(heading()).toContain('[detached]')
-    expect(buffersButton()?.textContent).toBe(`buffers ${MAX_BUFFERS} ▾`)
-    // THE NAME IS NOT REISSUED — `scratch 1` was retired and this is `scratch 9`, which is
+    expect(buffersButton()?.textContent).toBe(`buffers ${MAX_WARM_BUFFERS} ▾`)
+    // THE NAME IS NOT REISSUED — `scratch 1` was retired and this is `scratch ${MAX_WARM_BUFFERS + 1}`, which is
     // `ScratchBuffers.#minted`'s contract seen from the app. The λ group is where a buffer's label
     // becomes user-visible text.
     const bound = document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')?.value
-    expect(bound).toBe(optionValue('lambda', `scratch-${MAX_BUFFERS + 1}`))
+    expect(bound).toBe(optionValue('lambda', `scratch-${MAX_WARM_BUFFERS + 1}`))
 
     // STAGE 6 — **THE REFUSAL SURVIVES THE SOURCE PANE, WHICH IS DEFERRED-A11Y ITEM 12.** `#link-status`
     // used to be appended into the source pane's host, and that host ships a close control:
@@ -206,7 +206,7 @@ describe('the buffer cap, from the control that hits it', () => {
     forkButton()?.click()
 
     expect(statusLine()).toContain('fork failed — ')
-    expect(statusLine()).toContain(`all ${MAX_BUFFERS} scratch buffers are live`)
-    expect(buffersButton()?.textContent).toBe(`buffers ${MAX_BUFFERS} ▾`)
+    expect(statusLine()).toContain(`all ${MAX_WARM_BUFFERS} scratch buffers are live`)
+    expect(buffersButton()?.textContent).toBe(`buffers ${MAX_WARM_BUFFERS} ▾`)
   })
 })

@@ -70,11 +70,10 @@ const splitRow = (leaf: string): void => {
 }
 
 // ONE MOUNT FOR THE FILE, THE SAME REASON EVERY SIBLING FILE GIVES: ES module imports are cached, so
-// `main()` runs once per page and Vitest gives each test FILE its own page. `localStorage` is cleared
-// BEFORE the mount, not after — `main()` reads it exactly once, synchronously, while resolving `let
-// tree`, so anything written here after that read would never be seen.
+// `main()` runs once per page and Vitest gives each test FILE its own page. Neither storage key needs
+// clearing before the mount any more — each browser test file gets its own in-memory `Storage`, installed
+// in `tests/browser/setup.ts` before this file's own module body runs; see that file's doc for why.
 beforeAll(async () => {
-  localStorage.removeItem(LAYOUT_STORAGE_KEY)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
 })

@@ -3,7 +3,7 @@ import type { ControlState } from '../../src/controls'
 import { History } from '../../src/history'
 import type { LinkWiring } from '../../src/link-wiring'
 import type { Leg, RunReply, RunRequest } from '../../src/protocol'
-import { BufferCapReached, type ScratchBuffers } from '../../src/scratch'
+import { BufferCapReached, MAX_WARM_BUFFERS, type ScratchBuffers } from '../../src/scratch'
 import type { ClientPort, SessionId } from '../../src/session-client'
 import { SessionClient } from '../../src/session-client'
 import type { Binding, LegState, PaneOption, PaneView, SessionEntry } from '../../src/sessions'
@@ -295,8 +295,14 @@ describe('PaneSlot', () => {
       onBuffersChanged: () => {
         throw new Error('a rebind must not report a change to the buffer count')
       },
+      // COUNTED WHERE `onBuffersChanged` THROWS, AND THE PAIR IS THE WHOLE DISTINCTION 5d-ii-d's T5
+      // added a second dependency for: a rebind changes no buffer and therefore no COUNT, while the
+      // stored `bindings` map is exactly what it does change. One of these two must fire and the other
+      // must not, and only asserting both says so.
+      onBuffersPersist: () => persists++,
     })
     let draws = 0
+    let persists = 0
 
     const lambda = new PaneSlot('lambda', 'source')
     transport.events(lambda).rebind({ leg: 'lambda', session: 'lambda-scratch' })
@@ -305,6 +311,11 @@ describe('PaneSlot', () => {
     // claims, and it was the second one the Critical broke.
     expect(lambda.resolve(reg).hist.current?.text).toBe('from scratch')
     expect(draws).toBe(1)
+    // THE STORED BINDINGS FOLLOWED THE SLOT. `main.ts`'s `persistBuffers` reads them off `panes.all()`
+    // at write time, so a rebind that moved the slot without asking for a write would leave
+    // `localStorage` naming the session this pane was on BEFORE the pick — and the next reload would
+    // undo the gesture with nothing on screen to say so.
+    expect(persists).toBe(1)
 
     // THE CROSS-LEG PICK, WHICH THIS LAYER REFUSES TO ANSWER. The exact pick that produced the
     // Critical: the session half is λ-only, so projecting it onto a TM slot mints the binding `legOf`
@@ -323,6 +334,10 @@ describe('PaneSlot', () => {
     // rule the old guard followed: that rule was for a decline a user could reach, and this is a
     // wiring bug no user can.
     expect(draws).toBe(1)
+    // AND NO WRITE ON THE REFUSED PICK EITHER, for the reason the slot did not move: the throw is
+    // ahead of `slot.rebind`, so there is nothing new to record and a write here would persist the
+    // state a wiring bug tried to reach.
+    expect(persists).toBe(1)
   })
 
   /**
@@ -375,6 +390,12 @@ describe('PaneSlot', () => {
           },
         }) as unknown as LinkWiring,
       onBuffersChanged: () => buffersChanged++,
+      // A THROW, FOR THE REASON THE TWO CASTS ABOVE ARE CASTS: `detach` is not a rebind, and the fork
+      // it performs persists through `onBuffersChanged` reaching `main.ts`'s `refreshBuffers`. A
+      // `detach` that wrote storage itself would be a second writer for one gesture, and this says so.
+      onBuffersPersist: () => {
+        throw new Error('a fork must not persist through the rebind dependency')
+      },
     })
 
     const slot = new PaneSlot('lambda', 'source')
@@ -391,9 +412,25 @@ describe('PaneSlot', () => {
 
     // THE REFUSAL, THROUGH THE SAME HANDLER — the contrast that makes the assertions above about the
     // `instanceof` rather than about there being no catch.
-    thrown = new BufferCapReached('all 8 scratch buffers are live; retire one')
+    // **BUILT FROM `MAX_WARM_BUFFERS` AND THE REAL WORDING, WHERE THIS USED TO HAND-SPELL A MESSAGE FROM
+    // TWO RENAMES AGO — whole-branch review before merge, finding 4.** It read
+    // `new BufferCapReached('all 8 scratch buffers are live; retire one')`: the cap is
+    // `MAX_WARM_BUFFERS` and the sentence `ScratchBuffers.#refuseAtCap` actually raises ends "retire or
+    // cool one from the buffers list in the header to make room". Nothing failed, because the assertion
+    // below looked for `'retire one'` and that survived as a SUBSTRING of `'retire or cool one'` — by
+    // luck of wording, not by design. Task 8's rename sweep was `rg -l MAX_BUFFERS`, which a
+    // hand-spelled string cannot match, so a fixture claiming to be the app's own message drifted
+    // silently past the commit that changed it.
+    //
+    // THE ASSERTION MOVES TO `'retire or cool one'` WITH IT, so a future wording change breaks this test
+    // instead of quietly passing on a shorter prefix of the old one. What this test is about is
+    // unchanged: the `instanceof` branch in `transport.ts`'s `detach` reports a `BufferCapReached`
+    // rather than re-throwing it, and the message reaches `forkFailed` intact.
+    thrown = new BufferCapReached(
+      `all ${MAX_WARM_BUFFERS} scratch buffers are live; retire or cool one from the buffers list in the header to make room`,
+    )
     expect(() => events.detach?.(0)).not.toThrow()
-    expect(forkFailed).toContain('retire one')
+    expect(forkFailed).toContain('retire or cool one')
     // THE STATUS LINE IS THE ONE THING THAT CHANGED, so a draw and no buffer-count report.
     expect(draws).toBe(1)
     expect(buffersChanged).toBe(0)
