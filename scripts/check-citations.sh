@@ -91,9 +91,19 @@ set -euo pipefail
 # not a pointer, and **the escape hatch cannot reach it**: that directive must be the file's first line
 # and BuildKit reads everything after the `=` as the image reference, so appending a marker would break
 # the build rather than excuse the line. So the discrimination is structural — the character before
-# `Dockerfile` must not be a path or word character, which an image reference's `/` always is and a
-# citation's `(`, space or line start never is. The roadmap said this gate's false-positive rate was
+# `Dockerfile` must not be a path or word character, which a NAMESPACED image reference's `/` is and a
+# citation's `(`, space or line start is not. The roadmap said this gate's false-positive rate was
 # unmeasured because the tree held no legitimate use of the form. It holds one.
+#
+# **THAT GUARD IS NARROWER THAN ITS FIRST WORDING CLAIMED, AND THE MEASUREMENT IS HERE RATHER THAN THE
+# CLAIM.** It read "which an image reference's `/` ALWAYS is", and an unnamespaced Docker Hub reference
+# has no slash at all. Measured against the shipped pattern: `# syntax=docker/dockerfile:1` passes, and
+# both `# syntax=dockerfile:<tag>` and `FROM dockerfile:<tag>` are FLAGGED — written with a placeholder
+# tag here because the real digits made THIS COMMENT fail the scan, which is the same reason the header
+# above may hold no real citation. Neither form appears in this repo
+# and the real BuildKit frontend is `docker/dockerfile`, so nothing here fires — but the guard covers
+# the namespaced case only. **The residue fails LOUD**, which is the direction to be wrong in: an
+# unnamespaced reference stops a commit and gets read, where a missed citation would not.
 #
 # **WHAT IS STILL UNCOVERED, STATED HERE RATHER THAN LEFT TO BE FOUND THE SAME WAY.** A `Dockerfile`
 # citation written with a path prefix, which the guard above cannot keep apart from an image reference
@@ -394,7 +404,14 @@ while IFS= read -r -d '' f; do
     # shape this gate bans in a file — and the distinction is §4.2's, not an inconsistency. A pointer
     # written into a tracked file has to stay true; a line of terminal output is an observation of one
     # run against one tree, and it is never a tracked file.
-    tokens=$(printf '%s\n' "$hit" | { LC_ALL=C grep -a -oEi "$CITATION_RE" || true; } | tr '\n' ' ')
+    # **THE `Dockerfile` ALTERNATIVE'S GUARD IS CONSUMING, SO `-o` HANDS BACK THE CHARACTER BEFORE THE
+    # CITATION AS WELL.** Unstripped, this printed `cites =dockerfile:<tag>` and `cites  dockerfile:<tag>` —
+    # misreporting what was found, in the message whose whole job is to name it (placeholder tags again —
+    # the literal examples tripped the scan). The class is exactly
+    # one character and always one of the guard's own exclusion set, so one `sed` removes it; for every
+    # other alternative the match already starts on a citation character and the strip is a no-op.
+    tokens=$(printf '%s\n' "$hit" | { LC_ALL=C grep -a -oEi "$CITATION_RE" || true; } \
+      | LC_ALL=C sed -E 's|^[^/A-Za-z0-9_.-]||' | tr '\n' ' ')
     printf 'error: %s:%s: cites %sby line number — name the symbol instead\n' \
       "$f" "${hit%%:*}" "$tokens" >&2
     bad=1

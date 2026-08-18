@@ -992,9 +992,9 @@ fn tm_check() {
     // quoted sentence's own first line, in `TmCursor`'s struct doc, when the λ-hang measurement
     // apparatus (#1) wrote it. This conversion found line 112 holding a line of
     // `LambdaCursor::depth_capped`'s doc — and that doc is ALSO about telling two producers of
-    // `HitCap` apart, which is exactly why it would have
-    // read as confirmation. It is the wrong pair: the λ depth guard against the λ step cap, where this
-    // sentence is about the TM step cap against the TM live-cell cap.
+    // `HitCap` apart, which is exactly why it would have read as confirmation. It is the wrong pair:
+    // the λ depth guard against the λ step cap, where this sentence is about the TM step cap against
+    // the TM live-cell cap.
     //
     // The classified outcome printed above therefore names the wall without naming which wall, and
     // 5,000,000 steps in ~70 ms is 14 ns/step, which makes 5,000,000 live cells at least as plausible.

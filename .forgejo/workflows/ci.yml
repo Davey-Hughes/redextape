@@ -117,9 +117,15 @@ jobs:
       # Same script as `.pre-commit-config.yaml` runs, so the local and CI gates cannot drift.
       # SELF-TEST FIRST, AND NOT AS CEREMONY. This gate's whole job is to report nothing on a tree
       # that already passes, so a green scan is indistinguishable from a broken detector. `--self-test`
-      # plants a citation and asserts it is caught, asserts a symbol citation is not, and asserts an
-      # escape-hatch marker is counted rather than hidden — all through the same `citation_lines` the
-      # scan uses, so it cannot drift into agreeing with a broken scan.
+      # plants citations and asserts they are caught — single and range, `.rs` and not, either case —
+      # asserts a symbol citation is not flagged, asserts an escape-hatch marker is counted rather than
+      # hidden, and asserts a tally that disagrees with `git ls-files` is rejected. All through the same
+      # `citation_lines` the scan uses, so it cannot drift into agreeing with a broken scan.
+      # THIS LIST NAMED THREE ASSERTIONS UNTIL THE RE-REVIEW, and the self-test had grown past it: the
+      # extension and case coverage came from a finding that the pattern failed SILENT on `.html`,
+      # `Dockerfile`, `.conf`, `.tm` and `.txt`, and the tally assertion from a finding that the
+      # reconciliation could not fail. A stale enumeration of a gate's own coverage is the shape of
+      # claim this gate exists to retire, so it is written to be re-checkable rather than re-counted.
       - name: Prove the citation detector still detects
         run: scripts/check-citations.sh --self-test
       - name: Reject file:line citations in tracked source

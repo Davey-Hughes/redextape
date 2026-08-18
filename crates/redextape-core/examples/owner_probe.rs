@@ -64,8 +64,8 @@ fn head(s: &str) {
 /// lines further at each end than the range names. This conversion found 107 opening on
 /// `let mut v: Vec<(String, String)> = [`, which skips the two `let list20`/`let list60` `format!`s
 /// above it, and 133 closing on the comment about the `cons` spine, one line short of the two
-/// `v.push` calls that put those lists in the corpus. All four are copied verbatim below, and without them "its `programs()`, minus
-/// `while40`" is not what the range holds.
+/// `v.push` calls that put those lists in the corpus. All four are copied verbatim below, and without
+/// them "its `programs()`, minus `while40`" is not what the range holds.
 fn programs() -> Vec<(String, String)> {
     let list20 = format!("[{}]", (1..=20).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
     let list60 = format!("[{}]", (1..=60).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
