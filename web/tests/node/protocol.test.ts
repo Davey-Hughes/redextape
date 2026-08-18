@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   FRAME_OVERHEAD_BYTES,
+  forkable,
   lambdaFrameBytes,
+  MAX_FORK_RULES,
   OWNER_BYTES,
   REDEX_SPAN_BYTES,
+  ruleCount,
   SPAN_BYTES,
   tmFrameBytes,
 } from '../../src/protocol'
-import type { LambdaState, TmState } from '../../src/types'
+import type { LambdaState, TmProgram, TmState } from '../../src/types'
 
 const lam = (text: string, spans: number): LambdaState => ({
   text,
@@ -111,5 +114,55 @@ describe('lambdaFrameBytes', () => {
       owner: { Exact: 3 },
     }
     expect(lambdaFrameBytes(f)).toBe(FRAME_OVERHEAD_BYTES + 2 + REDEX_SPAN_BYTES + OWNER_BYTES)
+  })
+})
+
+/** A program with exactly `n` rules, spread over ten states so the reduce has something to reduce. */
+function programOf(n: number): TmProgram {
+  const states = Array.from({ length: 10 }, (_, i) => ({
+    name: `q${i}`,
+    accept: false,
+    rules: [] as TmProgram['states'][number]['rules'],
+  }))
+  for (let i = 0; i < n; i++) {
+    states[i % 10]?.rules.push({ read: [null], write: [null], moves: ['S'], next: 0 })
+  }
+  return { states, alphabet: ['_'], tapes: 1, width: 4, start: 0 }
+}
+
+describe('the fork cap', () => {
+  it('counts every rule across every state, not the states', () => {
+    expect(ruleCount(programOf(0))).toBe(0)
+    expect(ruleCount(programOf(1))).toBe(1)
+    expect(ruleCount(programOf(37))).toBe(37)
+  })
+
+  it('admits a program at the cap and refuses one rule past it', () => {
+    expect(forkable(programOf(MAX_FORK_RULES - 1))).toBe(true)
+    expect(forkable(programOf(MAX_FORK_RULES))).toBe(true)
+    expect(forkable(programOf(MAX_FORK_RULES + 1))).toBe(false)
+  })
+
+  /**
+   * A DECLINED LEG IS NOT FORKABLE, AND THE `null` ARM IS WHY THE PREDICATE TAKES A NULLABLE.
+   * `compiled` carries `tmProgram: TmProgram | null`, so every caller would otherwise write the same
+   * null check beside every call — which is the second place for it to be wrong.
+   */
+  it('refuses a null program without the caller checking', () => {
+    expect(forkable(null)).toBe(false)
+  })
+
+  /**
+   * THE CAP MUST SIT BETWEEN THE TWO CORPUS PROGRAMS THE DESIGN NAMES (§3.1), AND THIS ASSERTS THE
+   * PROPERTY RATHER THAN THE NUMBER. A future re-measurement may move `MAX_FORK_RULES`; moving it
+   * outside this interval would silently change which demo programs can be forked at all, which is
+   * the fact the figure exists to control.
+   */
+  it('sits between list20 and list60', () => {
+    // **THESE BOUNDS WERE IN THE WRONG UNIT UNTIL TASK 2 MEASURED THEM.** They read 16,250 and 127,881 —
+    // list20's LINE count and list60's δ-table ROW count. A row is a state OR a rule (list60 is 33,699
+    // states + 94,182 rules = 127,881 exactly), and this constant gates on rules alone.
+    expect(MAX_FORK_RULES).toBeGreaterThan(11_802) // list20's rules — must be forkable
+    expect(MAX_FORK_RULES).toBeLessThan(94_182) // list60's rules — must be refused
   })
 })

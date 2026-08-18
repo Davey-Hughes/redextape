@@ -1305,6 +1305,16 @@ rather than a note saying a11y is on the todo. Known outstanding, all observed r
    control that provably cannot work should not be offered, which is why `raise_cap`'s refusal of
    `depth_capped` means no button rather than a grey one — so the fix is to move focus deliberately,
    not to start disabling things.
+
+   **ONE INSTANCE RETIRED, 2026-08-18, PR plan5d-iv, design §4.7.** `main.ts`'s `refreshBuffers` used
+   to read `buffersButton.hidden = live === 0`, plus a line moving focus to `#restore-layout` when
+   retiring the last buffer hid the control the click had just landed on — an instance of this exact
+   item, on `#buffers` rather than on `tm-pane.ts`'s reattach or `pane-chrome.ts`'s `[continue]`. Both
+   lines are gone: the buffer-list menu now offers "new TM buffer" and so is never empty, which removes
+   the reason for the hide and the workaround beside it. `#buffers` stays visible and reads `buffers ▾`
+   at zero; `tm-blank-buffer.test.ts`'s `keeps focus on the buffers button when the last buffer is
+   retired` pins it. One instance retired, not the pass discharged — the two instances above remain
+   open.
 2. **The δ-table toggle relabels itself** (`hide δ` / `show δ`) with nothing announcing that the table's
    state changed. Same shape as the appearance button, which PR #20 solved with an `aria-label` naming
    the current state; nothing else in `web/` has been given the same treatment.
@@ -1380,8 +1390,15 @@ rather than a note saying a11y is on the todo. Known outstanding, all observed r
     DISMISSES the list — `buffer-list.ts` calls `hidePopover()` before `onRetire`, so no row is left
     naming a buffer that has gone — changes the header button's own `buffers N ▾` readout, and, because
     retire rebinds every pane bound to that buffer back to the source session, silently changes what
-    panes are showing. Focus moves too: to the invoker, or to `#restore-layout` when the last buffer
-    takes the button with it. Nothing announces any of that, and the surface that would have to is the
+    panes are showing. Focus moves too: to the invoker.
+
+    **CORRECTED 2026-08-18, PR plan5d-iv — the `#restore-layout` clause above is no longer true.** It
+    read "or to `#restore-layout` when the last buffer takes the button with it," describing the
+    workaround item 1's own retirement (above) removed: `#buffers` no longer hides at zero, so retiring
+    the last buffer never strands the click on a control that just vanished, and there is no second
+    destination for focus to fall back to. `tm-blank-buffer.test.ts`'s `keeps focus on the buffers
+    button when the last buffer is retired` pins the one destination that remains. Nothing announces
+    any of that, and the surface that would have to is the
     one the gesture closed. **A refused fork** is the mirror case: nothing on the page moves at all, and
     the entire outcome is a line of text appearing on `#link-status` — which item 6 already records as
     announcing nothing. So the one control whose failure mode is *no visible change* reports through the
@@ -1496,6 +1513,26 @@ rather than a note saying a11y is on the todo. Known outstanding, all observed r
     that retire announces neither its rebinds nor anything else; this is the same rebind, reached from
     the same list, behind a button that reads `cool` rather than `retire` — and the one fact that makes
     the two different, that the buffer is still there and can be warmed again, is not conveyed either.
+15. **A second collapse control exists now, doubling the count of controls sharing item 2's own
+    mitigation rather than its gap** (added 2026-08-18, PR plan5d-iv, design §6's own filing).
+    `pane-chrome.ts`'s `collapseButton` — until this slice mounted on `LambdaPane`'s term editor
+    alone — now also drives `TmPane`'s machine-source editor (`noun = 'machine source'`), so the page
+    can show two independent collapse controls at once, `hide the term editor` and `hide the machine
+    source`. Checked directly rather than assumed: neither carries state in colour (item 7 does not
+    gain an instance here) and both already carry PR #20's `aria-label` treatment item 2 asks the
+    δ-table toggle for — `collapseButton`'s own doc names this explicitly. Filed because design §6
+    obligated it, not because a new gap was found: when the deferred pass reaches item 2, it now has
+    two on-screen instances of the SAME already-mitigated shape to confirm rather than one.
+16. **Neither editable text region carries an accessible name of its own** (added 2026-08-18, PR
+    plan5d-iv, design §6's own filing). `scratch-editor.ts`'s `ScratchEditor` — the one class behind
+    both the λ pane's term editor and, as of this slice, the TM pane's machine-source editor — sets no
+    `aria-label` and no distinguishing attribute of any kind on its mount; CodeMirror's own default
+    `role="textbox" aria-multiline="true"` is the entire accessibility surface either instance gets.
+    One editable region was already this way before this slice; what changes is that the page can now
+    show TWO at once, and nothing distinguishes them beyond the (separately labelled) collapse control
+    that happens to sit above each — a control a screen-reader user tabbing between edit fields is not
+    necessarily reading beside the field it names. `grep -rn aria-live src/ index.html` finds nothing
+    anywhere in this app, which is the same absence every item above already documents.
 
 What already exists, so the pass starts from the right baseline: the appearance control is a real
 `<button type="button">` with an `aria-label` naming its current state, updated on every change
@@ -8471,3 +8508,159 @@ read. **The two exceptions are declared**: one `println!` in `step_survey.rs` an
 unconditionally — `require linear-history "$R_LINEAR"`, outside every `if` — and neither step carries an
 `if:` of its own. `--self-test` runs first, then the scan, for the reason `check-text-bytes.sh` states in
 its own comment: a gate that only ever runs against a passing tree cannot tell you it still works.
+
+#### PLAN 5d-iv CLOSES — the TM pane becomes editable and both legs survive a reload, and the last task found the restore filter was not merely permissive in the wrong direction, it was blind to the whole TM leg (2026-08-18, branch `plan5d-iv`, `2699fdd^..0ceea75` plus this entry and the three standing-list entries it files)
+
+**5d-iv moves at last.** Every entry above this one that mentioned it — 5d-ii-a through 5d-ii-d — repeated
+the same line: *"5d-iv — the TM editable pane — is unchanged: after 5d-ii, before Plan 5's accessibility
+pass."* Eleven tasks across this branch gave the TM pane an editor region, a fork gesture, a blank-buffer
+gesture, and a buffer collection that carries a `leg`. Task 11, the last one, is the composition proof:
+does any of that survive a reload, end to end, through a real thread and a real `pkg/`.
+
+**THE HEADER'S RANGE IS CORRECTED, WHOLE-BRANCH REVIEW BEFORE MERGE.** It read `2699fdd..bfe6675`,
+which under git range semantics excludes `2699fdd` itself (`A..B` means reachable from `B`, not from
+`A`) even though `2699fdd` is Task 1 and the first commit unique to this branch — and it stopped at
+`bfe6675`, before Task 11's own commit and the fix round that followed it. `2699fdd^..0ceea75` is what
+that range should have read: every commit this branch made, `2699fdd` included, through the last one
+that touches tracked source rather than only this entry.
+
+##### THE COMPOSITION TEST FOUND A DEFECT BIGGER THAN THE ONE IT WAS SENT TO FIND
+
+Task 11 was briefed to close one specific, narrow defect: `main.ts`'s restore loop filtered a restored
+binding by the LEAF's pane kind (`lambdaLeaves.has(leaf)`, true for any `lambda` leaf) and never looked at
+the NAMED BUFFER's own `leg`, so a hand-edited payload pairing a `tm`-leg buffer with a `lambda` leaf's
+binding would pass the filter and reach `SessionRegistry.legOf`, which throws — the mirror of a crash
+`buffer-restore.test.ts`'s own `SEEDED` fixture already pins from the other direction (a `lambda`-leg
+buffer bound to a `tm` leaf, refused by the same check). That defect is real and this closes it: the fix
+replaces the leaf-kind check with a leg-AGREEMENT check (`legOfLeaf.get(leaf) !== legOfBuffer.get(session)`)
+between the leaf's own pane kind and the restored buffer's own `leg`.
+
+**But the ORIGINAL check — `l.pane === 'lambda'` — does not merely admit the wrong pairing; it refuses
+EVERY `tm`-leaf binding, correct or not.** `lambdaLeaves` only ever contains ids of `lambda`-kind leaves,
+so a properly matched `tm-0 → <tm-leg buffer>` binding was dropped by the exact same line that let the
+mismatched one through. The first composition test written for this task — fork the TM pane, reload,
+expect the pane to come back showing its machine — failed against the unfixed source not with the `legOf`
+throw the briefed defect predicts, but by silently landing the TM pane back on the SOURCE session, because
+its own binding was never restored at all. The same fix (a leg-AGREEMENT check rather than a leaf-kind
+check) closes both faces of the one root cause: nothing before Task 11 had ever restored a TM-bound pane
+onto its buffer, in either the correct or the corrupted case, because nothing had ever looked at what leg
+the RESTORED BUFFER carried.
+
+##### THE MECHANISM A "RELOAD" TEST NEEDED, AND WHY NO EXISTING FILE HAD IT
+
+`buffer-restore.test.ts`'s own doc states, at length, that a reload "cannot be simulated by mounting
+twice" — `main.ts`'s `ready` is computed once at import evaluation (`export const ready = main()`), `main`
+itself is not exported, and a second bare `import('../../src/main')` from the same specifier returns the
+cached module. Every browser test file in this repo mounts exactly once for exactly that reason. Task 11's
+brief called for a `remountApp()` that reads back the SAME `localStorage` a real gesture just wrote,
+inside one test — which none of the eleven prior tasks needed and none of them built.
+
+**`tm-buffer-restore.test.ts` gets a genuine second module instance by importing `../../src/main` under a
+cache-busting query string** (`../../src/main?remount=N`). Vite's dev server — which is what serves
+modules to a Vitest browser test; nothing here is pre-bundled — keys its module graph on the full
+specifier including the query, so a differently-queried import is a distinct module realm: fresh top-level
+state, a fresh `main()` invocation, and event listeners bound to a freshly reset DOM that an earlier
+instance's own listeners never fire on. This was verified directly before being relied on, with a
+throwaway probe: clicking a button on a first mount's DOM did nothing to a second, freshly-imported
+mount's own button, and clicking the SECOND mount's own button worked — proving the two are independent
+realms rather than one cached module answering twice. `localStorage` is left untouched across a remount,
+which is the one thing a real reload keeps too.
+
+##### QUESTION 1, PRE-REGISTERED AT TASK 2 — DID `MAX_FORK_RULES` LAND ON 20,000? **NO. IT LANDED ON
+50,000, HIGH BY A FACTOR OF 2.5**
+
+`src/protocol.ts` reads `export const MAX_FORK_RULES = 50_000` today, confirmed by reading the constant
+directly rather than trusting the plan's own pre-registration. Task 2's own measurement report already
+states the gap plainly and is not re-litigated here, only cited: at the pre-registered 20,000 rules the
+interpolated interaction cost is ~39 ms against the 250 ms budget — about 15% of it, a large factor of
+unused headroom — while the two-point power-law fit through the corpus's `list20` (11,802 rules) and
+`list60` (94,182 rules) points crosses the 250 ms line at roughly 60,700–61,200 rules. **The cost that
+moved the figure is `parse`** — `tmScratch`'s own parse time, the one of the three measured costs
+(`emit`, `clone`, `parse`) this slice could not change. It grows SUPER-LINEARLY (fitted exponent ~1.7,
+against `emit`'s ~0.93 and `clone`'s ~0.78) and its share of the total cost rises from 85.5% at 11,802
+rules to 97.0% at 94,182 — so an intuition calibrated on a 20,000-rule machine underestimated how much
+further the 250 ms budget actually reaches before `parse`'s growth catches up with it. `50,000` itself is
+not the model's implied maximum either: Task 2 chose it as a round number under the budget rather than
+riding the ~61,000-rule edge of a fit drawn through only two corpus points with an 82,380-rule gap
+between them.
+
+**AMENDED 2026-08-18 — the paragraph above describes the FIRST CUT ONLY, and a reader stopping there
+would conclude the shipped cap rests on a two-point interpolation. It does not.** Task 2's own fix round
+added `list35`, `list43`, `list47` and `list50` to the corpus permanently, closing the 82,380-rule gap
+between `list20` and `list60` to a direct 9,218-rule bracket around the shipped `50,000` — between
+`list43` (49,591 rules) and `list47` (58,809 rules) — rather than leaving the cap resting on the
+extrapolated ~61,000-rule crossing above. Re-confirmed today, at this entry's own commit:
+`list43` clears at 167 ms, `list47` still clears at 248 ms (2 ms under the 250 ms budget — closer than
+the fitted crossing implied), and `list50` (66,237 rules) breaches at 271 ms. **The "~28% margin" this
+paragraph used to close on is retracted rather than corrected**: it was unsourced, and it is not the
+measured worst case — the ledger this entry answers to records a worst-of-3 reading of 196.4 ms at
+`list43` (21.4% margin), and a fresh run today gave 33%. Run-to-run spread of that size makes a single
+margin figure the wrong thing to carry forward; the bracket above — three readings, re-runnable on
+demand — is what replaces it.
+
+**A CARRIED MINOR, FILED HERE BECAUSE THE TASK REPORT IT LIVES IN IS GITIGNORED.** `tm-fork-cost.test.ts`'s
+fix round added a fourth measured cost, CodeMirror's own mount time for each corpus program's emitted
+text (design §4.2's own FIX ROUND point 2). Across the corpus that cost shows **no correlation with
+size, somewhat noisily** — NOT *"virtualization makes it flat,"* which is a wrong explanation for a real
+observation: `ScratchEditor`'s mount does no virtualization of its own at construction time (CodeMirror
+lays out the whole document), so a flat reading has nothing to do with rows being off-screen. The correct
+reading is simply that mount cost does not scale with program size over this corpus, and does so with
+enough noise that it is worth stating as a shape rather than a number.
+
+##### QUESTION 2, PRE-REGISTERED AT TASK 8 — DID `tm-pane.ts` STAY UNDER `lambda-pane.ts`'S SIZE? **YES.
+43.2 KB AGAINST 44.7 KB, BY THE METRIC THE PLAN ITSELF TRACKED — BUT NOT BY LINE COUNT, WHICH DISAGREES**
+
+Task 8's own Step 9 pre-registered `wc -c` (bytes), not line count, checking against a snapshot of
+`lambda-pane.ts` at "~46 KB." Measured at this entry's own commit: `tm-pane.ts` is **44,198 bytes
+(43.16 KiB)**, `lambda-pane.ts` is **45,801 bytes (44.73 KiB)**. By the pre-registered metric, `tm-pane.ts`
+stayed under, with about 1.6 KB of margin — the design's own instruction not to split the tape-row and
+table rendering out "in this task" held for every task after Task 8 too, since nothing crossed the line
+that would have called for it.
+
+**Line count says the opposite, and the divergence is worth recording rather than smoothing.** `tm-pane.ts`
+is 796 lines against `lambda-pane.ts`'s 720 — `tm-pane.ts` is the LONGER file by line count while being
+the SMALLER one by byte count, because its average line is shorter (≈55.5 bytes/line against
+`lambda-pane.ts`'s ≈63.6). A reader who reached for `wc -l` instead of the pre-registered `wc -c` would
+report this question the other way. Neither number is wrong; they answer different questions, and only
+one of them is the one Task 8 actually pre-registered. Since the pre-registered check passes, no half is
+named to lift out here — Task 8's own conditional was "if it is now past `lambda-pane.ts`'s size, name the
+half," and it is not.
+
+##### WHAT THIS SLICE DID NOT CLOSE
+
+**The per-frame layout write on `pointermove`**, filed at 5d-ii-d's own close and repeated at every entry
+since, remains open and still belongs to whoever next touches `layout-view.ts`'s divider-drag path.
+
+**`parse_asm` remains unclaimed.**
+
+**The accessibility pass is now unblocked.** Every entry since 5d-ii-a has repeated some form of "5d-iv —
+the TM editable pane — is unchanged: after 5d-ii, before Plan 5's accessibility pass." 5d-iv is the last
+slice that pass was gated behind; this entry is what moves it off that line.
+
+##### Verification
+
+Figures re-derived at this entry's own commit rather than carried from Task 11's own report:
+
+```
+cargo nextest run --workspace          → 902 tests run, 902 passed, 8 skipped
+cargo clippy --workspace --all-targets -- -D warnings     → clean
+pnpm test (web/)                       → 653 passed in 68 files
+pnpm run test:coverage (web/)          → statements 95.95%, branches 90.85%, functions 98.60%, lines 98.26%
+pre-commit run --all-files             → all 6 hooks Passed
+scripts/check-citations.sh --self-test → passed
+scripts/check-citations.sh             → 265 files scanned, 0 violations
+```
+
+`pnpm test`'s 653 (68 files) is Task 11's own baseline of 649 (67 files) plus the four tests
+`tm-buffer-restore.test.ts` adds. The coverage figures are within 0.01 of the branch's own running
+baseline (95.95 / 90.84 / 98.60 / 98.26 going in) — the fix's own new branches (the leg-agreement check)
+are exercised by the new tests without moving the aggregate materially, so the convention floor
+(95.57 / 89.88 / 98.51 / 98.08) and the enforced gate (`{lines: 97, functions: 97, branches: 89,
+statements: 95}`) both clear with the same margin the branch closed the last slice with.
+
+**The mismatched-payload defect was reproduced against the unfixed source before being fixed, not merely
+reasoned about.** With `main.ts`'s restore-loop change reverted, `tm-buffer-restore.test.ts`'s fourth test
+(a hand-built payload pairing a `tm`-leg buffer with a `lambda` leaf's binding) throws `Error: session
+scratch-1 has no lambda leg` out of `SessionRegistry.legOf`, through `PaneSlot.resolve`, `draw`, and
+`Object.applyLayout`, taking the whole page down with it — the exact crash class the fix closes. Full
+text is in Task 11's own report.

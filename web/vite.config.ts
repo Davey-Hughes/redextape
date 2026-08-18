@@ -26,30 +26,41 @@ import { configDefaults, defineConfig } from 'vitest/config'
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /**
- * The affordability probe's own file, excluded from the browser project's default set unless
- * `REDEXTAPE_PROBE` is set — `pnpm test:probe` is what sets it.
+ * The probes' own files, excluded from the browser project's default set unless `REDEXTAPE_PROBE` is
+ * set — `pnpm test:probe` and `pnpm test:probe:tm` are what set it.
  *
- * **IT IS A MEASUREMENT WHOSE CONSOLE OUTPUT IS THE DELIVERABLE (its own header says so), AND A
+ * **IT IS A MEASUREMENT WHOSE CONSOLE OUTPUT IS THE DELIVERABLE (each file's own header says so), AND A
  * DELIVERABLE NOBODY READS ON EVERY PUSH IS PURE COST.** Design §4.6's probe runs eleven real wasm
  * workers and builds eleven 32 MiB rings, deserialising every frame onto the main thread — the peak is
  * roughly half a gigabyte inside one page, which is the threshold it exists to measure. The browser
  * project has no `fileParallelism: false`, so under the default `include` that peak could land
  * concurrently with `session-memory.test.ts`'s and `frame-cost.test.ts`'s, in one origin, on every
- * push. This repo's history already records a λ probe taking 60 GiB of RAM and all of swap.
+ * push. This repo's history already records a λ probe taking 60 GiB of RAM and all of swap. 5d-iv T2's
+ * probe is far cheaper (ten compiles, no workers — the fix round's own confirming points widened the
+ * corpus from six programs to ten, and each one now mounts a real CodeMirror editor to time, not merely
+ * compiles it) but joins the same list for the same structural reason below, not because it shares that
+ * weight.
  *
  * **AN ENV FLAG RATHER THAN A BARE `exclude`, BECAUSE A FILE OUTSIDE `include` CANNOT BE NAMED BACK IN.**
  * Vitest's positional filters select WITHIN the resolved include set, so `vitest run <path>` on an
  * excluded file reports no test files rather than running it — which under `passWithNoTests: false`
  * (see the `test` block below for why that is off) is an error, not a probe run. Gating the exclusion
- * makes `pnpm test:probe` the one way in and keeps the default suite free of it.
+ * makes each `pnpm test:probe*` script the one way in and keeps the default suite free of it.
  *
- * NOT DELETED, NOT SKIPPED, AND NOT MOVED OUT OF `tests/browser/`: it is a real test file that must keep
- * running against the real app under the same harness and the same Chromium flags — §4.6's whole
- * argument is that the cap is a measurement rather than an extrapolation, and a measurement that cannot
- * be re-run is an extrapolation with a date on it.
+ * **THE GATE LIVES HERE AND NOT INSIDE THE PROBE FILES, BECAUSE `process.env` DOES NOT EXIST IN THE
+ * BROWSER PROJECT'S RUNTIME.** A probe file's own top level cannot read `REDEXTAPE_PROBE` to skip
+ * itself (`describe.runIf(process.env.REDEXTAPE_PROBE === '1')` throws `ReferenceError: process is not
+ * defined` the moment the browser tries to import it — `process` is a Node global this Vite-served page
+ * never gets) — this array, evaluated by Vitest's own Node-side config loader, is the only place the
+ * check can run before the file is ever fetched into the browser at all.
+ *
+ * NOT DELETED, NOT SKIPPED, AND NOT MOVED OUT OF `tests/browser/`: every probe here is a real test file
+ * that must keep running against the real app under the same harness and the same Chromium flags —
+ * §4.6's whole argument is that a cap like this is a measurement rather than an extrapolation, and a
+ * measurement that cannot be re-run is an extrapolation with a date on it.
  */
-const PROBE_FILE = 'tests/browser/buffer-affordability.test.ts'
-const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? [PROBE_FILE] : []
+const PROBE_FILES = ['tests/browser/buffer-affordability.test.ts', 'tests/browser/tm-fork-cost.test.ts']
+const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : []
 
 export default defineConfig({
   server: { fs: { allow: [REPO_ROOT] } },

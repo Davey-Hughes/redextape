@@ -69,8 +69,8 @@ const SHELL = `
 const SEEDED = serializeBuffers({
   minted: 2,
   buffers: [
-    { id: 'scratch-1', label: 'scratch 1', text: '(\\a. a)', collapsed: false },
-    { id: 'scratch-2', label: 'scratch 2', text: '(\\b. b) (\\c. c)', collapsed: true },
+    { id: 'scratch-1', label: 'scratch 1', text: '(\\a. a)', collapsed: false, leg: 'lambda' },
+    { id: 'scratch-2', label: 'scratch 2', text: '(\\b. b) (\\c. c)', collapsed: true, leg: 'lambda' },
   ],
   bindings: { 'lambda-0': 'scratch-2', 'tm-0': 'scratch-1' },
 })

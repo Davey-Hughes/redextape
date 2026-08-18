@@ -129,11 +129,11 @@ const editorsIn = (leaf: string) => document.querySelectorAll(`[data-leaf="${lea
 /**
  * Type `text` into the term editor mounted on `leaf`, replacing whatever is in it.
  *
- * A REAL CodeMirror TRANSACTION THROUGH `EditorView.findFromDOM`, which is `lambda-editor.test.ts`'s
+ * A REAL CodeMirror TRANSACTION THROUGH `EditorView.findFromDOM`, which is `scratch-editor.test.ts`'s
  * own `retype` and the technique the first test below already documents inline: setting `.textContent`
  * and firing a synthetic `InputEvent` never reaches CodeMirror's `docChanged` update listener —
  * CodeMirror owns its DOM and does not read it back — so it is dead code that fires no recompile at
- * all. `LambdaEditor#setText` is no substitute either: it raises a `#seeding` flag for the duration of
+ * all. `ScratchEditor#setText` is no substitute either: it raises a `#seeding` flag for the duration of
  * its dispatch so a fork's seed is never mistaken for a keystroke, which suppresses exactly the
  * recompile a caller here is asking for — `scratch-edit.test.ts`'s file doc states that argument.
  *
@@ -162,19 +162,29 @@ const typeInto = (leaf: string, text: string): void => {
  *
  * THE LIST IS RE-OPENED PER ROW, WHICH IS `buffer-list.ts`'s CONTRACT RATHER THAN A RETRY. Rows are
  * built on `beforetoggle` and the retire handler hides the popover before it fires, so the buttons this
- * loop just walked are gone by the time the retire returns; the count on the button is the loop's
- * condition for exactly that reason — it is the one readout that stays current while the list is closed.
+ * loop just walked are gone by the time the retire returns; the row count read fresh on each reopen is
+ * the loop's condition for exactly that reason — it is the one readout that only exists while the list
+ * is open.
+ *
+ * **THE LOOP USED TO END ON A DIGIT PARSED OUT OF `#buffers`'S OWN LABEL TEXT, AND THAT COUPLING ALREADY
+ * BROKE ONCE IN THIS TASK — a fix-round finding.** 5d-iv T10 dropped the digit from the label at zero
+ * (`buffers ▾`, not `buffers 0 ▾`, once the menu stopped being empty at zero), and every one of this
+ * file's ten tests failed with the loop spinning past its own `guard`, because `/\d+/` finds nothing in
+ * a label carrying no digit at all. The repair made at the time kept the coupling — it taught the loop
+ * to treat "no digit" as zero rather than removing the dependency on the label's own wording, so the
+ * next rewording would break it the same way. **This is that removal.** The loop's condition is now the
+ * row count the open list itself renders (`.buffer-list .buffer-row`), a structural fact about the menu
+ * rather than a string a label is free to reword.
  */
 const retireEveryBuffer = (): void => {
   const button = document.querySelector<HTMLButtonElement>('#buffers')
   if (button === null) throw new Error('no #buffers control in the header')
-  // The readout is `buffers N ▾` (`bufferList.update`), and `N === 0` is also the state that hides the
-  // button — so a loop that trusted the popover to be openable would spin on an empty list.
-  for (let guard = 0; (button.textContent ?? '').match(/\d+/)?.[0] !== '0'; guard++) {
-    if (guard > 32) throw new Error(`the buffer list will not empty: ${button.textContent}`)
-    button.click()
+  for (let guard = 0; ; guard++) {
+    if (guard > 32) throw new Error('the buffer list will not empty after 32 retires')
+    if (button.getAttribute('aria-expanded') !== 'true') button.click()
+    if (document.querySelectorAll('.buffer-list .buffer-row').length === 0) break
     const row = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="retire "]')
-    if (row === null) throw new Error(`${button.textContent} but the open list has no row to retire`)
+    if (row === null) throw new Error('the open list has rows but no retire control on any of them')
     row.click()
   }
 }
@@ -381,7 +391,7 @@ describe('two λ panes on two λ sessions', () => {
     expect(editorsIn(second ?? '')).toBe(0)
 
     // THE SAME `EditorView` INSTANCE, CAPTURED BEFORE THE MOVE — `EditorView.findFromDOM`, the same
-    // technique `lambda-editor.test.ts`'s own `retype` documents. A node count alone (the assertions
+    // technique `scratch-editor.test.ts`'s own `retype` documents. A node count alone (the assertions
     // above and below) cannot tell "the editor moved" from "a new editor was built with the same
     // text": destroying the old view and constructing a fresh one seeded with its text produces the
     // identical `.cm-editor` counts at every step. `toBe`, not `toEqual`, is what a rebuild fails —
@@ -470,7 +480,7 @@ describe('two λ panes on two λ sessions', () => {
    * that holds the editor unmounts the view without destroying it... the next pane to ask for the
    * editor re-mounts the same view with its text, cursor and undo intact", and nothing made that true.
    * `applyLayout` dropped the closed pane from `panes` before anything asked it for its editor, and
-   * `reconcileEditors` only ever iterates `panes.of('lambda')` — so the `LambdaEditor` was stranded in
+   * `reconcileEditors` only ever iterates `panes.of('lambda')` — so the `ScratchEditor` was stranded in
    * a host no longer in the tree, while the survivor went on offering "bring the term editor to this
    * pane" and clicking it did nothing, forever. A control that provably cannot work, offered anyway.
    *

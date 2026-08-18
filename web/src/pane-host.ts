@@ -1,4 +1,4 @@
-import type { EditorCustody } from './editor-custody'
+import type { EditablePane, EditorCustody } from './editor-custody'
 import { LambdaPane } from './lambda-pane'
 import {
   closeLeaf,
@@ -14,7 +14,7 @@ import {
 import { renderLayout } from './layout-view'
 import type { PaneChoice, PaneEvents } from './pane-chrome'
 import type { LeafId, PaneCollection, PaneKind } from './panes'
-import type { Leg } from './protocol'
+import { type Leg, ruleCount } from './protocol'
 import type { SessionId } from './session-client'
 import { type Binding, PaneSlot, type TmCompiled } from './sessions'
 import { TmPane } from './tm-pane'
@@ -200,7 +200,16 @@ export function createPaneHost(deps: {
   } = deps
 
   /**
-   * Give a λ pane that has just come to be bound to a warm buffer an editor, if nothing else holds one.
+   * Give a pane that has just come to be bound to a warm buffer an editor, if nothing else holds one.
+   *
+   * **`pane: EditablePane`, NOT `LambdaPane` — 5d-iv T10.** This took `LambdaPane` specifically until a
+   * blank TM buffer (`ScratchBuffers.forkBlank`) made the identical gap reachable on the other leg: a
+   * `forkBlank`'d buffer binds no pane at mint (unlike a fork, which rebinds its own slot), so the ONLY
+   * route to an editor is a later pick through a TM pane's own selector — this function, called from the
+   * same-leg `rebind` arm below, widened the same way `editor-custody.ts`'s `EditablePane` already lets
+   * `homeFor`/`hold` cover both panes without a union. `TmPane implements EditablePane` exactly as
+   * `LambdaPane` does (`setEditor`/`takeEditor`/`receiveEditor`/`holdsEditor`), so nothing in this body
+   * changes — only the type of what it is handed.
    *
    * **WITHOUT THIS, A `cool` FOLLOWED BY A `warm` LEAVES A BUFFER THAT CAN NEVER BE EDITED AGAIN.**
    * `ScratchBuffers.cool` rebinds every pane away from the buffer it sleeps (that is the invariant the
@@ -243,7 +252,7 @@ export function createPaneHost(deps: {
    *
    * For what this doc used to claim and why it changed, see the history note under `mountScratchEditor`.
    */
-  const mountScratchEditor = (leaf: LeafId, pane: LambdaPane, session: SessionId): void => {
+  const mountScratchEditor = (leaf: LeafId, pane: EditablePane, session: SessionId): void => {
     if (custody.hasEditor(session)) return
     const seed = scratchSeedOf(session)
     if (seed === null) return
@@ -300,7 +309,7 @@ export function createPaneHost(deps: {
    * A NARROWER REASON.** 5d-ii-d persists every scratch BUFFER's text (`buffers-store.ts`), so a λ pane's
    * editor is no longer the only copy of what it holds. Two things keep this paragraph's conclusion:
    * the SOURCE editor's document is still stored nowhere at all, and a buffer's stored text is whatever
-   * `ScratchBuffers.setText` last wrote — driven by `LambdaEditor`'s 300ms debounce, not by every
+   * `ScratchBuffers.setText` last wrote — driven by `ScratchEditor`'s 300ms debounce, not by every
    * keystroke (`cool`'s own doc has the measurement of what that window costs). Destroying a live view
    * would therefore still discard work; it would just discard less of it than it used to.
    *
@@ -370,10 +379,15 @@ export function createPaneHost(deps: {
    * members below take no arguments. A pane does not know its place in the tree and does not need to;
    * this closure is the one place that pairs a pane with its leaf.
    *
-   * `detach`/`showEditor` ARE WRAPPED RATHER THAN LEFT TO `transport.events`, AND ONLY FOR THE λ LEG —
-   * `transport.ts` resolves a fork against the registry and the source index, neither of which knows a
-   * `LeafId` exists; `editorOwner` is keyed by one, so pairing the two has to happen here, the same
-   * division `splitRow`/`splitColumn`/`close` already draw for the layout gestures below them.
+   * `detach`/`showEditor` ARE WRAPPED RATHER THAN LEFT TO `transport.events`, AND THIS PARAGRAPH USED
+   * TO SAY "ONLY FOR THE λ LEG" — 5d-iv Task 9 gives the TM leg its own fork, and `detachMachine` needs
+   * the identical wrapping for the identical reason: `transport.ts` resolves a fork against the
+   * registry and the session's own `tmProgram`, neither of which knows a `LeafId` exists; `editorOwner`
+   * is keyed by one, so pairing the two has to happen here, the same division `splitRow`/`splitColumn`/
+   * `close` already draw for the layout gestures below them. `showEditor` HAS NO TM COUNTERPART — a TM
+   * pane never builds a `claimEditorButton` (`PaneEvents.showEditor`'s own doc: the affordance "exists
+   * only on a pane whose slot may be bound to a scratch, which today means the λ leg" — a TM scratch's
+   * editor never moves between panes the way a λ one can).
    *
    * For what this doc used to claim and why it changed, see the history note under `paneEvents`.
    */
@@ -465,12 +479,29 @@ export function createPaneHost(deps: {
               if (after !== before) custody.claim(after, id)
             },
             // THE MOVE HALF. Only `editorOwner` changes here — `reconcileEditors` (below `applyLayout`)
-            // is what actually relocates the mounted `LambdaEditor`, which is what lets this handler stay
+            // is what actually relocates the mounted `ScratchEditor`, which is what lets this handler stay
             // as small as `PaneEvents.showEditor`'s own doc says it should be: report the click, know
             // nothing else.
             showEditor: () => {
               custody.claim(slot.binding.session, id)
               applyLayout()
+            },
+          }
+        : {}),
+      ...(slot.binding.leg === 'tm'
+        ? {
+            // THE FIRST-MOUNT HALF OF `editorOwner`, THIS LEG'S OWN — 5d-iv Task 9, mirroring the λ
+            // `detach` wrapper above line for line. `base.detachMachine` (`transport.ts`'s handler)
+            // rebinds `slot` SYNCHRONOUSLY when the fork actually happens, so `slot.binding.session`
+            // already names the new TM scratch by the time this wrapper resumes — checked rather than
+            // assumed, because a refused fork (the cap) leaves the binding exactly where it was, and
+            // recording ownership for a fork that never happened would point `editorOwner` at a session
+            // with no editor coming.
+            detachMachine: () => {
+              const before = slot.binding.session
+              base.detachMachine?.()
+              const after = slot.binding.session
+              if (after !== before) custody.claim(after, id)
             },
           }
         : {}),
@@ -551,6 +582,19 @@ export function createPaneHost(deps: {
            * makes the cast sound; `slot.binding.leg` would answer the same today, and the entry's own
            * kind is the fact the cast is actually about.
            *
+           * **BOTH `'lambda'` AND `'tm'`, WHERE THIS USED TO CHECK ONLY `'lambda'` — 5d-iv T10.** A
+           * `ScratchBuffers.forkBlank`'d TM buffer binds no pane at mint, so the ONLY way a TM pane ever
+           * comes to show one is this same-leg rebind arm — and until this widened, the condition below
+           * was `false` for every TM pane, so `moved` stayed `null`, no outgoing editor was ever taken
+           * into custody (harmless for a pane that never held one) and — the real defect —
+           * `mountScratchEditor` below was never called for the ARRIVING side either, so a TM pane picked
+           * onto a warm buffer through its own selector rendered that buffer's frames with no editor and
+           * no route to one. `entry.pane as unknown as EditablePane`, not `as LambdaPane`: `TmPane`
+           * implements `EditablePane` exactly as `LambdaPane` does (`editor-custody.ts`'s own doc), and
+           * `PaneView<LegFrame[K]>` — what `entry.pane` is actually typed as — shares no member with
+           * either concrete class, which is why the cast still needs the `unknown` step `editor-custody.
+           * ts`'s `editorHomeFor` already takes for the identical reason.
+           *
            * **RESOLVED ONCE INTO `moved` AND READ ON BOTH SIDES OF `base.rebind`** — the outgoing
            * handover above it and the arriving mount below it are the same pane under the same two
            * conditions, and `base.rebind` neither adds nor removes a `PaneEntry` (it writes the slot,
@@ -562,7 +606,10 @@ export function createPaneHost(deps: {
            */
           const leaving = slot.binding.session
           const entry = panes.get(id)
-          const moved = choice.session !== leaving && entry?.kind === 'lambda' ? (entry.pane as LambdaPane) : null
+          const moved =
+            choice.session !== leaving && (entry?.kind === 'lambda' || entry?.kind === 'tm')
+              ? (entry.pane as unknown as EditablePane)
+              : null
           if (moved !== null) {
             const held = moved.takeEditor()
             if (held !== null) custody.hold(leaving, held)
@@ -680,7 +727,7 @@ export function createPaneHost(deps: {
    *
    * `reconcileEditors()` RUNS AFTER PANES EXIST AND BEFORE THE TREE PAINTS — after, because it needs
    * `panes.get` to resolve the panes `editorOwner` names; before painting, though the two are otherwise
-   * independent (one moves a `LambdaEditor` inside a host, the other moves hosts inside `<main>`),
+   * independent (one moves a `ScratchEditor` inside a host, the other moves hosts inside `<main>`),
    * simply so a split that both creates a new pane AND moves the editor onto it settles in one pass
    * rather than a visible one-frame lag.
    *
@@ -823,8 +870,29 @@ export function createPaneHost(deps: {
         // is what a session that HAD a machine and lost it tells its panes; a pane one statement old is
         // already in that state (`#program`, `#index` and `#frame` all start `null`), so the call would
         // be a redraw of an empty table dressed as a repair.
+        //
+        // **`setForkAvailable` RIDES THE SAME SEED, AND ITS ABSENCE WAS ITS OWN GAP — Important fix,
+        // fix round on Task 9.** `TmCompiled.tmText`'s own doc names the reason this field rides beside
+        // `program`/`tapeNames` at all: `setForkAvailable`'s decision "needs it the moment a TM pane
+        // exists," which a bare `setProgram` call here never supplied — a pane split onto an already
+        // compiled session rendered the whole machine and offered no fork until the next source
+        // recompile happened to call `replies.ts`'s `setTmProgram` again. `ruleCount` is imported for
+        // the identical reason `replies.ts` computes it: `setForkAvailable`'s second argument is a
+        // count, not a boolean, and the two callers must not compute it two different ways.
+        //
+        // **SAFE TO CALL BEFORE THIS PANE'S OWN `#detached` HAS EVER BEEN SET, BECAUSE OF WHEN IT RUNS.**
+        // `TmPane`'s constructor defaults `#detached` to `false`, so a pane bound to a session that IS
+        // detached (a split onto a TM scratch) would show the control live for the instant between this
+        // line and the `draw()` inside `applyLayout`'s own `finally` — except nothing paints in that
+        // instant: `draw()` runs synchronously, later in this same call, and its `PaneSlot.render` ->
+        // `TmPane.setDetached` reaches `#refreshDetach` before the browser ever renders a frame. Calling
+        // this any earlier — before `#refreshDetach` existed to correct it — would have handed exactly
+        // that split-onto-a-scratch pane the same live-and-throwing control Critical 1 fixed.
         const compiled = tmProgramOf(session)
-        if (compiled !== null) pane.setProgram(compiled.program, compiled.tapeNames)
+        if (compiled !== null) {
+          pane.setProgram(compiled.program, compiled.tapeNames)
+          pane.setForkAvailable(compiled.tmText, ruleCount(compiled.program))
+        }
         panes.add({ id: l.id, kind: 'tm', slot, pane, host })
       }
     }

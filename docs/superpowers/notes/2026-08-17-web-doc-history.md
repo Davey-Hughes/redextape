@@ -1355,6 +1355,68 @@ above in full.
 **Slice.** 5d-ii-d — design §4.8's storage-failure report and the Critical its first position produced;
 review round 2, Minor B.
 
+### `refreshBuffers` — the hide-at-zero rule and the focus-restoration branch
+
+**What the doc claimed.** Five paragraphs arguing for withdrawing the buffers button at zero buffers and
+for the focus-restoration line that decision required, quoted in the order they stood in the doc.
+
+> **THE BUTTON IS NOT OFFERED AT ZERO, AND THAT IS A DECISION.** A list with no rows is a gesture with
+> no possible outcome: there is nothing to reclaim, nothing to name and nothing a click could do —
+> which is this slice's own standard ("a control that provably cannot work must not be offered",
+> `editor-custody.ts`), and the standard `detachButton`, `collapseButton` and `paneSelect`'s
+> below-two-options self-removal already apply in pane chrome. The counter-argument is real and is
+> rejected: an always-present `buffers 0 ▾` would advertise that the capability exists, at the price of
+> a control whose only reachable state is an empty bordered box.
+
+> `hidden` RATHER THAN `remove()`, WHICH IS WHERE THIS DEPARTS FROM THOSE THREE. The popover is
+> inserted BESIDE this button (`button.after(menu)`, once, at construction) and takes it as its
+> implicit anchor, so detaching the button would strand the list in the header and leave re-insertion
+> to guess the header's order. `hidden` takes the control out of the layout, out of the tab order and
+> out of the accessibility tree while leaving that pairing intact — the same mechanism
+> `controlStrip` uses for `extend`.
+
+> **AND WITHDRAWING IT IS WHERE THE TWO CORRECT DECISIONS ABOVE MEET AND STRAND THE KEYBOARD.**
+> Measured, not reasoned from the spec: retiring the last buffer left `document.activeElement` as
+> `<body>`. `buffer-list.ts`'s row control dismisses the popover before it fires, and the popover hide
+> algorithm hands focus back to the invoker when focus is inside the popover — so by the time this
+> runs, focus is on the very button the next line takes out of the tab order, and focus on a
+> `display: none` element falls to the document body. Neither half is wrong on its own: the list
+> autofocuses its first row so the control is reachable, and the button withdraws because at zero it
+> provably cannot work. It is the accessibility list's own item 1 — *"a control that hides itself on
+> click strands the keyboard"* — assembled out of two parts that each pass review, and item 1's stated
+> remedy is to move focus deliberately rather than to stop hiding things.
+
+> **`#restore-layout` RATHER THAN A PANE, WHICH IS WHERE THIS DIVERGES FROM `pane-host.ts`'s
+> `focusPane`.** That helper names "the place the user is looking" as a leaf the gesture acted on, and
+> a retire has no such leaf to offer in the case that reaches this branch: the buffer whose retire
+> empties the header is very often an orphan — the state this whole list exists to reach — so nothing
+> was rebound and there is no pane the gesture touched. What survives, in the strip the gesture was
+> made in and immediately beside the control that has just gone, is `#restore-layout`; it is never
+> itself withheld, so this cannot hand focus to a second hidden element.
+
+> IT IS GUARDED ON THE BUTTON ACTUALLY HOLDING FOCUS, because a retire is not the only caller. A fork
+> reaches here too, and so does the initial call below, and neither should move a caret out of the
+> source editor. The guard is also what keeps a mouse user's focus where the pointer left it: a click
+> that never focused the invoker never gets focus back from `hidePopover`, so there is nothing here to
+> move.
+
+**What falsified it.** 5d-iv T10 gave the buffers menu a "new TM buffer" control (`buffer-list.ts`'s
+`rebuildRows`), reached through this same button, which is available whether or not any buffer is
+live — "give me somewhere to paste a `.tm` file" has no cap and no dependency on a buffer already
+existing, unlike a fork. A list that is never empty removes the premise "a list with no rows is a
+gesture with no possible outcome" the whole withdrawal argument rests on, and removes it hardest exactly
+where it matters most: a user with zero buffers is precisely the user reaching for "new TM buffer",
+and the withdrawn button was unreachable to exactly that user. The call site now reads two lines —
+`buffersButton.hidden = live === 0` and the focus-restoration line beside it — deleted outright rather
+than replaced, per this project's own standing accessibility list, item 1, *"a control that hides itself
+on click strands the keyboard"*: the fix retires this instance of the item by removing the hide rather
+than by adding a second workaround around it.
+
+The surviving prose was repaired where it referenced the moved text; the pre-move original is quoted
+above in full.
+
+**Slice.** 5d-iv T10 — design §4.7's second gesture.
+
 ---
 
 ## `web/src/buffer-list.ts`

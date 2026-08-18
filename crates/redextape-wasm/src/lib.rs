@@ -388,6 +388,26 @@ impl Session {
         to_value(&p)
     }
 
+    /// `tmText()` -> `string | null`. The machine as `.tm` text, for a fork to seed a `TmScratch` from.
+    ///
+    /// **NOT FALLIBLE AND SO NOT `Result`.** Unlike its neighbours it marshals a plain `String`, which
+    /// `JsValue::from` cannot fail on; a declined leg is `null`, which is a fact rather than an error.
+    ///
+    /// **RETURNS `JsValue`, NOT A BARE `Option<String>`.** wasm-bindgen's native ABI marshals `None` as
+    /// `undefined`, never `null` — `serialize_missing_as_null(true)` is this crate's `to_value` helper's
+    /// setting, and this method does not call `to_value`. The explicit match below is what makes the
+    /// doc's `string | null` claim true; collapsing it back to a bare `Option<String>` return would keep
+    /// this compiling while quietly turning a declined leg's `null` into `undefined`. Same idiom as
+    /// `lambdaScratchAt`'s `text` field, this crate's own precedent for a plain string that can be absent.
+    #[wasm_bindgen(js_name = tmText)]
+    #[must_use]
+    pub fn tm_text(&self) -> JsValue {
+        match self.0.tm_text() {
+            Some(s) => JsValue::from_str(&s),
+            None => JsValue::NULL,
+        }
+    }
+
     /// # Errors
     ///
     /// Returns `Err` when this session's TM leg is absent — check `tmStatus().available` first. No

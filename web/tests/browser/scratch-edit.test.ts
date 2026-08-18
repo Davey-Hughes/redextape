@@ -22,8 +22,8 @@ import { beforeAll, describe, expect, it } from 'vitest'
  * previous having actually run, which is exactly the shared-mutable-fixture shape that file's own
  * comment rejects. Every stage below asserts before it acts, same as there.
  *
- * **`EditorView.findFromDOM` PLUS A REAL CHANGE TRANSACTION, NOT `LambdaEditor#setText`.**
- * `lambda-editor.test.ts`'s own file doc records why: `setText` sets a `#seeding` flag for the
+ * **`EditorView.findFromDOM` PLUS A REAL CHANGE TRANSACTION, NOT `ScratchEditor#setText`.**
+ * `scratch-editor.test.ts`'s own file doc records why: `setText` sets a `#seeding` flag for the
  * duration of its dispatch so a fork's seed is never mistaken for a keystroke, which means calling it
  * here would report zero recompiles instead of one. This file's `type` helper is that file's, aimed
  * at the pane's editor host instead of a bare one.

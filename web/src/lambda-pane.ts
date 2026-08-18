@@ -1,5 +1,6 @@
 import type { ControlState } from './controls'
-import { LambdaEditor } from './lambda-editor'
+import type { EditablePane } from './editor-custody'
+import { EDITOR_DEBOUNCE_MS } from './editor-debounce'
 import type { LambdaWindow } from './lambda-window'
 import {
   claimEditorButton,
@@ -13,19 +14,12 @@ import {
   type SplitChoices,
 } from './pane-chrome'
 import type { Leg } from './protocol'
+import { ScratchEditor } from './scratch-editor'
 import type { Binding, PaneOption } from './sessions'
 import { byteIndexAt, byteToIndex, decorationRanges, indexToByte } from './spans'
 import type { Diagnostic, LambdaState } from './types'
 
 export type { PaneEvents }
-
-/**
- * `main.ts`'s own `DEBOUNCE_MS` (300), duplicated rather than imported — the same argument
- * `LambdaEditor`'s own doc records for why it takes this as a constructor argument instead of
- * importing it: `main.ts` mounts the app, and a widget module reaching back into it would make the
- * app a dependency of one of its own panes. Same gesture, same speed, second name.
- */
-const EDITOR_DEBOUNCE_MS = 300
 
 function ellipsis(): HTMLElement {
   const el = document.createElement('span')
@@ -44,7 +38,7 @@ function ellipsis(): HTMLElement {
  * `… too deep`) rather than one being suppressed. `results.ts` still prints the full normal form at
  * 64 KiB.
  */
-export class LambdaPane {
+export class LambdaPane implements EditablePane {
   #text: HTMLElement
   #strip: ReturnType<typeof controlStrip>
   #badge: ReturnType<typeof detachedBadge>
@@ -73,14 +67,14 @@ export class LambdaPane {
    */
   #editorHost: HTMLElement
   /**
-   * The mounted `LambdaEditor`, or `null` on an attached pane. NEVER `null` merely because the editor
+   * The mounted `ScratchEditor`, or `null` on an attached pane. NEVER `null` merely because the editor
    * is collapsed away — `collapseButton`'s callback (constructor, below) toggles `.is-collapsed` on
    * `#editorHost`, not on this field, so a collapsed editor is a live CodeMirror instance sitting
    * behind a `display: none` parent, with its debounce still running exactly as it was before the
    * click. `setDetached` is what makes "attached" and "`#editor === null`" the same fact — see its own
    * doc for the review finding that made that true rather than merely intended.
    */
-  #editor: LambdaEditor | null = null
+  #editor: ScratchEditor | null = null
   #collapse: ReturnType<typeof collapseButton>
   /**
    * The "bring the term editor to this pane" control, or `null` on a pane whose events carry no `showEditor` handler
@@ -238,7 +232,7 @@ export class LambdaPane {
    * CodeMirror instance is a live instance with a live debounce, and §5 asks for a test that
    * reattaching a pane REMOVES the editor. Removal is what makes that question have one answer.
    *
-   * A RE-SEED WITH THE SAME TEXT IS A NO-OP INSIDE `LambdaEditor.setText`, so this is safe on the
+   * A RE-SEED WITH THE SAME TEXT IS A NO-OP INSIDE `ScratchEditor.setText`, so this is safe on the
    * per-frame path — which, since the whole-branch review before merge, it genuinely sits on:
    * `setDetached` below now calls `setEditor(null)` itself whenever the pane it reports for stops
    * being detached, and `setDetached` is driven every frame by `PaneSlot.render`. `replies.ts` still
@@ -283,7 +277,7 @@ export class LambdaPane {
     const onEdit = this.#onEdit
     if (this.#editor === null) {
       this.#editorHost.className = collapsed ? 'term-editor is-collapsed' : 'term-editor'
-      this.#editor = new LambdaEditor({
+      this.#editor = new ScratchEditor({
         host: this.#editorHost,
         initial: text,
         debounceMs: EDITOR_DEBOUNCE_MS,
@@ -309,7 +303,7 @@ export class LambdaPane {
    * below is what re-offers "bring the term editor to this pane" here the instant this method makes `#editor === null`
    * true while `#detached` is still true.
    */
-  takeEditor(): LambdaEditor | null {
+  takeEditor(): ScratchEditor | null {
     const editor = this.#editor
     if (editor === null) return null
     this.#editor = null
@@ -343,7 +337,7 @@ export class LambdaPane {
   /**
    * Mount an editor this pane did not build — `takeEditor`'s other half, and what makes "the editor
    * moves" true rather than "a new one seeded with the same text appears here". `editor.dom` is
-   * CodeMirror's own node (`LambdaEditor.dom`'s doc); appending an already-mounted node relocates it
+   * CodeMirror's own node (`ScratchEditor.dom`'s doc); appending an already-mounted node relocates it
    * rather than duplicating it, so the SAME `EditorView` — cursor, selection and undo history included —
    * is what ends up inside this pane's host.
    *
@@ -384,16 +378,16 @@ export class LambdaPane {
    * buffer's own flag through the `collapsedOf` reader threaded into `createEditorCustody` for exactly
    * this call, the same way `replies.ts`'s `scratch-compiled` arm already does for `setEditor`.
    */
-  receiveEditor(editor: LambdaEditor, collapsed = false): void {
+  receiveEditor(editor: ScratchEditor, collapsed = false): void {
     if (this.#editor !== null) throw new Error('a λ pane was handed a second editor while still holding one')
     this.#editorHost.className = collapsed ? 'term-editor is-collapsed' : 'term-editor'
     this.#editorHost.append(editor.dom)
     // **THE EDITS FOLLOW THE VIEW, AND THIS LINE IS WHY — found by driving the app, not by the suite.**
-    // A `LambdaEditor` is built by the pane that FORKS (`setEditor`'s mount branch), closing over THAT
+    // A `ScratchEditor` is built by the pane that FORKS (`setEditor`'s mount branch), closing over THAT
     // pane's `editScratch`; moving `editor.dom` here does not move the callback. So a claimed editor
     // went on reporting through the pane that made it, and `transport.ts` resolves
     // `slot.binding.session` at edit time — meaning the instant that pane was rebound elsewhere,
-    // keystrokes in the moved editor recompiled whatever IT was showing. `LambdaEditor.onEdit`'s own doc
+    // keystrokes in the moved editor recompiled whatever IT was showing. `ScratchEditor.onEdit`'s own doc
     // carries the measurement. `this.#onEdit` may be `undefined` on a pane built without the handler,
     // which is the same "an edit that goes nowhere is invisible" split `#onEdit` already documents — and
     // is why this assigns the same wrapper `setEditor` does rather than the field itself.

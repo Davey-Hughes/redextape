@@ -131,7 +131,7 @@ async function settled(src: string): Promise<void> {
 
 /**
  * A real keystroke into the buffer's own editor — `scratch-edit.test.ts`'s helper, and its reason:
- * `LambdaEditor#setText` sets a `#seeding` flag for the duration of its dispatch so a fork's seed is
+ * `ScratchEditor#setText` sets a `#seeding` flag for the duration of its dispatch so a fork's seed is
  * never mistaken for a keystroke, so calling it here would fire no recompile at all.
  */
 function typeIntoBufferEditor(text: string): void {
@@ -188,7 +188,7 @@ describe('a scratch buffer across a recompile of the source', () => {
     await until(() => term() !== '', 'the buffer to produce its first frame')
     const buffer = bufferOption()
     const label = buffer.textContent ?? ''
-    expect(label).toMatch(/^scratch \d+$/)
+    expect(label).toMatch(/^λ scratch \d+$/)
     expect(selector()?.value).toBe(buffer.value)
 
     // STAGE 2 — TYPE A TERM NO SOURCE PROGRAM IN THIS TEST COULD PRODUCE. This is what makes the
@@ -251,19 +251,22 @@ describe('a scratch buffer across a recompile of the source', () => {
  * pane by `takeEditor` keeps one.
  *
  * **AND IT PINS WHERE FOCUS LANDS**, which is not in its name because it is the same gesture rather than
- * a second one. Retiring the LAST buffer is the only path on which the header control that was just
- * activated is withdrawn, so it is the only path that can strand the keyboard — and this test is already
- * standing in exactly that state, with one buffer and no pane showing it. A separate `it` would have to
- * fork a second buffer to get back here, and would then be asserting against a header that never
- * withdraws.
+ * a second one. **THIS USED TO PIN THAT RETIRING THE LAST BUFFER WITHDRAWS THE HEADER CONTROL FOCUS HAD
+ * JUST LANDED ON, AND SENDS FOCUS TO `#restore-layout` INSTEAD — 5d-iv T10 RETIRED THAT.** The menu now
+ * offers "new TM buffer" and is therefore never empty, so `main.ts`'s `refreshBuffers` no longer hides
+ * `#buffers` at zero and has nothing left to strand the keyboard over: the popover's own hide algorithm
+ * already hands focus back to the invoker (`buffer-list.ts`'s `bufferRow` calls `menu.hidePopover()`
+ * before `onRetire`), and an invoker that is never taken out of the tab order keeps it. What this test
+ * still pins is that the button holds focus and stays reachable through the very retire that used to
+ * evict it — the accessibility list's item 1, one instance retired.
  */
 describe('the header buffer list', () => {
   it('lists a buffer no pane is showing as an orphan, and retiring it ends the buffer and its editor', async () => {
     // STAGE 0 — what the test above left, asserted rather than assumed. The button reads ONE buffer,
     // which is `transport.ts`'s fork telling the header its count changed; a readout wired only to the
-    // retire would still read `buffers 0 ▾` here, and a button never unhidden would be invisible.
+    // retire would still read the zero-buffer label here.
     const label = bufferOption().textContent ?? ''
-    expect(label).toMatch(/^scratch \d+$/)
+    expect(label).toMatch(/^λ scratch \d+$/)
     const button = buffersButton()
     expect(buffersDisplay()).not.toBe('none')
     expect(button?.textContent).toBe('buffers 1 ▾')
@@ -306,20 +309,25 @@ describe('the header buffer list', () => {
     retireControl(label)?.click()
     expect(document.querySelector('.buffer-list')?.matches(':popover-open')).toBe(false)
 
-    // THE BUFFER IS GONE FROM THE HEADER — and the button withdraws entirely rather than offering an
-    // empty list, which is `main.ts`'s decision and the same standard pane chrome applies.
-    expect(button?.textContent).toBe('buffers 0 ▾')
-    expect(buffersDisplay()).toBe('none')
+    // **THE BUFFER IS GONE FROM THE HEADER — AND THE BUTTON NO LONGER WITHDRAWS, WHICH IS A REVERSAL —
+    // 5d-iv T10.** This used to assert the button withdrew entirely rather than offering an empty list,
+    // which was `main.ts`'s decision at the time and the same standard pane chrome applies elsewhere.
+    // The menu is no longer ever empty (it offers "new TM buffer"), which removed the premise for that
+    // decision along with the decision itself: the readout is the zero-buffer label, not an empty count,
+    // and the control stays reachable exactly when a user with nothing to reclaim wants somewhere to
+    // paste a `.tm` file.
+    expect(button?.textContent).toBe('buffers ▾')
+    expect(buffersDisplay()).not.toBe('none')
 
-    // **AND THE KEYBOARD IS STILL SOMEWHERE**, which is the assertion the two lines above create the
-    // hazard for: `hidePopover` gives focus back to `#buffers`, and the next thing that happens is
-    // `#buffers` being taken out of the tab order — so without `main.ts`'s deliberate move, focus is on
-    // `<body>` here and a keyboard user restarts from the top of the document after the one gesture in
-    // this app that destroys work. Asserted as `#restore-layout` rather than as "not `<body>`": the
-    // weaker form passes on any accidental landing spot, including whichever control happens to sort
-    // first in the header, and this is a decision about where focus goes rather than a check that it
-    // went somewhere.
-    expect(document.activeElement?.id).toBe('restore-layout')
+    // **AND THE KEYBOARD IS STILL SOMEWHERE — ON THE BUTTON ITSELF, WHICH IS ALSO A REVERSAL.** This
+    // used to assert `#restore-layout`, because `#buffers` withdrew the instant the retire that had just
+    // focused it: `hidePopover` gave focus back to the invoker, and the very next line then took that
+    // invoker out of the tab order, so `main.ts` moved focus to `#restore-layout` deliberately rather
+    // than strand it on `<body>`. `#buffers` is never withdrawn now, so `hidePopover`'s hand-back is the
+    // whole of what places focus, with nothing after it to undo — the accessibility list's item 1, "a
+    // control that hides itself on click strands the keyboard," retired by removing the hide rather than
+    // by relocating the catch.
+    expect(document.activeElement).toBe(button)
 
     // AND FROM EVERY PANE'S SELECTOR, which is the registry side of the same fact — design §5's
     // "retiring an orphan from the list removes it from every pane's selector", read off the TM pane
@@ -337,7 +345,7 @@ describe('the header buffer list', () => {
     // wrong buffer — so both states are parentless and the proxy stopped discriminating.
     //
     // **NOTHING IN THE DOM REPLACES IT.** Measured in Chromium across mounted / detached / destroyed,
-    // all three states of a real `LambdaEditor`: `parentElement`, `isConnected`, `EditorView.findFromDOM`,
+    // all three states of a real `ScratchEditor`: `parentElement`, `isConnected`, `EditorView.findFromDOM`,
     // the presence of `.cm-content`, its `contenteditable`, `childElementCount` and `cmView` on the node
     // are IDENTICAL for detached and destroyed. `EditorView.destroy()` tears down the view without
     // clearing anything a query can reach. A replacement proxy would be the same mistake in a newer

@@ -1,4 +1,5 @@
 import type { LeafId } from './panes'
+import type { Leg } from './protocol'
 import type { SessionId } from './session-client'
 
 /**
@@ -18,15 +19,31 @@ import type { SessionId } from './session-client'
  */
 export const BUFFERS_STORAGE_KEY = 'redextape.buffers'
 
-/** Bumped when the stored shape changes. A mismatch falls back to nothing rather than migrating. */
-export const BUFFERS_VERSION = 1
+/**
+ * Bumped when the stored shape changes. A mismatch falls back to nothing rather than migrating.
+ *
+ * **2, AS OF 5d-iv T5** — `PersistedBuffer` gained `leg`, a field a `version: 1` payload never wrote.
+ * Refusing one under `parseBuffers`' own rule (this file's own doc: "a failed read is silent... it is
+ * indistinguishable from a first visit") is what a stale-shape payload gets, same as any other
+ * pre-existing hazard this function refuses rather than migrates.
+ */
+export const BUFFERS_VERSION = 2
 
-/** One buffer as it survives a reload: what it is called, what it holds, and how it was displayed. */
+/**
+ * One buffer as it survives a reload: what it is called, what it holds, how it was displayed, and
+ * which leg its session was built on.
+ *
+ * `leg` RIDES THIS RECORD RATHER THAN `bindings` — `bindings: Record<LeafId, SessionId>` says which
+ * BUFFER a leaf was on, and a leaf's own leg is a fact about the TREE (`layout.ts`), not about the
+ * buffer; this field is the fact `restore` needs to rebuild the right kind of session for a buffer
+ * BEFORE any leaf's binding is even read.
+ */
 export type PersistedBuffer = {
   id: SessionId
   label: string
   text: string
   collapsed: boolean
+  leg: Leg
 }
 
 /**
@@ -80,6 +97,7 @@ function validBuffer(node: unknown, ids: Set<string>): node is PersistedBuffer {
   if (typeof n.label !== 'string' || n.label.length === 0) return false
   if (typeof n.text !== 'string') return false
   if (typeof n.collapsed !== 'boolean') return false
+  if (n.leg !== 'lambda' && n.leg !== 'tm') return false
   if (ids.has(n.id)) return false
   ids.add(n.id)
   return true

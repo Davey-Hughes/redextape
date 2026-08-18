@@ -9,7 +9,7 @@ import { SessionClient } from '../../src/session-client'
 import type { Binding, LegState, PaneOption, PaneView, SessionEntry } from '../../src/sessions'
 import { PaneSlot, resetLegs, SessionRegistry } from '../../src/sessions'
 import { createTransport } from '../../src/transport'
-import type { LambdaState, TmState } from '../../src/types'
+import type { LambdaState, TmProgram, TmState } from '../../src/types'
 
 /**
  * THE BINDING MODEL, DRIVEN WITHOUT A BROWSER — plan T7's claim at the level where it is decided.
@@ -434,6 +434,106 @@ describe('PaneSlot', () => {
     // THE STATUS LINE IS THE ONE THING THAT CHANGED, so a draw and no buffer-count report.
     expect(draws).toBe(1)
     expect(buffersChanged).toBe(0)
+  })
+
+  /**
+   * **THE IDENTICAL DISCRIMINATION, ON THE TM LEG'S OWN HANDLER — 5d-iv Task 9.** `detachMachine`'s
+   * `catch` (`transport.ts`) is the same `instanceof BufferCapReached` shape as `detach`'s above, over
+   * a fake `scratchpad.fork` that throws — cheap for the identical reason: no worker is needed to prove
+   * which branch a throw takes. What differs from the λ test is what `detachMachine` resolves BEFORE
+   * the `try`: `sessions.entryOf(session).tmProgram?.tmText`, not `linkWiring().index.lambdaText`, so
+   * the session here is seeded with a `tmProgram` a real `compiled` reply would have left rather than
+   * with an `index`.
+   */
+  it('re-throws a non-cap error out of the machine-fork handler and keeps only the cap refusal', () => {
+    const reg = new SessionRegistry()
+    const source = entry('source', { label: 'source', tm: [0] })
+    const program: TmProgram = {
+      states: [{ name: 'pc0', accept: false, rules: [] }],
+      alphabet: ['a'],
+      tapes: 1,
+      width: 8,
+      start: 0,
+    }
+    source.tmProgram = { program, tapeNames: ['TAPE'], tmText: 'tapes 1\nstart pc0\nstate pc0:\n' }
+    reg.add(source)
+
+    let forkFailed: string | null = null
+    let draws = 0
+    let buffersChanged = 0
+    let thrown: unknown = new Error('a pool invariant broke')
+
+    const transport = createTransport({
+      sessions: reg,
+      // THE ONLY METHOD `detachMachine` CALLS ON IT, mirroring the λ test's fake above.
+      scratchpad: {
+        fork: () => {
+          throw thrown
+        },
+      } as unknown as ScratchBuffers,
+      draw: () => draws++,
+      // NO `index` FIELD HERE, UNLIKE THE λ TEST'S FAKE — `detachMachine` never reads `linkWiring()`
+      // for its text (`sessions.entryOf(...).tmProgram?.tmText` is the whole resolution), so a fake
+      // that omitted `index` would still be exercising the real handler rather than papering over a
+      // read it does not perform.
+      linkWiring: () =>
+        ({
+          setForkFailed: (r: string | null) => {
+            forkFailed = r
+          },
+        }) as unknown as LinkWiring,
+      onBuffersChanged: () => buffersChanged++,
+      onBuffersPersist: () => {
+        throw new Error('a machine fork must not persist through the rebind dependency')
+      },
+    })
+
+    const slot = new PaneSlot('tm', 'source')
+    const events = transport.events(slot)
+
+    // THE WIRING BUG, IDENTICAL IN SHAPE TO THE λ CASE ABOVE.
+    expect(() => events.detachMachine?.()).toThrow(/a pool invariant broke/)
+    expect(forkFailed).toBeNull()
+    expect(draws).toBe(0)
+    expect(buffersChanged).toBe(0)
+
+    // THE REFUSAL, THROUGH THE SAME HANDLER.
+    thrown = new BufferCapReached(
+      `all ${MAX_WARM_BUFFERS} scratch buffers are live; retire or cool one from the buffers list in the header to make room`,
+    )
+    expect(() => events.detachMachine?.()).not.toThrow()
+    expect(forkFailed).toContain('retire or cool one')
+    expect(draws).toBe(1)
+    expect(buffersChanged).toBe(0)
+  })
+
+  /**
+   * **`detachMachine` REACHED WITH NO MACHINE TEXT IS A WIRING BUG, NOT A REFUSAL — `transport.ts`'s
+   * own doc on the guard.** The control is disabled exactly when `tmText === null`
+   * (`TmPane.setForkAvailable`), so a click that reaches this handler with one names a gap between the
+   * button's own state and what the handler reads, not a state a user chose. Asserted on a session with
+   * no `tmProgram` at all (the ordinary case — nothing has compiled a machine to this session yet), the
+   * cheapest way to reach `tmText === null` without also building a real one that IS forkable.
+   */
+  it('throws loudly rather than forking with no machine text', () => {
+    const reg = new SessionRegistry()
+    reg.add(entry('source', { label: 'source', tm: [0] }))
+
+    const transport = createTransport({
+      sessions: reg,
+      scratchpad: {
+        fork: () => {
+          throw new Error('fork must not be called with no machine text')
+        },
+      } as unknown as ScratchBuffers,
+      draw: () => undefined,
+      linkWiring: () => ({ setForkFailed: () => undefined }) as unknown as LinkWiring,
+      onBuffersChanged: () => undefined,
+      onBuffersPersist: () => undefined,
+    })
+
+    const events = transport.events(new PaneSlot('tm', 'source'))
+    expect(() => events.detachMachine?.()).toThrow(/detachMachine reached with no machine text/)
   })
 
   /**

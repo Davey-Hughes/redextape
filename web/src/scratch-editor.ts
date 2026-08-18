@@ -7,10 +7,10 @@ import { lintRanges } from './diagnostics'
 import type { Diagnostic } from './types'
 
 /**
- * What a λ term editor needs: where to mount, what to start with, how long to wait, and where edits
+ * What a scratch editor needs: where to mount, what to start with, how long to wait, and where edits
  * go.
  */
-export type LambdaEditorConfig = {
+export type ScratchEditorConfig = {
   host: HTMLElement
   initial: string
   /** `main.ts`'s `DEBOUNCE_MS`, passed in rather than imported — see the class doc. */
@@ -19,9 +19,10 @@ export type LambdaEditorConfig = {
 }
 
 /**
- * **THE λ TERM EDITOR — design §4.2's upper region and §4.3's recompile trigger.**
+ * **THE SCRATCH TEXT EDITOR — design §4.2's upper region and §4.3's recompile trigger, for either leg
+ * a scratch buffer can hold.**
  *
- * A CodeMirror 6 instance over a scratch session's term. It is the surface 5d-i's §6 said had no
+ * A CodeMirror 6 instance over a scratch session's text. It is the surface 5d-i's §6 said had no
  * home: `ScratchBuffers` gave a scratch a life of its own, and this is the thing that can change
  * its text.
  *
@@ -34,14 +35,16 @@ export type LambdaEditorConfig = {
  * `spans`, which the worker computes per frame from a term it holds. An editor's buffer is text the
  * user is halfway through typing — there is no frame for it and `analyze` is the SOURCE language's
  * parser, not λ's. Colouring it would need a λ `linter`-shaped path this slice does not have, and a
- * stale colouring on a buffer being typed into is worse than none.
+ * stale colouring on a buffer being typed into is worse than none. The same argument is why `.tm` text
+ * stays uncoloured here too: `print_tm_mapped` exists in `redextape-core` but is not exported to wasm,
+ * because a colouring computed from a printed machine is stale the instant the user types.
  *
  * **`debounceMs` IS INJECTED RATHER THAN IMPORTED FROM `main.ts`.** It is `DEBOUNCE_MS` (300), the
  * source pane's own constant, because it is the same gesture at the same speed — but importing from
  * `main.ts` would make a module that mounts the app a dependency of one of its widgets, and the test
  * above needs to drive it without one.
  */
-export class LambdaEditor {
+export class ScratchEditor {
   #view: EditorView
   #timer: ReturnType<typeof setTimeout> | null = null
   #ms: number
@@ -56,7 +59,7 @@ export class LambdaEditor {
    */
   #seeding = false
 
-  constructor(config: LambdaEditorConfig) {
+  constructor(config: ScratchEditorConfig) {
     this.#ms = config.debounceMs
     this.#onEdit = config.onEdit
     this.#view = new EditorView({
@@ -96,7 +99,7 @@ export class LambdaEditor {
    *
    * **THE VIEW MOVES AND ITS CALLBACK DID NOT, WHICH ROUTED KEYSTROKES TO ANOTHER BUFFER — found by
    * driving the app in a browser.** `dom` above is the whole of what a relocation used to move: a
-   * `LambdaEditor` is constructed by the pane that FORKS, closing over that pane's `editScratch`, and
+   * `ScratchEditor` is constructed by the pane that FORKS, closing over that pane's `editScratch`, and
    * `receiveEditor` re-parents the node without touching this field. So an editor claimed by a second
    * pane still reported its edits through the FIRST pane's handler — and `transport.ts` resolves
    * `slot.binding.session` at edit time, so the moment that first pane was rebound anywhere else, typing

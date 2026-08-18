@@ -272,7 +272,16 @@ pub struct Session {
     ///
     /// The projection is still built ONCE and cached — see `build_tm_leg`. Pairing changes where it
     /// is stored, not how often it is computed.
-    pub(crate) tm: Result<(TmProgram, TmCursor<Rc<Machine>>), TmDecline>,
+    ///
+    /// **THE HEADER JOINS THE PAIR RATHER THAN SITTING BESIDE IT AS A FOURTH `Option` FIELD, FOR THE
+    /// REASON THE PARAGRAPHS ABOVE GIVE FOR THE PAIR ITSELF.** A header exists exactly when this
+    /// `Result` is `Ok` — `compile` reads it off `run_tm_described`, which always produces one on a
+    /// non-declining arm — so an `Option<TmHeader>` next to this field could spell "an available leg
+    /// with no header", a state no program can reach and every reader would have to handle. It is
+    /// retained because `tm_text` needs it: `print_tm` without a header reparses to a machine running
+    /// from blank tapes at `MIN_FIELD_WIDTH` instead of from this program's input. Cost is
+    /// O(tapes x width), not O(states).
+    pub(crate) tm: Result<(TmProgram, TmCursor<Rc<Machine>>, tm::TmHeader), TmDecline>,
     pub(crate) map: SourceMap,
     /// The halted run's final tapes, from `TmRun::Ran`. `None` for `HitCap` — a capped run never
     /// reached a final configuration, which is what `tm_value` reports as `Unfinished` rather than
@@ -479,8 +488,14 @@ impl Session {
                 // `Ran` and `HitCap` BOTH yield a working cursor, and that is the point of the split:
                 // a run that spent its budget is resumable through `raise_tm_cap`, so flattening it
                 // into a decline would throw away a session the user can still drive.
-                TmRun::Ran { tapes } => Ok((build_tm_leg(&d.header, d.machine, caps), Some(tapes))),
-                TmRun::HitCap => Ok((build_tm_leg(&d.header, d.machine, caps), None)),
+                TmRun::Ran { tapes } => {
+                    let (p, c) = build_tm_leg(&d.header, d.machine, caps);
+                    Ok(((p, c, d.header), Some(tapes)))
+                }
+                TmRun::HitCap => {
+                    let (p, c) = build_tm_leg(&d.header, d.machine, caps);
+                    Ok(((p, c, d.header), None))
+                }
             },
         };
 
@@ -619,7 +634,7 @@ impl Session {
 
     pub fn tm_status(&self) -> TmStatus {
         match &self.tm {
-            Ok((p, c)) => {
+            Ok((p, c, _)) => {
                 // No depth guard on this leg — the machine has no term to recurse over — so `HitCap`
                 // has one producer and `Capped` is unambiguous here in a way it is not for λ.
                 let run = match c.status() {
@@ -657,19 +672,35 @@ impl Session {
     /// AVAILABILITY IS READ OFF `tm`, the same place `tm_status` reads it, so the two cannot disagree
     /// about whether this leg is there.
     pub fn tm_program(&self) -> Result<TmProgram, SessionError> {
-        let (p, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let (p, _, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
         Ok(p.clone())
+    }
+
+    /// This session's machine as `.tm` text, or `None` for a declined leg.
+    ///
+    /// **UNCONDITIONAL ON SIZE.** Asked, it prints, however many rules the machine has — `list60` is
+    /// 94,182 of them (127,881 is the δ-table's ROW count, states plus rules; see `protocol.ts`'s
+    /// `ruleCount`) and about 7.8 MB of text. The size decision belongs to the caller and lives in
+    /// `protocol.ts`'s `forkable`, for the reason that module's own constant records: the app needs the
+    /// rule count to WORD its refusal as well as to make it, so a threshold here would be a second home
+    /// for one number.
+    ///
+    /// `print_tm_with` AND NOT `print_tm`: without the header the text reparses to a machine running
+    /// from blank tapes at `MIN_FIELD_WIDTH`, which is decision 6's state and is not this machine.
+    pub fn tm_text(&self) -> Option<String> {
+        let (_, cursor, header) = self.tm.as_ref().ok()?;
+        Some(tm::print_tm_with(cursor.machine(), header))
     }
 
     /// Advance one δ-step. `false` once the run has halted or hit a cap — `tm_status().run` says
     /// which, and is the only thing that can.
     pub fn step_tm(&mut self) -> Result<bool, SessionError> {
-        let (_, c) = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c, _) = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
         Ok(c.next().is_some())
     }
 
     pub fn tm_state(&self, radius: usize) -> Result<TmState, SessionError> {
-        let (_, c) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
         Ok(TmState::window(c, Some(&self.map), radius))
     }
 
@@ -679,7 +710,7 @@ impl Session {
     /// `get`, NEVER `[]`: an absent tape answers `Err` rather than indexing out of bounds. `from`/`to`
     /// need no such guard because `Tape::slice` clamps both.
     pub fn tape_slice(&self, tape: usize, from: usize, to: usize) -> Result<Vec<Symbol>, SessionError> {
-        let (_, c) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
         let tapes = c.tapes();
         let t = tapes.get(tape).ok_or(SessionError::NoSuchTape { tape, tapes: tapes.len() })?;
         Ok(t.slice(from, to))
@@ -687,7 +718,7 @@ impl Session {
 
     /// Extend a capped run's budget. Additive and saturating, like the λ leg's.
     pub fn raise_tm_cap(&mut self, extra_steps: u64, extra_cells: u64) -> Result<(), SessionError> {
-        let (_, c) = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c, _) = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
         c.raise_cap(extra_steps, extra_cells);
         Ok(())
     }
@@ -714,7 +745,7 @@ impl Session {
     /// apart. Under the second, `total_steps` is the count reached when cells ran out — well below
     /// `caps.steps` — so a reader must not take a capped run's length as evidence of which wall it hit.
     pub fn tm_value(&self) -> Result<Decoded, SessionError> {
-        let (_, cursor) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let (_, cursor, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
         let tapes: &[Tape] = match &self.final_tapes {
             Some(t) => t,
             None if cursor.status() == Some(tm::TmStatus::Halted) => cursor.tapes(),
@@ -796,7 +827,7 @@ impl Session {
     /// declined leg yields an empty leg rather than an error — the same shape `SourceMap::build`
     /// already has. There is nothing here for a caller to handle.
     pub fn link_index(&self, byte_budget: usize) -> LinkIndex {
-        let program = self.tm.as_ref().ok().map(|(p, _)| p);
+        let program = self.tm.as_ref().ok().map(|(p, _, _)| p);
         LinkIndex::build(self.initial_lambda.as_ref(), program, &self.map, byte_budget, MAX_PRINT_DEPTH)
     }
 }
@@ -2040,6 +2071,58 @@ state halt: accept
         assert!(owned > 0, "the mapped side resolved no owner in 50 steps, so the comparison proves nothing");
     }
 
+    /// **`tm_text` MUST PRODUCE TEXT THAT REBUILDS THE SAME MACHINE, NOT MERELY TEXT THAT PARSES.**
+    /// `a_headered_scratch_matches_the_session_path_except_for_the_source_node` already proves that
+    /// property for text produced by a hand-assembled `print_tm_with` call. This proves it for the
+    /// SHIPPED path — the method the app will actually call — which is the one that can regress.
+    ///
+    /// **THE WIDTH ASSERTION IS WHAT CATCHES A DROPPED HEADER.** Without one, `tm_scratch` falls back
+    /// to `MIN_FIELD_WIDTH` (4) and blank tapes; this fixture's auto-fit chooses 64, so a header lost
+    /// anywhere between `compile` and `print_tm_with` fails here rather than showing up as a machine
+    /// that quietly computes nothing.
+    #[test]
+    fn tm_text_round_trips_through_tm_scratch_to_the_same_machine() {
+        let src = "let x = 40; x + 2";
+        let mut s = Session::compile(src, EncodingKind::Unary).session.expect("compiles");
+
+        let text = s.tm_text().expect("an available TM leg has text");
+        let made = tm_scratch(&text);
+        assert!(made.diagnostics.is_empty(), "a printed machine must reparse: {:?}", made.diagnostics);
+        let mut sc = made.scratch.expect("a printed machine must reparse");
+
+        let st = sc.tm_status();
+        assert!(st.header, "the header survived `compile` and reached the printer");
+        assert_eq!(st.width, 64, "the auto-fit width, not `MIN_FIELD_WIDTH`");
+        assert_eq!(sc.tm_program(), s.tm_program().expect("TM available"), "same machine, same projection");
+
+        // Lockstep rather than a step-0 comparison: a wrong `init` can agree on an empty tape at step 0
+        // and diverge the moment the machine reads one.
+        let mut owned = 0usize;
+        for step in 0..50u32 {
+            let mapped = s.tm_state(3).expect("TM available");
+            owned += usize::from(mapped.source_node.is_some());
+            assert_eq!(
+                sc.tm_state(3),
+                TmState { source_node: None, ..mapped.clone() },
+                "step {step}: the scratch loses `source_node` and must lose nothing else"
+            );
+            assert_eq!(sc.step_tm(), s.step_tm().expect("TM available"), "step {step}: the two must stop together");
+        }
+        assert!(owned > 0, "the mapped side resolved no owner in 50 steps, so the comparison proves nothing");
+    }
+
+    /// **A DECLINED TM LEG HAS NO TEXT, AND `None` IS THE ONLY HONEST ANSWER.** There is no machine to
+    /// print. This is the same condition `tm_program` answers `SessionError::TmAbsent` on, read off the
+    /// same `Result`, so the two cannot disagree about whether a leg exists.
+    #[test]
+    fn a_declined_tm_leg_has_no_text() {
+        let s = Session::compile("let mut n = 1; while n > 0 { n = n + 1; } n", EncodingKind::Unary)
+            .session
+            .expect("compiles");
+        assert!(s.tm_program().is_err(), "this fixture's TM leg must decline for the test to mean anything");
+        assert_eq!(s.tm_text(), None);
+    }
+
     /// **`TmScratchStatus` HAS EXACTLY THESE FIVE FIELDS, AND A SIXTH FAILS TO COMPILE HERE.** The
     /// field this type exists in order NOT to have is `total_steps` — `Session::tm_status` reports one
     /// from the run `compile` performed, and a scratch is stepped rather than described-run, so any
@@ -2260,7 +2343,7 @@ state halt: accept
         use redextape_core::viewmodel::TmState;
 
         let s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
-        let (program, mut c) = s.tm.expect("the TM leg runs this");
+        let (program, mut c, _) = s.tm.expect("the TM leg runs this");
         let fitted = program.width;
 
         let mut saw_some = false;

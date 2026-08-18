@@ -1,5 +1,15 @@
 import type { LinkIndexWire } from './link'
-import type { Decoded, Diagnostic, LambdaState, LambdaStatus, Span, TmProgram, TmState, TmStatus } from './types'
+import type {
+  Decoded,
+  Diagnostic,
+  LambdaState,
+  LambdaStatus,
+  Span,
+  TmProgram,
+  TmScratchStatus,
+  TmState,
+  TmStatus,
+} from './types'
 
 /**
  * The λ printer's byte budget FOR THE READOUT — the one term a user actually reads.
@@ -263,6 +273,42 @@ export function tmFrameBytes(f: TmState): number {
   return FRAME_OVERHEAD_BYTES + cells * 2 + f.heads.length * 8 + f.window_start.length * 8
 }
 
+/**
+ * The largest machine, in δ rules, that may be opened in an editor.
+ *
+ * **MEASURED (5d-iv T2), NOT CHOSEN.** Emit, structured clone and `tmScratch` parse were priced across
+ * the corpus; this is the largest round count whose three costs total under the 250 ms an initiated
+ * gesture may take. `list20` is **11,802 rules** and clears it; `list60` is **94,182** and does not.
+ * **Those are RULE counts. An earlier draft quoted 16,250 and 127,881 — list20's LINES and list60's
+ * δ-table ROWS. A row is a state or a rule: 33,699 states + 94,182 rules is where 127,881 comes from.**
+ *
+ * **RULES RATHER THAN BYTES, BECAUSE THE COUNT IS ANSWERABLE BEFORE ANYTHING IS EMITTED.** `TmProgram`
+ * is projected once per compile and both threads hold it, so the refusal costs a reduce rather than a
+ * 7.8 MB allocation that is then discarded. Bytes per rule is stable at 55-61 across a 280x range, so
+ * a rule bound is a byte bound within about ten percent.
+ *
+ * **AND IT IS A REFUSAL, NEVER A TRUNCATION, WHICH IS WHERE THIS DIVERGES FROM `LAMBDA_BYTE_BUDGET`.**
+ * A truncated term is still a readable term and that budget trims and shows it. A truncated `.tm` file
+ * is not a machine: it either fails to parse or parses into a different one, missing its tail states.
+ */
+export const MAX_FORK_RULES = 50_000
+
+/** How many δ rules a projected machine has, summed across its states. */
+export function ruleCount(p: TmProgram): number {
+  return p.states.reduce((n, s) => n + s.rules.length, 0)
+}
+
+/**
+ * Whether this machine may be forked into an editable buffer.
+ *
+ * A TYPE PREDICATE, so a caller that passes the check has a non-null `TmProgram` without a second
+ * check. `compiled` carries `tmProgram: TmProgram | null` and every consumer would otherwise repeat
+ * the null test beside this one.
+ */
+export function forkable(p: TmProgram | null): p is TmProgram {
+  return p !== null && ruleCount(p) <= MAX_FORK_RULES
+}
+
 export type RunRequest =
   | { kind: 'run'; gen: number; src: string; encoding: string }
   /**
@@ -277,12 +323,14 @@ export type RunRequest =
    * stepped and watched, not evaluated, so an `encoding` field here would be a parameter with no
    * reader on either side.
    *
-   * λ ONLY, AND A `tm-scratch` VARIANT IS ABSENT BECAUSE NOTHING COULD SEND IT. §4.1's `TmScratch`
-   * exists at the boundary (plan T3, `tmScratch(src)` is exported and typed) but the app holds no TM
-   * TEXT anywhere: the TM pane renders a δ-table projected from a compiled program, not the `.tm`
-   * source that would have built one. A request kind no surface can produce is the fabricated-state
-   * shape `session.rs`'s `Session::tm` records the cost of, so the variant lands with the surface that
-   * can send it. See `ScratchBuffers`'s doc in `scratch.ts` for the same line drawn on the session side.
+   * λ ONLY — `tm-scratch`, BELOW, IS THE VARIANT FOR THE MACHINE HALF OF §4.1's `TmScratch`. See that
+   * variant's own doc for why it needs neither `step` nor `encoding` either. **THIS REQUEST STAYS λ
+   * ONLY EVEN THOUGH THE SESSION SIDE NO LONGER DOES** — `ScratchBuffers`'s doc in `scratch.ts` used to
+   * draw the identical "only one leg exists" line about the whole class; 5d-iv T5 gave it a second one,
+   * and that doc now argues the opposite. What survives here is narrower and still true: THIS variant
+   * of the wire is still the λ-only half of a pair, `tm-scratch` below is its counterpart, and a
+   * `ScratchBuffers` buffer picks between the two per mint rather than this request growing a `leg`
+   * field of its own.
    *
    * **`step` IS WHICH FRAME THE PANE WAS SHOWING, AND THE WORKER REPLAYS TO IT** (design §4.1). It is
    * not an offset into `src`: `src` is the SOURCE session's step-0 term at `LAMBDA_BYTE_BUDGET`, and
@@ -290,6 +338,23 @@ export type RunRequest =
    * box IS the term — which is why editing needs no message of its own.
    */
   | { kind: 'lambda-scratch'; gen: number; src: string; step: number }
+  /**
+   * Build a TM scratchpad from `.tm` TEXT and open a cursor on it — 5d-iv design §4.4.
+   *
+   * **NO `step`, UNLIKE `lambda-scratch`.** That request carries one because a λ fork replays the
+   * source term to the frame the pane was showing. A machine has no step-k term: its text IS the
+   * machine, and the scratch starts from its header's initial configuration. A `step` here would be a
+   * field with no reader on either side.
+   *
+   * **NO `encoding`, FOR `lambda-scratch`'s OWN REASON.** An encoding says how a VALUE is decoded,
+   * decoding is type-directed, and a `TmScratch` has no `ty` — `tmValue`, `sourceSpan` and `linkIndex`
+   * are absent from the type rather than declining.
+   *
+   * **THIS IS THE VARIANT `lambda-scratch`'s DOC NOW POINTS AT.** §4.1's `TmScratch` exists at the
+   * boundary (plan T3, `tmScratch(src)` is exported and typed); this is the request that finally gives
+   * the app a surface that can send it — 5d-iv's TM pane.
+   */
+  | { kind: 'tm-scratch'; gen: number; src: string }
   /**
    * Record further. For a `capped` leg the worker raises the cursor cap first; for a `budget` leg it
    * simply allows another `HISTORY_BYTES` and resumes.
@@ -351,6 +416,24 @@ export type RunReply =
    */
   | { kind: 'scratch-compiled'; gen: number; lambda: LambdaStatus; text: string | null }
   /**
+   * A TM scratch was built — 5d-iv design §4.4, and `scratch-compiled`'s counterpart rather than a
+   * widening of it.
+   *
+   * **A SEPARATE ARM BECAUSE THE PAYLOADS SHARE NO FIELD.** `scratch-compiled` carries a
+   * `LambdaStatus` and the text the fork was built from; this carries a `TmScratchStatus` — five
+   * fields, no `total_steps` — and a machine. Folding them would put a union inside the arm and a
+   * switch in every consumer to open it.
+   *
+   * **`tmProgram` IS NOT NULLABLE HERE, WHERE IT IS ON `compiled`.** A `TmScratch` exists only for text
+   * that parsed to a machine, so the δ-table always has a program to render; text that did not parse
+   * takes `no-session`, carrying the diagnostics, exactly as it does for λ.
+   *
+   * **AND THERE IS NO `text` ECHO.** λ needs one because the worker computes the term at step k and
+   * the main thread has never seen it. Here the main thread SENT the text, so echoing it would return
+   * up to `MAX_FORK_RULES` rules of string to the sender that already holds it.
+   */
+  | { kind: 'tm-scratch-compiled'; gen: number; tm: TmScratchStatus; tmProgram: TmProgram }
+  /**
    * A session exists. Sent BEFORE any recording, so the panes can mount and show their declines
    * while the legs are still being stepped.
    *
@@ -383,6 +466,22 @@ export type RunReply =
        * The ten typed arrays inside are TRANSFERRED, not cloned; see the worker's `postMessage`.
        */
       linkIndex: LinkIndexWire | null
+      /**
+       * This session's machine as `.tm` text, or `null` when there is no TM leg or the machine is over
+       * `MAX_FORK_RULES`.
+       *
+       * **IT RIDES THIS REPLY FOR `linkIndex`'s REASON, AND THE CAP IS WHAT MAKES THAT AFFORDABLE.**
+       * A lazy fetch on first click costs a round trip into a worker measured starved for 4,679 ms
+       * during recording, which is exactly when a user reaches for a fork. Eager and unbounded would
+       * post 7.8 MB on every `list60` compile whether or not anyone ever forks; eager and capped costs
+       * at most `MAX_FORK_RULES` rules of text.
+       *
+       * **`null` IS THE ONLY FACT BEHIND THE REFUSAL.** There is no `canFork` boolean beside it: a
+       * second encoding of one fact is how a control comes to be offered for a fork that cannot happen.
+       * The pane words its refusal from `ruleCount(tmProgram)`, so the decision and the message read
+       * the same object.
+       */
+      tmText: string | null
     }
   | { kind: 'lambda-frames'; gen: number; frames: LambdaState[]; done: RecordEnd | null }
   | { kind: 'tm-frames'; gen: number; frames: TmState[]; done: RecordEnd | null }

@@ -64,7 +64,7 @@ const retire = (label: string) => bar.querySelector<HTMLButtonElement>(`button[a
 
 describe('bufferList', () => {
   it('lists each buffer with its pane count, and marks an orphan', () => {
-    bufferList(button, () => THREE, noop, noop)
+    bufferList(button, () => THREE, noop, noop, noop)
     button.click()
     expect(rowText()).toEqual(['scratch 1 — 2 panes', 'scratch 2 — 1 pane', 'scratch 3 — orphan'])
   })
@@ -88,7 +88,7 @@ describe('bufferList', () => {
    * supply and this field exists for.
    */
   it('shows each buffer’s own term, so two rows can be told apart', () => {
-    bufferList(button, () => THREE, noop, noop)
+    bufferList(button, () => THREE, noop, noop, noop)
     button.click()
     expect(termText()).toEqual(['\\x. x', '\\y. y y', 'no term yet'])
   })
@@ -104,7 +104,7 @@ describe('bufferList', () => {
    * hovering it would produce an empty tooltip — a control reporting something it does not have.
    */
   it('marks a buffer with no term, and carries the full term as a title only when there is one', () => {
-    bufferList(button, () => THREE, noop, noop)
+    bufferList(button, () => THREE, noop, noop, noop)
     button.click()
     const terms = [...bar.querySelectorAll<HTMLElement>('.buffer-row-term')]
     expect(terms.map((e) => e.classList.contains('is-absent'))).toEqual([false, false, true])
@@ -132,6 +132,7 @@ describe('bufferList', () => {
         live = live.filter((r) => r.id !== id)
       },
       noop,
+      noop,
     )
 
     button.click()
@@ -151,7 +152,7 @@ describe('bufferList', () => {
    * for them — which is why there is no separate test for those two paths.
    */
   it('opens on the button and keeps aria-expanded true while open', () => {
-    bufferList(button, () => THREE, noop, noop)
+    bufferList(button, () => THREE, noop, noop, noop)
     expect(button.getAttribute('aria-haspopup')).toBe('menu')
     expect(button.getAttribute('aria-expanded')).toBe('false')
 
@@ -173,7 +174,7 @@ describe('bufferList', () => {
    * different control from the one this describes.
    */
   it('moves focus into the list on open', () => {
-    bufferList(button, () => THREE, noop, noop)
+    bufferList(button, () => THREE, noop, noop, noop)
     button.click()
     const active = document.activeElement
     expect(menu()?.contains(active)).toBe(true)
@@ -195,8 +196,8 @@ describe('bufferList', () => {
     const second = document.createElement('button')
     second.type = 'button'
     bar.append(second)
-    bufferList(button, () => THREE, noop, noop)
-    bufferList(second, () => [], noop, noop)
+    bufferList(button, () => THREE, noop, noop, noop)
+    bufferList(second, () => [], noop, noop, noop)
 
     const mine = button.getAttribute('aria-controls') ?? ''
     const theirs = second.getAttribute('aria-controls') ?? ''
@@ -219,7 +220,7 @@ describe('bufferList', () => {
    * been retired.
    */
   it('names how many buffers there are on its own button', () => {
-    const list = bufferList(button, () => THREE, noop, noop)
+    const list = bufferList(button, () => THREE, noop, noop, noop)
     list.update(3)
     expect(button.textContent).toBe('buffers 3 ▾')
     list.update(1)
@@ -257,7 +258,7 @@ describe('bufferList: temperature', () => {
   const row = () => bar.querySelector<HTMLElement>('.buffer-row')
 
   it('a cold row offers warm and not cool', () => {
-    bufferList(button, () => COLD, noop, noop)
+    bufferList(button, () => COLD, noop, noop, noop)
     button.click()
     expect(row()?.textContent).toContain('asleep')
     expect(temperature('warm', 'scratch 1')).not.toBeNull()
@@ -265,7 +266,7 @@ describe('bufferList: temperature', () => {
   })
 
   it('a warm row offers cool and not warm', () => {
-    bufferList(button, () => WARM, noop, noop)
+    bufferList(button, () => WARM, noop, noop, noop)
     button.click()
     expect(temperature('cool', 'scratch 1')).not.toBeNull()
     expect(temperature('warm', 'scratch 1')).toBeNull()
@@ -278,6 +279,7 @@ describe('bufferList: temperature', () => {
       () => COLD,
       noop,
       (id, warm) => seen.push([id, warm]),
+      noop,
     )
     button.click()
     temperature('warm', 'scratch 1')?.click()
@@ -297,6 +299,7 @@ describe('bufferList: temperature', () => {
       () => WARM,
       noop,
       (id, warm) => seen.push([id, warm]),
+      noop,
     )
     button.click()
     temperature('cool', 'scratch 1')?.click()
@@ -305,7 +308,7 @@ describe('bufferList: temperature', () => {
 
   // A COLD BUFFER HAS NO SESSION, so a row must not claim it holds a term it cannot read.
   it('a cold row says it is asleep rather than showing no term', () => {
-    bufferList(button, () => COLD, noop, noop)
+    bufferList(button, () => COLD, noop, noop, noop)
     button.click()
     expect(row()?.textContent).not.toContain('no term')
   })
@@ -343,6 +346,7 @@ describe('bufferList: temperature', () => {
         const updated = live.map((r) => (r.id === id ? { ...r, warm } : r))
         live = [...updated].reverse()
       },
+      noop,
     )
 
     button.click()
@@ -388,7 +392,7 @@ describe('bufferList: where the list opens', () => {
     // still fails `sharesEdge`.
     bar.style.left = '20px'
     bar.style.top = '150px'
-    bufferList(button, () => THREE, noop, noop)
+    bufferList(button, () => THREE, noop, noop, noop)
     button.click()
 
     const list = menu()?.getBoundingClientRect() ?? new DOMRect()

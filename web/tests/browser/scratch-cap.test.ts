@@ -100,8 +100,11 @@ describe('the buffer cap, from the control that hits it', () => {
    */
   it('refuses the fork past the cap with a message on the status line, evicts nothing, and takes the fork after a retire', async () => {
     // STAGE 0 — a page that has never forked, asserted rather than assumed: the readout has to be
-    // wired for the counts below to mean anything, and `hidden` is `main.ts`'s treatment of zero.
-    expect(buffersButton()?.textContent).toBe('buffers 0 ▾')
+    // wired for the counts below to mean anything. **`buffers ▾`, WITHOUT THE `0` — 5d-iv T10.** This
+    // used to read `buffers 0 ▾`; `buffer-list.ts`'s `update` drops the digit at zero now, because the
+    // menu this button opens is never empty any more (it offers "new TM buffer"), so `main.ts` also no
+    // longer sets `hidden` at zero — the previous comment here named that as the zero-count treatment.
+    expect(buffersButton()?.textContent).toBe('buffers ▾')
     expect(statusLine()).not.toContain('fork failed')
 
     // STAGE 1 — fill to the cap through the control, alternating with the selector that makes the pane
@@ -151,7 +154,7 @@ describe('the buffer cap, from the control that hits it', () => {
     // retire the row it named first.
     buffersButton()?.click()
     // **THE ROWS ARE TOLD APART BY THEIR TERMS, WHICH IS WHAT MAKES "AIM AT ONE ROW" A CHOICE.** Every
-    // row here is `scratch N — orphan` on its first line and identical to its neighbours; the second
+    // row here is `λ scratch N — orphan` on its first line and identical to its neighbours; the second
     // line is the buffer's own term, and it is the only thing on this surface a user could pick BY.
     // Asserted here rather than only in `buffer-list.test.ts` because that file's fixture supplies the
     // terms and this one gets them from `MAX_WARM_BUFFERS` real workers through `main.ts`'s join.
@@ -159,7 +162,7 @@ describe('the buffer cap, from the control that hits it', () => {
     expect(terms).toHaveLength(MAX_WARM_BUFFERS)
     for (const t of terms) expect(t.textContent ?? '').not.toBe('')
 
-    const row = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label="retire scratch 1"]')
+    const row = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label="retire λ scratch 1"]')
     if (row === null) throw new Error('the buffer the refusal named has no row in the header list')
     row.click()
     expect(buffersButton()?.textContent).toBe(`buffers ${MAX_WARM_BUFFERS - 1} ▾`)
@@ -178,7 +181,7 @@ describe('the buffer cap, from the control that hits it', () => {
     expect(statusLine()).not.toContain('fork failed')
     expect(heading()).toContain('[detached]')
     expect(buffersButton()?.textContent).toBe(`buffers ${MAX_WARM_BUFFERS} ▾`)
-    // THE NAME IS NOT REISSUED — `scratch 1` was retired and this is `scratch ${MAX_WARM_BUFFERS + 1}`, which is
+    // THE NAME IS NOT REISSUED — `λ scratch 1` was retired and this is `λ scratch ${MAX_WARM_BUFFERS + 1}`, which is
     // `ScratchBuffers.#minted`'s contract seen from the app. The λ group is where a buffer's label
     // becomes user-visible text.
     const bound = document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')?.value

@@ -203,7 +203,7 @@ describe('rebinding a forked λ pane through the binding selector', () => {
 
     // 2. A SECOND λ PANE ON THE SAME BUFFER, through the real split picker's `(same)` entry — the
     //    gesture `two-lambda-panes.test.ts` establishes. It arrives holding no editor: there is one
-    //    `LambdaEditor` per buffer and `lambda-0` has it.
+    //    `ScratchEditor` per buffer and `lambda-0` has it.
     const split = document.querySelector<HTMLButtonElement>(
       '[data-leaf="lambda-0"] button[aria-label="split left and right"]',
     )

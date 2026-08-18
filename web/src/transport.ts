@@ -202,8 +202,25 @@ export function createTransport(deps: {
     },
     // THE FORK — design §4.3, and the handler that finally puts a second session in the registry
     // (T7's own doc names its absence as the reason this slice's tests could not be driven through
-    // the app). OMITTED ON THE TM LEG for the reason the two handlers below are, and one more: §4.1's
-    // `TmScratch` is built from `.tm` text and nothing in this app holds any — see `scratch.ts`.
+    // the app).
+    //
+    // **OMITTED ON THE TM LEG, AND THE REASON WRITTEN HERE UNTIL NOW WAS WRONG ON BOTH HALVES —
+    // whole-branch review before merge.** It read "for the reason the two handlers below are, and one
+    // more: §4.1's `TmScratch` is built from `.tm` text and nothing in this app holds any — see
+    // `scratch.ts`." `editScratch` and `collapse`, the two handlers below, are no longer λ-only either
+    // — each carries its own paragraph, dated to this same task, saying so in as many words. And this
+    // app does hold `.tm` text: `detachMachine`, in the `leg === 'tm'` spread further down THIS file,
+    // reads it straight off `sessions.entryOf(slot.binding.session).tmProgram?.tmText` — the field
+    // `replies.ts`'s `setTmProgram` writes from every `compiled` reply. `scratch.ts` carries no
+    // matching paragraph any more either; design §1 named it as one of three files carrying this
+    // comment, and only `protocol.ts` and `scratch.ts` were ever assigned a task to correct it.
+    //
+    // **THE REAL REASON `detach` STAYS λ-ONLY:** it forks a TERM at a step, replaying the source's
+    // step-0 text to the frame the pane was showing (`scratchpad.fork(slot, wiring.index.lambdaText,
+    // step, 'lambda')` below) — a shape with no TM equivalent, since a machine has no per-step text to
+    // replay. `detachMachine` is the TM leg's own handler for the same gesture, seeded from the whole
+    // `.tm` file instead of a step (its own doc, below, has the argument), which is why this is a
+    // second handler rather than one function gated by leg.
     //
     // THE PANE NOW SENDS A STEP, NOT TEXT, AND THIS HANDLER RESOLVES IT — see `PaneEvents.detach`'s
     // doc for why (design §4.1 moved the seed off the frame's own printed text).
@@ -260,7 +277,7 @@ export function createTransport(deps: {
             // are wiring bugs, and rendering one as a status line would swallow it. Anything else is
             // re-thrown unchanged.
             try {
-              scratchpad.fork(slot, wiring.index.lambdaText, step)
+              scratchpad.fork(slot, wiring.index.lambdaText, step, 'lambda')
             } catch (e) {
               if (!(e instanceof BufferCapReached)) throw e
               wiring.setForkFailed(e.message)
@@ -292,59 +309,76 @@ export function createTransport(deps: {
             // — and the first frame is a worker round trip away.
             draw()
           },
-          // THE EDIT PATH — design §4.3's second gesture, `LambdaEditor`'s debounced `onEdit` wired
-          // through `LambdaPane.setEditor` (`pane-chrome.ts`'s `editScratch` doc). `recompile` REBUILDS
-          // THE BUFFER THIS PANE IS SHOWING rather than forking a second one, which is the whole of
-          // what this handler decides. It used to say "the singleton is `scratch.ts`'s to keep, not
-          // this handler's to re-derive", and there was no id to pass because there was one scratch;
-          // 5d-ii-c decision 1 makes buffers plural, so the pane's own binding is what says which term
-          // the keystrokes belong to. Reading it here rather than in the callee is the same rule
-          // `detach` above follows: this file is handed what it needs to name, it does not go looking.
-          //
-          // NO `draw()`, UNLIKE `detach` ABOVE, and the asymmetry is the point rather than an
-          // oversight. `detach` draws because it REBINDS the slot synchronously — the badge, the
-          // selector and the status line are stale the instant the click returns. `recompile` posts a
-          // message and changes nothing else synchronously: the pane is already on this session and
-          // stays on it (`scratch.ts`'s own doc: "does not rebind and does not touch the registry"),
-          // so there is no fact for a draw to catch up on until the worker's `scratch-compiled` reply
-          // arrives and `onScratchReply` paints it. Drawing here would be the same waste the source
-          // editor's own `EditorView.updateListener` in `main.ts` already declines to pay on every
-          // keystroke — its comment states the reason: `hist` has not changed, so repainting is waste.
-          editScratch: (src: string) => {
-            scratchpad.recompile(slot.binding.session, src)
-          },
-          // THE COLLAPSE REPORT — 5d-ii-d T9, design §4.7. LAMBDA-ONLY, LIKE `detach` AND `editScratch`
-          // BESIDE IT: `PaneEvents.collapse`'s own doc states the rule ("a handler it can never fire is
-          // a parameter pretending to be a capability"), and `TmPane` never builds a `collapseButton` to
-          // fire it. THE SESSION IS ALREADY IN SCOPE HERE, which is the whole reason this lives in
-          // `transport.ts` rather than behind a callback threaded through `pane-host.ts` the way
-          // `detach`/`showEditor` are — those two need a `LeafId` this file does not have (`editorOwner`
-          // is keyed by one); this handler needs nothing beyond `slot.binding.session`, which every
-          // other handler above already resolves the same way.
-          //
-          // **`slot.binding.session` USED TO NOT BE SAFE THE WAY "EVERY OTHER HANDLER" IMPLIES — THE SAME
-          // GAP `editScratch` USED TO HAVE, NOW CLOSED AT ITS SOURCE.** `editor-custody.ts`'s
-          // `reconcileEditors` doc used to record a live gap: `pane-host.ts`'s same-leg `rebind` arm did
-          // not hand a scratch→scratch rebind's outgoing editor to custody, so a pane could go on showing
-          // buffer A's live editor above buffer B's frames once its binding had moved to B, and
-          // `editScratch` — read at edit time, exactly as this handler reads at click time — would write
-          // THROUGH that stale editor to B rather than to A. `collapse` resolves the buffer the identical
-          // way and shared the same shape: clicking collapse in that window would have recorded the flag
-          // against B while the editor on screen was A's. **Fixed where this paragraph always said it
-          // belonged** — `pane-host.ts`'s rebind wrapper now takes the outgoing editor into custody before
-          // the binding moves, so by the time either handler here reads `slot.binding.session`, the
-          // editor actually mounted on the pane agrees with it. Neither handler needed to change; the
-          // stale binding they used to inherit is what stopped being possible.
-          collapse: (collapsed: boolean) => {
-            // NO `draw()`. The class toggle already happened in the pane — `collapseButton`'s own
-            // callback performs it before this ever runs — and nothing else on screen depends on this
-            // flag. `onBuffersPersist()` is the entire consequence: Task 5's writer, called here for the
-            // same reason `rebind` above calls it after a `slot.rebind`.
-            scratchpad.setCollapsed(slot.binding.session, collapsed)
-            onBuffersPersist()
-          },
         }
       : {}),
+    // THE EDIT PATH — design §4.3's second gesture, `ScratchEditor`'s debounced `onEdit` wired
+    // through both panes' own `setEditor` (`pane-chrome.ts`'s `editScratch` doc). `recompile` REBUILDS
+    // THE BUFFER THIS PANE IS SHOWING rather than forking a second one, which is the whole of
+    // what this handler decides. It used to say "the singleton is `scratch.ts`'s to keep, not
+    // this handler's to re-derive", and there was no id to pass because there was one scratch;
+    // 5d-ii-c decision 1 makes buffers plural, so the pane's own binding is what says which term
+    // the keystrokes belong to. Reading it here rather than in the callee is the same rule
+    // `detach` above follows: this file is handed what it needs to name, it does not go looking.
+    //
+    // NO `draw()`, UNLIKE `detach` ABOVE, and the asymmetry is the point rather than an
+    // oversight. `detach` draws because it REBINDS the slot synchronously — the badge, the
+    // selector and the status line are stale the instant the click returns. `recompile` posts a
+    // message and changes nothing else synchronously: the pane is already on this session and
+    // stays on it (`scratch.ts`'s own doc: "does not rebind and does not touch the registry"),
+    // so there is no fact for a draw to catch up on until the worker's `scratch-compiled` reply
+    // arrives and `onScratchReply` paints it. Drawing here would be the same waste the source
+    // editor's own `EditorView.updateListener` in `main.ts` already declines to pay on every
+    // keystroke — its comment states the reason: `hist` has not changed, so repainting is waste.
+    //
+    // **PROVIDED ON BOTH LEGS, NOT ONLY λ — WHICH REVERSES WHAT THIS PROPERTY USED TO SAY, Important
+    // finding, review of Task 8.** It used to sit inside the `leg === 'lambda'` spread above, beside
+    // `detach` and `collapse`, on the reasoning that an editor exists only on a pane whose slot owns a
+    // scratch and that "today means the λ leg". Task 8 made that false: `TmPane` also `implements
+    // EditablePane` and its constructor reads `on.editScratch` exactly the way `LambdaPane`'s does
+    // (`this.#onEdit = on.editScratch`), unconditional on leg. `slot.binding.session` resolves
+    // identically on either leg, so there is nothing leg-specific left in this handler's body — moving
+    // it out of the spread is the whole fix.
+    editScratch: (src: string) => {
+      scratchpad.recompile(slot.binding.session, src)
+    },
+    // THE COLLAPSE REPORT — 5d-ii-d T9, design §4.7.
+    //
+    // **PROVIDED ON BOTH LEGS, NOT ONLY λ — WHICH REVERSES WHAT THIS PROPERTY USED TO SAY, Important
+    // finding, review of Task 8.** It used to read "LAMBDA-ONLY, LIKE `detach` AND `editScratch` BESIDE
+    // IT: `PaneEvents.collapse`'s own doc states the rule ('a handler it can never fire is a parameter
+    // pretending to be a capability'), and `TmPane` never builds a `collapseButton` to fire it" — both
+    // halves false as of Task 8: `TmPane`'s constructor builds a `collapseButton` on its own control
+    // strip and calls `on.collapse?.(collapsed)` from it, exactly like `LambdaPane`'s. Left inside the
+    // λ-only spread, every `TmPane` was constructed with `on.collapse === undefined`, so a TM collapse
+    // toggled the class but never reached `scratchpad.setCollapsed` or `redextape.buffers` — collapse a
+    // TM scratch, reload, it comes back expanded, the exact screen-disagrees-with-storage defect the
+    // collapse-seeding rules exist to prevent. THE SESSION IS ALREADY IN SCOPE HERE, which is the whole
+    // reason this lives in `transport.ts` rather than behind a callback threaded through `pane-host.ts`
+    // the way `detach`/`showEditor` are — those two need a `LeafId` this file does not have (`editorOwner`
+    // is keyed by one); this handler needs nothing beyond `slot.binding.session`, which every
+    // other handler above already resolves the same way, on either leg.
+    //
+    // **`slot.binding.session` USED TO NOT BE SAFE THE WAY "EVERY OTHER HANDLER" IMPLIES — THE SAME
+    // GAP `editScratch` USED TO HAVE, NOW CLOSED AT ITS SOURCE.** `editor-custody.ts`'s
+    // `reconcileEditors` doc used to record a live gap: `pane-host.ts`'s same-leg `rebind` arm did
+    // not hand a scratch→scratch rebind's outgoing editor to custody, so a pane could go on showing
+    // buffer A's live editor above buffer B's frames once its binding had moved to B, and
+    // `editScratch` — read at edit time, exactly as this handler reads at click time — would write
+    // THROUGH that stale editor to B rather than to A. `collapse` resolves the buffer the identical
+    // way and shared the same shape: clicking collapse in that window would have recorded the flag
+    // against B while the editor on screen was A's. **Fixed where this paragraph always said it
+    // belonged** — `pane-host.ts`'s rebind wrapper now takes the outgoing editor into custody before
+    // the binding moves, so by the time either handler here reads `slot.binding.session`, the
+    // editor actually mounted on the pane agrees with it. Neither handler needed to change; the
+    // stale binding they used to inherit is what stopped being possible.
+    collapse: (collapsed: boolean) => {
+      // NO `draw()`. The class toggle already happened in the pane — `collapseButton`'s own
+      // callback performs it before this ever runs — and nothing else on screen depends on this
+      // flag. `onBuffersPersist()` is the entire consequence: Task 5's writer, called here for the
+      // same reason `rebind` above calls it after a `slot.rebind`.
+      scratchpad.setCollapsed(slot.binding.session, collapsed)
+      onBuffersPersist()
+    },
     // OMITTED ENTIRELY ON THE λ LEG, not set to `undefined` — `PaneEvents.linkState` is optional
     // under `exactOptionalPropertyTypes`, which distinguishes "absent" from "present and undefined".
     // The λ pane has no table to click.
@@ -361,6 +395,52 @@ export function createTransport(deps: {
             const wiring = linkWiring()
             if (!wiring.linkable || wiring.index === null) return
             wiring.setLinkTo(wiring.index.nodeForState(stateId), 'tm')
+          },
+          // THE MACHINE FORK — design §4.3, `detach`'s counterpart for this leg. **NO STEP TO RESOLVE,
+          // WHERE `detach` ABOVE RESOLVES ONE** — `PaneEvents.detachMachine`'s own doc has the argument:
+          // a machine's seed is the whole `.tm` file, not a replay to a frame.
+          //
+          // `sessions.entryOf(...).tmProgram?.tmText` IS THE ONE PLACE THIS TEXT LIVES ON THIS SIDE —
+          // `replies.ts`'s `setTmProgram` is what writes it, from the `compiled` reply's own `tmText`
+          // field, every time this session's TM leg recompiles. Reading it off the SLOT's OWN SESSION,
+          // not a fixed `SOURCE_SESSION` this file does not have: whichever session a TM pane is
+          // currently bound to is the one its fork control forks FROM, same as `detach` above resolves
+          // `slot.binding.session` rather than assuming which session it is.
+          //
+          // **`null` REACHING HERE IS A WIRING BUG, NOT A USER ACTION — LOUD, NOT SWALLOWED.** The
+          // control is withdrawn or disabled (`TmPane.#refreshDetach`) whenever this would be `null` —
+          // over the cap (`tmText === null` with a machine present, disabled) or on a pane already
+          // showing the scratch it would fork (`#detached`, removed entirely — Critical fix, fix round
+          // on Task 9: `setForkAvailable`'s own call site fans out over the SOURCE session only, so a
+          // pane that has just rebound onto its own new scratch needs `#refreshDetach` driven from
+          // `setDetached`, not another `setForkAvailable` call it will never receive again) — so a
+          // click that reaches this handler with one is `detachMachine` firing on a button that should
+          // never have been clickable — a defect in the wiring between the two, not a state a user
+          // chose.
+          detachMachine: () => {
+            const text = sessions.entryOf(slot.binding.session).tmProgram?.tmText ?? null
+            if (text === null) throw new Error('detachMachine reached with no machine text')
+            // **`BufferCapReached` AND NOT A BARE `catch`**, for the reason the λ handler's own doc
+            // gives in full: the other throws reachable from `fork` are `SessionRegistry.add`'s and
+            // `SessionPool.bind`'s guards over their own invariants, and rendering one of those as a
+            // status line would swallow a wiring bug.
+            try {
+              scratchpad.fork(slot, text, 0, 'tm')
+            } catch (e) {
+              if (!(e instanceof BufferCapReached)) throw e
+              linkWiring().setForkFailed(e.message)
+              // NO `onBuffersChanged()` ON THIS ARM, `detach`'s OWN REASON: the header's count did not
+              // move, because that is the whole content of the refusal.
+              draw()
+              return
+            }
+            // SAME ORDER AS `detach` ABOVE, AND THE SAME REASON FOR EACH LINE: a fresh attempt retires
+            // yesterday's news on the SUCCESS path, the header's buffer count is stale until this
+            // returns, and everything about this pane — its badge, its selector, its status line — is
+            // stale the instant the synchronous rebind above returns.
+            linkWiring().setForkFailed(null)
+            onBuffersChanged()
+            draw()
           },
         }
       : {}),

@@ -1217,6 +1217,41 @@ fn untranslatable_tm_text_crosses_as_diagnostics_and_a_null_handle() {
     assert_eq!(get(&out, "scratch"), JsValue::NULL, "no machine, no handle — and `null`, not `undefined`");
 }
 
+/// **THE WIRE CARRIES A STRING OR A NULL, AND THE NATIVE TIER CANNOT SEE WHICH.** `Session::tm_text`
+/// (the `#[wasm_bindgen]` method, not `session::Session::tm_text`) returns `JsValue` and matches its
+/// `Option<String>` explicitly rather than crossing the boundary as a bare `Option` — wasm-bindgen's
+/// native ABI marshals `None` as `undefined`, not `null`, and this method does not call `to_value`, so
+/// this crate's `serialize_missing_as_null(true)` setting does not reach it. Which one arrives is a
+/// property of the boundary and is asserted here — on the available leg in this case, and on a declined
+/// one in `declined_tm_text_crosses_as_null_not_undefined` below — because `protocol.ts` types the field
+/// `string | null`.
+#[wasm_bindgen_test]
+fn tm_text_crosses_as_a_string() {
+    let (_, session) = compile("let x = 40; x + 2");
+    let text = call(&session, "tmText", &[]);
+    assert!(text.is_string() || text.is_null(), "tmText must cross as a string or null, got {text:?}");
+}
+
+/// **THE CASE THE ABOVE TEST CANNOT REACH.** `"let x = 40; x + 2"` has an available TM leg, so
+/// `text.is_string() || text.is_null()` there is satisfied by the `Some` arm alone — a bare
+/// `Option<String>` return would pass it too, `undefined` included, since `is_null()` is never the
+/// disjunct that has to hold. `"let mut n = 1; while n > 0 { n = n + 1; } n"` declines with
+/// `TmDecline::Overflow` under unary encoding (pinned by `session.rs`'s
+/// `a_declined_tm_leg_reports_no_total_steps`), so it exercises the `None` arm and can tell `null` from
+/// `undefined` apart. `is_null()` and not `is_string() || is_null()`: `undefined` must fail this
+/// assertion, not merely be permitted to pass it.
+#[wasm_bindgen_test]
+fn declined_tm_text_crosses_as_null_not_undefined() {
+    let (_, session) = compile("let mut n = 1; while n > 0 { n = n + 1; } n");
+    // Without this guard, a regression in the fixture's decline behavior would be misdirected as
+    // *"must cross as null"* when the real cause is *"the fixture stopped declining"* — similar to
+    // the `owned > 0` guard in `a_headered_scratch_matches_the_session_path_except_for_the_source_node`.
+    let tm_status = call(&session, "tmStatus", &[]);
+    assert_eq!(get(&tm_status, "available"), JsValue::FALSE, "this fixture must decline under unary encoding");
+    let text = call(&session, "tmText", &[]);
+    assert!(text.is_null(), "a declined TM leg's tmText must cross as `null`, not `undefined`, got {text:?}");
+}
+
 /// **THE COMPILE-TIME HALF OF DECISION 2, AND IT IS A TEST RATHER THAN A COMMENT.** The design's §5
 /// asks for a `trybuild`-style case or an assertion against the generated `.d.ts`; this is neither
 /// literally, and it is stronger than both for what it costs — no new dependency, and no dependence on

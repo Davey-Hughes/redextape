@@ -87,6 +87,20 @@ export class SessionClient {
   }
 
   /**
+   * Build a TM scratchpad from `.tm` text and open a cursor on it — design §4.4.
+   *
+   * NO `step`, UNLIKE `scratch`, FOR THAT REQUEST'S OWN REASON STATED ON THE WIRE TYPE: a machine has
+   * no step-k term to replay to, so the text in the box IS the term the scratch starts from.
+   *
+   * THE SAME GUARD AS `request`/`scratch` AND FOR THE SAME REASON: post this generation's work only if
+   * it is still the current one.
+   */
+  tmScratch(gen: number, src: string): void {
+    if (gen !== this.#gen) return
+    this.#port.postMessage({ kind: 'tm-scratch', gen, src })
+  }
+
+  /**
    * Ask for more frames on one leg. ADDRESSES THE CURRENT GENERATION AND DOES NOT ADVANCE IT: this
    * continues the run already in the worker, and bumping the generation would abandon the very
    * session it is trying to extend.

@@ -370,6 +370,26 @@ body {
   display: none;
 }
 
+/* 5d-iv Task 8: the TM pane's collapse is a class on `.tm-pane` itself (design §4.1's "a class on the
+   pane, not a second rendering mode"), not on the editor host the way `.term-editor.is-collapsed` above
+   is for the λ pane — so the same `.term-editor` declarations above are reused here (not duplicated)
+   and hidden through an ancestor selector instead of a modifier class on the host.
+
+   TWO SELECTORS FOR ONE BEHAVIOUR, CONSIDERED AND KEPT APART — Minor finding, review of Task 8. §4.1's
+   own words are quoted above for a reason: "a class on the pane, not a second rendering mode" contrasts
+   a CSS-class toggle against a renderer branch (mount/unmount, or two DOM subtrees) — it does not say
+   which ELEMENT the class has to land on. Converging on the λ idiom would mean writing `is-collapsed`
+   onto `TmPane`'s own `#editorHost` instead of `.tm-pane`, and that is the one thing this pane's own
+   design note (`tm-pane.ts`'s `#body` doc) and the plan's own Task 8 test both already rule out: the
+   test asserts `.tm-pane` itself carries `.collapsed`, because §4.1 is read literally there as "the
+   pane," not "the editor host" — `TmPane`'s collapse is a fact about the WHOLE machine-source region,
+   not about one child of it. A single-class selector cannot select an ancestor's class; once the class
+   lives one level up, the descendant combinator here is the only CSS that reaches the editor from it.
+   The two idioms differ because the two panes' designs differ, not by drift. */
+.tm-pane.collapsed .term-editor {
+  display: none;
+}
+
 .truncated {
   color: var(--fg-dim);
   font-style: italic;

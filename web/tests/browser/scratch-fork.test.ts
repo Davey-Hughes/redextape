@@ -166,7 +166,7 @@ describe('detach is a fork', () => {
 
       const tm = reg.legOf({ session: SOURCE, leg: 'tm' })
       const before = tm.hist.newestStep
-      pad.fork(slot, '(λx. x) (λy. y)', 0)
+      pad.fork(slot, '(λx. x) (λy. y)', 0, 'lambda')
 
       // Two threads now, and the fork did not take the source's. Kept above the behavioural
       // assertion so a failure says "there is one worker" rather than leaving it to be inferred.
@@ -220,7 +220,7 @@ describe('detach is a fork', () => {
         },
       })
 
-      pad.fork(new PaneSlot('lambda', SOURCE), '(λx. x) (λy. y)', 0)
+      pad.fork(new PaneSlot('lambda', SOURCE), '(λx. x) (λy. y)', 0, 'lambda')
       await until(() => seen.some((r) => r.kind === 'lambda-frames' && r.done !== null), "the scratchpad's frames")
 
       // `scratch-compiled`, NOT `compiled`, and never a `result`: §3.3 puts `lambdaValue`, `linkIndex`
@@ -270,7 +270,7 @@ describe('detach is a fork', () => {
         onReply: (_session, r) => seen.push(r),
       })
 
-      pad.fork(slot, 'λx. x', 0)
+      pad.fork(slot, 'λx. x', 0, 'lambda')
       await until(() => seen.some((r) => r.kind === 'scratch-compiled'), "the scratchpad's thread to answer")
       const thread = spawned[1]
       if (thread === undefined) throw new Error('the fork should have spawned a second thread')
@@ -410,7 +410,7 @@ describe('the no-session report for a failed fork', () => {
 
       // THE PHANTOM BUILD. `detach` has already rebound the slot by the time this call returns —
       // the CRITICAL finding's own bug, reproduced here before it is fixed by what comes next.
-      pad.fork(slot, 'not a valid lambda term (((', 0)
+      pad.fork(slot, 'not a valid lambda term (((', 0, 'lambda')
       slot.render(reg, pane, slot.resolve(reg))
       expect(slot.binding.session).toBe(SCRATCH)
 
@@ -474,7 +474,7 @@ describe('the no-session report for a failed fork', () => {
       // one produced the same id; 5d-ii-c decision 1 mints per fork, so this line's buffer is
       // `scratch 2` while `scratch 1` is still live above rather than spent.
       expect(reg.has(SCRATCH_2)).toBe(false)
-      pad.fork(slot, '(λx. x) (λy. y)', 0)
+      pad.fork(slot, '(λx. x) (λy. y)', 0, 'lambda')
       await until(() => seen.some((r) => r.kind === 'lambda-frames' && r.done !== null), "the buffer's frames")
       expect(reg.has(SCRATCH_2)).toBe(true)
       expect(reg.legOf({ session: SCRATCH_2, leg: 'lambda' }).hist.current).not.toBeUndefined()
@@ -653,7 +653,7 @@ describe('the no-session report for a failed fork', () => {
       // THE PHANTOM BUILD — an unparseable seed, for the reason the test above records: it reaches the
       // identical `scratch === null` branch of `onLambdaScratch` as a genuinely over-budget term without
       // needing an enormous fixture.
-      pad.fork(slot, 'not a valid lambda term (((', 0)
+      pad.fork(slot, 'not a valid lambda term (((', 0, 'lambda')
       expect(slot.binding.session).toBe(SCRATCH)
       await until(() => seen.some((r) => r.kind === 'no-session'), 'the failed build to answer')
       const failReply = seen.find((r) => r.kind === 'no-session')

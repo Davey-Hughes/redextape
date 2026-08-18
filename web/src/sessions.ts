@@ -80,8 +80,17 @@ export type SessionLegs = { [L in Leg]?: LegState<LegFrame[L]> }
  * `tapeNames` RATHER THAN `setProgram`'s OWN PARAMETER NAME (`names`), because on the entry the pair is
  * read a long way from that method: `protocol.ts` spells it `tapeNames`, and so does the reply this is
  * retained from.
+ *
+ * **`tmText`, RIDING BESIDE THEM — 5d-iv Task 9.** `TmPane.setForkAvailable`'s decision (§4.3) needs it
+ * the moment a TM pane exists, which is the same "a pane created after the reply must still be seeded"
+ * argument this type's other two fields already make — see `replies.ts`'s `setTmProgram`, which pushes
+ * all three together. **INDEPENDENT OF `program` BEING NON-NULL, WHICH IS WHY IT IS NOT A SECOND
+ * NULLABLE ENVELOPE ON THE ENTRY.** A machine can exist and still have `tmText: null` — over
+ * `MAX_FORK_RULES` (`protocol.ts`'s `compiled` reply, `tmText`'s own doc: "null when there is no TM leg
+ * or the machine is over the cap") — so this field carries a fact `program`'s own nullability cannot
+ * stand in for.
  */
-export type TmCompiled = { readonly program: TmProgram; readonly tapeNames: string[] }
+export type TmCompiled = { readonly program: TmProgram; readonly tapeNames: string[]; readonly tmText: string | null }
 
 /**
  * One session: what it is called, whether it is inside the source correspondence, the legs it records
@@ -206,8 +215,22 @@ export type PaneOption = { readonly leg: Leg; readonly id: SessionId; readonly l
  * `Session::tm` records the cost of. The caller passing a `TmStatus` for a λ-only session is not an error either —
  * it is what a caller with one reply shape and three session shapes will naturally do — so this is
  * silent rather than a throw.
+ *
+ * **`tm` WIDENED TO `Pick<TmStatus, 'available' | 'reason'>`, WHERE IT USED TO READ `TmStatus | null` —
+ * 5d-iv Task 9.** The body below reads only those two fields; the full `TmStatus` shape was never
+ * needed, and `replies.ts`'s new `tm-scratch-compiled` arm has a `TmScratchStatus` to pass here rather
+ * than a `TmStatus` — a different wire shape (`width`/`run` non-nullable, no `total_steps`,
+ * `TmScratchStatus`'s own doc in `types.ts`) that shares exactly the two fields this function reads and
+ * none of the ones it does not. Naming the narrower shape is what lets both callers pass their own
+ * status without one of them fabricating fields the other's type demands and this function never asked
+ * for.
  */
-export function resetLegs(legs: SessionLegs, lambda: LambdaStatus | null, tm: TmStatus | null, reason = ''): void {
+export function resetLegs(
+  legs: SessionLegs,
+  lambda: LambdaStatus | null,
+  tm: Pick<TmStatus, 'available' | 'reason'> | null,
+  reason = '',
+): void {
   const lambdaLeg = legs.lambda
   const tmLeg = legs.tm
   for (const leg of [lambdaLeg, tmLeg]) {

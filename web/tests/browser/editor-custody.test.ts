@@ -2,10 +2,10 @@ import { EditorView } from '@codemirror/view'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createEditorCustody } from '../../src/editor-custody'
 import { History } from '../../src/history'
-import { LambdaEditor } from '../../src/lambda-editor'
 import { LambdaPane } from '../../src/lambda-pane'
 import type { LeafId } from '../../src/panes'
 import { PaneCollection } from '../../src/panes'
+import { ScratchEditor } from '../../src/scratch-editor'
 import type { ClientPort, SessionId } from '../../src/session-client'
 import { SessionClient } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
@@ -133,7 +133,7 @@ const claimControl = (host: HTMLElement) =>
   host.querySelector<HTMLButtonElement>('button[aria-label="bring the term editor to this pane"]')
 
 /**
- * A real `LambdaEditor`, mounted in a host of its own.
+ * A real `ScratchEditor`, mounted in a host of its own.
  *
  * A REAL ONE RATHER THAN A `{ destroy() {} }` STUB, WHICH IS THE POINT OF THE FILE. What the three arms
  * below are protecting is a live `EditorView` with a pending debounce over a worker that is gone, and a
@@ -143,14 +143,14 @@ const claimControl = (host: HTMLElement) =>
  * `debounceMs` IS SHORT ON PURPOSE — one test waits out a real debounce rather than faking a clock, so
  * that "the pending recompile cannot fire" is asserted against the timer the app actually schedules.
  */
-function makeEditor(initial: string, onEdit: (src: string) => void = () => undefined): LambdaEditor {
+function makeEditor(initial: string, onEdit: (src: string) => void = () => undefined): ScratchEditor {
   const host = document.createElement('div')
   document.body.append(host)
-  return new LambdaEditor({ host, initial, debounceMs: 20, onEdit })
+  return new ScratchEditor({ host, initial, debounceMs: 20, onEdit })
 }
 
-/** A real keystroke — `lambda-editor.test.ts`'s `retype`, and its reason: `setText` is the seed path. */
-function retype(editor: LambdaEditor, text: string): void {
+/** A real keystroke — `scratch-editor.test.ts`'s `retype`, and its reason: `setText` is the seed path. */
+function retype(editor: ScratchEditor, text: string): void {
   const view = EditorView.findFromDOM(editor.dom)
   if (view === null) throw new Error('no CodeMirror view under the editor dom')
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
@@ -247,7 +247,7 @@ describe('reconcileEditors: an editor in custody whose session has been retired'
    * **THE PENDING RECOMPILE IS ASSERTED, NOT ONLY THE UNMOUNT.** A debounce is scheduled and then the
    * retire is reconciled inside its window; the test then waits out a real multiple of that window. A
    * `destroy()` removed from this branch fires `onEdit` for a session the pool has already unbound —
-   * which is exactly what `LambdaEditor.destroy`'s own doc says the cancel is for, asserted here against
+   * which is exactly what `ScratchEditor.destroy`'s own doc says the cancel is for, asserted here against
    * the timer the app schedules rather than a faked clock.
    */
   it('destroys the held editor and cancels the recompile it had pending', async () => {
@@ -416,7 +416,7 @@ describe('hasEditor: the third input to the claim control', () => {
  * **AN EDITOR THAT MOVES MUST TAKE ITS EDIT HANDLER WITH IT — Important finding, found by driving the
  * app in a browser after the suite was green, and the second defect that walkthrough turned up.**
  *
- * A `LambdaEditor` is constructed by the pane that FORKS (`LambdaPane.setEditor`'s mount branch),
+ * A `ScratchEditor` is constructed by the pane that FORKS (`LambdaPane.setEditor`'s mount branch),
  * closing over THAT pane's `editScratch`. `receiveEditor` relocates `editor.dom` — which is all the
  * editor-moves rule ever moved — and left the callback pointing at the pane that built it. That is
  * invisible while both panes are on the same buffer, which is the only state the suite ever reached,
@@ -430,7 +430,7 @@ describe('hasEditor: the third input to the claim control', () => {
  * `lambda-0`'s editor, over `scratch 2` — the user typed in one pane and the error appeared in another.
  *
  * DRIVEN HERE AT THE PANE PAIR RATHER THAN THROUGH `main()`, because what is under test is one
- * assignment in `receiveEditor` and the seam it crosses is `LambdaPane` -> `LambdaEditor`. The app-level
+ * assignment in `receiveEditor` and the seam it crosses is `LambdaPane` -> `ScratchEditor`. The app-level
  * sequence above needs two real worker forks to reach a state this file constructs in four lines, and
  * `two-lambda-panes.test.ts` already drives the claim gesture end to end.
  */

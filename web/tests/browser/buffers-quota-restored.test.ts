@@ -50,7 +50,7 @@ const SHELL = `
  */
 const SEEDED = serializeBuffers({
   minted: 1,
-  buffers: [{ id: 'scratch-1', label: 'scratch 1', text: '(\\a. a)', collapsed: false }],
+  buffers: [{ id: 'scratch-1', label: 'scratch 1', text: '(\\a. a)', collapsed: false, leg: 'lambda' }],
   bindings: {},
 })
 

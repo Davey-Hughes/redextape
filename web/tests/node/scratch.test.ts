@@ -68,8 +68,11 @@ function harness(): {
   ports: FakePort[]
   replies: { session: SessionId; reply: RunReply }[]
   lastScratchPost: () => { src: string; step: number } | undefined
+  slotOf: () => PaneSlot<'lambda'>
+  postedTo: (id: SessionId) => RunRequest[]
 } {
   const ports: FakePort[] = []
+  const portsById = new Map<SessionId, FakePort>()
   const replies: { session: SessionId; reply: RunReply }[] = []
   const reg = new SessionRegistry()
   const pool = new SessionPool(() => {
@@ -91,7 +94,28 @@ function harness(): {
     const req = ports.at(-1)?.sent.at(-1)
     return req?.kind === 'lambda-scratch' ? { src: req.src, step: req.step } : undefined
   }
-  return { reg, pool, buffers, ports, replies, lastScratchPost }
+  // A FRESH SLOT PER CALL, BOUND TO `SOURCE` ON THE λ LEG — every new test below forks more than
+  // once and each fork wants its own `Detachable`, the way every test above builds its own
+  // `PaneSlot`. The leg is fixed at `'lambda'` because `Detachable` never reads it (`scratch.ts`'s own
+  // doc: it asks for the two members retirement actually uses), so the same slot shape works whether
+  // the buffer it ends up rebound to is on the λ leg or the TM one.
+  const slotOf = (): PaneSlot<'lambda'> => new PaneSlot('lambda', SOURCE)
+  // WHAT WAS POSTED TO ONE BUFFER'S OWN PORT, KEYED BY THE ID `fork`/`forkBlank` RETURNED — `ports` is
+  // spawn order and says nothing about which port belongs to which buffer once a test wants to name
+  // one. `pool.bind` is wrapped rather than `ScratchBuffers` itself, because that is the one place in
+  // this harness that sees a `SessionId` and a freshly spawned port in the same call — `#spawn`'s own
+  // doc: "THE REPLY CARRIES THE ID BECAUSE THE WIRE DOES NOT... the name is closed over HERE, per
+  // buffer, at the one place that knows which thread it just made." This does the identical thing one
+  // layer down, for a test rather than for `onReply`.
+  const bind = pool.bind.bind(pool)
+  pool.bind = (id, onReply) => {
+    const client = bind(id, onReply)
+    const p = ports.at(-1)
+    if (p !== undefined) portsById.set(id, p)
+    return client
+  }
+  const postedTo = (id: SessionId): RunRequest[] => portsById.get(id)?.sent ?? []
+  return { reg, pool, buffers, ports, replies, lastScratchPost, slotOf, postedTo }
 }
 
 const lambdaFrame = (text: string, step = 0): LambdaState => ({
@@ -133,7 +157,7 @@ describe('ScratchBuffers.fork', () => {
 
     expect(pool.size).toBe(0)
     expect(reg.size).toBe(1)
-    const id = buffers.fork(slot, '(λx. x) 1', 0)
+    const id = buffers.fork(slot, '(λx. x) 1', 0, 'lambda')
 
     expect(pool.has(id)).toBe(true)
     expect(reg.has(id)).toBe(true)
@@ -159,7 +183,7 @@ describe('ScratchBuffers.fork', () => {
     reg.add(sourceEntry())
     const slot = new PaneSlot('lambda', SOURCE)
 
-    buffers.fork(slot, '(λx. x) 1', 7)
+    buffers.fork(slot, '(λx. x) 1', 7, 'lambda')
 
     expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: '(λx. x) 1', step: 7 }])
   })
@@ -176,7 +200,7 @@ describe('ScratchBuffers.fork', () => {
     reg.add(source)
     const slot = new PaneSlot('lambda', SOURCE)
 
-    buffers.fork(slot, 'λy. y', 0)
+    buffers.fork(slot, 'λy. y', 0, 'lambda')
 
     expect(reg.entryOf(SOURCE)).toBe(source)
     expect(reg.entryOf(SOURCE).client).toBe(source.client)
@@ -204,8 +228,8 @@ describe('ScratchBuffers.fork', () => {
     const a = new PaneSlot('lambda', SOURCE)
     const b = new PaneSlot('lambda', SOURCE)
 
-    const first = buffers.fork(a, 'x', 0)
-    const second = buffers.fork(b, 'y', 0)
+    const first = buffers.fork(a, 'x', 0, 'lambda')
+    const second = buffers.fork(b, 'y', 0, 'lambda')
 
     expect(first).not.toBe(second)
     expect(pool.size).toBe(2)
@@ -215,8 +239,8 @@ describe('ScratchBuffers.fork', () => {
     expect(b.binding.session).toBe(second)
     expect(reg.options('lambda')).toEqual([
       { id: SOURCE, label: 'source' },
-      { id: first, label: 'scratch 1' },
-      { id: second, label: 'scratch 2' },
+      { id: first, label: 'λ scratch 1' },
+      { id: second, label: 'λ scratch 2' },
     ])
   })
 
@@ -240,8 +264,8 @@ describe('ScratchBuffers.fork', () => {
     const { reg, buffers, ports } = harness()
     reg.add(sourceEntry())
 
-    buffers.fork(new PaneSlot('lambda', SOURCE), 'let a = 1; a', 0)
-    buffers.fork(new PaneSlot('lambda', SOURCE), 'let b = 2; b', 3)
+    buffers.fork(new PaneSlot('lambda', SOURCE), 'let a = 1; a', 0, 'lambda')
+    buffers.fork(new PaneSlot('lambda', SOURCE), 'let b = 2; b', 3, 'lambda')
 
     expect(ports.map((p) => p.sent)).toEqual([
       [{ kind: 'lambda-scratch', gen: 1, src: 'let a = 1; a', step: 0 }],
@@ -263,12 +287,12 @@ describe('ScratchBuffers.fork', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
 
-    const first = buffers.fork(new PaneSlot('lambda', SOURCE), 'x', 0)
-    const second = buffers.fork(new PaneSlot('lambda', SOURCE), 'y', 0)
+    const first = buffers.fork(new PaneSlot('lambda', SOURCE), 'x', 0, 'lambda')
+    const second = buffers.fork(new PaneSlot('lambda', SOURCE), 'y', 0, 'lambda')
 
     expect(buffers.list()).toEqual([
-      { id: first, label: 'scratch 1', warm: true },
-      { id: second, label: 'scratch 2', warm: true },
+      { id: first, label: 'λ scratch 1', warm: true, leg: 'lambda' },
+      { id: second, label: 'λ scratch 2', warm: true, leg: 'lambda' },
     ])
   })
 
@@ -287,8 +311,8 @@ describe('ScratchBuffers.fork', () => {
     reg.add(sourceEntry())
     const slot = new PaneSlot('lambda', SOURCE)
 
-    const first = buffers.fork(slot, 'first', 0)
-    const second = buffers.fork(slot, 'again', 0)
+    const first = buffers.fork(slot, 'first', 0, 'lambda')
+    const second = buffers.fork(slot, 'again', 0, 'lambda')
 
     expect(second).not.toBe(first)
     expect(slot.binding.session).toBe(second)
@@ -304,11 +328,11 @@ describe('ScratchBuffers.fork', () => {
   it('registers a buffer detached, under its minted label, with one leg and no TM leg', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
-    const id = buffers.fork(new PaneSlot('lambda', SOURCE), 'λx. x', 0)
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), 'λx. x', 0, 'lambda')
 
     const entry = reg.entryOf(id)
     expect(entry.detached).toBe(true)
-    expect(entry.label).toBe('scratch 1')
+    expect(entry.label).toBe('λ scratch 1')
     expect(entry.legs.tm).toBeUndefined()
     expect(entry.legs.lambda?.status).toEqual({ available: false, reason: 'building…' })
     // A λ-only session must not be offered to a TM slot: `legOf` throws for a leg a session lacks, and
@@ -330,8 +354,8 @@ describe('ScratchBuffers.fork', () => {
   it('routes each buffer’s replies under that buffer’s own id', () => {
     const { reg, buffers, ports, replies } = harness()
     reg.add(sourceEntry())
-    const first = buffers.fork(new PaneSlot('lambda', SOURCE), 'λx. x', 0)
-    const second = buffers.fork(new PaneSlot('lambda', SOURCE), 'λy. y', 0)
+    const first = buffers.fork(new PaneSlot('lambda', SOURCE), 'λx. x', 0, 'lambda')
+    const second = buffers.fork(new PaneSlot('lambda', SOURCE), 'λy. y', 0, 'lambda')
 
     const compiled = (text: string): RunReply => ({
       kind: 'scratch-compiled',
@@ -383,14 +407,14 @@ describe('ScratchBuffers.fork', () => {
   it('refuses a fork at the cap rather than evicting a buffer to make room', () => {
     const { reg, pool, buffers, ports } = harness()
     reg.add(sourceEntry())
-    const oldest = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0)
-    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0)
+    const oldest = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0, 'lambda')
+    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0, 'lambda')
     const refused = new PaneSlot('lambda', SOURCE)
 
-    expect(() => buffers.fork(refused, 'one too many', 0)).toThrow(BufferCapReached)
-    expect(() => buffers.fork(refused, 'one too many', 0)).toThrow(/retire/)
-    expect(() => buffers.fork(refused, 'one too many', 0)).toThrow(new RegExp(`${MAX_WARM_BUFFERS}`))
-    expect(() => buffers.fork(refused, 'one too many', 0)).not.toThrow(/scratch 1/)
+    expect(() => buffers.fork(refused, 'one too many', 0, 'lambda')).toThrow(BufferCapReached)
+    expect(() => buffers.fork(refused, 'one too many', 0, 'lambda')).toThrow(/retire/)
+    expect(() => buffers.fork(refused, 'one too many', 0, 'lambda')).toThrow(new RegExp(`${MAX_WARM_BUFFERS}`))
+    expect(() => buffers.fork(refused, 'one too many', 0, 'lambda')).not.toThrow(/scratch 1/)
 
     expect(buffers.list()).toHaveLength(MAX_WARM_BUFFERS)
     expect(buffers.list()[0]?.id).toBe(oldest)
@@ -413,11 +437,11 @@ describe('ScratchBuffers.fork', () => {
   it('takes a fork again after a retire, because the cap counts live buffers rather than minted ones', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
-    const oldest = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0)
-    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0)
+    const oldest = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0, 'lambda')
+    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0, 'lambda')
 
     expect(buffers.retire(oldest, SOURCE, [])).toBe(true)
-    const again = buffers.fork(new PaneSlot('lambda', SOURCE), 'room now', 0)
+    const again = buffers.fork(new PaneSlot('lambda', SOURCE), 'room now', 0, 'lambda')
 
     expect(again).toBe(`scratch-${MAX_WARM_BUFFERS + 1}`)
     expect(buffers.list()).toHaveLength(MAX_WARM_BUFFERS)
@@ -446,7 +470,7 @@ describe('ScratchBuffers.retire', () => {
     reg.add(sourceEntry())
     const a = new PaneSlot('lambda', SOURCE)
     const b = new PaneSlot('lambda', SOURCE)
-    const id = buffers.fork(a, 'λx. x', 0)
+    const id = buffers.fork(a, 'λx. x', 0, 'lambda')
     b.rebind(id)
 
     expect(buffers.retire(id, SOURCE, [a, b])).toBe(true)
@@ -476,7 +500,7 @@ describe('ScratchBuffers.retire', () => {
     reg.add(source)
     const lambda = new PaneSlot('lambda', SOURCE)
     const tm = new PaneSlot('tm', SOURCE)
-    const id = buffers.fork(lambda, 'λx. x', 0)
+    const id = buffers.fork(lambda, 'λx. x', 0, 'lambda')
 
     buffers.retire(id, SOURCE, [lambda, tm])
     expect(lambda.binding).toEqual({ session: SOURCE, leg: 'lambda' })
@@ -503,8 +527,8 @@ describe('ScratchBuffers.retire', () => {
     reg.add(sourceEntry())
     const slotA = new PaneSlot('lambda', SOURCE)
     const slotB = new PaneSlot('lambda', SOURCE)
-    const a = buffers.fork(slotA, 'x', 0)
-    const b = buffers.fork(slotB, 'y', 0)
+    const a = buffers.fork(slotA, 'x', 0, 'lambda')
+    const b = buffers.fork(slotB, 'y', 0, 'lambda')
 
     expect(buffers.retire(a, SOURCE, [slotA, slotB])).toBe(true)
 
@@ -531,8 +555,8 @@ describe('ScratchBuffers.retire', () => {
     reg.add(sourceEntry())
     const slotA = new PaneSlot('lambda', SOURCE)
     const slotB = new PaneSlot('lambda', SOURCE)
-    const a = buffers.fork(slotA, 'x', 0)
-    const b = buffers.fork(slotB, 'y', 0)
+    const a = buffers.fork(slotA, 'x', 0, 'lambda')
+    const b = buffers.fork(slotB, 'y', 0, 'lambda')
 
     buffers.retire(a, SOURCE, [slotA, slotB])
 
@@ -569,7 +593,7 @@ describe('ScratchBuffers.retire', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
     const slot = new PaneSlot('lambda', SOURCE)
-    const id = buffers.fork(slot, 'λx. x', 0)
+    const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
 
     const leg = reg.legOf({ session: id, leg: 'lambda' })
     leg.hist.push(lambdaFrame('λx. x'), 1)
@@ -609,7 +633,7 @@ describe('ScratchBuffers.retire', () => {
     expect(pool.size).toBe(0)
     expect(slot.binding.session).toBe(SOURCE)
 
-    const id = buffers.fork(slot, 'λx. x', 0)
+    const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
     expect(buffers.retire(id, SOURCE, [slot])).toBe(true)
     expect(buffers.retire(id, SOURCE, [slot])).toBe(false)
     expect(ports[0]?.terminated).toBe(1)
@@ -625,9 +649,9 @@ describe('ScratchBuffers.retire', () => {
     reg.add(sourceEntry())
     const slot = new PaneSlot('lambda', SOURCE)
 
-    const first = buffers.fork(slot, 'first', 0)
+    const first = buffers.fork(slot, 'first', 0, 'lambda')
     buffers.retire(first, SOURCE, [slot])
-    const second = buffers.fork(slot, 'second', 0)
+    const second = buffers.fork(slot, 'second', 0, 'lambda')
 
     expect(second).not.toBe(first)
     expect(ports.length).toBe(2)
@@ -635,7 +659,7 @@ describe('ScratchBuffers.retire', () => {
     expect(ports[1]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'second', step: 0 }])
     expect(ports[1]?.terminated).toBe(0)
     expect(slot.binding.session).toBe(second)
-    expect(buffers.list()).toEqual([{ id: second, label: 'scratch 2', warm: true }])
+    expect(buffers.list()).toEqual([{ id: second, label: 'λ scratch 2', warm: true, leg: 'lambda' }])
   })
 })
 
@@ -681,8 +705,8 @@ describe('ScratchBuffers.noSessionReply', () => {
     reg.add(sourceEntry())
     const slotA = new PaneSlot('lambda', SOURCE)
     const slotB = new PaneSlot('lambda', SOURCE)
-    const phantom = buffers.fork(slotA, 'not a term (((', 0)
-    const live = buffers.fork(slotB, 'λx. x', 0)
+    const phantom = buffers.fork(slotA, 'not a term (((', 0, 'lambda')
+    const live = buffers.fork(slotB, 'λx. x', 0, 'lambda')
     // THE ONE FACT THAT DISTINGUISHES THE TWO BUFFERS — `noSessionReply`'s discriminator is whether the
     // λ leg has ever recorded a frame, and the worker that would have recorded one is a fake port here.
     reg.legOf({ session: live, leg: 'lambda' }).hist.push(lambdaFrame('λx. x'), 1)
@@ -714,7 +738,7 @@ describe('ScratchBuffers.noSessionReply', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
     const slot = new PaneSlot('lambda', SOURCE)
-    const id = buffers.fork(slot, 'λx. x', 0)
+    const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
     reg.legOf({ session: id, leg: 'lambda' }).hist.push(lambdaFrame('λx. x'), 1)
 
     expect(buffers.noSessionReply(id, [])).toBe(null)
@@ -732,7 +756,7 @@ describe('ScratchBuffers.noSessionReply', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
     const slot = new PaneSlot('lambda', SOURCE)
-    const id = buffers.fork(slot, 'λx. x', 0)
+    const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
     buffers.retire(id, SOURCE, [slot])
 
     expect(buffers.noSessionReply(id, [])).toBe(null)
@@ -748,7 +772,7 @@ describe('ScratchBuffers.noSessionReply', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
     const slot = new PaneSlot('lambda', SOURCE)
-    const id = buffers.fork(slot, 'λx. x', 0)
+    const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
 
     expect(buffers.cool(id, SOURCE, [slot])).toBe(true)
 
@@ -768,7 +792,7 @@ describe('ScratchBuffers.recompile', () => {
     const { reg, pool, buffers, ports } = harness()
     reg.add(sourceEntry())
     const slot = new PaneSlot('lambda', SOURCE)
-    const id = buffers.fork(slot, '(λx. x) (λy. y)', 0)
+    const id = buffers.fork(slot, '(λx. x) (λy. y)', 0, 'lambda')
     const before = pool.size
 
     expect(buffers.recompile(id, 'λz. z')).toBe(true)
@@ -788,8 +812,8 @@ describe('ScratchBuffers.recompile', () => {
   it('recompiles the buffer it names rather than the most recent one', () => {
     const { reg, buffers, ports } = harness()
     reg.add(sourceEntry())
-    const first = buffers.fork(new PaneSlot('lambda', SOURCE), 'x', 0)
-    buffers.fork(new PaneSlot('lambda', SOURCE), 'y', 0)
+    const first = buffers.fork(new PaneSlot('lambda', SOURCE), 'x', 0, 'lambda')
+    buffers.fork(new PaneSlot('lambda', SOURCE), 'y', 0, 'lambda')
 
     expect(buffers.recompile(first, 'λz. z')).toBe(true)
 
@@ -830,7 +854,7 @@ describe('ScratchBuffers.setCollapsed / collapsedOf', () => {
   it('collapsedOf answers false for a freshly forked buffer', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
-    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0, 'lambda')
 
     expect(buffers.collapsedOf(id)).toBe(false)
   })
@@ -838,7 +862,7 @@ describe('ScratchBuffers.setCollapsed / collapsedOf', () => {
   it('setCollapsed records the flag and collapsedOf reads it back', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
-    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0, 'lambda')
 
     buffers.setCollapsed(id, true)
     expect(buffers.collapsedOf(id)).toBe(true)
@@ -868,13 +892,22 @@ describe('ScratchBuffers.setCollapsed / collapsedOf', () => {
 
     expect(buffers.collapsedOf('scratch-9')).toBe(false)
   })
+
+  // `setText`'s OWN DEFENSIVE ARM, THE SAME SHAPE AS `setCollapsed`'S ABOVE AND FOR THE SAME REASON —
+  // `setText`'s own doc: its two callers (`recompile` and `replies.ts`'s `scratch-compiled` arm) both
+  // resolve the id off a live pane's own binding, which can never name a buffer this map does not hold.
+  it('setText on an id that is not a buffer is a silent no-op', () => {
+    const { buffers } = harness()
+
+    expect(() => buffers.setText('scratch-9', 'anything')).not.toThrow()
+  })
 })
 
 describe('cold and warm buffers', () => {
   it('cool terminates the worker and keeps the record', () => {
     const { reg, pool, buffers, ports } = harness()
     reg.add(sourceEntry())
-    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0, 'lambda')
     expect(pool.has(id)).toBe(true)
 
     expect(buffers.cool(id, SOURCE, [])).toBe(true)
@@ -896,7 +929,7 @@ describe('cold and warm buffers', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
     const s = new PaneSlot('lambda', SOURCE)
-    const id = buffers.fork(s, '(\\x. x)', 0)
+    const id = buffers.fork(s, '(\\x. x)', 0, 'lambda')
 
     expect(buffers.cool(id, SOURCE, [s])).toBe(true)
 
@@ -906,7 +939,7 @@ describe('cold and warm buffers', () => {
   it('cool answers false for a buffer that is already cold', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
-    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0, 'lambda')
     buffers.cool(id, SOURCE, [])
     expect(buffers.cool(id, SOURCE, [])).toBe(false)
   })
@@ -930,7 +963,7 @@ describe('cold and warm buffers', () => {
   it('warm gives a cold buffer a worker again and posts its text', () => {
     const { reg, pool, buffers } = harness()
     reg.add(sourceEntry())
-    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0, 'lambda')
     buffers.cool(id, SOURCE, [])
 
     buffers.warm(id)
@@ -945,7 +978,7 @@ describe('cold and warm buffers', () => {
   it('warm posts the buffer text at step 0', () => {
     const { reg, buffers, ports, lastScratchPost } = harness()
     reg.add(sourceEntry())
-    const id = buffers.fork(new PaneSlot('lambda', SOURCE), 'seed-text', 3)
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), 'seed-text', 3, 'lambda')
     buffers.setText(id, 'the-term')
     buffers.cool(id, SOURCE, [])
     ports.length = 0
@@ -960,6 +993,21 @@ describe('cold and warm buffers', () => {
     expect(() => buffers.warm('scratch-9')).toThrow(/not a buffer/)
   })
 
+  // THE EARLY RETURN — a buffer already warm has nothing for `warm` to do, and this is the one call
+  // site that would otherwise spawn a SECOND thread for a session `SessionPool.bind` already holds.
+  it('warm is a no-op for a buffer that is already warm', () => {
+    const { reg, pool, buffers, ports } = harness()
+    reg.add(sourceEntry())
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0, 'lambda')
+    const portsBefore = ports.length
+
+    buffers.warm(id)
+
+    expect(ports.length).toBe(portsBefore)
+    expect(pool.has(id)).toBe(true)
+    expect(reg.has(id)).toBe(true)
+  })
+
   // TASK 3 — `recompile` IS THE FIRST OF `setText`'S TWO REAL CALLERS (design §4.3): the text of
   // record is the user's own typed text, written at the point a rebuild is posted. Read back the same
   // way `warm posts the buffer text at step 0` above reads back an explicit `setText` call — cool,
@@ -968,7 +1016,7 @@ describe('cold and warm buffers', () => {
   it('recompile records the text it posts', () => {
     const { reg, buffers, ports, lastScratchPost } = harness()
     reg.add(sourceEntry())
-    const id = buffers.fork(new PaneSlot('lambda', SOURCE), 'seed', 0)
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), 'seed', 0, 'lambda')
 
     buffers.recompile(id, 'typed-term')
     buffers.cool(id, SOURCE, [])
@@ -987,10 +1035,10 @@ describe('cold and warm buffers', () => {
   it('warm throws BufferCapReached when the cap is already spent', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
-    const cooled = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0)
-    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0)
+    const cooled = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0, 'lambda')
+    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0, 'lambda')
     buffers.cool(cooled, SOURCE, [])
-    buffers.fork(new PaneSlot('lambda', SOURCE), 'refill', 0)
+    buffers.fork(new PaneSlot('lambda', SOURCE), 'refill', 0, 'lambda')
     expect(buffers.warmCount()).toBe(MAX_WARM_BUFFERS)
 
     expect(() => buffers.warm(cooled)).toThrow(BufferCapReached)
@@ -1006,7 +1054,7 @@ describe('cold and warm buffers', () => {
   it('retire ends a cold buffer without touching the registry', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
-    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0)
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), '(\\x. x)', 0, 'lambda')
     buffers.cool(id, SOURCE, [])
 
     expect(buffers.retire(id, SOURCE, [])).toBe(true)
@@ -1018,7 +1066,7 @@ describe('cold and warm buffers', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
     const s = new PaneSlot('lambda', SOURCE)
-    const id = buffers.fork(s, '(\\x. x)', 0)
+    const id = buffers.fork(s, '(\\x. x)', 0, 'lambda')
     // COOLED WITHOUT `s`, so the pane is left pointing at the buffer the way a caller that forgot to
     // pass it would leave it — this is what makes the assertion below about `retire`'s own rebind pass
     // rather than about the one `cool` already ran (see `cool rebinds a bound pane to home` above for
@@ -1033,8 +1081,8 @@ describe('cold and warm buffers', () => {
   it('warmCount counts threads and not records', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
-    const a = buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0)
-    buffers.fork(new PaneSlot('lambda', SOURCE), 'b', 0)
+    const a = buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0, 'lambda')
+    buffers.fork(new PaneSlot('lambda', SOURCE), 'b', 0, 'lambda')
     expect(buffers.warmCount()).toBe(2)
 
     buffers.cool(a, SOURCE, [])
@@ -1049,14 +1097,14 @@ describe('cold and warm buffers', () => {
   it('forking after cooling one of MAX_WARM_BUFFERS spends the room the cooled buffer gave up', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
-    const first = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0)
-    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0)
+    const first = buffers.fork(new PaneSlot('lambda', SOURCE), 'x0', 0, 'lambda')
+    for (let i = 1; i < MAX_WARM_BUFFERS; i++) buffers.fork(new PaneSlot('lambda', SOURCE), `x${i}`, 0, 'lambda')
     expect(buffers.warmCount()).toBe(MAX_WARM_BUFFERS)
 
     expect(buffers.cool(first, SOURCE, [])).toBe(true)
     expect(buffers.warmCount()).toBe(MAX_WARM_BUFFERS - 1)
 
-    const again = buffers.fork(new PaneSlot('lambda', SOURCE), 'room now', 0)
+    const again = buffers.fork(new PaneSlot('lambda', SOURCE), 'room now', 0, 'lambda')
 
     expect(buffers.warmCount()).toBe(MAX_WARM_BUFFERS)
     expect(buffers.list()).toHaveLength(MAX_WARM_BUFFERS + 1)
@@ -1080,14 +1128,14 @@ describe('cold and warm buffers', () => {
 describe('snapshot and restore', () => {
   it('round-trips buffers through a snapshot', () => {
     const h = harness()
-    const a = h.buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0)
+    const a = h.buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0, 'lambda')
     h.buffers.setText(a, 'term-a')
 
     const snap = h.buffers.snapshot({ 'lambda-0': a })
     const fresh = harness()
     fresh.buffers.restore(snap)
 
-    expect(fresh.buffers.list()).toEqual([{ id: a, label: 'scratch 1', warm: false }])
+    expect(fresh.buffers.list()).toEqual([{ id: a, label: 'λ scratch 1', warm: false, leg: 'lambda' }])
     // THE BINDINGS ARE CARRIED, NOT COMPUTED — `snapshot`'s one parameter exists because this class
     // cannot see a pane, so the only claim it can make about `bindings` is that what went in comes out.
     expect(snap.bindings).toEqual({ 'lambda-0': a })
@@ -1096,7 +1144,7 @@ describe('snapshot and restore', () => {
   // EVERY RESTORED BUFFER IS COLD. Warming is the app's decision, taken per pane in main.ts.
   it('restores every buffer cold, spawning nothing', () => {
     const h = harness()
-    h.buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0)
+    h.buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0, 'lambda')
     const snap = h.buffers.snapshot({})
 
     const fresh = harness()
@@ -1109,20 +1157,20 @@ describe('snapshot and restore', () => {
   // THE COUNTER, NOT THE COUNT — a restored page must not reissue a retired buffer's name.
   it('a fork after a restore mints past every restored id', () => {
     const h = harness()
-    h.buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0)
-    h.buffers.fork(new PaneSlot('lambda', SOURCE), 'b', 0)
+    h.buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0, 'lambda')
+    h.buffers.fork(new PaneSlot('lambda', SOURCE), 'b', 0, 'lambda')
     const snap = h.buffers.snapshot({})
 
     const fresh = harness()
     fresh.buffers.restore(snap)
-    const next = fresh.buffers.fork(new PaneSlot('lambda', SOURCE), 'c', 0)
+    const next = fresh.buffers.fork(new PaneSlot('lambda', SOURCE), 'c', 0, 'lambda')
 
     expect(next).toBe('scratch-3')
   })
 
   it('a restored buffer warms from its persisted text', () => {
     const h = harness()
-    const a = h.buffers.fork(new PaneSlot('lambda', SOURCE), 'seed', 0)
+    const a = h.buffers.fork(new PaneSlot('lambda', SOURCE), 'seed', 0, 'lambda')
     h.buffers.setText(a, 'persisted-term')
     const snap = h.buffers.snapshot({})
 
@@ -1131,5 +1179,122 @@ describe('snapshot and restore', () => {
     fresh.buffers.warm(a)
 
     expect(fresh.lastScratchPost()).toEqual({ src: 'persisted-term', step: 0 })
+  })
+})
+
+describe('two legs, one collection', () => {
+  /**
+   * **POOL SIZE IS THE AXIS, NOT RENDERING** — 5d-i's rule, restated for the leg. A test driven
+   * through the DOM cannot see how many threads exist, and "one cap across both legs" is a claim about
+   * threads.
+   */
+  it('spends one shared seat per warm buffer whichever leg it is', () => {
+    const { buffers, slotOf } = harness()
+    for (let i = 0; i < MAX_WARM_BUFFERS; i++) {
+      buffers.fork(slotOf(), 'text', 0, i % 2 === 0 ? 'lambda' : 'tm')
+    }
+    expect(buffers.warmCount()).toBe(MAX_WARM_BUFFERS)
+    expect(() => buffers.fork(slotOf(), 'text', 0, 'tm')).toThrow(BufferCapReached)
+    expect(() => buffers.fork(slotOf(), 'text', 0, 'lambda')).toThrow(BufferCapReached)
+  })
+
+  it('sends lambda-scratch for a lambda buffer and tm-scratch for a tm one', () => {
+    const { buffers, slotOf, postedTo } = harness()
+    const l = buffers.fork(slotOf(), 'lambda text', 3, 'lambda')
+    const t = buffers.fork(slotOf(), 'tm text', 0, 'tm')
+    expect(postedTo(l)).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'lambda text', step: 3 }])
+    expect(postedTo(t)).toEqual([{ kind: 'tm-scratch', gen: 1, src: 'tm text' }])
+  })
+
+  /**
+   * ONE COUNTER ACROSS BOTH LEGS, WHICH IS WHAT KEEPS `mintedIndex`'s `scratch-N` FORM AND THE
+   * NEVER-REISSUED GUARANTEE. Two counters would mint `scratch-1` twice.
+   */
+  it('mints from one id space and puts the leg in the label', () => {
+    const { buffers, slotOf } = harness()
+    expect(buffers.fork(slotOf(), 'a', 0, 'lambda')).toBe('scratch-1')
+    expect(buffers.fork(slotOf(), 'b', 0, 'tm')).toBe('scratch-2')
+    const rows = buffers.list()
+    expect(rows.map((r) => r.leg)).toEqual(['lambda', 'tm'])
+    // **THE EXACT STRING, NOT `toContain` — 5d-iv T5 REVIEW FIX (Important 3).** `toContain('1')` /
+    // `toContain('2')` is satisfied by ANY label that happens to contain that digit, including a `TM`
+    // buffer minted with the λ label by mistake (`'λ scratch 2'` contains `'2'` exactly as `'TM scratch
+    // 2'` does) — `#mint`'s leg ternary can be replaced by the unconditional λ template and this
+    // assertion would not notice. The exact string is the only assertion that reads the PREFIX, which is
+    // the one thing the ternary decides.
+    expect(rows[0]?.label).toBe('λ scratch 1')
+    expect(rows[1]?.label).toBe('TM scratch 2')
+    expect(rows[0]?.label).not.toBe(rows[1]?.label)
+  })
+
+  it('mints a blank tm buffer with no pane bound to it', () => {
+    const { buffers, postedTo } = harness()
+    const id = buffers.forkBlank('tm')
+    expect(buffers.warmCount()).toBe(1)
+    expect(postedTo(id)).toEqual([{ kind: 'tm-scratch', gen: 1, src: '' }])
+  })
+
+  // `forkBlank` SPENDS THE SAME SHARED SEAT, SO IT REFUSES AT THE SAME CAP — the one difference from
+  // `fork`'s refusal is the prefix `#refuseAtCap` is called with: no gesture named, because this is not
+  // a fork (`forkBlank`'s own doc).
+  it('forkBlank refuses at the cap rather than evicting a buffer to make room', () => {
+    const { buffers, slotOf } = harness()
+    for (let i = 0; i < MAX_WARM_BUFFERS; i++) buffers.fork(slotOf(), 'text', 0, 'lambda')
+
+    expect(() => buffers.forkBlank('tm')).toThrow(BufferCapReached)
+    expect(buffers.warmCount()).toBe(MAX_WARM_BUFFERS)
+  })
+
+  /**
+   * **`recompile` BRANCHES ON THE BUFFER'S OWN LEG — 5d-iv T5 REVIEW FIX (Important 1).** Before this
+   * fix, `recompile` posted `client.scratch` (`lambda-scratch` on the wire) unconditionally, so editing
+   * a TM buffer sent its `.tm` text to `onLambdaScratch`, which parses it as a λ term and answers
+   * `no-session` with a λ syntax error every time — "fork failed — <λ syntax error>" on a machine the
+   * user never tried to fork. This is the gesture the whole slice exists to add: a TM buffer rebuilds
+   * with `tm-scratch`, mirroring `#spawn`'s own branch on `state.leg`.
+   */
+  it('recompile posts tm-scratch for a tm buffer, not lambda-scratch', () => {
+    const { buffers, postedTo } = harness()
+    const id = buffers.forkBlank('tm')
+
+    expect(buffers.recompile(id, 'new tm text')).toBe(true)
+
+    expect(postedTo(id)).toEqual([
+      { kind: 'tm-scratch', gen: 1, src: '' },
+      { kind: 'tm-scratch', gen: 2, src: 'new tm text' },
+    ])
+  })
+
+  // `warm` MIRRORS `recompile`'S FIX AT THE OTHER CALL SITE `#spawn` SERVES — a cold TM buffer that
+  // comes back must post `tm-scratch` on its own fresh thread, not `lambda-scratch`. `postedTo` reads
+  // the NEWEST port bound to `id`, which is the one `warm`'s re-spawn just opened (`cool` terminated the
+  // old one), so this is the request that new thread actually received.
+  it('warm re-spawns a cold tm buffer with tm-scratch, not lambda-scratch', () => {
+    const { buffers, postedTo } = harness()
+    const id = buffers.forkBlank('tm')
+    buffers.cool(id, SOURCE, [])
+
+    buffers.warm(id)
+
+    expect(postedTo(id)).toEqual([{ kind: 'tm-scratch', gen: 1, src: '' }])
+  })
+
+  /**
+   * **A TM BUFFER'S LEG SURVIVES A SNAPSHOT/RESTORE ROUND TRIP — 5d-iv T5 REVIEW FIX (Important 3).**
+   * `restore`'s `leg: b.leg` is the one line standing between this and every restored buffer coming back
+   * λ — the report names it explicitly: "silently wrong the day a TM buffer's record needs to survive a
+   * reload." A second `harness()` restores into, for the file's own stated reason: a fresh collection
+   * cannot confuse "restored it" with "still had it".
+   */
+  it('round-trips a tm buffer’s leg through snapshot and restore', () => {
+    const h = harness()
+    const id = h.buffers.forkBlank('tm')
+    h.buffers.setText(id, 'tm source')
+
+    const snap = h.buffers.snapshot({})
+    const fresh = harness()
+    fresh.buffers.restore(snap)
+
+    expect(fresh.buffers.list()).toEqual([{ id, label: 'TM scratch 1', warm: false, leg: 'tm' }])
   })
 })

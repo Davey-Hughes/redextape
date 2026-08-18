@@ -1,11 +1,13 @@
 import type { EditorView } from '@codemirror/view'
+import { tapeNames } from '../../pkg/redextape_wasm.js'
 import { showWorkerError } from './banner'
+import type { EditablePane } from './editor-custody'
 import { setDecline, setLink } from './highlight'
 import type { LambdaPane } from './lambda-pane'
 import { LinkIndex } from './link'
 import type { LinkWiring } from './link-wiring'
 import type { PaneCollection } from './panes'
-import { lambdaFrameBytes, type RunReply, tmFrameBytes } from './protocol'
+import { lambdaFrameBytes, type RunReply, ruleCount, tmFrameBytes } from './protocol'
 import { noSessionRows, type Row, resultRows } from './results'
 import type { ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
@@ -73,7 +75,7 @@ function renderRows(host: HTMLElement, rows: Row[]): void {
  * longer read as "every slot a retire might have to move".
  *
  * **`reconcileEditors: () => void` LEFT WITH IT, FOR THE SAME REASON AND ONE TASK AFTER `compile.ts`
- * SHED THE IDENTICAL DEPENDENCY.** It made every `LambdaEditor` — mounted on a pane, or waiting in
+ * SHED THE IDENTICAL DEPENDENCY.** It made every `ScratchEditor` — mounted on a pane, or waiting in
  * `editor-custody.ts`'s `heldEditors` — agree with where custody said it belonged, and it was called on
  * the one arm that retired a session, because a retire must leave no editor behind for a session that
  * no longer exists. No arm retires. The property it enforced is unchanged and now has no trigger here
@@ -122,7 +124,7 @@ export function createReplies(deps: {
    * arm below already has the reply's own session in scope — so the id travels with the reply rather
    * than being assumed by the wiring.
    */
-  editorHome: (session: SessionId) => LambdaPane | undefined
+  editorHome: (session: SessionId) => EditablePane | undefined
   /**
    * A buffer's text of record has just changed — the stored payload is stale until this returns.
    *
@@ -144,29 +146,52 @@ export function createReplies(deps: {
   const { sessions, scratchpad, results, view, panes, links: linkWiring, draw, editorHome, onBuffersPersist } = deps
 
   /**
-   * Tell every TM pane on `session` what machine it is showing, and leave that on the session's entry.
+   * Store `compiled` on `session`'s entry and fan `setProgram` out to every TM pane bound to it —
+   * the half `setTmProgram` and the `tm-scratch-compiled` arm below share, extracted so the second of
+   * those two stops re-implementing it — Minor fix, fix round on Task 9. Both callers need "the entry
+   * agrees with what the panes were just told" (`setTmProgram`'s own doc has the argument for why that
+   * has to be one call), and both callers need it on the SAME per-pane pass a second per-pane fact
+   * rides on — `then`, run immediately after `setProgram` for each pane in turn, is that second fact:
+   * `setForkAvailable` for `setTmProgram` below, `setScratchStatus` for `tm-scratch-compiled`. Passing
+   * it in rather than duplicating the loop is what keeps each caller's own second concern off a SECOND
+   * pass over `panes.ofSession('tm', session)` — which is exactly what `tm-scratch-compiled` used to
+   * pay for `setScratchStatus`, walking the same pane list twice for two facts that could ride one
+   * walk.
+   */
+  const storeAndSetProgram = (
+    session: SessionId,
+    compiled: TmCompiled | null,
+    then?: (pane: TmPane, rules: number) => void,
+  ): void => {
+    sessions.entryOf(session).tmProgram = compiled
+    const rules = compiled === null ? 0 : ruleCount(compiled.program)
+    for (const p of panes.ofSession('tm', session)) {
+      const pane = p.pane as TmPane
+      pane.setProgram(compiled?.program ?? null, compiled?.tapeNames ?? [])
+      then?.(pane, rules)
+    }
+  }
+
+  /**
+   * Tell every TM pane on `session` what machine it is showing AND whether it may be forked, leaving
+   * both on the session's entry — `storeAndSetProgram` above plus the one fact only THIS caller adds.
    *
-   * **THE STORE AND THE PUSH ARE ONE CALL SO THEY CANNOT DISAGREE.** `SessionEntry.tmProgram` exists to
-   * seed a TM pane created later (see its own doc), which is only correct while it holds what the panes
-   * on screen were actually told — and the arms below tell them different things, one of which is
-   * "nothing". Storing beside each `setProgram` loop instead would be one chance per arm to update one
-   * and not the other, and the failure that produces is a pane created during an outage showing a
-   * machine nobody else is showing, which nothing on screen would report.
+   * **`setForkAvailable` RIDES THE SAME FAN-OUT, NOT A SECOND LOOP — 5d-iv Task 9.** A pane seeded with
+   * a machine is exactly a pane that needs to be told whether that machine may be forked; splitting the
+   * two into separate passes over `panes.ofSession('tm', session)` would be two chances for one to run
+   * and the other not to. `compiled?.tmText ?? null` and the rule count both fall out of the SAME
+   * `compiled` this call already stores — see `TmCompiled.tmText`'s own doc for why the field rides
+   * beside `program` rather than on a second envelope.
    *
-   * PER-SESSION, WHICH IS WHAT `panes.ofSession('tm', session)` SAYS AND `panes.of('tm')` WOULD NOT — the
-   * fan-out this replaces carried that argument at every one of its sites, and it is the same one: a
-   * reply belongs to the session whose worker sent it, so a scratch session's TM pane (there is none
-   * today, but the collection does not know that) is never repainted with the source session's answer.
-   *
-   * THE `as TmPane` CAST IS THE ONE THE LOOPS ALREADY CARRIED. `PaneView<TmState>` is what the collection
-   * is parameterised by and `setProgram` is not on it — deliberately, since `PaneSlot` never calls it —
-   * so this is the same narrowing at one site instead of at every arm.
+   * **ONLY THIS CALLER PASSES A `tmText` THAT MEANS ANYTHING.** `tm-scratch-compiled` (below) calls
+   * `storeAndSetProgram` directly, with no `then` for fork availability at all, precisely because that
+   * reply carries no `tmText` (its own doc: "no text echo" — the main thread already holds what built
+   * the scratch) — routing a bare `null` through THIS function would read as "over the cap", which is
+   * a lie for a scratch that was never offered a fork control in the first place. See that arm's own
+   * comment.
    */
   const setTmProgram = (session: SessionId, compiled: TmCompiled | null): void => {
-    sessions.entryOf(session).tmProgram = compiled
-    for (const p of panes.ofSession('tm', session)) {
-      ;(p.pane as TmPane).setProgram(compiled?.program ?? null, compiled?.tapeNames ?? [])
-    }
+    storeAndSetProgram(session, compiled, (pane, rules) => pane.setForkAvailable(compiled?.tmText ?? null, rules))
   }
 
   /**
@@ -207,7 +232,9 @@ export function createReplies(deps: {
         // in it leaves the session holding nothing rather than an envelope around a `null`.
         setTmProgram(
           session,
-          reply.tmProgram === null ? null : { program: reply.tmProgram, tapeNames: reply.tapeNames },
+          reply.tmProgram === null
+            ? null
+            : { program: reply.tmProgram, tapeNames: reply.tapeNames, tmText: reply.tmText },
         )
         linkWiring.setIndex(reply.linkIndex === null ? null : new LinkIndex(reply.linkIndex))
         // `setLink.of(null)` HERE TOO, NOT ONLY `setDecline`. `linkMark` clears its own decoration on
@@ -282,13 +309,25 @@ export function createReplies(deps: {
    * `view`, none of which a detached session has any claim on (§3.3: no `linkIndex`, no `sourceSpan`,
    * no `ty`).
    *
-   * FOUR ARMS AND NO `default`, WHICH IS NOT AN OVERSIGHT. `session-worker.ts` answers a
-   * `lambda-scratch` request with exactly `scratch-compiled`, `lambda-frames`, `no-session` or
-   * `worker-error` — `compiled`, `tm-frames` and `result` need a TM leg, a `SourceMap` or a `ty`, and
-   * `onLambdaScratch`/`onExtend` are where each is refused. A reply this switch does not name is a
-   * reply this session's worker cannot send, and falling through is the honest answer: there is
-   * nothing on a scratchpad for a TM frame to land in, and inventing somewhere is the shape
-   * `session.rs`'s `Session::tm` prices.
+   * SIX ARMS AND NO `default`, WHERE THIS DOC USED TO SAY FOUR — 5d-iv Task 9 is the task that closes
+   * the gap the paragraph below used to record as open. `session-worker.ts` answers a `lambda-scratch`
+   * request with exactly `scratch-compiled`, `lambda-frames`, `no-session` or `worker-error`, and a
+   * `tm-scratch` request with `tm-scratch-compiled`, `tm-frames`, `no-session` or `worker-error` — the
+   * same four-shape answer per leg (`onTmScratch`, `session-worker.ts`'s TM counterpart to
+   * `onLambdaScratch`), and `compiled`/`result` still need a `SourceMap`/`ty` no buffer has, on either
+   * leg. `no-session` and `worker-error` are genuinely shared, one arm apiece for both legs — a buffer's
+   * failure to build or its worker's death read the same whichever leg minted it. `lambda-frames` and
+   * `tm-frames` are not shareable in the same way (`hist.push` closes over a different `LegState`), so
+   * each gets its own arm; `scratch-compiled` and `tm-scratch-compiled` likewise, because their payloads
+   * share no field (`tm-scratch-compiled`'s own doc in `protocol.ts` has the argument).
+   *
+   * **`tm-scratch-compiled` USED TO BE LEFT OPEN ON PURPOSE, AND THIS IS THE TASK THAT WAS ALWAYS GOING
+   * TO CLOSE IT.** The paragraph used to read: "Wiring those two arms needs a TM buffer's own pane and
+   * editor, which nothing in `src/` has yet... Whichever task first gives a TM buffer a pane is where
+   * this switch grows the other two arms." `tm-pane.ts`'s fork control (design §4.3, this task) is that
+   * pane — a TM pane can now be bound to a TM scratch's session through the same selector a λ scratch
+   * already uses, so a machine that parsed and a cursor that stepped no longer vanish with no pane, no
+   * status line and no `#link-status` any the wiser.
    *
    * IT NEVER TOUCHES `results.dataset.state` EXCEPT ON A THROW. That flag is the source compile's
    * "running…" indicator and `app.test.ts`'s `settled` waits on it; a scratchpad's traffic is not a
@@ -356,7 +395,7 @@ export function createReplies(deps: {
         // COINCIDENCE.** For a fork, the term the worker derived at the requested step is the first
         // moment this app knows what the buffer holds — `ScratchBuffers.fork` posts the SOURCE's
         // step-0 text and a step, and the worker re-derives between them. Recording it here rather
-        // than reading it back off the `LambdaEditor` later is what lets a buffer whose editor was
+        // than reading it back off the `ScratchEditor` later is what lets a buffer whose editor was
         // never mounted — a fork whose build failed, or one custody retired — still be persisted.
         if (reply.text !== null) scratchpad.setText(session, reply.text)
         // AND THEN INTO STORAGE — 5d-ii-d design §4.9. The paragraph above ends "still be persisted",
@@ -370,6 +409,54 @@ export function createReplies(deps: {
         if (reply.text !== null) onBuffersPersist()
         draw()
         return
+      case 'tm-scratch-compiled': {
+        // ONE STATUS, AND THE `null` IS NOT A FABRICATION — `resetLegs` drops a status for a leg the
+        // session does not have rather than writing one so the record is square, `scratch-compiled`'s
+        // own doc above. This is that arm's mirror: there the λ status is real and TM is `null`; here
+        // it is the reverse. `reply.tm` is a `TmScratchStatus`, not a `TmStatus` — `resetLegs`'s own
+        // doc has the argument for why its `tm` parameter was widened to accept it.
+        resetLegs(sessions.entryOf(session).legs, null, reply.tm)
+        // THE MACHINE IS STORED ON THE ENTRY AND FANNED OUT TO `setProgram`, THE SAME PAIRING
+        // `setTmProgram` MAKES FOR THE `compiled` ARM — so a pane bound to this session later
+        // (`pane-host.ts`'s `tmProgramOf`) is seeded from the entry rather than left blank. THROUGH
+        // `storeAndSetProgram` RATHER THAN `setTmProgram` ITSELF — that helper's own doc has the
+        // argument: `setTmProgram` also pushes fork AVAILABILITY from a `tmText` this reply does not
+        // carry, and routing a bare `null` through it would read as "this machine is over the cap",
+        // which is false for a scratch that was never offered a fork control in the first place.
+        // `setScratchStatus` rides the SAME pass as `then` (Minor fix, fix round on Task 9) rather than
+        // a second loop over `panes.ofSession('tm', session)` below — `storeAndSetProgram`'s own doc
+        // has the argument. `tapeNames()` IS A FIXED, PROGRAM-INDEPENDENT WASM EXPORT, not a wire field
+        // this reply carries either (`protocol.ts`'s `tm-scratch-compiled` doc: "no text echo" is the
+        // general shape — nothing this reply's own build did not already need is repeated on it) —
+        // `session-worker.ts`'s `onRun` calls the identical export to answer the SAME question for the
+        // `compiled` reply, and it answers identically for every machine.
+        const compiled: TmCompiled = { program: reply.tmProgram, tapeNames: tapeNames() as string[], tmText: null }
+        storeAndSetProgram(session, compiled, (pane) => pane.setScratchStatus(reply.tm))
+        // THE EDITOR IS SEEDED FROM THE BUFFER'S OWN TEXT OF RECORD, NOT FROM THIS REPLY — there is
+        // none to seed from (`tm-scratch-compiled` carries no `text`, unlike `scratch-compiled`).
+        // `ScratchBuffers.editorSeed`'s own doc names the gap this closes: "the λ half of the repair
+        // `pane-host.ts`'s `tmProgramOf` already performs for the other leg." `ScratchBuffers.fork` and
+        // `.recompile` both write `BufferState.text` BEFORE posting a build — the mint's own `src`
+        // argument, or the just-typed text — so by the time this reply lands the buffer already holds
+        // its own correct text; there is nothing here to derive, only to mount.
+        const seed = scratchpad.editorSeed(session)
+        if (seed !== null) editorHome(session)?.setEditor(seed.text, seed.collapsed)
+        // AND THEN INTO STORAGE, UNCONDITIONALLY — CRITICAL, whole-branch review before merge. This
+        // arm's own λ sibling above makes this call under a guard (`if (reply.text !== null)`) because
+        // `text: null` there means no scratch was built at all, so the write above it is skipped too.
+        // Nothing here is conditional on this reply the same way: `protocol.ts`'s own doc on
+        // `tm-scratch-compiled` records that this variant carries no absent-leg case — a `TmScratch`
+        // exists only for text that already parsed to a machine, so every arrival here follows a real
+        // edit or a real fork, either of which already wrote `BufferState.text` (the paragraph above).
+        // Omitting this call was the whole defect: a fork's own edit, or a blank buffer's own paste,
+        // reached the running machine (`recompile`'s synchronous `setText`) and never reached
+        // `localStorage`, so a reload returned whatever was durable before the edit — the buffer's
+        // ORIGINAL text for an edited fork, or nothing at all for a pasted blank buffer, since neither
+        // one had another persist site of its own.
+        onBuffersPersist()
+        draw()
+        return
+      }
       case 'lambda-frames': {
         // UNGUARDED FOR THE REASON THE `scratch-compiled` ARM ABOVE STATES: `legOf` throws for a session
         // the registry no longer holds, and a cooled buffer's worker cannot deliver a reply at all
@@ -377,6 +464,15 @@ export function createReplies(deps: {
         // `ScratchBuffers.noSessionReply` for the argument in full.
         const leg = sessions.legOf({ session, leg: 'lambda' })
         for (const f of reply.frames) leg.hist.push(f, lambdaFrameBytes(f))
+        leg.done = reply.done
+        draw()
+        return
+      }
+      case 'tm-frames': {
+        // THE TM COUNTERPART OF `lambda-frames` ABOVE, UNGUARDED FOR THE IDENTICAL REASON — a cooled
+        // buffer's worker cannot deliver this reply at all.
+        const leg = sessions.legOf({ session, leg: 'tm' })
+        for (const f of reply.frames) leg.hist.push(f, tmFrameBytes(f))
         leg.done = reply.done
         draw()
         return
@@ -433,7 +529,7 @@ export function createReplies(deps: {
           linkWiring.setForkFailed(`fork failed — ${failed.map((d) => d.message).join(' · ')}`)
           // `draw()` REPAINTS THE STATUS LINE, WHICH IS ALL THAT CHANGED. **IT USED TO BE PRECEDED BY
           // `reconcileEditors()`**, because this was the app's one remaining retire site and a retire
-          // must leave no `LambdaEditor` behind — mounted, or waiting in `editor-custody.ts`'s
+          // must leave no `ScratchEditor` behind — mounted, or waiting in `editor-custody.ts`'s
           // `heldEditors` — for a session that no longer exists. It ends no session, so it sweeps
           // nothing: the factory's own doc above records where that argument lives and what coverage
           // went with the call. `draw()` rather than `applyLayout()` for the reason it always was — no

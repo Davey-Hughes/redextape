@@ -65,6 +65,33 @@ export type TmStatus = {
   total_steps: number | null
 }
 
+/**
+ * A `TmScratch`'s status — **five fields, and the missing one is the point**.
+ *
+ * NO `total_steps`. `Session.tmStatus` reports one from the run `compile` performed; a scratch is
+ * stepped rather than described-run, so any value here would be invented. The Rust side pins this by
+ * an exhaustive destructuring, so a sixth field fails to compile there with `E0027` — this type is the
+ * wire's copy of that shape and must be edited in step with it.
+ *
+ * `header` IS THE FIELD `TmStatus` HAS NO COUNTERPART FOR. `false` means the text carried no header,
+ * so the machine runs from blank tapes at `MIN_FIELD_WIDTH` — explicitly not an error, and a fact the
+ * pane must surface rather than let the user assume they are watching the machine they pasted.
+ *
+ * `width` AND `run` ARE NOT `| null`, WHICH IS THE SAME ARGUMENT AS `TmStatus`'S NULLABILITY IN THE
+ * OTHER DIRECTION. `TmStatus`'s pair is nullable because a `Session` can decline the TM leg entirely —
+ * `available: false` with nothing behind it. A `TmScratch` has no such leg to decline: it is built from
+ * text that already parsed to a machine (`TmScratchStatus` in `crates/redextape-wasm/src/session.rs`,
+ * and its own doc there), so `width` and `run` are always answerable and an `Option` around either
+ * would be a state no worker can produce. See that Rust struct for the argument in full.
+ */
+export type TmScratchStatus = {
+  available: boolean
+  reason: string
+  width: number
+  run: RunStatus
+  header: boolean
+}
+
 export type Cut = 'Bytes' | 'Depth'
 
 /**

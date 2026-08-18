@@ -101,6 +101,7 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): RunReply =>
   tmProgram,
   tapeNames,
   linkIndex: null,
+  tmText: null,
 })
 
 /** The switch under test, over a registry holding `entry`, with no pane in the collection. */
@@ -356,7 +357,7 @@ describe('a poisoned buffer survives its own no-session reply', () => {
    */
   it('keeps the buffer listed, registered and running after a no-session reply', () => {
     const { reg, pool, buffers, ports, replies, slot } = scratchDriver()
-    const id = buffers.fork(slot, 'not a term (((', 0)
+    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
 
     replies.onScratchReply(id, noSession([DIAGNOSTIC]))
 
@@ -374,7 +375,7 @@ describe('a poisoned buffer survives its own no-session reply', () => {
    */
   it('leaves the pane on the buffer rather than dragging it home', () => {
     const { buffers, replies, slot } = scratchDriver()
-    const id = buffers.fork(slot, 'not a term (((', 0)
+    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
 
     replies.onScratchReply(id, noSession([DIAGNOSTIC]))
 
@@ -390,7 +391,7 @@ describe('a poisoned buffer survives its own no-session reply', () => {
    */
   it('reports the reason on the fork-failed surface', () => {
     const { buffers, replies, slot, gutter, forkFailed } = scratchDriver()
-    const id = buffers.fork(slot, 'not a term (((', 0)
+    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
 
     replies.onScratchReply(id, noSession([DIAGNOSTIC]))
 
@@ -410,7 +411,7 @@ describe('a poisoned buffer survives its own no-session reply', () => {
    */
   it('does not report a mid-edit parse failure as a failed fork', () => {
     const { reg, buffers, replies, slot, gutter, forkFailed } = scratchDriver()
-    const id = buffers.fork(slot, 'λx. x', 0)
+    const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
     reg.legOf({ session: id, leg: 'lambda' }).hist.push(lambdaFrame('λx. x'), 1)
 
     replies.onScratchReply(id, noSession([DIAGNOSTIC]))
@@ -433,7 +434,7 @@ describe('a poisoned buffer survives its own no-session reply', () => {
 describe('onScratchReply records a buffer’s text from its own scratch-compiled reply', () => {
   it('records the built term as the buffer’s text and asks for it to be persisted', () => {
     const { buffers, ports, replies, slot, lastScratchPost, persists } = scratchDriver()
-    const id = buffers.fork(slot, 'seed', 0)
+    const id = buffers.fork(slot, 'seed', 0, 'lambda')
 
     replies.onScratchReply(id, {
       kind: 'scratch-compiled',
@@ -465,7 +466,7 @@ describe('onScratchReply records a buffer’s text from its own scratch-compiled
    */
   it('does not ask for a write when the build produced no scratch', () => {
     const { buffers, replies, slot, persists } = scratchDriver()
-    const id = buffers.fork(slot, 'not a term (((', 0)
+    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
 
     replies.onScratchReply(id, {
       kind: 'scratch-compiled',

@@ -121,7 +121,7 @@ function editorDoc(): string {
 }
 
 /** A real keystroke into the scratch's own editor — `scratch-edit.test.ts`'s helper and its reason:
- * `LambdaEditor#setText` sets a `#seeding` flag for its dispatch, so it reports no edit at all. */
+ * `ScratchEditor#setText` sets a `#seeding` flag for its dispatch, so it reports no edit at all. */
 function typeIntoScratchEditor(text: string): void {
   const host = editorHost()
   if (host === null) throw new Error('no scratch editor mounted under [data-leaf="lambda-0"]')
@@ -155,17 +155,17 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // and still holds its text. Both halves are asserted because the defect this file exists for lives
     // between them — a buffer that survives while its editor does not.
     await openList()
-    clickRowControl('cool scratch 1')
+    clickRowControl('cool λ scratch 1')
     expect(heading()).not.toContain('[detached]')
     expect(editorHost()).toBeNull()
-    expect(rowNames()).toEqual(['scratch 1 — orphan — asleep'])
+    expect(rowNames()).toEqual(['λ scratch 1 — orphan — asleep'])
 
     // STAGE 2 — WARM. The row loses its asleep marker synchronously (`handleTemperature` rebuilds the
     // rows around the caller's handler returning), and NOTHING MOUNTS, which is correct and is asserted
     // rather than assumed: no pane is bound to this buffer, so there is no pane for an editor to mount
     // onto. This is the state the fix must not change.
-    clickRowControl('warm scratch 1')
-    expect(rowNames()).toEqual(['scratch 1 — orphan'])
+    clickRowControl('warm λ scratch 1')
+    expect(rowNames()).toEqual(['λ scratch 1 — orphan'])
     expect(everyEditorHost()).toHaveLength(0)
     closeList()
 
@@ -214,6 +214,6 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // satisfy every assertion above and read two rows here. Reopened first, per `closeList`'s doc: the
     // rebind two stages up changed this row's pane count and no repaint reaches a list already open.
     await openList()
-    expect(rowNames()).toEqual(['scratch 1 — 1 pane'])
+    expect(rowNames()).toEqual(['λ scratch 1 — 1 pane'])
   })
 })

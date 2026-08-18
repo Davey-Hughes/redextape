@@ -275,7 +275,7 @@ describe('the fork control, end to end', () => {
     // **THE SECOND ENTRY IS A MINTED NAME, WHERE THIS LINE USED TO READ `'λ scratchpad'`.** That was
     // the label `main.ts` gave its one fixed scratch session, written down before the session existed;
     // 5d-ii-c decision 1 makes a fork mint the buffer AND its name together (`ScratchBuffers.fork`), so
-    // the label is `scratch N` and N counts the forks this page has performed. The shape is asserted
+    // the label is `λ scratch N` and N counts the forks this page has performed. The shape is asserted
     // rather than the number for the reason `main()`-per-FILE makes unavoidable: N is a function of
     // every earlier test's forks, so pinning it would make this test fail for something another test
     // did. The GROUP'S LENGTH is what carries the claim the old line carried — one fork, one new λ
@@ -283,7 +283,7 @@ describe('the fork control, end to end', () => {
     const buffer = lambdaOptionElements()[1]
     expect(lambdaOptions()).toHaveLength(2)
     expect(lambdaOptions()[0]).toBe('source')
-    expect(lambdaOptions()[1]).toMatch(/^scratch \d+$/)
+    expect(lambdaOptions()[1]).toMatch(/^λ scratch \d+$/)
     // AND THE PANE IS ON IT — against the option element the app itself built, not against a name this
     // file guessed. The second line is what stops that from being satisfied by the pane having stayed
     // where it was: `optionValue('lambda', 'source')` is the one λ pair whose id this file can still

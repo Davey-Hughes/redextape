@@ -26,8 +26,9 @@ export type BufferRow = {
    * **WITHOUT IT A ROW IS A COUNTER'S OUTPUT AND A PANE COUNT, AND AT THE CAP EVERY PANE COUNT IS THE
    * SAME TOO.** The one gesture this control exists for is *choose a buffer and end it* — and the user
    * reaching it under a refusal has just been told they must choose, with no basis whatsoever on which
-   * to do so. `label` is `scratch N` BY CONSTRUCTION (`#minted` only counts up), so no amount of naming
-   * fixes this: the distinguishing fact is what the buffer HOLDS.
+   * to do so. `label` is `λ scratch N` or `TM scratch N` BY CONSTRUCTION (`#minted` only counts up, and
+   * the leg picks the prefix — `ScratchBuffers`'s own doc in `scratch.ts`), so no amount of naming fixes
+   * this: the distinguishing fact is what the buffer HOLDS.
    *
    * `string | null` RATHER THAN AN EMPTY STRING FOR THE ABSENT CASE, because the two are different
    * things the row says differently: a buffer whose fork has not answered yet, or never will, has no
@@ -294,6 +295,7 @@ export function bufferList(
   rows: () => readonly BufferRow[],
   onRetire: (id: SessionId) => void,
   onTemperature: (id: SessionId, warm: boolean) => void,
+  onNewTm: () => void,
 ): { update(count: number): void } {
   const id = `buffer-list-${listSeq++}`
   const menu = document.createElement('div')
@@ -317,6 +319,17 @@ export function bufferList(
    * first one for `autofocus`, and so `handleTemperature` below can reach into the clicked buffer's own
    * item to move focus back onto it after the rebuild — see `handleTemperature`'s own doc for why
    * (5d-ii-d review round 2, Finding 1).
+   *
+   * **THE "NEW TM BUFFER" CONTROL IS BUILT HERE TOO, FIRST, AHEAD OF EVERY ROW — 5d-iv T10, design §4.7.**
+   * "GIVE ME SOMEWHERE TO PASTE A `.tm` FILE" is a different intention from a fork, which detaches a pane
+   * onto a copy of what it was showing — there is no view to seed a TM buffer FROM (`ScratchBuffers.
+   * forkBlank`'s own doc), and above the fork cap that gesture is unavailable where this one never is. It
+   * lives here rather than in the app header because this menu is where buffers are managed, and it is
+   * what makes the menu non-empty at zero — which is why `main.ts`'s `refreshBuffers` no longer hides the
+   * invoking button. IT IS BUILT INSIDE `rebuildRows`, NOT ONCE AT CONSTRUCTION, so a temperature click's
+   * `menu.replaceChildren` (this function's own next line) does not delete it out from under a still-open
+   * list — the same reason every row is rebuilt here rather than patched in place. FIRST, so a keyboard
+   * user tabbing into the list reaches it before a row list that may be long, rather than after.
    */
   const rebuildRows = (): {
     id: SessionId
@@ -324,8 +337,16 @@ export function bufferList(
     retire: HTMLButtonElement
     temperature: HTMLButtonElement
   }[] => {
+    const newTm = document.createElement('button')
+    newTm.type = 'button'
+    newTm.className = 'new-tm'
+    newTm.textContent = 'new TM buffer'
+    newTm.addEventListener('click', () => {
+      menu.hidePopover()
+      onNewTm()
+    })
     const items = rows().map((row) => bufferRow(row, menu, onRetire, handleTemperature))
-    menu.replaceChildren(...items.map((i) => i.el))
+    menu.replaceChildren(newTm, ...items.map((i) => i.el))
     return items
   }
 
@@ -386,9 +407,16 @@ export function bufferList(
   })
 
   return {
-    /** Refresh the button's own readout — design §4.2's `[buffers 3 ▾]`. */
+    /**
+     * Refresh the button's own readout — design §4.2's `[buffers 3 ▾]`.
+     *
+     * **`buffers ▾`, WITHOUT THE `0`, AT ZERO — 5d-iv T10.** Every other count is the honest answer to
+     * "how many buffers exist"; zero used to be too, but the menu this button opens is no longer empty
+     * at zero (`rebuildRows`'s "new TM buffer" control, above) and a `0` in front of a control that is
+     * about to open something readable would misstate the one thing a count is for.
+     */
     update(count: number) {
-      button.textContent = `buffers ${count} ▾`
+      button.textContent = count === 0 ? 'buffers ▾' : `buffers ${count} ▾`
     },
   }
 }

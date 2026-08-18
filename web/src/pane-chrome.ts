@@ -72,9 +72,9 @@ export type PaneEvents = {
   /**
    * A genuine edit landed in a detached pane's own scratch buffer — design §4.3's second edit
    * gesture, and `detach`'s counterpart: that one forks a new scratch from a source-derived view,
-   * this one recompiles the scratch that already exists. `LambdaEditor`'s debounced `onEdit` is the
+   * this one recompiles the scratch that already exists. `ScratchEditor`'s debounced `onEdit` is the
    * only caller, wired through `LambdaPane.setEditor`, so it fires on a keystroke that survived the
-   * debounce — never on the seed that mounted the editor (`LambdaEditor#setText`'s `#seeding` guard
+   * debounce — never on the seed that mounted the editor (`ScratchEditor#setText`'s `#seeding` guard
    * is what keeps a seed from reaching here at all).
    *
    * OPTIONAL, FOR THE SAME REASON `detach` IS: an editor exists only on a pane whose slot owns a
@@ -101,15 +101,39 @@ export type PaneEvents = {
   /**
    * This pane's editor was collapsed or expanded.
    *
-   * OPTIONAL, LIKE `detach` AND `showEditor` BESIDE IT, because a TM pane has no editor to collapse
-   * and a handler it can never fire is a parameter pretending to be a capability.
+   * OPTIONAL, LIKE `detach` AND `showEditor` BESIDE IT, for the same "a caller with no handler gets a
+   * pane that never offers the affordance" test those two apply — a pane built with no `collapse`
+   * handler builds no `collapseButton` at all.
+   *
+   * **NOT WITHHELD ON A TM PANE, WHICH REVERSES WHAT THIS PARAGRAPH USED TO SAY.** It read "because a
+   * TM pane has no editor to collapse and a handler it can never fire is a parameter pretending to be a
+   * capability" — true before Task 8 (5d-iv), false after: `TmPane` also `implements EditablePane` and
+   * its constructor builds a `collapseButton` on its own control strip exactly like `LambdaPane`'s, and
+   * calls `on.collapse?.(collapsed)` from it. `transport.ts`'s `events` provides this handler on both
+   * legs now — see its own doc for the review finding that caught the gap: left λ-only, every `TmPane`
+   * was built with `on.collapse === undefined`, so a TM collapse toggled the class but never reached
+   * `scratchpad.setCollapsed`, and the buffer came back expanded on reload.
    *
    * IT REPORTS THE GESTURE AND DOES NOT PERFORM IT. `collapseButton`'s own callback still toggles
-   * `.is-collapsed` on the editor host — the presentation is unchanged and stays local — and this is
-   * the app being told, so it can record the state against the BUFFER (5d-ii-d §4.7) rather than
-   * against the pane the editor happens to be mounted in today.
+   * the collapse class on the pane's own editor region — the presentation is unchanged and stays local —
+   * and this is the app being told, so it can record the state against the BUFFER (5d-ii-d §4.7) rather
+   * than against the pane the editor happens to be mounted in today.
    */
   collapse?: (collapsed: boolean) => void
+  /**
+   * Fork this pane's MACHINE into a TM scratch buffer — 5d-iv design §4.3.
+   *
+   * **NO STEP, WHERE `detach` CARRIES ONE, AND THAT IS WHY IT IS A SECOND MEMBER RATHER THAN A REUSE.**
+   * A λ fork replays the source term to the frame the pane was showing, so that handler reports the one
+   * fact it owns. A machine has no step-k text: the seed is the whole `.tm` file, which lives in
+   * `main.ts`'s and `replies.ts`'s retention of the last `compiled` reply, not in the pane. This handler
+   * needs nothing from the pane, and a `step` parameter its handler ignored would be a parameter with no
+   * reader — which this file already refuses by name for `close` above.
+   *
+   * OPTIONAL, LIKE `detach`, AND BY THE SAME TEST: a pane has this handler when it has the affordance
+   * the handler reports.
+   */
+  detachMachine?(): void
   /** A state row was clicked. Absent on panes that have no table. */
   linkState?: (stateId: number) => void
   /** A token in the λ link window was clicked, at this byte offset into the full `lambdaText`. */
@@ -221,7 +245,7 @@ export function detachedBadge(title: HTMLElement): { update(detached: boolean): 
  * inherited from 5d-i, where this button was all that shipped: it ran the term the pane was showing,
  * independently, with the source session still going, and nothing more — every claim §4.3 made about
  * the FORK, and none of what a user would eventually do with one. **5d-iii shipped exactly that**: a
- * detached pane's body gained a second region, a `LambdaEditor` mounted over the frame renderer
+ * detached pane's body gained a second region, a `ScratchEditor` mounted over the frame renderer
  * (`LambdaPane`'s `#editorHost`, design §4.2), and this button is still how a user reaches it — the
  * click still forks, the editor is what the fork now lands on. What has not changed, and could not
  * have: an ATTACHED pane still has no editor and this button still does not add one, because the
@@ -277,25 +301,70 @@ export function detachedBadge(title: HTMLElement): { update(detached: boolean): 
  * control in a pane, not a new style, which is the treatment `.pane-binding`'s own comment records
  * for the selector. Nothing here carries state in colour (§6): the button is present or it is not,
  * and what it says is words.
+ *
+ * **`title` IS A PARAMETER NOW, DEFAULTED TO THE λ WORDING — 5d-iv Task 9, the same widening
+ * `collapseButton`'s `noun` parameter already made for this file.** The λ pane forks a TERM into a λ
+ * scratchpad; `TmPane` forks a MACHINE into a TM one, and hard-coding the old sentence would have been
+ * wrong on the second caller. Every existing call site (this file's own tests, `LambdaPane`'s) keeps
+ * reading exactly the old string; `TmPane` is the one caller that passes something else.
+ *
+ * **`setReason` IS THE ONE DEVIATION FROM THIS FILE'S "ADDED AND REMOVED, NEVER DISABLED" IDIOM, AND IT
+ * IS DELIBERATE — 5d-iv Task 9, design §4.3.** Every other control here treats "cannot work" as a
+ * reason to vanish, on the standard that a thing that provably cannot work should not be presented as
+ * though it might. A machine over `MAX_FORK_RULES` is a different shape of "cannot work": the machine
+ * exists and the refusal is a SIZE limit, not an absence, so vanishing here would be the defect this
+ * repo prices under a different name — a user who cannot tell "no machine" from "machine too big to
+ * open" has no way to learn the second is not permanent. `setForkAvailable`'s own doc (`tm-pane.ts`)
+ * decides WHEN this fires; this function only supplies the DOM primitive — present, disabled, and
+ * naming why.
  */
-export function detachButton(parent: HTMLElement, onDetach: () => void): { update(available: boolean): void } {
+export function detachButton(
+  parent: HTMLElement,
+  onDetach: () => void,
+  title = 'fork this term into a λ scratchpad — the source session keeps running',
+): { update(available: boolean): void; setReason(msg: string): void } {
   const el = document.createElement('button')
   el.type = 'button'
   el.className = 'detach'
   el.textContent = '✎ fork'
-  el.title = 'fork this term into a λ scratchpad — the source session keeps running'
+  el.title = title
   el.addEventListener('click', onDetach)
   // The same no-op guard `detachedBadge` and `paneSelect` state, for the same reason: this runs on
   // every recorded frame during playback (`main.ts`'s `draw()` -> `PaneSlot.render` -> the pane's
   // `render`), and appending or removing an unchanged node sixty times a second is churn nobody asked
   // for. It starts absent, so a pane that has never rendered offers no fork.
+  //
+  // IT TRACKS MOUNT/UNMOUNT ONLY, NOT WHETHER THE BUTTON IS DISABLED — `setReason` writes `disabled`
+  // directly and `update`'s own `available` branch resets it on EVERY call, guarded or not (below), so
+  // a caller can go straight from a disabled mount to an enabled one without an unmount between them.
   let on = false
   return {
     update(available: boolean) {
+      // RESET TO THE DEFAULT ENABLED STATE ONLY WHEN THE CONTROL IS ACTUALLY DISABLED — Minor fix,
+      // fix round on Task 9. This used to run on every call that asked for `available`, unconditional
+      // on `el.disabled`, before the no-op guard below — which is exactly the churn that guard exists
+      // to refuse: `LambdaPane.#refreshDetach` runs on every recorded frame during playback, so an
+      // ordinary attached pane's `update(true)` wrote `disabled = false`, `title = title` and
+      // removed an attribute that was never there, roughly 60 times a second, forever. Checking
+      // `el.disabled` first is what keeps the "caller whose machine just dropped under the cap
+      // reaches here with `available` unchanged from the previous, disabled call" case still working
+      // — the mount/unmount guard below correctly does nothing on that call, and this is what still
+      // clears `disabled` and the reason, exactly once, because `el.disabled` is what actually
+      // changed.
+      if (available && el.disabled) {
+        el.disabled = false
+        el.title = title
+        el.removeAttribute('aria-description')
+      }
       if (available === on) return
       on = available
       if (available) parent.append(el)
       else el.remove()
+    },
+    setReason(msg: string) {
+      el.disabled = true
+      el.title = msg
+      el.setAttribute('aria-description', msg)
     },
   }
 }
@@ -344,6 +413,14 @@ export function detachButton(parent: HTMLElement, onDetach: () => void): { updat
  * host's own `.is-collapsed` class, so the closure's flag and the host's class are set from the same
  * value and cannot arrive disagreeing with each other — the exact disagreement this whole doc is about.
  *
+ * **`noun` NAMES WHAT IS BEING SHOWN OR HIDDEN, AND DEFAULTS TO `LambdaPane`'S OWN WORDING — 5d-iv
+ * Task 8.** The label used to read the literal words "the term editor" unconditionally, which is λ
+ * vocabulary on a control `TmPane` now shares. Generalising the string in place would have changed an
+ * existing, user-visible accessible name on the λ pane for a slice that has no reason to touch it; a
+ * defaulted parameter instead leaves every existing call site (this file's own test, `LambdaPane`'s)
+ * reading exactly "show/hide the term editor", while `TmPane` passes `'machine source'` and reads
+ * "show/hide the machine source". Nothing here carries state in colour (§6): the words are the state.
+ *
  * THE RESET LIVES INSIDE `update`, NOT A SEPARATE METHOD, because `available` going false already IS
  * the unmount signal — and the existing no-op guard above (`available === on`) already fires exactly
  * once per real transition. Piggybacking on that guard is what keeps this safe on the per-frame path
@@ -363,6 +440,7 @@ export function detachButton(parent: HTMLElement, onDetach: () => void): { updat
 export function collapseButton(
   parent: HTMLElement,
   onToggle: (collapsed: boolean) => void,
+  noun = 'term editor',
 ): { update(available: boolean, initial?: boolean): void } {
   const el = document.createElement('button')
   el.type = 'button'
@@ -370,8 +448,8 @@ export function collapseButton(
   let collapsed = false
   const relabel = () => {
     el.textContent = collapsed ? '⌄' : '⌃'
-    el.setAttribute('aria-label', collapsed ? 'show the term editor' : 'hide the term editor')
-    el.title = collapsed ? 'show the term editor' : 'hide the term editor'
+    el.setAttribute('aria-label', collapsed ? `show the ${noun}` : `hide the ${noun}`)
+    el.title = collapsed ? `show the ${noun}` : `hide the ${noun}`
   }
   relabel()
   el.addEventListener('click', () => {

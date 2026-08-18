@@ -46,7 +46,7 @@ const DEBOUNCE_MS = 300
  * **THE EDITOR SWEEP AND THE FINDING BEHIND IT ARE RECORDED WHERE THE SWEEP STILL HAPPENS, NOT HERE.**
  * This file took `reconcileEditors: () => void` — and, before that, a narrow `editorHome: () =>
  * LambdaPane | undefined` thunk it called `setEditor(null)` through — because a retire must leave no
- * `LambdaEditor` behind for a session that no longer exists, including one in CUSTODY
+ * `ScratchEditor` behind for a session that no longer exists, including one in CUSTODY
  * (`editor-custody.ts`'s `heldEditors`, where a closed pane's editor waits) which the narrow thunk could
  * not reach at all. Both spellings went with the retire. The account of that IMPORTANT finding, and of
  * the third round's correction to it — the sweep visited the sessions `editorOwner` named, so a custody
@@ -116,7 +116,7 @@ export function createCompile(deps: {
     // `scratchpad.list().at(-1)` placeholder that picked WHICH buffer a keystroke ended — deliberately
     // visible in a caller that could not justify the choice, rather than hidden as a rule inside a
     // collection that has ids for everything else. The `reconcileEditors()` that had to leave no
-    // `LambdaEditor` behind, mounted or in custody, for the session the retire killed. And the `draw()`
+    // `ScratchEditor` behind, mounted or in custody, for the session the retire killed. And the `draw()`
     // beside it, which repainted the panes the rebind had just moved: nothing here changes a binding
     // now, so there is nothing for this path to repaint, and the source's own frames arrive through
     // `replies.ts` and drive their own.

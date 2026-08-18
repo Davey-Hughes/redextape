@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { BUFFERS_STORAGE_KEY, parseBuffers } from '../../src/buffers-store'
+import { BUFFERS_STORAGE_KEY, BUFFERS_VERSION, parseBuffers } from '../../src/buffers-store'
 import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout } from '../../src/layout'
 
 /**
@@ -40,7 +40,7 @@ const SHELL = `
 
 beforeAll(async () => {
   localStorage.setItem(LAYOUT_STORAGE_KEY, serializeLayout(defaultLayout()))
-  localStorage.setItem(BUFFERS_STORAGE_KEY, '{"version":1,"minted":"lots"}')
+  localStorage.setItem(BUFFERS_STORAGE_KEY, `{"version":${BUFFERS_VERSION},"minted":"lots"}`)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
 })
@@ -49,11 +49,11 @@ beforeAll(async () => {
  * **WHAT THIS FILE ACTUALLY PINS, STATED PLAINLY — IT IS THE WRITER'S BEHAVIOUR, NOT THE READER'S.**
  * Both assertions below are satisfied by an implementation that never reads `redextape.buffers` at
  * all, not only by one that reads it and correctly refuses a corrupt payload. The first (`#buffers`
- * hidden, no `.detached-badge`) is vacuously true whenever nothing restores, corrupt payload or none.
- * The second (the stored value equals `{minted:0,buffers:[],bindings:{}}`) is produced by
- * `refreshBuffers()`'s ordinary, unconditional start-up write (`main.ts`'s start-up `refreshBuffers()`
- * call, made after `compile.schedule(SAMPLE)` — that call site's own comment is the authoritative
- * account of why it sits there), which fires on every
+ * reads the zero-buffer label, no `.detached-badge`) is vacuously true whenever nothing restores,
+ * corrupt payload or none. The second (the stored value equals `{minted:0,buffers:[],bindings:{}}`) is
+ * produced by `refreshBuffers()`'s ordinary, unconditional start-up write (`main.ts`'s start-up
+ * `refreshBuffers()` call, made after `compile.schedule(SAMPLE)` — that call site's own comment is the
+ * authoritative account of why it sits there), which fires on every
  * page load regardless of whether anything upstream of it ever looked at these bytes. So this file
  * cannot distinguish "read the corrupt payload and refused it" from "never read the key at all" — it
  * pins that a refused restore leaves the app in the state a fresh page starts in, not that the refusal
@@ -65,8 +65,13 @@ beforeAll(async () => {
  */
 describe('a corrupt buffers payload', () => {
   it('a corrupt buffers key leaves the page with no buffers and every pane on source', () => {
-    // THE BUTTON IS HIDDEN AT ZERO BUFFERS — `main.ts`'s `refreshBuffers` — which is the assertion.
-    expect(document.querySelector<HTMLButtonElement>('#buffers')?.hidden).toBe(true)
+    // **THE BUTTON READS THE ZERO-BUFFER LABEL — 5d-iv T10.** This used to assert `#buffers`'s own
+    // `hidden` was `true`, which `main.ts`'s `refreshBuffers` no longer sets at any count: the menu now
+    // offers "new TM buffer" and so is never empty, which is exactly why the control is reachable at
+    // zero rather than withheld. `textContent` is what still answers "did nothing restore" — the label
+    // is `buffers ▾` (`buffer-list.ts`'s `update`, the zero case this task added) only when the count is
+    // genuinely zero, which a restored buffer would move off of.
+    expect(document.querySelector<HTMLButtonElement>('#buffers')?.textContent).toBe('buffers ▾')
     // AND NO PANE IS DETACHED. `.detached-badge` is `pane-chrome.ts`'s own class for the `[detached]`
     // marker, mounted and unmounted rather than hidden, and a buffer is the only session in this app
     // that can produce one — so its absence is "every pane is on the source session" stated in the DOM.

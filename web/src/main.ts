@@ -716,16 +716,16 @@ async function main(): Promise<EditorView> {
    * bindings", which is a fresh page — today's behaviour exactly, reached without a line of
    * reconciliation.
    *
-   * **ONE FAILURE IS NOT AMONG THEM AND IS REFUSED HERE INSTEAD: A BINDING THAT NAMES A LEAF WHICH IS
-   * NOT A λ PANE.** `parseBuffers` cannot catch it — the payload is a `Record<LeafId, SessionId>` and
-   * carries no leg, deliberately (design §4.1), so validating it would need the layout tree, which that
-   * module is free of on purpose. A buffer has exactly ONE leg and it is `lambda` (`ScratchBuffers`'s
-   * `#spawn`), and `SessionRegistry.legOf` throws for a leg a session lacks — so a binding that reached
-   * a `tm` leaf would build a `PaneSlot('tm', 'scratch-N')`, and `draw.ts`'s per-pane loop has no
-   * `try`/`catch`: the first frame throws and takes every subsequent one with it. **Measured, not
-   * reasoned** — `tests/browser/buffer-restore.test.ts` seeds exactly that binding and the whole page
-   * died at `main()` (`session scratch-1 has no tm leg`), which is the same Critical `transport.ts`'s
-   * `rebind` records from the other direction.
+   * **ONE FAILURE IS NOT AMONG THEM AND IS REFUSED HERE INSTEAD: A BINDING THAT NAMES A LEAF WHOSE
+   * PANE KIND DISAGREES WITH THE BUFFER'S OWN LEG.** `parseBuffers` cannot catch it — the payload is a
+   * `Record<LeafId, SessionId>` and carries no leg, deliberately (design §4.1), so validating it would
+   * need the layout tree, which that module is free of on purpose. `SessionRegistry.legOf` throws for a
+   * leg a session lacks — so a binding that reached a `tm` leaf naming a λ-only buffer (or a `lambda`
+   * leaf naming a TM-only one) would build a `PaneSlot` requesting a leg that buffer's session does not
+   * have, and `draw.ts`'s per-pane loop has no `try`/`catch`: the first frame throws and takes every
+   * subsequent one with it. **Measured, not reasoned** — `tests/browser/buffer-restore.test.ts` seeds
+   * exactly that binding and the whole page died at `main()` (`session scratch-1 has no tm leg`), which
+   * is the same Critical `transport.ts`'s `rebind` records from the other direction.
    *
    * **AND IT IS REACHABLE WITHOUT A HAND-EDITED KEY.** A λ pane bound to a buffer, then switched to TM
    * through the pane picker, changes the leaf's KIND through `pane-host.ts`'s `applyLayout` — which
@@ -735,9 +735,18 @@ async function main(): Promise<EditorView> {
    * the end of `main()` then drops the binding from storage, because the pane it named is on the source
    * session.
    *
-   * `l.pane === 'lambda'` RATHER THAN `l.id !== SOURCE_LEAF`, because the source leaf is not the only
-   * leaf a λ buffer cannot serve — and stating the positive is what makes this line follow the fact it
-   * depends on (a buffer is λ-only) rather than an enumeration of what it is not.
+   * **THE LEAF AND THE NAMED BUFFER MUST AGREE ON A LEG, WHICH IS THE INVARIANT AND NOT `l.pane ===
+   * 'lambda'` — 5d-iv T11.** `ScratchBuffers` mints a `tm` buffer now (`fork`/`forkBlank`, given `'tm'`),
+   * so "a buffer is λ-only" stopped being a fact this guard could lean on the moment `PersistedBuffer`
+   * gained `leg` (T6). Checking only the LEAF's pane kind, with no look at the NAMED BUFFER's own `leg`,
+   * both under- and over-refuses: it drops every legitimate `tm`-leaf binding on a `tm` leaf (there is no
+   * arm that ever admits one), and it still ADMITS a hand-edited payload pairing a `tm`-leg buffer's id
+   * with a `lambda` leaf's binding — the leaf IS a λ pane, so the old `lambdaLeaves.has(leaf)` check
+   * passed it — which reaches `pane-host.ts`'s `applyLayout`, builds `PaneSlot('lambda', session)` for a
+   * session whose only leg is `tm`, and throws out of `SessionRegistry.legOf` in the first `draw()` — the
+   * same crash class `buffer-restore.test.ts`'s own `SEEDED` fixture already pins from the mirrored
+   * direction (a `lambda`-leg buffer bound to a `tm` leaf). `legOfLeaf`/`legOfBuffer` below replace the
+   * leaf-only check with the actual invariant: the binding survives only when both legs agree.
    */
   const restoredBuffers = parseBuffers(readBuffersStorage())
   /**
@@ -748,9 +757,12 @@ async function main(): Promise<EditorView> {
   const restoredBindings: [LeafId, SessionId][] = []
   if (restoredBuffers !== null) {
     scratchpad.restore(restoredBuffers)
-    const lambdaLeaves = new Set(leaves(tree).flatMap((l) => (l.pane === 'lambda' ? [l.id] : [])))
+    const legOfLeaf = new Map(
+      leaves(tree).flatMap((l) => (l.pane === 'lambda' || l.pane === 'tm' ? [[l.id, l.pane] as const] : [])),
+    )
+    const legOfBuffer = new Map(restoredBuffers.buffers.map((b) => [b.id, b.leg] as const))
     for (const [leaf, session] of Object.entries(restoredBuffers.bindings)) {
-      if (!lambdaLeaves.has(leaf)) continue
+      if (legOfLeaf.get(leaf) !== legOfBuffer.get(session)) continue
       restoredBindings.push([leaf, session])
       paneHost.seedBinding(leaf, session)
     }
@@ -811,7 +823,12 @@ async function main(): Promise<EditorView> {
       scratchpad.list().map((b) => ({
         id: b.id,
         label: b.label,
-        paneCount: panes.ofSession('lambda', b.id).length,
+        // `b.leg`, NOT THE LITERAL `'lambda'` — 5d-iv T5 REVIEW FIX. `BufferInfo` gained `leg` in this
+        // task precisely so this join could read a TM buffer's own leg instead of assuming every buffer
+        // is a λ one; hard-coding `'lambda'` here made a TM buffer's row read 0 panes always, so a row
+        // could say "orphan" while a TM pane was bound to it — `panes.ofSession`'s own generic
+        // parameter is what a caller narrows to answer either leg's question.
+        paneCount: panes.ofSession(b.leg, b.id).length,
         /**
          * **THE ROW'S ONE DISTINGUISHING FACT, JOINED HERE FOR `paneCount`'s REASON** — see
          * `BufferRow.term` for why a row without it is a counter's output and a pane count, with every
@@ -835,10 +852,26 @@ async function main(): Promise<EditorView> {
          * on purpose, so asking and catching would be treating a designed state as an exception — and
          * it would also swallow the genuine wiring bug the throw exists to report.
          *
+         * **A SECOND BRANCH, ON `b.leg`, IS WHAT KEEPS THIS FROM THROWING FOR A WARM TM BUFFER TOO —
+         * 5d-iv T5 REVIEW FIX.** `legOf({ session: b.id, leg: 'lambda' })` unconditionally is a throw for
+         * any warm buffer whose entry has no `lambda` leg at all — every TM buffer, by `#spawn`'s own
+         * construction (`scratch.ts`'s own doc) — which escaped the `beforetoggle` handler exactly the
+         * way the cold case above used to. `TmState` (`types.ts`) carries no printable `text` field the
+         * way `LambdaState` does — a configuration is tape windows and a state index, not a term to
+         * print — so there is no equivalent string to join for a TM row today; it reads `null` (`no term
+         * yet` in the row) rather than inventing one. That is honest rather than a placeholder: nothing
+         * in `replies.ts`'s `onScratchReply` routes a TM buffer's `tm-scratch-compiled` or its
+         * `tm-frames` anywhere yet (that file's own doc), so a TM buffer's `tm` leg never records a frame
+         * for this to read even once one exists to ask.
+         *
          * For what this doc used to claim and why it changed, see the history note under `buffers` —
          * the row builder's `term`.
          */
-        term: b.warm ? (sessions.legOf({ session: b.id, leg: 'lambda' }).hist.current?.text ?? null) : null,
+        term: b.warm
+          ? b.leg === 'lambda'
+            ? (sessions.legOf({ session: b.id, leg: 'lambda' }).hist.current?.text ?? null)
+            : null
+          : null,
         warm: b.warm,
       })),
     (id) => {
@@ -917,6 +950,45 @@ async function main(): Promise<EditorView> {
         draw()
       }
     },
+    () => {
+      /**
+       * **THE SECOND GESTURE — 5d-iv design §4.7.** `ScratchBuffers.fork` detaches a pane onto a copy of
+       * what it was showing, and is unavailable above the fork cap; `forkBlank` mints a warm, empty
+       * buffer on `leg` with no view to seed from and binds no pane, and is always available — "give me
+       * somewhere to paste a `.tm` file" is a different intention from a fork, not the same door
+       * narrowed. `'tm'` IS THE ONLY LEG THIS BUTTON EVER MINTS: the menu's own control is `buffer-list.
+       * ts`'s "new TM buffer", built for the TM pane specifically because a λ buffer already has a seed
+       * — the source's own step-0 term, through `fork` — and a TM buffer does not (`ScratchBuffers.
+       * forkBlank`'s own doc: the TM pane renders a δ-table projected from a compiled program, never the
+       * machine source that produced one).
+       *
+       * `BufferCapReached`, NOT A BARE `catch` — the same standard the retire and temperature handlers
+       * above hold themselves to. The other throws `forkBlank` can reach are `SessionRegistry.add`'s and
+       * `SessionPool.bind`'s guards over their own invariants; rendering one of those as a status line
+       * would swallow a wiring bug rather than report a refusal.
+       */
+      try {
+        scratchpad.forkBlank('tm')
+      } catch (e) {
+        if (!(e instanceof BufferCapReached)) throw e
+        linkWiring.setForkFailed(e.message)
+        // NO `refreshBuffers()` ON THIS ARM — the header's count did not move, because that is the
+        // whole content of the refusal (`transport.ts`'s `detach` handler states the identical rule for
+        // `fork`'s own refusal). `draw()` still runs: the status line is the one thing that DID change.
+        draw()
+        return
+      }
+      // A FRESH MINT RETIRES YESTERDAY'S NEWS, ON THE SUCCESS PATH — the same rule and the same reason
+      // `transport.ts`'s `detach` handler states for `fork`: a stale "fork failed — all N scratch
+      // buffers are live" must not still be on screen the instant a mint against that very cap succeeds.
+      linkWiring.setForkFailed(null)
+      // THE HEADER GAINED A BUFFER, AND `draw()` DOES NOT REACH ITS READOUT — the same split `fork`'s
+      // own success path draws (`transport.ts`): `refreshBuffers()` repaints the buffer-list button and
+      // persists the collection, `draw()` repaints every pane's own chrome, most importantly the
+      // binding selector that gains this buffer as a new option the instant it exists.
+      refreshBuffers()
+      draw()
+    },
   )
 
   /**
@@ -932,54 +1004,21 @@ async function main(): Promise<EditorView> {
    * for line (its own comment states why the `custody.reconcile()` obligation is independent), and a
    * guard here that skipped this one call for `cool` while keeping it for `retire` would be two
    * near-identical handlers doing their shared cleanup differently over a distinction — whether the
-   * count moved — that this function's OTHER job does not care about: the focus-stranding guard and the
-   * button's `hidden` state below are exactly as correct to re-check on a cool as on a retire, since
+   * count moved — that this function's OTHER job does not care about: the readout below and the
+   * persisted payload it triggers are exactly as correct to recompute on a cool as on a retire, since
    * both examine the count rather than assume it changed.
    *
-   * **THE BUTTON IS NOT OFFERED AT ZERO, AND THAT IS A DECISION.** A list with no rows is a gesture with
-   * no possible outcome: there is nothing to reclaim, nothing to name and nothing a click could do —
-   * which is this slice's own standard ("a control that provably cannot work must not be offered",
-   * `editor-custody.ts`), and the standard `detachButton`, `collapseButton` and `paneSelect`'s
-   * below-two-options self-removal already apply in pane chrome. The counter-argument is real and is
-   * rejected: an always-present `buffers 0 ▾` would advertise that the capability exists, at the price of
-   * a control whose only reachable state is an empty bordered box.
-   *
-   * `hidden` RATHER THAN `remove()`, WHICH IS WHERE THIS DEPARTS FROM THOSE THREE. The popover is
-   * inserted BESIDE this button (`button.after(menu)`, once, at construction) and takes it as its
-   * implicit anchor, so detaching the button would strand the list in the header and leave re-insertion
-   * to guess the header's order. `hidden` takes the control out of the layout, out of the tab order and
-   * out of the accessibility tree while leaving that pairing intact — the same mechanism
-   * `controlStrip` uses for `extend`.
-   *
-   * **AND WITHDRAWING IT IS WHERE THE TWO CORRECT DECISIONS ABOVE MEET AND STRAND THE KEYBOARD.**
-   * Measured, not reasoned from the spec: retiring the last buffer left `document.activeElement` as
-   * `<body>`. `buffer-list.ts`'s row control dismisses the popover before it fires, and the popover hide
-   * algorithm hands focus back to the invoker when focus is inside the popover — so by the time this
-   * runs, focus is on the very button the next line takes out of the tab order, and focus on a
-   * `display: none` element falls to the document body. Neither half is wrong on its own: the list
-   * autofocuses its first row so the control is reachable, and the button withdraws because at zero it
-   * provably cannot work. It is the accessibility list's own item 1 — *"a control that hides itself on
-   * click strands the keyboard"* — assembled out of two parts that each pass review, and item 1's stated
-   * remedy is to move focus deliberately rather than to stop hiding things.
-   *
-   * **`#restore-layout` RATHER THAN A PANE, WHICH IS WHERE THIS DIVERGES FROM `pane-host.ts`'s
-   * `focusPane`.** That helper names "the place the user is looking" as a leaf the gesture acted on, and
-   * a retire has no such leaf to offer in the case that reaches this branch: the buffer whose retire
-   * empties the header is very often an orphan — the state this whole list exists to reach — so nothing
-   * was rebound and there is no pane the gesture touched. What survives, in the strip the gesture was
-   * made in and immediately beside the control that has just gone, is `#restore-layout`; it is never
-   * itself withheld, so this cannot hand focus to a second hidden element.
-   *
-   * IT IS GUARDED ON THE BUTTON ACTUALLY HOLDING FOCUS, because a retire is not the only caller. A fork
-   * reaches here too, and so does the initial call below, and neither should move a caret out of the
-   * source editor. The guard is also what keeps a mouse user's focus where the pointer left it: a click
-   * that never focused the invoker never gets focus back from `hidePopover`, so there is nothing here to
-   * move.
+   * For what this doc used to claim and why it changed, see the history note under `refreshBuffers` —
+   * the hide-at-zero rule and the focus-restoration branch.
    */
   const refreshBuffers = (): void => {
     const live = scratchpad.list().length
-    if (live === 0 && document.activeElement === buffersButton) restoreLayoutButton.focus()
-    buffersButton.hidden = live === 0
+    // **NO HIDE-AT-ZERO, AND NO FOCUS RESTORATION BESIDE IT — 5d-iv design §4.7.** This function used
+    // to read `buffersButton.hidden = live === 0`, plus a line moving focus to the reset-layout button
+    // when retiring the last buffer hid the control the click had landed on. That is item 1 of the
+    // standing accessibility list, "a control that hides itself on click strands the keyboard"; the
+    // menu now offers "new TM buffer" and so is never empty, which removes the reason for the hide and
+    // therefore the workaround. One instance retired, not the pass discharged.
     buffers.update(live)
     /**
      * **THE PERSIST RIDES ON THIS FUNCTION BECAUSE ITS CALLERS ARE ALREADY THE RIGHT SET.** The doc
@@ -1157,7 +1196,7 @@ async function main(): Promise<EditorView> {
     //
     // **`sourceSession` AND `reconcileEditors` WERE PASSED HERE UNTIL DECISION 2's SECOND DELETION**,
     // and both served the retire inside `noSessionReply`'s phantom-fork path — a home for its panes to
-    // be sent back to, and a sweep so no `LambdaEditor` outlived the session it killed. That path ends
+    // be sent back to, and a sweep so no `ScratchEditor` outlived the session it killed. That path ends
     // no buffer now (`replies.ts`'s own arm records what the user loses with it), so both arguments
     // followed the same four `compile.ts` shed one task earlier. `custody.reconcile` is unchanged and
     // still reached on every layout gesture through `applyLayout`.

@@ -1,13 +1,13 @@
 import { EditorView } from '@codemirror/view'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { LambdaEditor } from '../../src/lambda-editor'
+import { ScratchEditor } from '../../src/scratch-editor'
 
 /**
  * **A MISMATCH FOUND AGAINST THE BRIEF, AND HOW THIS FILE RESOLVES IT.**
  *
- * The brief's Step 1 sketch simulated "a burst of keystrokes" by calling `LambdaEditor#setText`
+ * The brief's Step 1 sketch simulated "a burst of keystrokes" by calling `ScratchEditor#setText`
  * three times. Run as written, that test fails: `setText` sets `#seeding` for the duration of its
- * dispatch (see `lambda-editor.ts`'s own doc on that field — "the fork's seed, and nothing else"),
+ * dispatch (see `scratch-editor.ts`'s own doc on that field — "the fork's seed, and nothing else"),
  * so the update listener never schedules a recompile and `onEdit` is called zero times, not one.
  * Step 5's own prediction agrees with this reading — "coalesces a burst... expects one fire, which
  * THE MUTATION still satisfies" only makes sense if the guard-removed mutant is what makes that test
@@ -20,9 +20,9 @@ import { LambdaEditor } from '../../src/lambda-editor'
  * CodeMirror's own public API for recovering the view instance mounted under a DOM node — and
  * dispatches a change transaction directly to it, exactly as `tests/browser/app.test.ts`'s `retype`
  * treats a direct `view.dispatch` of a buffer replacement as standing in for a user retyping the
- * whole document. No private field of `LambdaEditor` is touched.
+ * whole document. No private field of `ScratchEditor` is touched.
  */
-describe('LambdaEditor', () => {
+describe('ScratchEditor', () => {
   beforeEach(() => {
     document.body.replaceChildren()
     vi.useFakeTimers()
@@ -32,7 +32,7 @@ describe('LambdaEditor', () => {
   const make = (onEdit = vi.fn()) => {
     const host = document.createElement('div')
     document.body.append(host)
-    return { host, onEdit, ed: new LambdaEditor({ host, initial: '\\x. x', debounceMs: 300, onEdit }) }
+    return { host, onEdit, ed: new ScratchEditor({ host, initial: '\\x. x', debounceMs: 300, onEdit }) }
   }
 
   /** A real keystroke — as against `setText`'s seed, see the file doc above. */

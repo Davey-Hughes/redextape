@@ -92,6 +92,7 @@ describe('SessionClient streaming', () => {
       tmProgram: null,
       tapeNames: [],
       linkIndex: null,
+      tmText: null,
     })
     deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: null })
     deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: 'ended' })
@@ -153,6 +154,32 @@ const compiled = (gen: number): RunReply => ({
   tmProgram: null,
   tapeNames: [],
   linkIndex: null,
+  tmText: null,
+})
+
+describe('tmScratch', () => {
+  it('posts a tm-scratch request carrying only the text', () => {
+    const { port, sent } = fakePort()
+    const c = new SessionClient(port, () => {})
+    const gen = c.supersede()
+    c.tmScratch(gen, 'tapes 1\nstart q0\nstate q0:\n')
+    expect(sent).toEqual([{ kind: 'tm-scratch', gen, src: 'tapes 1\nstart q0\nstate q0:\n' }])
+  })
+
+  /**
+   * SAME STALE-GENERATION GUARD AS `scratch`, ASSERTED RATHER THAN ASSUMED. A request posted under a
+   * superseded generation is a message the worker will answer into a pane that has moved on — the
+   * shape `supersede` exists to prevent, and a new method that forgot the guard would reopen it.
+   */
+  it('drops a request whose generation has been superseded', () => {
+    const { port, sent } = fakePort()
+    const c = new SessionClient(port, () => {})
+    const stale = c.supersede()
+    c.supersede()
+    sent.length = 0
+    c.tmScratch(stale, 'tapes 1\n')
+    expect(sent).toEqual([])
+  })
 })
 
 describe('SessionClient generation', () => {
