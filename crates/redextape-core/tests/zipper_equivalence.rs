@@ -55,11 +55,19 @@ fn term_of(src: &str) -> Option<LambdaTerm> {
 }
 
 /// The `NodeId` of every `Core` node satisfying `pred`, over the whole tree. Iterative with an
-/// explicit worklist, and it MUST stay that way: `Core::for_each_child`'s doc (`core.rs:84-89`) states
-/// that a long statement spine can be tens of thousands of nodes deep and that recursive traversal of
-/// it "aborts the process with an uncatchable stack overflow", and that `for_each_child` "must never
-/// call itself" for exactly that reason — a recursive caller here would defeat the point. Mirrors
-/// `find_id` in `lambda_provenance.rs`, generalized to collect every match instead of the first.
+/// explicit worklist, and it MUST stay that way: `Core::for_each_child`'s doc (`core.rs`) states that
+/// a long statement spine can be tens of thousands of nodes deep and that recursive traversal of it
+/// "aborts the process with an uncatchable stack overflow", and that `for_each_child` "must never call
+/// itself" for exactly that reason — a recursive caller here would defeat the point. Mirrors `find_id`
+/// in `lambda_provenance.rs`, generalized to collect every match instead of the first.
+///
+/// THAT POINTER READ `core.rs` lines 84-89 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It was exactly that
+/// doc's five lines plus `for_each_child`'s own signature when region-path tagging (#28) wrote it;
+/// `clippy::pedantic` (#31) moved the item down two, so this conversion found the range opening on
+/// `Core::id`'s closing brace and the blank line under it and stopping one line short of the doc's end
+/// — dropping "this method must never call itself", the one of the three claims quoted above that this
+/// function's shape turns on. The other two were still inside it, which is what made the range read as
+/// confirmation.
 fn ids_where(core: &Core, pred: &dyn Fn(&Core) -> bool) -> BTreeSet<NodeId> {
     let mut out = BTreeSet::new();
     let mut stack = vec![core];
@@ -74,15 +82,24 @@ fn ids_where(core: &Core, pred: &dyn Fn(&Core) -> bool) -> BTreeSet<NodeId> {
 
 /// **NOT `MAX_REDUCTION_STEPS`, and not because the generated programs need it.** `arb_expr_over`
 /// generates only `+`, monus `-`, `>`, `==` and `if` over integer leaves — no recursion, no functions,
-/// no loops (`three_way_oracle.rs:529`'s doc on this same generator: "every generated program terminates
-/// to a value"). Verified directly: raising this cap to 5,000,000 still runs the proptest below in
-/// 0.22 s with 0 of 262 generated programs capping. **This cap exists for the four CURATED capping
-/// cases in `curated_shapes_agree_step_for_step` below** — terms and programs built to diverge or
-/// recurse unboundedly — so they hit a small, cheap bound instead of running to `MAX_REDUCTION_STEPS`.
-/// The property under test is "these two cursors agree": on the emitted `StepEvent` sequence, on the
-/// resulting term, AND on the resulting `Status` — `Some(Normalized)` for the six terminating shapes
-/// and every generated program, `Some(HitCap)` for the four capping cases, and never a case where the
-/// two cursors' statuses disagree.
+/// no loops (`three_way_oracle.rs`'s `arb_tm_safe_expr`, whose doc covers this same generator: "every
+/// generated program terminates to a value"). Verified directly: raising this cap to 5,000,000 still
+/// runs the proptest below in 0.22 s with 0 of 262 generated programs capping. **This cap exists for
+/// the four CURATED capping cases in `curated_shapes_agree_step_for_step` below** — terms and programs
+/// built to diverge or recurse unboundedly — so they hit a small, cheap bound instead of running to
+/// `MAX_REDUCTION_STEPS`. The property under test is "these two cursors agree": on the emitted
+/// `StepEvent` sequence, on the resulting term, AND on the resulting `Status` — `Some(Normalized)` for
+/// the six terminating shapes and every generated program, `Some(HitCap)` for the four capping cases,
+/// and never a case where the two cursors' statuses disagree.
+///
+/// THE `three_way_oracle.rs` POINTER READ line 529 UNTIL THIS COMMIT, AND IT HAD DRIFTED. Line 529 was
+/// the literal line carrying "every generated program terminates to a value" when the zipper slice (#5)
+/// wrote it; the node-count bound (#32) moved `arb_tm_safe_expr` down eight lines, taking the quoted
+/// sentence with it, and this conversion found 529 holding a DIFFERENT line of the same doc — the one
+/// naming `redextape-test-support`'s `arb_expr_over` as where the safety lever lives. Recorded ACCURATE
+/// at first, because the citing text says "529's doc" and that doc does still carry the quote; STALE is
+/// the right verdict, because what 529 holds is something adjacent and plausible, which is the failure
+/// mode this slice exists to catch rather than an exception to it.
 const EQUIV_CAP: u64 = 10_000;
 
 /// How many events of each `Owner` variant a run emitted.
@@ -107,9 +124,20 @@ const EQUIV_CAP: u64 = 10_000;
 /// `exact > 30` stays green as long as the SUM across every tagged construct clears it, whichever
 /// construct actually supplied the tags — so it goes blind the moment one construct loses its tag as
 /// long as the others keep the total up. Measured 2026-08-10: reverting `Let { mutable: true }`'s own
-/// tag (`lower.rs:611`) or `build_while`'s root tag (`lower.rs:766`) individually still left `exact` at
-/// 49 and 50 respectively, both comfortably above such a floor. Recording each event's own `NodeId` is
-/// what lets an assertion be about ONE construct rather than the sum of all of them.
+/// tag (`lower.rs`'s `lower_region_body`, in its `Core::Let { mutable: true }` arm) or `build_while`'s
+/// root tag (`lower.rs`) individually still left `exact` at 49 and 50 respectively, both comfortably
+/// above such a floor. Recording each event's own `NodeId` is what lets an assertion be about ONE
+/// construct rather than the sum of all of them.
+///
+/// BOTH POINTERS ABOVE WERE LINE NUMBERS UNTIL THIS COMMIT, AND BOTH HAD DRIFTED 44 LINES UNDER ONE
+/// COMMIT. `lower.rs` line 611 was that arm's own `Ok(app_owned(abs(STORE, cont), new_store, *id))`,
+/// and line 766 was `build_while`'s own `Ok(app_owned(app(fix(), g), s_init, id))`, when region-path
+/// tagging (#28) took the measurement; `clippy::pedantic` (#31) pushed both down 44 lines, so the two
+/// calls are now exactly where the parentheticals above name them — inside `lower_region_body`'s
+/// `Core::Let { mutable: true }` arm, and at the end of `build_while`. This conversion found 611
+/// holding the blank line above `lower_region_body`'s doc, and 766 the closing brace of `in_position`'s
+/// `match`, five lines above `fn build_while`. THE MEASUREMENT ITSELF STANDS — it is a
+/// dated observation about a real run, and only the two coordinates were ever wrong.
 #[derive(Default, Debug)]
 struct OwnerCensus {
     exact: usize,
@@ -269,15 +297,24 @@ fn curated_shapes_agree_step_for_step() {
     // `Seq`". Both halves of that claim were wrong. There is no `Core::If` anywhere in this fixture —
     // it has no `if` at all, only `Let { mutable: true }` (twice), the `Seq` joining the loop to its
     // continuation, and the `While` itself. And measured directly: reverting only `Seq`'s own tag
-    // (`lower.rs:652`) drops `exact` from 51 to 22 — but 19 of those 22 SURVIVING `Exact` events come
-    // from `lower_expr`'s `BinOp` arm (the functional path this fixture's `acc + 1`, `n - 1` and
-    // `n > 0` also go through), not from any region construct at all; only 3 of 22 are region-path
-    // `Exact` events. A floor between 22 and 51 mostly measures whether `BinOp` is still tagged, which
-    // no revert here ever touches — and reverting `Let { mutable: true }` or `build_while`'s own root
-    // tag individually left `exact` at 49 and 50, both comfortably clear of a floor that also has to
-    // sit below 51. A count cannot distinguish "the construct I care about lost its tag" from "an
-    // unrelated construct is still tagged"; only naming each construct's own `NodeId` and checking it
-    // directly can. `ids_where` plus the loop below do that instead, one construct at a time.
+    // (`lower.rs`'s `lower_region_body`, in its `Core::Seq` arm) drops `exact` from 51 to 22 — but 19
+    // of those 22 SURVIVING `Exact` events come from `lower_expr`'s `BinOp` arm (the functional path
+    // this fixture's `acc + 1`, `n - 1` and `n > 0` also go through), not from any region construct at
+    // all; only 3 of 22 are region-path `Exact` events. A floor between 22 and 51 mostly measures
+    // whether `BinOp` is still tagged, which no revert here ever touches — and reverting
+    // `Let { mutable: true }` or `build_while`'s own root tag individually left `exact` at 49 and 50,
+    // both comfortably clear of a floor that also has to sit below 51. A count cannot distinguish "the
+    // construct I care about lost its tag" from "an unrelated construct is still tagged"; only naming
+    // each construct's own `NodeId` and checking it directly can. `ids_where` plus the loop below do
+    // that instead, one construct at a time.
+    //
+    // THE `Seq` POINTER READ `lower.rs` line 652 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It was that
+    // `Core::Seq` arm's own `Ok(app_owned(abs(STORE, cont), first_store, *id))` when region-path
+    // tagging (#28) took this measurement; `clippy::pedantic` (#31) pushed it down 44 lines, so that
+    // call is now the last line of `lower_region_body`'s `Core::Seq` arm. This conversion found 652
+    // landing on the `let cont = cont?;` of the `Core::Let { mutable: true }` arm — the same function,
+    // three lines above THAT arm's tag, which is one of the two neighbouring reverts this very
+    // paragraph contrasts the `Seq` one against.
     for (what, pred) in [
         ("while", &(|c: &Core| matches!(c, Core::While(..))) as &dyn Fn(&Core) -> bool),
         ("let mut", &|c: &Core| matches!(c, Core::Let { mutable: true, .. })),
@@ -306,12 +343,19 @@ fn curated_shapes_agree_step_for_step() {
     // `Let { mutable: true }`'s and `Seq`'s own ids never appear there AT ALL, at HEAD or under any of
     // the three reverts below, because every step this fixture attributes to them is `Exact`, never the
     // *enclosing* tag for a deeper redex — so there is no `Within` presence to assert for either one.
-    // Losing `build_while`'s own root tag (`lower.rs:766`) removes `while_id` from every `App` in the
+    // Losing `build_while`'s own root tag (`lower.rs`) removes `while_id` from every `App` in the
     // term, so it can no longer be named by EITHER an exact contraction or a context scan — the one
     // mutation this fixture can drive that breaks both symptoms from the same root cause, and (checked
     // directly) `within_ids` stays exactly `{while_id, ...the three BinOp ids}` under the other two
     // reverts (`Seq`, `Let { mutable: true }`), so `While`'s `Within` presence is not an artifact of
     // whichever revert happened to be active when it was measured.
+    //
+    // THAT POINTER READ `lower.rs` line 766 UNTIL THIS COMMIT, AND IT HAD DRIFTED — the same 44 lines,
+    // under the same commit, as the pair in `OwnerCensus`'s doc, and resolved here separately because
+    // this sentence makes a different claim about the same tag. It was `build_while`'s own
+    // `Ok(app_owned(app(fix(), g), s_init, id))` when region-path tagging (#28) wrote it; after
+    // `clippy::pedantic` (#31) that call is the last line of `build_while`, and this conversion found
+    // 766 holding the closing brace of `in_position`'s `match`, five lines above `fn build_while`.
     let while_ids = ids_where(&loop_core, &|c: &Core| matches!(c, Core::While(..)));
     assert!(!while_ids.is_empty(), "the loop fixture must contain a while");
     for id in while_ids {
@@ -368,16 +412,25 @@ proptest! {
     /// = String>`, so it takes a leaf *strategy* and yields source text directly.
     ///
     /// **The leaf range (`0u64..8`) was chosen by measurement, not to mirror any call site — it does
-    /// NOT mirror `llvm_oracle.rs:153`'s `(0u64..1000)`.** Arithmetic here runs on CHURCH NUMERALS, so
-    /// cost scales with the numeral's VALUE; which redex normal order picks next depends only on the
-    /// term's structure, never on the magnitude of a leaf, so a narrower range changes nothing about
-    /// what this test exercises. Measured in release: `0u64..8` runs this proptest in 0.22 s;
-    /// `0u64..64` takes >110 s; `0u64..1000` takes >5 min. This range in fact mirrors
-    /// `three_way_oracle.rs:535`'s `arb_tm_safe_expr`, which lands on the same bound for an unrelated
-    /// reason — TM fixed-width-field safety — irrelevant to this file. A future editor "restoring" a
-    /// wider range on the belief that it should match `llvm_oracle.rs` will hang this suite. See the
-    /// generator's doc in `redextape-test-support` for why the recursion parameters must not be changed
-    /// either.
+    /// NOT mirror `llvm_oracle.rs`'s `arb_first_order_expr` and its `(0u64..1000)`.** Arithmetic here
+    /// runs on CHURCH NUMERALS, so cost scales with the numeral's VALUE; which redex normal order picks
+    /// next depends only on the term's structure, never on the magnitude of a leaf, so a narrower range
+    /// changes nothing about what this test exercises. Measured in release: `0u64..8` runs this
+    /// proptest in 0.22 s; `0u64..64` takes >110 s; `0u64..1000` takes >5 min. This range in fact
+    /// mirrors `three_way_oracle.rs`'s `arb_tm_safe_expr`, which lands on the same bound for an
+    /// unrelated reason — TM fixed-width-field safety — irrelevant to this file. A future editor
+    /// "restoring" a wider range on the belief that it should match `llvm_oracle.rs` will hang this
+    /// suite. See the generator's doc in `redextape-test-support` for why the recursion parameters must
+    /// not be changed either.
+    ///
+    /// THE `three_way_oracle.rs` POINTER READ line 535 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It was
+    /// `arb_tm_safe_expr`'s own `arb_expr_over((0u64..8)..)` — the bound this range is said to mirror —
+    /// when the zipper slice (#5) wrote it; the node-count bound (#32) moved that function down eight
+    /// lines, so that bound is now `arb_tm_safe_expr`'s own one-line body, and this conversion found
+    /// 535 holding a line of that function's DOC, about the operators the generator omits. Still inside
+    /// the same item, which is why it read as confirmation. The `llvm_oracle.rs` pointer beside it had
+    /// NOT drifted: line 153 still held `arb_first_order_expr`'s `(0u64..1000)`, unmoved since #5 wrote
+    /// the two pointers together.
     #[test]
     fn generated_programs_agree_step_for_step(
         src in arb_expr_over((0u64..8).prop_map(|n| n.to_string()))

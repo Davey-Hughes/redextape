@@ -49,7 +49,17 @@ use redextape_core::tm::{self, EncodingKind, TmRun};
 use redextape_core::viewmodel::{LinkIndex, TmProgram};
 use redextape_core::{parser, typeck};
 
-/// `LAMBDA_BYTE_BUDGET` from `web/src/protocol.ts:9` — the budget the app passes `linkIndex`.
+/// `protocol.ts`'s `LAMBDA_BYTE_BUDGET` — the budget the app passes `linkIndex`.
+///
+/// THAT POINTER READ `protocol.ts` line 9 UNTIL THIS COMMIT, AND IT WAS NEVER RIGHT — invalidated by
+/// its own commit, which is the mechanism this slice exists to retire caught in the act. Line 9 held
+/// that constant in the PARENT of the commit that wrote this doc, static click-linking (#23); that
+/// same commit added a `LinkIndexWire` import at the top of `protocol.ts` and pushed the constant one
+/// line down, so what landed was a pointer at the ` */` closing the constant's own doc block. It has
+/// not moved since, so the pointer has been one line short for its whole life. `frame_cost_probe.rs`
+/// cites the SAME constant one line the other way, for the mirror-image reason — its `#17` commit
+/// lifted the constant while this one lowered it, and each probe recorded the position its own commit
+/// had just destroyed. See that file's `WEB_BYTE_BUDGET`.
 const WEB_BYTE_BUDGET: usize = 65_536;
 
 /// Programs, spread deliberately. The first seven are `frame_cost_probe`'s own calibration rows; the

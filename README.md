@@ -230,8 +230,11 @@ nextest is missing rather than falling back, so the gate behaves the same everyw
 `scripts/setup-dev.sh` installs it. Because nextest does not run doctests, the script pairs every
 config with an explicit `cargo test --doc` at the same feature flags.
 
-The pre-commit hooks intentionally run only `cargo fmt` and `cargo clippy` on a Rust change — fast
-enough for every commit. Run `scripts/check-all.sh` before merging.
+There are **six** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
+heavier; a `web/` change runs `biome ci` and `tsc --noEmit`. The other two — `check-text-bytes` and
+`check-citations` — are unscoped and walk `git ls-files` on every commit whatever is staged, because
+both catch things that arrive in a path nobody thought to list. All six are fast enough for every
+commit. Run `scripts/check-all.sh` before merging.
 
 `scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps marked
 `#[ignore = "slow tier: ..."]` — three of them today — which `cargo test` skips by default and CI

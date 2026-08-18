@@ -2,8 +2,9 @@
 # The full feature-matrix gate: every config the crate supports, in one command.
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml), so the local and CI gates cannot drift.
-# The pre-commit hooks deliberately do NOT run it — they stay fast (fmt + clippy); this is the
-# before-a-merge check.
+# The pre-commit hooks deliberately do NOT run it — they stay fast: fmt and clippy on a Rust change,
+# biome and tsc on a web/ one, plus two unscoped tree-wide gates (control bytes, `file:line`
+# citations) on every commit. Six hooks; this is the before-a-merge check.
 #
 #   scripts/check-all.sh                  # everything: base, LLVM and browser configs
 #   scripts/check-all.sh --no-llvm        # skip LLVM (no toolchain installed)

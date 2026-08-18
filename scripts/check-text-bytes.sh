@@ -60,10 +60,17 @@ violation_codes() {
 # on the checker itself. Both directions are asserted: a planted NUL must be caught, and a clean
 # file must not be flagged, because a detector that fires on everything is equally useless.
 self_test() {
-  local dir dirty clean n
+  local dirty clean n
+  # SINGLE-QUOTED SO IT EXPANDS WHEN THE TRAP FIRES, AND `${dir:?}` BECAUSE THE COLON FORM IS THE ONLY
+  # ONE THAT ABORTS ON SET-BUT-EMPTY. `set -u` does not catch that case and neither does quoting:
+  # `dir=""` makes `rm -rf "$dir"` harmless but `rm -rf "$dir"/*` catastrophic, and the version someone
+  # copies out of a script is the version that later grows the suffix. `check-citations.sh` already
+  # writes it this way. **`dir` IS DELIBERATELY NOT `local`** — a fire-time expansion needs the variable
+  # to still exist when the trap fires, which is after this function has returned; the sibling's
+  # `SELF_TEST_DIR` is global for the same reason. The previous double-quoted form baked the path in at
+  # trap-set time and so did not care, which is precisely what made the weak form look adequate.
   dir=$(mktemp -d)
-  # shellcheck disable=SC2064
-  trap "rm -rf '$dir'" EXIT
+  trap 'rm -rf "${dir:?}"' EXIT
   dirty="$dir/dirty.ts"
   clean="$dir/clean.ts"
   printf 'let k = "a\000b"\n' > "$dirty"
@@ -84,15 +91,36 @@ self_test() {
   echo "self-test passed: a planted NUL is detected, an escaped one is not"
 }
 
-if [ "${1:-}" = "--self-test" ]; then
-  self_test
-  exit 0
-fi
+# AN UNRECOGNISED ARGUMENT IS AN ERROR. The first version tested `[ "${1:-}" = "--self-test" ]` and fell
+# through on anything else, so `check-text-bytes.sh --slf-test` ran a full scan and exited 0 — a typo in
+# the CI step or the hook would have silently downgraded the self-test into a duplicate of the scan
+# beside it, and this is the gate whose first draft passed against a planted NUL.
+case "$#:${1-}" in
+  0:) ;;                              # no argument: scan the tracked tree
+  1:--self-test) self_test; exit 0 ;;
+  *)
+    printf 'error: unrecognised argument: %s\n' "$*" >&2
+    cat >&2 <<'MSG'
+usage: scripts/check-text-bytes.sh [--self-test]
+
+  (no argument)   scan tracked text files for C0 control bytes
+  --self-test     prove the detector still detects, against a planted NUL
+MSG
+    exit 2
+    ;;
+esac
 
 cd "$(git rev-parse --show-toplevel)"
 
 bad=0
-while IFS= read -r f; do
+# **NUL-DELIMITED, AND THAT IS NOT ABOUT SPACES.** `git ls-files` C-QUOTES any path it considers unusual
+# — `core.quotePath` defaults to true — so a tracked `café.ts` arrives as the literal string
+# `"caf\303\251.ts"`, `[ -f ]` fails on it, and the file is dropped unread and unwarned. Demonstrated on
+# a throwaway repo: a `café.ts` carrying a real NUL passed this gate, a hole in the very gate that
+# exists to catch the byte that makes a file invisible. `-c core.quotePath=false` would close that and
+# would still drop a path with an embedded newline, because the loop would still be reading lines; `-z`
+# closes both and cannot be undone by a user's config.
+while IFS= read -r -d '' f; do
   [ -f "$f" ] || continue
   printf '%s\n' "$f" | grep -qiE "$BINARY_RE" && continue
   n=$(violations_in "$f")
@@ -100,7 +128,7 @@ while IFS= read -r f; do
     printf 'error: %s contains %s control byte(s): %s\n' "$f" "$n" "$(violation_codes "$f")" >&2
     bad=1
   fi
-done < <(git ls-files)
+done < <(git ls-files -z)
 
 if [ "$bad" -ne 0 ]; then
   cat >&2 <<'MSG'

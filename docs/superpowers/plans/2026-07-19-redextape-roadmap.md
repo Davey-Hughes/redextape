@@ -7840,3 +7840,634 @@ states this; the probe is what makes stating it honest.
 
 `pnpm exec tsc --noEmit` and `biome ci --error-on-warnings` → clean, run by the pre-commit hook on every
 commit of this branch. One pre-existing `info` about a Biome config migration, unrelated and unchanged.
+
+#### THE CITATION GATE CLOSES — 57 pointers resolved and 37 were already wrong, the design named the least common of the four mechanisms that broke them, and the gate found five silent-pass doors in itself (2026-08-17, branch `citation-checker`, `9ce1c15..5d09d0c`, this entry, and the correction round the whole-branch review forced)
+
+Design: [`../specs/2026-08-17-citation-checker-design.md`](../specs/2026-08-17-citation-checker-design.md).
+Plan: [`2026-08-17-citation-checker.md`](2026-08-17-citation-checker.md).
+
+The convention 5d-ii-d proposed — *"CITE SYMBOLS, NEVER LINES, FOR ANYTHING IN THIS REPO"* — and the
+mechanical checker that same entry filed and declined as *"the right instrument … the wrong moment"*,
+in that order, because **the order is the whole design**. Converting a citation requires resolving it,
+and resolving it is the audit. A gate installed first would have banned a form without ever finding out
+how badly it had already failed.
+
+Eight tasks, twenty commits, 34 files, +1,488 / −153, measured over `9ce1c15..5d09d0c`; the correction
+round after the whole-branch review, the rebase onto `main`, and the re-review's own corrections add the rest,
+and are recorded in their own section at the end. **That clause gave a COUNT until the re-review, and the count
+was already wrong when the commit carrying it landed** — mechanism 1 of this entry's own four, one commit after
+the entry finished describing them. It names no number now, because a number here rots on the next commit and
+the range above already carries the measurement.
+**The only executable lines the CONVERSION adds are `scripts/check-citations.sh` and its two
+invocations** — the qualifier matters, because this branch also grew `scripts/check-text-bytes.sh` by
+14 lines of code (a `--self-test`/usage dispatch and the `-z` read loop), which two sections below this
+one describes at length while the sentence above originally denied it existed. Two probe string
+literals changed; every other line of the conversion is a comment, verified per file by a comment-strip
+diff rather than asserted.
+
+**EVERY COORDINATE IN THIS ENTRY IS AN OBSERVATION WITH A TREE ATTACHED, AND THAT IS §4.2 BEING
+EXERCISED RATHER THAN EVADED.** Citing-site coordinates are as they stood at the branch point `08b3442`;
+target coordinates name the commit they were read at. A dated record is allowed to say where something
+was, and this entry is the first written since the gate landed that has cause to say so out loud.
+
+##### THE HEADLINE IS A RATE, AND IT IS WORSE THAN THE DESIGN'S SAMPLE PREDICTED
+
+**57 `file:line` citations in tracked source were resolved by hand. 37 of them — 65% — were already
+wrong.** Not stale in the sense of pointing at nothing: 54 of the 55 in the plan's tables land inside a
+file long enough to hold the line, which is exactly why §3.1 declined to build a range check. They point
+at *something*, and the something is usually plausible.
+
+The corpus is 55 colon-form tokens across 26 files, which is what the plan's six conversion tables hold
+(16 + 11 + 9 + 5 + 10 + 4) and what the same pattern still counts on `main` today. **Task 1's review
+added two more that no table contained** — prose-form pointers, `` (`replies.ts` lines 325-341) `` and a
+trio of bare `(lines 82–83)` parentheticals in `main.ts`, which rot identically and which the gate
+cannot see. 55 + 2 = 57.
+
+##### THE STALE RATE WAS NOT EVENLY SPREAD, WHICH IS A SHARPER CLAIM THAN "CITATIONS ROT"
+
+| task | area | resolved | stale |
+| --- | --- | ---: | ---: |
+| 1 + 1b | `web/` | 18 | 5 |
+| 2 | `lambda_provenance.rs` | 11 | 10 |
+| 3 | `zipper_equivalence.rs` + `sourcemap_coverage.rs` | 9 | 8 |
+| 4 | `core/src/` | 5 | 5 |
+| 5 | `examples/` | 10 | 9 |
+| 6 | `wasm/` + `native/` | 4 | **0** |
+| | | **57** | **37** |
+
+**The one clean task is the two crates least touched by large mechanical refactors, and its four
+citations were accurate at birth as well as today.** Task 6's report is right to call them lucky rather
+than careful: two point at the top of a function body nothing has touched, one points into the middle of
+a long doc comment whose file grew only below it, and one points at a struck-through paragraph in a
+dated spec, which by construction nobody edits again.
+
+**So the risk is a function of neighbouring churn, not of author care.** `lambda_provenance.rs` is the
+densest file in the corpus and the most drifted; `core/src/` has five citations and five failures. A
+convention that asks authors to be careful cannot see this at all, because the author whose care would
+matter is not editing the citing file. That is the argument for a gate, and it is made by the
+distribution rather than by assertion.
+
+##### SPEC §1.1 IS NOT FALSIFIED — IT IS INCOMPLETE, AND IT NAMED THE LEAST COMMON OF FOUR
+
+The design says citations undershoot because a file grows above the cited line, *"and the commonest way
+for that to happen is the citing commit itself."* That was inherited from 5d-ii-d, where it was true of
+the sample it was drawn from.
+
+**The first draft of this branch's ledger declared it falsified. That over-correction was itself wrong**,
+and it is worth one clause because it is the same failure the branch is about: a claim asserted from the
+two tasks that had finished rather than re-derived from the corpus. Mechanism split over all 37, derived
+row by row from the per-task ledgers:
+
+| how the citation came to be wrong | count |
+| --- | ---: |
+| a later, unrelated commit shifted the target | 28 |
+| **never correct at any revision** — the pointer matched no state that entered history | 4 |
+| **the citing commit itself**, which invalidated its own pointer | 3 |
+| the target was deleted, the work relocated to another file | 1 |
+| mechanism not established by the record | 1 |
+
+**§1.1's mechanism is confirmed, four times over, and only three of the four are among the stale** —
+the fourth is accurate today by accident and has its own section below. It is the *rarest* class, not the
+commonest, and the design could not have known that from a hand-read sample of four.
+
+**THE CLEANEST DEMONSTRATION IS EXACT, AND IT HAPPENED TWICE IN ONE COMMIT.** `9fbd911` (Plan 4's
+producer slice) wrote two separate citations at `lower_asm.rs:321` — one in `sourcemap.rs`'s module doc
+at line 22, one in `sourcemap_coverage.rs` at line 99. At `9fbd911~1`, line 321 **was** `if src != dst`,
+the guard both sentences name. The same commit then touched `lower_asm.rs` in exactly two hunks,
+`@@ -92 +92,5 @@` and `@@ -118 +122,4 @@` — both **above** line 321, both unrelated `unwrap` → `if let`
+rewrites in `Ctx::bind` and `Ctx::bind_fn` for the no-panic rule, +4 and +3. **Seven lines, and two
+pointers invalidated in the same breath that wrote them.** `clippy::pedantic` later moved the guard
+another 35, to 363.
+
+**A LATER UNRELATED COMMIT IS THE COMMON CASE, AND ONE PR ACCOUNTS FOR MOST OF IT.** `fd61543` —
+`clippy::pedantic` (#31), a lint sweep over 104 files whose only behaviour changes were **three**
+edge-case defect fixes in unrelated files — moved the targets of **fifteen** citations across two test
+files: ten of the eleven in `lambda_provenance.rs` and five of the eight in `zipper_equivalence.rs`.
+Fourteen it broke outright; the fifteenth it merely widened, because `lambda_provenance.rs:567` was
+already wrong. Drifts of 1, 1, 2, 2, 2, 35, 44, 44, 44, 44 in the first file alone.
+
+**"Eight" and "three" are both corrections, made by the whole-branch review.** This paragraph read
+*"five of the nine"* — nine is Task 3's pair total, `zipper_equivalence.rs` plus
+`sourcemap_coverage.rs`; that file holds **eight**, which the paragraph just below already said. And it
+read *"no behaviour change at all"*, which `fd61543`'s own message contradicts twice over: its body
+says *"Two of them turned out to be real bugs"* and then lists **three** under a heading claiming two,
+and #31's own closing entry above is titled *"three real defects it surfaced"*. Verified in `fd61543`'s
+diff for this correction: `redextape-native-rt`'s four `(p - 1) as usize` heap and box indexes folded
+into `usize::try_from`, `lambda::term::shift`'s new upper-bound `assert!`, and
+`viewmodel::LinkIndex::tm_owner` declining the whole leg through `Option<Vec<i32>>` rather than
+laundering an overflowing `NodeId` into the `-1` no-owner sentinel. **The false version was also in the
+gate's own header and in the message it prints when it fires** — a false provenance claim in tracked
+source, which is the class this branch had already caught twice, shipped in the user-facing text of the
+gate built to end it.
+
+**And it had both of those files open.** It added four lines at the top of `lambda_provenance.rs` — a
+crate-level `#![allow(clippy::pedantic)]` and its two-line rationale, occupying lines 4 through 6 — and
+appended one lint name to `zipper_equivalence.rs`'s existing `#![allow(..)]`, which `fd61543` left at
+line 28 — with eleven and eight citations respectively sitting below those edits.
+**It re-resolved none of the fifteen.** "Nobody
+looked" would be a weak argument for a gate; **"somebody was in the file, twice, and it still did not
+help" is the argument**, because it says the failure is not reachable by asking authors to be careful
+about what they pass.
+
+It also broke Task 1's four in `running-focus.test.ts` — written correct by region-path tagging (#28),
+invalidated three PRs later by a lint sweep that never opened the citing file, each by **exactly one
+line**. Not one of the four fails loudly. A reader following `desugar.rs:129-140` lands on
+`Stmt::Fn { .. } => lower_fn_run_at(…)` — a match arm, in the right `match`, in the right file — and
+reads on into the `Assign` arm without noticing. A reader following `parser.rs:97` lands on the comment
+*"An identifier followed by `=` is an assignment statement"*, which reads as outright confirmation.
+**An off-by-one that lands on plausible material is worse than one that lands on nothing**, and that is
+the shape most of the 37 have.
+
+**THE THIRD MECHANISM IS THE ONE NO LINE ARITHMETIC COULD HAVE FOLLOWED.**
+`lambda_sharing_probe.rs:1872` cited `.forgejo/workflows/ci.yml:112`, which at `9a7db07` was
+`- name: Clippy` with `cargo clippy --workspace --all-targets` on the line below it. The scope-filter
+slice `cc22850` (#8) deleted that step and folded workspace clippy into `scripts/check-all.sh`'s feature
+matrix. **The invocation moved between files. After that commit there was no correct line number at any
+offset**, and line 112 today is a comment in the unrelated `linear-history` job — still a gating job in
+the same file, near enough to survive a glance.
+
+**THE SPEC IS AMENDED BY ADDENDUM, NOT REWRITE, AND THE DISTINCTION IS DELIBERATE.** §1.1 now carries a
+short block recording the measured four-way split. Two other figures in the same spec were **corrected in
+place** — §3.4's range/single counts and §4.4's timing claim — and the difference is not squeamishness.
+Those two were factually false when written and stayed false; §1.1 was a reasonable inference from
+5d-ii-d's evidence that this branch's larger sample enriched. An inference that later evidence extends
+gets an addendum. A wrong number gets fixed, and a note saying it is wrong is not a fix.
+
+##### EIGHT CITATIONS WERE WRONG AT BIRTH, AND NO CONVENTION ABOUT KEEPING POINTERS CURRENT REACHES THEM
+
+Every coordinate below is as it stood at the branch point `08b3442`.
+
+| citation | claimed | why it was never right |
+| --- | --- | --- |
+| `lambda_provenance.rs:567` → `core.rs:85-89` | `Core::for_each_child`'s doc | at #28 the doc ran 84-88 and the signature was 89: the range opened on the doc's *second* line and closed on the signature |
+| `sourcemap.rs:22` → `lower_asm.rs:321` | the `if src != dst` guard | §1.1's mechanism, above — correct at the parent, +7 by its own commit |
+| `sourcemap_coverage.rs:99` → `lower_asm.rs:321` | the same guard | the same seven lines, a second time |
+| `lower.rs:1241` → `lower.rs:576` | the `Assign` arm's `forget` branch | 53 lines short at `9fbd911`; and `9fbd911~1` contains no `forget` at all, so it matched no revision either side |
+| `blowup_probe.rs:355` → `reduce.rs:64-80` | the body its local `depth_exceeds` transcribes | the function is 17 lines and the range is 17 lines, but it was at 54-70 in the parent and 74-90 in the citing commit — the pointer sits between two revisions and matches neither |
+| `frame_cost_probe.rs:60` → `protocol.ts:10` | `LAMBDA_BYTE_BUDGET` | correct at #17's parent; #17 lifted the constant to 9 in the same commit that wrote the pointer |
+| `link_index_probe.rs:52` → `protocol.ts:9` | the same constant | correct at #23's parent; #23 pushed it to 10 in the same commit that wrote the pointer |
+| `owner_probe.rs:55` → `frame_cost_probe.rs:107-133` | *"its `programs()`, minus `while40`"*, copied verbatim | the copied material runs 105-135. Two lines short at each end, and **the range has not moved a line since it was written** |
+
+**This class is what a convention structurally cannot close.** Every process fix on offer — re-read your
+citations before you push, re-resolve pointers into files you touch — assumes there is a later moment at
+which somebody has cause to look. For a pointer that was wrong the day it landed there is no such moment,
+and `owner_probe.rs`'s is the purest case: zero drift over its entire life, and wrong throughout.
+
+**The eight split evenly into two sub-classes, and only one of them is recoverable in principle.** Four
+were correct at the parent and destroyed by their own commit — §1.1's mechanism, which a reviewer reading
+the diff could in principle have caught. **Four matched no revision at all**, meaning they were resolved
+against a working tree that never entered history: a file open in an editor, mid-edit, while the citing
+sentence was being typed. Nothing in git can catch that after the fact and nothing before it either,
+short of not writing the coordinate.
+
+##### THE ONE ACCURATE SURVIVOR IN `examples/` IS ACCURATE THROUGH TWO ERRORS CANCELLING
+
+`frame_cost_probe.rs` and `link_index_probe.rs` cite the same constant, `protocol.ts`'s
+`LAMBDA_BYTE_BUDGET`, one line apart — 10 and 9. **Each recorded the position its own commit had just
+destroyed.** Plan 5a-i (#17, `62735a5`) created `frame_cost_probe.rs` and in the same commit rewrote
+`protocol.ts`, lifting the constant from 10 to 9; the probe's pointer read 10 and landed on the blank
+line below it. Static click-linking (#23, `ff4c461`) created `link_index_probe.rs` and in the same commit
+added a `LinkIndexWire` import at the top of `protocol.ts`, pushing the constant from 9 to 10; that
+probe's pointer read 9 and landed on the ` */` closing the constant's doc.
+
+**#23's import pushed the constant back under #17's pointer.** Net drift over the whole history: zero.
+`frame_cost_probe.rs:60` is the one accurate citation in ten, and it is accurate because two independent
+mistakes happened to cancel.
+
+**No convention reaches this.** Both authors resolved the coordinate against the file in front of them.
+Both were wrong. One got lucky, and the luck is indistinguishable from care by any inspection of the
+result. It is also the tightest available demonstration that "accurate today" and "accurate at birth" are
+independent facts — which is why every task on this branch checked both, and why Task 5's first draft got
+one of the two landing sites backwards. One pointer sits one line above the constant and one line below
+it; the ` */` can only be above. **The mirror symmetry of the pair is exactly what made the duplicated
+claim look right**, and the reviewer caught it by re-measuring at the commit rather than by reading the
+sentence.
+
+##### THE GATE FOUND FIVE SILENT-PASS DOORS IN ITSELF, AND FOUR WERE INVISIBLE TO ITS OWN SELF-TEST
+
+Reporting a clean tree over a file it never read is the one outcome this gate cannot afford. It could,
+five ways. The class was declared shut after the first, argued about at length; review then found two
+more still open **in the shipped gate, on a tree it had already reported clean**, and the whole-branch
+review before merge found a fifth after that — in the very sentence written to announce the third.
+
+**1. THE GATE'S OWN HEADER CONTAINED A REAL CITATION.** Spec §4.3 predicted this in writing — *"a script
+whose header shows `desugar.rs:77` would fail itself on the first run"* — and the first draft carried a
+real one anyway, inside the sentence explaining that it may not. It passed while the file was untracked,
+because `git ls-files` did not yet list it; `git add` and a rescan rejected it by name. The sentence now
+records that it happened rather than being quietly corrected.
+
+**2. THE SHELL OPENED THE FILE, NOT GREP.** `grep -nE "$RE" < "$f"` looks equivalent to passing the path
+and is not: a redirect that cannot open a file fails in *bash*, before grep runs, and bash reports that as
+status **1** — indistinguishable from grep's "found nothing". Against a `chmod 000` file the gate printed
+"0 violations" and exited **0 over a file it had never read**, while the self-test passed throughout.
+Making grep the opener turns a permission failure into exit 2, which the existing guard could already see.
+
+**3. `git ls-files` C-QUOTES NON-ASCII PATHS.** `core.quotePath` defaults to true, so a tracked `café.rs`
+arrived as the literal string `"caf\303\251.rs"`, `[ -f ]` failed on it, and the file was **dropped: not
+read, not counted, not warned.** The sibling had the identical hole — a NUL-bearing `café.ts` passed
+`check-text-bytes.sh`, the gate that exists to catch exactly that byte. Both now read `git ls-files -z`,
+which was chosen over `-c core.quotePath=false` because that closes three of the four shapes and an
+embedded newline in a path is the fourth.
+
+**4. ONE STRAY HIGH BYTE MADE EVERY CITATION IN A FILE INVISIBLE.** Under the default
+`--binary-files=binary`, a file holding a NUL or any byte sequence invalid for the ambient locale makes
+grep write `binary file matches` to stderr, print nothing to stdout, and exit **0**. Empty output plus
+`rc=0` is precisely a clean file, so the `rc > 1` guard never fired. And `check-text-bytes.sh` allows
+`\200-\377` **on purpose**, so such a file is legal there and invisible here — neither gate saw it.
+
+**The one-line fix for door 4 was necessary and not sufficient, and that is the finding to carry
+forward.** Measured after fixing the detector's own grep, the file still reported clean: `violations_in`'s
+downstream `grep -vE` **independently declared the piped stream binary and dropped the very line the
+detector had just produced.** `LC_ALL=C` and `-a` now apply to every grep in the script, not because each
+was shown to need it but because uniform byte handling is checkable at a glance and per-call-site
+reasoning is what produced the second miss.
+
+**5. THE ANNOUNCEMENT THAT CLOSED DOOR 3 COULD NOT FAIL.** The scan's tally printed
+`$((scanned + excluded + skipped))` beneath a comment calling it *"`git ls-files`' own count"* and
+claiming that *"a file that goes missing between them shows up as a total that no longer adds"*. It never
+compared the two. The sum of the three buckets is the sum of the three buckets, so a path that vanished
+before the loop moved every term of the equation at once, and the total stayed internally consistent to
+the end. Reproduced in a sandbox by the whole-branch review: a real tracked total of **8**, a planted
+drop over a file holding a live pointer, the gate printing *"0 skipped — 7 tracked paths in all"* and
+exiting **0**. **This is door 3's own shape, reproduced inside the sentence that announces door 3** — an
+assertion that cannot fail, in the gate this repo's "an assertion that cannot fail is a defect" rule was
+turned on first. The total now comes from a second, independent `git ls-files` walk, a mismatch exits 2,
+and `--self-test` drives the comparison in both directions.
+
+**All five have the identical signature — nothing on stdout, no warning the caller sees, exit 0 — and
+each arrives from a different layer, which is why closing one taught nothing about the others.** It is the
+same silent-skip shape as the control byte `check-text-bytes.sh` exists to catch, reproduced five times
+inside its sibling. **Four of the five were invisible to the self-test.** Three were caught only by
+planting into the real tree — a `chmod 000` file, a `café.rs`, a `\377` byte — and the fifth only by
+reading the claim and asking what would make it false, which is the one method that reaches a defect
+whose signature is that nothing goes wrong. That is `check-text-bytes.sh`'s own
+documented lesson — *its first draft passed against a planted NUL* — recurring one branch later, in the
+gate written in its image.
+
+Two further findings of the same family were closed in the same round. The escape-hatch count printed
+**only on the success path**, so a commit adding both a violation and a marker slipped the marker past
+unannounced. And an unrecognised argument ran a full scan and exited 0, which would have degraded a
+mistyped `--self-test` in CI into a second scan that always passes; both scripts now exit 2 with usage.
+
+##### THE UNSAFE FORM WAS MASKING A SCOPE BUG, WHICH IS AN ARGUMENT FOR THE REPO RULE RATHER THAN AGAINST IT
+
+`check-text-bytes.sh` cleaned up with `trap "rm -rf '$dir'" EXIT` — the double-quoted, expand-at-trap-set
+form the repo's shell rule forbids in favour of `trap 'rm -rf "${dir:?}"' EXIT`. **Making the change broke
+it**, because `dir` was `local` and an EXIT trap fires after the function has returned: the fire-time
+expansion found no variable and `${dir:?}` aborted, leaking the temp directory.
+
+**The unsafe form had baked the path in at trap-set time and so never cared.** It was not merely
+tolerable, it was *concealing* the scope error — the variable's lifetime had been wrong since the script
+was written and nothing could show it while the value was captured early. `dir` is now global, for the
+same reason the sibling's `SELF_TEST_DIR` is, and the fix was verified by counting `/tmp/tmp.*`
+directories across a `--self-test` run rather than by reading the code.
+
+##### THE BRANCH'S OWN CLAIMS ROTTED AT ROUGHLY THE RATE OF THE CORPUS IT WAS AUDITING
+
+This is the entry's thesis, and it is stronger than the argument the design made.
+
+| the claim | the truth | who caught it |
+| --- | --- | --- |
+| T1's report: *"seven of the 16 cite `session.rs:257-273`"* | **eight** — its own ledger listed all eight | the review; the commit message still says seven |
+| the controller's T2 brief: `lower.rs:637` *"undershoots by 27"* | **44** — measured against the wrong anchor | the implementer |
+| T2's report: a drift multiset of seven values | **ten** stale citations, so ten values | the review |
+| T2's drift note, in tracked source: #31 *"never opened this file"* | it did — four insertions at the top | the review; then the fixer found the same falsehood a second time, in §4, outside the stated scope, and corrected it rather than leave it standing two sections below its own correction |
+| T2's headline: *"every one of the 11 was correct when written"* | ten of eleven; `:567` never was | the review |
+| the controller's T3 brief: `lower.rs:611` holds `Ok(app(abs(STORE, body), initial_store))` | that is line **609**; 611 is blank | the implementer |
+| the controller's T3 brief: the tag the sentence names is at 637 | 637 is `origins.at_root` — a **sourcemap origin**, while the `exact` census the sentence measures is fed by term owner tags. Right arm, right function, **wrong mechanism** | the implementer, by doing step 1 of the procedure — write down what the citing text claims *before* looking |
+| the controller's T3 brief: `lower.rs:766` *"undershoots by 5"* | **44** — the citation is `build_while`'s root tag, not its `fn` line | the implementer |
+| the controller's T4 brief: `lower.rs:576` will be stale from #31's 44 | right coordinate, wrong mechanism: **53 lines off at its own commit**, before #31 existed | the implementer, adjudicated by the reviewer against `9fbd911` directly |
+| T4's drift note: 53 + 44 lines of drift | the observed gap is **134**; 37 lines across three intervening slices were unattributed | the review |
+| T4's drift note on `viewmodel.rs`: *"482 is inside a comment in `subst`'s body"* | true when resolved; **the same commit's own row-C fix added nine lines above it**, so at HEAD 482 is `subst`'s *doc* | the review |
+| T5's width justification: the symbol is *"17 characters longer, and `max_width` leaves exactly that much"* | **18**, and the budget left **13** — which is why a trim was needed at all, so the sentence defeated itself | the review |
+| T5's drift note, in tracked source: the stale pointer landed on the ` */` closing the constant's doc | it landed on the **blank line below** the constant. The sibling probe's identical sentence is *correct for its own pointer* | the review |
+| the controller's T7 brief: #31 broke **14** citations | **15** | the implementer |
+| spec §3.4: *"26 of the 55 are `file:N-M`"* | **transposed, not miscounted** — 55 tokens, 29 ranges, 26 singles. 26 is the singles count wearing the ranges label | the review |
+| `.pre-commit-config.yaml` and spec §4.4: the sibling gate *"costs milliseconds"* | **583–589 ms** — two orders out, standing unchecked since that gate was written | the gate's own review, incidentally |
+| the gate's tally comment, copied into this entry: the three buckets *"sum to `git ls-files`' own count"* | nothing was ever compared — the sum of the buckets is the sum of the buckets. A planted drop reported 7 of 8 tracked paths and exited 0 | the whole-branch review, in a sandbox |
+| `CITATION_RE`'s eleven extensions, argued as deliberately dumb | the tree tracked five kinds it did not name: `index.html`, `Dockerfile`, a `.txt`, a `.conf`, two `.tm` — and an upper-case `.RS` — all passing | the whole-branch review |
+| the gate's header: *"Every grep in this script now handles bytes the same way"* | the token-extraction grep had neither `-a` nor `LC_ALL=C` | the whole-branch review |
+| the gate's header AND the message it prints when it fires, spec §1.1 and this entry: #31 *"no behaviour change at all"* | **three** real defect fixes, which #31's own closing entry is titled after | the whole-branch review |
+| `buffers-quota.test.ts`, in tracked source: `` `replies.ts`'s `LambdaPane.setEditor` `` | `LambdaPane` is `lambda-pane.ts`'s; `replies.ts` only calls the method. **The one possessive in 57 that named a symbol its file does not own** | the whole-branch review |
+| spec §1.1's evidence table: drifts of 26, 5 and 27 | **44, 44 and 44** — one commit, and the table's own replacement coordinates were two sourcemap origins and an `fn` line | the whole-branch review |
+| `.pre-commit-config.yaml`: *"NOT scoped by `files:`, unlike every hook below it"* | the hook this branch added directly beneath it is also unscoped | the whole-branch review |
+| `.pre-commit-config.yaml`: *"costs a quarter-second — measured 583-589 ms"* | contradicts itself inside one clause; the quarter-second is the citation gate. **Introduced by `5d09d0c`, whose entire subject was that this adjective was two orders out** | the whole-branch review |
+| the plan's Step 5: *"Both together are milliseconds"* | the third site of that adjective — `5d09d0c`'s subject claimed *"in three places"* and its body names the two it fixed | the whole-branch review |
+| `ci.yml`'s job header: the control-byte steps *"are what a PR needs from this job"* | four unconditional steps now, two of them added by this branch below that sentence | the whole-branch review |
+| `README.md`, `check-all.sh`, `setup-dev.sh`: the pre-commit set is *"fmt + clippy"* | six hooks, and this branch added the sixth | the whole-branch review |
+| this entry: *"five of the nine in `zipper_equivalence.rs`"* | **eight** — nine is Task 3's pair total; the paragraph below it already said eight | the whole-branch review |
+| this entry: 849 → 985 *"eight days later"* | `08b3442` 15:26 → `34ac14d` 19:58. **Four and a half hours, the same day**; the whole branch is one day | the whole-branch review |
+| this entry: *"the only executable lines this branch adds are `scripts/check-citations.sh` and its two invocations"* | it also adds 14 to `scripts/check-text-bytes.sh` — which this entry describes two sections later | the whole-branch review |
+| this entry: *"985 at this branch's close"* | **1015** at `2d88a45`. Writing the entry added 30, 29 of them in this file | the whole-branch review |
+| this entry: `883` is *"the most likely reading error"*, a misread `(883/900)` progress counter | `883/8` is a twice-recorded historical baseline — #32's Verification, #34's *"baseline 883"*, and plan 5d-i's final step. A stale baseline carried forward is at least as likely | the whole-branch review |
+
+**Thirty-two counting-or-claim errors, at least six of them the controller's, and every single one caught
+by somebody re-deriving rather than reading.** **The split is the finding.** Sixteen were caught while the
+branch ran. The other sixteen were caught by one whole-branch review AFTER the branch declared itself
+finished, over a tree that had passed its own gate, its own self-test, six pre-commit hooks and CI —
+including four in `scripts/check-citations.sh` itself and one in the text that gate prints when it fires.
+**The error rate did not fall as the branch went, and the document written to record that it does not
+fall was among the things still wrong.**
+
+**Twelve of the thirty-two reached *tracked source* rather than a gitignored report or a dated entry.**
+Three did during the branch: the fabricated provenance claim, the mirror-image landing site, and **a drift
+note that its own commit falsified while it was being written to condemn that exact mechanism** — the
+tightest illustration the branch produced, kept in the tree with its second clause intact, because a note
+about drift that drifted inside one commit argues the case better than any sentence about it could. The
+review added nine more, four of them in the gate's own source: a reconciliation that could not fail, an
+extension list that failed silent, a byte-handling claim one grep did not keep, and a false provenance
+claim about #31 in the failure message a user reads.
+
+**That is not six careless agents.** It is the same structural fact the gate exists for: **nobody can
+verify a coordinate they did not personally resolve, and prose invites you to trust whoever wrote it
+last.** A brief is read as authority. A report's summary line is read instead of its own table three
+inches above it. The one procedural step that repeatedly paid — *write down what the citing text claims
+before looking at the target* — works precisely because it forbids reading the answer first.
+
+**The ledger is not exempt either.** It recorded Task 3's drift multiset as seven values for eight stale
+rows, and it recorded a fork-point baseline of `cargo nextest run --workspace` → *"883 passed"* which does
+not reproduce; see Verification. Two more, on the document whose job was to carry the findings.
+
+##### `docs/` IS A SCOPE BOUNDARY AND NOT AN EXEMPTION, AND THE FIGURE MOVING IS THE POINT
+
+**1015 `file:line` citations live under `docs/` at `2d88a45`, the commit that added this entry, across
+68 tracked files. None was touched and none should be.**
+
+| | what it is | what makes it wrong |
+| --- | --- | --- |
+| a citation in **source** | a **pointer** — *go look here* | it stops being true the moment the target moves |
+| a citation in a **dated record** | an **observation** — *on 2026-08-12 this was at line 44* | nothing. It was true then and it still records that |
+
+Rewriting the second kind would falsify the record, which is the shape the web-doc-history slice settled
+one entry above this one when it deliberately left a stale roadmap hit alone. **So a future roadmap entry
+may still cite a line, and should, when the point is to timestamp where something stood** — this entry
+does so throughout, under the convention stated at the top. That freedom is what makes this a boundary
+rather than an exemption: an exemption suspends a rule that ought to apply, and here the rule does not
+apply.
+
+**The count itself demonstrates the distinction, and this paragraph is the demonstration.** It was
+**849** at the branch point `08b3442` (15:26) and **985** when the gate landed at `34ac14d` (19:58) —
+**four and a half hours later, the same day.** The whole branch is one day; the entry originally said
+*"eight days later"*, which no commit on it supports.
+
+**Then this entry moved the number itself.** 985 at `5d09d0c`, 1015 at `2d88a45` — writing this section
+added 30, twenty-nine of them in this file, and the correction round after the whole-branch review added
+more again. **§1.1's mechanism biting the paragraph that argues the figure is allowed to move is the
+tightest illustration in the entry**, and it is why every figure here now names the commit it was taken
+at rather than *"at this branch's close"*, which is a phrase with no tree attached. A figure that grows
+as the record grows is behaving exactly as an observation should. Anyone finding a four-figure count of
+unconverted citations and reading it as unfinished work should read this paragraph first; it is the
+decision most likely to be re-litigated.
+
+##### THE ESCAPE HATCH SHIPS AT ZERO, AND THE COUNT IS THE ONLY THING SEPARATING IT FROM AN ALLOWLIST
+
+A line may end with `check-citations: allow`. §1.2 rejected an allowlist for three reasons and §4.5 states
+the case against this valve in its own words — *"an escape hatch is an allowlist with better manners"*.
+
+**What keeps them different is where they live.** A config file collects exemptions where no reader of the
+code will ever meet them; a marker sits on the line it excuses, is visible in review, and is **counted out
+loud on every run**. It ships at **0**, and the standing rule is: *a non-zero count without an argument
+beside it is a finding.*
+
+That rule was very nearly hollow. The count printed only on the success path until review caught it —
+so the one run where a new marker matters most, the failing one that also carries a violation, was the
+run that said nothing. It prints on every run now.
+
+##### WHAT THIS SLICE COULD NOT ESTABLISH
+
+**The prose form is uncaught by design, by measurement, and it is now far more common than when the
+measurement was taken.** A pointer written `` (`replies.ts` lines 325-341) `` rots identically and trips
+nothing. §4.3 measured the case for extending the gate and refused it: tracked source held 15 prose-form
+hits of which only **2** were live pointers — six coverage figures in `vite.config.ts`, one CI flag, six
+drift notes deliberately written in prose so they would not trip this very gate. **A gate on that form
+would fire on 13 non-citations to catch 2**, which is the *"fires spuriously in its first week"* failure
+5d-ii-d named, arrived at by measurement rather than by taste. The 2 were converted by hand (Task 1b).
+
+**But this slice multiplied the form thirty-fold.** Counting `` `<file>` line(s) N `` in tracked non-docs
+source: **1 at the branch point, 31 at close.** Every one of the 31 is a drift note written under clause
+(c) — old coordinate, in prose, past tense — and none is a live pointer; that was checked by reading all
+31. **The only thing keeping them observations rather than pointers is a convention**, which is precisely
+the instrument this branch's evidence says cannot close the class. **A prose-form pointer written after
+this slice is caught by nothing.**
+
+**Clause (d) was minted mid-branch and not applied retroactively to Task 1's file.** Task 3's review found
+drift notes carrying *present-tense* line numbers — *"that call is at 810"*, *"the guard is at 363
+today"* — which are live pointers with identical drift risk, in the one form the gate is blind to. **The
+slice was manufacturing the exact class it exists to remove.** Twelve sites were swept; the sweep covered
+three Rust files and reached neither `running-focus.test.ts` nor the four Task 5 notes that landed after
+it, all of which described their landing sites in the present tense.
+
+**That was the one genuine convention split across the six agents, and the whole-branch review closed
+it.** Tasks 2, 3 and 4 write the dated form — *"this conversion found 611 holding the blank line above
+`lower_region_body`'s doc"* — while Tasks 1 and 5 wrote *"line 73 now lands on"*, *"line 112 today is"*,
+*"107 opens on"*, *"and now open on the `Stmt::Fn` arm above it"*. **No clause was violated: not one of
+them mints a new number**, which is why the split survived six reviews. It is still the difference
+between an observation with a tree attached and a live claim about a tree that keeps moving, in a branch
+whose whole argument is that the second kind rots. Five sites in `blowup_probe.rs` (two),
+`lambda_sharing_probe.rs`, `owner_probe.rs` and `running-focus.test.ts` now read in the dated form, and
+`running-focus.test.ts` states the convention once rather than repeating it four times.
+
+**Symbol citations are unverified and remain so.** The ambitious gate — extract backticked identifiers
+from comments, check each exists — is filed, not refused. It is the design most likely to fire on prose,
+CSS classes, string literals and shell flags, and it wants prototyping against the now-converted tree and
+a **measured false-positive rate** before it is wired to anything.
+
+**The gate's false-positive rate over future code is barely measured, and the one data point arrived the
+moment the pattern's blind spot closed.** The entry originally said the tree held *zero* legitimate uses
+of the form; that was true only of the eleven extensions the pattern then matched. Widening it to the
+kinds this repo actually tracks turned up exactly one: `# syntax=docker/dockerfile:1`, the BuildKit
+frontend directive that opens `Dockerfile`. It is an `image:tag`, not a pointer, **and §4.5's valve
+cannot reach it** — that directive must be the file's first line and BuildKit reads everything after the
+`=` as the image reference, so a trailing marker would break the build rather than excuse the line. The
+discrimination is structural instead: the character before `Dockerfile` must not be a path or word
+character, which an image reference's `/` always is. One false positive, in 258 files, closed without
+spending the escape hatch — which is a better outcome than the valve and a thinner evidence base than it
+looks. It is still no evidence about what the gate does to a stack-trace assertion or a source-map
+fixture nobody has written yet, which is the whole reason §4.5's valve exists and the whole reason it is
+uncomfortable.
+
+**A citation split across a line wrap is not caught, and that is a property of the tool rather than a
+decision.** `// see desugar.rs:` on one line and `// <line> for the binding` on the next matches nothing,
+because grep is line-based and so is every rule in the script. Reflowing a comment can hide a pointer the
+gate would have rejected the moment it was written on one line, and the pointer rots exactly as fast.
+Recorded in the script's header beside §4.3's blind spot.
+
+**Whether the convention holds without the gate is untested, and now untestable here.** Every citation in
+tracked source was converted by the same eight tasks under the same settled wording, which is a poor
+sample for the question *"do authors write symbol citations unprompted?"* The one piece of evidence on
+file predates this branch: 5d-ii-d records late tasks moving to symbol citations on their own initiative
+once the pattern was visible.
+
+##### 5d-ii-d's FILED CHECKER CLOSES, AND THAT ENTRY IS NOT EDITED
+
+5d-ii-d filed three things at itself and declined all three. `scratch.ts`'s comment ratio was paid down by
+the entry above this one. **The pre-commit citation checker is paid down here.** The per-frame layout
+write on `pointermove` remains open and still belongs to whoever next touches that path.
+
+**That entry is left exactly as it stands, including the sentence this branch's evidence enriches.** It
+says the commonest cause is the citing commit itself; measured over 37, it is the rarest of four. **The
+correction is made forward, here, where it is visible as a correction** — the web-doc-history convention,
+which holds that correcting history to match the present is worse than leaving it, because a dated entry
+that has been edited to agree with today teaches the next reader nothing about how the belief changed.
+
+**This branch did correct its own spec twice, and the cases are different in kind rather than in
+convenience.** `2026-08-17-citation-checker-design.md` is unmerged: it is this slice's live contract, not
+a dated record of what was believed on a day that has passed. §3.4's transposition and §4.4's timing were
+false when written and would have shipped as instructions. §1.1 was true of its evidence and is enriched
+by more, so it takes an addendum recording the four-way split and keeps its argument intact. **The test is
+whether the document is still making a claim about the present.** 5d-ii-d's entry is not; this spec is.
+
+##### THE WHOLE-BRANCH REVIEW FOUND ZERO CRITICAL AND STILL SAID NO, AND THE REASON IS THE BRANCH'S OWN THESIS
+
+Before the PR, one review read the whole branch and verified every claim by execution rather than by
+reading. **Zero Critical. Five Important, eleven Minor, and "ready to merge?" answered no** — because
+four false claims sat in tracked source on a branch whose entire thesis is that written claims rot, and
+one of them was the gate's own user-facing failure text.
+
+**Every one of them survived the branch's full apparatus.** `scripts/check-citations.sh` reported the
+tree clean. `--self-test` passed. Six pre-commit hooks passed on every commit. CI was green. None of that
+can see a sentence that is false, which is the same gap the branch spent eight tasks documenting from the
+outside and then reproduced from the inside: **the gate checks the FORM of a pointer and nothing checks
+the CONTENT of a claim, and the second is where all five Important findings lived.**
+
+**The one method that worked was the one the branch already named.** Every finding came from re-deriving
+a number or re-resolving a symbol against the tree — `git ls-files` counted rather than assumed, `fd61543`
+diffed rather than quoted, `lower.rs` read at `#31`'s parent rather than at HEAD, `LambdaPane` grepped for
+its definition rather than trusted to the file the sentence attached it to. Not one came from reading more
+carefully. **A brief is read as authority; a gate's own header is read as documentation; a report's
+summary line is read instead of its table.** That is the whole entry, restated by a reviewer who had the
+entry in front of them.
+
+**What the correction round changed, in one list.** The tally now compares against `git ls-files` and
+exits 2 on a mismatch, with a `--self-test` assertion driving the comparison both ways. `CITATION_RE`
+covers `html`, `conf`, `tm`, `txt` and `Dockerfile`, matches case-insensitively, and the self-test plants
+a range and a non-`.rs` fixture rather than only the single-line `.rs` form that was its blind spot for a
+whole branch. The `LambdaPane.setEditor` possessive names `onScratchReply`'s `scratch-compiled` arm and
+the file that declares the method. #31's provenance is corrected in the gate's header, in its failure
+message, in spec §1.1 and here. §1.1's evidence table is corrected in place. The eleven Minors are folded
+into the sections they belong to rather than listed.
+
+**What it did not close.** A `Dockerfile` citation written with a path prefix is still invisible, because
+the guard that keeps an image reference out cannot tell the two apart; this repo has one Dockerfile and it
+is at the root. Extensionless files other than `Dockerfile`, and dotfiles cited by their bare name, are
+still uncovered — all three are now stated in the script rather than left to be found. And the
+reconciliation's self-test drives the comparison function directly rather than end-to-end through a
+sandboxed repo, so it proves the comparison discriminates, not that the scan wires it up; the end-to-end
+proof was run by hand against a planted drop and is not automated.
+
+##### Verification
+
+**Every figure in this entry was re-derived from the tree or from the per-task ledgers for this entry, not
+carried from the branch's progress ledger.** That is not ceremony: the ledger was measured against the
+same eight reports and disagreed with them twice, once on a drift multiset and once on a test count. Both
+disagreements are recorded below rather than resolved in the ledger's favour.
+
+**And re-derivation was the only option that survives the branch.** The eight task reports and the
+progress ledger live under `.superpowers/sdd/`, which is gitignored: they are working-tree files that a
+`git clean -fdx` removes. **This entry is the branch's only durable record**, which is why it carries the
+per-citation evidence rather than a summary of it — and why the two ledger disagreements above are stated
+rather than quietly dropped along with the document that held them.
+
+**The corpus.** `git grep` for `[A-Za-z0-9_./-]+\.(rs|ts|tsx|js|json|toml|yml|yaml|css|md|sh):[0-9]+` over
+tracked non-`docs/` files at the branch point `08b3442` → **55** tokens, which is also what the same
+pattern counts on `main` today, and which is the sum of the plan's six tables (16 + 11 + 9 + 5 + 10 + 4).
+Task 1b's two prose-form pointers are outside every table → **57**.
+
+**A 58th arrived with the pattern's blind spot, and it was accurate.** Widening the extension list found
+one more live pointer in tracked source that eleven extensions could not see: `.dockerignore`'s
+`` (Dockerfile:32) ``, naming `COPY web/ ./`. Line 32 **is** `COPY web/ ./`, so it is one of the few
+accurate ones — the corpus's stale rate stays 37 of 57, and this one is recorded separately rather than
+folded in, because a citation the audit never had the means to find is not the same evidence as one it
+resolved. It is now `` (`Dockerfile`, in its `web` stage) ``.
+
+**The split.** 4 + 1 + 10 + 8 + 5 + 9 + 0 = **37 stale**, derived from the seven task reports' own
+per-citation ledgers rather than from any summary line. 37 / 57 = **64.9%**.
+
+**Ranges against singles.** 55 tokens at the branch point: **29 ranges, 26 singles**, re-derived with the
+gate's shipped pattern. Spec §3.4 said *"26 of the 55 are `file:N-M`"* and has been corrected in place.
+
+**`docs/`.** **849** across 66 tracked files at the branch point `08b3442`, **855** at the design commit
+`aff3868`, **985** at `34ac14d` where the gate landed and still 985 at `5d09d0c`, **1015** across 68 at
+`2d88a45` where this entry landed. Each figure names the commit it was taken at, because *"at this
+branch's close"* — the phrase this line and the gate's header both carried — is a coordinate with no tree
+attached, which is the same fault in prose that the gate rejects in `file:line` form. Re-derived with the
+gate's shipped pattern; the widened extension list changes none of these five numbers.
+
+**The gate, re-run after the correction round:**
+
+```
+scripts/check-citations.sh --self-test
+  self-test passed: planted file:line citations are caught (single and range, .rs and
+  not, either case), a symbol citation is not, an excused one is counted rather than
+  hidden, and a tally that does not match git ls-files is rejected                     exit 0
+
+scripts/check-citations.sh
+  no file:line citations in tracked source: 258 files scanned, 0 violations,
+  0 escape-hatch marker(s) honoured (113 out of scope or binary, 0 skipped
+  — 371 tracked paths in all)                                                          exit 0
+
+scripts/check-text-bytes.sh
+  no control bytes in tracked text files                                               exit 0
+```
+
+**258 + 113 + 0 = 371**, and `git ls-files | wc -l` is **371**.
+
+**THAT RECONCILIATION DID NOT EXIST WHEN THIS PARAGRAPH FIRST CLAIMED IT, AND THE CLAIM WAS THE
+DEFECT.** The script's tally printed `$((scanned + excluded + skipped))` under a comment calling it
+*"`git ls-files`' own count"*, and this entry copied the sentence. Nothing was ever compared: the sum of
+the three buckets is the sum of the three buckets, so a path that vanished before the loop moved every
+term at once and the arithmetic stayed consistent all the way to a clean exit. The whole-branch review
+demonstrated it in a sandbox — a real tracked total of 8, a planted door-3-shaped drop over a file
+holding a live pointer, and the gate printing *"0 skipped — 7 tracked paths in all"* and exiting **0**.
+**An assertion that cannot fail, inside the gate built to end that class, four doors after the class was
+declared shut, in a branch whose entire thesis is that written claims rot.** `check-citations.sh` now
+takes the total from a second, independent `git ls-files` walk and exits **2** when the three buckets
+disagree with it, `--self-test` asserts that comparison in both directions, and the sentence above is
+true for the first time. The same false sentence stood in the script's own comment and is corrected
+there too.
+
+**Cost, measured rather than described.** Self-test plus scan, five runs each, on this machine at close:
+**`check-citations.sh` 255–269 ms**, **`check-text-bytes.sh` 574–594 ms**. The implementer measured
+243–251 and 583–589; the reviewer 254–281 and 567–587. **The figures are given as ranges with their
+provenance because the claim they replaced was the adjective "milliseconds", which had stood unchecked in
+a hook comment and in this slice's own §4.4 and was two orders out.**
+
+**`cargo nextest run --workspace` → 900 tests run, 900 passed, 8 skipped**, run against the branch tip for
+this entry. **The progress ledger's fork-point baseline of "883 passed, 8 skipped" does not reproduce, and
+it cannot be a real change**: the branch adds no executable line to any test target — verified per file by
+comment-strip diff in all six conversion tasks, and independently here by the branch diff against
+`08b3442` containing no added test declaration.
+
+**THE LIKELIER EXPLANATION IS A STALE BASELINE CARRIED FORWARD, NOT A MISREAD PROGRESS COUNTER, AND THE
+FIRST DRAFT OF THIS PARAGRAPH NAMED THE WRONG ONE.** `883 passed / 8 skipped` is a real, twice-recorded
+historical figure: it is #32's own Verification line in this file, it is quoted as *"baseline 883"* in
+#34's Verification below that, and `2026-08-11-plan5d-i-session-model.md`'s final-verification step
+tells its executor to compare against *"#32's 883/8"*. A ledger opening with a baseline copied from the
+last document that had one is the ordinary way that number reaches a branch four slices later. `883`
+does also appear in this very run as the progress counter `(883/900)`, which is why the entry reached
+for it — but a coincidence that has to be noticed is a weaker hypothesis than a figure that was written
+down twice and re-read. Both stay hypotheses; the attribution is corrected because naming the less
+likely one as *"the most likely reading error"* is the same defect as any other unchecked claim here.
+**The 8 skipped are the repo's pre-existing slow-tier `#[ignore]`s and are unchanged.**
+
+**`pnpm test` → 606 passed in 63 files. NOT re-run for this entry**, and labelled rather than presented as
+fresh, in the departure 5d-ii-d and web-doc-history both made and both had to name: it is Task 1b's
+figure, taken after the last change to any `web/` file on this branch, and re-running it needs a `pkg/`
+wasm build this entry did not do. Every later commit touched only `crates/`, `scripts/`, config and
+`docs/`.
+
+**No executable line changed in the conversion.** Six tasks, each with a per-file comment-strip diff via
+process substitution — **never a `>` redirect**, per the `noclobber` hazard the entry above this one
+records, where a gate `diff`ed two stale snapshots and printed `NO CODE CHANGED` for a tree it had not
+read. **The two exceptions are declared**: one `println!` in `step_survey.rs` and one label string in
+`blowup_probe.rs`, both citations living inside string literals printed for a human, both shown in Task
+5's report as the complete set the comment-stripped diff produces.
+
+**`pre-commit run --all-files` → all 6 hooks Passed**, run for this entry: `check-text-bytes`,
+`check-citations`, `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `biome ci`,
+`tsc --noEmit`. No `--no-verify` on any commit of this branch.
+
+**The gate is not skippable in CI.** Both steps ride in the `linear-history` job, which `gate` requires
+unconditionally — `require linear-history "$R_LINEAR"`, outside every `if` — and neither step carries an
+`if:` of its own. `--self-test` runs first, then the scan, for the reason `check-text-bytes.sh` states in
+its own comment: a gate that only ever runs against a passing tree cannot tell you it still works.

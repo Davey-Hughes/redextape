@@ -19,12 +19,21 @@
 //! empty for those instead of failing, so a TM-only program still gets a usable map. And a Core node
 //! `lower_asm` emits NO instruction for — a transparent `Let`/`Seq` binder, a `Lambda`, the callee
 //! `Var` of a statically-resolved OR builtin call, or a `Var` whose resolved register is already the
-//! destination it would be moved into (`if src != dst` at `lower_asm.rs:321`, reached directly from an
-//! `Assign` to that name or through `If`/`Let`/`Seq` destination propagation) — maps to `None`: THE MAP
-//! SAYS NOTHING WHERE THE LOWERING SAID NOTHING. It does not fall back to a surrounding block. A
-//! caller that wants "nearest enclosing block" for highlighting computes that at its own call site,
-//! where it reads as the UI heuristic it is rather than as map data.
-//! `tests/sourcemap_coverage.rs` pins both halves of that boundary.
+//! destination it would be moved into (the `if src != dst` in `lower_asm.rs`'s `lower_inner`, in its
+//! `Core::Var` arm, reached directly from an `Assign` to that name or through `If`/`Let`/`Seq`
+//! destination propagation) — maps to `None`: THE MAP SAYS NOTHING WHERE THE LOWERING SAID NOTHING.
+//! It does not fall back to a surrounding block. A caller that wants "nearest enclosing block" for
+//! highlighting computes that at its own call site, where it reads as the UI heuristic it is rather
+//! than as map data. `tests/sourcemap_coverage.rs` pins both halves of that boundary.
+//!
+//! THAT POINTER READ `lower_asm.rs` line 321 UNTIL THIS COMMIT, AND IT WAS ALREADY WRONG WHEN IT WAS
+//! WRITTEN — invalidated by its own commit, which is §1.1's mechanism caught in the act. Line 321
+//! WAS `if src != dst`, in the PARENT of the commit that wrote this citation (`9fbd911`, the Plan 4
+//! producer slice); that same commit added seven lines above it in `lower_asm.rs` — two no-panic
+//! rewrites in `Ctx::bind` and `Ctx::bind_fn`, unrelated to anything this module doc argues — so the
+//! pointer was seven lines short the moment it landed. `clippy::pedantic` (#31) later moved the
+//! guard a further 35 lines, and this conversion found 321 holding the `"$box"` arm of
+//! `lower_builtin_apply`'s dispatch `match`, a different function entirely.
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -10,7 +10,7 @@
 //
 // A TEST-ONLY WORKER, ON `depth-cap-worker.ts`'s PRECEDENT, so no message kind is added to
 // `protocol.ts` for a measurement's benefit — a request no surface can produce is the fabricated-state
-// shape `session.rs:257-273` prices.
+// shape `session.rs`'s `Session::tm` prices.
 import init, { lambdaScratch } from '../../../pkg/redextape_wasm.js'
 import { HISTORY_BYTES, lambdaFrameBytes } from '../../src/protocol'
 import type { LambdaState } from '../../src/types'

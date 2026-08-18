@@ -1034,7 +1034,7 @@ async function main(): Promise<EditorView> {
    * `linkWiring.drawLink(...)` reaches `detachedPanes()` here — `theLambdaSlot()`/`theTmSlot()` read
    * `panes.active(...)` — all before `paneHost.applyLayout()` has ever run once. `draw()`'s own body
    * (`draw.ts`) reads `panes` three more times before it gets that far: `panes.active('lambda')`/
-   * `panes.active('tm')` (lines 82–83), `panes.all()` (127) and `panes.of('lambda')` (174).
+   * `panes.active('tm')`, `panes.all()` and `panes.of('lambda')`.
    *
    * **STILL SAFE, AND FOR A REASON THAT HAS NOTHING TO DO WITH ORDERING.** `applyLayout` remains the
    * only thing that ever populates `panes`, so every one of those reads runs against a collection that

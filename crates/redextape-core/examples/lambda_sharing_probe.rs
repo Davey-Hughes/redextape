@@ -1869,8 +1869,21 @@ fn verify_interner() {
 // differential against `subst` in `src/`, the shift-additivity lemma the rewrite depends on, and a
 // `lift == 0` allocation-identity pin — and it ran on every MANUAL `cargo run --example
 // lambda_sharing_probe`. That turned out to be weaker evidence than it sounds: CI compiles this
-// example (`.forgejo/workflows/ci.yml:112`, `cargo clippy --workspace --all-targets`) but never RUNS
-// it, so the check that makes the rewrite safe to act on gated nothing automatically.
+// example — `ci.yml`'s `rust` job, in its `Feature matrix (non-LLVM, non-browser configs)` step,
+// which runs `scripts/check-all.sh`, whose base tier carries the `clippy|--workspace --all-targets`
+// row — but never RUNS it, so the check that makes the rewrite safe to act on gated nothing
+// automatically.
+//
+// THAT POINTER READ `.forgejo/workflows/ci.yml` line 112 UNTIL THIS COMMIT, AND THE STEP IT NAMED NO
+// LONGER EXISTS. A YAML file has no symbol in the Rust sense, but it has job and step names, and those
+// are what a reader needs and what survives a reordering of the file — so this now names both. Line
+// 112 was `- name: Clippy`, whose `run:` on the line below was the very
+// `cargo clippy --workspace --all-targets` quoted here, when the structural-sharing commit
+// (`9a7db07`) wrote this. The scope-filter slice (#8) deleted that step outright and folded workspace
+// clippy into `check-all.sh`'s feature matrix, so the invocation changed FILES rather than lines.
+// This conversion found line 112 holding a comment in the unrelated `linear-history` job, explaining
+// why its merge-commit check runs on pushes to `main` rather than on `pull_request` — still a gating
+// job in the same CI file, which is near enough to survive a glance.
 //
 // It now lives in `crates/redextape-core/tests/subst_differential.rs` as three `#[test]`s,
 // which `cargo nextest run -p redextape-core` executes on every CI run. It is not duplicated here: two

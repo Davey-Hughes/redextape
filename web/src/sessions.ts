@@ -88,7 +88,7 @@ export type TmCompiled = { readonly program: TmProgram; readonly tapeNames: stri
  * into, the machine its last compile produced, and the client that talks to its worker.
  *
  * THE CLIENT IS PER ENTRY BECAUSE THE GENERATION ALREADY IS. `SessionClient`'s `#gen`
- * (`session-client.ts:15`) is private and per instance, and design §3.2 records that this was always
+ * (`session-client.ts`) is private and per instance, and design §3.2 records that this was always
  * right — generations are per session, and there was only ever one session to be per.
  *
  * THE ENTRY HOLDS THE CLIENT; `SessionPool` OWNS ITS WORKER'S LIFE. There is exactly one
@@ -202,8 +202,8 @@ export type PaneOption = { readonly leg: Leg; readonly id: SessionId; readonly l
  * that impossible is this one.
  *
  * A STATUS FOR A LEG THE SESSION DOES NOT HAVE IS DROPPED, NOT FABRICATED. A `LambdaScratch` has no TM
- * leg to be "not compiled", and writing one so the record is square is the shape `session.rs:257-273`
- * records the cost of. The caller passing a `TmStatus` for a λ-only session is not an error either —
+ * leg to be "not compiled", and writing one so the record is square is the shape `session.rs`'s
+ * `Session::tm` records the cost of. The caller passing a `TmStatus` for a λ-only session is not an error either —
  * it is what a caller with one reply shape and three session shapes will naturally do — so this is
  * silent rather than a throw.
  */
@@ -325,7 +325,7 @@ export class SessionRegistry {
    * `main()` makes. A binding naming a session the registry does not hold is a wiring bug, not a state
    * the UI has an honest rendering for — and the alternative, an `?? emptyLeg` fallback at every call
    * site, is a fabricated answer for an unreachable state, which is the exact shape
-   * `session.rs:257-273` records the cost of.
+   * `session.rs`'s `Session::tm` records the cost of.
    */
   entryOf(id: SessionId): SessionEntry {
     const entry = this.#entries.get(id)

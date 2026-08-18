@@ -281,8 +281,8 @@ export type RunRequest =
    * exists at the boundary (plan T3, `tmScratch(src)` is exported and typed) but the app holds no TM
    * TEXT anywhere: the TM pane renders a δ-table projected from a compiled program, not the `.tm`
    * source that would have built one. A request kind no surface can produce is the fabricated-state
-   * shape `session.rs:257-273` records the cost of, so the variant lands with the surface that can
-   * send it. See `ScratchBuffers`'s doc in `scratch.ts` for the same line drawn on the session side.
+   * shape `session.rs`'s `Session::tm` records the cost of, so the variant lands with the surface that
+   * can send it. See `ScratchBuffers`'s doc in `scratch.ts` for the same line drawn on the session side.
    *
    * **`step` IS WHICH FRAME THE PANE WAS SHOWING, AND THE WORKER REPLAYS TO IT** (design §4.1). It is
    * not an offset into `src`: `src` is the SOURCE session's step-0 term at `LAMBDA_BYTE_BUDGET`, and
@@ -329,7 +329,7 @@ export type RunReply =
    * wire. `compiled` carries `tm`, `tmProgram`, `tapeNames`, `declinedSpan` and `linkIndex`; a
    * `LambdaScratch` has no TM leg, no `SourceMap` and no `ty`, so every one of those would be a
    * fabricated field on a message about a session that provably cannot have them — the shape §3.3
-   * refuses at the type level and `session.rs:257-273` prices. A consumer that receives this one
+   * refuses at the type level and `session.rs`'s `Session::tm` prices. A consumer that receives this one
    * cannot even ask the wrong question.
    *
    * NO `result` EVER FOLLOWS IT, unlike `compiled`. `result` carries `lambdaLeg(session).value`, which

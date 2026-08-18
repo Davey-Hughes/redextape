@@ -114,8 +114,8 @@ function answer(r: RunReply): string {
   if (r.kind !== 'result') return `unexpected reply: ${r.kind}`
   const v = r.lambda.value
   // `typeof v === 'object'` BEFORE the `in`, because `Decoded` is not all objects — `'Unfinished'` and
-  // `'Undecodable'` are bare string members (`types.ts:51`), and `in` does not narrow a union that
-  // still admits a primitive. Both string members fall through to the `undecoded:` arm, which is the
+  // `'Undecodable'` are bare string members (`types.ts`'s `Decoded`), and `in` does not narrow a union
+  // that still admits a primitive. Both string members fall through to the `undecoded:` arm, which is the
   // right home for them here: this helper exists to make a WRONG reply legible, and "the λ leg never
   // finished" is exactly that rather than a shape to destructure.
   return typeof v === 'object' && v !== null && 'Value' in v ? v.Value.text : `undecoded: ${JSON.stringify(v)}`

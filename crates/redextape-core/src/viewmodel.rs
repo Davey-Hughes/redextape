@@ -217,8 +217,8 @@ pub struct TmState {
 /// level, and the compiler's `drop_in_place` walks the `Box` chain the same way. A wasm trap does not
 /// unwind, so neither returns an error — both poison the module, and the `Drop` path fires where no
 /// caller can see it. `LambdaTerm`, the type this is built FROM, carries a hand-written iterative
-/// destructor (`lambda/term.rs:482`) for exactly that hazard; indices are how this type avoids
-/// needing one.
+/// destructor (`term.rs`'s `impl Drop for LambdaTerm`) for exactly that hazard; indices are how this
+/// type avoids needing one.
 ///
 /// `nodes` is in POST-ORDER — every child precedes its parent — because the walk that builds it
 /// completes children before parents. `root` is therefore always `nodes.len() - 1`, and is stored
@@ -226,6 +226,18 @@ pub struct TmState {
 ///
 /// `nodes` is never empty: a term has at least one node, and a zero budget refuses at the first one,
 /// so `root` always indexes a real element.
+///
+/// THAT POINTER READ `term.rs` line 482 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It was
+/// `impl Drop for LambdaTerm`'s own opening line when the arena rewrite (#15) wrote it, and three
+/// commits moved it 166 lines down between them — static click-linking (#23) by 5, the dual-focus
+/// slice (#26) by 95, and `clippy::pedantic` (#31) by 66. This conversion found 482, as this file
+/// then stood, inside a comment in `subst`'s body, arguing why the `maxfree` check has to come
+/// BEFORE the `Abs` arm builds its shifted argument — a different function, and an argument about
+/// substitution COST rather than about teardown depth, so nothing near where it landed could be
+/// mistaken for the destructor. THIS COMMIT'S OWN ADDED LINES ELSEWHERE IN `term.rs` HAVE SINCE
+/// MOVED 482 AGAIN, off that landing too — the tightest demonstration available of why this note
+/// retires the coordinate rather than trusting it: even the sentence recording the drift did not
+/// outlive its own commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TermTree {

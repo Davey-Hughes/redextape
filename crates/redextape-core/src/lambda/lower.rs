@@ -1238,12 +1238,35 @@ mod tests {
 
     /// `\x. (x = x + 1)`: the lambda body is a BARE `Assign`, with no enclosing `Seq`, so
     /// `lower_region` enters `lower_region_body` with `Pos::Value` directly on the `Assign` node —
-    /// the store-discard branch at `lower.rs:576` that calls `forget`. `desugar` never builds this
-    /// shape (`Stmt::Assign`/`Stmt::While` always land inside a `Core::Seq`, desugar.rs:77-84), but
-    /// `core` is a `pub mod` and `lower_mapped` takes `&Core`, so it is reachable through the public
-    /// API. Without `forget`, the discarded `x + 1` subtree's origins would survive and pick up the
-    /// coarse ancestor wraps meant for the (also-discarded) rebuilt store, landing on paths that do
-    /// not resolve against the actual — much shallower — produced term.
+    /// the store-discard branch that calls `forget`, in `lower.rs`'s `lower_region_body`, in its
+    /// `Core::Assign` arm. `desugar` never builds this shape (`Stmt::Assign`/`Stmt::While` always
+    /// land inside a `Core::Seq` — `desugar.rs`'s `lower_stmts_at`, in its `Stmt::Assign` and
+    /// `Stmt::While` arms), but `core` is a `pub mod` and `lower_mapped` takes `&Core`, so it is
+    /// reachable through the public API. Without `forget`, the discarded `x + 1` subtree's origins
+    /// would survive and pick up the coarse ancestor wraps meant for the (also-discarded) rebuilt
+    /// store, landing on paths that do not resolve against the actual — much shallower — produced
+    /// term.
+    ///
+    /// BOTH POINTERS ABOVE WERE LINE NUMBERS UNTIL THIS COMMIT, AND NEITHER HELD. THE SELF-CITATION
+    /// WAS NEVER RIGHT AT ALL. `lower.rs` line 576 was this file naming its OWN line, from inside its
+    /// own test module, and at the commit that wrote it (`9fbd911`, the Plan 4 producer slice, which
+    /// added `Origins`, this test and the pointer together) it already sat 53 lines ABOVE the
+    /// `Pos::Value => origins.forget(mv)` it names — on the opening line of the
+    /// `Core::Let { mutable: false }` arm's comment, a sibling arm of the same `match`.
+    /// Three intervening slices then moved it 37 more — the λ-hang measurement apparatus (#1) by 18,
+    /// the β-step-hang close (#3) by 13, and dual focus while running (#26) by 6 — and
+    /// `clippy::pedantic` (#31) a further 44, the same shift already found under other pointers into
+    /// this file, so this conversion found 576 holding a line of
+    /// `lower_region`'s doc — the function the sentence above names as the one that ENTERS
+    /// `lower_region_body`, one caller removed from the branch meant, which is what would have made
+    /// it read as confirmation.
+    ///
+    /// `desugar.rs` lines 77-84 were exactly right when written: the `Stmt::Assign` and
+    /// `Stmt::While` arms in full, each wrapping its statement in a `Core::Seq`. The viewmodel slice
+    /// (#11) gave `lower_stmts_at` its span machinery and pushed both arms 52 lines down (#31 added
+    /// one more), and this conversion found 77-84 holding the last lines of that function's DOC —
+    /// which names "the `Assign` and `While` arms' statement spans" in its own text, so the range
+    /// still reads as though it were about the two arms cited.
     #[test]
     fn forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths() {
         let value = Core::BinOp(2, BinOp::Add, Box::new(Core::Var(3, "x".to_string())), Box::new(Core::Nat(4, 1)));

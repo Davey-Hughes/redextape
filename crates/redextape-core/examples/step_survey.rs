@@ -362,7 +362,18 @@ fn main() {
     println!("    strategy. Merging them would overstate the devirtualization headline.");
     println!("  • Apply is DECOMPOSED BY CALLEE, because one `Apply` bucket would merge populations with");
     println!("    opposite optimizer implications. In particular `cons`/`head`/`tail`/`is_empty` lower to");
-    println!("    a SINGLE asm instruction each (lower_asm.rs:247-250) — no frame, no Call, no Ret. They");
+    // THE PARENTHETICAL ON THE NEXT LINE READ `lower_asm.rs` lines 247-250 UNTIL THIS COMMIT, AND IT
+    // HAD DRIFTED 70 LINES — the full accounting is in `ApplyClass::Builtin`'s doc below, which cited
+    // the same range and is resolved there. The short version: the range was those four dispatch arms
+    // when this survey landed, and it is now the tail of `lower_function`'s doc plus that function's
+    // signature and body — the emitter that gives a user function a frame, a `Call` and a `Ret`,
+    // which is the exact thing this sentence says these builtins do NOT get.
+    //
+    // "a SINGLE" became "ONE" on the same line for width alone: the symbol is 18 characters longer
+    // than the coordinate it replaces, which puts the line 5 over `max_width = 120`; dropping
+    // "a SINGLE" for "ONE" saves exactly 5. "ONE" is the wording `ApplyClass::Builtin` already uses
+    // for this same claim, so the two now match.
+    println!("    ONE asm instruction each (`lower_asm.rs`'s `lower_builtin_apply`) — no frame, no Call, no Ret. They");
     println!("    are heap ops, and there is NOTHING THERE FOR AN INLINER TO INLINE.");
     println!("  • A Node(id) bucket identifies a construct by KIND and NodeId only. Core carries no");
     println!("    source span, so this report cannot and does not print a line/column.");
@@ -1233,8 +1244,20 @@ const CLOSURE_BOX_ROW: &str = "ClosureScaffold ($box alloc + $boxh reads)";
 /// by ~4.7x. Everything needed to split them is already in the Core the rollup holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ApplyClass {
-    /// `cons`/`head`/`tail`/`is_empty` — ONE asm instruction each (`lower_asm.rs:247-250`). No frame,
-    /// no `Call`, no `Ret`. A heap op wearing call syntax; nothing here for an inliner.
+    /// `cons`/`head`/`tail`/`is_empty` — ONE asm instruction each (`lower_asm.rs`'s
+    /// `lower_builtin_apply`). No frame, no `Call`, no `Ret`. A heap op wearing call syntax; nothing
+    /// here for an inliner.
+    ///
+    /// THAT POINTER READ `lower_asm.rs` lines 247-250 UNTIL THIS COMMIT — as did the printed report's
+    /// own copy of this claim, up in `main` — AND IT HAD DRIFTED 70 LINES. It was exactly the four
+    /// dispatch arms `"cons"`, `"head"`, `"tail"` and `"is_empty"`, inside `lower_builtin_apply`, when
+    /// the source map and this survey landed together (`6adca99`); mutually recursive functions
+    /// (`9cec4f6`) pushed them 32 lines down, the unshadowable-scaffolding-builtins fix (`c870d0b`) 1,
+    /// the Plan 4 producer slice (`9fbd911`) 7, and `clippy::pedantic` (#31) a further 30. The range
+    /// now holds the closing two lines of `lower_function`'s doc plus that function's signature and
+    /// body — the emitter that gives a user function its own subroutine, with the frame, `Call` and
+    /// `Ret` this sentence exists to say these builtins avoid. Still in the same file, still about
+    /// lowering a call, which is what would have made it read as confirmation.
     Builtin,
     /// `$applyN` — defunc's closure-dispatch indirection. The devirtualization target.
     Dispatch,

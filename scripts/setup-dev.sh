@@ -79,7 +79,7 @@ fi
 
 if command -v pre-commit >/dev/null 2>&1; then
   pre-commit install
-  echo "==> pre-commit hooks installed (cargo fmt + clippy)"
+  echo "==> pre-commit hooks installed (6: control bytes, citations, cargo fmt, clippy, biome, web typecheck)"
 else
   echo "==> pre-commit not found; skipping hook install (pip install pre-commit)" >&2
 fi

@@ -288,7 +288,7 @@ export function createReplies(deps: {
    * `onLambdaScratch`/`onExtend` are where each is refused. A reply this switch does not name is a
    * reply this session's worker cannot send, and falling through is the honest answer: there is
    * nothing on a scratchpad for a TM frame to land in, and inventing somewhere is the shape
-   * `session.rs:257-273` prices.
+   * `session.rs`'s `Session::tm` prices.
    *
    * IT NEVER TOUCHES `results.dataset.state` EXCEPT ON A THROW. That flag is the source compile's
    * "running…" indicator and `app.test.ts`'s `settled` waits on it; a scratchpad's traffic is not a

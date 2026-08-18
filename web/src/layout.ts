@@ -130,8 +130,8 @@ function hasSource(root: LayoutNode): boolean {
  * | `kind`, the leaf being created | only if a `'source'` leaf is already in the tree |
  *
  * THE SUBJECT'S REFUSAL IS UNCONDITIONAL because there is one editor, so there is nothing to duplicate
- * into, and a split producing an undefined second thing is the fabricated state `session.rs:257-273`
- * prices. `layout-view.ts` does not render a split control on the source pane at all — this throw is
+ * into, and a split producing an undefined second thing is the fabricated state `session.rs`'s
+ * `Session::tm` prices. `layout-view.ts` does not render a split control on the source pane at all — this throw is
  * the backstop for a caller that got there another way, not the UI.
  *
  * THE TARGET'S REFUSAL IS CONDITIONAL, ON PURPOSE: this function must be able to CREATE a source leaf

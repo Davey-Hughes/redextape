@@ -541,9 +541,9 @@ fn a_program_just_under_the_guard_still_compiles() {
 /// STILL BELOW THE CRASH, and measured rather than assumed: past 580 the TM lowering refuses, so the
 /// deepest input any guard admits is a 699-element list, and bisecting the STACK SIZE (the depth
 /// cannot be pushed further — the guards refuse first) puts its requirement between 2 and 3 MiB of
-/// the 8 given — against the LIST spine specifically. `lambda/lower.rs:36-38` records a store-passing
-/// statement spine as ~19% fatter per level than that spine, so the true worst-reachable-case margin
-/// is roughly **2.2x–3.4x**, not the 2.7x–4x a straight read of this bisection would give (the
+/// the 8 given — against the LIST spine specifically. `lower.rs`'s `MAX_LAMBDA_LOWER_DEPTH` records a
+/// store-passing statement spine as ~19% fatter per level than that spine, so the true worst-reachable-case
+/// margin is roughly **2.2x–3.4x**, not the 2.7x–4x a straight read of this bisection would give (the
 /// decision is unaffected either way — see the roadmap entry for the full derivation).
 #[wasm_bindgen_test]
 fn a_deep_but_legal_program_needs_the_raised_shadow_stack() {
@@ -633,7 +633,7 @@ fn the_ast_tolerates_the_deepest_term_a_reduction_reaches() {
 /// MEASURES V8's OWN LIMITS on a nested plain JS object, independent of `TermTree`/`TermNode`
 /// entirely. The design's load-bearing justification for this whole branch is a claim that was never
 /// run: *"a 3,000-deep nested object still traps a recursive JS walk or a `JSON.stringify`"*
-/// (`docs/superpowers/specs/2026-08-07-termnode-arena-design.md:37`). This project's own standard —
+/// (`docs/superpowers/specs/2026-08-07-termnode-arena-design.md` §0). This project's own standard —
 /// applied to the Rust side just above, in `the_ast_tolerates_the_deepest_term_a_reduction_reaches` —
 /// is that a claim like this is not established until a program chosen to break it has actually been
 /// run. This test runs it, checking both the design's own quoted 3,000 and the smaller 1,805 this

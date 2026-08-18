@@ -1599,7 +1599,7 @@ mod tests {
         // of a 1-step reduction must still answer the term the reduction actually ended on.
         //
         // THIS DOES NOT PIN THE REPLAY LOOP'S `break` (final whole-branch review, T1's mutation
-        // result). `LambdaCursor::next` latches permanently once ended (`trace.rs:149-152`:
+        // result). `LambdaCursor::next` latches permanently once ended (`trace.rs`:
         // `self.status.is_some()` short-circuits every call after the first `None`), so `step_lambda`
         // answers `false` forever past the end — looping the full 500 iterations and breaking out
         // early reach bit-identical state, which is why deleting the `break` kills nothing here. What

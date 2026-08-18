@@ -143,8 +143,17 @@ impl LambdaTerm {
     /// identity: once an allocation is freed the allocator may hand that exact address to a later,
     /// unrelated one, so an id compared against a term that has since died can match by coincidence
     /// rather than by fact. Any caller collecting these across a walk must keep the terms alive for the
-    /// whole walk. `tests/lambda_sharing.rs:73-81` argues that hazard at length for the sharing gate,
-    /// which is the in-tree consumer that depends on it.
+    /// whole walk. `lambda_sharing.rs`'s `reduce_trace_shares_its_snapshots` argues that hazard at
+    /// length for the sharing gate, which is the in-tree consumer that depends on it.
+    ///
+    /// THAT POINTER READ `lambda_sharing.rs` lines 73-81 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It
+    /// was exactly the nine-line comment making that argument when structural sharing (`9a7db07`)
+    /// wrote the pointer and the comment together; closing the β-step hang (#3) added ten lines above
+    /// it, and this conversion found 73-81 opening on the closing braces of `walk` — the very
+    /// function that comment names — running on through the test's own signature and first
+    /// statements, and stopping two lines short of the argument it was pointing at. Landing inside
+    /// the right test, on the way to the right comment, is what would have made it read as
+    /// confirmation.
     #[must_use]
     pub fn alloc_id(&self) -> usize {
         Rc::as_ptr(&self.0) as usize

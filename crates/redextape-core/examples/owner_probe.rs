@@ -52,10 +52,20 @@ fn head(s: &str) {
     line(&"-".repeat(s.len()));
 }
 
-/// The corpus, copied verbatim from `frame_cost_probe.rs:107-133` (its `programs()`, minus `while40`,
-/// which that file adds only for its own section F). Reusing it keeps this probe's columns comparable
-/// with every figure this Plan has already recorded. The last three entries are picked to defeat
-/// bounds, not to represent the corpus — see that file's comment on `num200`/`list20`/`list60`.
+/// The corpus, copied verbatim from `frame_cost_probe.rs`'s `programs()`, minus `while40`, which that
+/// file adds only for its own section F. Reusing it keeps this probe's columns comparable with every
+/// figure this Plan has already recorded. The last three entries are picked to defeat bounds, not to
+/// represent the corpus — see that file's comment on `num200`/`list20`/`list60`.
+///
+/// THAT POINTER READ `frame_cost_probe.rs` lines 107-133 UNTIL THIS COMMIT, AND IT NEVER COVERED WHAT
+/// IT CLAIMED TO. It has not drifted a line since dual focus while running (#26) wrote it — that
+/// function is byte-identical in the cited range — so this is the other failure the branch keeps
+/// finding: a range that was wrong the day it was written. The material actually copied here runs two
+/// lines further at each end than the range names. This conversion found 107 opening on
+/// `let mut v: Vec<(String, String)> = [`, which skips the two `let list20`/`let list60` `format!`s
+/// above it, and 133 closing on the comment about the `cons` spine, one line short of the two
+/// `v.push` calls that put those lists in the corpus. All four are copied verbatim below, and without them "its `programs()`, minus
+/// `while40`" is not what the range holds.
 fn programs() -> Vec<(String, String)> {
     let list20 = format!("[{}]", (1..=20).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
     let list60 = format!("[{}]", (1..=60).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));

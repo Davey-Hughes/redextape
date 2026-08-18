@@ -96,13 +96,14 @@ fn find_first<'a>(core: &'a Core, pred: &dyn Fn(&Core) -> bool) -> Option<&'a Co
 /// * the callee `Var` of an `Apply` — read off as a label by the `Apply` arm (user function OR
 ///   builtin), never lowered into a register.
 /// * a non-callee `Var` whose resolved register is the SAME register `lower_into` is asked to fill
-///   (`lower_asm.rs:321`'s `if src != dst`) — emits nothing, not even a `Mov`. `dst` only ever equals a
-///   variable's own slot while lowering the value of an `Assign` to that same name (`Assign` looks the
-///   slot up and lowers its value straight into it), and that identity survives being handed down
-///   through `If`'s branches, a non-shadowing `Let`/`LetRec`/`LetRecGroup` body, or `Seq`'s second half
-///   — every other position (a `BinOp`/`Apply`/`While` operand, an `Assign`'s own destination, a fresh
-///   `Let` binder's value slot) always lowers into a brand-new register, so the identity cannot survive
-///   into it. `target_name` below tracks exactly this propagation; every other `Var` emits `Mov`/`Nil`.
+///   (the `if src != dst` in `lower_asm.rs`'s `lower_inner`, in its `Core::Var` arm) — emits nothing,
+///   not even a `Mov`. `dst` only ever equals a variable's own slot while lowering the value of an
+///   `Assign` to that same name (`Assign` looks the slot up and lowers its value straight into it),
+///   and that identity survives being handed down through `If`'s branches, a non-shadowing
+///   `Let`/`LetRec`/`LetRecGroup` body, or `Seq`'s second half — every other position (a
+///   `BinOp`/`Apply`/`While` operand, an `Assign`'s own destination, a fresh `Let` binder's value slot)
+///   always lowers into a brand-new register, so the identity cannot survive into it. `target_name`
+///   below tracks exactly this propagation; every other `Var` emits `Mov`/`Nil`.
 ///
 /// Everything else emits: `Nat`/`Bool`/`Unit` (`Li`), `BinOp` (`Bin`), `If` (`Jz`+`Jmp`), `While`
 /// (`Jz`+`Jmp`+`Li`), `Assign` (`Li`), `Apply` (`Call` or a builtin instruction), `LetRec` /
@@ -114,6 +115,16 @@ fn find_first<'a>(core: &'a Core, pred: &dyn Fn(&Core) -> bool) -> Option<&'a Co
 /// false on the defunc path, where the root of the tree that gets lowered is `defunc`'s, not this one.)
 ///
 /// Iterative, like every other `Core` walk — see `Core::for_each_child`'s doc.
+///
+/// THE `lower_asm.rs` POINTER IN THE `Var` BULLET READ line 321 UNTIL THIS COMMIT, AND IT WAS ALREADY
+/// WRONG THE DAY IT LANDED. `if src != dst` was exactly line 321 at the parent of `9fbd911` — but
+/// `9fbd911`, the commit that added this file, also replaced the `unwrap`s in `Ctx::bind` and
+/// `Ctx::bind_fn` with `if let` for the no-panic rule, adding seven lines above the guard. The
+/// citation shipped seven lines short of the thing it named, inside the commit that wrote it.
+/// `clippy::pedantic` (#31) then moved it 35 further, so the guard now sits where the `Var` bullet
+/// above names it, in `lower_inner`'s `Core::Var` arm; this conversion found 321 holding a `"$box"` arm
+/// of `lower_builtin_apply`, a different function. A coordinate can be stale before it is even pushed;
+/// a symbol cannot.
 fn classify(core: &Core) -> (Vec<NodeId>, Vec<NodeId>) {
     let (mut emits, mut transparent) = (Vec::new(), Vec::new());
     // Third field: `target_name`, `Some(x)` iff this node is lowered with `dst` == the register

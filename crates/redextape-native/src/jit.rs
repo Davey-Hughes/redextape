@@ -98,7 +98,7 @@ fn register_symbols(builder: &mut JITBuilder) {
 /// The ISA is built explicitly rather than via `JITBuilder::new`, which constructs its own from
 /// default flags and offers no way to reach `opt_level` — which is why Cranelift ran unoptimized
 /// until this was wired up. `JITBuilder::new` delegates to `with_flags(&[], ..)`, whose whole ISA
-/// setup is (cranelift-jit 0.134.2, `src/backend.rs:60-74`):
+/// setup is (cranelift-jit 0.134.2, `src/backend.rs`):
 ///
 /// ```text
 ///     let mut flag_builder = settings::builder();

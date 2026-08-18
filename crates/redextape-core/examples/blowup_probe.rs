@@ -263,9 +263,11 @@ fn depth(t: &LambdaTerm) -> u32 {
 }
 
 /// A TRANSCRIPTION of `lambda::reduce::depth_exceeds`, which is `pub(crate)` and so unreachable from
-/// an example target. Kept character-for-character equivalent on purpose: this is the function
-/// `trace::LambdaCursor` calls BEFORE EVERY STEP, so what it costs is what a run costs before its
-/// first β-step. The `LambdaCursor` ramp below measures the real one end-to-end as a cross-check.
+/// an example target. Kept character-for-character equivalent to the walk `reduce.rs`'s
+/// `depth_exceeds` USED TO BE — it is a `u32` compare now, and the note on the ramp label below says
+/// why the walk is still what gets measured here. That function is what `trace::LambdaCursor` calls
+/// BEFORE EVERY STEP, so what the walk cost is what a run cost before its first β-step. The
+/// `LambdaCursor` ramp below measures the real one end-to-end as a cross-check.
 fn depth_exceeds(t: &LambdaTerm, limit: u32) -> bool {
     let mut stack: Vec<(&LambdaTerm, u32)> = vec![(t, 0)];
     while let Some((node, d)) = stack.pop() {
@@ -350,9 +352,22 @@ fn part1() {
     ));
     drop(c);
 
+    // THE PRINTED LABEL BELOW READ `reduce.rs` lines 64-80 UNTIL THIS COMMIT, AND IT WAS NEVER RIGHT
+    // — invalidated by its own commit, before any later edit touched either file. At `9a7db07`, the
+    // structural-sharing commit that wrote this probe, `depth_exceeds` spanned seventeen lines and the
+    // cited range is seventeen lines long — but it sits ten lines HIGH of where that commit left the
+    // function, and ten lines LOW of where its parent had it, because the same commit added twenty
+    // lines of doc above `depth_exceeds` while this label was being written. What landed covered the
+    // last ten lines of that new doc and only the first seven of the function. `LambdaTerm` then
+    // carried `depth` as a construction-time invariant (#3), which replaced the whole walk with a
+    // `u32` compare, so `reduce.rs`'s `depth_exceeds` is now three lines and the range holds two
+    // paragraphs of its doc instead — the ones recording that the walk WAS 96% of the reducer's time
+    // and that memoizing it was rejected. Prose about the very function named, which is what would
+    // have made it read as confirmation. **The transcription above is still the WALK**, kept
+    // deliberately as the thing measured; it is no longer what `reduce.rs` runs.
     ramp(
         "depth_exceeds(t, MAX_TERM_DEPTH)",
-        "transcription of reduce.rs:64-80; the cursor calls this BEFORE EVERY STEP",
+        "transcription of `reduce.rs`'s `depth_exceeds`; the cursor calls this BEFORE EVERY STEP",
         |n| {
             let c = doubling_chain(n);
             let t0 = Instant::now();
@@ -750,9 +765,19 @@ fn part_oom() {
 /// does and does not establish; none of it is a margin against anything.
 ///
 /// WHAT THE LAST COLUMN ACTUALLY TIMES is one CURSOR step, not one β-step alone. `LambdaCursor::next`
-/// ran `depth_exceeds` over the full logical tree before every step (`trace.rs:73`) and did not
+/// ran `depth_exceeds` over the full logical tree before every step (`trace.rs`) and did not
 /// short-circuit at these depths — 141 against `MAX_TERM_DEPTH` = 3,000 — so every row was the depth
 /// guard PLUS a β-step, and each row was an UPPER BOUND on its β-step rather than that step's cost.
+///
+/// THAT POINTER READ `trace.rs` line 73 UNTIL THIS COMMIT, AND IT HAD DRIFTED 91 LINES. It was
+/// `LambdaCursor::next`'s own `if depth_exceeds(&self.current, MAX_TERM_DEPTH)` when the λ-hang
+/// measurement apparatus (#1) wrote it, and still was when the β-step hang closed (#3). Five slices
+/// then pushed it down — the reduction-context zipper (#5) by 4, the viewmodel contract (#11) by 34,
+/// the wasm `Session` (#13) by 13, dual focus while running (#26) by 33, and `clippy::pedantic` (#31)
+/// by 7. This conversion found line 73 holding the blank line between `LambdaCursor::new`'s closing
+/// brace and `last_redex`'s doc — still inside `LambdaCursor`'s inherent `impl`, one block above the
+/// `impl Iterator` that holds `next` and the guard, which is what would have made it read as
+/// confirmation.
 ///
 /// **ALL OF THAT IS PRE-2026-08-01. `depth_exceeds` IS NOW O(1)** — `LambdaTerm` carries `depth` as a
 /// construction-time invariant, so the guard is a `u32` comparison and contributes nothing measurable.
@@ -910,11 +935,23 @@ fn tm_check() {
             // reports is what `run_tm` below actually did.
             //
             // THE CATCH-ALL THIS REPLACED DID NOT REPRODUCE IT. `Err(e) =>` fell into `defunc` on
-            // `TooDeep` as well, which `lower_program` returns IMMEDIATELY (`tm.rs:104-105`) — so on a
-            // `TooDeep` program this line would have printed a `defunc` path `run_tm` never took.
-            // Unreachable at these levels, since `lower_asm` succeeds directly at every one; corrected
-            // in the code rather than in the comment because the comment's claim is the one worth
-            // keeping, and a hazard demonstrator's transcript must not be able to say something false.
+            // `TooDeep` as well, which `lower_program` returns IMMEDIATELY from its
+            // `LowerError::TooDeep` arm (`tm.rs`) — so on a `TooDeep` program this line would have
+            // printed a `defunc` path `run_tm` never took. Unreachable at these levels, since `lower_asm`
+            // succeeds directly at every one; corrected in the code rather than in the comment because
+            // the comment's claim is the one worth keeping, and a hazard demonstrator's transcript must
+            // not be able to say something false.
+            //
+            // THAT POINTER READ `tm.rs` lines 104-105 UNTIL THIS COMMIT, AND IT HAD DRIFTED 17 LINES.
+            // It was exactly the two arms this sentence contrasts — `Err(LowerError::Unsupported { .. })
+            // => {}` and `Err(e @ LowerError::TooDeep { .. }) => return Err(e)` — when the λ-hang
+            // measurement apparatus (#1) wrote it, and it stayed put through the wasm boundary and Plan
+            // 5a-i. The node-count bound (#32) then moved the whole `match` down 17 lines, so the range
+            // now holds two lines of `lower_program`'s own DOC: the ones naming the contract test
+            // `directly_applied_lambda_is_a_named_subroutine` and saying that defunctionalizing such a
+            // program first would wrongly reject it. Same item, and the doc paragraph that actually
+            // states the `TooDeep` rule sits eight lines further down — near enough that a reader
+            // checking quickly would have taken it for the arm.
             Err(e @ LowerError::Unsupported { .. }) => match defunc(&core).and_then(|d| lower_asm(&d)) {
                 Ok(p) => format!(
                     "lower_asm {e:?} -> defunc ok: code={} labels={} slots={}",
@@ -945,8 +982,20 @@ fn tm_check() {
     }
 
     // WHICH cap returned `HitCap`, because nothing above can say. `TmStatus` has exactly two variants
-    // and `HitCap` is the answer for the step cap AND for the live-cell cap — `trace.rs:112` records
-    // the two as "genuinely interchangeable: both return `HitCap` with no side effect on either path".
+    // and `HitCap` is the answer for the step cap AND for the live-cell cap — `trace.rs`'s `TmCursor`
+    // records the two as "genuinely interchangeable: both return `HitCap` with no side effect on
+    // either path".
+    //
+    // THAT POINTER READ `trace.rs` line 112 UNTIL THIS COMMIT, AND IT HAD DRIFTED 91 LINES — the same
+    // 91, under the same five slices, as the `depth_exceeds` pointer in part D's doc, and resolved
+    // here separately because this sentence quotes a different claim in a different item. It was that
+    // quoted sentence's own first line, in `TmCursor`'s struct doc, when the λ-hang measurement
+    // apparatus (#1) wrote it. This conversion found line 112 holding a line of
+    // `LambdaCursor::depth_capped`'s doc — and that doc is ALSO about telling two producers of
+    // `HitCap` apart, which is exactly why it would have
+    // read as confirmation. It is the wrong pair: the λ depth guard against the λ step cap, where this
+    // sentence is about the TM step cap against the TM live-cell cap.
+    //
     // The classified outcome printed above therefore names the wall without naming which wall, and
     // 5,000,000 steps in ~70 ms is 14 ns/step, which makes 5,000,000 live cells at least as plausible.
     //

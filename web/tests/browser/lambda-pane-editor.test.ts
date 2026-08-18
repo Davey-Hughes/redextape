@@ -35,7 +35,7 @@ const events = (): PaneEvents => ({
  * A `LambdaState` fixture built through a helper typed as `LambdaState`, not an inline object literal
  * — so a field the brief's sketch omitted (`owner`, missing from its literal entirely) or mistyped
  * (`spans` as `[]` inferred rather than `Classified`) is a compiler error here instead of a silently
- * wrong fixture. `types.ts:83-116` is the real shape this is built from.
+ * wrong fixture. `types.ts`'s `LambdaState` is the real shape this is built from.
  */
 const lambdaState = (over: Partial<LambdaState> = {}): LambdaState => ({
   text: '\\x. x',

@@ -55,11 +55,13 @@ const PLUS = SAMPLE.indexOf('+')
  * that is the same reason `while4` used to report `None` on 432 of its 470 steps (task 8's M1). Region-
  * path tagging (2026-08-10) added five region tagging sites — both `Let` arms, `Seq`, the region `If`,
  * and `While`'s own root `App` — and this program's desugaring cannot avoid two of them: `let mut n = 1`
- * is a `Let{mutable: true}` node, and `desugar.rs`'s `Stmt::Assign` arm unconditionally wraps the
- * assignment in a `Core::Seq` (`desugar.rs:129-140`) — there is no statement position that skips it.
+ * is a `Let{mutable: true}` node, and `desugar.rs`'s `lower_stmts_at`, in its `Stmt::Assign` arm,
+ * unconditionally wraps the assignment in a `Core::Seq` — there is no statement position that skips it.
  * `Assign` itself is STILL never tagged (`lower.rs`'s `Core::Assign` arm returns the rebuilt store
- * untagged), but the `Seq` wrapping it is, and `desugar.rs:136,138` mints that `Seq`'s span from the
- * same `Stmt::Assign` span, so its tag reads on screen as if `n = 2;` itself were the named construct.
+ * untagged), but the `Seq` wrapping it is, and `desugar.rs`'s `lower_stmts_at`, in that same
+ * `Stmt::Assign` arm, mints that `Seq`'s span from the `Stmt::Assign` span with two `spans.push` calls
+ * that share the one `*span` — one for the `Assign`, one for the `Seq` — so its tag reads on screen as
+ * if `n = 2;` itself were the named construct.
  *
  * MEASURED, NOT ASSUMED, THE SAME WAY AS `SAMPLE`: driving `trace::LambdaCursor` over this source
  * (`cargo run --example`-style, against a throwaway probe, cross-checked against the running app)
@@ -76,9 +78,10 @@ const PLUS = SAMPLE.indexOf('+')
  * ```
  *
  * A FULLY untagged program is no longer constructible from source syntax at all, not just unlucky for
- * this fixture. `x = e` parses only as `Stmt::Assign` (`parser.rs:97` special-cases `Ident '='` at
- * statement position; assignment is never a tail `Expr`), and every `Stmt::Assign`/`Stmt::While`/non-tail
- * `Stmt::Expr` desugars inside a `Core::Seq` (`desugar.rs:129-160`) — so there is no source route to a
+ * this fixture. `x = e` parses only as `Stmt::Assign` (`parser.rs`'s `parse_block_body` special-cases
+ * `Ident '='` at statement position; assignment is never a tail `Expr`), and every
+ * `Stmt::Assign`/`Stmt::While`/non-tail `Stmt::Expr` desugars inside a `Core::Seq` (`desugar.rs`'s
+ * `lower_stmts_at`, one arm each) — so there is no source route to a
  * bare, `Seq`-free `Assign` (only `lower.rs`'s own
  * `forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths` test reaches that shape,
  * and only by constructing `Core` directly, bypassing the parser and desugarer). `owner_probe.rs`'s
@@ -93,6 +96,20 @@ const PLUS = SAMPLE.indexOf('+')
  *   - steps 1, 4 and 5 are what remain of the ORIGINAL property this test was written for: §5.1's "most
  *     β-steps have no source construct" must still show nothing and never throw on the way to deciding
  *     that, exactly where `while4` spends 92% of its own run.
+ *
+ * THE FOUR POINTERS ABOVE WERE LINE NUMBERS UNTIL THIS COMMIT, AND EVERY ONE OF THEM HAD DRIFTED BY
+ * EXACTLY ONE. They were resolved correctly when region-path tagging (#28) wrote them; `clippy::pedantic`
+ * (#31) then inserted a line above each and nothing re-resolved them. **EVERY LANDING SITE BELOW IS
+ * WHERE THIS CONVERSION FOUND THE OLD COORDINATE, NOT WHERE IT STANDS TODAY** — the dated form Tasks
+ * 2 through 4 settled on, adopted here by the whole-branch review so the six agents' notes read alike.
+ * A present-tense sentence about a coordinate is a live pointer wearing prose, in the one form the
+ * gate cannot see. `desugar.rs` lines 129-140 were the whole `Stmt::Assign` arm and were found opening
+ * on the `Stmt::Fn` arm above it; its lines 136 and 138 were the arm's two `spans.push` calls and were
+ * found landing on the `Core::Assign` construction and on the `seq_id` mint rather than on either
+ * push; `parser.rs` line 97 was the `Ident`-then-`Assign` predicate itself and was found holding the
+ * comment introducing it; `desugar.rs` lines 129-160 spanned the three `Seq`-wrapping arms and were
+ * found beginning one arm early. Not one of them broke a reader outright — each still landed close
+ * enough to read as confirmation, which is exactly why they are symbols now.
  */
 const SPARSELY_TAGGED = 'let mut n = 1; n = 2; n'
 

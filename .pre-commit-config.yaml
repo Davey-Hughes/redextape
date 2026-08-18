@@ -8,16 +8,44 @@
 repos:
   - repo: local
     hooks:
-      # NOT scoped by `files:`, unlike every hook below it, and that is the point: the byte this
-      # rejects makes a file invisible to search, so a gate that only fires when a matching path is
-      # staged would miss it arriving in a path nobody thought to list. It walks `git ls-files` and
-      # costs milliseconds.
+      # NOT scoped by `files:`, unlike every SCOPED hook below it, and that is the point: the byte
+      # this rejects makes a file invisible to search, so a gate that only fires when a matching path
+      # is staged would miss it arriving in a path nobody thought to list. The citation hook below is
+      # unscoped for its own version of the same reason, so "every hook below it" was falsified by the
+      # hook this repo added directly underneath — the four `files:`-scoped hooks are the comparison.
+      #
+      # It walks `git ls-files` and costs the better part of a second — 574-594 ms over five runs at
+      # the citation branch's close, with two other observers at 583-589 and 567-587. **THIS SENTENCE
+      # HAS NOW BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND THE SECOND TIME WAS THE FIX FOR THE
+      # FIRST.** It read "milliseconds" until the citation gate's review measured it, and the commit
+      # whose entire subject line was that the adjective was two orders out replaced it with "a
+      # quarter-second — measured 583-589 ms", which contradicts itself inside one clause. The
+      # quarter-second is the CITATION gate below (255-269 ms at the same close); this one is more
+      # than twice that. Cheap enough to run always; not free.
+      #
       # `--self-test` FIRST, then the scan — the same order CI uses, and for the same reason: this
       # gate's first draft passed against a planted NUL, so a scan of a clean tree proves nothing on
-      # its own. Both together are milliseconds.
+      # its own.
       - id: check-text-bytes
         name: no control bytes in tracked text
         entry: bash -c 'scripts/check-text-bytes.sh --self-test && scripts/check-text-bytes.sh'
+        language: system
+        always_run: true
+        pass_filenames: false
+      # UNSCOPED FOR THE SAME REASON AS THE HOOK ABOVE, AND WITH ITS OWN EVIDENCE. A `file:line`
+      # citation rots because something is inserted ABOVE its target, and the file that moves is
+      # almost never the file being committed — so a rule scoped by staged path would miss the
+      # citation arriving in a path nobody thought to list. It walks `git ls-files` instead, and the
+      # cost was MEASURED rather than assumed: self-test plus scan is ~250 ms over 258 files, after
+      # the per-file `printf | grep` filters were replaced with bash matching (~975 ms before). The
+      # tally reconciliation added a second `git ls-files` walk, worth about +35 ms — measured
+      # INTERLEAVED against the previous version on the same machine, because absolute figures here
+      # vary by more than the change does and a single before/after pair would have measured load.
+      # `--self-test` first, then the scan, for the reason `check-text-bytes` states: a gate that only
+      # ever runs against a passing tree cannot tell you it still works.
+      - id: check-citations
+        name: no file:line citations in tracked source
+        entry: bash -c 'scripts/check-citations.sh --self-test && scripts/check-citations.sh'
         language: system
         always_run: true
         pass_filenames: false

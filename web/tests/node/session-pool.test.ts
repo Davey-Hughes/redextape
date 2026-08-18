@@ -6,7 +6,7 @@ import { SessionPool } from '../../src/session-client'
 /**
  * A `PoolPort` with no thread behind it.
  *
- * THE WHOLE POINT OF `ClientPort` BEING STRUCTURAL (`session-client.ts:9-12`), one type up: the pool
+ * THE WHOLE POINT OF `ClientPort` BEING STRUCTURAL (`session-client.ts`), one type up: the pool
  * is a map, a spawn on first bind and a `terminate` on unbind, and none of that needs a worker to
  * exercise. `terminated` is a COUNT rather than a boolean so a double-terminate is visible — the
  * failure a `has`-then-`delete` written in the wrong order would produce.

@@ -99,8 +99,17 @@ describe('a full store', () => {
    * reach `persistBuffers` directly) — after the SAME fork, on the SAME still-detached pane, touching
    * neither `forkFailed` nor `detached`. Waiting for it is the same signal
    * `scratch-fork.test.ts`'s truncated-frame test uses: `.term-editor` mounts in the SAME handler,
-   * synchronously before `onBuffersPersist()` runs (`replies.ts` lines 325-341), so its arrival is proof
-   * the second persist has already been attempted.
+   * synchronously before `onBuffersPersist()` runs — the `scratch-compiled` arm's own `setEditor`
+   * call, reached through `editorHome` — so its arrival is proof the second persist has already been
+   * attempted. **`setEditor` IS `lambda-pane.ts`'s `LambdaPane` METHOD, NOT ANYTHING `replies.ts`
+   * DEFINES, and this sentence said otherwise until the whole-branch review.** It read
+   * `` `replies.ts`'s `LambdaPane.setEditor` `` — the one possessive in 57 conversions that named a
+   * symbol its file does not own, which sends a reader grepping `replies.ts` for a definition that
+   * has never been there. Task 2 got the identical shape right (*"called at `reduce.rs`'s
+   * `reduce_step_go`"*); this one is the counter-example, and the fix is to name the arm that calls
+   * it and the file that declares it. This citation used to read `replies.ts` lines 325-341, which by
+   * then was comment prose about `linkIndex` nullability and `setEditor`'s single target, not either
+   * call.
    */
   it('reports once, and the report survives further writes', async () => {
     refuseWrites = true

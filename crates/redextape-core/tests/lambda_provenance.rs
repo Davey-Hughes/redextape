@@ -103,10 +103,18 @@ fn a_full_reduction_never_produces_a_tag_that_was_not_in_the_source_term() {
     // THE JUSTIFICATION THIS COMMENT USED TO GIVE IS DEAD, AND IT IS NOT WHY THE FIXTURE STAYS THIS
     // SHAPE. It read that `reduce_step`'s non-root path rebuilds spine `App`s through plain `app(..)`,
     // so a redex below the root would emit unrelated `None`s. Task 4 changed exactly that: the descent
-    // now rebuilds through `app_tagged_for_rebuild` (`reduce.rs:268,271`), preserving each spine node's
-    // own owner, so a deeper fixture would no longer manufacture spurious `None`s. What survives is the
-    // narrower point above — root-only keeps the descent out of the picture, so a failure here can only
-    // be `beta_go`'s.
+    // now rebuilds through `app_tagged_for_rebuild` (called at `reduce.rs`'s `reduce_step_go`, once on the
+    // function side and once on the argument side of its `Node::App` arm), preserving each spine node's own
+    // owner, so a deeper fixture would no longer manufacture spurious `None`s. What survives is the
+    // narrower point above — root-only keeps the descent out of the picture, so a failure here can only be
+    // `beta_go`'s.
+    //
+    // THAT POINTER READ `reduce.rs` lines 268 and 271 UNTIL THIS COMMIT, AND BOTH HAD DRIFTED. They were
+    // exactly the two `app_tagged_for_rebuild` calls when 5c wrote them; `clippy::pedantic` (#31) moved
+    // each call down two lines, into the pair the paragraph above names — the function side and the
+    // argument side of `reduce_step_go`'s `Node::App` arm. This conversion found the old pair landing on
+    // the two `reduce_step_go` recursion branches two lines above each call — close enough to read as
+    // confirmation.
     let t = app_owned(abs("f", app_owned(var(0), var(0), 3)), abs("y", app_owned(var(0), var(0), 42)), 7);
 
     let mut allowed: Vec<Option<u32>> = owners(&t);
@@ -157,14 +165,21 @@ fn lowering_tags_each_core_construct_at_its_own_root() {
     // directly on the root, not via a flattened walk that would accept the tag landing anywhere.
     assert_eq!(term.owner(), Some(let_id), "the lowered term's root must be tagged with the Let construct's own id");
     // `"let x = 40;"` AND NOT THE WHOLE PROGRAM — THE FACT THE WHOLE `Within` ARGUMENT RESTS ON.
-    // `desugar.rs`'s `Stmt::Let` arm records `Stmt::Let`'s OWN statement span (`spans.push((id, *span))`,
-    // `desugar.rs:119-123`), which covers the binding syntax only, even though the `Core::Let` it builds
-    // encloses every following statement as its `body`. Were the map to record the enclosing block's span
-    // instead, the root's tag would name the entire program — and since the root is the outermost `App`,
-    // every `Within` step in the run would resolve to it. "Somewhere inside `let x = 40;`" is a real
-    // narrowing; "somewhere inside the whole program" is exactly the degenerate nearest-enclosing-node
-    // answer 5b refused on the TM leg, and design §6's M2 threshold would have been a formality. That
-    // is why this asserts the exact text rather than merely that `resolve` returns something.
+    // `desugar.rs`'s `lower_stmts_at`, in its `Stmt::Let` arm, records `Stmt::Let`'s OWN statement span
+    // (`spans.push((id, *span))`), which covers the binding syntax only, even though the `Core::Let` it
+    // builds encloses every following statement as its `body`. Were the map to record the enclosing
+    // block's span instead, the root's tag would name the entire program — and since the root is the
+    // outermost `App`, every `Within` step in the run would resolve to it. "Somewhere inside
+    // `let x = 40;`" is a real narrowing; "somewhere inside the whole program" is exactly the degenerate
+    // nearest-enclosing-node answer 5b refused on the TM leg, and design §6's M2 threshold would have
+    // been a formality. That is why this asserts the exact text rather than merely that `resolve`
+    // returns something.
+    //
+    // THAT POINTER READ `desugar.rs` lines 119-123 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It was the
+    // whole `Stmt::Let` arm — its pattern down to the `Core::Let` the arm builds — when 5c wrote it;
+    // `clippy::pedantic` (#31) pushed the arm down a line, so this conversion found the range opening on
+    // the enclosing `acc = match stmt` and stopping at the `spans.push`. The push it names was still
+    // inside it, which is exactly why the range read as confirmation.
     assert_eq!(resolve(let_id), "let x = 40;", "the Let's tag must resolve to the let binding's own source text");
 
     // 2. Descend by STRUCTURE — not by searching — to the BinOp's own App. `lower.rs`'s `Let` arm
@@ -472,10 +487,19 @@ fn region_constructs_tag_their_own_roots_without_duplicating() {
 }
 
 /// **FINDING 1: THE FOURTH TAGGED ARM, OBSERVED.** `lower_region_body`'s `Let { mutable: false }` arm
-/// (`lower.rs:637`) was the one tagged arm with no fixture reaching it: neither the fixture above nor
+/// (`lower.rs`) was the one tagged arm with no fixture reaching it: neither the fixture above nor
 /// `a_region_ifs_tag_sits_on_its_outer_application`'s below contains an immutable `let` in region
 /// position, and every other test in this file stays green whether or not that arm tags anything at
-/// all — reverting `lower.rs:637`'s `app_owned(..)` back to plain `app(..)` left the whole file green.
+/// all — reverting the `app_owned(..)` returned by `lower.rs`'s `lower_region_body` in its
+/// `Core::Let { mutable: false }` arm back to plain `app(..)` left the whole file green.
+///
+/// BOTH POINTERS ABOVE READ `lower.rs` line 637 UNTIL THIS COMMIT, AND IT HAD DRIFTED ONTO THE
+/// OPPOSITE ARM. It was that `Core::Let { mutable: false }` arm's own `Ok(app_owned(..))` when
+/// region-path tagging (#28) wrote it; `clippy::pedantic` (#31) then pushed `lower_region_body`'s arms
+/// down 44 lines, carrying the `app_owned(..)` it named down with the rest of its arm. This conversion
+/// found 637 holding the `origins.at_root(*id)` of the `Core::Let { mutable: true }` arm — the arm this
+/// Finding exists to tell this one apart from. It still landed on a `Let` arm of the right function,
+/// which is what made it read as confirmation.
 ///
 /// `let k = 1;` sits in the body of the region-opening `let mut n`, which `lower_region_body`'s
 /// `Let { mutable: true }` arm hands to `lower_region_body` again for its continuation — exactly
@@ -564,10 +588,16 @@ fn app_tagged_with(t: &LambdaTerm, id: u32) -> Option<LambdaTerm> {
 /// tree rather than hardcoded, so these tests track whatever ids the parser assigns instead of a
 /// number that could drift. Iterative, like every other `Core` walk in this suite (see `find_first`
 /// in `tests/sourcemap_coverage.rs`, the same function over `&Core` rather than `NodeId`) —
-/// `Core::for_each_child`'s doc (`core.rs:85-89`) states that a long statement sequence desugars to a
-/// spine tens of thousands of nodes deep and that recursive traversal of it "aborts the process with
-/// an uncatchable stack overflow", so a caller "walks the tree with its own explicit worklist"; this
+/// `Core::for_each_child`'s doc (`core.rs`) states that a long statement sequence desugars to a spine
+/// tens of thousands of nodes deep and that recursive traversal of it "aborts the process with an
+/// uncatchable stack overflow", so a caller "walks the tree with its own explicit worklist"; this
 /// function IS that caller, not licence to call itself.
+///
+/// THAT POINTER READ `core.rs` lines 85-89 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It ran from the
+/// doc's second line to `for_each_child`'s own signature when region-path tagging (#28) wrote it;
+/// `clippy::pedantic` (#31) moved the item down two lines, so this conversion found the range opening
+/// on the blank line above the doc and stopping a line short of its end. Both quoted sentences were
+/// still inside it, so nothing about it looked wrong.
 fn find_id(core: &redextape_core::core::Core, pred: &impl Fn(&redextape_core::core::Core) -> bool) -> Option<u32> {
     let mut stack = vec![core];
     while let Some(n) = stack.pop() {
@@ -624,7 +654,7 @@ fn a_whiles_tag_names_the_loop_and_not_the_whole_program() {
 /// HEAD, the same mutation now fails it). This is `a_region_ifs_tag_sits_on_its_outer_application`'s
 /// idiom, applied here.
 ///
-/// It is not just tidiness: `fix()` is itself an `Abs` (`lower.rs:83-86`, the Y-combinator shape), so
+/// It is not just tidiness: `fix()` is itself an `Abs` (`lower.rs`, the Y-combinator shape), so
 /// `(fix g)` is a redex. Under the WRONG (inner) placement the loop's first β-step would report
 /// `Owner::Exact(while_id)` — the redex contracted first carries the tag directly. Under the correct
 /// (outer) placement that same first β-step instead descends through the tagged outer App to reach
@@ -659,8 +689,9 @@ fn a_whiles_tag_sits_on_its_outer_application() {
 ///
 /// **NOT REACHABLE THROUGH `parser::parse` — BUILT DIRECTLY.** `while` is a `Stmt`, never an
 /// `Expr` (`ast.rs`), and `Stmt::While` desugars UNCONDITIONALLY into
-/// `Core::Seq(seq_id, While(..), acc)` (`desugar.rs:141-153`) — even for a tail-less block, whose
-/// `acc` starts as `Core::Unit`, not the `While` itself (`desugar.rs:93-99`). `Core::Seq`'s `first`
+/// `Core::Seq(seq_id, While(..), acc)` (`desugar.rs`'s `lower_stmts_at`, in its `Stmt::While` arm) —
+/// even for a tail-less block, whose `acc` starts as `Core::Unit`, not the `While` itself
+/// (`desugar.rs`'s `lower_stmts_at` again, where `acc` is seeded from `tail`). `Core::Seq`'s `first`
 /// is always lowered at `Pos::Store` (the `Core::Seq` arm in `lower_region_body`), never
 /// `Pos::Value`. So no parsed program can ever put a `Core::While` node itself in `Pos::Value` — a
 /// fixture built through `parser::parse` (as originally tried here, with
@@ -671,15 +702,33 @@ fn a_whiles_tag_sits_on_its_outer_application() {
 /// `Core::While` IS reachable at `Pos::Value`, but only through hand-built `Core` — never through
 /// the parser. The path below is the simplest one: the TOP-LEVEL node handed to
 /// `lower`/`lower_mapped`. `lower_expr`'s `Core::While(..) => lower_region(core, ..)` arm passes
-/// `lower_region` that same node, and `lower_region` (`lower.rs:566`) enters `lower_region_body` on
+/// `lower_region` that same node, and `lower_region` (`lower.rs`) enters `lower_region_body` on
 /// it at `Pos::Value`. It is not the only one: any hand-built node that encloses a `While` in value
 /// position reaches the same branch too — e.g. `Core::Lambda(_, ["x"], Core::While(..))`, the shape
-/// `forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths` (`lower.rs:1204`)
+/// `forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths` (`lower.rs`)
 /// uses for the sibling `Assign` branch, under `lower.rs`'s own "`forget` is reachable only through
-/// direct `Core` construction" section (`lower.rs:1193-1198`) — which states the identical
-/// structural fact for `Assign`/`While` together, so the two accounts should not drift apart.
-/// Constructing the `Core` by hand — bypassing `parser::parse`/`desugar` — is what actually
+/// direct `Core` construction" section — whose single test is that one, and whose doc states the
+/// identical structural fact for `Assign`/`While` together, so the two accounts should not drift
+/// apart. Constructing the `Core` by hand — bypassing `parser::parse`/`desugar` — is what actually
 /// exercises this branch, by any such route.
+///
+/// THE FIVE POINTERS ABOVE WERE LINE NUMBERS UNTIL THIS COMMIT, AND ALL FIVE HAD DRIFTED — under one
+/// lint-only PR (`clippy::pedantic`, #31) that DID open this file: its whole edit here was the
+/// crate-level `allow` attribute at the top, and it re-resolved none of the eleven citations it was
+/// sitting in. Being in the file was not enough — which is the argument for a gate, rather than for a
+/// convention asking authors to re-check what they pass. `desugar.rs` lines 141-153
+/// were the whole `Stmt::While` arm down to the `Core::Seq` it builds, and this conversion found them
+/// opening on the `Stmt::Assign` arm's closing brace and stopping one line short of that `Core::Seq`.
+/// Its lines 93-99 were `acc`'s initializer through the `Core::Unit` branch — which #31 also rewrote
+/// from a `match` into an `if let` — and were found starting in the comment above it and ending before
+/// the `Core::Unit`. `lower.rs` line 566 was `lower_region`'s own
+/// `lower_region_body(.., Pos::Value, ..)` call, which #31 moved 35 lines down, leaving 566 a blank
+/// line above `cur_store`, a different function. `lower.rs` line 1204 was that test's `fn` line —
+/// `forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths`, moved 44 lines — and
+/// 1204 was found inside the unrelated `nat_nodes` helper. `lower.rs` lines 1193-1198 were the section
+/// banner and the opening of its doc, moved the same 44 lines, and 1193-1198 was found holding
+/// `nat_nodes`'s doc — which also argues about deep spines and stack overflow, so it reads like the
+/// right block to anyone who checks it quickly.
 #[test]
 fn a_while_in_value_position_carries_no_tag() {
     use redextape_core::core::Core;

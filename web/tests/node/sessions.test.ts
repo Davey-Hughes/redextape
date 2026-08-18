@@ -543,8 +543,9 @@ describe('resetLegs', () => {
 
   /**
    * A `LambdaScratch` has no TM leg to be "not compiled", and writing one so the record is square is
-   * the shape `session.rs:257-273` records the cost of. The caller passes one reply's worth of status
-   * whatever the session's shape; dropping the half that has nowhere to go is the whole behaviour.
+   * the shape `session.rs`'s `Session::tm` records the cost of. The caller passes one reply's worth of
+   * status whatever the session's shape; dropping the half that has nowhere to go is the whole
+   * behaviour.
    *
    * BOTH ONE-LEGGED SHAPES, NOT JUST THE λ ONE. §4.1 has two scratch types and this function has two
    * independent guards; testing one leaves the other's absent-arm unexercised, which is the direction
