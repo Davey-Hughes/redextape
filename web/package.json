@@ -16,6 +16,7 @@
     "test:browser": "vitest run --project browser",
     "test:probe": "REDEXTAPE_PROBE=1 vitest run --project browser tests/browser/buffer-affordability.test.ts",
     "test:probe:tm": "REDEXTAPE_PROBE=1 vitest run --project browser tests/browser/tm-fork-cost.test.ts",
+    "test:probe:floor": "REDEXTAPE_PROBE=1 vitest run --project browser tests/browser/pane-floor.test.ts",
     "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {

@@ -35,9 +35,52 @@ export type LayoutNode =
  * node-testable. `layout-view.ts` converts a pointer delta into a fraction of the split's measured
  * extent before calling `resize`, which is the one place a pixel exists.
  *
- * 0.1 IS A CHOICE, NOT A MEASUREMENT, and is recorded as such: at a 1,200px window a 10% floor is
- * ~120px, which is wider than the δ-table's narrowest column and about four characters of λ text.
- * Nothing was measured to pick it; if a pane turns out to be unusable at the floor, the number moves.
+ * MEASURED 2026-08-18 (`pnpm test:probe:floor`, `tests/browser/pane-floor.test.ts`), not merely chosen
+ * — 5d-iv T6. The first pass of that task drove only the source/λ (row, WIDTH) divider and read
+ * `clipped` off the wrong element; both gaps were found by the probe's own author and fixed the same
+ * day, so the table below is the RE-MEASURED reading, not the original one. The probe mounts the real
+ * app at three imposed window SIZES (width and height both — a height floor read against an
+ * unconstrained container height is the same fiction an unmeasured width would be) and drags BOTH
+ * dividers hard past the floor: source/λ (row split) for width, and the row-of-source-and-λ / TM
+ * (column split, root) for height. `resize`'s clamp lands each drag exactly on 0.1.
+ *
+ * | window | source | λ (unforked) | tm, full width | tm, at its OWN (height) floor |
+ * | --- | --- | --- | --- | --- |
+ * | 900x600   | 89px, overflow 2.28x  | 799px, overflow n/a  | 900px, overflow 1.00x  | 59px, overflow 11.46x |
+ * | 1200x800  | 119px, overflow 1.71x | 1069px, overflow n/a | 1200px, overflow 1.00x | 79px, overflow 8.56x  |
+ * | 1920x1080 | 191px, overflow 1.06x | 1717px, overflow n/a | 1920px, overflow 1.00x | 107px, overflow 6.32x |
+ *
+ * `overflow` IS A RATIO (inner content extent ÷ box extent), not the boolean the first pass printed.
+ * That boolean read the `[data-leaf]` PANE element's own `scrollWidth`/`clientWidth`, which never
+ * differs no matter how hard the pane is squeezed — CodeMirror's `.cm-scroller` and TM's `.cells`
+ * absorb all the real overflow one level in, so the boolean was `false` at every width regardless,
+ * which is worse than not measuring: a reader would take it as reassurance it never earned. The ratio
+ * measures the scroller that actually overflows. `source`'s three figures agree on ~203px of content
+ * (`let x = 40; x + 2`, `.cm-scroller`'s `white-space: pre`) squeezed into a shrinking box — the
+ * "about four characters, scroll for the rest" state this doc predicted before anything was measured,
+ * confirmed rather than contradicted. `tm, full width` is not a floor reading (only the height drag
+ * touches TM) — its 1.00x is just "not squeezed," included for contrast with the last column.
+ *
+ * 0.1 STANDS FOR WIDTH. `source`'s editor keeps mounting and running at the floor at all three
+ * widths — nothing destroyed or hidden, only scrolled. λ's DEFAULT view is `.term`, a plain element
+ * with `white-space: pre-wrap` — not a `ScratchEditor` at all, so it wraps instead of overflowing
+ * horizontally and `overflow=n/a` above is a real absence of a `.cm-scroller`, not a probe gap. λ only
+ * gains `source`'s editor machinery, and by extension `source`'s measured floor behaviour, once forked
+ * into a scratch buffer — a state this reading still does not exercise directly, so that half remains
+ * inference by symmetry rather than a direct measurement.
+ *
+ * 0.1 DOES NOT STAND FOR TM's HEIGHT, AND THIS IS A FINDING, NOT A FIX. At every size TM's own content
+ * is 6-11x taller than the box the drag left it — the `[data-leaf="tm-0"]` pane's `overflow: auto`
+ * genuinely fires here (unlike the width case above), because `.state-table`'s `max-height: 40vh` is
+ * relative to the BROWSER'S viewport, not to this pane. A divider drag does not resize the browser
+ * window, so shrinking TM's allocated share of the split does nothing to that cap — the δ-table (open
+ * by default, `TmPane`'s `#open` starts `true`) stays whatever size the WINDOW allows regardless of
+ * how little SPACE the pane itself was just given. This is a shape mismatch between two different
+ * boxes a CSS unit was written against, not a wrong constant — no fraction near 0.1 closes it, since
+ * the content driving the overflow does not shrink as the fraction does. Per design §9 this module
+ * does not become the place a pixel fix would live even if one were made; this is flagged as a design
+ * question (does `.state-table`'s cap want to track the PANE rather than the viewport?) rather than
+ * acted on here.
  */
 export const MIN_PANE_FRACTION = 0.1
 

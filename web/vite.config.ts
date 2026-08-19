@@ -59,7 +59,11 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
  * §4.6's whole argument is that a cap like this is a measurement rather than an extrapolation, and a
  * measurement that cannot be re-run is an extrapolation with a date on it.
  */
-const PROBE_FILES = ['tests/browser/buffer-affordability.test.ts', 'tests/browser/tm-fork-cost.test.ts']
+const PROBE_FILES = [
+  'tests/browser/buffer-affordability.test.ts',
+  'tests/browser/tm-fork-cost.test.ts',
+  'tests/browser/pane-floor.test.ts',
+]
 const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : []
 
 export default defineConfig({

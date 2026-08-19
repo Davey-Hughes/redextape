@@ -1543,6 +1543,45 @@ that slice is reachable without a mouse. That is the whole of it.
 one place where deferring is least comfortable: it is a control whose entire purpose is to report
 something the other panes cannot show.
 
+#### THE PASS IS UNBLOCKED AND DELIBERATELY STILL NOT TAKEN — THE TRIGGER MOVES FROM "5d-iv HAS LANDED" TO "THE UI IS CLOSE TO DONE" (2026-08-18, decision, no code)
+
+**5d-iv closed and its entry recorded the pass as unblocked** (see that entry's own WHAT THIS SLICE DID
+NOT CLOSE: *"5d-iv is the last slice that pass was gated behind; this entry is what moves it off that
+line."*). That is still true. **The pass is not being taken anyway**, and this entry exists so that is a
+recorded decision rather than a thing that quietly did not happen — which is precisely the failure mode
+the section above named when it wrote the list instead of a note saying a11y is on the todo.
+
+**THE REASON, AND IT IS THE ORIGINAL DECISION'S OWN REASON APPLIED TO A CONDITION THAT TURNS OUT NOT TO
+HAVE BEEN MET.** The deferral above rests on one sentence: *"no accessibility work happens per-slice
+while the pane set is still changing shape ... Semantics written now would be rewritten twice and end up
+a patchwork of three slices' habits."* What 5d-iv discharged was the last *planned* slice the pass was
+sequenced behind. It did not establish that the controls have settled — and they have not. The web UI is
+expected to need substantial tuning before it is a thing anyone would call finished, and tuning is
+exactly the activity that adds, removes and re-purposes controls. Running the pass against a UI that is
+still going to move would produce the patchwork the original decision was written to avoid, one slice
+later than feared and for the same reason.
+
+**WHAT ACTUALLY CHANGES HERE IS THE TRIGGER, NOT THE PRIORITY.** It was *"after 5d-iv, before anything
+else in Plan 5"* — a condition on a slice, which is why every entry from 5d-ii-a onward could restate it
+mechanically. It is now *"when the web UI is close to actually being done"* — a condition on the UI. That
+is a weaker and vaguer trigger and saying so is the point: **a condition nobody can check is how a
+deferral becomes a cancellation.**
+
+**THE RISK IS NOW LARGER THAN WHEN IT WAS FIRST NAMED, AND THE LIST IS THE EVIDENCE.** The section above
+says the risk of deferring "is that it silently never happens". That section shipped with five items. The
+list now runs to **sixteen**, two of which (11 and 12) were fixed in the branch that filed them — so
+fourteen remain, one of those (item 1) with a single instance retired by plan5d-iv and the rest of it
+standing. Every slice that touched the pane set has added to it: 5b, 5d-ii-b, 5d-ii-c, 5d-ii-d and
+plan5d-iv each filed at least one, and item 9 records 5d-ii-a filing four that were *declared* added and
+never written down — the silent-never-happens failure occurring inside the list built to prevent it. The
+list is doing its job as a record. It is not a mitigation: nothing on it gets easier by waiting, and a
+list that only grows is a list whose owner has not yet been named.
+
+**WHAT WOULD MAKE IT TIME, SO THE TRIGGER IS CHECKABLE BY SOMEONE OTHER THAN ITS AUTHOR.** No slice
+scheduled that adds, removes or relabels a control; no pane kind or renderer expected to change; and the
+standing list going a full slice without gaining an entry. Whoever takes the pass should check those
+three rather than re-deriving this decision.
+
 #### 5d SPLITS IN TWO, AND ITS SESSION MODEL IS DECIDED AHEAD OF ITS SLICE — 5c RESEQUENCED IN FRONT OF IT (2026-08-10, brainstorm, no code)
 
 Recorded here rather than left in a brainstorm transcript, for the reason this Plan's log has now given
@@ -8664,3 +8703,498 @@ reasoned about.** With `main.ts`'s restore-loop change reverted, `tm-buffer-rest
 scratch-1 has no lambda leg` out of `SessionRegistry.legOf`, through `PaneSlot.resolve`, `draw`, and
 `Object.applyLayout`, taking the whole page down with it — the exact crash class the fix closes. Full
 text is in Task 11's own report.
+
+#### THE DIVIDER DRAG CLOSES — the roadmap filed a per-frame layout write as a cost, and measuring it found a drag that moves one frame and dies (2026-08-18, branch `divider-drag-gesture`, `b5a156d^..6aec43f` plus this entry)
+
+Design: [`../specs/2026-08-18-divider-drag-gesture-design.md`](../specs/2026-08-18-divider-drag-gesture-design.md).
+Plan: [`2026-08-18-divider-drag-gesture.md`](2026-08-18-divider-drag-gesture.md).
+
+**The per-frame layout write on `pointermove`** — filed at 5d-ii-d's close, repeated by 5d-iv's close
+directly above this one, and handed each time to *"whoever next touches that path"* — is closed. Seven
+tasks, fourteen commits, 9 files, +856 / -49 measured over `b5a156d^..6aec43f` excluding this branch's own
+design and plan documents; +2,216 / -49 with them. The branch's first commit, `9444ff1`, is the a11y
+deferral's own entry and is not this slice's work; it sat at the branch point and is excluded from the
+range above.
+
+**THE FILED ITEM DESCRIBED A COST AND IT WAS SITTING ON TOP OF A DEFECT.** It named a synchronous
+`localStorage` write at pointer rate, which is real and is now gone. It did not name the thing in the
+same handler that made the whole gesture non-functional, because nothing had ever measured the gesture.
+**A divider drag on the real page moved exactly one `pointermove`'s worth and then stopped**, in every
+build this app has ever shipped to a browser.
+
+##### THE MEASUREMENT CAME BEFORE THE DESIGN, AND IT IS WHAT RECLASSIFIED THE ITEM
+
+A probe mounted the app through `main()` in Chromium, grabbed the first divider, and dispatched a
+`pointerdown` followed by successive `pointermove`s. Verbatim:
+
+```
+sizes before:                        [0.5, 0.5]
+after pointerdown, divider in DOM:   true
+after move #1 (+40px), in DOM:       false
+  sizes:                             [0.5966, 0.4034]     (40/414 = one step, correctly converted)
+after move #2 (+80px total):         [0.5966, 0.4034]     unchanged
+live divider is the node we grabbed: false
+  after move #3 at the LIVE divider: [0.5966, 0.4034]     unchanged
+```
+
+To resize a pane, a user would have had to press, twitch, release, and repeat.
+
+**THE MECHANISM, AND POINTER CAPTURE DOES NOT SAVE IT.** `divider`'s `pointermove` called `onResize`,
+whose caller is `pane-host.ts`'s `applyLayout` reaching `renderLayout` reaching `root.replaceChildren()`.
+That destroys the divider element holding the drag, on the drag's own first frame. The replacement
+element built in its place has `dragging = false` in its own fresh closure, so every later frame returns
+at `if (!dragging) return`. Explicit pointer capture is released implicitly when the captured element
+leaves the document, so the capture the `pointerdown` took goes with it.
+
+**This is not an artefact of synthetic events**, and the probe was written to say so rather than to be
+believed. `root.contains(d) === false` after `replaceChildren()` is deterministic DOM behaviour; the
+fresh closure's `dragging` is `false` by construction. The probe dispatched move #3 at the *live* divider
+as well as at the grabbed one — the node a real user's pointer would now be over — and **neither moved
+anything**, because the live divider's own closure never saw a `pointerdown`.
+
+##### THE DEFECT WAS REPRODUCED AS A COMMITTED TEST BEFORE IT WAS FIXED — AND IT IS THREE TESTS, NOT THE FIVE THE FIRST REPORT CLAIMED
+
+`web/tests/browser/divider-drag.test.ts`, run against unfixed source. Three failures, quoted as they were
+captured:
+
+```
+ FAIL  |browser (chromium)| tests/browser/divider-drag.test.ts > dragging a divider on a mounted app > does not destroy the divider being dragged
+AssertionError: expected false to be true // Object.is equality
+
+ ❯ tests/browser/divider-drag.test.ts:92:41
+     90|       divider.dispatchEvent(pointer('pointermove', x))
+     91|       // The whole defect, in one assertion. Before the fix this is `f…
+     92|       expect(rootEl().contains(divider)).toBe(true)
+       |                                         ^
+
+ FAIL  |browser (chromium)| tests/browser/divider-drag.test.ts > dragging a divider on a mounted app > tracks the pointer for the whole drag, not one frame of it
+AssertionError: expected 0.5483091787439613 to be close to 0.644927536231884, received difference is 0.09661835748792269, but expected 0.0005
+
+ ❯ tests/browser/divider-drag.test.ts:109:18
+    107|     // 60px of travel against the measured split extent. Before the fi…
+    108|     const [first] = storedRowSizes()
+    109|     expect(first).toBeCloseTo(0.5 + 60 / span, 3)
+       |                  ^
+
+ FAIL  |browser (chromium)| tests/browser/divider-drag.test.ts > dragging a divider on a mounted app > writes storage once for the gesture, not once per frame
+AssertionError: expected 1 to be +0 // Object.is equality
+
+ ❯ tests/browser/divider-drag.test.ts:122:20
+    120|     const total = setItem.mock.calls.filter((c) => c[0] === LAYOUT_STO…
+    121|
+    122|     expect(midDrag).toBe(0)
+       |                    ^
+```
+
+**The three numbers are the probe's transcript again, in assertion form.** `expected false to be true` is
+the divider leaving the DOM at move 1. `0.5483091787439613` is exactly `0.5 + 20/414` — one frame of a
+60px drag, three moves of 20px each, of which the first landed and the other two hit a detached parent
+that measures `extent() === 0` and so converted to a zero delta. `expected 1 to be +0` is the storage
+write the filed item named, observed mid-drag.
+
+**THE FIRST REPORT OF THIS RUN SAID ALL FIVE TESTS FAILED, AND THAT CLAIM IS RETRACTED RATHER THAN
+REPEATED HERE.** A `vi.spyOn` on `localStorage.setItem` installed by the third test was restored by a
+trailing `mockRestore()` sitting *after* that test's own failing assertion — so the restore never ran and
+the spy, with its accumulated call history, leaked into the rest of the file. `vi.spyOn` on an
+already-spied method returns the *same* spy, so the fifth test's `expected 4 to be +0` counts one write
+from the third test's failure, two from `beforeEach` mounts and one from an unrelated `pointermove` —
+**none of them from the gesture that test dispatched.** Run with clean hygiene the fifth test PASSES
+against the unfixed source, and provably so: it asserts a *count* of writes, and a missing `commit()` can
+only ever produce fewer writes than expected, never more. Only the three quoted above are failures
+established as properties of the source rather than of the run, so only those three are quoted. The file
+now restores every spy through an unconditional `afterEach(() => vi.restoreAllMocks())`.
+
+**Test 1's failure was also falsified before it was trusted.** Its assertion was inverted to
+`toBe(false)`, rerun, and passed — confirming the divider is genuinely gone after move 1 rather than the
+test having grabbed the wrong node. The assertion was restored before any source changed.
+
+##### THE FILED ITEM'S OWN PROPOSED FIX WAS HALF RIGHT, AND THE OTHER HALF WOULD HAVE FIXED NOTHING — CORRECTED FORWARD
+
+5d-ii-d's entry reads: *"The fix is a commit-on-`pointerup` or a debounce."*
+
+**The `pointerup` half is right and is what shipped.** `commit()` is called once, at the end of the
+gesture, and it is the only thing on this path that persists.
+
+**The debounce half addresses the storage write and nothing else.** `renderLayout` destroys the divider
+at whatever rate it is called; coalescing the *write* behind a timer leaves `replaceChildren()` firing on
+every frame, so the drag dies on frame one exactly as before, having written once instead of ten times.
+The same argument sinks the obvious variant — rAF-coalescing the existing path — which was considered and
+rejected against the measurement rather than skipped: `requestAnimationFrame` still calls `renderLayout`,
+still calls `replaceChildren()`, still destroys the divider, at precisely the rate a pointer drag already
+produces.
+
+**5d-ii-d's entry is not edited.** Per the web-doc-history convention it states — *"correcting history to
+match the present is worse than leaving it, because a dated entry that has been edited to agree with
+today teaches the next reader nothing about how the belief changed"* — the correction is made here, where
+it is visible as a correction. The filed item was a reasonable inference from what could be seen without
+a working drag to measure. It was not wrong to file; half of its remedy was wrong, and only measurement
+could have told the difference.
+
+##### WHY A GREEN SUITE COULD NOT SEE IT, AND FOUR SLICES CARRIED THE SENTENCE THAT SAID SO
+
+`layout-view.test.ts` held the only divider-drag test in the repo, and its `onResize` was a stub that
+pushed to an array. **A stub that never re-renders leaves the divider it grabbed alive for the whole
+test**, so the one assertion that would have caught this — is the node still in the document? — was never
+in a position to fail.
+
+5d-ii-a filed the gap in words, at its own close: *"no test drags a divider on a tree `main()` mounted and
+then reads back what was stored."* 5d-ii-b, 5d-ii-c, 5d-ii-d and 5d-iv each carried that sentence forward
+untouched. **It is the same finding 5d-ii-a's own headline named — a green suite that cannot see its own
+app — surviving four slices of being written down.** A sentence in a closing entry is a record, not a
+gate; nothing turned it into a test until a slice was assigned to it.
+
+##### WHAT THE GESTURE COSTS NOW
+
+A resize gesture — pointer drag or held arrow key — gets a cheap per-frame path and exactly one commit at
+its end. Per frame: `setTree(resize(...))`, then `syncSizes(root, getTree())`, then `draw()`. On end: one
+`applyLayout()`, which rebuilds, serialises and writes once.
+
+**No element is created or destroyed mid-gesture**, so the divider survives, capture holds, and the drag
+tracks the pointer for its whole length. The model is still updated on every frame, which is what keeps
+`MIN_PANE_FRACTION`'s clamp and `aria-valuenow` correct with no logic duplicated anywhere — the reason
+the "DOM leads, model commits at `pointerup`" alternative was rejected: it forces `layout-view.ts` to
+reimplement the floor clamp in pixels, and two places computing one thing is a defect class this
+repository has now filed repeatedly.
+
+**`draw()` stays on the per-frame path, and what is measured there is narrower than the decision itself.**
+The TM pane's delta-table is virtualized against `#tableHost.clientHeight` — a *measured* viewport height
+that only `draw()` recomputes, and that is the fact that is actually measured. What follows from it is a
+prediction, not a second measurement: drop `draw()` from the per-frame path and dragging a pane taller
+would show blank space below the last rendered row for the length of the drag, snapping right on release.
+Sound reasoning from the mechanism above, and the per-frame cost of leaving `draw()` in was never
+separately measured either — but neither the predicted blank space nor the per-frame cost was actually
+run and timed, so "measured decision" overstated what this slice checked.
+
+**`syncSizes` throws rather than repairs on a DOM/model shape mismatch**, following
+`LambdaPane.receiveEditor`'s precedent and its stated reason: a silent repair absorbs the finding as
+normal operation. **And `aria-valuenow` is written by it as a load-bearing act, not a courtesy** —
+`divider()` sets the attribute once at build time, and it stayed truthful only because the whole tree was
+rebuilt after every resize. Stop rebuilding without adding that write and the attribute silently freezes
+at whatever the divider was born with, in the one part of the layout subsystem deliberately exempted from
+Plan 5's deferred accessibility pass. The exemption is maintained here, not extended: nothing on the
+standing a11y list is added or discharged by this slice.
+
+##### WHAT THIS DISCHARGES FROM THE CARRIED-FORWARD LIST
+
+**The divider drag on the real page.** 5d-ii-a's sentence above is closed by
+`web/tests/browser/divider-drag.test.ts`, which mounts through `main()`, drags, and reads back what was
+stored. Twelve tests, including the pointer path, the keyboard path, the no-op gestures that must write
+nothing, and the reload.
+
+**Reload's interaction with it**, carried by three slices: drag, release, remount through
+`tm-buffer-restore.test.ts`'s cache-busting `?remount=N` idiom, and the dragged sizes come back. It
+**passed on its first run and the implementer said so plainly** rather than manufacturing a red phase —
+it discharges a carried claim rather than fixing a defect, and the review enumerated four independent
+ways it can go red (a wrong helper throws on `'nothing stored'`; a broken drag fails before the remount;
+a restore that ignores storage reads `aria-valuenow` back as `'50'`; renormalisation drift is caught at
+5-decimal precision) rather than accepting a green test as evidence of anything.
+
+**`MIN_PANE_FRACTION`**, whose own doc said *"0.1 IS A CHOICE, NOT A MEASUREMENT"* — see below, because
+the answer does not fit on one line.
+
+##### `MIN_PANE_FRACTION` IS MEASURED AT LAST, AND THE VERDICT SPLITS
+
+Nobody could check the floor before, because driving a pane to it requires a drag that works. A probe now
+mounts the real app at three imposed window *sizes* — width and height both, because a height floor read
+against an unconstrained container height is the same fiction an unmeasured width would be — and drags
+**both** dividers hard past the floor. Verbatim:
+
+```
+window 900x600px   | source 89px  overflow=2.28x | tm-height 59px  overflow=11.46x
+window 1200x800px  | source 119px overflow=1.71x | tm-height 79px  overflow=8.56x
+window 1920x1080px | source 191px overflow=1.06x | tm-height 107px overflow=6.32x
+```
+
+**0.1 STANDS FOR WIDTH.** The source pane's editor keeps mounting and running at the floor at all three
+widths. Nothing is destroyed or hidden; content becomes horizontally scrollable, which is the "about four
+characters, scroll for the rest" state the constant's own doc predicted before anything was measured.
+That is confirmation of the original guess, not a refutation, and the constant did not move. The three
+ratios agree with each other on the same absolute content: `2.28x89`, `1.71x119` and `1.06x191` all come
+to ~203px of the same `let x = 40; x + 2`, squeezed into three different boxes — internal consistency
+that makes the mechanism trustworthy rather than a fluke.
+
+**0.1 IS NOT THE PROBLEM FOR TM'S HEIGHT, AND NO FRACTION IS.** At the height floor TM's content runs
+6.3x to 11.5x taller than the box it was left. **`.state-table`'s `max-height: 40vh` is relative to the
+BROWSER'S viewport, not to the pane** — and a divider drag does not resize the browser window, so
+shrinking TM's share of the split does nothing at all to that cap. The content driving the overflow is
+nearly *constant* across the three imposed heights (`11.46x59`, `8.56x79`, `6.32x107` all come to ~676px),
+which is the direct evidence for the mechanism. Moving the floor would have to approach "most of the
+split" before the table stopped overflowing, which defeats the purpose of a divider. **This is a CSS unit
+written against the wrong box, not a wrong constant**, and calling it a floor-tuning question would have
+been the wrong repair applied confidently.
+
+**Per the design's own hard boundary, neither the constant's value nor its kind moved.** A fraction is
+wrong in both directions — roughly 90px at a 900px window, roughly 344px on a 3440px ultrawide — and that
+may well be the real finding, but the constant chose its shape deliberately and gave a reason: *"A
+FRACTION RATHER THAN A PIXEL COUNT, so this module needs no element measurements and stays
+node-testable."* Changing the *kind* of the floor changes the layout model and costs `layout.ts` its node
+tier. It is filed with the reading behind it rather than slipped into a gesture fix.
+
+**AND THE FIRST ROUND'S READING WAS TAKEN AGAINST EMPTY PANES.** The reading above is the *second*. The
+first was captured before a settled-wait existed, mid-debounce, before `compile.schedule`'s 300ms timer
+had fired — so TM's `.cells` and tapes and the λ pane's `.term` did not exist yet, and the probe measured
+boxes with nothing in them. It reported "0.1 stands" on that basis, and the conclusion happened to survive
+re-measurement for width while being flatly wrong for height. **This is recorded rather than smoothed
+because it is the same class of error the whole slice is about: a measurement that looked clean and was of
+the wrong thing.** The first round also printed a `clipped` boolean that read the `[data-leaf]` pane
+element's own `scrollWidth`/`clientWidth` — which never differs no matter how hard the pane is squeezed,
+because CodeMirror's `.cm-scroller` and TM's `.cells` absorb the real overflow one level in. It was
+`false` at every width regardless. **A field that always reads "fine" is worse than no field**, because a
+reader takes it as reassurance it never earned; it is replaced by the ratio above.
+
+##### THE BASELINE THIS BRANCH FORKED FROM WAS 655, NOT THE 653 THE ENTRY DIRECTLY ABOVE CLAIMS AT ITS OWN COMMIT
+
+5d-iv's closing entry opens its Verification block with *"Figures re-derived at this entry's own commit
+rather than carried from Task 11's own report"*, gives `pnpm test` as **653 passed in 68 files**, and
+derives it in the next paragraph: *"Task 11's own baseline of 649 (67 files) plus the four tests
+`tm-buffer-restore.test.ts` adds."*
+
+**This branch forks from `ec6900b`, which IS that entry's commit, and the tree there runs 655 in the same
+68 files.** Measured on this branch before a line of its source was written, and re-derivable from today's
+figure without trusting that measurement at all: this slice adds exactly 17 tests (5 to
+`layout-view.test.ts` for `syncSizes`, and 12 in the new `divider-drag.test.ts` — 6, then 5, then 1, over
+Tasks 3, 4 and 5), and `672 - 17 = 655`.
+
+**BOTH HALVES OF THE DERIVATION ARE CHECKABLE AND ONE OF THEM IS WRONG.** `tm-buffer-restore.test.ts` —
+which landed in `ec6900b` and has not been touched since, on `main` or here — holds **six** tests, not
+four. `649 + 6 = 655`. The two the derivation missed are the file's last pair, `keeps a forked TM
+buffer's edited text after a reload` and `keeps a pasted blank TM buffer's text after a reload`.
+
+**AND THE CORRECT NUMBER HAD ALREADY BEEN MEASURED ON THAT BRANCH.** 5d-iv's own ledger — gitignored,
+which is why this is recorded here rather than left where nobody will find it — records `653 passed in 68
+files` as **Task 11's checkpoint**, taken before the fix round that followed it, and then records a
+FINAL VERIFICATION run after the fixes reading **655 passed in 68 files**. The closing entry quoted the
+checkpoint and attached the "re-derived at this entry's own commit" claim to it. Nothing was fabricated;
+a figure was carried across a fix round that changed it, and a re-derivation sentence was written over
+the top of a number that had not been re-derived.
+
+**This is the third time this repository has shipped a stale closing count, and the third time it has
+been corrected forward rather than in place.** 5d-iv's entry is left exactly as it stands. The lesson it
+already draws in its own words — that a count taken before the last commit is a count of a different tree
+— is the lesson, and editing the number out of the record would delete the evidence for it.
+
+##### FOUR OF THE DEFECTS THIS BRANCH FIXED WERE IN ITS OWN PLAN, AND A FIFTH WAS A TEST THAT PASSED AGAINST THE BUG IT WAS WRITTEN TO PROVE
+
+The plan mandated code verbatim in several places, which means the plan does not get to grade its own
+work. Implementers caught it four times:
+
+1. **A brief asserted `'0.7 1 0'` for a `style.flex` readback.** Chromium normalizes a unitless
+   flex-basis to `0px`. The implementer asserted the normalized string rather than loosening the
+   matcher, so a wrong fraction still fails — verified as non-weakening by the reviewer, who hand-traced
+   the recursive walk against `defaultLayout()` and a `resize([0], 0, 0.2)` and confirmed 0.7/0.3/0.5 and
+   aria 70/50 independently.
+2. **A brief armed a commit flag AFTER calling `handlers.resize`**, contradicting the arm-before-throw
+   ordering the same brief argued for. Reordered.
+3. **A brief's doc text was factually false.** It said a resize no longer rebuilds. It does: `commit`
+   reaches `applyLayout()`, which calls `renderLayout` unconditionally in its `finally`. What changed is
+   the *rate* — once per frame became once per gesture — and `renderLayout`'s focus rescue stays
+   load-bearing for arrow-key resize, for drags, and for every structural change. Corrected in the code
+   comments and in the design document, left visible as a correction rather than silently rewritten,
+   because a comment claiming a resize no longer rebuilds would be a new false statement replacing an old
+   one.
+4. **A brief's snippet did not typecheck under the repo's `noUncheckedIndexedAccess`.** A correctly
+   shaped `=== undefined` guard was added rather than an assertion.
+
+**And the sharpest one is not a plan defect at all.** A review found that `keyup` committed on ANY key
+while a divider was armed, so a stray keyup mid-hold committed early and auto-repeat re-armed for a second
+write. The test written to prove it **passed identically against the bug** — the reviewer simulated both
+code paths and got one write either way, because the double-write needs a *re-arming* keydown between the
+stray keyup and the real one. The test was fixed and its discrimination then PROVEN by reverting the
+source and watching `expected 1 to be +0` fail at the intermediate assertion while the file's other ten
+tests stayed green. **A regression test that has not been seen to fail is a comment**, and this branch
+caught one of its own wearing the shape of a passing check.
+
+##### A REGRESSION THIS BRANCH SHIPPED INTO ITS OWN MIDDLE AND CLOSED ONE TASK LATER
+
+Recorded because the intermediate state was real and the commits are on this branch. Making the pointer
+path cheap took persistence off `resize`, and the keyboard path called `resize` on `keydown` with nothing
+yet wired to `commit` — so between `c2112a1` and `19a6a32`, **arrow-key resize changed the layout and
+never persisted it.** The plan sequenced the keyboard work as its own task and that task closed it:
+`keydown` resizes, `keyup` commits, `blur` commits so a layout is not lost when focus leaves mid-hold, and
+auto-repeat's N keydowns and single keyup become N cheap frames and one storage write.
+
+**`c2112a1` and `41c2a69` are green with that regression live** — the whole suite passing at both —
+because no test asserted that arrow-key resize persists at either of them — `layout-view.test.ts`'s keyboard test drives
+an inert stub that never persists anything either way. **That is this slice's own defect shape, reproduced
+inside the branch that was fixing it**: a gap in the suite, a change that walks straight through it, and a
+green run that says nothing about the thing that broke. It is caught one task later only because the plan
+scheduled a task to write the test. Squash-merge means no such commit reaches `main`, so nothing here
+needs repair — recording it is what stops a branch from reporting only its endpoints.
+
+##### WHAT THIS SLICE DID NOT CLOSE
+
+**There is still no `ResizeObserver` anywhere in this app.** `grep -rn ResizeObserver web/src web/tests`
+finds nothing, at this entry's own commit. So a plain window resize leaves the TM pane's virtual window
+stale — computed against a `clientHeight` that only `draw()` recomputes — until something else happens to
+redraw. **Filed, with the reason it is a different slice: it changes when EVERY pane redraws, not when a
+gesture commits.** This slice put `draw()` on the resize gesture's per-frame path, which is the same bug's
+gesture-shaped instance; the general form needs an observer and a policy about who owns redraw, and that
+is a design question rather than a wiring one.
+
+**`.state-table`'s `max-height: 40vh` tracking the viewport rather than its pane — FOR DAVEY, a design
+decision.** The measurement above establishes that TM is unusable at its height floor and that
+`MIN_PANE_FRACTION` cannot fix it. Should the cap track the pane instead? That changes what the TM pane
+is at every size, not only at the floor, and it is not a change to make inside a gesture fix.
+
+**λ's floor when forked into a scratch buffer is inference, not measurement.** The probe measured λ's
+DEFAULT view, which is `.term` — a plain element with `white-space: pre-wrap` that wraps rather than
+overflowing horizontally, so its `overflow=n/a` reading is a real absence of a `.cm-scroller` rather than
+a probe gap. λ only gains the source pane's editor machinery, and by extension the source pane's measured
+floor behaviour, once forked into a scratch buffer. **That state is never driven to the floor by this
+probe**, so "0.1 stands for λ too" rests on symmetry with the source pane rather than on a reading.
+
+**A note on `setPointerCapture` and synthetic pointer ids, corrected forward from an earlier draft of
+this entry.** That draft claimed capture throws `NotFoundError` on every synthetic `pointerdown` in the
+suite and called it a cross-test hazard. Measured directly (Chromium 151, `setPointerCapture` on ids `0`,
+`1`, `2`): only `1` never throws — it is the reserved mouse-pointer id and is always active, including on
+a page's very first `pointerdown`. Every synthetic pointer event this suite dispatches already uses
+`pointerId: 1`, so nothing throws today and there is no standing hazard to hand forward. The constraint
+worth keeping is on future tests, not on this code: a synthetic `pointerdown` with any id other than `1`
+throws, so any new synthetic pointer test must use `pointerId: 1`. Only the throw's position relative to
+`preventDefault` moved on this branch, and that ordering is unaffected by this correction.
+
+**Two pre-existing pointer-handling gaps, deferred to Davey rather than fixed under cover of this
+slice.** Both predate the branch; each was raised by a review and each was declined with a reason rather
+than left unmentioned.
+
+- **The gesture's `last` position goes stale across a throw.** If `syncSizes` throws inside the frame
+  handler, `last = now` is never reached, so the next `pointermove` computes its delta against a stale
+  `last` and double-counts the failed frame. Reaching it requires a structural DOM/tree mismatch that a
+  sizes-only resize should not produce, and the damage is self-limited even then: `resize`'s own
+  `MIN_PANE_FRACTION` clamp bounds the one double-counted frame the same way it bounds any other, so this
+  is a one-frame inaccuracy rather than an unbounded drift. The fix, when someone takes it, is a
+  `try`/`finally` around the frame handler's body so `last = now` runs whether or not `syncSizes` throws.
+- **Nothing tracks `pointerId`**, so a second `pointerdown` before `pointerup` resets the `moved` flag
+  while the model has already advanced: two fingers on one divider can drop a write. Harmless before this
+  slice, because every frame persisted.
+
+**Four minor findings in code the plan mandated verbatim**, carried for triage rather than graded by the
+plan that wrote them: `syncNode` validates sibling COUNT but never node KIND, so a child that changed
+`split` to `leaf` without changing the sibling count would write `flex` onto the wrong kind of box — not
+reachable from `resize`, the only caller inside this app, because `resize` is structure-preserving and
+never changes a node's kind; but `syncSizes` is exported, so any future caller that hands it a
+kind-changed tree hits this gap, which is a real one in the throw-rather-than-repair contract's coverage
+and not merely academic; the throw is non-atomic, since earlier siblings are already mutated before the
+loop reaches the failing index, which is harmless if every catcher rebuilds and wrong if one ever
+swallows; and the flex-fallback template is duplicated between `build` and `syncNode`, which is the last
+logic duplicated across the pair the `CHILD_STRIDE` comment exists to keep aligned. The fourth — a local
+`const divider` shadowing the module's own `function divider` — was fixed on this branch as `dividerEl`.
+
+**Whether anyone can work in a multi-buffer layout is still not established.** Carried unchanged from
+5d-ii-a through 5d-iv, and this slice does not touch it: what it establishes is that the divider between
+those buffers now moves when dragged, which is a precondition for the question rather than an answer to
+it.
+
+**`parse_asm` remains unclaimed.**
+
+##### Verification
+
+Figures re-derived at this entry's own commit rather than carried from any task report — which is the
+practice this entry's own baseline section indicts an earlier entry for claiming and not doing:
+
+```
+cargo nextest run --workspace                          → 902 tests run, 902 passed, 8 skipped
+cargo clippy --workspace --all-targets -- -D warnings  → clean
+pnpm test (web/)                                       → 675 passed in 69 files
+pnpm run test:coverage (web/)                          → statements 96.02%, branches 90.88%,
+                                                         functions 98.85%, lines 98.29%
+pre-commit run --all-files                             → all 6 hooks Passed
+scripts/check-citations.sh --self-test                 → passed
+scripts/check-citations.sh                             → 267 files scanned, 0 violations,
+                                                         0 escape-hatch markers honoured
+```
+
+`675` reconciles exactly against the corrected `655` baseline: +7 in `layout-view.test.ts` for `syncSizes`
+in isolation (the plan's own 5, plus 2 this review round added for `syncSizes`'s and `syncNode`'s other
+two throw arms — see below), and +13 in the new `divider-drag.test.ts` (6, 5 and 1 over three tasks, plus
+1 this review round added for a second drag off a re-queried divider). The 69th file is
+`divider-drag.test.ts`; `pane-floor.test.ts` is a `PROBE_FILES` member and does not run in the default
+suite, confirmed by `pnpm test 2>&1 | grep -c pane-floor` returning 0. The citation scan's 267 is 265 plus
+this branch's two new documents.
+
+**This review round's own three tests, and why they were owed.** `syncSizes`'s "nothing is rendered under
+root" throw and `syncNode`'s "no divider after child i" throw had no test before this round —
+`layout-view.test.ts`'s existing DOM/model-mismatch test hits the sibling-COUNT throw arm instead of
+either. And no test in the default suite dragged a divider a SECOND time after a commit-time rebuild,
+which is the shape closest to this slice's own namesake defect (a drag dying on its first frame) that nine
+`divider-drag.test.ts` cases and this branch's whole thesis had not covered: `pane-floor.test.ts` drags
+twice, but it is excluded from the default suite as a `PROBE_FILES` member. All three are now covered;
+`675 - 672 = 3`.
+
+**No threshold was lowered and none needed to be.** The convention floor is 95.57 / 89.88 / 98.51 / 98.08
+(statements / branches / functions / lines) and the enforced gate is `{lines: 97, functions: 97,
+branches: 89, statements: 95}`; all four axes clear both, re-measured after this review round's own three
+tests and its one new never-yet-reached line (`commitKeys`'s re-entrancy guard, Finding 2 below — the
+reviewer could not construct a path that reaches it, so it is deliberately uncovered rather than an
+oversight). **Branches — the axis most at risk here, since this branch's own new throw arms are what a
+default suite is likeliest to leave uncovered — closes at 90.88%, 1.00 above the floor and 1.88 above the
+gate**, a hair over its pre-round figure: this round's two new `layout-view.test.ts` cases cover ground
+the plan's original five did not (the "nothing rendered under root" arm, and the "position after a child
+holds an element that is not a divider" branch of `syncNode`'s divider check, which is distinct from the
+"position falls off the end of the DOM entirely" branch the pre-existing mismatch test already hit), which
+roughly offsets the guard clause this round added on the uncovered side.
+
+**A comparison against the fork point is deliberately NOT made here.** 5d-iv's entry reports
+95.95 / 90.85 / 98.60 / 98.26 at `ec6900b`, and today's figures are above all four — but coverage was not
+re-measured at `ec6900b` on this branch, and the section above is a demonstration that this repository's
+closing figures are not always what they claim. A delta computed against an unverified number would be
+the same mistake in a new column. The floor and the gate are conventions, checkable from the config, and
+they are what this block compares to.
+
+##### THE DRAG WAS DRIVEN WITH A REAL POINTER BEFORE THIS PR MERGED, BECAUSE THE 675 TESTS STRUCTURALLY CANNOT SEE THE ONE MECHANISM IT DEPENDS ON
+
+**Every test in this branch dispatches synthetic `PointerEvent`s directly AT the divider element, and
+that bypasses pointer capture entirely.** In a real drag the pointer leaves the divider — six pixels
+wide — within the first few frames, and from that moment `pointermove` is hit-tested against whatever
+is under the cursor, which is a pane. The only reason the divider keeps receiving events is
+`setPointerCapture`. A test that dispatches at the element gets its handler called whether capture
+works or not. **So `setPointerCapture` could have been broken, or silently no-opped by the
+`preventDefault` reorder this slice made, and all 675 tests would still be green while the drag stayed
+dead on the page** — which is this entry's own headline failure wearing a different hat, and the reason
+the walkthrough below was performed rather than assumed.
+
+Driven through CDP (`page.mouse.*`), which produces real hit-tested input, against `pnpm dev`:
+
+```
+split extent 1714px, source starts at 851px, aria-valuenow 50
+
+drag +20px  → source  871px, aria 51
+drag +60px  → source  911px, aria 54
+drag +120px → source  970px, aria 57
+drag +180px → source 1030px, aria 61
+                                          storage written during the drag: NO
+                                          storage written on release:      YES, once
+release → source 1030px. Asked for +180px, got +179px. Console errors: 0.
+```
+
+**+179 of +180 is the whole finding, stated as a number.** Before this slice the same gesture moved
+one frame's worth and stopped; the 1px is rounding on a fractional layout.
+
+**THE CAPTURE PROOF IS THE SECOND WALKTHROUGH, AND IT IS THE ONE THAT MATTERS**, because a divider
+follows the pointer and is therefore usually under it anyway — `hasPointerCapture(1) === true` alone
+does not establish that capture is load-bearing. Dragging hard PAST the floor separates them: the
+divider clamps and stops, the pointer keeps travelling.
+
+```
+drag −900px → aria-valuenow 10, source 170px   (170/1714 = 0.099: the floor, reached on a real page)
+              pointer is now 219px from the divider
+              document.elementFromPoint at the pointer → NOTHING
+drag back right, without releasing → aria 10 → 68, source 1163px
+release → capture released, hasPointerCapture(1) === false
+```
+
+**A drag recovered from the floor while the pointer was 219 pixels away with nothing under it.** No
+mechanism other than pointer capture can deliver those events. Capture is engaged, it is load-bearing,
+and the `preventDefault`-before-`setPointerCapture` reorder did not break it.
+
+**The keyboard path, same page.** Three held `ArrowRight`s then one release: **no write while held, one
+write on release**, `aria-valuenow` 59 → 65 — exactly three `KEY_STEP`s of 0.02 — and **focus was still
+on a divider afterwards**. That last clause is the corrected §8 claim observed rather than argued: the
+commit rebuilds the tree and destroys the focused divider, and `renderLayout`'s focus rescue is what
+puts focus back. An earlier draft of this slice's design said the keyboard path had stopped depending on
+that rescue. It has not, and here is the page saying so.
+
+**What this does NOT establish.** One browser (Chromium), one pointer type (mouse — no touch, no pen,
+no second pointer), one window size, and a synthetic-but-real-input harness rather than a hand on a
+mouse. The `MIN_PANE_FRACTION` floor being *reachable* is confirmed here; whether a 170px source pane is
+*usable* is the judgement Task 6's probe records and this walkthrough does not improve on.

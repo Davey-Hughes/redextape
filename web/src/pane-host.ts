@@ -11,7 +11,7 @@ import {
   setLeafKind,
   splitLeaf,
 } from './layout'
-import { renderLayout } from './layout-view'
+import { renderLayout, syncSizes } from './layout-view'
 import type { PaneChoice, PaneEvents } from './pane-chrome'
 import type { LeafId, PaneCollection, PaneKind } from './panes'
 import { type Leg, ruleCount } from './protocol'
@@ -911,9 +911,20 @@ export function createPaneHost(deps: {
       custody.reconcile()
     } finally {
       for (const l of leaves(getTree())) hostFor(l.id, l.pane)
-      renderLayout(root, getTree(), hosts, (path, index, delta) => {
-        setTree(resize(getTree(), path, index, delta))
-        applyLayout()
+      renderLayout(root, getTree(), hosts, {
+        // THE CHEAP PATH — NO `renderLayout`, NO PERSIST. Nothing structural changes during a resize:
+        // `resize` touches `sizes` on exactly one split node, so no pane is created, destroyed or
+        // rebound as a consequence, and rebuilding would destroy the divider performing the gesture.
+        // `draw()` STAYS, and it is the one thing here whose output genuinely depends on pane size —
+        // the TM pane's δ-table is virtualized against a measured `clientHeight`, so dropping it would
+        // show blank space below the last row for the length of the drag.
+        resize: (path, index, delta) => {
+          setTree(resize(getTree(), path, index, delta))
+          syncSizes(root, getTree())
+          draw()
+        },
+        // ONE FULL RECONCILE PER GESTURE, WHICH IS WHERE THE STORAGE WRITE LIVES NOW.
+        commit: () => applyLayout(),
       })
       writeLayoutStorage(serializeLayout(getTree()))
       draw()
