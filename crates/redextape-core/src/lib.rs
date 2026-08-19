@@ -23,6 +23,7 @@ pub mod lambda;
 pub mod lexer;
 pub mod parser;
 pub mod prelude;
+pub mod printer;
 pub mod sourcemap;
 pub mod span;
 pub mod tm;
@@ -85,6 +86,22 @@ pub fn run(src: &str) -> Result<value::Value, RunError> {
     }
 }
 
+/// Format `src`: parse it and print it back canonically. The formatter is exactly `print ∘ parse`
+/// (spec §7.2), so nothing about the input's layout is preserved except its comments and its blank
+/// lines, both of which are trivia the printer places by rule.
+///
+/// # Errors
+///
+/// Returns the parse diagnostics when `src` does not parse. There is no partial format: a file that
+/// does not parse is returned untouched to the caller, which is the only safe thing to do with it.
+pub fn format(src: &str) -> Result<String, Vec<Diagnostic>> {
+    let (parsed, diagnostics) = parser::parse_full(src);
+    match parsed {
+        Some(p) => Ok(printer::print(&p)),
+        None => Err(diagnostics),
+    }
+}
+
 #[cfg(test)]
 mod smoke_tests {
     use super::*;
@@ -92,6 +109,13 @@ mod smoke_tests {
     #[test]
     fn version_is_exposed() {
         assert_eq!(VERSION, "0.0.0");
+    }
+
+    #[test]
+    fn format_returns_canonical_text_or_the_diagnostics_that_stopped_it() {
+        assert_eq!(format("let  x=1;x").expect("formats"), "let x = 1;\nx\n");
+        let err = format("let x = ;").expect_err("does not parse");
+        assert!(!err.is_empty(), "and says why");
     }
 }
 

@@ -179,3 +179,46 @@ impl Expr {
         }
     }
 }
+
+impl Stmt {
+    /// The statement's own span. `Let` and `Assign` include their terminating `;` because the parser
+    /// merges it in; `Fn` and `While` end at their body's closing brace; `Stmt::Expr` carries no span
+    /// of its own and reports its expression's, which stops short of the `;`.
+    #[must_use]
+    pub fn span(&self) -> Span {
+        match self {
+            Stmt::Let { span, .. } | Stmt::Fn { span, .. } | Stmt::Assign { span, .. } | Stmt::While { span, .. } => {
+                *span
+            }
+            Stmt::Expr(e) => e.span(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn stmt_span_covers_each_variant() {
+        use crate::parser::parse;
+        let src = "let x = 1; fn f(a) { a } x = 2; while x > 0 { x = 0; } x; 0";
+        let (program, diags) = parse(src);
+        assert!(diags.is_empty(), "{diags:?}");
+        let stmts = &program.expect("parses").block.stmts;
+        for s in stmts {
+            let sp = s.span();
+            assert!(sp.start < sp.end, "empty span for {s:?}");
+            assert!(sp.end <= src.len());
+        }
+        // Each variant's boundary is pinned individually, not just bounds-checked, because the
+        // asymmetry `Stmt::span`'s doc comment describes (`Let`/`Assign` swallow their `;`,
+        // `Fn`/`While` stop at the body's `}`, a bare `Expr` stops short of its `;`) is consumed by
+        // later blank-line logic that measures gaps from these exact ends. "Tidying" any one of
+        // these assertions to match its neighbours would silently change formatted output.
+        let text = |s: &super::Stmt| &src[s.span().start..s.span().end];
+        assert_eq!(text(&stmts[0]), "let x = 1;");
+        assert_eq!(text(&stmts[1]), "fn f(a) { a }");
+        assert_eq!(text(&stmts[2]), "x = 2;");
+        assert_eq!(text(&stmts[3]), "while x > 0 { x = 0; }");
+        assert_eq!(text(&stmts[4]), "x");
+    }
+}

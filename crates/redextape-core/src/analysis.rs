@@ -135,8 +135,16 @@ pub fn attribute_tm_spans(text: &str, map: &SourceMap, spans: &Classified) -> At
 /// whatever tokens the lexer recovered are classified and the errors are surfaced through `analyze`.
 #[must_use]
 pub fn classify_source(src: &str) -> Classified {
-    let (tokens, _diagnostics) = lex(src);
-    tokens.iter().filter(|t| t.kind != TokenKind::Eof).map(|t| (t.span, class_of(t.kind))).collect()
+    let (tokens, comments, _diagnostics) = lex(src);
+    let mut out: Classified =
+        tokens.iter().filter(|t| t.kind != TokenKind::Eof).map(|t| (t.span, class_of(t.kind))).collect();
+    // A MERGE, NOT A RECONCILIATION. A comment can never overlap a token — the lexer consumes it whole
+    // before emitting anything else — so ordering the union by start offset is the entire operation,
+    // and `class_of` stays the exhaustive match it was. `TokenClass::Comment` was declared and
+    // unreachable until this line.
+    out.extend(comments.iter().map(|c| (c.span, TokenClass::Comment)));
+    out.sort_by_key(|(s, _)| s.start);
+    out
 }
 
 fn class_of(k: TokenKind) -> TokenClass {
@@ -216,6 +224,42 @@ mod tests {
         // Lexing a program with an illegal character must not panic; whatever tokens survive classify.
         let _ = classify_source("let x = @@@;");
         let _ = classify_source("");
+    }
+
+    #[test]
+    fn classify_source_emits_comment_spans_in_offset_order() {
+        let src = "1 + // why\n2 // and again";
+        let got = classify_source(src);
+        let slice = |s: Span| &src[s.start..s.end];
+        let pairs: Vec<(&str, TokenClass)> = got.iter().map(|(s, c)| (slice(*s), *c)).collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("1", TokenClass::Nat),
+                ("+", TokenClass::Operator),
+                ("// why", TokenClass::Comment),
+                ("2", TokenClass::Nat),
+                ("// and again", TokenClass::Comment),
+            ]
+        );
+    }
+
+    #[test]
+    fn classified_spans_are_sorted_and_do_not_overlap() {
+        let src = "// lead\nlet x = 1; // trail\nx";
+        let got = classify_source(src);
+        // BOTH COMMENTS MUST BE PRESENT, and this assertion is what makes the ordering check below
+        // mean something. The tokens alone are already sorted and non-overlapping, so without this a
+        // regression that dropped every comment span would leave the ordering assertion green.
+        assert_eq!(
+            got.iter().filter(|(_, c)| *c == TokenClass::Comment).count(),
+            2,
+            "both comments must reach the output: {got:?}"
+        );
+        assert!(
+            got.windows(2).all(|w| w[0].0.end <= w[1].0.start),
+            "a consumer indexes these in order; overlapping spans would double-colour bytes"
+        );
     }
 
     #[test]

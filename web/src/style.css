@@ -231,7 +231,10 @@ body {
   color: var(--tok-punct);
 }
 
-/* Eight the λ and asm/TM text forms produce. Styled now so Plan 5 does not ship invisible spans. */
+/* Eight classes. SEVEN come only from the λ and asm/TM text forms, and were styled ahead of time so
+ * Plan 5 would not ship invisible spans. `.tok-comment` is no longer one of them: since the trivia
+ * slice, `lex` returns `//` comments and `classify_source` classifies them, so this rule is what
+ * paints comments in ordinary source. */
 .tok-comment,
 .tok-binder,
 .tok-mnemonic,

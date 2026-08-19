@@ -1,14 +1,15 @@
-//! Hand-written lexer. Skips whitespace and `//` line comments; recognizes keywords, `Nat`
+//! Hand-written lexer. Skips whitespace and COLLECTS `//` line comments; recognizes keywords, `Nat`
 //! literals, identifiers, the v1 operator set, and delimiters. Unknown characters become a
 //! `Diagnostic` and are skipped (no token emitted).
 
 use crate::diagnostic::Diagnostic;
 use crate::span::Span;
-use crate::token::{Token, TokenKind};
+use crate::token::{Comment, Token, TokenKind};
 
 #[must_use]
-pub fn lex(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
+pub fn lex(src: &str) -> (Vec<Token>, Vec<Comment>, Vec<Diagnostic>) {
     let mut toks = Vec::new();
+    let mut comments = Vec::new();
     let mut diags = Vec::new();
     let bytes = src.as_bytes();
     let mut i = 0;
@@ -20,11 +21,14 @@ pub fn lex(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             i += 1;
             continue;
         }
-        // Line comments.
+        // Line comments. Kept rather than skipped: a `print ∘ parse` formatter over an AST that never
+        // saw them would delete every comment in the file.
         if c == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            let start = i;
             while i < bytes.len() && bytes[i] != b'\n' {
                 i += 1;
             }
+            comments.push(Comment { span: Span::new(start, i), own_line: own_line_at(bytes, start) });
             continue;
         }
         // Two-character operators (must be tried before their one-char prefixes).
@@ -70,7 +74,23 @@ pub fn lex(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     }
 
     toks.push(Token { kind: TokenKind::Eof, span: Span::new(src.len(), src.len()) });
-    (toks, diags)
+    (toks, comments, diags)
+}
+
+/// True when only whitespace separates `start` from the previous newline, or from the start of input.
+/// Byte-wise and backwards from `start`, so it costs the length of one line at most.
+fn own_line_at(bytes: &[u8], start: usize) -> bool {
+    let mut j = start;
+    while j > 0 {
+        j -= 1;
+        if bytes[j] == b'\n' {
+            return true;
+        }
+        if !bytes[j].is_ascii_whitespace() {
+            return false;
+        }
+    }
+    true
 }
 
 fn two_char_kind(c: u8, next: Option<u8>) -> Option<TokenKind> {
@@ -134,7 +154,7 @@ mod tests {
     use super::*;
 
     fn kinds(src: &str) -> Vec<TokenKind> {
-        let (toks, diags) = lex(src);
+        let (toks, _comments, diags) = lex(src);
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         toks.into_iter().map(|t| t.kind).collect()
     }
@@ -172,19 +192,74 @@ mod tests {
     #[test]
     fn ident_text_is_recovered_by_span() {
         let src = "count_down";
-        let (toks, _) = lex(src);
+        let (toks, _, _) = lex(src);
         assert_eq!(toks[0].kind, TokenKind::Ident);
         assert_eq!(&src[toks[0].span.start..toks[0].span.end], "count_down");
     }
 
     #[test]
     fn unknown_char_becomes_a_diagnostic_and_is_skipped() {
-        let (toks, diags) = lex("1 $ 2");
+        let (toks, _, diags) = lex("1 $ 2");
         assert_eq!(diags.len(), 1);
         assert_eq!(&"1 $ 2"[diags[0].span.start..diags[0].span.end], "$");
         assert_eq!(
             toks.iter().map(|t| t.kind).collect::<Vec<_>>(),
             vec![TokenKind::Nat(1), TokenKind::Nat(2), TokenKind::Eof,]
         );
+    }
+
+    #[test]
+    fn comments_are_collected_with_their_spans_and_text() {
+        let src = "1 // a comment\n2";
+        let (toks, comments, diags) = lex(src);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(
+            toks.iter().map(|t| t.kind).collect::<Vec<_>>(),
+            vec![TokenKind::Nat(1), TokenKind::Nat(2), TokenKind::Eof,]
+        );
+        assert_eq!(comments.len(), 1);
+        assert_eq!(&src[comments[0].span.start..comments[0].span.end], "// a comment");
+    }
+
+    #[test]
+    fn own_line_is_true_only_when_nothing_but_whitespace_precedes_on_the_line() {
+        let (_, comments, _) = lex("1 // trailing\n  // leading\n2");
+        assert_eq!(comments.len(), 2);
+        assert!(!comments[0].own_line, "a comment after code on the same line is trailing");
+        assert!(comments[1].own_line, "a comment with only whitespace before it owns its line");
+    }
+
+    #[test]
+    fn a_comment_at_the_very_start_of_input_owns_its_line() {
+        let (_, comments, _) = lex("// first thing\n1");
+        assert_eq!(comments.len(), 1);
+        assert!(comments[0].own_line);
+    }
+
+    #[test]
+    fn a_comment_with_no_trailing_newline_ends_at_end_of_input() {
+        let src = "1 // to the end";
+        let (_, comments, _) = lex(src);
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].span.end, src.len());
+        assert_eq!(&src[comments[0].span.start..comments[0].span.end], "// to the end");
+    }
+
+    #[test]
+    fn a_crlf_line_ending_leaves_the_carriage_return_inside_the_span() {
+        // The span stops at `\n`, so a `\r` before it is inside the comment text. The printer trims
+        // trailing whitespace (design §3), which is where that is handled — recorded here so the
+        // trimming has a reason rather than looking defensive.
+        let src = "1 // note\r\n2";
+        let (_, comments, _) = lex(src);
+        assert_eq!(&src[comments[0].span.start..comments[0].span.end], "// note\r");
+    }
+
+    #[test]
+    fn a_bare_double_slash_is_still_a_comment() {
+        let src = "1 //\n2";
+        let (_, comments, _) = lex(src);
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].span.end - comments[0].span.start, 2);
     }
 }

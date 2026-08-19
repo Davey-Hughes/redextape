@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9ae01179b54936a0e0a7d3f4153dbde5c6e088cbbd88f28d130dbfed6055696e # shrinks to src = "let v0 = if 0 > 0 { 0 } else { if 0 > 0 { 1 } else { 0 } };\nv0"
+cc 6e3f60780f421d1a85af9ddbcda286260fb65356212e719e69c265c1eb113062 # shrinks to src = "let v0 = if if 0 > 0 { 0 } else { if 0 > 0 { 1 } else { 0 } } > 0 { 1 } else { 0 };\nv0"
+cc ea9d36246aabb662ad09b76fca021013b4d2ca490f7106bd125897e41ed3015c # shrinks to src = "let v0 = [ // lead\n\n];\nv0"
+cc 8e858e0cff5f39772e826edc3eea2adb022f01afe31bcbcebe397d806aae6cb4 # shrinks to src = "let v0 = [ // lead\n\n]; // trail\nv0"
+cc 9fe5ed61bb856e4ec7fc5f26da6c24c268d4068574840689f635887fe945f70b # shrinks to src = "let v0 = [[if 0 > 0 { 1 } else { 0 }], [0 // trail\n]];\nv0"

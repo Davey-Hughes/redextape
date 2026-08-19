@@ -190,13 +190,16 @@ unfinished contract. Ordered by when a consumer will hit them.
    label `:` and the asm operand `,` classify as `Punct`, matching what the TM printer already did. No
    printed byte changed. `classify_source` is held to the same property, with the one documented
    exception below — item 4's comment bytes, which the corpus therefore excludes on purpose.
-4. **`classify_source` can never emit `TokenClass::Comment`, and this is the `fmt` blocker wearing a
+4. ~~**`classify_source` can never emit `TokenClass::Comment`, and this is the `fmt` blocker wearing a
    different hat.** `lexer.rs` discards `//` comments, so `TokenKind` has no variant for them and the
    one class every source highlighter needs is unreachable. Fixing it means deciding how trivia
    attaches — token stream or AST — **which is exactly the decision that blocks `redextape fmt`**, since
    a `print ∘ parse` formatter over an AST that never saw comments deletes every comment in the file.
    Patching it for the highlighter alone would likely be redone once `fmt` forces the real design.
-   **Do it once, as its own slice, and both consumers are served.** See the Plan 6 note below.
+   **Do it once, as its own slice, and both consumers are served.** See the Plan 6 note below.~~
+   **CLOSED 2026-08-19, branch `surface-trivia-and-printer`** — trivia representation settled once, for
+   both consumers. `TokenClass::Comment` is reachable and the surface language has a printer. See the
+   closing entry at the end of this file.
 **Minor findings from the same review.** Recorded here because the execution ledger they were logged in
 is git-ignored scratch, so leaving them there would have discarded them at merge. Six of the seven were
 fixed before merge; the status below is what is true now, not what the review first found.
@@ -1874,10 +1877,12 @@ next reader does not re-derive it.
 has a parser and no printer. §7.2 defines the formatter as exactly `print ∘ parse`, so this is the bulk of
 the work, not a wrapper over something existing.
 
-**The blocking decision for `fmt` is comment retention, and it is bigger than the printer.** `lexer.rs`
+~~**The blocking decision for `fmt` is comment retention, and it is bigger than the printer.** `lexer.rs`
 skips `//` comments entirely, so a `print ∘ parse` formatter over an AST that never saw them **deletes
 every comment in the file**. Either trivia gets attached to tokens/AST, or `fmt` is comment-destroying and
-unshippable. Decide this before writing the printer.
+unshippable. Decide this before writing the printer.~~ **CLOSED 2026-08-19, branch
+`surface-trivia-and-printer`** — decided, and it was one decision for both consumers named two paragraphs
+below. See the closing entry at the end of this file.
 
 **That decision now has a second consumer, so do it once.** Plan 4's producer slice shipped
 `analysis::classify_source`, and it can never emit `TokenClass::Comment` for exactly the same reason —
@@ -9198,3 +9203,144 @@ that rescue. It has not, and here is the page saying so.
 no second pointer), one window size, and a synthetic-but-real-input harness rather than a hand on a
 mouse. The `MIN_PANE_FRACTION` floor being *reachable* is confirmed here; whether a 170px source pane is
 *usable* is the judgement Task 6's probe records and this walkthrough does not improve on.
+
+#### THE `fmt` BLOCKER CLOSES — the same decision serves two filed items, and three rationales that sounded like reasons did not survive being checked (2026-08-19, branch `surface-trivia-and-printer`, `68178db..ed9f655` plus this entry)
+
+Design: [`../specs/2026-08-18-surface-trivia-and-printer-design.md`](../specs/2026-08-18-surface-trivia-and-printer-design.md).
+Plan: [`2026-08-19-surface-trivia-and-printer.md`](2026-08-19-surface-trivia-and-printer.md).
+
+Plan 4's deferral item 4 — *"`classify_source` can never emit `TokenClass::Comment`, and this is the
+`fmt` blocker wearing a different hat"* — and Plan 6's survey note — *"The blocking decision for `fmt` is
+comment retention, and it is bigger than the printer"* — were the same decision, filed against two
+different consumers. Both close here, from one slice: the mini-language gets a printer, `//` comments and
+blank lines survive `print ∘ parse`, and `TokenClass::Comment` — declared, indexed, discriminant-tested,
+and unreachable since the day Plan 4 shipped it — has a producer for the first time. `redextape fmt` is
+unblocked; nothing under `crates/redextape-cli` yet exists to call it.
+
+Eleven tasks, 36 commits from `68178db`, measured over `68178db..ed9f655`. **+2,175 / −50 across 11
+files**, excluding this branch's own design and plan documents; **+5,342 / −50 across 13 files** including
+them — the exclusion matches every closing entry above this one, because a plan and a design document are
+the record of the work, not the work.
+
+##### THREE RATIONALES THIS BRANCH FALSIFIED, AND THAT IS THE THROUGH-LINE
+
+Each sounded authoritative. Each was never checked before it was written down. Each propagated into code,
+comments and a test's own failure message before anything measured it.
+
+**§13: *"an argument list is a set of distinct roles, and packing them hides which is which."*** rustfmt
+fills argument lists exactly as it fills arrays — verified twice, once by the calibration probe and once
+by the controller running rustfmt directly. That sentence had already produced `bracketed`'s `allow_fill`
+parameter, a branch in the code, a doc comment, and a test's failure message (`"arguments never fill"`).
+All four are deleted; `bracketed(open, close, items)` now takes three arguments and has one rule.
+
+**§14: *"The AST gives spans per element, not per bracket."*** It does not. `Expr::List`, `Expr::Call` and
+`Expr::Method` each carry an outer span; nothing was passing it down to the code deciding whether a
+bracketed construct had to break. A comment touching a bracket fell outside the region that measured
+first-element-start to last-element-end, so `[1, 2 // trailing\n]` printed inline, the comment reattached
+to an unrelated `;`, and a blank line appeared that the author never wrote. The fix threading a real
+`region: Span` is one parameter, not the reconstruction the doc comment implied was needed.
+
+**§15: *"collapsing it is both what rustfmt does and what the author wrote."*** This grammar has no
+`else if`: `parser.rs`'s `If` arm calls `parse_braced_block()` unconditionally after
+`expect(TokenKind::Else)`, so the collapsed spelling was never sugar here. The collapse fired on any
+nested `if` in an `else` branch and printed text this printer's own parser rejects with `expected '{'`.
+Task 10's generative property suite found it unprompted, inside 89 cases, and shrank two independent
+properties to the same program.
+
+The design's own words for the pattern: **"a stated reason is not evidence, and this document is where
+that keeps being demonstrated."**
+
+##### THE REWIND-STATE THEME
+
+`Printer`'s `Mark` holds five fields by the time the branch closed — `out_len`, `line_start`, `last_end`,
+`next`, and (test-only) `visited_len` — none of them present at Task 4. Each joined the same way: not by
+reading the printer's logic, but by asking what a discarded speculative print had already changed before
+the rewind ran. Task 6 found the first two together as a reproducible panic — `attempt to subtract with
+overflow`, on `[1, 2, 3].map(<ten long args>)`, because both width paths truncated `out` without restoring
+`line_start`. Task 8 added `last_end` (a controller-predicted hazard, reproduced with a scratch harness
+outside the checkout) and `visited_len`, dormant only because the test asserting the trivia design's
+load-bearing ordering invariant used an input too short to force a rewind — forced, an 80-item list's
+rewind left discarded spans in place and the reprint appended the same spans after them, `a,b,c,a,b,c`,
+decreasing exactly where that invariant forbids it. Task 9 added `next`: comments consumed by a discarded
+print do not reappear, confirmed by constructing the postfix_chain hazard and watching the comment vanish
+before the fix landed.
+
+**The same instinct caught a sixth bug in the same task that was not a `Mark` field at all.** Fix round 2
+(`96fbc8e`) added a per-link comment flush to `postfix_chain`'s broken-form loop with no guaranteed
+newline after it for a `Link::Call`, so `xs.first(1) // note\n(2).second(3)` reprinted as
+`"xs\n    .first(1) // note(2)\n    .second(3)\n"` — the `(2)` swallowed into the comment it now trailed,
+silently dropping a call on reparse. The reviewer bisected it to `96fbc8e` rather than treating it as
+pre-existing, and fix round 3 (`e64a905`) closed it by giving `Link::Call` the same "a flush implies a
+newline" treatment `Link::Method`'s own unconditional `newline()` already had. Not a `Mark` addition, but
+the identical discipline: distrust whatever a print — discarded or just-flushed — left sitting in the
+buffer.
+
+The rule the plan now states: when adding printer state, ask **"does this need to rewind?"**, not "is this
+a byte offset?"
+
+##### A PROPERTY GAP LET FOUR DEFECTS THROUGH BEFORE PROPERTY 7 CLOSED IT
+
+Task 9 found four placement defects in the plan's own code: a comment torn off its element and reattached
+to an unrelated `;` (§14's bracket-edge hole); a leaked leading blank line on a comment-only file or
+block; a comment swept into the wrong chain link because the region's left edge started at the previous
+link's end; and a comment swallowed into a call two links away because `breakable` gated the connector
+flush chain-wide rather than per-comment. Two of the four — the ones §14 documents directly — are shown
+passing every property this design already specified: **output reparsed, comment text and order survived,
+and the wrong output was a fixed point, so idempotence held too.** The property that would have caught
+them — that a comment stays anchored to the construct it was written against — is the one §10 never
+stated. Property 7 (comment anchoring) exists because of that gap, and ships with
+`comment_anchoring_catches_the_two_defects_it_was_written_for`, a test asserting the anchoring check
+itself can tell the fixed and the broken shape apart — a property that cannot fail is worth nothing, in
+its own module's words.
+
+##### THE CALIBRATION PROBE'S FOUR READINGS, AND TWO RULE CHANGES CAME OUT OF THE SAME RUN
+
+`examples/rustfmt_calibration_probe.rs`'s own module doc, MEASURED 2026-08-19 against rustfmt
+1.9.0-stable (`8bab26f4f6` 2026-07-14):
+
+```
+1. long short-element array: filled  (agrees)
+2. switch point: 10  (SHORT_ELEMENT = 10 agrees)
+3. trailing comma: fill yes, vertical yes  (fill DIFFERED — printer had no trailing comma in fill mode;
+   fixed in fill_rows)
+4. method chain: broke at every `.`  (agrees)
+```
+
+Three of the four confirmed the design outright. Only reading 3 differed, and it moved one rule directly —
+fill mode now emits a trailing comma. **The same probe run carried a fifth finding outside the four
+numbered questions**, in the same case set: the "long argument list" case, where rustfmt filled at the
+identical 10/11 element-width threshold as an array rather than breaking one-per-line, which is what §13
+above falsifies. That is the second rule change — `bracketed` lost its `allow_fill` parameter entirely —
+and it came from the same invocation as the four numbered readings, not a separate pass. Two rules moved
+out of one calibration run.
+
+##### THE CHEAPEST CONFIRMATION IN THE BRANCH
+
+`tests/span_wellformed.rs`'s `source_with_a_comment_is_the_one_gap_this_corpus_avoids`, written before
+this branch's plan existed, stated its own death sentence in its own doc comment: *"When trivia
+representation is settled … `classify_source` will emit `TokenClass::Comment` here, THIS TEST WILL FAIL,
+and the fix is to delete it and add a commented program to `CORPUS`."* Task 3 (`9799171`) is exactly that:
+the test deleted, and a sixth `CORPUS` entry —
+`"// leading\nlet x = 1; // trailing\nx + 1"` — takes its place. No design work, no debugging, no dispute
+about the fix: a test's author predicted, in advance, precisely which line would fail and precisely what
+the fix would be, and it fired exactly there. Nothing else in this branch was this cheap to confirm.
+
+##### WHAT THIS DID NOT CLOSE
+
+**`crates/redextape-cli` is still unbuilt.** `redextape fmt` has an engine to call and no command that
+calls it. **`parse_asm` remains unclaimed**, exactly where Plan 6's survey left it — the asm form still
+prints without reading back. **λ, TM and asm keep their own printers**, untouched; nothing here
+generalizes to them. **Comment content is never re-wrapped** — one comment form, treated as opaque bytes,
+copied from `src[span]` and never reflowed. **Binary expressions still never break** — §6.6's stated,
+priced, deliberate divergence from rustfmt, and the calibration probe was explicitly not permitted to
+overturn it.
+
+##### Verification
+
+Figures as measured at `ed9f655`, before this entry's own commits:
+
+```
+cargo nextest run --workspace                              → 842 tests pass, 8 skipped
+cargo llvm-cov nextest --workspace --fail-under-lines 90    → 95.13% lines, first run of that gate
+                                                                since the branch began
+```

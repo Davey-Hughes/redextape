@@ -30,20 +30,23 @@ use redextape_core::ty::Ty;
 mod common;
 use common::core_of;
 
-/// NO PROGRAM HERE CARRIES A `//` COMMENT, AND THAT RESTRICTION IS LOAD-BEARING FOR THE COVERAGE
-/// ASSERTION IN `check`. `lexer.rs` discards comments, so `TokenKind` has no variant for them and
-/// `classify_source` emits nothing over their bytes — a real, non-whitespace hole. That is a filed,
-/// separately-scoped issue (item 4 of the Plan 4 deferral list in
-/// `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`: trivia representation blocks `redextape fmt`
-/// and `TokenClass::Comment` alike, and is to be settled once for both), not something to paper over
-/// with a `is_comment` special case here. `source_with_a_comment_is_the_one_gap_this_corpus_avoids`
-/// below states the hole outright, so extending this corpus to comments fails loudly rather than
-/// quietly weakening the property. The printed forms are unaffected: no printer emits a comment.
+/// COMMENTS ARE IN THE CORPUS AS OF THE TRIVIA SLICE, AND THAT IS THE POINT. `lexer.rs` used to
+/// discard `//` comments, so `classify_source` emitted nothing over their bytes — a real,
+/// non-whitespace hole in the coverage assertion in `check`, which this corpus avoided on purpose and
+/// `source_with_a_comment_is_the_one_gap_this_corpus_avoids` stated outright. `lex` now returns them
+/// and `classify_source` classifies them, so the last entry below exercises the property that was
+/// previously excluded from it. The printed forms are unaffected: no printer emits a comment.
 /// THE `if` IS NOT DECORATION. The four straight-line programs lower to assembly with NO LABELS, so the
 /// coverage assertion could not see the label `:` at all: deleting its classification left this whole
 /// file green, which is how it was measured. A branch is the smallest program that emits one.
-const CORPUS: &[&str] =
-    &["1 + 2 * 3", "3 - 5", "let x = 1; let y = x + x; y * 3", "[1, 2, 3]", "if 2 > 1 { 10 } else { 20 }"];
+const CORPUS: &[&str] = &[
+    "1 + 2 * 3",
+    "3 - 5",
+    "let x = 1; let y = x + x; y * 3",
+    "[1, 2, 3]",
+    "if 2 > 1 { 10 } else { 20 }",
+    "// leading\nlet x = 1; // trailing\nx + 1",
+];
 
 /// The same asm and TM the source map is built against.
 fn asm_and_tm(core: &Core) -> (Program, Machine) {
@@ -144,31 +147,6 @@ fn every_classifier_produces_well_formed_spans() {
         checked += 5;
     }
     assert_eq!(checked, CORPUS.len() * 5, "every source must reach all five classified forms");
-}
-
-/// The coverage assertion above holds for `classify_source` only because `CORPUS` has no comments. This
-/// pins the exception rather than leaving it to a doc comment: the `//` bytes are non-whitespace and no
-/// token claims them, so `check` WOULD fail on this input. Asserted as an equality on the classified
-/// text, not merely "some gap exists", so it cannot pass for an unrelated reason.
-///
-/// When trivia representation is settled (roadmap Plan 4, deferral item 4 — the same decision `redextape
-/// fmt` waits on), `classify_source` will emit `TokenClass::Comment` here, THIS TEST WILL FAIL, and the
-/// fix is to delete it and add a commented program to `CORPUS`.
-#[test]
-fn source_with_a_comment_is_the_one_gap_this_corpus_avoids() {
-    let src = "1 + // why\n2";
-    let spans = classify_source(src);
-    let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&src[s.start..s.end], *c)).collect();
-    assert_eq!(
-        named,
-        vec![("1", TokenClass::Nat), ("+", TokenClass::Operator), ("2", TokenClass::Nat)],
-        "the lexer discards comments, so no span covers `// why`"
-    );
-    assert!(
-        !spans.iter().any(|(s, _)| s.start < 11 && s.end > 5),
-        "if a span now covers the comment, the deferred trivia work has landed: delete this test and put \
-         a commented program in CORPUS"
-    );
 }
 
 #[test]

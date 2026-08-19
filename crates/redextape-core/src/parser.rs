@@ -5,7 +5,7 @@ use crate::ast::{BinOp, Block, Expr, Program, Stmt};
 use crate::diagnostic::Diagnostic;
 use crate::lexer::lex;
 use crate::span::Span;
-use crate::token::{Token, TokenKind};
+use crate::token::{Comment, Token, TokenKind};
 
 /// Maximum number of tokens (including the trailing `Eof`) a program may contain. This is now only
 /// a coarse resource bound — it caps the memory and time spent lexing/parsing pathological input —
@@ -15,9 +15,28 @@ use crate::token::{Token, TokenKind};
 /// how many tokens the program contains.
 pub const MAX_TOKENS: usize = 100_000;
 
+/// A parse and everything needed to print it back: the tree, its trivia, and the string both are
+/// measured against.
+///
+/// THE THREE TRAVEL TOGETHER BECAUSE A MISMATCH AMONG THEM IS SILENT. Comments carry byte offsets;
+/// resolving them against a different string yields text from the wrong place with no error and no
+/// empty result. `analysis::attribute_tm_spans` records the same failure from the version that took a
+/// map and a machine as two arguments — it "could not check they described one lowering", and
+/// resolved every id to some other state's name. One value makes that unrepresentable.
+#[derive(Debug)]
+pub struct Parsed<'a> {
+    pub program: Program,
+    pub comments: Vec<Comment>,
+    pub src: &'a str,
+}
+
+/// Parse `src`, keeping its trivia. `Some` only when the entire input parsed.
+///
+/// `comments` is sorted by start offset and no comment overlaps a token, which is what lets the
+/// printer walk it with a single forward cursor.
 #[must_use]
-pub fn parse(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
-    let (tokens, mut diags) = lex(src);
+pub fn parse_full(src: &str) -> (Option<Parsed<'_>>, Vec<Diagnostic>) {
+    let (tokens, comments, mut diags) = lex(src);
     if !diags.is_empty() {
         return (None, diags);
     }
@@ -30,12 +49,20 @@ pub fn parse(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
     }
     let mut p = Parser { src, tokens, pos: 0, depth: 0 };
     match p.parse_program() {
-        Ok(program) => (Some(program), diags),
+        Ok(program) => (Some(Parsed { program, comments, src }), diags),
         Err(diag) => {
             diags.push(diag);
             (None, diags)
         }
     }
+}
+
+/// Parse `src`, discarding trivia. The entry point for every consumer that wants a tree and nothing
+/// else — roughly 25 call sites across this workspace, none of which formats anything.
+#[must_use]
+pub fn parse(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
+    let (parsed, diags) = parse_full(src);
+    (parsed.map(|p| p.program), diags)
 }
 
 /// Maximum nesting depth (parens, brackets, nested calls, nested blocks — anything that recurses
@@ -317,7 +344,17 @@ impl Parser<'_> {
             }
             TokenKind::LBrace => {
                 let block = self.parse_braced_block()?;
-                let span = block.span;
+                // MERGED WITH THE `{`, not taken from `block.span`. `parse_block_body` starts its span
+                // at the first token INSIDE the braces, so `block.span` runs first-inner-token..`}` —
+                // fine for a `Block`, which is a body and not an expression, but wrong for the
+                // expression that CONTAINS it. Every other `Expr` variant's span covers its own opening
+                // token (`Expr::List` merges `t.span` with the `]` right above), and the printer relies
+                // on that: it uses `item.span().start` as "the offset this item's printed text begins
+                // at" to decide what a comment precedes and how many newlines the author left before it.
+                // With the inner start, a comment between `{` and the first statement read as being
+                // BEFORE the block entirely and escaped its braces, and the gap measured for blank
+                // lines ran across the `{` and its newline, inventing one. Design §14 and §17.
+                let span = t.span.merge(block.span);
                 Ok(Expr::Block { block: Box::new(block), span })
             }
             TokenKind::If => {
@@ -373,6 +410,43 @@ mod tests {
         let prog = program(src);
         assert!(prog.block.stmts.is_empty(), "expected a single tail expression");
         *prog.block.tail.expect("expected a tail expression")
+    }
+
+    #[test]
+    fn parse_full_returns_the_comments_beside_the_program() {
+        let src = "// lead\nlet x = 1; // trail\nx";
+        let (parsed, diags) = parse_full(src);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let parsed = parsed.expect("a clean program parses");
+        assert_eq!(parsed.src, src);
+        let texts: Vec<&str> = parsed.comments.iter().map(|c| &src[c.span.start..c.span.end]).collect();
+        assert_eq!(texts, vec!["// lead", "// trail"]);
+        assert_eq!(parsed.program.block.stmts.len(), 1);
+    }
+
+    #[test]
+    fn parse_full_yields_none_and_diagnostics_on_malformed_input() {
+        let (parsed, diags) = parse_full("let x = ;");
+        assert!(parsed.is_none(), "a program that does not parse yields no Parsed");
+        assert!(!diags.is_empty(), "and says why");
+    }
+
+    #[test]
+    fn parse_is_unchanged_and_still_returns_a_two_tuple() {
+        let (program, diags) = parse("let x = 1; x");
+        assert!(diags.is_empty());
+        assert!(program.is_some());
+    }
+
+    #[test]
+    fn comments_are_sorted_by_start_offset() {
+        let src = "// a\nlet x = 1; // b\n// c\nx";
+        let (parsed, _) = parse_full(src);
+        let parsed = parsed.expect("parses");
+        assert!(
+            parsed.comments.windows(2).all(|w| w[0].span.start < w[1].span.start),
+            "the printer's cursor walks this list once, forwards"
+        );
     }
 
     #[test]
