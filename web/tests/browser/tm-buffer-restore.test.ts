@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 // from at the identical depth (`../../../`), so the same `server.fs.allow` entry (`vite.config.ts`'s
 // `REPO_ROOT`) already covers it.
 import list_1_2 from '../../../crates/redextape-core/tests/fixtures/list_1_2.tm?raw'
-import { BUFFERS_STORAGE_KEY, serializeBuffers } from '../../src/buffers-store'
+import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
 import type { Leg } from '../../src/protocol'
 import type { SessionId } from '../../src/session-client'
 
@@ -472,13 +472,29 @@ describe('restoring buffers on both legs', () => {
 
     const view = editorViewOf(first.tmPane())
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: list_1_2 } })
-    // `first.settled()` AGAIN, NOT A CUSTOM `.state-row` CHECK — measured, not assumed. The δ-table is
-    // VIRTUALIZED (accessibility list item 3: "only the ~24 rows in view exist in the DOM"), so its row
-    // COUNT never reflects the machine's true size and stays ~24 whichever machine is loaded — a count
-    // check waiting for `list_1_2.tm`'s own 455 (146 states + 309 rules) never resolves. This file's own
-    // `settled()` is the mechanism every fork-based test in this describe block already relies on for
-    // the identical wait (a worker round trip completing), and a paste is not a different kind of build.
-    await first.settled()
+    // NOT A `.state-row` COUNT, and that half of the older reasoning here still stands: the δ-table is
+    // VIRTUALIZED (accessibility list item 3, "only the ~24 rows in view exist in the DOM"), so its row
+    // count never reflects the machine's true size and stays ~24 whichever machine is loaded — a check
+    // waiting for `list_1_2.tm`'s own 455 (146 states + 309 rules) never resolves.
+    //
+    // **BUT NOT `settled()` EITHER, WHICH CORRECTS WHAT STOOD HERE.** That call waited for 500 ms of
+    // unchanged text. The paste repaints the pane synchronously, and the worker then compiles 25,142
+    // characters with nothing further touching the DOM until it answers — so the window can elapse
+    // inside that silence and hand back "settled" while the buffer has not been persisted yet, after
+    // which `remountApp` below reloads a store that never received the paste. MEASURED by bisecting the
+    // window against this test: 150 ms fails, 300 ms passes, so the shipped 500 ms carried a margin of
+    // only about 2-3x — the same order as the margin that actually reddened CI in
+    // `tm-scratch-fork.test.ts` (run 229), whose `forkEditorMounted` doc has that story.
+    //
+    // The persist IS the fact the remount depends on, so it is what this waits for, through the app's
+    // own `parseBuffers` rather than a hand-read of the JSON — a test that agrees with the app's parser
+    // cannot drift from the format the app writes.
+    await until(
+      () =>
+        parseBuffers(localStorage.getItem(BUFFERS_STORAGE_KEY))?.buffers.find((b) => b.id === 'scratch-1')?.text ===
+        list_1_2,
+      'the pasted machine to reach localStorage',
+    )
 
     // NO SECOND `pickBinding` HERE — this pane's binding was already recorded in the persisted layout
     // by the call above, so `main.ts`'s restore loop warms this buffer and rebinds `tm-0` to it on its

@@ -97,6 +97,38 @@ const editorViewOf = (pane: HTMLElement): EditorView => {
 }
 
 /**
+ * Whether the fork's own editor is mounted in `pane` — the fact the three fork gestures below wait on,
+ * in place of the content quiescence they used to wait on.
+ *
+ * **A QUIESCENCE POLL CANNOT SEE THIS ARRIVE, AND THAT IS NOT A TUNING PROBLEM.** `settleOn` (deleted
+ * with this comment's arrival) declared the pane settled after 500 ms of unchanged text. The click's
+ * own handler repaints the heading to `[detached]` SYNCHRONOUSLY (`tm-buffer-restore.test.ts`'s
+ * `detachedWithNoEditorYet` doc measured that), so that change is already in the DOM before the poll
+ * takes its first sample — and from that sample until the `tm-scratch-compiled` reply mounts this
+ * editor, the text then does not change again AT ALL. Measured, not assumed: over five runs the first
+ * post-click change and the editor's own mount were the same event, at 169/199/211/217/243 ms. So the
+ * window had nothing left to reset it and was racing the round-trip directly, at a margin of about 2x
+ * on this machine. A slower or busier runner crosses 500 ms and the poll returns "settled" having observed
+ * nothing whatever, leaving the assertions to read a DOM that has not been repainted.
+ *
+ * That is not hypothetical: it is what reddened CI run 229, as `expected null not to be null` on the
+ * `.cm-editor` query in `'leaves the source session running'`. Shrinking ONLY the window from 500 ms
+ * to 100 ms reproduces that exact failure locally and deterministically.
+ *
+ * A DOCUMENT-WIDE quiescence check was never the escape either, and the reason is worth keeping from
+ * the comment deleted alongside `settleOn`: the source session keeps recording its own λ leg
+ * throughout this file's tests (design §4.3's entire point), repainting the λ pane continuously, so a
+ * page-wide check could be starved of ever settling at all. Scoping it to this pane is what made it
+ * terminate — and is also what left it with nothing to watch.
+ *
+ * Polling for the fact is immune by construction, which is `startStateGoesToHalt`'s own argument
+ * (Important 4) applied to the gesture that precedes the edit rather than to the edit itself: this can
+ * only become true once the reply has actually landed and mounted the editor, so there is no window to
+ * expire and no interval to tune.
+ */
+const forkEditorMounted = (pane: HTMLElement): boolean => pane.querySelector('.cm-editor') !== null
+
+/**
  * The `<option>` value `paneSelect` encodes a `(leg, session)` pair as — `scratch-app.test.ts`'s own
  * `optionValue`, spelled out here for the same reason that file's doc gives: this pins the DOM contract
  * rather than agreeing with whatever the control currently does.
@@ -115,34 +147,8 @@ const bringTmPaneHome = (): void => {
   select.dispatchEvent(new Event('change'))
 }
 
-/**
- * Wait until `snapshot()` stops changing.
- *
- * **THE STABILITY WINDOW IS LONGER THAN `EDITOR_DEBOUNCE_MS` (300), ON PURPOSE.** A shorter one would
- * declare the app "settled" the instant a keystroke lands and the editor's OWN debounce timer is still
- * ticking with nothing yet posted to the worker — a real hazard here, since `typeInto` below changes
- * `snapshot()`'s value (the typed text) SYNCHRONOUSLY, well before the debounced recompile even fires.
- * 500 ms of continuous non-change cannot elapse before the 300 ms debounce has fired and, for the small
- * machines this file forks, the worker has very likely already answered.
- */
-async function settleOn(snapshot: () => string, timeoutMs = 60_000): Promise<void> {
-  const started = performance.now()
-  let last = snapshot()
-  let stableSince = performance.now()
-  while (performance.now() - stableSince < 500) {
-    if (performance.now() - started > timeoutMs) throw new Error('timed out waiting for the TM pane to settle')
-    await new Promise((r) => setTimeout(r, 30))
-    const now = snapshot()
-    if (now !== last) {
-      last = now
-      stableSince = performance.now()
-    }
-  }
-}
-
 type App = {
   compiled(): Promise<void>
-  settled(): Promise<void>
   tmPane(): HTMLElement
   editorText(pane: HTMLElement): string
   typeInto(pane: HTMLElement, text: string): void
@@ -171,10 +177,6 @@ async function mountApp(src: string): Promise<App> {
 
   return {
     compiled: () => until(idle, `the app to settle on \`${src}\``),
-    // SCOPED TO THE TM PANE'S OWN TEXT, NOT THE WHOLE PAGE. The source session keeps recording its own
-    // λ leg throughout this file's tests (§4.3's entire point), which would repaint the λ pane
-    // continuously and could starve a document-wide quiescence check of ever settling.
-    settled: () => settleOn(() => tmPaneHost().textContent ?? ''),
     tmPane: tmPaneHost,
     editorText: (pane) => editorViewOf(pane).state.doc.toString(),
     typeInto: (pane, text) => {
@@ -246,8 +248,12 @@ describe('forking a TM pane', () => {
     expect(document.querySelector<HTMLElement>('#results')?.dataset.state).toBe('running')
 
     detach()?.click()
-    await app.settled()
-    expect(app.tmPane().querySelector('.cm-editor')).not.toBeNull()
+    // NO `expect(...querySelector('.cm-editor')).not.toBeNull()` AFTER THIS LINE, THOUGH ONE STOOD
+    // HERE UNTIL THE WAIT CHANGED SHAPE. The wait now guarantees exactly what that assertion checked,
+    // so it could no longer fail — and a check that cannot fail is the `/halt/i` defect this file
+    // already caught once (Important 3), wearing different clothes. The wait carries the claim
+    // instead, and names it in its own timeout message.
+    await until(() => forkEditorMounted(app.tmPane()), "the fork's own editor to mount")
     expect(app.tmPane().textContent).toMatch(/detached/i)
 
     // THE ASSERTION: the source's own run finishes despite the fork, rather than stalling forever —
@@ -271,10 +277,14 @@ describe('forking a TM pane', () => {
     await app.compiled()
     const detach = () => app.tmPane().querySelector<HTMLButtonElement>('button.detach')
     detach()?.click()
-    await app.settled()
-
-    expect(app.tmPane().textContent).toMatch(/detached/i)
+    // **ASSERTED BEFORE ANY WAIT, BECAUSE "THE INSTANT" IS THIS TEST'S WHOLE CLAIM.** This doc's own
+    // sentence above — the control must withdraw when this pane's session becomes the scratch, "not
+    // only when some later reply happens to tell it to" — is only tested if the assertion runs before
+    // the reply can land. Waiting first and asserting after would pass just as happily on a regression
+    // that withdrew the control on the reply, which is the defect the test exists to catch.
     expect(detach()).toBeNull()
+    await until(() => forkEditorMounted(app.tmPane()), "the fork's own editor to mount")
+    expect(app.tmPane().textContent).toMatch(/detached/i)
   })
 
   /**
@@ -285,7 +295,7 @@ describe('forking a TM pane', () => {
     const app = await mountApp('let x = 40; x + 2')
     await app.compiled()
     app.tmPane().querySelector<HTMLButtonElement>('button.detach')?.click()
-    await app.settled()
+    await until(() => forkEditorMounted(app.tmPane()), "the fork's own editor to mount")
 
     const original = app.editorText(app.tmPane())
     expect(original).toContain('state ')
@@ -295,8 +305,10 @@ describe('forking a TM pane', () => {
     app.typeInto(app.tmPane(), edited)
 
     // WAIT ON THE FACT ITSELF, NOT ON QUIESCENCE — Important 4. See `startStateGoesToHalt`'s own doc
-    // for why a content-quiescence poll (`app.settled()`) can resolve before the debounced recompile
-    // ever reaches the worker, and why polling for this fact instead is immune to that race.
+    // for why a content-quiescence poll can resolve before the debounced recompile ever reaches the
+    // worker, and why polling for this fact instead is immune to that race. The quiescence helper that
+    // reasoning was written against is gone entirely now: `forkEditorMounted`'s doc has the measurement
+    // that retired it from the three fork gestures above, which were its last callers.
     await until(() => startStateGoesToHalt(app.tmPane(), start), `the δ-table to show \`${start}\` going to halt`)
     expect(startStateGoesToHalt(app.tmPane(), start)).toBe(true)
   })
