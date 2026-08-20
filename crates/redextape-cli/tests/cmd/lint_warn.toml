@@ -1,0 +1,3 @@
+bin.name = "redextape"
+args = ["lint", "warn.rxt"]
+fs.sandbox = true

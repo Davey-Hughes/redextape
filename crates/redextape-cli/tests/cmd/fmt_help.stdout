@@ -1,0 +1,10 @@
+Format source files in place
+
+Usage: redextape fmt [OPTIONS] <PATHS>...
+
+Arguments:
+  <PATHS>...  Files to format. `-` reads standard input and writes standard output
+
+Options:
+      --check  Print a diff instead of rewriting; exit 1 if anything would change
+  -h, --help   Print help

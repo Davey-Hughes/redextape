@@ -15,7 +15,7 @@ use redextape_core::tm::machine::Machine;
 use redextape_core::tm::{self, EncodingKind, Symbol, Tape, TmRun};
 use redextape_core::trace::{LambdaCursor, TmCursor};
 use redextape_core::viewmodel::{LambdaState, LinkIndex, TermTree, TmProgram, TmState};
-use redextape_core::{Diagnostic, Severity, Span, parser, typeck};
+use redextape_core::{Diagnostic, Severity, Span, lints, parser, typeck};
 
 /// The deepest term any print through the session may walk — the two big-budget prints
 /// (`lambda_state`, `link_index`) and the per-frame `lambdaState(FRAME_BYTES)` path alike.
@@ -439,6 +439,12 @@ impl Session {
         if diagnostics.iter().any(|d| d.severity == Severity::Error) {
             return Compiled { diagnostics, session: None };
         }
+        // MIRRORS `analyze`'s OWN GATE, so the two paths cannot disagree about which programs get
+        // linted: a program with no error-severity diagnostic — parse succeeded and `typecheck` above
+        // added none — runs lints exactly once, here, before any of the fallible steps below get a
+        // chance to add more diagnostics of their own. A warning is not a blocker: `session` is still
+        // built past this point, unlike the early return above.
+        diagnostics.extend(lints::check(&program));
         // A program that typechecked cannot fail this, but the error is mapped into diagnostics rather
         // than unwrapped: `typecheck` and `result_type` run inference twice over the same AST, and a
         // divergence between them must surface as a diagnostic, not as an abort inside a wasm module.
@@ -1785,6 +1791,18 @@ mod tests {
             Session::compile("let x = ;", EncodingKind::Unary).diagnostics,
             "analyze and compile must not disagree about what is wrong with a program"
         );
+
+        // A parse error is the one place lints structurally cannot run on EITHER path, so the assertion
+        // above cannot tell "compile also runs lints" apart from "compile has no error diagnostics to
+        // compare against". A warning-only program closes that gap: `x` is declared `mut` and never
+        // assigned, which is exactly `lints::check`'s does-not-need-`mut` rule and nothing else.
+        let warned = analyze("let mut x = 1; x + 1");
+        assert!(!warned.is_empty(), "an unnecessary `mut` must be reported");
+        assert!(warned.iter().all(|d| d.severity == Severity::Warning), "this program has no error, only a lint");
+
+        let compiled = Session::compile("let mut x = 1; x + 1", EncodingKind::Unary);
+        assert_eq!(warned, compiled.diagnostics, "analyze and compile must not disagree about a warning either");
+        assert!(compiled.session.is_some(), "a warning must not block a session from being built");
     }
 
     /// Church 42 decodes to 42, but only after the run reaches its end.

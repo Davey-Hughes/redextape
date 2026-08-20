@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/redextape-cli",
     "crates/redextape-core",
     "crates/redextape-native",
     "crates/redextape-native-rt",

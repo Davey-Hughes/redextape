@@ -1,0 +1,4 @@
+bin.name = "redextape"
+args = ["fmt", "broken.rxt"]
+fs.sandbox = true
+status.code = 2

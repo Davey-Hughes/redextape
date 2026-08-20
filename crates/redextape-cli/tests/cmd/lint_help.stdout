@@ -1,0 +1,9 @@
+Report parse, type and lint diagnostics
+
+Usage: redextape lint <PATHS>...
+
+Arguments:
+  <PATHS>...  Files to check. `-` reads standard input
+
+Options:
+  -h, --help  Print help

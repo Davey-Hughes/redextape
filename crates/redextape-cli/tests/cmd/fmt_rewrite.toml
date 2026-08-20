@@ -1,0 +1,3 @@
+bin.name = "redextape"
+args = ["fmt", "dirty.rxt"]
+fs.sandbox = true

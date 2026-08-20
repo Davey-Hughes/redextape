@@ -2640,14 +2640,23 @@ produce. The oracle validates every combination.
   fun artifact *and* it validates the view-model ergonomics before the web UI. This complements the passive
   "assembly pane / single-tape view" notes under v2 — the terminal is the fastest medium to prototype them.
 
-- **tree-sitter grammar — frontend/tooling track, defer to the visualizer.** A CST for editor tooling:
-  incremental parsing, error-tolerant highlighting, a live editing surface. It does NOT replace the
-  hand-written front-end parser for the oracle (it produces a CST you'd still lower into the typed Core).
-  **When:** only once the interactive visualizer (Plan 5) exists and wants in-browser editing; nothing on
-  the compiler/oracle path depends on it. **Risk — dual-grammar drift:** pick a lane up front — either
-  tree-sitter for *highlighting only* (hand-parser stays the semantic source of truth; drift is cosmetic)
-  or tree-sitter as the *only* parser (lower CST→Core; couples the build to the tree-sitter toolchain).
-  Never maintain two authoritative grammars.
+- **tree-sitter grammar — frontend/tooling track, and its trigger was overtaken.** A CST for editor
+  tooling: incremental parsing, error-tolerant highlighting, a live editing surface. It does NOT replace
+  the hand-written front-end parser for the oracle (it produces a CST you'd still lower into the typed
+  Core). ~~**When:** only once the interactive visualizer (Plan 5) exists and wants in-browser editing;
+  nothing on the compiler/oracle path depends on it.~~ **CORRECTED 2026-08-19, branch `cli-fmt-and-lint`
+  — that trigger fired and the answer was no.** Plan 5 exists, three of its panes are editable, and it
+  decided it did *not* want a grammar for any of them: `web/src/highlight.ts` renders CodeMirror
+  *decorations* over `classify_source`'s spans, and its own doc comment records why. So this entry's
+  stated condition can no longer arrive — it was already met, by a slice that chose the other way.
+  **When:** when an **external editor** needs it — Neovim, Helix, Zed, Emacs — none of which can call
+  `classify_source` at all. Nothing serves that today; `redextape-lsp` is deferred to v2 and does not
+  serve it either. Still nothing on the compiler/oracle path depends on it. **Risk — dual-grammar drift:
+  THE LANE IS NOW FIXED, and it is *highlighting only*.** The hand-written parser stays the semantic
+  source of truth, and since 2026-08-19 it owns the canonical printer too (`redextape_core::format`,
+  which `redextape fmt` calls), so a grammar here may never lower CST→Core — any drift it introduces is
+  cosmetic by construction. The rejected lane was tree-sitter as the *only* parser (couples the build to
+  the tree-sitter toolchain). Never maintain two authoritative grammars.
 
 - **TM value encoding — the swappable `Encoding` seam, realized. Encoding track, items 1-3: DONE.**
   `tm/encoding.rs`'s `Encoding` trait was declared a "swappable seam" back in Part 2b-1 and had exactly
@@ -9344,3 +9353,522 @@ cargo nextest run --workspace                              → 842 tests pass, 8
 cargo llvm-cov nextest --workspace --fail-under-lines 90    → 95.13% lines, first run of that gate
                                                                 since the branch began
 ```
+
+#### PLAN 6'S FIRST HALF CLOSES — `format` gets its first caller, `Severity::Warning` its first producer ever, and eleven mutations survived a full suite before anyone thought to try one, four of them because their tests assert a diagnostic's COUNT and SPAN and never its MESSAGE (2026-08-19, branch `cli-fmt-and-lint`, `02eca34..53d2202`, 36 commits)
+
+Design: [`../specs/2026-08-19-cli-fmt-and-lint-design.md`](../specs/2026-08-19-cli-fmt-and-lint-design.md).
+Plan: [`2026-08-19-cli-fmt-and-lint.md`](2026-08-19-cli-fmt-and-lint.md).
+
+**`redextape fmt` and `redextape lint` work.** `crates/redextape-cli` exists, its binary is `redextape`,
+and `redextape_core::format` — the `print ∘ parse` formatter the branch immediately before this one
+built, whose own closing entry recorded *"nothing under `crates/redextape-cli` yet exists to call it"* —
+has a caller. `fmt` rewrites in place through an atomic write; `fmt --check` prints a unified diff and
+exits 1; `fmt -` is a pipeline filter; `lint` renders ariadne snippets for parse, type and lint
+diagnostics on stderr, leaving stdout clean. **Fourteen** `trycmd` golden transcripts drive the real
+binary (`ls crates/redextape-cli/tests/cmd/*.toml | wc -l` → 14; it was thirteen until the final review
+added `fmt_error.toml`), which is the only place `main`'s exit-code mapping and clap's own errors are
+exercised as one process.
+
+Ten tasks plus a final whole-branch review and its fix wave. **36 commits from `02eca34`**, measured
+over `02eca34..53d2202`. **+2,898 / −18 across 69 files**, excluding this branch's own design and plan
+documents; **+4,993 / −18 across 71 files** including them — the excluding figure is the one every
+closing entry above this one reports, because a plan and a design document are the record of the work,
+not the work.
+
+```
+git rev-list --count 02eca34..53d2202                                        → 36
+git diff --shortstat 02eca34..53d2202                                        → 71 files, +4,993 / −18
+git diff --shortstat 02eca34..53d2202 -- . \
+  ':(exclude)docs/superpowers/specs/2026-08-19-cli-fmt-and-lint-design.md' \
+  ':(exclude)docs/superpowers/plans/2026-08-19-cli-fmt-and-lint.md'          → 69 files, +2,898 / −18
+```
+
+**This heading's own commit enumeration was wrong, and correcting it is not bookkeeping.** It read
+*"`02eca34..fffdfe6` plus this entry, the three wording corrections it carries, and a flake it found"* —
+an accounting for exactly two commits after `fffdfe6`, where there are **thirteen**. Four existed when
+the entry was first written: `107c2c7` (this entry and its wording corrections), `3765fc5` (the flake),
+`beb33f2`, and `ec79f69`. Nine more came out of the final review's fix wave. **And `beb33f2` was
+miscounted as a wording correction when it is a BEHAVIOUR change** — it makes
+`Session::compile_with_caps` run the lint pass, which changes what the browser's results pane reports
+for every warning-carrying program. An entry that describes its own range as two commits of prose when
+it is thirteen commits including a behaviour change is making the same class of claim it spends the rest
+of its length taking apart.
+
+##### `Severity::Warning` WAS DECLARED, SERIALIZED, MIRRORED IN TYPESCRIPT, AND CONSTRUCTED NOWHERE
+
+Not "under-tested" — **absent**. At `02eca34` the identifier `Severity::Warning` did not appear anywhere
+in any Rust file in the tree. `diagnostic.rs` declared the variant and derived `Serialize`/`Deserialize`
+for it; every Rust site that named a `Severity` variant at all named `Severity::Error` — twelve mentions
+across the tree, two constructing it, nine testing for it, one in a doc comment — and `Diagnostic` had
+exactly one constructor, `Diagnostic::error`. Across the wasm boundary the lane was fully built:
+`web/src/types.ts` declares `Severity = 'Error' | 'Warning'` and `web/src/diagnostics.ts`
+maps `d.severity === 'Error' ? 'error' : 'warning'` into `@codemirror/lint` — an `else` branch that no
+input could reach, because nothing upstream could produce the value that selects it.
+`git log --all -S 'Severity::Warning'` finds its first appearance on this branch.
+
+It now has **two producers**, both in the new `lints.rs` via a new `Diagnostic::warning`: a `let mut`
+that is never assigned, and a binding that is never read (`_`-prefixed names are exempt, which is how
+you say you meant it). `analyze` runs the lint pass only when no error-severity diagnostic exists.
+
+**This is the same shape of gap `TokenClass::Comment` carried until the branch before this one closed
+it** — a variant declared, indexed, discriminant-tested, wired through the serialization boundary, and
+unreachable from the day it shipped. Two in a row is not a coincidence; it is what happens when a type
+is designed for a consumer that arrives later, and nothing fails in the interval.
+
+§5.1 predicted the browser would inherit these warnings with **zero** `web/` changes. Verified end to
+end: `web/src/main.ts` wires `lintFromAnalyze` to the wasm `analyze` export, which delegates to
+`redextape_core::analyze`. The lint gutter shows them, and `web/` is untouched by this branch apart from
+one doc comment corrected below.
+
+##### THE DESIGN PREDICTED FIXTURE FALLOUT AND GOT ZERO, TWICE — AND THE FIRST EXPLANATION OF THAT WAS ALSO WRONG
+
+§5.2, *"The blast radius is measured, not guessed"*, counted **19 assertions** across `typeck.rs`,
+`lib.rs` and `redextape-wasm/src/session.rs` asserting that a program's diagnostics are empty, called the
+migration *"a known, bounded migration"*, and budgeted a triage task with two named outcomes — the
+fixture is wrong, or the rule is.
+
+**Actual fallout: zero. Twice.** Zero for `unused_mut`, and zero again for `unused_variable`, which fires
+on a far more common shape. Neither zero was taken on trust: the first was cross-checked from both
+directions (every `let mut` fixture in the tree follows the accumulator idiom, so they are genuinely
+assigned; and two of the rule's own five tests are no-op-immune — they assert a count of exactly one,
+plus its severity and span — with a 37-case probe firing a warning through every descent edge, so the
+zero is not a silent no-op). **Those two tests are also two of the four the final review later broke
+with a mutation, for exactly the property named in that parenthesis: count plus severity plus span, and
+never the message. See the mutation section below.**
+
+The second zero came with an explanation — *"every fixture in the tree happens to read every binding it
+declares"* — and **that explanation is false.** The review that checked it instead of accepting the
+number audited exhaustively, extracting every string literal in the tree and running `analyze` on the
+ones that look like programs. Five tree programs declare a `let` nothing reads, and warn today:
+
+```
+crates/redextape-core/src/lambda/lower.rs      a_group_member_shadowing_a_mutable_is_rejected       unused `f`
+crates/redextape-core/src/lambda/lower.rs      immutable_let_shadowing_a_mutable_is_rejected        unused `x`
+crates/redextape-core/src/typeck.rs            the_same_name_in_two_different_runs_is_still_legal   unused `sep`
+crates/redextape-core/src/desugar.rs           a_member_name_wins_over_an_enclosing_binding...      unused `g`
+crates/redextape-core/examples/step_survey.rs  (the example's own program)                          unused `b`
+```
+
+None of the five fails, and the reason is **not** that the fixtures were careful. **It is the shape of
+the assertions.** None of these five routes through an assertion on `analyze`'s diagnostics: they call
+`parse` / `desugar` / `lower` directly, or they call `crate::run`, which discards
+`analysis.diagnostics` on the `Ok` path, or they are an example binary that asserts nothing. The
+prediction was wrong, the correction to the prediction was wrong, and only the second was caught by
+someone looking rather than reasoning.
+
+**The transferable part is the liability, not the zero.** A later task that starts asserting `analyze`'s
+diagnostics on any of those five inherits the fallout §5.2 budgeted for and this branch did not pay. The
+five are named above so that task does not have to rediscover them.
+
+One positive cross-check fell out of the same audit: the `desugar.rs` hit is the program whose own doc
+records the deliberate semantics *"was 30 and is now 3"*, and the new scope walker's `fn_run` grouping
+independently agrees that the run's `fn g` wins over the enclosing `let g` — documented semantics
+confirmed from a second direction by code written without reference to it.
+
+##### ELEVEN MUTATIONS SURVIVED A FULL TEST SUITE, AND THE THROUGH-LINE GOT SHARPER EACH TIME IT WAS RE-EXAMINED
+
+Not eleven defects — eleven places where the suite could not tell the code from a broken version of it.
+Every one was found by someone applying the mutation, never by reading the tests. **Five were found
+during the ten tasks; the final whole-branch review applied six more and every one of those survived
+too.** The first five:
+
+1. **The entire lint scope walk, neutered.** Replacing all eight descent arms with `=> {}` — or
+   neutering `push_param` on its own — left **1005 / 1005 green**. The walk was correct and almost
+   untested, and the zero fixture fallout above is precisely why nothing backstopped it.
+2. **`write_atomic` replaced with a plain `fs::write`.** All **6** of its own tests green — while that
+   substitution reintroduces both security defects described below.
+3. **The `--check` guard deleted, so `--check` rewrote the tree.** **23 / 23 green.** `--check` had zero
+   coverage: no test passed `check = true`, `WouldChange` was constructed nowhere, exit 1 was exercised
+   nowhere. This is the flag whose entire promise is that it does not write.
+4. **`fmt::diff` gutted to its two header lines with no hunk content** — exactly "tells you a file would
+   change without telling you what", the failure the task exists to remove. **35 / 35 green**, because
+   the assertions looked for `--- `, `+++ ` and a path substring and nothing else.
+5. **`Outcome::Rewritten`'s exit code, verified nowhere against a real process.** `main` maps
+   `Ok(Clean | Rewritten) => SUCCESS` — one arm, two variants — and every unit test calls `fmt::run`
+   directly with a buffer. No golden ran a plain `fmt <path>` rewrite, in the suite whose stated charter
+   is to be the only place `main`'s mapping runs at all.
+
+And the six the final review added, after the entry above had already been written and the branch was
+believed finished:
+
+6. **`fmt`'s exit code 2, verified nowhere against a real process.** Changing `main`'s
+   `Ok(fmt::Outcome::Failed) => ExitCode::from(2)` to `from(0)` left **1071 / 1071 green**. No `.toml`
+   under `tests/cmd` ever ran `fmt` on an unparseable **path** — `broken.rxt` was in the tree but only
+   `lint_error.toml` used it — and neither `assert_cmd` target ran `fmt` on a path at all. A CI running
+   `redextape fmt` across a repository would have gone silently green on every file that does not parse.
+7. **`Lints::fn_run`'s `close(mark)` deleted**, so a `fn` run's parameters never leave scope.
+8. **`Expr::Lambda`'s `close(mark)` deleted**, the same defect one variant over.
+9. **`Stmt::Let` pushing its `Local` onto `scope` BEFORE walking `value` rather than after.** That
+   breaks `let x = 1; let x = x + 1; x` — the commonest shadowing idiom in the language — by crediting
+   the *new* binding with the read that belongs to the old one. The module carried a comment asserting
+   the correct order with no test behind it.
+10. **`lints::check`'s `sort_by_key(|d| d.span.start)` deleted.** No test noticed, because no test in
+    the tree had two unused bindings in it to put in the wrong order.
+11. **`report::should_color`'s `NO_COLOR` check deleted** — removing
+    `std::env::var_os("NO_COLOR").is_none() &&` left all 47 CLI tests green. Nothing exercised
+    `NO_COLOR` at all, let alone against a non-tty stderr, so the whole convention was unobserved.
+
+**Seven, eight and nine are not cosmetic — each one produces a FALSE POSITIVE in the browser's lint
+gutter.** A correctly scoped, genuinely used binding gets reported as unused, in the editor, on a program
+that is fine. They are the direct cost of the design doc's §5 claim that both rules *"ride `TyEnv`'s
+existing `mark`/`truncate` scope discipline, which already models shadowing correctly."* They do not ride
+it. `lints.rs` declares its own `scope: Vec<Local>` and its own `mark`/`close`, and it **MIRRORS**
+typeck's discipline. A mirror is a second thing that can drift, and these three mutations are that drift
+with nothing in the tree able to report it. §5 is struck and corrected in the design doc.
+
+##### THE SHARPEST FORM OF THE THROUGH-LINE, AND THE MOST TRANSFERABLE FINDING ON THIS BRANCH
+
+**Four of those six survived because their tests assert a diagnostic's COUNT and its SPAN and never its
+MESSAGE.** Delete a scope-close and the count stays **1**. The span stays at the outer binding, **0**.
+The only thing that moves is the text — from *"variable `x` does not need to be mutable"* to *"unused
+variable `x`"* — and no assertion in the tree was looking at it. `assert_eq!(ds.len(), 1)` plus a span
+check is green under the correct code and under the broken code alike, and to anyone auditing the file
+it reads exactly like a test that pins the rule.
+
+**This is a different failure from an under-tested line, and it defeats every cheap detector.** Coverage
+cannot see it: the mutated line executes on every run. Reading the test cannot see it: the assertion
+looks specific, names a count, names a span, and is not obviously weak. Only *applying the mutation* can
+see it — which is why all eleven of these were found that way and none by anyone reading. A diagnostic is
+a triple of severity, span and message, and a test that pins two of the three has pinned the shadow of
+the rule rather than the rule.
+
+**The fifth of the six is the same failure one altitude up: an exit code asserted in THREE documents and
+observed by no process.** `2` on a `fmt` parse failure is written in the design doc's §6 exit-code table,
+again in its §8 case list, and again in `crates/redextape-cli/README.md` — and until `fmt_error.toml`
+landed, nothing anywhere ever ran the binary on an unparseable path to watch what it returned. Three
+independent statements of a fact and zero observations of it. **How many places a claim is written down
+carries no information about whether it is true**, and a reader tallying agreements will read three
+copies as three witnesses.
+
+**The earlier through-line still holds; it is the same lesson at a different altitude — tests that pin
+the outcome but not the mechanism.** Six tests asserted
+`write_atomic`'s end state thoroughly and none asserted it went through a rename, so a plain `fs::write`
+satisfied all six — and **both** security defects lived entirely in the *how*, which is what an
+end-state assertion cannot see by construction. One level up, the same shape again: `input::tests`
+pinned the mechanism well, and nothing pinned that `fmt` *calls* it, so both fixes could be bypassed at
+the single call site that mattered. Count-without-message and outcome-without-mechanism are one family:
+**an assertion is only as strong as the narrowest thing that satisfies it**, and the narrowest thing is
+never what the author had in mind.
+
+All eleven are now pinned by tests proven to fail under their own mutation — applied, confirmed failing,
+then restored byte-identically — the first five re-applied independently
+by a second reader rather than accepted from the fixer's table. **A twelfth arrived after this entry was
+written; it has its own section below, because how it was found is the part worth keeping.** One near-miss is worth keeping: the
+permission-bits test that looked like the obvious pin for #2 would have been **vacuous**. An existing
+file's mode survives a truncating write (`O_TRUNC` never re-chmods), and `write_atomic` copies the
+target's mode onto its temp, so both paths converge on identical final mode bits. Only the **inode**
+discriminates — and it does so *by construction*, not probabilistically, because the temp is created,
+allocating a new inode, before the rename unlinks the target, so the target's inode is still live and
+cannot be handed to the temp.
+
+##### AND THEN A TWELFTH, AFTER THIS ENTRY WAS WRITTEN, FOUND BY CI RATHER THAN BY ANY GATE HERE
+
+**The eleven above were all found by someone applying a mutation. The twelfth was found by a machine
+with a different `uid`, and no gate in this repository could have found it.**
+
+`fmt::tests::a_write_failure_on_one_file_does_not_stop_the_others` is the test pinning finding I1 — a
+write failure that used to `?`-propagate out of `fmt::run`'s loop and skip every input after it. It
+induced that write failure by setting the target's directory to `0o500`. **Root bypasses directory
+permission checks** (`CAP_DAC_OVERRIDE`), so under CI's root runner the write SUCCEEDED, the outcome was
+`Rewritten` rather than `Failed`, and the assertion broke. The product was never wrong; the mechanism
+had quietly stopped inducing anything, which is this section's whole subject arriving one more time and
+one layer further out.
+
+**Every gate in this tree runs as `uid 1000`** — `scripts/check-all.sh`, the coverage run, `cargo
+nextest`, and the thread-mode `cargo test` that caught the earlier fixture flake. All four agreed the
+suite was green. Nothing in the tree guards for, or tests under, a different `uid`. Reproduced locally
+only after CI reported it, with `unshare -r`:
+
+```
+euid=1000 → write into a 0500 dir: refused
+euid=0    → write into a 0500 dir: SUCCEEDED
+unshare -r cargo nextest run --workspace --no-fail-fast → 1080 passed, 1 failed (this one, alone)
+```
+
+The fix does not reach for a `uid` guard, which would have made the assertion CI most needs the one
+thing CI never runs. It blocks `write_atomic`'s computed temp path with a directory instead, so
+`create_new` fails on **EEXIST** — an existence check, which no capability overrides — and the input
+itself stays an ordinary readable file so the failure is genuinely on the write. The replacement is
+strictly stronger than what it replaced: it lost its `#[cfg(unix)]` gate, and it now asserts the message
+contains `cannot write`, so a read failure taking that path is caught rather than waved through by a
+bare filename match. `1081 / 1081` under both `uid`s.
+
+**The transferable part is not "test as root".** It is that a test's *mechanism for inducing the
+condition* is itself an assertion, and an unasserted one — `0o500` was believed to mean "this write will
+fail" and meant it only for some callers. A test can pin severity, span, message and outcome perfectly
+and still be measuring nothing, if the thing it set up did not happen.
+
+##### TWO SECURITY DEFECTS IN ONE SMALL FUNCTION, BOTH REPRODUCED BEFORE THEY WERE FIXED
+
+Both came out of a background review of the input module, and both were demonstrated end to end before
+anything was changed. `write_atomic` was `fs::write(&tmp, contents)?` followed by
+`fs::rename(&tmp, path)`, with `tmp` a fully deterministic `<dir>/<filename>.redextape-tmp`.
+
+**Symlink → arbitrary file overwrite.** `fs::write` is `File::create`, i.e.
+`O_WRONLY|O_CREAT|O_TRUNC`, which **follows symlinks**. Pre-planting `b.rxt.redextape-tmp` as a symlink
+to `victim.txt` and running the write overwrote `victim.txt` with the formatted source. Fixed with
+`OpenOptions::create_new(true)` — `O_EXCL` refuses the symlink outright — and the temp name now carries
+the process id. Exploiting it needs write access to the directory, so severity is moderate for a
+developer tool; the deterministic name is independently a **correctness** bug, because two concurrent
+`fmt` runs collide on it and any pre-existing file at that path is silently clobbered.
+
+**AND A THIRD SYMLINK QUESTION, DECIDED RATHER THAN DEFENDED AGAINST.** The two fixes above make
+`write_atomic` refuse to follow a symlink — deliberately, as an anti-attack measure, and it takes its
+path literally by design. That left a separate question the design never asked: what should `fmt` do
+when the **source you named** is itself a symlink? It replaced the *link* with a regular file and left
+the real file it pointed at unformatted, silently, exit 0 — while `write_atomic`'s own doc opened
+*"Replace `path`'s contents, atomically"*, which was not what happened. **Decided by the human, not
+inferred:** `fmt` resolves the link and formats the real file, and the link survives — which is what
+rustfmt does, and the answer a developer expects from a formatter pointed at a symlinked source.
+`fmt::one` now canonicalizes the path immediately before the write, so any chain in any directory
+resolves. Verified end to end. A broken symlink cannot reach that call, because `input::read` already
+follows the same link to read the source and a missing target fails there as `Outcome::Failed`, exactly
+as a missing plain path does. **Resolving the target is policy and belongs at the one call site that
+wants it; refusing to follow a link is a security property and belongs in `write_atomic`** — the two
+pull in opposite directions and the split is what lets both be right.
+
+**Permission widening, and this one needs no attacker at all.** `fs::write` creates the temp at
+`0666 & ~umask` — 0644 here — and the rename then replaces the target, so a source file that was **0600
+came out 0644**. Measured end to end: *"target before: 600 / temp created: 644 / target after: 644."*
+Fixed by copying the target's own mode onto the temp before the rename, and fixed better than specified:
+via `set_permissions` on the **open descriptor** (`fchmod`), not on the path, so it cannot be redirected
+by a path swapped underneath mid-operation.
+
+##### A PRECEDENT CLAIM CARRIED FOR TWO TASKS, REPEATED TO THE HUMAN, AND FALSE
+
+The stdin test module's doc claimed that rustfmt, black, prettier and gofmt all support printing full
+reformatted source under `--check` on stdin. **Checked, one tool at a time: rustfmt prints a *diff*.
+black prints *nothing* — exit code only. prettier prints a *filename* token. None of them dumps
+reformatted source.** The claim had already been quoted to Davey while asking him which behaviour should
+govern `fmt --check -`, so a fabricated precedent was load-bearing in a decision a human made. It is
+deleted and replaced with a note recording that it was checked and is false.
+
+**It also caused concrete harm before it was caught.** `cli.rs`'s help for `check` read *"Print a diff of
+what would change and exit 1. Writes nothing."* The diff work made that true for a path and left it false
+for stdin, so `redextape fmt --check - > out.rxt` silently wrote a fully reformatted file while `--help`
+promised a diff. Adjudicated: stdin emits a diff labelled `<stdin>`. The earlier half of the same
+question was adjudicated the same way — `fmt --check -` on input that would change now exits **1** rather
+than the 0 it had been returning, which is the CI shape `cat f | redextape fmt --check -` going silently
+green while the help text promised otherwise.
+
+That help string now reads **"Print a diff instead of rewriting; exit 1 if anything would change."** Two
+reviewers independently read *"Writes nothing"*, sitting directly after *"Print a diff"*, as "produces no
+output" rather than "never rewrites the target". The golden transcript that pins it verbatim was
+regenerated and read byte for byte before it was committed, not blessed.
+
+This is this branch's own instance of the standing lesson — **a stated reason is not evidence** — and it
+is the same failure mode `scripts/check-citations.sh` exists to catch one level down.
+
+##### FOUR SMALLER FINDINGS WORTH KEEPING
+
+- **A flake no gate in this repository could ever have reported**, found by typing `cargo test` after
+  the gate was already green. Two `--check`-on-a-clean-file tests both asked `fmt`'s `tmpdir` helper for
+  the label `"check-clean"`, and that helper names its directory `<label>-<process id>` and begins by
+  removing it. Under `cargo nextest`, which runs every test in its own process, the two labels resolve
+  to two different directories and the suite is green forever. Under `cargo test` they are threads in
+  **one** process, the labels resolve to **one** directory, and one test's `remove_dir_all` deletes the
+  other's fixture mid-run: **4 failures in 15 `cargo test -p redextape-cli` runs**, against
+  `cargo nextest run --workspace` green on every one. `scripts/check-all.sh` demands nextest and fails
+  rather than falling back, by deliberate design and for good measured reasons — which is exactly why
+  this class of defect is invisible to it. Fixed structurally rather than by renaming the collision:
+  both helpers now append a per-call atomic counter, so a repeated label is harmless instead of latent.
+  Re-measured at **30 / 30**. The module already carried a comment asserting that each test used *"this
+  test's own temp directory"*; the duplicated label had quietly falsified it.
+
+- **An `#![allow(...)]` that suppressed nothing shipped inside the plan's own code block**, and was
+  proved inert by deleting it and re-running clippy. Root cause: the plan's Global Constraints misread
+  `clippy.toml` — the in-tests exemption **does** reach a `#[test]` fn in an integration target, and the
+  carve-out is for a free helper outside any test fn. The identical allow sat in the last task's block
+  and would have been reintroduced eight tasks later; both were corrected in the plan. The crate ships
+  with **zero** `allow(` in its `src/` or `tests/`.
+- **`TRYCMD=overwrite`, which the plan mandated, is a no-op on a case with no existing golden.** It
+  rewrites only on *mismatch*, and a fresh case has nothing to mismatch against — traced to trycmd's own
+  source rather than worked around. The goldens were produced with `TRYCMD=dump` and read before being
+  copied in. Two of them looked wrong and both were benign, each run down rather than assumed:
+  `no_subcommand.stderr` is byte-identical to `--help`'s stdout (genuine clap 4 behaviour), and one
+  golden records `/ No newline at end of file` where the binary emits `\`, because snapbox's path filter
+  rewrites every `\` byte unconditionally — on **both** the loaded golden and the live stream, so the
+  comparison stays self-consistent. That is documented in the transcript harness so nobody "fixes" the
+  binary to match the golden.
+- **A test the brief demanded was unreachable, and saying so was the right answer.** "A file with both a
+  warning and an error → `Errored`" cannot occur: `analyze` runs lints only when no error-severity
+  diagnostic exists, and `Diagnostic::warning` is called nowhere in `redextape-core` outside `lints.rs`,
+  so parser and typeck diagnostics are always `Error` and lints are always `Warning` and the two never
+  mix. A private `outcome_for(&[Diagnostic])` was extracted and tested against a synthetic mixed vector.
+  Not padding: the priority-inversion mutation — testing `any(Warning)` before `any(Error)` — is
+  behaviourally **invisible** on every reachable input, since an all-error list, an all-warning list and
+  an empty list give the identical outcome under either branch order. The synthetic test is the only
+  thing in the tree that pins that branch order at all.
+
+##### THE TREE-SITTER TRIGGER WAS OVERTAKEN BY THE VERY PLAN THAT WAS SUPPOSED TO FIRE IT
+
+The roadmap's own tree-sitter entry (line 2643, under *Extension tracks*) said **When:** *"only once the
+interactive visualizer (Plan 5) exists and wants in-browser editing."* Plan 5 exists, three of its panes
+are editable, and it decided it did **not** want a grammar for any of them: `web/src/highlight.ts`
+renders CodeMirror *decorations* over `classify_source`'s spans. So the stated condition cannot arrive in
+the future — it already arrived, and the answer was no. **That entry's `When:` clause is corrected in
+place above**, and its risk note's open choice is now closed: the lane is **highlighting only**, with the
+hand-written parser staying the semantic source of truth — which it now is for output as well, since it
+owns the canonical printer that `redextape fmt` calls. The real driver, whenever it comes, is **external
+editors** — Neovim, Helix, Zed, Emacs — which cannot call `classify_source` at all and which
+`redextape-lsp` (deferred to v2) does not yet serve.
+
+`web/src/highlight.ts`'s own doc comment overstated the rule in the opposite direction, saying a grammar
+is *"forbidden outright"*. The roadmap forbids two **authoritative** grammars and explicitly permits the
+highlighting-only lane; that sentence is corrected, so the next reader is not stopped by a rule that does
+not say what they were told it says.
+
+**AND THE REPLACEMENT NEEDED A SECOND PASS, WHICH IS THE MORE USEFUL HALF OF THIS.** The corrected
+wording said a Lezer grammar would be *"a second AUTHORITATIVE grammar … which the roadmap's tree-sitter
+entry rules out — it permits a highlighting-only lane, but a CodeMirror language package is not that
+lane."* **The entry says nothing of the kind.** It names neither Lezer nor CodeMirror, and its test for
+*authoritative* is **lowering** — *"a grammar here may never lower CST→Core"*. A Lezer grammar driving
+highlighting lowers nothing, so by the entry's own criterion it falls **inside** the permitted lane. One
+overstatement had been traded for a narrower overstatement, still attributed to a document that does not
+contain it. The doc comment now argues from what is actually true and checkable — `classify_source`
+already ships the spans, and incremental re-parse, bracket matching and structural folding are out of v1
+scope — and attributes nothing to the roadmap. **A correction is not self-verifying**, and the second
+pass caught what the first introduced.
+
+##### WHAT THIS DID NOT CLOSE
+
+**`redextape run` and the emit subcommands** — Plan 6's other half, and why this entry says *first half*.
+`value.rs`'s `format_value` and the four existing examples already do most of the work; nothing here
+blocks them. **`parse_asm`** is still unclaimed, exactly where Plan 6's survey left it — the asm form
+prints and cannot be read back. **`--deny-warnings`** — a warning exits 0 and there is no way to make it
+fatal; one flag and one exit-code branch, whenever CI asks for it. **A config file** — no
+`redextape.toml`, no width option; `MAX_WIDTH` stays the printer's constant. **More lint rules** — two
+rules give the tier a producer, but a rule *set* is a later slice with its own design covering which
+rules, suppression syntax, and whether any are configurable. **Terminal syntax highlighting**, which is
+the tree-sitter item corrected above and is now waiting on an external-editor consumer rather than on
+Plan 5.
+
+##### THREE FIGURES IN THIS ENTRY DID NOT RE-DERIVE FROM THE TREE, AND NONE OF THEM CARRIED ITS COMMAND
+
+Every conclusion they supported holds. That is precisely why they are worth correcting: a figure nobody
+can reproduce is doing rhetorical work rather than evidentiary work, and this entry spends its length
+arguing that the difference matters. **The standard this entry now holds itself to: a count in prose
+carries the command that produces it, or it is restated as whatever was actually counted.** All three
+re-derivations below were run at `53d2202`.
+
+**1. *"13 `Session::compile`-based diagnostic assertions in `session.rs`"* — re-derives as seven.**
+
+```
+grep -cE '\.diagnostics' crates/redextape-wasm/src/session.rs         → 21   every mention, any source
+grep -cE 'assert.*\.diagnostics' crates/redextape-wasm/src/session.rs → 19   every one-line assertion
+```
+
+Of those 19, **seven** have a `Session::compile*` result as their subject. The other twelve assert on
+`lambda_scratch`, `lambda_scratch_at` or `tm_scratch` results, none of which reaches the lint pass at
+all. (A twentieth assertion escapes the line-based grep because it is spread over four lines — the
+`assert_eq!` comparing `analyze("let x = ;")` against
+`Session::compile("let x = ;", …).diagnostics` — and it is one of the seven.) Those seven sit in six
+test functions. **Seven is the figure the sentence wanted**; 13 matches neither the narrow reading nor
+either broad one. Fallout was zero at 7, at 19 and at 21, so nothing above changes.
+
+**2. *"all 710 source files … the 639 that look like programs"* — no file universe in this repository
+reaches 710.**
+
+```
+git ls-files | wc -l                        → 453   every tracked file at 53d2202
+git ls-tree -r --name-only 02eca34 | wc -l  → 390   every tracked file at the branch point
+git ls-files '*.rs' | wc -l                 → 120   Rust files
+git ls-files '*.rs' '*.ts' | wc -l          → 237   Rust and TypeScript together
+```
+
+The audit itself was real and exhaustive, and its result — the five programs named above — was checked
+one by one and stands. The **710/639** pair describes neither files nor anything else recoverable from
+the tree, so it is struck above rather than repaired: what the audit did is *"extracted every string
+literal in the tree and ran `analyze` on the ones that look like programs"*, and that sentence is both
+true and checkable, which the numbers were not.
+
+**3. *"186 `let mut` fixtures exist in the tree"* — the countable figure is 219 occurrences, 99
+distinct.**
+
+```
+git grep -hoE '"[^"]*let mut[^"]*"' -- '*.rs' | wc -l            → 219   fixture literals, occurrences
+git grep -hoE '"[^"]*let mut[^"]*"' -- '*.rs' | sort -u | wc -l  →  99   textually distinct
+git grep -lE '"[^"]*let mut[^"]*"' -- '*.rs' | wc -l             →  55   files carrying one
+```
+
+That grep sees single-line double-quoted literals only; extracting raw strings as well moves the
+occurrence count to 205 literals holding 249 separate `let mut` bindings, across the same 55 files. No
+definition lands on 186. **The claim the number was supporting — that every `let mut` fixture in the
+tree follows the accumulator idiom and is therefore genuinely assigned — is independently established
+by the zero fallout itself** and does not rest on the count, which is the only reason the count going
+unreproducible is a defect in the record rather than in the conclusion.
+
+##### Verification
+
+Figures as measured at **`53d2202`**, the last commit of the work itself. **The commits that follow it
+are deliberately outside every figure here**: they are the correction round that rewrote this entry and
+struck the design doc's overtaken sections, and they touch three files, all of them prose — this entry,
+the design doc, and one TypeScript doc comment. No test, no gate and no behaviour moves under them.
+Naming the measurement commit and then naming what came after it is the whole of the fix for *"figures
+as measured at X plus this entry's own commits"* — a phrase that quietly stretches a number over commits
+that did not exist when it was taken, and which cannot even be repaired with a count, because the count
+changes with the next commit that repairs it.
+
+```
+git rev-list --count 02eca34..53d2202                    → 36 commits
+cargo nextest run --workspace                            → 1081 pass, 8 skipped (998 at 02eca34; +83)
+cargo llvm-cov nextest --workspace --fail-under-lines 90 → 95.65% lines against a 90% floor — passed
+scripts/check-all.sh --no-llvm --no-browser              → every base-tier leg green
+cargo test -p redextape-cli --bins  x30                  → 30/30 green (was 11/15 before the tmpdir fix)
+```
+
+**The 1071 quoted throughout the mutation section above is not an error and is deliberately left
+standing.** It is what the suite counted at the moment each of those mutations was applied; the ten
+tests the fix wave added to pin them are what carry it to 1081. A mutation result is a measurement of a
+suite at a commit, and re-stamping it with a later total would falsify it.
+
+**The 998 is measured, not inferred**, in a worktree at `02eca34`; the branch's own ledger records 1000
+as its first figure, which was taken *after* the crate's first two tests already existed. The gap is two
+tests, and it is recorded here because a "before" number that is really an "after" number is the same
+class of claim this entry is otherwise about.
+
+**`--no-llvm --no-browser` is a partial gate and this entry does not claim otherwise** — the script says
+so itself on every run. What ran: `cargo fmt --all --check`; the wasm32 target probe; clippy and
+nextest-plus-doctests for `--workspace`, for `-p redextape-core --features serde`, and for
+`-p redextape-native --no-default-features`; and `cargo check --target wasm32-unknown-unknown` for
+`redextape-core`, `redextape-core --features serde` and `redextape-wasm`. What was skipped: the **LLVM**
+tier (clippy and tests for `redextape-native` under `--features llvm`, both with and without default
+features) and the **browser** tier (`wasm-pack test --headless --chrome crates/redextape-wasm`).
+
+**The LLVM tier is untouched; the browser tier is NOT, and this paragraph said otherwise until the
+branch's last commit.** Outside the new crate it changes `Cargo.toml`, `Cargo.lock`, `redextape-core`'s
+`diagnostic.rs`, `lib.rs` and new `lints.rs`, `web/src/highlight.ts`'s doc comment, the two READMEs —
+and `redextape-wasm`'s `session.rs`, which the final commit edits. No file under
+`crates/redextape-native` or `crates/redextape-native-rt` is touched, so the LLVM tier's skip is safe on
+the same reasoning as before.
+
+**The browser tier's skip is now an argument about a file this branch edits, which is a weaker claim and
+is stated as one.** `Session::compile_with_caps` gained a `lints::check` call. The wasm32 `cargo check`
+leg ran and is clean, and the browser tier covers `#[wasm_bindgen]` glue and `serde-wasm-bindgen`
+marshalling — neither of which a call into `redextape-core` alters, and `session.rs` is natively tested
+precisely so its logic lives outside that shell. But that is reasoning, not measurement, and it now
+covers an edited file rather than an untouched one. **CI runs both tiers on the PR and that is what
+settles it.**
+
+**`pre-commit run --all-files` → all 6 hooks Passed**, run for this entry: `check-text-bytes`,
+`check-citations`, `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `biome ci`,
+`tsc --noEmit`. No `--no-verify` on any commit of this branch.
+
+**The one gap this branch carried to the end was closed at the end, by decision rather than by
+default.** `Session::compile_with_caps` re-implemented parse-plus-typecheck inline and never called the
+lint pass, so the wasm *compile* path and the *analyze* path disagreed about warnings — the browser's
+lint gutter got them, the results pane did not. It was raised in the first task that could have caused
+it (the one that gave `Severity::Warning` a producer at all) and carried, visible in the ledger, through
+eight more.
+
+**What made it worth closing was not the divergence — it was a test whose claim outran what it
+checked.** `analyze_reports_diagnostics_without_building_a_session` asserts *"analyze and compile must
+not disagree about what is wrong with a program"*, and passed only because the program it used was a
+parse error, the one input where lints structurally cannot run on EITHER path. A green test asserting a
+sentence that was false in general is the same shape as the five surviving mutations above, and this
+branch had already spent ten tasks learning to distrust exactly that.
+
+`compile_with_caps` now calls `lints::check` under the same condition `analyze` uses — no error-severity
+diagnostic — so warnings never block a session being built. **Fixture fallout: zero across every
+diagnostic assertion in `session.rs`**, and the strengthened test was proved to fail without the call
+(`left: [… "variable \`x\` does not need to be mutable"], right: []`).

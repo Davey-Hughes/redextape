@@ -25,4 +25,10 @@ impl Diagnostic {
     pub fn error(span: Span, message: impl Into<String>) -> Self {
         Diagnostic { span, severity: Severity::Error, message: message.into() }
     }
+
+    /// A `Severity::Warning` diagnostic. Warnings never block compilation: `analyze` sets `core` from
+    /// the presence of an ERROR, so a program that only warns still desugars, runs, and lowers.
+    pub fn warning(span: Span, message: impl Into<String>) -> Self {
+        Diagnostic { span, severity: Severity::Warning, message: message.into() }
+    }
 }

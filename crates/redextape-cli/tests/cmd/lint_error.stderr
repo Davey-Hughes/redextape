@@ -1,0 +1,7 @@
+Error: expected an expression
+   ╭─[ broken.rxt:1:9 ]
+   │
+ 1 │ let x = ;
+   │         ┬  
+   │         ╰── expected an expression
+───╯

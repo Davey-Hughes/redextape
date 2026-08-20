@@ -1,0 +1,3 @@
+bin.name = "redextape"
+args = ["frobnicate"]
+status.code = 2

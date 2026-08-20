@@ -1,0 +1,4 @@
+bin.name = "redextape"
+args = ["fmt", "--check", "-"]
+stdin = "let   x=1;\nx+1"
+status.code = 1

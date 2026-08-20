@@ -18,10 +18,16 @@ function build(spans: Classified, text: string): DecorationSet {
 /**
  * Highlighting via DECORATIONS, not a Lezer grammar.
  *
- * A grammar would be a second authoritative grammar for this language, which the roadmap forbids
- * outright — and it would be redundant, because `classify_source` already ships and already returns
- * the spans. What a grammar would additionally buy (incremental re-parse, bracket matching,
- * structural folding) is not in v1 scope.
+ * The case against one here is redundancy and scope. `classify_source` already ships and already
+ * returns the spans this field renders, so a grammar would be a second description of the same token
+ * structure with nothing keeping the two in agreement. What it would additionally buy — incremental
+ * re-parse, bracket matching, structural folding — is not in v1 scope.
+ *
+ * It is NOT ruled out on authority, and this comment claimed it was until 2026-08-19. The roadmap's
+ * tree-sitter entry forbids a second AUTHORITATIVE grammar, and its own test for "authoritative" is
+ * lowering: a grammar there may never lower a CST into Core. A Lezer grammar driving highlighting
+ * lowers nothing, so by that test it sits inside the highlighting-only lane the entry permits rather
+ * than outside it. The entry names neither Lezer nor CodeMirror at all.
  */
 export const highlighting = StateField.define<DecorationSet>({
   create: () => Decoration.none,

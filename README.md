@@ -30,8 +30,8 @@ it — a per-frame tree costs 850 MB against a 32 MB history ring, and most step
 any budget that is still affordable
 (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2). What the visualizer the
 project is *for* still lacks: click-linking between the panes, dual-focus highlight while running,
-editable λ/TM panes with detach-on-edit, the λ pane's structural tree (deliberately, see above), and a
-CLI.
+editable λ/TM panes with detach-on-edit, the λ pane's structural tree (deliberately, see above), and the
+CLI's `run` and emit subcommands — `redextape fmt` and `redextape lint` ship as of 2026-08-19.
 See "Development & CI" below to build and run it, or still `cargo run --example` for the raw backends
 without a browser.
 
@@ -153,9 +153,10 @@ as it diverges. Both are reachable only because control now returns from each β
   unscheduled: a per-frame tree costs 850 MB against `HISTORY_BYTES`' 32 MB ring, and most steps have no
   tree to draw at any budget that is still affordable
   (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2).
-- **CLI** — `crates/redextape-cli`: `redextape fmt` / `lint`, plus subcommands to emit and run λ /
-  TM artifacts. Roadmap Plan 6. `fmt` is blocked on a decision nobody has made yet — the lexer
-  discards `//` comments, so a `print ∘ parse` formatter over that AST would delete every one.
+- **CLI, the second half** — `crates/redextape-cli` exists and `redextape fmt` / `redextape lint`
+  work (Roadmap Plan 6's first half, 2026-08-19); see that crate's own README. Still unbuilt:
+  `redextape run` and the subcommands to emit λ / TM artifacts, `parse_asm`, `--deny-warnings`, and a
+  config file. The comment-retention decision that used to block `fmt` closed one branch earlier.
 - **LSP** — `crates/redextape-lsp`, deferred to v2.
 
 Until those land, the examples are the interface:

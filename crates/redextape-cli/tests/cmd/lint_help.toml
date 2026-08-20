@@ -1,0 +1,2 @@
+bin.name = "redextape"
+args = ["lint", "--help"]

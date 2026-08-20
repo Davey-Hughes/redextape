@@ -1,0 +1,7 @@
+Warning: variable `x` does not need to be mutable
+   ╭─[ warn.rxt:1:1 ]
+   │
+ 1 │ let mut x = 1;
+   │ ───────┬──────  
+   │        ╰──────── variable `x` does not need to be mutable
+───╯

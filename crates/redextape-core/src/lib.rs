@@ -21,6 +21,7 @@ pub mod diagnostic;
 pub mod interp;
 pub mod lambda;
 pub mod lexer;
+pub mod lints;
 pub mod parser;
 pub mod prelude;
 pub mod printer;
@@ -58,6 +59,13 @@ pub fn analyze(src: &str) -> Analysis {
     };
     diagnostics.extend(typeck::typecheck(&program));
     let has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
+    // Lints run only on a program that is otherwise clean. A file with a type error does not also
+    // need to be told one of its bindings is unused — and it keeps the blast radius of these rules to
+    // programs that previously reported NOTHING, which is the set the tree's `is_empty()` assertions
+    // are about.
+    if !has_error {
+        diagnostics.extend(lints::check(&program));
+    }
     let core = if has_error { None } else { Some(desugar::desugar(&program)) };
     Analysis { diagnostics, core }
 }
