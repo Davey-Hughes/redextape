@@ -578,11 +578,12 @@ fn beta_go(t: &LambdaTerm, j: u32, s: &LambdaTerm) -> LambdaTerm {
                 //
                 // **THE CHECK IS UNCONDITIONAL, AND THAT IS `shift`'s POLICY RATHER THAN CAUTION HERE.**
                 // A `debug_assert!` was the first shape of this and it is the trade `shift`'s own doc
-                // block explicitly refuses: this workspace sets no `[profile]` overrides, so a release
-                // build has neither debug assertions nor overflow checks, and a `k < j` arriving from a
-                // wrong `maxfree` would WRAP to `u32::MAX` — a term full of dangling references that
-                // reduces to a wrong answer, rather than an error. A miscompile is worse than a crash,
-                // and `shift` measured its equivalent unconditional check at below run-to-run noise.
+                // block explicitly refuses: this workspace sets no `[profile]` override that reaches
+                // either one — its only such setting is dev debug info — so a release build has neither
+                // debug assertions nor overflow checks, and a `k < j` arriving from a wrong `maxfree`
+                // would WRAP to `u32::MAX` — a term full of dangling references that reduces to a wrong
+                // answer, rather than an error. A miscompile is worse than a crash, and `shift` measured
+                // its equivalent unconditional check at below run-to-run noise.
                 //
                 // The invariant it guards is not local: `maxfree(Var(k))` is `k + 1`, so the prune above
                 // returns for every `k < j` — including at the `saturating_add` ceiling, where
@@ -786,9 +787,10 @@ mod tests {
     /// BRANCH AT ALL.** `beta_go` reaches `var(*k - 1)` only when `k > j >= 0`, so `k >= 1` and the
     /// subtraction cannot underflow — that much is structural. But structural is a property of the code
     /// as written, not of the code as edited, so the arm also carries an unconditional
-    /// `assert!(*k > j, …)`: this workspace sets no `[profile]` overrides, and in release a wrong
-    /// `maxfree` would otherwise wrap to `u32::MAX` with neither debug assertions nor overflow checks to
-    /// stop it. That is the same trade `shift`'s own doc block makes and for the same stated reason —
+    /// `assert!(*k > j, …)`: this workspace sets no `[profile]` override that reaches either one — its
+    /// only such setting is dev debug info — and in release a wrong `maxfree` would otherwise wrap to
+    /// `u32::MAX` with neither debug assertions nor overflow checks to stop it. That is the same trade
+    /// `shift`'s own doc block makes and for the same stated reason —
     /// "a miscompile is worse than a crash".
     ///
     /// ~~Fusion does not weaken that guarantee; it makes it structural.~~ **Corrected 2026-08-03:** the

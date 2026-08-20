@@ -232,10 +232,10 @@ impl NodeGen {
 
     /// Issue the next id. **SATURATES AT `MAX_NODE_ID` rather than wrapping.**
     ///
-    /// This was a bare `self.next += 1`, which wraps silently in release (this workspace sets no
-    /// `[profile]` overrides, so no debug assertion catches it) and re-issues id 0 to whatever mints
-    /// next — colliding with the root of the tree and every early node, in the map the UI resolves
-    /// clicks through.
+    /// This was a bare `self.next += 1`, which wraps silently in release (the workspace's only
+    /// `[profile]` setting is dev debug info, so no debug assertion catches it) and re-issues id 0 to
+    /// whatever mints next — colliding with the root of the tree and every early node, in the map the
+    /// UI resolves clicks through.
     ///
     /// **SATURATION STILL REPEATS AN ID, and that is the honest trade rather than an oversight.** One
     /// known repeated id at a documented ceiling beats a silent restart at 0 that collides with the

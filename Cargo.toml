@@ -43,3 +43,43 @@ unimplemented = "warn"
 # and a new stable can add a pedantic lint that reddens CI with no code change. This field is the
 # one-line remedy.
 pedantic = { level = "warn", priority = -1 }
+
+# Dev and test builds keep line tables and drop the rest of the DWARF — types, variable locations,
+# and the string table naming them. Panics and backtraces still resolve to file, line and column,
+# which is the property this repository cannot give up: its tests ARE its primary diagnostic, and a
+# branch whose central lesson was that a test pinning two of severity/span/message has pinned only
+# the shadow of a rule cannot afford backtraces that name a function and no position. VERIFIED
+# DIRECTLY rather than reasoned about — under this setting a panic three frames deep still prints
+# the file, line AND column of every frame. `debug = 0` drops exactly that, which is why the cheaper
+# setting is not the one here.
+#
+# COVERAGE IS UNAFFECTED, and this was measured rather than taken from the documentation: the
+# workspace's `cargo llvm-cov nextest --workspace --fail-under-lines 90` gate passes at 95.19% lines
+# under this profile. `llvm-cov` reads the maps `-C instrument-coverage` embeds into the binary, not
+# DWARF, so there was no reason to expect otherwise — but the gate is a merge blocker and a guess
+# about a merge blocker is worth thirty seconds to settle.
+#
+# For a debugger session that needs variable inspection, override per invocation:
+#   CARGO_PROFILE_DEV_DEBUG=2 cargo test -p <crate>
+#
+# Measured on 32 cores, `cargo nextest run --workspace --no-run` into a FRESH target dir each time,
+# then tarred and zstd'd the way actions/cache stores it:
+#   debug = 2 (cargo default)   3.71 GB   863 MiB zstd   24s / 25s / 23s
+#   line-tables-only            2.26 GB   582 MiB zstd   23s / 20s / 22s   <- here
+#
+# THE THREE TIMES PER ARM ARE THE POINT, not padding. A single pair of runs made this look like a
+# 28s-to-20s speedup, and repeating it dissolved that into overlapping ranges: the honest claim is
+# that dropping the DWARF costs no build time and may save a little, NOT that it is materially
+# faster. ws-sim, which made this same change, DID measure a large speedup (35s to 18s) — its
+# workspace is roughly seven times this one's and link time dominates there. Do not import its
+# number here.
+#
+# The size figures are not noisy in the same way and are the reason for the change: 281 MiB less to
+# upload and 281 MiB less to restore, paid five times each way, because CI keeps five separate cargo
+# caches over five separate copies of `target`.
+#
+# The other half of that CI bulk — the incremental-compilation cache — is deliberately NOT dropped
+# here. It is set in the workflow instead, because disabling it costs local rebuild time that a
+# runner never pays back; the reasoning is written at that setting.
+[profile.dev]
+debug = "line-tables-only"

@@ -56,6 +56,40 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# CI-ONLY, and deliberately NOT beside `[profile.dev] debug` in the workspace manifest. Incremental
+# compilation writes a per-crate dependency-graph cache that is dead weight on a runner: measured at
+# 627 MB inside a 3.71 GB target tree, and it compresses poorly, so it is paid on every cache upload
+# AND on every restore — five times over each way, because the five cargo caches below are separate
+# keys over separate copies of `target`.
+#
+# IT IS NOT FREE, which is why it is scoped here rather than set for everyone. On a WARM target tree
+# with a one-file edit — the shape of a second push to an open PR, where the cache restored is this
+# job's own — a rebuild measured 2s with incremental on against 8s with it off. That 6s buys 166 MiB
+# less traffic in each direction. A runner pays the traffic on every job and the 6s once; a laptop
+# pays the 6s many times an hour and never pays the traffic. Same setting, opposite answer.
+#
+# Job-level `env:` blocks (see `rust-llvm`) MERGE with this rather than replacing it — same-key wins
+# at the more specific level, and `LLVM_SYS_221_PREFIX` shares no key with this.
+env:
+  CARGO_INCREMENTAL: "0"
+
+# THE `v2` IN THE FIVE CARGO CACHE KEYS BELOW IS A GENERATION SALT, AND IT IS WHAT MAKES THE PROFILE
+# CHANGE TAKE EFFECT AT ALL. Those keys are `hashFiles('**/Cargo.lock')`, which a profile change does
+# not move, so every one of them would have hit EXACTLY — and on an exact primary-key hit the cache
+# action skips saving altogether ("Cache hit occurred on the primary key ..., not saving cache", its
+# own source). The pre-change caches would have survived indefinitely and none of the measured saving
+# would have materialised. The change would have been inert, and silently so: every job still green.
+#
+# Waiting for the next Cargo.lock change would not have fixed it either. `restore-keys` would have
+# restored a pre-change `target`, and cargo never garbage-collects that directory, so the following
+# save would have carried BOTH generations of artefacts — bigger than before, not smaller. The salt
+# is part of the shared prefix precisely so the restore-keys miss the old caches too, rather than
+# reintroducing what the primary key just excluded.
+#
+# The cost is ONE fully cold pipeline the first time this lands: every job recompiles and re-fetches
+# the registry. Bump it again only for the same reason — a change that alters what `target` holds
+# without altering Cargo.lock.
+
 jobs:
   # Detect what exists so the pipeline no-ops until code lands, then auto-activates.
   detect:
@@ -261,10 +295,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-scoped-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-v2-scoped-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            cargo-scoped-
-            cargo-
+            cargo-v2-scoped-
+            cargo-v2-
       - name: Scoped check (NOT the merge gate)
         env:
           BEFORE: ${{ github.event.before }}
@@ -319,8 +353,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-
+          key: cargo-v2-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-v2-
       # BOTH opt-outs, not just --no-llvm. The browser tier joined the gate with the arena slice, and
       # a bare --no-llvm now selects it — which would make this job the only one needing Chrome while
       # `rust-browser` below already installs it. Same union-invariant split as LLVM, one tier wider.
@@ -386,8 +420,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-slow-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-slow-
+          key: cargo-v2-slow-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-v2-slow-
       - name: Slow tier (exhaustive sweeps)
         run: ./scripts/check-slow.sh
 
@@ -487,8 +521,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-llvm-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-llvm-
+          key: cargo-v2-llvm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-v2-llvm-
       # --llvm-only, NOT the bare invocation this used to be. Bare `check-all.sh` is `--no-llvm` plus
       # the LLVM configs by construction, so this job re-ran every non-LLVM config the `rust` job had
       # already run. MEASURED at 50.1s (`T_llvm_repeat`, warm) — and the mechanism is not what the
@@ -602,8 +636,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-browser-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-browser-
+          key: cargo-v2-browser-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-v2-browser-
       # Chrome runs as root in this container, which it refuses to do sandboxed, and the container's
       # /dev/shm is too small for it. Both are handled by `crates/redextape-wasm/webdriver.json`
       # (`goog:chromeOptions.args`), which wasm-bindgen-test reads from the crate root — so this step
