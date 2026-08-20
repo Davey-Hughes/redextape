@@ -144,14 +144,20 @@ mod tests {
         // is one past its char offset. `render`'s label is `LINE:COL`: byte-correct indexing must
         // therefore report `2:1`, and a char-indexed renderer fed these byte offsets would report
         // `2:2` instead — asserting the exact column is what makes this test fail if `IndexType::Byte`
-        // is ever swapped for `IndexType::Char` (confirmed by making that swap locally: the label
-        // changed to `a.rxt:2:2`, one column later, exactly as this comment predicts).
+        // is ever swapped for `IndexType::Char`. Confirmed by making that swap locally: the label moved
+        // one column later, exactly as this comment predicts.
+        //
+        // The two coordinates below are RENDERED OUTPUT, not pointers. `a.rxt` is the `label` argument
+        // this test passes to `render` — no such file exists — so `LINE:COL` here names a position in
+        // a string literal three lines down, and nothing it could drift away from. `check-citations`
+        // cannot tell that apart from a real pointer, which is what its marker is for.
+        // a.rxt:2:2 is what a char-indexed renderer prints. check-citations: allow
         let src = "// π\nlet mut x = 1; x + 1";
         let ds = redextape_core::analyze(src).diagnostics;
         assert_eq!(ds.len(), 1, "expected only the unused-mut warning, on line 2: {ds:?}");
         let mut buf = Vec::new();
         render(&mut buf, "a.rxt", src, &ds, false).unwrap();
         let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("a.rxt:2:1"), "byte-correct column is 1, not (e.g.) a char-indexed 2: {text}");
+        assert!(text.contains("a.rxt:2:1"), "byte-correct column: {text}"); // check-citations: allow
     }
 }

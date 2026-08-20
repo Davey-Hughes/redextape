@@ -112,12 +112,20 @@ set -euo pipefail
 # on. And `.lock`, `.proptest-regressions`, `.gitignore`, `.dockerignore` — tracked here, deliberately
 # absent, on the judgement that nobody writes a line pointer into a lockfile or a proptest seed. If one
 # appears, this list is the one-line edit, and nothing in this repository will ask for it first.
-readonly CITATION_RE='([A-Za-z0-9_./-]+\.(rs|ts|tsx|js|json|toml|yml|yaml|css|md|sh|html|conf|tm|txt)|(^|[^/A-Za-z0-9_.-])Dockerfile):[0-9]+'
+readonly CITATION_RE='([A-Za-z0-9_./-]+\.(rs|ts|tsx|js|json|toml|yml|yaml|css|md|sh|html|conf|tm|txt|rxt)|(^|[^/A-Za-z0-9_.-])Dockerfile):[0-9]+'
 
 # THE ESCAPE HATCH, AND IT IS COUNTED OUT LOUD BECAUSE THAT IS THE ONLY THING SEPARATING IT FROM AN
 # ALLOWLIST (spec §4.5). A config file collects exemptions where no reader of the code will ever meet
 # them; a marker sits on the line it excuses and is visible in review. If this count is ever above zero
-# without an argument beside it, that is a finding. It ships at zero.
+# without an argument beside it, that is a finding.
+#
+# **IT SHIPPED AT ZERO AND NOW SHIPS AT TWO, AND THIS IS THE ARGUMENT THE SENTENCE ABOVE DEMANDS.**
+# Both are in `report.rs`'s byte-vs-char indexing test, on the two lines carrying `a.rxt:<line>:<col>`.
+# That is the exact case the message at the bottom of this file names — *"a stack-trace assertion, a
+# source-map fixture"* — and it is a stronger instance than either: `a.rxt` IS NOT A FILE. It is the
+# `label` argument that test hands to `render`, so the coordinate names a position in a string literal
+# in the same function, and there is no target it could ever drift away from. A pointer that cannot rot
+# is not what this gate is for, and the marker says so on the line rather than in a config nobody reads.
 readonly ALLOW_RE='check-citations: allow[[:space:]]*$'
 
 # BINARY FILES ARE SKIPPED BY EXTENSION, reusing `check-text-bytes.sh`'s argument verbatim: an
@@ -127,6 +135,38 @@ readonly BINARY_RE='\.(png|jpg|jpeg|gif|ico|webp|pdf|wasm|woff2?|ttf|otf|zip|gz|
 
 # `docs/` is a scope boundary, not an exemption — see the header and spec §4.2.
 readonly SCOPE_RE='^docs/'
+
+# **RECORDINGS ARE THE SECOND BOUNDARY, AND THEY ARE A BOUNDARY FOR `docs/`'s REASON, NOT A NEW ONE.**
+# A `.stdout`/`.stderr` golden is a byte-for-byte capture of what the binary printed. When `rxt` joined
+# the list above, three of them lit up on lines rendering `warn.rxt:<line>:<col>` — ariadne's rendered
+# diagnostic location for a real fixture at its real position. That is not a pointer somebody wrote and
+# will forget to update; it is output, and the test that owns it fails the moment it stops matching, so
+# it is the one citation-shaped thing in this tree that CANNOT go stale unnoticed. Exactly `docs/`'s
+# argument — an observation is not a pointer — arriving from the other end.
+#
+# **AND THE ESCAPE HATCH STRUCTURALLY CANNOT REACH THEM, WHICH IS WHY THIS IS A BOUNDARY RATHER THAN
+# THREE MARKERS.** A marker excuses the line it sits on; a golden must byte-match the program's output;
+# the program does not print `check-citations: allow`. Appending one would break the test it belongs to
+# — the same shape as the Dockerfile `# syntax=` line above, where the hatch also could not reach and
+# the discrimination had to move into the pattern.
+#
+# What this gives up, stated rather than discovered later: a genuine authored pointer inside a golden
+# is now invisible here. Nobody hand-writes prose into a file `TRYCMD=dump` regenerates, and a golden
+# is reviewed as a diff against real output, so the exposure is small — but it is not zero.
+readonly RECORDING_RE='\.(stdout|stderr)$'
+
+# True when $1 is a path this gate does not read: out of scope, binary, or a recording.
+#
+# **THIS IS A FUNCTION SO THE SELF-TEST CAN REACH IT, AND THAT IS THE WHOLE REASON.** Every exclusion
+# here is a door of exactly the shape this file has closed three times — nothing on stdout, no warning,
+# exit 0 — and until `RECORDING_RE` was added the three predicates lived inline in the scan loop where
+# `--self-test` could not see them at all. `violations_in` was tested to death and the decision about
+# WHICH FILES REACH IT was tested not at all. Adding a fourth untested exclusion to prove a point about
+# untested exclusions would have been its own punchline.
+excluded_path() {
+  local f="$1"
+  [[ $f =~ $SCOPE_RE ]] || [[ ${f,,} =~ $BINARY_RE ]] || [[ ${f,,} =~ $RECORDING_RE ]]
+}
 
 # Every citation-bearing line of $1, as `<lineno>:<text>`. **THE ONE DETECTION IMPLEMENTATION** — the
 # scan below, the escape-hatch count, and `--self-test` all reach the tree through this and nothing
@@ -234,6 +274,7 @@ self_test() {
   ranged="$SELF_TEST_DIR/ranged.md"
   uppercase="$SELF_TEST_DIR/uppercase.rs"
   dockerish="$SELF_TEST_DIR/Dockerfile"
+  surfaced="$SELF_TEST_DIR/surfaced.rs"
 
   # **THE ONLY REAL CITATION ANYWHERE IN THIS SLICE, AND IT IS ASSEMBLED HERE RATHER THAN WRITTEN.**
   # The name and the number are separate values joined by printf, so no line of this tracked file
@@ -264,6 +305,15 @@ self_test() {
   # were removed.
   printf '# the build context (%s:%d) is what COPY reads\n# syntax=%s/%s:%d\n' \
     'Dockerfile' "$lineno" 'docker' 'dockerfile' 1 > "$dockerish"
+
+  # **THE EXTENSION THE LIST WAS LAST MISSING, PLANTED SO THE LIST CANNOT QUIETLY LOSE IT AGAIN.**
+  # `rxt` joined `CITATION_RE` when the CLI slice landed and `.rxt` fixtures entered the tree. Removing
+  # it again passed this whole self-test — every planted citation named a `.rs`, `.md`, `.html` or
+  # `Dockerfile` target, so the newest entry was the one thing no assertion covered. That is the
+  # extension list's documented silent-failure direction reproduced inside the test written to guard
+  # it, one branch after the same shape was found in the list itself. Caught by sabotaging the shipped
+  # pattern rather than by reading it.
+  printf '//! the fixture at %s:%d is what `fmt_error.toml` feeds the binary.\n' 'broken.rxt' "$lineno" > "$surfaced"
 
   n=$(violations_in "$dirty" | wc -l | tr -d '[:space:]')
   if [ "$n" -ne 1 ]; then
@@ -307,6 +357,32 @@ self_test() {
     exit 1
   fi
 
+  n=$(violations_in "$surfaced" | wc -l | tr -d '[:space:]')
+  if [ "$n" -ne 1 ]; then
+    echo "self-test FAILED: a planted citation naming a .rxt target was not detected — \`rxt\` has fallen out of the extension list, which fails silent by design" >&2
+    exit 1
+  fi
+
+  # **WHICH FILES REACH THE DETECTOR, ASSERTED IN BOTH DIRECTIONS AND FOR THE FIRST TIME.** Every
+  # assertion above this point tests `violations_in`; none of them tested whether a file ever gets
+  # handed to it. That is the same blind spot as the doors in the header — a path silently skipped and
+  # a file silently unread are the identical outcome — and `excluded_path` exists as a function
+  # precisely so this block can exist. The NEGATIVE half is the load-bearing one: an exclusion
+  # predicate that returned true for everything would satisfy all three positive cases and read like a
+  # working gate.
+  for excluded_case in 'docs/superpowers/plans/roadmap.md' 'web/public/logo.PNG' 'tests/cmd/lint_warn.stderr' 'tests/cmd/fmt_stdin.stdout'; do
+    if ! excluded_path "$excluded_case"; then
+      echo "self-test FAILED: '$excluded_case' should be out of scope, binary or a recording, and was not — an exclusion this gate documents is not being applied" >&2
+      exit 1
+    fi
+  done
+  for scanned_case in 'crates/redextape-core/src/lints.rs' 'web/src/highlight.ts' 'crates/redextape-cli/tests/cmd/broken.rxt' 'Dockerfile'; do
+    if excluded_path "$scanned_case"; then
+      echo "self-test FAILED: '$scanned_case' was excluded from the scan — a file this gate must read is being skipped, which is a silent pass" >&2
+      exit 1
+    fi
+  done
+
   # THE SCAN'S BOOKKEEPING, BOTH DIRECTIONS, AND IT IS THE ONE ASSERTION HERE THAT IS NOT ABOUT THE
   # DETECTOR. `reconcile` exits rather than returns, so it is driven in a subshell and judged by its
   # status. It is tested because the claim it now enforces shipped for a whole branch as an identity
@@ -322,7 +398,7 @@ self_test() {
     exit 1
   fi
 
-  echo "self-test passed: planted file:line citations are caught (single and range, .rs and not, either case), a symbol citation is not, an excused one is counted rather than hidden, and a tally that does not match git ls-files is rejected"
+  echo "self-test passed: planted file:line citations are caught (single and range, .rs and not, either case, and naming a .rxt target), a symbol citation is not, an excused one is counted rather than hidden, the scan's own exclusions admit and reject the right paths, and a tally that does not match git ls-files is rejected"
 }
 
 # **AN UNRECOGNISED ARGUMENT IS AN ERROR, IN A GATE WHOSE WHOLE THESIS IS "NO SILENT PASS".** The first
@@ -374,7 +450,7 @@ while IFS= read -r -d '' f; do
   # Matched in bash rather than by piping each path into `grep -q`, unlike the sibling: two extra
   # processes per file is most of a whole-tree scan's runtime, and a path is one string.
   # `${f,,}` lowercases, which is what the sibling's `grep -qi` was for.
-  if [[ $f =~ $SCOPE_RE ]] || [[ ${f,,} =~ $BINARY_RE ]]; then
+  if excluded_path "$f"; then
     excluded=$((excluded + 1))
     continue
   fi
@@ -434,7 +510,7 @@ fi
 # dangling symlinks — and the reported total is now `git ls-files`' number, not the scan's.
 total=$(tracked_total)
 reconcile "$scanned" "$excluded" "$skipped" "$total"
-tally=$(printf '%s out of scope or binary, %s skipped — %s tracked paths in all' \
+tally=$(printf '%s out of scope, binary or recording, %s skipped — %s tracked paths in all' \
   "$excluded" "$skipped" "$total")
 
 if [ "$bad" -ne 0 ]; then
