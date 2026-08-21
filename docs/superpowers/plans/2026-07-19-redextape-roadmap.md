@@ -10079,3 +10079,467 @@ folding them into a streak would turn the evidence for the diagnosis into fake e
 
 The deterministic reproduction, and its disappearance at a window that previously killed the test, is
 what carries the claim.
+
+#### PR 1 OF THE TREE-SITTER SLICE CLOSES — the mini-language gets a grammar held span-for-span against the front end, and the version the spec pinned the toolchain to has never existed (2026-08-21, branch `tree-sitter-grammars`, `2303361..4550112`, 16 commits, plus this entry)
+
+Design: `docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md`. Plan:
+`docs/superpowers/plans/2026-08-20-tree-sitter-grammars.md`. This is PR 1 of 3 — the λ and TM grammars
+get their own plans.
+
+What ships: `grammars/tree-sitter-redextape/` — `grammar.js`, the committed generated `src/`,
+`queries/highlights.scm`, `tree-sitter.json`, and eight `tree-sitter test` cases;
+`crates/redextape-grammar-check`, a workspace crate that compiles the generated parser through `cc` and
+compares **every highlight capture against `redextape_core::analysis::classify_source`, span for span**;
+and a `grammar` leg in `scripts/check-all.sh` that regenerates the committed parser and fails if it is
+stale. The lane stays what the roadmap fixed it to: **highlighting for external editors, and the grammar
+may never lower a CST into Core.** Nothing here touches `web/`.
+
+##### THE TRIGGER HAD NOT FIRED, AND THE GATE WAS OPENED ANYWAY
+
+The roadmap's tree-sitter entry (line 2643 today, under *Extension tracks*) sets the condition as *"when
+an **external editor** needs it — Neovim, Helix, Zed, Emacs"*, and records that **nothing serves that
+today**. That is still true. No editor asked; the sequence CLI-first-then-tree-sitter was chosen on
+2026-08-19 and its first half landed the day before this branch opened (design §2). **This is a decision,
+not an oversight**, and it is recorded as one so a later reader does not reconstruct it as a trigger
+nobody checked.
+
+That entry is **left exactly as written, and this one does not edit it.** The `cli-fmt-and-lint` entry
+above is the precedent, and it is a precedent for *when* an in-place correction is warranted rather than
+for correcting freely: it rewrote the old `When:` clause because that clause had become **impossible to
+satisfy** — Plan 5 had already met it and answered no — and it said so in its own entry rather than
+silently. Nothing about the current clause is impossible. It simply has not happened yet, and the grammar
+exists first. That is a fact about the sequencing, not a defect in the entry, so the entry stands and this
+one records the decision beside it.
+
+##### THE FINDING THAT OUTRANKS THE FEATURE: THE PINNED CLI VERSION DOES NOT EXIST
+
+The design's toolchain table pinned the CLI at **0.27.0**. There is no such release. That number was
+read off `/usr/sbin/tree-sitter --version` on this machine, and that binary is Arch's
+`tree-sitter-cli-git` — built from tree-sitter's `master` at `0.26.12.r400.g43623ec9b`, **reporting the
+version it is heading toward rather than the one it descends from.** Checked live at the time: npm's
+`tree-sitter-cli` and GitHub's numbered releases both top out at **v0.26.12**.
+
+**A version read off a locally installed binary is not evidence that the version exists.** The binary
+answers "what do I call myself", which is a different question from "what can be downloaded", and a
+nightly or VCS build is free to answer the first with a string no release ever carried. Nothing local
+would have caught it: the grammar generated, the ABI was right, the differential was green, and the whole
+suite passed — on a machine that already had the binary. The failure was reserved for the **first CI
+run**, as a download 404 in an install script, **far from the mistake and shaped like an infrastructure
+problem rather than a wrong constant.**
+
+Re-pinned to the released **v0.26.12**, which then needed a new `tree-sitter.json`: without that file the
+released CLI **warns and silently falls back to ABI 14**, which the Rust crate refuses to load. So the
+file is not decoration — it is what makes the pin reproducible. Regenerating under the released CLI
+changed **exactly one line**, `.minor_version` `0` → `1`; the parse tables are byte-identical, so the
+re-pin is a metadata change and not a re-derivation of the grammar:
+
+```
+git show 9bdf401 -- grammars/       →  1 file changed, 1 insertion(+), 1 deletion(-)
+                                       -      .minor_version = 0,
+                                       +      .minor_version = 1,
+```
+
+Design §8.1 was rewritten to carry the correction rather than the original number (`b74b32e`), and
+`ensure_treesitter` now **prefers a repository-local `.tools/tree-sitter` over `PATH` and asserts the
+pinned `--version`** — which at this point in the story was `0.26.12`, and moves once more below —
+because this machine's `PATH` still resolves to the `master` build, and
+regenerating with it emits the other `.minor_version` and reddens the very leg that exists to catch a
+stale `parser.c`. **A pinned tool has to win locally too, or the gate punishes correct work.**
+
+##### AND THE PIN WAS STILL WRONG — TWICE MORE, NEITHER TIME ABOUT THE VERSION NUMBER
+
+**v0.26.12 exists and could not run.** The first CI run reached the install step, downloaded the asset,
+**verified its checksum**, and refused to install it:
+
+```
+/tmp/tree-sitter-install-1mS6q2/tree-sitter.gz: OK
+error: downloaded tree-sitter for Linux-x86_64 (asset tree-sitter-linux-x64.gz) but it will not run here.
+  nothing was installed to /root/.cargo/bin.
+```
+
+`objdump -T` on that asset shows **GLIBC_2.39**; the runner image `catthehacker/ubuntu:act-latest` has
+**2.35**. Every published Linux asset for the release is the same glibc build — `tree-sitter-linux-x64.gz`
+and `tree-sitter-cli-linux-x64.zip` both — and there is no musl variant, so **no download could have
+worked.** That run answered the two questions the design had filed as unverifiable and both came back
+green: the runner reaches github.com, and `$HOME/.cargo/bin` is writable.
+
+**Building it from source could not work either.** `cargo install tree-sitter-cli --version 0.26.12
+--locked` fails on the runner with `Unable to find libclang`: the CLI vendors QuickJS through `bindgen`.
+
+**The pin is now v0.25.10**, whose prebuilt binary needs only **GLIBC_2.34**. It regenerates this grammar
+to **byte-identical `src/grammar.json` and `src/node-types.json`** at ABI 15 with the corpus passing;
+`src/parser.c` moves by one line (the generator-version comment) and `src/tree_sitter/array.h` follows,
+being the CLI's own vendored runtime header.
+
+**The generalisation, which cost three attempts to reach: EXISTING IS NOT USABLE.** Confirming a release
+was published is one check; confirming its artifact runs where it must is a second, and confirming it can
+be built there is a third. The version number was wrong once. The other two failures had a correct
+version number and a working download.
+
+**What made each failure cheap was the self-test.** The installer verifies `--version` in a temporary
+directory before anything reaches its destination — a property added earlier in this branch for an
+unrelated reason (a reviewer found the macOS path would otherwise leave an unexecutable file at exactly
+the location `ensure_treesitter` prefers). It fired on Linux instead, and turned "will not run" into one
+labelled line rather than an exit 126 several steps later.
+
+##### A CORRECTION THIS ENTRY MADE AND THEN HAD TO UNMAKE — NODE *IS* REQUIRED
+
+This branch twice recorded, as a measurement, that the CLI needs no Node because it evaluates
+`grammar.js` itself. The cited evidence was `env -i PATH=/usr/bin:/bin <cli> generate` exiting 0 and
+propagating an edit. **`/usr/bin/node` exists on this machine**, so the "node-free" environment contained
+node. Under a genuinely empty `PATH` both CLIs fail with `Failed to load grammar.js -- Failed to run
+'node'`.
+
+**A negative result is only evidence if the absence was itself verified** — the control has to remove the
+thing it is controlling for. One line, `command -v node` under the exact environment about to be tested,
+would have caught it. It survived two passes, an author's and a reviewer's, for the reason bad claims
+usually survive: **nothing depended on it.** The runner has node; the gate was green either way. A claim
+no consequence rests on is a claim nothing pushes back on, which makes it likelier to be wrong and less
+likely to be found.
+
+##### TWO VACUOUS TESTS, ONE CAUGHT BEFORE IMPLEMENTATION AND ONE BY REVIEW
+
+`overlapping_captures_agree_on_class` **asserted nothing** — it was written as a scan over overlapping
+captures with no failing branch, so agreement and disagreement produced the same green. Caught in
+pre-flight, before Task 1 started. Disagreement is now an `Err` from `captures_with`, and
+`a_conflicting_query_is_rejected` feeds it a query that assigns two different classes to the same span
+and requires the `Err`. That is the pair: a claim, and a proof the claim can fail.
+
+`captures_returns_one_entry_per_span` was a **tautology**. It deduplicated a list that was already keyed
+by a `BTreeMap`, so the property it asserted was a property of the data structure it had just read out
+of, not of `captures`. Caught by Task 3's review. Replaced by
+`captures_pins_text_and_class_for_one_source`, whose expectations the re-review **checked against
+`class_of` independently** rather than against the code that produced them — which is the part that
+matters: a pinned expectation derived from the implementation is the same tautology with more lines.
+
+##### THE ERROR-NODE GUARD IS LOAD-BEARING, AND MUTATION IS WHAT PROVED IT
+
+`compare()` refuses any source whose tree contains an ERROR node before it compares anything. That reads
+like defensive tidiness. It is not. **Disable it and `the_comparison_can_fail` goes green on
+`compare("let x = @@@;")` — the test that exists to prove the differential can fail stops being able to
+fail.**
+
+The mechanism, traced through both sides rather than assumed: `lex` emits **no token at all** for `@`,
+only a diagnostic, which `classify_source` discards — so the classification of `let x = @@@;` is exactly
+four spans, `let` `x` `=` `;`. The grammar parks the `@@@` inside an ERROR node, and no highlight query
+matches inside one, so its capture list is **the same four spans**. The `zip` loop finds no divergence,
+the length check finds no difference to report, and `compare` returns `Ok` on input that does not parse.
+**Both sides silently drop the garbage, which makes them agree precisely where one of them gave up** —
+and the length check that would catch a truncated capture list is no help when the lengths coincide.
+Task 4 mutated the guard and watched the test go red;
+the reviewer reproduced it independently and then worked the length-check arithmetic in both directions
+without constructing an input that passes while mis-classifying. **This entry cites that result and did
+not re-run the mutation** — the guard is in the shipped code, and re-mutating it here would mean editing
+`crates/` in a documentation commit.
+
+##### A RULE THAT REJECTED INPUT THE REAL PARSER ACCEPTS, DEFENDED BY A DOC COMMENT THAT WAS FALSE
+
+`grammar.js` shipped a `_expression_except_block` rule barring a bare block from callee, receiver and
+condition position. `parse_postfix` accepts all three, so `{ f }(1)`, `{ f }.m(1)` and `while { a } { b }`
+each became an **ERROR node** under the grammar and parse fine under the front end.
+
+**The doc comment defending the restriction claimed the differential would pass such input.** It cannot:
+`compare()` refuses any source containing an ERROR node, which is the guard two sections above. So the
+comment asserted a green that the code it sat beside makes impossible — and it was the *comment*, not the
+rule, that would have kept the next reader from probing it. Probed rather than argued: dropping the
+restriction generates with **no conflict** and matches `parser.rs` on all three shapes. Rule deleted,
+three corpus cases added, and the re-review swept **every** `_expression`-typed field for a second
+instance of the same defect class and found none.
+
+A sibling defect in the same task: `list` delegated to the shared `arguments` rule, wrapping list
+elements in a spurious `arguments` node where `Expr::List { items }` is flat. Both were **plan defects**,
+found by the implementer checking the plan against `parser.rs` rather than implementing it.
+
+##### ONE SHARED CAPTURE MAP COULD NOT SERVE THREE GRAMMARS, AND WOULD HAVE PASSED EVERYTHING UNTIL PR 2
+
+The spec put a single `capture → TokenClass` table in front of all three languages.
+**`@variable.parameter` cannot be one row.** In the mini-language it must be `Ident` — `class_of` calls a
+parameter an identifier. In λ it must be `Binder` — `print_lambda_mapped` folds the bound name into the
+binder. Both are correct for their own language, and a table keyed by capture name alone has nowhere to
+put that.
+
+**The collision was scheduled for PR 2 and every test until then would have passed**, which is the
+expensive shape: a defect that is invisible for as long as only one consumer exists. Spec §5.1 amended to
+per-grammar tables (`fa215e3`).
+
+Splitting the table **recovered a check that could not exist while it was shared**: reverse totality — no
+row unused by any query — was untestable with one table, because the λ and TM rows are *legitimately*
+unused until those grammars land. Per-grammar, it is testable now, and
+`every_map_row_is_used_by_a_query` exists. The map ships **11 rows** against the **11 distinct capture
+names** the shipped queries emit across **12 patterns** — total in both directions, and the counts are
+equal because both tests now hold.
+
+##### THREE INDEPENDENT AGREEMENT RESULTS, ZERO DIVERGENCES, AND WHAT EACH IS WORTH
+
+| result | what was compared | reproducible from this tree |
+|---|---|---|
+| Task 3's review sweep | **34** hand-written sources — every operator, CRLF comments, keyword-prefix identifiers, `u64` overflow, emoji, tabs | **no** — a scratch harness, never committed |
+| `CORPUS` | **13** hand-written programs, `compare()`d span for span | yes |
+| `tests/generated.rs` | **256** generated programs from `arb_expr_over` | yes |
+
+Zero divergences in all three, and **the grammar agreed with `classify_source` on the whole hand-written
+corpus with no change to `grammar.js` or `highlights.scm`** — the differential was built and passed
+first run, which is a weaker signal than a differential that caught something and is worth saying rather
+than dressing up.
+
+The 34-source figure is the one nobody else can re-run. It is stated as what it is: a reviewer's manual
+sweep during Task 3, not a standing check, and it is named here for the *classes* it covered rather than
+counted as coverage.
+
+The 256 is **proptest's default**, not a configured number — `grep -rn ProptestConfig
+crates/redextape-grammar-check/` returns nothing. The reviewer refused to take it on faith and timed the
+case count instead; re-measured today, it is still linear at ~0.47 ms per case, so these are genuine
+parse-and-compare cycles rather than a cached or short-circuiting loop:
+
+```
+PROPTEST_CASES=1    …  Summary [ 0.004s]
+PROPTEST_CASES=256  …  Summary [ 0.125s]
+PROPTEST_CASES=2560 …  Summary [ 1.199s]
+```
+
+**What 256 does not buy is breadth, and design §11.3 said so before the number existed.** `arb_expr_over`
+produces `+`, `-`, `>`, `==` and `if` over numeric leaves — **no `fn`, no `while`, no closures, no UFCS.**
+Those live only in the 13 hand-written entries, which means the *most structurally interesting* parts of
+the grammar rest on the smaller and weaker layer. The generated corpus gives depth on a narrow shape. The
+three results above are independent of each other; they are not independent of that.
+
+##### THE REGENERATE LEG'S OWN BLIND SPOT WAS THE SILENT PASS IT EXISTS TO PREVENT
+
+`check_grammars` regenerates every `grammars/*/` and fails on a diff. The first version used
+`git diff --quiet`, **which sees only tracked files** — a regenerated file that was never `git add`ed
+compares against nothing and reports clean. Not hypothetical: a reviewer of this leg dropped an untracked
+file under `grammars/` and the check returned green. Nothing is broken today, since the one existing
+grammar has every generated file tracked; but `tree-sitter-redextape-lambda` and `-tm` are PRs 2 and 3,
+and a `src/` that was never staged **would have regenerated green forever.** A
+`git ls-files --others --exclude-standard` arm now catches it, with a **deliberately different message** —
+stale and untracked need different responses from the reader.
+
+That arm has a blind spot of its own and the code names it: `--exclude-standard` **honours `.gitignore`**,
+so a generated file matched by one would be invisible here — the same defect one level up. No grammar
+carries a `.gitignore` today and the top-level one names nothing under `grammars/`, so it is sound as
+written, and `4550112` exists solely to say so at the site.
+
+**Non-vacuity was re-proved after each of the two fix rounds**, because the detection logic changed both
+times: edit `grammar.js` without regenerating → the leg reddens; revert and regenerate → clean. A leg
+that was proved capable of failing before the last edit to it has been proved about a different leg.
+
+`setup-dev.sh` was separately **broken on macOS** — a hardcoded linux asset, no `uname` guard, and it left
+an unexecutable file at `.tools/tree-sitter` that `ensure_treesitter` *prefers*, so the run died at exit
+126 and the actionable message was never reached. macOS assets are now selected by `uname` and
+checksummed against GitHub's published digests, and **linux-arm64 is now rejected rather than silently
+handed the x86_64 binary** — a behaviour change, flagged as one. The install destination moved from
+`/usr/local/bin` to `$HOME/.cargo/bin`, matching `install-nextest-ci.sh`; the root write was an unproven
+privilege assumption about the runner.
+
+##### THE COMMITTED ARTIFACT'S SIZE, WHICH DESIGN §11.1 LEFT AS AN OPEN QUESTION
+
+**103,333 bytes** — `wc -c grammars/tree-sitter-redextape/src/parser.c`, at ABI 15. The design declined
+to guess, noting only that the one-rule spike produced 8.5 KB, and said the real one is *"measured in PR 1
+rather than guessed. If it is unreasonable, that is a PR 1 finding with the whole design still in front of
+it, not a surprise discovered in PR 3."* So: ~101 KiB of generated C from a 156-line `grammar.js`, and it
+regenerates deterministically from that file, which the `grammar` leg checks on every run.
+
+**Verdict: not unreasonable, and the design's question is answered rather than deferred.** The number the
+risk was really about is three of them, and that is an *extrapolation, not a measurement* — λ and TM are
+smaller languages than the mini-language and their parse tables are unlikely to be larger, so the ceiling
+is roughly 300 KB and the floor is well under it. Recorded here so PR 3 is not the first place anyone adds
+it up, and so that whoever writes PR 3 can check the extrapolation against a second real number instead of
+this one. `.gitattributes` is the lever if the diffs become noisy; nothing has asked for it yet.
+
+##### THE README'S INSTALL BLOCK IS THE ONE THING HERE NO GATE CAN CHECK, SO IT WAS READ OUT OF SOURCE
+
+`grammars/tree-sitter-redextape/README.md` ships install snippets for nvim-treesitter, Helix and Zed.
+**Nothing in CI can execute any of them**, which makes them the part of this branch most likely to be
+wrong and least likely to be caught — so every one was taken from current primary sources rather than
+written from memory, and three of the claims the plan carried into it did not survive that.
+
+**Design §11.2's risk is closed in the direction it did not expect.** It flagged *"Zed's grammar
+packaging may not read a subdirectory"* and pre-committed to a generated mirror repository if it could
+not. **It can.** The key is `path`, and it is **undocumented** — Zed's public docs page for language
+extensions shows only `repository` and `rev`. It is in the struct that deserializes `extension.toml`:
+
+```rust
+// zed-industries/zed, crates/extension/src/extension_manifest.rs
+pub struct GrammarManifestEntry {
+    pub repository: String,
+    #[serde(alias = "commit")]  pub rev: String,
+    #[serde(default)]           pub path: Option<String>,
+}
+```
+
+`extension_builder.rs` joins it to the clone before looking for `src/parser.c`, and two shipped
+extensions depend on it — `zed-extensions/ocaml` builds two grammars out of one repository at
+`grammars/ocaml` and `grammars/interface`. **No mirror repo, and the layout does not change.** Reading
+the docs alone would have produced the opposite answer and a mirror nobody needed.
+
+**nvim-treesitter is two incompatible plugins sharing a name**, and the plan's snippet described only
+the frozen one. On `main`, `files`, `generate_requires_npm` and `requires_generate_from_grammar` are
+**gone**; `generate`, `generate_from_json`, `path` and `queries` are new. Worse, `install_info.queries`
+is joined to the **repository root**, not to `location` — `install.lua` applies `location` to the compile
+directory and `queries` to the clone directory, separately. The natural `queries = "queries"` therefore
+resolves to a path that does not exist here, **and the failure is that highlights are silently not
+installed.** The README carries the full `grammars/tree-sitter-redextape/queries` and says why.
+
+Helix's `subpath` is real and documented. Its `comment-token` is not current — `comment-tokens` is, with
+the singular kept as a back-compat alias.
+
+##### AND THE SNIPPETS DO NOT WORK FOR ANYONE TODAY, WHICH IS NOT A SNIPPET PROBLEM
+
+Every one of them makes an editor clone this repository, and **it is not anonymously clonable.** Probed
+2026-08-21:
+
+```
+$ curl -sS -o /dev/null -w '%{http_code}\n' \
+    https://forge.daveynet.xyz/davey/redextape/info/refs?service=git-upload-pack
+401
+$ curl -sS https://git.daveynet.xyz/davey/redextape/info/refs?service=git-upload-pack | wc -c
+0
+$ GIT_TERMINAL_PROMPT=0 GIT_CONFIG_GLOBAL=/dev/null git ls-remote https://git.daveynet.xyz/davey/redextape
+   (no output, exit 0)
+```
+
+`forge.daveynet.xyz` refuses anonymously, which is the honest failure. `git.daveynet.xyz` is the **SSH**
+host, and over HTTPS it answers the ref advertisement with **HTTP 200 and a zero-byte body** — which git
+reads as *a repository with no refs*, so `ls-remote` **exits 0 and prints nothing.** That is a silent
+empty, the same failure shape as the untracked-file blind spot two sections up and the vacuous tests
+above it, arriving this time from the hosting layer. It is also the URL `tree-sitter.json` records as the
+grammar's repository, so it is the one a reader is most likely to paste.
+
+Not fixed here — the instance's visibility is not this branch's to change, and `tree-sitter.json` is
+generated-adjacent metadata this task did not touch. **Named in the README instead**, with both hosts
+and the SSH form, so the first person to try an install reads the cause instead of debugging an editor.
+
+##### WHAT THIS DID NOT CLOSE
+
+**The λ grammar — PR 2**, with its own plan, its own capture table, and design §6.2's gap waiting for it:
+`parse_lambda` accepts `\` and `λ` interchangeably while `print_lambda` emits only `λ`, so **no
+printer-produced corpus entry can ever contain a `\`**. The grammar must accept it — it is what a
+keyboard types, and an editor is exactly where it gets typed — and the differential will have no
+authority to compare against for it. It rests on hand-written `tree-sitter test` cases plus the
+observation that `parse_lambda` succeeds on each.
+
+**The TM grammar — PR 3**, and design §6.3's gap: `print_tm_mapped` emits no `Comment` class at all,
+because the printer never writes a comment, while `;` comments are part of the form `parse_tm` accepts.
+Same weaker treatment. **This is the same shape of gap `TokenClass::Comment` had on the source path
+before 2026-08-19**, where the fix was to give the lexer somewhere to put comments; the equivalent here is
+a `classify_lambda`/`classify_tm` over authored text, which is real work with a real consumer —
+`redextape-lsp`, deferred to v2.
+
+**Design §6.1, and it is not deferred, it is priced.** `@function.call` and `@variable` both project to
+`Ident`, so the differential asserts *that* a span is an identifier and never *which kind*: a grammar
+capturing every identifier as `@function.call` would pass all 269 comparisons above. The two alternatives
+were costed and both rejected — capturing at exactly `TokenClass` granularity makes the differential total
+at the price of one colour for every identifier in every editor, and checking the finer captures against
+the AST's own callee positions costs a second comparison per language, times three. The granularity rests
+on `tree-sitter test` and on review. Written down so the second option can be taken up by someone who
+knows it was weighed.
+
+**`parse_asm` — still unclaimed**, exactly where Plan 6's survey left it, and it is why the asm form could
+not be a fourth grammar: the form prints and cannot be read back, so a grammar for it would have **no
+parser to be checked against**. The differential has no authority to call.
+
+**Two things only the first CI run can settle**, and neither is verifiable from this machine: whether the
+runner has egress to `github.com` for the pinned release asset, and **whether the macOS binaries actually
+execute on real hardware** — their checksums were verified by independent download, which proves the right
+bytes arrived and nothing about whether they run. A MacBook smoke test of `setup-dev.sh` is the cheap way
+to close the second.
+
+**The README's install snippets stay unchecked, permanently.** They were verified against source on
+2026-08-21 and nothing will notice when an editor's config format moves — nvim-treesitter's `main`
+rewrite is exactly that happening once already. The dates and the sources are in the README so the next
+reader knows what to re-check rather than what to trust. **And the repository's own visibility is
+untouched**: until it is anonymously readable, or a reader substitutes an authenticated URL, none of the
+three installs.
+
+**Everything in design §12 stays out**: no `locals.scm` (a scope resolver is a semantic claim inside a
+lane defined as cosmetic — the nearest thing here to the two authoritative grammars the roadmap forbids),
+no `injections.scm`, no folds, no indents, no editor-extension packaging, and nothing in `web/`. The
+README ships install snippets; it does not ship a Zed extension, an nvim-treesitter upstream PR, or an npm
+package. **Packaging follows a consumer, and there is not one yet** — which is the same sentence as the
+trigger at the top of this entry, arriving from the other direction.
+
+##### VERIFICATION
+
+All at `4550112`, on this machine.
+
+```
+$ cargo nextest run --workspace
+     Summary [  36.697s] 1093 tests run: 1093 passed, 8 skipped
+
+$ scripts/check-all.sh --no-llvm --no-browser
+==> using tree-sitter 0.25.10 at /home/davey/projects/redextape/.tools/tree-sitter
+==> regenerating grammars/tree-sitter-redextape/
+…
+green, but PARTIAL — these tiers were SKIPPED: LLVM browser. This is NOT a full gate on its own.
+```
+
+The gate exits `0` and **says of itself that it is partial** — the LLVM coverage tier and the browser
+tier were skipped, so this is not the merge gate, and CI runs both.
+
+```
+$ wc -c grammars/tree-sitter-redextape/src/parser.c
+103333 grammars/tree-sitter-redextape/src/parser.c
+
+$ grep -m1 LANGUAGE_VERSION grammars/tree-sitter-redextape/src/parser.c
+#define LANGUAGE_VERSION 15
+
+$ cd grammars/tree-sitter-redextape && ../../.tools/tree-sitter test
+Total parses: 8; successful parses: 8; failed parses: 0; success percentage: 100.00%
+
+$ cargo nextest run -p redextape-grammar-check
+     Summary [   0.126s] 12 tests run: 12 passed, 0 skipped
+```
+
+Every count this entry quotes, with what produces it:
+
+```
+16   commits          git rev-list --count 2303361..4550112
+8    tree-sitter test cases   tree-sitter test, "Total parses: 8" above
+13   CORPUS programs   awk '/^pub const CORPUS/,/^\];/' crates/redextape-grammar-check/src/lib.rs \
+                         | grep -c '^    ("'
+11   capture-map rows  awk '/^pub const CAPTURE_CLASSES/,/^\];/' …/src/lib.rs | grep -c '^    ("'
+11   capture names     grep -v '^;' grammars/tree-sitter-redextape/queries/highlights.scm \
+                         | grep -oE '@[a-z.]+' | sort -u | wc -l
+12   query patterns    grep -v '^;' …/queries/highlights.scm | grep -c '@'   — the `-v '^;'` matters:
+                       without it the count reads 14, because two prose comments name captures,
+                       and 14 is what this entry said before the command was run against it
+156  grammar.js lines  wc -l < grammars/tree-sitter-redextape/grammar.js
+256  generated cases   proptest's default; grep -rn ProptestConfig crates/redextape-grammar-check/
+                       returns nothing, and the timing above shows the cases are real
+```
+
+##### AND AS MERGED, BECAUSE FOUR OF THOSE FIGURES MOVED AFTER THEY WERE WRITTEN
+
+The block above is an observation about `4550112` and stays as written; this repository annotates
+rather than rewrites. But the two CI failures documented above landed *after* it, and they moved four
+of its numbers — so a reader checking them against merged `main` would find them wrong with nothing
+saying why. Re-measured at `badca12`, the commit CI passed on:
+
+```
+$ git rev-list --count 2303361..badca12
+24                                        # was 16 at 4550112
+
+$ wc -c grammars/tree-sitter-redextape/src/parser.c
+103342                                    # was 103333 — the v0.25.10 CLI writes its own version
+                                          # into line 1's header comment, which the 0.26.12 build
+                                          # did not. Parse tables unchanged.
+
+$ cargo nextest run -p redextape-grammar-check
+     Summary 14 tests run: 14 passed      # was 12 — the final review found `compare`'s span-for-span
+                                          # comparison had NO test and could be deleted with the
+                                          # suite still green; two tests now pin it, one per branch.
+
+$ cargo nextest run --workspace
+     Summary 1095 tests run: 1095 passed, 8 skipped   # was 1093, same two tests
+```
+
+Unmoved and re-checked at `badca12`: `LANGUAGE_VERSION 15`, `Total parses: 8`, 13 `CORPUS` programs,
+11 capture-map rows, 11 capture names, 12 query patterns, 156 `grammar.js` lines, 256 generated cases.
+
+The gate's own line also reads differently now — `==> regenerating and testing grammars/…` rather than
+`==> regenerating …` — because the final review found **nothing ran `tree-sitter test`**, though the
+design named it "layer 1" and named it again as the mitigation for the one gap the differential is
+disclosed as not covering.
+269  comparisons       13 + 256, the two reproducible rows of the agreement table
+34   review sweep      NOT reproducible — a scratch harness during Task 3's review, never committed
+```

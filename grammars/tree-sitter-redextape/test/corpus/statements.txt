@@ -1,0 +1,62 @@
+================================================================================
+a function, a mutable let, a while loop and a tail expression
+================================================================================
+
+fn count_down(n) {
+    let mut acc = 0;
+    while n > 0 { acc = acc + 1; n = n - 1; }
+    acc
+}
+count_down(3)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (identifier))
+    (block
+      (let_statement
+        (identifier)
+        (number))
+      (while_statement
+        (binary_expression
+          (identifier)
+          (number))
+        (block
+          (assignment
+            (identifier)
+            (binary_expression
+              (identifier)
+              (number)))
+          (assignment
+            (identifier)
+            (binary_expression
+              (identifier)
+              (number)))))
+      (identifier)))
+  (call_expression
+    (identifier)
+    (arguments
+      (number))))
+
+================================================================================
+comments on their own line and trailing
+================================================================================
+
+// leading
+let x = 1; // trailing
+x + 1
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (comment)
+  (let_statement
+    (identifier)
+    (number))
+  (comment)
+  (binary_expression
+    (identifier)
+    (number)))

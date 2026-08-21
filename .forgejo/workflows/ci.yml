@@ -287,6 +287,14 @@ jobs:
           rustup target add wasm32-unknown-unknown   # check-scoped.sh escalates to check-all.sh, which has a base-tier wasm leg
       - name: Install cargo-nextest (pinned + checksummed)
         run: ./scripts/install-nextest-ci.sh
+      # check-scoped.sh's default-deny arm escalates any path it does not recognise to
+      # `check-all.sh --no-llvm --no-browser` (see that script's header) — and a new top-level
+      # `grammars/` directory does not match its docs/tests/examples/benches cases, so it certainly
+      # escalates. That base tier now has a grammar leg, which ensure_treesitter hard-fails without.
+      # Installed unconditionally here for the same reason cargo-nextest above is: this job cannot
+      # know before running the script whether it will escalate.
+      - name: Install tree-sitter CLI (pinned + checksummed, scripts/check-all.sh's grammar leg)
+        run: ./scripts/install-treesitter-ci.sh
       # Restores the `rust` job's cache as a fallback, so a scoped run on a fresh branch starts warm
       # rather than compiling the workspace from scratch to run one test binary.
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -347,6 +355,13 @@ jobs:
       # `rust-llvm` runs too: both jobs invoke check-all.sh, so both need the same runner.
       - name: Install cargo-nextest (pinned + checksummed)
         run: ./scripts/install-nextest-ci.sh
+      # This job runs check-all.sh --no-llvm --no-browser (below), whose base tier now has a grammar
+      # leg that ensure_treesitter hard-fails without. Pinned to v0.25.10, NOT the newest numbered
+      # release — see scripts/install-treesitter-ci.sh for why that (not v0.26.12, and not the
+      # `master` build reported locally as "0.27.0") is what reproduces the committed grammar on this
+      # runner.
+      - name: Install tree-sitter CLI (pinned + checksummed, scripts/check-all.sh's grammar leg)
+        run: ./scripts/install-treesitter-ci.sh
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |

@@ -33,6 +33,16 @@
 # `#[ignore = "slow tier: ..."]`) has its own script and its own CI job: scripts/check-slow.sh.
 # Kept separate deliberately — a merge gate that takes minutes stops being run before merges.
 set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# THE SCRIPT ALREADY ASSUMED CWD == REPO ROOT IN SEVERAL PLACES BEFORE THIS LINE EXISTED — it was
+# just never enforced. `check_grammars` globs `grammars/*/`, the browser leg passes the relative
+# `crates/redextape-wasm` straight to `wasm-pack test`, and `ensure_treesitter`'s probe list checks
+# the relative `.tools/tree-sitter`: every one of those already broke, silently or with a raw `cd:
+# ...: No such file or directory`, when run from a subdirectory. Nothing else in this file depends on
+# the CALLER's directory — every other leg is a `cargo` invocation, and cargo finds the workspace
+# manifest by searching upward regardless of cwd, so this `cd` (matching scripts/setup-dev.sh's own
+# first line) can only fix cases that were already broken, not change a working one.
 
 run() { echo; echo "==> $*"; "$@"; }
 usage() {
@@ -120,6 +130,7 @@ esac
 # `--features "cranelift llvm"`; the genuinely LLVM-only config is --no-default-features --features llvm.
 LEGS=(
   "both|fmt|"
+  "base|grammar|"
   "base|wasmprobe|"
   "base|clippy|--workspace --all-targets"
   "base|test|--workspace"
@@ -160,7 +171,7 @@ check_legs() {
       *) echo "error: leg tagged with unknown tier '$tier': $row" >&2; exit 1 ;;
     esac
     case "$kind" in
-      fmt|clippy|build|test|probe|wasmprobe|wasm|browserprobe|browser) ;;
+      fmt|clippy|build|test|probe|wasmprobe|wasm|browserprobe|browser|grammar) ;;
       *) echo "error: leg tagged with unknown kind '$kind': $row" >&2; exit 1 ;;
     esac
   done
@@ -332,6 +343,88 @@ ensure_llvm_prefix() {
 # partway through instead of failing at startup. Both are no-ops for correctness locally, which is
 # why one file serves both. `headless` is NOT in that list: wasm-bindgen-test enables it by default,
 # and `--headless` on the wasm-pack command line is the separate switch that keeps it on.
+# The tree-sitter CLI, which regenerates the committed parsers. PINNED to v0.25.10 — NOT the newest
+# NUMBERED release (that is v0.26.12), and NOT the "0.27.0" a locally installed CLI may report. See
+# scripts/install-treesitter-ci.sh for why the pin sits below the newest release: 0.26+'s prebuilt
+# Linux asset needs GLIBC_2.39, which the CI runner does not have, and building 0.26 from source needs
+# `libclang`, which the runner also does not have. The grammars are generated at language ABI 15,
+# which the released CLI reaches only with `grammars/tree-sitter-redextape/tree-sitter.json` present
+# (see that file, and docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md §8.1), and
+# `redextape-grammar-check` asserts that ABI on load, so a mismatched CLI produces a diff here AND a
+# failing test there.
+#
+# THE PINNED BINARY IS PREFERRED OVER `$PATH`, not merely probed alongside it, and the order below is
+# load-bearing rather than cosmetic. This developer's machine keeps Arch's `tree-sitter-cli-git` — a
+# build off `master`, well past v0.25.10, self-reporting "0.27.0" — at /usr/sbin, which
+# `command -v tree-sitter` finds once it is on `$PATH`. Regenerating with that build is CORRECT work
+# that nonetheless emits a different `.minor_version` (design doc §8.1's measurement), so probing
+# `$PATH` before the pinned install would redden the very leg meant to catch a STALE parser, on
+# exactly the machine most likely to be regenerating one. Probe order: an explicit override, then the
+# repo-local install `scripts/setup-dev.sh` places (via `scripts/install-treesitter-ci.sh .tools`),
+# then `$HOME/.cargo/bin` — where CI installs it (`scripts/install-treesitter-ci.sh` defaults there
+# now, matching scripts/install-nextest-ci.sh, since `/usr/local/bin` assumed a root nothing
+# demonstrated), then `$PATH`, then the paths this machine has historically kept it at.
+ensure_treesitter() {
+  local c
+  if [ -z "${TREE_SITTER:-}" ]; then
+    # Resolved to an ABSOLUTE path here, not just found: `check_grammars` runs `"$TREE_SITTER"
+    # generate` from inside `( cd "$g" && ... )`, so a relative `.tools/tree-sitter` would stop
+    # resolving the moment that subshell changes directory.
+    for c in .tools/tree-sitter "$HOME/.cargo/bin/tree-sitter"; do
+      if [ -x "$c" ]; then TREE_SITTER="$(cd "$(dirname "$c")" && pwd)/$(basename "$c")"; break; fi
+    done
+  fi
+  if [ -z "${TREE_SITTER:-}" ] && command -v tree-sitter >/dev/null 2>&1; then
+    TREE_SITTER="$(command -v tree-sitter)"
+  fi
+  if [ -z "${TREE_SITTER:-}" ]; then
+    for c in /usr/local/bin/tree-sitter /usr/sbin/tree-sitter; do
+      if [ -x "$c" ]; then TREE_SITTER="$c"; break; fi
+    done
+  fi
+  if [ -z "${TREE_SITTER:-}" ]; then
+    echo "error: tree-sitter CLI not found, so the grammars cannot be checked against their source." >&2
+    echo "  install the pinned build: scripts/install-treesitter-ci.sh .tools" >&2
+    echo "  (scripts/setup-dev.sh does this for you on a fresh clone)" >&2
+    echo "  set it explicitly: TREE_SITTER=/path/to/tree-sitter scripts/check-all.sh" >&2
+    exit 1
+  fi
+  # A ONE-LINE DIFF IN GENERATED C IS A TERRIBLE WAY TO LEARN YOUR CLI IS THE WRONG BUILD. This
+  # asserts the version up front instead, so the failure names the mismatch rather than presenting as
+  # a spurious `check_grammars` diff on `.minor_version`.
+  #
+  # THE CAPTURE ITSELF MUST NOT BE ALLOWED TO KILL THE SCRIPT UNDER `set -e`/`pipefail`. A binary that
+  # exists, is executable-bit-set, and still cannot run — the wrong OS/architecture, a corrupt partial
+  # install — makes `"$TREE_SITTER" --version` exit 126 ("cannot execute binary file"), and under
+  # `pipefail` a plain `version="$("$TREE_SITTER" --version | awk ...)"` propagates that 126 straight
+  # through `set -e`: the script dies on THIS line, with the kernel's own error text, before the
+  # actionable message below ever prints. `raw=... && rc=0 || rc=$?` is the standard shape that keeps
+  # a failing command substitution from being the last thing in its statement, which is what `set -e`
+  # exempts from aborting — see bash's documented `&&`/`||` list exemption.
+  local raw rc version
+  raw="$("$TREE_SITTER" --version 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "error: tree-sitter at $TREE_SITTER did not run (exit $rc): $raw" >&2
+    echo "  a binary that exists but will not execute is usually the wrong OS/architecture build, or" >&2
+    echo "  a partial install left behind by an interrupted download." >&2
+    echo "  reinstall the pinned build: scripts/install-treesitter-ci.sh .tools" >&2
+    echo "  set it explicitly: TREE_SITTER=/path/to/tree-sitter scripts/check-all.sh" >&2
+    exit 1
+  fi
+  version="$(echo "$raw" | awk '{print $2}')"
+  if [ "$version" != "0.25.10" ]; then
+    echo "error: tree-sitter at $TREE_SITTER reports $version, not the pinned 0.25.10." >&2
+    echo "  a different build (e.g. Arch's tree-sitter-cli-git off master, which self-reports" >&2
+    echo "  \"0.27.0\") regenerates a different .minor_version and reddens this leg for no real" >&2
+    echo "  reason — see docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md §8.1." >&2
+    echo "  install the pinned build: scripts/install-treesitter-ci.sh .tools" >&2
+    echo "  set it explicitly: TREE_SITTER=/path/to/tree-sitter scripts/check-all.sh" >&2
+    exit 1
+  fi
+  export TREE_SITTER
+  echo "==> using tree-sitter $version at $TREE_SITTER"
+}
+
 ensure_browser() {
   if ! command -v wasm-pack >/dev/null 2>&1; then
     echo "error: wasm-pack not found (the browser leg drives the wasm boundary through it)." >&2
@@ -430,6 +523,60 @@ ensure_chromedriver() {
   echo "==> using chromedriver $("$cache/chromedriver" --version 2>&1 | grep -oE '[0-9.]+' | head -1) for Chrome $major"
 }
 
+check_grammars() {
+  local g status=0 untracked
+  for g in grammars/*/; do
+    echo "==> regenerating and testing ${g}"
+    # SAME SUBSHELL AS THE REGENERATE STEP, and `test` runs only if `generate` succeeded — a stale or
+    # broken `parser.c` is not a corpus the tests below should even attempt to read. Neither command is
+    # guarded by an `if`/`&&`/`||` at the STATEMENT level that reaches this function's caller, so a
+    # failure here is traced the same way `generate`'s already was: `set -e` (in effect for this whole
+    # script) kills the run on the spot, with the tree-sitter CLI's own output as the last thing
+    # printed, exactly as a `generate` failure already did before `test` existed. This is "layer 1" of
+    # the testing story the design and the grammar README both describe, and the design's own
+    # disclosed gap — that the differential checks captured spans, never tree SHAPE — names this corpus
+    # as the thing that covers it. A gate that regenerates but never runs it would leave that
+    # disclosed gap enforced nowhere: a tree-shape regression regenerates clean (parser.c still matches
+    # grammar.js) and only the corpus notices.
+    ( cd "$g" && "$TREE_SITTER" generate && "$TREE_SITTER" test )
+  done
+  # TWO SEPARATE CHECKS, not one, because they catch DIFFERENT failures needing DIFFERENT responses
+  # from the reader. `git diff --exit-code` sees only TRACKED modifications — a regenerated file that
+  # was never `git add`ed reports clean, since diff has nothing to compare it against. That is not
+  # hypothetical: a reviewer of this leg dropped an untracked file under `grammars/` and this check
+  # returned clean. Only one grammar exists today and every one of its generated files is tracked, so
+  # nothing is broken yet — but a later grammar (`tree-sitter-redextape-lambda`, `-tm`) whose `src/`
+  # was never staged would regenerate green FOREVER, silently, which is exactly the gap this leg
+  # exists to close. `git ls-files --others --exclude-standard` is what actually lists it. Restricted
+  # to `grammars/` so an unrelated dirty or untracked file elsewhere in the tree does not fail this leg.
+  if ! git diff --quiet --exit-code -- grammars/; then
+    echo "error: the committed generated parsers differ from what grammar.js produces." >&2
+    # NOT "run tree-sitter generate" — this leg already did, above, and the diff below is that
+    # regenerated output sitting in the working tree right now. Telling the reader to do again what
+    # already happened is the wrong instruction; the right one is to look at what is already there.
+    echo "  a grammar.js was edited without regenerating. this leg already regenerated src/ for you —" >&2
+    echo "  the diff below IS that output. review it, then:" >&2
+    echo "    git add grammars/ && git commit" >&2
+    git --no-pager diff --stat -- grammars/ >&2
+    status=1
+  fi
+  # `--exclude-standard` HONOURS .gitignore, WHICH IS THIS CHECK'S OWN BLIND SPOT. No grammar
+  # directory carries a .gitignore today and the top-level one names nothing under grammars/, so the
+  # check is sound as written — but some tree-sitter project templates DO ship one, and a generated
+  # file it happened to match would become invisible here. That is the same defect this arm exists to
+  # close, one level up. If a grammar ever gains a .gitignore, re-check what this can still see.
+  untracked="$(git ls-files --others --exclude-standard -- grammars/)"
+  if [ -n "$untracked" ]; then
+    echo "error: regenerating left untracked file(s) under grammars/ — a DIFFERENT problem from a" >&2
+    echo "  stale parser.c above. git diff cannot see a file that was never \`git add\`ed, so a new" >&2
+    echo "  grammar (or a new generated output) whose src/ was never staged would regenerate green" >&2
+    echo "  forever. \`git add\` the file(s) below, then commit them:" >&2
+    echo "$untracked" | sed 's/^/    /' >&2
+    status=1
+  fi
+  return "$status"
+}
+
 do_leg() {
   local kind="$1"; shift
   case "$kind" in
@@ -450,6 +597,10 @@ do_leg() {
     # ONLY real target is wasm32 would fail under the other crate's name. Each row names its own
     # package now, which costs one repeated fragment per row and buys a leg per crate.
     wasm)   ensure_wasm_target; run cargo check --target wasm32-unknown-unknown "$@" ;;
+    # NOT a `cargo` leg. Regenerates each grammar and fails if the committed output differs, because
+    # `src/parser.c` is a build artifact checked into git and nothing else can tell whether it was
+    # built from the `grammar.js` beside it.
+    grammar) ensure_treesitter; check_grammars ;;
     browserprobe) ensure_browser ;;
     # NOT a `cargo` leg, and the only row in this table that is not: `wasm-pack test` takes a crate
     # DIRECTORY, not cargo arguments, so the row supplies `crates/redextape-wasm` rather than a `-p`

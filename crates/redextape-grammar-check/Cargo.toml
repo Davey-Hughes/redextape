@@ -1,0 +1,29 @@
+[package]
+name = "redextape-grammar-check"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+tree-sitter = "0.26"
+# Gives `language()` a safe, ecosystem-sanctioned constructor for the raw `tree_sitter_redextape`
+# symbol (`LanguageFn::from_raw`, the same idiom every generated `bindings/rust/lib.rs` uses) instead
+# of `std::mem::transmute`. `tree-sitter` already depends on this crate transitively; naming it here
+# makes `LanguageFn` importable.
+tree-sitter-language = "0.1"
+# `error_nodes`'s return type is `Vec<redextape_core::Span>`, and that is `src/lib.rs` — not test
+# code — so this is a real dependency, not a dev-dependency: a `[dev-dependencies]` entry is invisible
+# to the library target itself and this crate would fail to compile without it.
+redextape-core = { path = "../redextape-core" }
+
+[dev-dependencies]
+redextape-test-support = { path = "../redextape-test-support" }
+proptest = "1"
+
+[build-dependencies]
+cc = "1"

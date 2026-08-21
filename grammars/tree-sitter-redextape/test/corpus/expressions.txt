@@ -1,0 +1,115 @@
+================================================================================
+binary precedence is left-associative, comparisons loosest
+================================================================================
+
+1 + 2 * 3 == 4 - 5
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (binary_expression
+    (binary_expression
+      (number)
+      (binary_expression
+        (number)
+        (number)))
+    (binary_expression
+      (number)
+      (number))))
+
+================================================================================
+calls, method chains and list literals
+================================================================================
+
+[3, 1, 2].map(add1).fold(0, add)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (method_call
+    (method_call
+      (list
+        (number)
+        (number)
+        (number))
+      (identifier)
+      (arguments
+        (identifier)))
+    (identifier)
+    (arguments
+      (number)
+      (identifier))))
+
+================================================================================
+if requires an else, and closures take one expression
+================================================================================
+
+let f = |x| if x > 0 { 1 } else { 0 };
+f(2)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (let_statement
+    (identifier)
+    (closure
+      (parameters
+        (identifier))
+      (if_expression
+        (binary_expression
+          (identifier)
+          (number))
+        (block
+          (number))
+        (block
+          (number)))))
+  (call_expression
+    (identifier)
+    (arguments
+      (number))))
+
+================================================================================
+a block is a valid callee position
+================================================================================
+
+{ f }(1)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (call_expression
+    (block
+      (identifier))
+    (arguments
+      (number))))
+
+================================================================================
+a block is a valid receiver position
+================================================================================
+
+{ f }.m(1)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (method_call
+    (block
+      (identifier))
+    (identifier)
+    (arguments
+      (number))))
+
+================================================================================
+a block is a valid while-condition position
+================================================================================
+
+while { a } { b }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (while_statement
+    (block
+      (identifier))
+    (block
+      (identifier))))

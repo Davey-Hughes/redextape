@@ -33,6 +33,10 @@ coverage/
 # Agent worktrees
 /.claude/worktrees/
 
+# Repo-local dev tooling scripts/setup-dev.sh installs (e.g. the pinned tree-sitter CLI), so a
+# developer's machine matches what CI runs without polluting $PATH or a system directory.
+/.tools/
+
 # Playwright MCP session output — screenshots and page snapshots from browser-driving tools.
 # Never source; regenerated on demand and easily swept in by `git add -A`.
 .playwright-mcp/

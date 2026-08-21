@@ -68,6 +68,28 @@ else
   echo "==> wasm-pack installed (cargo install)"
 fi
 
+# The tree-sitter CLI regenerates the committed parsers under `grammars/`, which is what
+# `scripts/check-all.sh`'s grammar leg checks against, and that gate HARD-FAILS without it — same
+# reason cargo-nextest and wasm-pack are installed above rather than left to the README.
+#
+# INSTALLED REPO-LOCAL (`.tools/`, git-ignored) RATHER THAN VIA `command -v`, and that is deliberate,
+# not an inconsistency with the tools above. The grammars are generated at language ABI 15, which
+# needs the pinned, released v0.25.10 CLI specifically — NOT the newest numbered release (see
+# scripts/install-treesitter-ci.sh for why the pin sits below it, and
+# docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md §8.1 for the ABI measurement) — a
+# `tree-sitter` already on this machine's `$PATH` is just as likely to be Arch's `tree-sitter-cli-git`,
+# built off `master` and self-reporting "0.27.0", which regenerates a different `.minor_version` and
+# reddens the grammar leg. `ensure_treesitter` in scripts/check-all.sh prefers this exact directory
+# over `$PATH` for the same reason. Calling the same pinned installer CI uses (a checksummed download
+# — see scripts/install-treesitter-ci.sh for why) means a developer regenerates with the identical
+# binary CI checks against, not a coincidentally-similar one.
+if .tools/tree-sitter --version 2>/dev/null | grep -q ' 0\.25\.10$'; then
+  echo "==> tree-sitter already installed (.tools/tree-sitter, $(.tools/tree-sitter --version))"
+else
+  mkdir -p .tools
+  scripts/install-treesitter-ci.sh .tools
+fi
+
 # The browser tier also needs a Chrome that wasm-pack can find. Reported, never installed — see above.
 if [ -n "${CHROME_PATH:-}" ] || command -v google-chrome >/dev/null 2>&1 \
   || [ -x /usr/bin/google-chrome-stable ] || [ -x /usr/bin/chromium ] \

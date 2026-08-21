@@ -1,0 +1,20 @@
+{
+  "grammars": [
+    {
+      "name": "redextape",
+      "camelcase": "Redextape",
+      "scope": "source.rxt",
+      "path": ".",
+      "file-types": ["rxt"],
+      "highlights": ["queries/highlights.scm"],
+      "injection-regex": "^rxt$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "GPL-3.0-only",
+    "description": "Redextape mini-language grammar for tree-sitter",
+    "authors": [{ "name": "davey" }],
+    "links": { "repository": "https://git.daveynet.xyz/davey/redextape" }
+  }
+}
