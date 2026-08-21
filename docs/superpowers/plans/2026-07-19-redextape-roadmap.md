@@ -9872,3 +9872,210 @@ branch had already spent ten tasks learning to distrust exactly that.
 diagnostic — so warnings never block a session being built. **Fixture fallout: zero across every
 diagnostic assertion in `session.rs`**, and the strengthened test was proved to fail without the call
 (`left: [… "variable \`x\` does not need to be mutable"], right: []`).
+
+#### THE CITATION GATE'S SECOND ROUND CLOSES — the scan's own file selection had never been tested, and the self-test could not see a whole class of target removed (2026-08-20, branch `citation-gate-rxt`, `1fa83b0..a1d15bf` plus this entry)
+
+The CLI slice put `.rxt` fixtures in the tree, and `CITATION_RE` did not know the extension — so a
+`fixture.rxt:12` pointer, exactly the kind the gate exists to stop, walked past it. Adding `rxt` is one
+character of the diff. The rest is what adding it exposed.
+
+##### THE SELF-TEST PASSED A SABOTAGE IT WAS BUILT TO CATCH
+
+Removing `rxt` from `CITATION_RE` — the precise regression the new support could suffer — passed the
+entire self-test. Every planted fixture named a `.rs`, `.md`, `.html` or `Dockerfile` target, so the suite
+proved the regex matched *the extensions it already planted* and said nothing about any other. **A
+self-test that plants one class of target cannot detect the removal of a different class**, and the only
+reason this surfaced is that the sabotage was actually run rather than reasoned about. A `.rxt` fixture
+now plants one.
+
+##### RECORDINGS ARE A SECOND SCOPE BOUNDARY, AND THEY ARRIVED BECAUSE `rxt` DID
+
+Three `.stdout`/`.stderr` goldens lit up the instant `rxt` joined the list: they are byte-for-byte
+captures of ariadne rendering a diagnostic against a `.rxt` file, so the "citation" in them is the
+binary's own output, not a pointer a human wrote. `RECORDING_RE` excludes them, on `docs/`'s reasoning
+rather than a new one — a file whose content is a recording of the program cannot be edited to remove
+the citation without destroying what it records.
+
+##### THE SCAN'S FILE SELECTION WAS UNTESTED, WHICH IS THE SILENT-PASS DIRECTION
+
+The three predicates deciding whether a path is scanned at all lived inline in the loop, where
+`--self-test` could not reach them. That is the dangerous half: a regex that stops matching fails loudly
+on the next real citation, but a path silently dropped from the scan looks *identical to a clean tree*.
+They are now `excluded_path`, and the self-test asserts both directions — paths that must be skipped and
+paths that must be read.
+
+##### THE COMMENT EXPLAINING THE BOUNDARY MADE THE SCRIPT FAIL ITS OWN SCAN
+
+The rationale quoted a real `warn.rxt` pointer as its example and the gate rejected the file on the
+commit that added it — the same trap the script's own header warns about, sprung by the person writing
+the warning. Replaced with a placeholder. The escape-hatch count ships at 2, with the argument written
+beside it rather than the number alone.
+
+#### THE CI CACHE HALVES — and the change that did it was inert as first pushed, green the whole time (2026-08-20, branch `ci-cache-profile`, `1c93693..50810b8` plus this entry)
+
+The pipeline keeps **five** cargo cache keys, each storing its own copy of `target`, and four of them are
+live on a typical non-draft run (`rust-scoped` serves drafts instead). **PR #50's own description said
+every byte is "paid ten times a pipeline — five uploads and five restores", and that is wrong in both
+halves; it is corrected here rather than left standing.** Four caches, not five, on the runs that matter —
+and in steady state a run does not upload at all. `actions/cache` skips the save on an exact primary-key
+hit, which is the very fact the salt below exists to work around, so an unchanged `Cargo.lock` means every
+job RESTORES its cache and writes none. The restore saving is therefore continuous and the upload saving
+lands on each `Cargo.lock` change. Both are real; they are not the same rate.
+
+Measured on 32 cores into fresh target dirs, tarred and zstd'd the way `actions/cache` stores them:
+
+| profile | `target` | zstd (what moves) |
+|---|---|---|
+| cargo defaults | 3.71 GB | 863 MiB |
+| `debug = "line-tables-only"` | 2.26 GB | 582 MiB |
+| `+ CARGO_INCREMENTAL=0` | 1.79 GB | 416 MiB |
+
+The two settings live in different files because they are not the same trade. `line-tables-only` is
+unconditional in the manifest: it keeps the file/line/column a backtrace resolves to and drops the types,
+variable locations and string table, which in a repository whose tests are its primary diagnostic is the
+only part of the DWARF earning its bytes. `CARGO_INCREMENTAL=0` is CI-only, because on a warm tree with a
+one-file edit a rebuild measured **2s with incremental on against 8s with it off** — a runner pays that 6s
+once per job and moves 166 MiB less on every restore; a laptop pays the 6s many times an hour and never
+sees the traffic. Same setting, opposite answer.
+
+##### THE CHANGE WAS INERT WHEN FIRST PUSHED, AND NOTHING WOULD HAVE SAID SO
+
+The cache keys are `hashFiles('**/Cargo.lock')`, which a profile change does not move. All five would
+have hit their primary key **exactly** — and `actions/cache` skips saving on an exact primary-key hit
+(*"Cache hit occurred on the primary key ..., not saving cache"*, read from the action's own source rather
+than assumed). The pre-change caches would have survived indefinitely, not one measured byte would have
+been saved, and **every job would have stayed green throughout**. The failure mode of this change was
+never a red build; it was a green one that did nothing.
+
+Waiting for the next `Cargo.lock` change would not have rescued it either: the restore-keys would have
+restored a pre-change `target`, cargo does not garbage-collect that directory, and the next save would
+have carried *both* generations — larger than before rather than smaller. The `v2` salt sits inside the
+shared prefix so the restore-keys miss the old caches too, rather than readmitting through the fallback
+what the primary key just shut out. It costs one fully cold pipeline, paid once.
+
+##### A SINGLE BEFORE/AFTER PAIR MEASURED THE MACHINE, NOT THE CHANGE
+
+The first pass timed the debug change at 28s against 20s and read as a speedup worth claiming. Three runs
+per arm dissolved it: **24/25/23 against 23/20/22**, overlapping ranges. The manifest therefore records
+that dropping the DWARF *costs* nothing rather than that it *gains* something, and says so beside ws-sim's
+much larger figure (35s → 18s) specifically to stop that number being imported into a workspace a seventh
+its size, where link time does not dominate the same way.
+
+**This repository already knew this about CI timings and had to relearn it locally.** The lesson is not
+"CI runners are noisy" — it is that one pair of runs is one sample of the machine wherever it is taken.
+
+##### WHAT WAS VERIFIED RATHER THAN REASONED
+
+`cargo llvm-cov` passes its `--fail-under-lines 90` gate at **95.19%** under the reduced profile, which is
+what `-C instrument-coverage`'s own maps predict but is also a merge blocker and so worth thirty seconds.
+A panic three frames deep still prints file, line **and** column for every frame — `debug = 0` drops
+exactly that, which is why it is not what was set. On the CLI binary `.debug_info` falls 10.55 MB to
+2.43 MB while `.debug_line` is essentially untouched, 2.98 MB to 2.76 MB; the documented escape hatch
+`CARGO_PROFILE_DEV_DEBUG=2` restores the former, exercised rather than asserted. `debug_assert!` still
+fires, that setting being debug-info level and nothing else.
+
+##### ADDING A `[profile]` SECTION FALSIFIED THREE LIVE SOURCE COMMENTS
+
+`core.rs`'s `NodeGen::fresh` and two sites in `lambda/term.rs` each open with *"this workspace sets no
+`[profile]` overrides"*, and each uses it to argue that an unconditional `assert!` is right where a
+`debug_assert!` looks cheaper — because a release build has neither debug assertions nor overflow checks
+to catch a wrapped `u32`. **The conclusion survived untouched; only the premise stopped being true.**
+It was rewritten to name the override that now exists and say it reaches neither mechanism. A reader who
+checked the old wording against the manifest would have found a `[profile]` section sitting there and had
+every reason to distrust a safety argument that is in fact sound — which is the failure worth three edits
+to avoid. Two dated `count-bounds` documents still carry the old sentence; they were true when written and
+are left as snapshots.
+
+#### THE FLAKE CLOSES — a quiescence poll cannot see an event that has not started, and the file naming that hazard had fixed only the half it named it for (2026-08-20, branch `fix-fork-quiescence-race`, `fb196e1..a541c29` plus this entry)
+
+CI run 229 failed `'leaves the source session running'` on `expected null not to be null` at its
+`.cm-editor` query, then passed twice on the identical commit. Neither the assertion nor the app was
+wrong.
+
+##### THE MECHANISM, AND WHY THE POLL COULD NOT SEE IT
+
+`app.settled()` declared the TM pane settled after **500 ms of unchanged text**. The detach click
+repaints the heading to `[detached]` synchronously, so that change is already in the DOM before the poll
+takes its first sample — and from that sample until the `tm-scratch-compiled` reply mounts the editor, the
+text does not change again at all. Measured over five runs, the first post-click change and the editor's
+own mount were **the same event**, at 169/199/211/217/243 ms.
+
+So the window had nothing left to reset it and was racing the round-trip directly, at a margin of about
+2x. A slower or busier runner crosses 500 ms and the poll reports "settled" having observed nothing
+whatever. **It answers "nothing is changing" when the truth is "nothing has started yet."**
+
+##### THE DIAGNOSTIC THAT SETTLED IT IS REUSABLE: BISECT THE WINDOW
+
+Shrinking **only** the stability window, 500 ms to 100 ms, with no other edit, reproduces run 229's exact
+failure locally and deterministically. That converts an intermittent CI red into a controlled experiment
+in one line, and the same knob then proves the fix: the repaired test passes at a **1 ms** window that
+killed it before. The sweep below is entirely this technique — every verdict in it was measured by moving
+that number, not read off the code.
+
+##### THE FILE ALREADY NAMED THIS HAZARD, FOR THE OTHER HALF OF THE GESTURE
+
+`startStateGoesToHalt`'s doc (Important 4, an earlier review round) argues exactly this against a
+quiescence poll for the *recompile after an edit*. The three *fork* gestures beside it were left on
+`settled()` — and they are the **worse** case, because an edit at least changes the editor's text
+synchronously and so gives a quiescence poll something to see. A fork gives it nothing. The correct
+argument was in the file, applied one gesture too late.
+
+All three now wait on `forkEditorMounted`. `settleOn` and `settled` are deleted; those were their last
+callers.
+
+##### FIXING IT INTRODUCED THE DEFECT THE FILE HAD ALREADY CAUGHT ONCE
+
+With the wait guaranteeing a mounted editor, the following
+`expect(...querySelector('.cm-editor')).not.toBeNull()` could no longer fail. That is the vacuous-`/halt/i`
+shape this same file retired under Important 3, reintroduced while fixing something else and caught only
+by rereading the diff. Deleted; the wait carries the claim and names it in its own timeout message.
+
+One assertion moved rather than changed. `'withdraws its own fork control'` claims the control withdraws
+*the instant* the pane's session becomes the scratch, "not only when some later reply happens to tell it
+to" — which is only tested if it runs **before** the reply can land. Waiting first would have passed just
+as happily on the regression the test exists to catch, so `expect(detach()).toBeNull()` now runs
+synchronously. It holds.
+
+##### THE SWEEP: TWO SIBLINGS, ONE MORE RACER, AND A GUARD THAT COULD NOT SEE IT
+
+`tm-blank-buffer.test.ts` is **clean and untouched** — all four tests pass at a 1 ms window, because its
+gestures bind a pane to an already-compiled buffer, seeding the editor from stored state with no round
+trip to lose a race against.
+
+`tm-buffer-restore.test.ts` carries **thirteen** `settled()` sites, seven of them directly after a
+`click()`, and those seven were already safe *for a reason written into the file*: its `settleOn` carries
+an extra `detachedWithNoEditorYet` condition, added when that file hit this same hazard on a fork's first
+mount. The guard holds every one of them at a 1 ms window.
+
+**The site that was racing is not among the seven, and that is the point.** It follows a `view.dispatch`
+— a paste, not a click — in `keeps a pasted blank TM buffer's text after a reload`, which pastes 25,142
+characters. The paste repaints
+synchronously and the worker then compiles in silence, so the window elapses inside that silence and
+returns before the buffer is persisted — after which the remount reloads a store that never received the
+paste. Bisected: **150 ms fails, 300 ms passes**, so the shipped 500 ms carried about 2-3x, the same order
+as the margin that actually reddened CI.
+
+`detachedWithNoEditorYet` was built for a fork's *synchronous placeholder* — `[detached]` text with no
+editor under it. A paste produces no such placeholder, so the guard reads a pane that looks finished
+throughout. **A guard aimed at one shape of "not done yet" does not cover another**, and its own doc says
+so about the case it was built for without noticing the case it was not. Reaching for the click-adjacent
+sites — the obvious place to look, and where this branch's other fix lived — would have swept past it.
+
+The whole file now passes at a 1 ms window, which is the check that the remaining twelve sites are
+window-independent rather than merely untested. That site now waits on the
+persist itself, through the app's own `parseBuffers` rather than a hand-read of the JSON, so the test
+cannot drift from the format the app writes.
+
+##### WHAT THE GREEN RUNS DO AND DO NOT PROVE
+
+`web` has passed three runs carrying the fix — 233 and 236 on the PR, 237 on the merge. That is
+consistent with it and proves little on its own: a flake firing once in ten runs looks exactly the same.
+
+**And two earlier green runs prove less still, though it would be easy to count them.** Runs 230 and 231
+also passed `web`, on the SAME commit line that had just failed at 229 — they predate any fix, being
+re-triggers on the `ci-cache-profile` branch. What they establish is that the failure was intermittent,
+which is what made it a flake rather than a break; they say nothing whatever about the repair, and
+folding them into a streak would turn the evidence for the diagnosis into fake evidence for the cure.
+
+The deterministic reproduction, and its disappearance at a window that previously killed the test, is
+what carries the claim.
