@@ -10991,11 +10991,11 @@ commit that CI actually passed on. An entry whose figures were true at a commit 
 describing a tree that never shipped.
 
 
-#### PR 3 OF THE TREE-SITTER SLICE CLOSES — the TM text form gets a grammar, the design's own stated gap was built on a false premise, and a grammar was wrong where its AUTHORITY could not look (2026-08-2X, branch `tree-sitter-tm`, `80ec6d4..TBD`, N commits, plus this entry)
+#### PR 3 OF THE TREE-SITTER SLICE CLOSES — the TM text form gets a grammar, the design's own stated gap was built on a false premise, and a grammar was wrong where its AUTHORITY could not look (2026-08-21, branch `tree-sitter-tm`, `80ec6d4..fcad9d4`, 13 commits, merged as `76ba136` / #55)
 
-> **The heading's date, commit range and commit count are placeholders, as is the VERIFICATION block
-> at the end.** They are filled from the commit CI passes on, after the whole-branch review — see that
-> block for why this entry refuses to guess them.
+> **The heading's figures and the VERIFICATION block were deliberately left as placeholders until the
+> branch was final, and were filled afterwards** — see VERIFICATION for why, and for the one way that
+> mechanism failed.
 
 Design: `docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md`. Plan:
 `docs/superpowers/plans/2026-08-21-tree-sitter-tm-grammar.md`. This is PR 3 of 3 and it closes the
@@ -11244,25 +11244,61 @@ editor-extension packaging, and nothing in `web/` beyond the three comment repai
 
 ##### VERIFICATION
 
-**DELIBERATELY EMPTY UNTIL THE WHOLE-BRANCH REVIEW HAS LANDED.** PR 1's entry needed four figures
-re-measured after the fact and PR 2's needed three, both for the identical structural reason: the
-closing entry is written in the last task, the review then runs and reliably lands more commits, and
-the figures are stale by construction the moment they are written. PR 2's entry ends by telling PR 3
-to measure at PR time instead. This is that instruction being followed rather than restated.
+**THE MECHANISM PR 2 PRESCRIBED WORKED, AND THEN FAILED IN A WAY NEITHER PREVIOUS ENTRY PREDICTED.**
+PR 1's entry needed four figures re-measured after the fact and PR 2's needed three, both because the
+closing entry is written in the last task while the whole-branch review reliably lands more commits
+afterwards. PR 2's entry ends by telling PR 3 to leave the figures blank and measure at PR time. This
+entry did exactly that — and **then the PR was merged with the placeholders still live**, so
+`2026-08-2X`, `80ec6d4..TBD` and `N commits` reached `main` inside `76ba136`, along with a VERIFICATION
+block whose entire content was a note explaining why it was empty. This section is the follow-up that
+fixed it.
 
-Every figure below is to be taken from the commit CI actually passed on, with the command that
-produces it:
+**No figure here was ever wrong, which was the point; but the entry was briefly unreadable, which was
+not.** Deferring a number removes the risk of stating it falsely and replaces it with the risk of
+never stating it at all. PR 1 and PR 2 each paid an appended correction; this one paid a follow-up PR.
+**A fourth entry should treat "fill the placeholders" as part of the merge rather than as work that
+follows it** — placeholder text is the only part of an entry a reader cannot interpret at all, which
+makes it the one kind of staleness worth blocking a merge on.
+
+Filled from `fcad9d4`, the commit **CI run 262 actually passed on** — every job green including
+`rust`, `rust-slow`, `rust-llvm`, `rust-browser` and `web`, confirmed against that run's own
+`git log -1 --format=%H` rather than inferred from the run number (see this file's note on run ids not
+being run numbers). `rust` carries `check-all.sh`, so its `grammar` leg regenerated all three grammars
+from a clean checkout and found no diff, which is what actually validates the committed `parser.c`.
 
 ```
-git rev-list --count 80ec6d4..<final>
-cargo nextest run --workspace                                  # 1110 / 8 skipped at the branch point
-cargo nextest run -p redextape-grammar-check                   # 29 at the branch point
-scripts/check-all.sh --no-llvm --no-browser                    # quote its own PARTIAL line
-wc -c grammars/tree-sitter-redextape-tm/src/parser.c           # siblings: 103,482 and 11,483
-grep -m1 LANGUAGE_VERSION grammars/tree-sitter-redextape-tm/src/parser.c
-cd grammars/tree-sitter-redextape-tm && ../../.tools/tree-sitter test
-wc -l < grammars/tree-sitter-redextape-tm/grammar.js           # siblings: 171 and 78
-grep -v '^;' .../queries/highlights.scm | grep -c '@'          # patterns; the -v matters, see PR 1
-grep -v '^;' .../queries/highlights.scm | grep -oE '@[a-z.]+' | sort -u | wc -l
-awk '/^pub const CAPTURE_CLASSES/,/^\];/' crates/redextape-grammar-check/src/tm.rs | grep -c '^    ("'
+$ git rev-list --count 80ec6d4..fcad9d4
+13
+
+$ cargo nextest run --workspace
+     Summary [  40.892s] 1125 tests run: 1125 passed, 8 skipped     # 1110 at the branch point
+
+$ cargo nextest run -p redextape-grammar-check
+     Summary [   0.688s] 44 tests run: 44 passed, 0 skipped         # 29 at the branch point
+
+$ cd grammars/tree-sitter-redextape-tm && ../../.tools/tree-sitter test
+Total parses: 12; successful parses: 12; failed parses: 0; success percentage: 100.00%
 ```
+
+Every count this entry quotes, with what produces it:
+
+```
+13     commits            git rev-list --count 80ec6d4..fcad9d4
+42220  parser.c bytes     wc -c grammars/tree-sitter-redextape-tm/src/parser.c
+15     language ABI       grep -m1 LANGUAGE_VERSION .../src/parser.c
+147    grammar.js lines   wc -l < grammars/tree-sitter-redextape-tm/grammar.js
+13     query patterns     grep -v '^;' .../queries/highlights.scm | grep -c '@'
+11     capture names      grep -v '^;' .../queries/highlights.scm | grep -oE '@[a-z.]+' | sort -u | wc -l
+11     capture-map rows   awk '/^pub const CAPTURE_CLASSES/,/^\];/' \
+                            crates/redextape-grammar-check/src/tm.rs | grep -c '^    ("'
+12     tree-sitter cases  tree-sitter test, "Total parses: 12" above
+32     generated cases    set explicitly in tests/tm.rs; §11.5 is why it is not proptest's 256
+```
+
+**The `-v '^;'` is not cosmetic**, and PR 1's entry is why it is written down here: without it the
+pattern count reads higher, because prose comments inside the query file also name captures. PR 1
+published 14 before running the command against its own claim.
+
+**Sizes and counts need no repetition; the two wall-clock figures above would**, and neither is
+load-bearing — the runner's variance swamps deltas at this scale and no claim in this entry rests on
+either.
