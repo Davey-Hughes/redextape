@@ -1,0 +1,114 @@
+================================================================================
+a whole-line comment
+================================================================================
+
+; what this machine does
+tapes 1
+start s
+
+state s: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (comment)
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (state
+    name: (identifier)))
+
+================================================================================
+a trailing comment on every line kind, and where the LAST one lands
+================================================================================
+
+tapes 1  ; how many tapes
+start s  ; where it begins
+
+state s:  ; the only state
+  [*] -> write [*], move [S], goto s  ; and its only rule
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (comment)
+  (start
+    target: (identifier))
+  (comment)
+  (state
+    name: (identifier)
+    (comment)
+    (rule
+      read: (group
+        (symbol))
+      write: (group
+        (symbol))
+      move: (move_group
+        (head_move))
+          target: (identifier)))
+      (comment))
+
+================================================================================
+a comment stops at its own newline
+================================================================================
+
+; one
+; two
+tapes 1
+start s
+
+state s: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (comment)
+  (comment)
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (state
+    name: (identifier)))
+
+================================================================================
+a comment naming a tape this compiler never starts non-empty
+================================================================================
+
+tapes 3
+start s
+version 1
+encoding unary
+width 4
+slots 1
+result Nat
+tape 2 #  ; stack
+
+state s: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (version
+    (number))
+  (encoding
+    name: (identifier))
+  (width
+    (number))
+  (slots
+    (number))
+  (result
+    type: (identifier))
+  (tape
+    index: (number)
+    cells: (identifier))
+  (comment)
+  (state
+    name: (identifier)))

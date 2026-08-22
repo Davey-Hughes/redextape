@@ -484,8 +484,12 @@ body {
    from the stylesheet's side.
 
    **`position-area` IS NOT DECORATION — WITHOUT IT THIS MENU OPENS IN THE TOP-LEFT CORNER OF THE
-   VIEWPORT, and that was measured rather than reasoned about** (`.superpowers/sdd/task-8-picker-*.png`
-   is the before/after pair). The UA stylesheet gives `[popover]` `position: fixed; inset: 0;
+   VIEWPORT, and that was measured rather than reasoned about.** The measurement is live, not a
+   memory: `tests/browser/pane-layout-controls.test.ts` positions the control away from the origin,
+   loads THIS stylesheet into the tester page, and asserts with `getBoundingClientRect` that the menu
+   sits under its own button and nowhere near the corner. Delete this rule and that test fails.
+   (It was originally evidenced by a before/after screenshot pair in an untracked working note, which
+   no clone ever had and which no longer exists. An executable check outranks it anyway.) The UA stylesheet gives `[popover]` `position: fixed; inset: 0;
    width: fit-content; margin: auto`; the `margin: 0` below is what stops the menu being centred in the
    window, and the moment it is gone `left: 0`/`right: 0` against a definite width is over-constrained,
    `right` is dropped, and the menu pins to the corner — detached from the button that opened it and

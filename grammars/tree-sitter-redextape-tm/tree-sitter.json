@@ -1,0 +1,20 @@
+{
+  "grammars": [
+    {
+      "name": "redextape_tm",
+      "camelcase": "RedextapeTm",
+      "scope": "source.tm",
+      "path": ".",
+      "file-types": ["tm"],
+      "highlights": ["queries/highlights.scm"],
+      "injection-regex": "^tm$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "GPL-3.0-only",
+    "description": "Redextape TM text form grammar for tree-sitter",
+    "authors": [{ "name": "davey" }],
+    "links": { "repository": "https://git.daveynet.xyz/davey/redextape" }
+  }
+}

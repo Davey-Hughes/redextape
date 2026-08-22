@@ -301,8 +301,10 @@ describe('layoutControls: the split picker', () => {
  * centring `margin: auto`, `left: 0`/`right: 0` against a `fit-content` width is over-constrained,
  * `right` is dropped, and the menu pins to the TOP-LEFT CORNER OF THE VIEWPORT — on top of the pane
  * chrome, and in the general case on top of a different pane entirely. Every test above passed against
- * that, because every one of them asks what the menu CONTAINS. `.superpowers/sdd/task-8-picker-*.png` is
- * the before/after pair.
+ * that, because every one of them asks what the menu CONTAINS. The describe below is the one that asks
+ * WHERE it is, and it is the whole record of that finding: the before/after screenshot pair it was
+ * originally evidenced by lived in an untracked working note, so no clone ever had it and it no longer
+ * exists. That is not a loss — a screenshot goes stale silently and this re-measures on every run.
  *
  * THESE ARE REAL MEASUREMENTS, NOT A PROXY FOR ONE. `tests/browser/setup.ts` loads `style.css` into the
  * tester page for exactly this reason (its own doc: the state table's `max-height` is load-bearing

@@ -48,15 +48,21 @@ legitimate is being refused here.
 **Whitespace is Unicode, not ASCII, and that is the one place this grammar's `extras` is deliberately
 wider than its sibling's.** λ's `skip_ws` tests `char::is_whitespace()` — the Unicode `White_Space`
 property — while the mini-language's lexer tests `is_ascii_whitespace()`. The natural `/\s/` in an
-`extras` list is **ASCII-only in tree-sitter's regex engine**: it *nearly* matches the mini-language's
-ASCII-only lexer — the two diverge on exactly one code point, U+000B VERTICAL TAB, which the
-mini-language's `/\s/` accepts and `is_ascii_whitespace()` rejects, a known open item left for a later
-PR and not fixed here — and it is wrong here regardless, where U+2009 THIN SPACE separates two atoms
-as far as `parse_lambda` is concerned. `grammar.js`
+`extras` list is **ASCII-only in tree-sitter's regex engine**: it *nearly* matched the mini-language's
+ASCII-only lexer — the two diverged on exactly one code point, U+000B VERTICAL TAB, which `/\s/`
+accepts and `is_ascii_whitespace()` rejects — and it is wrong here regardless, where U+2009 THIN SPACE
+separates two atoms as far as `parse_lambda` is concerned. `grammar.js`
 therefore spells the class out — the exact 25 code points in 10 ranges that `char::is_whitespace()`
-accepts. **Do not "harmonise" the two grammars' `extras`.** The mini-language's is nearly right for its
-own ASCII authority, with that single known gap; this one is right for λ's Unicode authority — copying
-either class into the other would not fix the first and would break the second.
+accepts.
+
+**The mini-language's own gap is CLOSED.** Its `extras` now spells out `is_ascii_whitespace()`'s five
+code points instead of `/\s/`, and `the_grammar_and_the_lexer_agree_on_every_ascii_whitespace_candidate`
+in `redextape-grammar-check`'s `tests/captures.rs` pins it. That test asks `parser::parse` rather than
+comparing spans, because `classify_source` skips a byte the lexer rejects and emits no span for it — so
+the span differential returned the same answer either way and could not see the defect at all.
+
+**Do not "harmonise" the two grammars' `extras`.** Each is now exactly right for its own authority, and
+they answer to different ones — copying either class into the other would break it.
 
 ## What this is for
 
@@ -417,7 +423,9 @@ The grammar table key must be `snake_case`; `redextape_lambda` qualifies.
 
 ## What the grammar covers
 
-`grammar.js` is **75 lines** — half the sibling's 156, which is what a four-token language costs.
+`grammar.js` is **78 lines** — under half the mini-language's 171, which is what a four-token
+language costs. (Both figures grew by a comment in PR 3, which closed the U+000B item this file
+describes above; they read 75 and 156 before that.)
 `queries/highlights.scm` holds **nine patterns** over **five capture names**, and
 `lambda::CAPTURE_CLASSES` has **five rows**, one per name, checked total in both directions
 (`the_capture_map_is_total_over_the_queries`, `every_map_row_is_used_by_a_query`).

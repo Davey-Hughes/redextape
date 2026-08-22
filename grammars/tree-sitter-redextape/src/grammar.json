@@ -746,7 +746,7 @@
   "extras": [
     {
       "type": "PATTERN",
-      "value": "\\s"
+      "value": "[\\t\\n\\f\\r ]"
     },
     {
       "type": "SYMBOL",

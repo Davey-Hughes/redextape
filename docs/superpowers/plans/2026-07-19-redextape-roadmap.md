@@ -10990,3 +10990,279 @@ if that is convenient, but take every number after the final review's fixes have
 commit that CI actually passed on. An entry whose figures were true at a commit nobody merged is
 describing a tree that never shipped.
 
+
+#### PR 3 OF THE TREE-SITTER SLICE CLOSES — the TM text form gets a grammar, the design's own stated gap was built on a false premise, and a grammar was wrong where its AUTHORITY could not look (2026-08-2X, branch `tree-sitter-tm`, `80ec6d4..TBD`, N commits, plus this entry)
+
+> **The heading's date, commit range and commit count are placeholders, as is the VERIFICATION block
+> at the end.** They are filled from the commit CI passes on, after the whole-branch review — see that
+> block for why this entry refuses to guess them.
+
+Design: `docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md`. Plan:
+`docs/superpowers/plans/2026-08-21-tree-sitter-tm-grammar.md`. This is PR 3 of 3 and it closes the
+slice. PR 1 merged 2026-08-21 as #53 (`648b7aa`), PR 2 the same day as #54 (`80ec6d4`).
+
+What ships: `grammars/tree-sitter-redextape-tm/` — `grammar.js`, the committed generated `src/` at ABI
+15, `queries/highlights.scm`, `tree-sitter.json`, a README, and `tree-sitter test` cases; plus
+`crates/redextape-grammar-check`'s third `Grammar` and its differential. Two repairs PR 2 carried
+forward landed here too, and one of them turned out to be the finding of the branch.
+
+##### THE FINDING THAT OUTRANKS THE FEATURE: THE DESIGN WAS WRONG ABOUT ITS OWN GAP, AND THE WRONGNESS WAS LOAD-BEARING
+
+Design §6.3 was titled *"TM comments are outside the differential entirely"* and opened with
+*"`print_tm_mapped` emits no `Comment` class, because the printer never writes a comment."* **The
+printer does write comments.** `write_header` pushes a `TokenClass::Comment` span for the trailing
+`; <name>` it appends to every tape line whose index this compiler has a name for.
+
+The narrower true statement is that the *header-less entry point* never reaches that code.
+`print_tm_inner` is the one printer and the header `Option` is the only difference between the entry
+points, so the class set is a function of that `Option`: **seven header-less, nine headered**, the two
+additions being `Comment` and `Ident`. §1.6 had recorded only the seven, and §5.1's capture table
+therefore had no TM row for `Ident` at all.
+
+**This was found by a survey run before the plan was written, which is the only reason it went in as a
+fact rather than arriving as a review finding.** The plan's own opening paragraph says the design was
+amended first, and §1.6, §5.1, §6.3, §10 and a new §11.5 carry the corrections — annotated in place
+with the original text quoted, as this repository does.
+
+**The correction changed the work, not just the prose.** §6.3 had framed the whole gap as a property
+of the form; it is mostly a *corpus decision*. A corpus printed with `print_tm_with_mapped` puts real,
+printer-authored, printer-classified comments inside the differential with no new machinery, and that
+is what this PR built: two corpora, one per printer. What is genuinely unreachable shrank to three
+comment positions, listed under *what this did not close* below.
+
+**And the correction itself needed correcting mid-flight.** The first draft of the amended §6.3 said
+no production caller builds a `TmHeader`. `run_tm_described` does — it is what `examples/tm_emit.rs`
+and `examples/regen_fixtures.rs` call, and the two checked-in `.tm` fixtures under
+`crates/redextape-core/tests/fixtures/` are its output. Caught before the plan was written, and it
+changed the plan's design: the headered corpus uses the production header path rather than a
+hand-built `TmHeader::new`, at the cost of a bounded simulation.
+
+##### THE THIRD VARIATION ON PR 2'S FINDING, AND THE FIRST WHERE THE BLIND SPOT IS IN THE AUTHORITY
+
+PR 2 closed with *"a grammar can be wrong exactly where nothing downstream is able to look"* and left
+one item open: the mini grammar's `extras: [/\s/, $.comment]` accepted **U+000B VERTICAL TAB**, which
+the lexer's `is_ascii_whitespace()` rejects. What PR 2's note could not say is why that survived two
+PRs with a span-for-span differential running over that exact grammar. Measured at `80ec6d4`:
+
+```
+let x =<VT>1;   grammar:         0 error nodes, 5 captures
+                classify_source: the same 5 spans as a plain space
+                parser::parse:   "unexpected character `\u{b}`" — REJECTED
+```
+
+**`classify_source` is total on malformed input: it SKIPS the offending byte and emits no span for
+it.** So it returns the identical classification whether or not the grammar accepts U+000B, and
+`compare_classified` compares equal. U+00A0 NBSP is the contrast — there the grammar already produced
+`ERROR` nodes and the two already agreed.
+
+**PR 2's blind spot was in the CORPUS (the printer could not produce the construct). This one is in
+the AUTHORITY**, which is a different and worse shape: no amount of corpus work reaches it, because
+the function being compared against cannot represent the disagreement. The regression test therefore
+asks `parser::parse` directly, sweeps all five accepted code points plus VT and NBSP, and asserts
+acceptance against diagnostics **in both directions**, so an `extras` edit that over-widens fails as
+loudly as one that under-widens.
+
+**The fix is one character's worth of regex and the generated diff is ten lines**, in which the C
+literally shows the bug leaving:
+
+```c
+-      if (('\t' <= lookahead && lookahead <= '\r') ||     // \t \n \v \f \r
++      if (lookahead == '\t' ||
++          lookahead == '\n' ||
++          lookahead == '\f' ||                            // no \v
++          lookahead == '\r' ||
+           lookahead == ' ') SKIP(0);
+```
+
+That smallness is why it landed in this PR rather than waiting: the one argument for deferring it was
+a large generated diff buried under TM's `parser.c`, and there was no large diff. λ's `extras` stays
+deliberately wider — `skip_ws` tests `char::is_whitespace()` — and both grammars' comments now say
+which function each answers to, which is the only thing keeping a future "these should match" edit
+from reintroducing it.
+
+##### THE RISK THE DESIGN NAMED IS NOT THE RISK THAT BIT
+
+§7 warns that TM lowering can refuse and instructs the corpus to filter and log its pass rate.
+Measured over `arb_expr_over`, 128 samples at each of the two leaf ranges in use: **100% pass, zero
+refusals.** The guard is correct, cheap, and idle. It stayed, and the generated leg logs its rate; a
+green pass-rate log is simply not evidence that anything was sized.
+
+What actually needed handling was **volume**, and the design said nothing about it:
+
+| | λ | TM | ratio |
+|---|---|---|---|
+| mean bytes per corpus entry | 912 | 18,905 | 21× |
+| mean spans per corpus entry | 637 | 6,865 | 11× |
+| max bytes seen | 2,977 | 109,668 | 37× |
+
+`1 + 2` alone is a 5-tape, 54-state, 170-line, 8,620-byte file carrying 3,177 spans. The largest
+curated demo in `tm_oracle.rs`/`native_oracle.rs` — `fn count_down(n) { … } count_down(4)` — is 1,365
+states, 4,722 lines, 272,283 bytes and 98,012 spans. At proptest's default 256 cases the TM
+differential would have parsed ~4.8 MB and compared ~2.0M spans every run.
+
+So the generated leg sets `cases: 32` **explicitly, with the measurement in the doc comment**. That
+became design §11.5. The authority side was never the problem and was measured too: 256 lowerings and
+prints take 79 ms debug, 17 ms release.
+
+##### A MEASUREMENT THAT COULD NOT SEE WHAT IT WAS MEASURING, CAUGHT BEFORE IT REACHED A TASK
+
+While proving the U+000B fix in a scratch copy, `tree-sitter parse` reported zero `ERROR` nodes for
+every input including the one that should have failed. **The CLI resolves a grammar through its config
+file, not through the working directory.** With no `parser-directories` configured it prints a warning,
+parses nothing, and produces output a `grep -c ERROR` reads as a clean parse. The first "the fix works"
+result was that. Re-run with an explicit `--config-path`, the same input produced
+`(ERROR [0, 7] - [0, 8])` exactly as intended.
+
+Same species as the branch's other findings, and the reason the plan carries the warning at the step
+that would hit it. **The pattern across all three: a check that cannot observe the thing it exists to
+check does not fail — it passes.**
+
+##### A DEAD CITATION THAT HAD COME BACK AS THE WRONG DOCUMENT
+
+PR 2's other carried-forward item was a sweep of `.superpowers/` references in merged comments. That
+directory carries a `.gitignore` of `*`, so nothing under it has ever been tracked and all three
+citations were dangling in any clone. Two named a screenshot pair that no longer exists even locally.
+
+**The third had gone worse than dead.** Those per-task reports are numbered per *slice* rather than
+globally, so a later slice reused the filename: the cited path today holds a tree-sitter
+regenerate-leg report about grammar generation, and the sentence the comment quoted is nowhere in it.
+**A dangling path fails loudly. A reused one resolves to a real, plausible-looking document about
+something else**, and a reader following it gets no signal they are reading the wrong thing.
+
+None of the three was simply deleted — each was carrying an argument, and deleting a citation turns a
+supported claim into an unsupported one. Both replacements are checkable where the originals never
+were: the two screenshot claims now point at the `pane-layout-controls.test.ts` describe block that
+re-measures the geometry with `getBoundingClientRect` against the shipped stylesheet on every run, and
+the quoted sentence is sourced to `main.ts`'s own `writeBuffersStorage` call. The replacement prose
+deliberately does not spell the offending path out, so that
+`git grep '\.superpowers/' -- . ':!docs'` stays a real check rather than matching the comment that
+explains the cleanup.
+
+##### AND TWO FIGURES THIS BRANCH INVALIDATED IN ALREADY-MERGED READMEs, WHICH IS THE SAME DEFECT SELF-INFLICTED
+
+The U+000B fix added a comment to `tree-sitter-redextape/grammar.js` and another to
+`tree-sitter-redextape-lambda/grammar.js`. Both files' READMEs quote their own line counts:
+
+```
+tree-sitter-redextape/grammar.js         156 -> 171
+tree-sitter-redextape-lambda/grammar.js   75 ->  78
+```
+
+λ's README asserted *"**75 lines** — half the sibling's 156"* and was wrong on both numbers. Corrected,
+each saying what it read before and why it moved. **A branch that spends its whole length finding
+stale figures is exactly the branch most likely to leave some**, and the only reason these were caught
+is that the TM README needed the same numbers for comparison and they did not match what `wc -l` said.
+
+One dangling cross-reference of this branch's own was caught the same way, before it landed: the first
+version of that fix pointed at a *Whitespace* section of the mini README that does not exist. The fact
+is stated inline instead. Citing a section beats stating a fact only when the section is there.
+
+##### THE TM GRAMMAR ITSELF, AND THE THREE THINGS ABOUT THE FORM THAT SHAPED IT
+
+**The form has one bare-word lexical class, not five.** A state name is whatever survives trimming —
+"no whitespace or reserved `; * : [ ]`" — so `wl1s2.s.sk0` and `add4.a.c.cwb` are single names and
+dots and digits are ordinary characters anywhere. An encoding name, a result type (`List<Nat>`) and a
+packed tape run (`#0000#0000#`) all fall inside that same class. They are ONE `identifier` token, told
+apart by the **field** they sit in, which is what lets `state pc0:` be `@label` and `goto pc0` be
+`@label.reference` without two identically-patterned tokens fighting in the lexer. That makes
+`@label`/`@label.reference` — design §5.2's worked example — arrive in the grammar it was designed
+for.
+
+**A tape's cells are one lexeme; a rule's symbols are one lexeme each.** `write_header` pushes a single
+span for a whole packed run and `write_syms` pushes one per symbol inside `[..]`. Same-looking text,
+two span shapes, so `cells` and `symbol` are two different nodes. Getting this wrong fails the
+differential on span count at the first `tape` line.
+
+**TM's queries must be TOTAL over the grammar's own tokens**, which neither sibling had to be: the
+printer spans every non-whitespace byte it writes, separators included, so there is no unclassified
+text a query could legitimately miss. `every_printed_token_is_captured` names the property, and
+eleven capture names cover nine classes — `@variable`/`@type` both project to `Ident` and
+`@punctuation.bracket`/`@punctuation.delimiter` both to `Punct`, both splits deliberate.
+
+**Nothing in the query file overlaps**, unlike the mini-language's deliberate catch-all. There, every
+identifier role projects to `Ident` so collapsing is sound; here the same name is `Label` in one
+position and `StateName` in another. `a_conflicting_query_is_rejected` runs the exact catch-all a
+future reader is most likely to add and asserts it is refused.
+
+**A form fact the survey missed, found by a test failing rather than by reading: a header is
+all-or-nothing.** `HeaderParts::finish` answers *"incomplete header: missing encoding, width, slots"*
+unless all four required directives are present once any of them is, and separately rejects a
+`tape <i>` whose index falls outside `0..n_tapes`. A corpus entry carrying only `result` and `tape 9`
+looked fine and parsed under the grammar and was not TM. `parse_tm_accepts_every_corpus_entry` caught
+it — the hand-written corpus has no printer behind it, so "the grammar accepts this" and "the
+authority accepts this" are two separate facts and both need checking.
+
+**The cheapest strong check cost nothing and already existed:** `crates/redextape-core/tests/fixtures/`
+holds two real 464- and 658-line `.tm` files with headers and comments, written by
+`examples/regen_fixtures.rs` through the same printer this grammar is held to. Parsing both was the
+first end-to-end evidence the grammar was right.
+
+##### WHAT THIS DID NOT CLOSE
+
+**Three comment positions still have no differential authority** — much less than design §6.3 claimed,
+and stated rather than left implicit. A whole-line `;` comment (no printer emits one); a trailing `;`
+comment on a line that is not a named `tape` line (`parse_tm_full` accepts one after every line kind,
+`write_header` writes one only after `tape <i>`); and `; stack`/`; heap`/`; box`, which the printer
+*would* write — `tape_name` names indices 2, 3 and 4 — but which are unreachable in fact because those
+tapes start empty and `TmHeader::new` drops empty tapes. All three rest on hand-written corpus entries
+checked by `tree-sitter test` plus a `parse_tm` assertion, which checks that the text parses under both
+descriptions and **not** that any capture agrees with a classification. Closing it properly means a
+`classify_tm` over authored text — LSP-shaped work, still deferred, and now the only remaining member
+of a family that started with §6.2's `\` alias.
+
+**Three accept-more divergences, all deliberate and all stated in `grammar.js` and the README.** One
+construct per line is not enforced; header directives are not required to precede the first `state`;
+and a header is not required to be complete. All three are whole-file properties, a CST is the wrong
+place to check them, and an editor should not underline a header the moment you type its first line.
+None is reachable from printed output, so none can reach the differential.
+
+**Design §6.1 is unchanged and still priced rather than deferred.** `@variable` and `@type` both
+project to `Ident` here, so the differential asserts *that* a span is an identifier and never *which
+kind*. The two ways to close it were costed in PR 1 and both rejected.
+
+**`"the brief"` references in merged code are still open** — 17 across 10 files. PR 2 flagged them
+alongside the `.superpowers/` sweep; they cite a concept rather than a path and are a different piece
+of work.
+
+**`parse_asm` is still unclaimed**, exactly where Plan 6's survey left it, and still the reason the asm
+form cannot be a fourth grammar: it prints and cannot be read back, so a grammar for it would have no
+parser to be checked against.
+
+**The README's install snippets stay unchecked, permanently, and they do not work for anyone today.**
+Re-probed rather than copied: `forge.daveynet.xyz` answers the ref advertisement `401`, and
+`git.daveynet.xyz` over HTTPS answers **HTTP 200 with a zero-byte body**, which `git ls-remote` reads
+as a repository with no refs and reports as **exit 0 and no output**. A silent empty, for the third
+entry running. `.tm` additionally collides with TeXmacs, which is a README line rather than a reason to
+invent an extension.
+
+**Everything in design §12 stays out**: no `locals.scm` — and for TM the case is sharper than for
+either sibling, since a state name resolves against the machine's own state table, which
+`parse_tm_full` already does and `Machine::validate()` already checks. No `injections.scm`, no folds,
+no indents (`print_tm_inner` indents rule lines by exactly two spaces and there is no `redextape fmt`
+for this form, so an indent setting would be an opinion with nothing to check it against), no
+editor-extension packaging, and nothing in `web/` beyond the three comment repairs above.
+
+##### VERIFICATION
+
+**DELIBERATELY EMPTY UNTIL THE WHOLE-BRANCH REVIEW HAS LANDED.** PR 1's entry needed four figures
+re-measured after the fact and PR 2's needed three, both for the identical structural reason: the
+closing entry is written in the last task, the review then runs and reliably lands more commits, and
+the figures are stale by construction the moment they are written. PR 2's entry ends by telling PR 3
+to measure at PR time instead. This is that instruction being followed rather than restated.
+
+Every figure below is to be taken from the commit CI actually passed on, with the command that
+produces it:
+
+```
+git rev-list --count 80ec6d4..<final>
+cargo nextest run --workspace                                  # 1110 / 8 skipped at the branch point
+cargo nextest run -p redextape-grammar-check                   # 29 at the branch point
+scripts/check-all.sh --no-llvm --no-browser                    # quote its own PARTIAL line
+wc -c grammars/tree-sitter-redextape-tm/src/parser.c           # siblings: 103,482 and 11,483
+grep -m1 LANGUAGE_VERSION grammars/tree-sitter-redextape-tm/src/parser.c
+cd grammars/tree-sitter-redextape-tm && ../../.tools/tree-sitter test
+wc -l < grammars/tree-sitter-redextape-tm/grammar.js           # siblings: 171 and 78
+grep -v '^;' .../queries/highlights.scm | grep -c '@'          # patterns; the -v matters, see PR 1
+grep -v '^;' .../queries/highlights.scm | grep -oE '@[a-z.]+' | sort -u | wc -l
+awk '/^pub const CAPTURE_CLASSES/,/^\];/' crates/redextape-grammar-check/src/tm.rs | grep -c '^    ("'
+```

@@ -1,0 +1,115 @@
+================================================================================
+the full header block, in the order the printer emits it
+================================================================================
+
+tapes 5
+start pc0
+version 1
+encoding binary
+width 4
+slots 5
+result List<Nat>
+tape 0 #0000#  ; reg
+tape 1 #0000#  ; work
+
+state pc0: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (version
+    (number))
+  (encoding
+    name: (identifier))
+  (width
+    (number))
+  (slots
+    (number))
+  (result
+    type: (identifier))
+  (tape
+    index: (number)
+    cells: (identifier))
+  (comment)
+  (tape
+    index: (number)
+    cells: (identifier))
+  (comment)
+  (state
+    name: (identifier)))
+
+================================================================================
+a tape beyond this compiler's layout prints without a comment
+================================================================================
+
+tapes 10
+start s
+version 1
+encoding unary
+width 4
+slots 1
+result Nat
+tape 9 #
+
+state s: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (version
+    (number))
+  (encoding
+    name: (identifier))
+  (width
+    (number))
+  (slots
+    (number))
+  (result
+    type: (identifier))
+  (tape
+    index: (number)
+    cells: (identifier))
+  (state
+    name: (identifier)))
+
+================================================================================
+a nested result type is still one token
+================================================================================
+
+tapes 1
+start s
+version 1
+encoding unary
+width 4
+slots 1
+result List<List<Nat>>
+
+state s: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (version
+    (number))
+  (encoding
+    name: (identifier))
+  (width
+    (number))
+  (slots
+    (number))
+  (result
+    type: (identifier))
+  (state
+    name: (identifier)))

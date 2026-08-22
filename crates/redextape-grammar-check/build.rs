@@ -35,4 +35,5 @@ fn main() {
     // `std::env::var` that could fail and need an `unwrap`/`expect` this crate's lints forbid.
     compile_grammar("tree-sitter-redextape");
     compile_grammar("tree-sitter-redextape-lambda");
+    compile_grammar("tree-sitter-redextape-tm");
 }

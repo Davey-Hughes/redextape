@@ -20,10 +20,19 @@ import { BUFFERS_STORAGE_KEY, serializeBuffers } from '../../src/buffers-store'
  * **ONE STORED BUFFER, NO BINDING, IS THE WHOLE FIXTURE** — deliberately the minimal shape the
  * hazard needs and not a full restore-and-rebind scenario (`buffer-restore.test.ts` already covers
  * that path in depth). `hasBuffers` is `payload.buffers.length > 0`, read off `scratchpad`'s own
- * records regardless of which pane, if any, is bound to a buffer — the hazard's own write-up
- * (`.superpowers/sdd/task-6-report.md` §5) is explicit that "the payload does carry buffers... the
- * restored ones, with empty `bindings`", so an orphaned buffer and an empty `bindings` map reproduce
- * it exactly, with no layout seeding and no warming needed.
+ * records regardless of which pane, if any, is bound to a buffer — `main.ts` passes exactly that
+ * expression as `writeBuffersStorage`'s second argument, and it names `payload.buffers` and never
+ * `payload.bindings`. So an orphaned buffer and an empty `bindings` map reproduce the hazard exactly,
+ * with no layout seeding and no warming needed.
+ *
+ * **THAT SENTENCE USED TO CITE AN UNTRACKED WORKING NOTE, AND THE CITATION HAD GONE WORSE THAN DEAD.**
+ * It named a per-task report file under the scratch note directory, whose own `.gitignore` is `*` — so
+ * nothing there was ever tracked and no clone could follow it. Worse, those reports are numbered per
+ * SLICE, not globally, so a later slice reused the filename: the path now holds a tree-sitter
+ * regenerate-leg report about grammar generation, and the sentence this comment quoted is nowhere in
+ * it. A dangling path fails loudly; a REUSED one resolves to a real, plausible-looking document about
+ * something else entirely. The claim is now sourced to the code, which is tracked and checkable, and
+ * the path is not spelled out here so that a grep for it stays a real check.
  *
  * **ITS OWN FILE, FOR THE ONE-MOUNT-PER-FILE REASON EVERY SIBLING GIVES.** It needs the buffers key
  * seeded with a real payload AND every subsequent write to that key refused from before `main()`'s

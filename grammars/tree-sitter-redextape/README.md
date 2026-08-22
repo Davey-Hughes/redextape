@@ -296,7 +296,9 @@ The grammar table key must be `snake_case`; `redextape` qualifies.
 
 ## What the grammar covers
 
-`grammar.js` is 156 lines. Statements: `let` (with `mut`), `fn`, `while`, assignment, expression
+`grammar.js` is 171 lines (156 until PR 3 replaced `extras`'s `/\s/` with the exact five code points
+`is_ascii_whitespace()` accepts, and explained why at the site — `/\s/` also accepted U+000B VERTICAL
+TAB, which the lexer rejects). Statements: `let` (with `mut`), `fn`, `while`, assignment, expression
 statements, and blocks. Expressions: binary operators with the front end's precedence, calls, method
 calls (UFCS chains), `if`/`else`, closures, list literals, parenthesized expressions, identifiers,
 numbers, booleans. `//` line comments are `extras`, so they may appear anywhere.

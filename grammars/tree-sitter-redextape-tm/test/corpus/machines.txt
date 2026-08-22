@@ -1,0 +1,139 @@
+================================================================================
+a minimal machine: one tape, one accepting state
+================================================================================
+
+tapes 1
+start s
+
+state s: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (state
+    name: (identifier)))
+
+================================================================================
+a rule nests inside the state it belongs to
+================================================================================
+
+tapes 2
+start a
+
+state a:
+  [# *] -> write [* _], move [R S], goto b
+state b: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (state
+    name: (identifier)
+    (rule
+      read: (group
+        (symbol)
+        (symbol))
+      write: (group
+        (symbol)
+        (symbol))
+      move: (move_group
+        (head_move)
+        (head_move))
+      target: (identifier)))
+  (state
+    name: (identifier)))
+
+================================================================================
+a state may carry no rules without being an accept state
+================================================================================
+
+tapes 1
+start s
+
+state s:
+state t: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (state
+    name: (identifier))
+  (state
+    name: (identifier)))
+
+================================================================================
+wildcards are symbols in both the read and the write group
+================================================================================
+
+tapes 3
+start s
+
+state s:
+  [* * *] -> write [* * *], move [S S S], goto s
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (state
+    name: (identifier)
+    (rule
+      read: (group
+        (symbol)
+        (symbol)
+        (symbol))
+      write: (group
+        (symbol)
+        (symbol)
+        (symbol))
+      move: (move_group
+        (head_move)
+        (head_move)
+        (head_move))
+      target: (identifier))))
+
+================================================================================
+a state name is one token however many dots and digits it carries
+================================================================================
+
+tapes 1
+start wl1s2.s.sk0
+
+state wl1s2.s.sk0:
+  [*] -> write [*], move [S], goto add4.a.c.cwb
+state add4.a.c.cwb: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (state
+    name: (identifier)
+    (rule
+      read: (group
+        (symbol))
+      write: (group
+        (symbol))
+      move: (move_group
+        (head_move))
+      target: (identifier)))
+  (state
+    name: (identifier)))

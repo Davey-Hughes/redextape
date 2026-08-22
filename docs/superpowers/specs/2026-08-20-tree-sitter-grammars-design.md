@@ -38,9 +38,15 @@ Every claim below was run, not recalled.
    asymmetry is not incidental; it determines the corpus design of §7 and produces two of the three
    gaps in §6.
 6. **The classes each form actually emits are far fewer than 14.** λ emits three — `Binder`,
-   `Ident`, `Punct`. TM emits seven — `Keyword`, `Label`, `Move`, `Nat`, `Punct`, `StateName`,
-   `TapeSymbol`. **`print_tm_mapped` emits no `Comment` at all**, though `;` comments are part of
-   the TM text form the parser accepts; see §6.3.
+   `Ident`, `Punct`. **TM emits seven or nine, and which one depends on an `Option`** — corrected
+   2026-08-21, during PR 3's survey. This clause first read *"TM emits seven — `Keyword`, `Label`,
+   `Move`, `Nat`, `Punct`, `StateName`, `TapeSymbol`. `print_tm_mapped` emits no `Comment` at all"*,
+   which is true of `print_tm_mapped` and false of the form's other printer. `print_tm_inner` is the
+   one printer; `print_tm_mapped` passes it `None` for the header and `print_tm_with_mapped` passes
+   `Some(h)`, and `write_header` emits **`Comment`** (the trailing `; reg` on a named tape line) and
+   **`Ident`** (the `encoding` and `result` operands). So the header-less printer emits seven and the
+   headered one emits nine. Measured on `1 + 2` lowered at `Unary::at(8)`: seven distinct classes over
+   3,163 spans, nine over the headered form. See §6.3, which was built on the false half.
 7. **A generator for mini-language expressions already exists.** `arb_expr_over`
    (`redextape-test-support/src/lib.rs:41`) is a `prop_recursive(3, 8, 3, ..)` shape over five arms,
    shared by four call sites. Its doc comment forbids changing the recursion parameters or the arm
@@ -181,7 +187,7 @@ table is still pinned to its own queries in both directions.
 | `@keyword.function` | `Binder` | λ — the `λ` or `\` token itself |
 | `@variable.parameter` | `Ident` in mini, `Binder` in λ | mini — a function or closure parameter; λ — the name the binder binds. **The row that forced per-grammar tables.** |
 | `@boolean` | `Bool` | mini — `true`, `false` |
-| `@variable`, `@function`, `@function.call` | `Ident` | mini, λ |
+| `@variable`, `@function`, `@function.call` | `Ident` | mini, λ, TM (see below) |
 | `@number` | `Nat` | mini, TM |
 | `@operator` | `Operator` | mini |
 | `@punctuation.bracket`, `@punctuation.delimiter` | `Punct` | all three |
@@ -190,6 +196,15 @@ table is still pinned to its own queries in both directions.
 | `@label.reference` | `StateName` | TM — a `goto` target |
 | `@character` | `TapeSymbol` | TM — a tape symbol, the blank `_`, the wildcard `*` |
 | `@constant.builtin` | `Move` | TM — `L`, `R`, `S` |
+
+**TM's `Ident` row was missed until PR 3's survey**, because §1.6 recorded only the header-less
+printer's seven classes. `write_header` classifies the operands of `encoding <name>` and
+`result <Ty>` as `Ident` — its own comment says why: *"neither has a class of its own, and `Ident` is
+the vocabulary's word for a name whose meaning comes from elsewhere in the file."* Two standard
+captures fit, and **the plan picks; both must land in TM's table projecting to `Ident`**: `@variable`
+for the encoding name, and either `@variable` or `@type` for the `result` operand, which really is a
+type (`Nat`, `List<Nat>`). `@type` is the better colour in an editor and costs one more row; §5.2's
+dotted-name escape hatch is not needed for either.
 
 ### §5.2 Where the standard vocabulary runs out, and why the fix is a dotted name
 
@@ -246,16 +261,74 @@ shape, plus a test in `crates/redextape-grammar-check` (`tests/lambda.rs`) asser
 parses, not that any capture agrees with a classification — and is why it is written down here rather
 than left implicit.
 
-### §6.3 TM comments are outside the differential entirely
+### §6.3 TM comments are MOSTLY outside the differential, and which part is a corpus decision
 
-`print_tm_mapped` emits no `Comment` class (§1.6), because the printer never writes a comment. `;`
-comments — whole-line and trailing — are nonetheless part of the form `parse_tm` accepts. Same
-treatment as §6.2: hand-written corpus, `tree-sitter test`, no differential authority.
+**CORRECTED 2026-08-21, during PR 3's survey. The premise this section was built on is false, and the
+gap is real but much narrower than it claimed.** The original text read:
 
-**This is the same shape of gap `TokenClass::Comment` had on the source path before 2026-08-19**, and
-it is worth noticing that the fix there was to give the lexer somewhere to put comments. The
-equivalent fix here would be a `classify_tm`/`classify_lambda` over authored text. That is a real
-piece of work with a real consumer — it is what an LSP would need — and it is **not** in this slice.
+> `print_tm_mapped` emits no `Comment` class (§1.6), because the printer never writes a comment. `;`
+> comments — whole-line and trailing — are nonetheless part of the form `parse_tm` accepts. Same
+> treatment as §6.2: hand-written corpus, `tree-sitter test`, no differential authority.
+
+**The printer does write comments.** `write_header` (`tm/header.rs`) pushes a `TokenClass::Comment`
+span for the trailing `; <name>` it appends to every tape line whose index this compiler has a name
+for — `reg`, `work`, `stack`, `heap`, `box`. What is true is narrower: the *header-less* entry point
+never reaches that code.
+
+`print_tm_inner` is the one printer, and the header's presence is the only difference between the
+entry points — which is what keeps them from drifting, and also what makes the class set a function of
+one `Option`:
+
+| printer | header | classes emitted | `Comment`? |
+|---|---|---|---|
+| `print_tm_mapped` | `None` | 7 — `Keyword`, `Label`, `Move`, `Nat`, `Punct`, `StateName`, `TapeSymbol` | no |
+| `print_tm_with_mapped` | `Some(h)` | 9 — those, plus `Comment` and `Ident` | yes |
+
+`Ident` is the other addition and has nothing to do with comments: it is what `encoding <name>` and
+`result <Ty>` classify their operands as. Both figures were measured on `1 + 2` lowered at
+`Unary::at(8)`, not read off the source.
+
+**What is genuinely outside the differential, then:**
+
+- **A whole-line `;` comment.** No printer emits one, so no produced corpus entry can contain one.
+- **A trailing `;` comment anywhere but a named tape line.** `parse_tm` accepts one after any line;
+  `write_header` writes one only after `tape <i>`, and only for `i` in this compiler's own layout.
+- **`; stack`, `; heap` and `; box` in practice, even under the headered printer.** Those three tapes
+  start empty, `TmHeader::new` drops empty tapes, and no `tape` line is written for them at all.
+  Measured: a headered `1 + 2` carries **one** `Comment` span under `Unary` (`; reg` — `init_work()`
+  is empty) and **two** under `Binary` (`; reg`, `; work`). Nothing produced reaches the other three.
+- **Every comment at all — but only if the corpus is printed header-less.** Which is the choice this
+  design made silently, by writing `print_tm_mapped(machine)` into §7's diagram without recording that
+  there was a choice to make.
+
+**So the largest part of this gap is a corpus decision rather than a fact about the form.** A TM corpus
+produced by `print_tm_with_mapped` puts real, printer-authored, printer-classified comments *inside*
+the differential with no new machinery. The cost is that something has to produce the `TmHeader`, and
+there are two ways, neither free:
+
+- **`run_tm_described`** (`tm.rs`) is the production path — it lowers, fits the field width,
+  **simulates**, and hands back `DescribedRun { machine, header, .. }`. `examples/tm_emit.rs` and
+  `examples/regen_fixtures.rs` already call it, and the two checked-in `.tm` files under
+  `crates/redextape-core/tests/fixtures/` are its output, comments and all. Its header is one the rest
+  of the project agrees is correct. Its price is the simulation — which is the TM-side analogue of the
+  reduction §7 forbids, and `examples/state_cost_probe.rs` records it building an 8.6-million-state
+  machine costing 6.0 GB on an unlucky input.
+- **`TmHeader::new` by hand** runs nothing, and constructs a value that no other non-test caller in the
+  tree constructs that way. A header built wrongly is a corpus that checks text nobody would ever
+  write.
+
+The plan decides, and either way the headered entries want to be a **small fixed set**, not the
+generated corpus. What the design owes the plan is that the choice exists at all, which the earlier
+text hid by writing `print_tm_mapped` into §7's diagram.
+
+Whatever is left after that choice gets the same treatment as §6.2: hand-written corpus,
+`tree-sitter test`, no differential authority.
+
+**This is still the same shape of gap `TokenClass::Comment` had on the source path before
+2026-08-19**, and it is worth noticing that the fix there was to give the lexer somewhere to put
+comments. The equivalent fix here would be a `classify_tm`/`classify_lambda` over authored text. That
+is a real piece of work with a real consumer — it is what an LSP would need — and it is **not** in this
+slice.
 
 ## §7 Corpus generation — one generator, three corpora
 
@@ -420,9 +493,29 @@ queries, corpus and README. This PR is where the design is either right or wrong
 
 **PR 2 — the λ grammar.** Three classes. Adds the `\` corpus of §6.2.
 
-**PR 3 — the TM grammar.** Seven classes, line-oriented, plus the optional header block that
-`parse_tm_full` reads and `parse_tm` discards. Adds the `;` comment corpus of §6.3. Largest of the
-three grammars and the one most likely to want a second review pass.
+**PR 3 — the TM grammar.** Seven classes header-less, **nine with the header block** that
+`parse_tm_full` reads and `parse_tm` discards (§1.6, §6.3 — this line said "seven classes" before PR
+3's survey corrected it), line-oriented. Adds the `;` comment corpus of §6.3.
+
+**"LARGEST OF THE THREE GRAMMARS" WAS A PREDICTION AND IT WAS WRONG — corrected 2026-08-22, measured
+once all three existed.** This line originally read *"Largest of the three grammars and the one most
+likely to want a second review pass"*, and PR 3's own amendment restated it as *"largest by every
+measure taken so far"*, which was worse: it asserted as measured something nobody had measured. What
+the tree actually says:
+
+| | mini | λ | TM |
+|---|---|---|---|
+| `grammar.js` lines | **171** | 78 | 147 |
+| `parser.c` bytes | **103,482** | 11,483 | 42,220 |
+| query patterns | 12 | 9 | **13** |
+| `tree-sitter test` cases | 8 | 6 | **12** |
+| mean bytes per corpus entry | — | 912 | **18,905** |
+
+**The mini-language is the largest GRAMMAR; TM is the largest CHECKING PROBLEM.** Mini's `parser.c`
+is 2.4x TM's, because expression precedence costs more parser states than a flat line-oriented form
+does. TM leads on everything downstream of the grammar — patterns, corpus cases, and corpus volume by
+21x (§11.5) — which is the measure that actually shaped PR 3's work. The prediction was directionally
+right about the effort and wrong about where it sat.
 
 Each PR closes with a roadmap entry, per the convention every slice since Plan 4 has followed.
 
@@ -442,6 +535,17 @@ Each PR closes with a roadmap entry, per the convention every slice since Plan 4
    Worth stating plainly: the generated corpus gives depth on a narrow shape, not breadth.
 4. **ABI drift on a future toolchain bump.** Pinned today; a CLI upgrade that changes the default ABI
    past what the Rust crate reads breaks the differential, and §8.1 is why the message will say so.
+5. **TM corpus SIZE, added 2026-08-21 by PR 3's survey — and it is not the risk §7 named.** §7 warns
+   that TM lowering can refuse and tells the corpus to filter and log its pass rate. Measured over 128
+   samples of `arb_expr_over` at both leaf ranges in use, the pass rate is **100%** — nothing refused,
+   so that guard is real but idle. What actually bites is volume. One printed TM machine averages
+   **18,905 bytes and 6,865 spans** (max seen: 109,668 bytes, 39,310 spans), against λ's **912 bytes
+   and 637 spans** for the same generator: **~21× the text and ~11× the spans per entry.** At
+   proptest's default 256 cases that is ~4.8 MB of text and ~2.0M spans parsed, queried and compared
+   per run. The authority side is cheap (256 lowerings and prints: 79 ms debug, 17 ms release); the
+   unpriced half is tree-sitter's. **PR 3 must choose its case count deliberately and record the
+   measurement rather than inheriting the default**, which is what PR 1 did and correctly flagged in
+   its own roadmap entry.
 
 ## §12 Explicitly out of scope
 

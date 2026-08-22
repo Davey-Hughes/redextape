@@ -23,7 +23,22 @@ module.exports = grammar({
   // `letter` from lexing as `let` followed by `ter`.
   word: $ => $.identifier,
 
-  extras: $ => [/\s/, $.comment],
+  // The class lists EXACTLY the code points `is_ascii_whitespace()` accepts — the WhatWG Infra set:
+  // TAB, LF, FF, CR, SPACE. It was `/\s/`, which is nearly right and diverges on ONE code point,
+  // U+000B VERTICAL TAB: `/\s/` accepts it and the lexer's `is_ascii_whitespace()` rejects it, so the
+  // grammar parsed a file the front end refuses. POSIX counts VT as whitespace and Rust does not,
+  // which is the whole disagreement.
+  //
+  // THE DIFFERENTIAL COULD NOT SEE THIS, which is why it survived two PRs. `classify_source` is total
+  // on malformed input: it skips the byte and emits no span for it, so it returns the same spans
+  // either way and the span comparison passes. `the_grammar_and_the_lexer_agree_on_every_ascii_
+  // whitespace_candidate` in `redextape-grammar-check`'s `tests/captures.rs` asks `parser::parse`
+  // instead, which is the only authority that can answer.
+  //
+  // DO NOT HARMONISE THIS WITH `tree-sitter-redextape-lambda`'s `extras`, which is deliberately wider:
+  // λ's `skip_ws` tests `char::is_whitespace()`, the Unicode White_Space property. Two grammars, two
+  // authorities, and the classes are only both correct while each answers to its own.
+  extras: $ => [/[\t\n\f\r ]/, $.comment],
 
   rules: {
     // A source file is a block body with no braces: statements, then an optional tail expression

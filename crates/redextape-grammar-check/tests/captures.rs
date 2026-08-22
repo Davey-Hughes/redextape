@@ -116,3 +116,43 @@ fn every_mini_query_pattern_fires_over_the_corpus() {
         panic!("{why}");
     }
 }
+
+/// The mini grammar's `extras` must accept exactly what the lexer's `is_ascii_whitespace()` accepts.
+///
+/// **THIS CANNOT BE A DIFFERENTIAL TEST, AND THAT IS WHY THE DEFECT SURVIVED PR 1 AND PR 2.**
+/// `classify_source` is total on malformed input: it SKIPS a byte the lexer rejects and emits no span
+/// for it, so it returns the identical five spans whether or not the grammar accepts U+000B, and
+/// `compare_classified` compares equal either way. Measured before the fix — `let x =<VT>1;` gave the
+/// grammar 0 error nodes and 5 captures, `classify_source` the same 5 spans as a plain space, and
+/// `parser::parse` the diagnostic "unexpected character". The only authority that can see this is
+/// `parser::parse`, so this test asks it directly rather than going through the spans.
+///
+/// U+00A0 NBSP is the contrast row: the grammar already produced ERROR nodes there, so the two
+/// already agreed, and it is included so that a future `extras` edit which over-widens fails here
+/// too rather than only under-widening being caught.
+///
+/// Rust's `is_ascii_whitespace()` is the WhatWG Infra set — SPACE, TAB, LF, FF, CR — and EXCLUDES
+/// VERTICAL TAB, which POSIX includes. That single disagreement is the whole bug.
+#[test]
+fn the_grammar_and_the_lexer_agree_on_every_ascii_whitespace_candidate() {
+    for (name, sep, lexer_accepts) in [
+        ("SPACE", ' ', true),
+        ("TAB", '\t', true),
+        ("LF", '\n', true),
+        ("FF", '\u{0c}', true),
+        ("CR", '\r', true),
+        ("VT", '\u{0b}', false),
+        ("NBSP", '\u{a0}', false),
+    ] {
+        let src = format!("let x ={sep}1;");
+        let tree = MINI.parse(&src).expect("the grammar must return a tree");
+        let grammar_accepts = MINI.error_nodes(&tree).is_empty();
+        let (_, diags) = redextape_core::parser::parse(&src);
+        assert_eq!(
+            diags.is_empty(),
+            lexer_accepts,
+            "{name}: the LEXER moved, not the grammar — re-measure before editing grammar.js"
+        );
+        assert_eq!(grammar_accepts, lexer_accepts, "{name}: the grammar and the lexer disagree");
+    }
+}

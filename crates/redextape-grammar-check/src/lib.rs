@@ -12,7 +12,9 @@
 pub mod grammar;
 pub mod lambda;
 pub mod mini;
+pub mod tm;
 
 pub use grammar::{Grammar, compare_classified};
 pub use lambda::LAMBDA;
 pub use mini::MINI;
+pub use tm::TM;

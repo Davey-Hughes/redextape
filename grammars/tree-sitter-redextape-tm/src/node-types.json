@@ -1,0 +1,384 @@
+[
+  {
+    "type": "encoding",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "group",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "symbol",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "move_group",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "head_move",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "result",
+    "named": true,
+    "fields": {
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "rule",
+    "named": true,
+    "fields": {
+      "move": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "move_group",
+            "named": true
+          }
+        ]
+      },
+      "read": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "target": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "write": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "slots",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "source_file",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "encoding",
+          "named": true
+        },
+        {
+          "type": "result",
+          "named": true
+        },
+        {
+          "type": "slots",
+          "named": true
+        },
+        {
+          "type": "start",
+          "named": true
+        },
+        {
+          "type": "state",
+          "named": true
+        },
+        {
+          "type": "tape",
+          "named": true
+        },
+        {
+          "type": "tapes",
+          "named": true
+        },
+        {
+          "type": "version",
+          "named": true
+        },
+        {
+          "type": "width",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "start",
+    "named": true,
+    "fields": {
+      "target": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "state",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "rule",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "symbol",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "tape",
+    "named": true,
+    "fields": {
+      "cells": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "index": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "number",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "tapes",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "version",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "width",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "*",
+    "named": false
+  },
+  {
+    "type": ",",
+    "named": false
+  },
+  {
+    "type": "->",
+    "named": false
+  },
+  {
+    "type": ":",
+    "named": false
+  },
+  {
+    "type": "[",
+    "named": false
+  },
+  {
+    "type": "]",
+    "named": false
+  },
+  {
+    "type": "accept",
+    "named": false
+  },
+  {
+    "type": "comment",
+    "named": true,
+    "extra": true
+  },
+  {
+    "type": "encoding",
+    "named": false
+  },
+  {
+    "type": "goto",
+    "named": false
+  },
+  {
+    "type": "head_move",
+    "named": true
+  },
+  {
+    "type": "identifier",
+    "named": true
+  },
+  {
+    "type": "move",
+    "named": false
+  },
+  {
+    "type": "number",
+    "named": true
+  },
+  {
+    "type": "result",
+    "named": false
+  },
+  {
+    "type": "slots",
+    "named": false
+  },
+  {
+    "type": "start",
+    "named": false
+  },
+  {
+    "type": "state",
+    "named": false
+  },
+  {
+    "type": "tape",
+    "named": false
+  },
+  {
+    "type": "tapes",
+    "named": false
+  },
+  {
+    "type": "version",
+    "named": false
+  },
+  {
+    "type": "width",
+    "named": false
+  },
+  {
+    "type": "write",
+    "named": false
+  }
+]
