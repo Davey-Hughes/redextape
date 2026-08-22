@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(clippy::pedantic))]
 
-use redextape_grammar_check::{CORPUS, compare, compare_with};
+use redextape_grammar_check::mini::{CORPUS, compare, compare_with};
 
 #[test]
 fn the_grammar_agrees_with_classify_source_on_every_corpus_program() {
@@ -18,7 +18,14 @@ fn the_grammar_agrees_with_classify_source_on_every_corpus_program() {
 fn the_comparison_can_fail() {
     // `@@@` is not lexable: `classify_source` recovers and classifies what it can while the grammar
     // produces ERROR nodes. Whatever the two do here, they must not agree silently.
-    assert!(compare("let x = @@@;").is_err(), "the comparison must reject un-lexable input");
+    //
+    // Asserts WHICH branch fired, not just that the call errored — `.is_err()` alone would still pass
+    // if a later edit made this hit the per-index or length branch instead of the ERROR-node guard it
+    // is meant to exercise, the same gap `the_lambda_comparison_can_fail` was found to have left open
+    // on this branch. This is the ERROR-node guard: `compare_classified` checks it first and returns
+    // before the per-index or length comparisons ever run.
+    let err = compare("let x = @@@;").expect_err("the comparison must reject un-lexable input");
+    assert!(err.contains("ERROR/MISSING nodes"), "expected the ERROR-node guard's message, got: {err}");
 }
 
 /// `the_comparison_can_fail` above only ever exercises the ERROR-node guard: for `let x = @@@;` the

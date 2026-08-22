@@ -1,0 +1,20 @@
+{
+  "grammars": [
+    {
+      "name": "redextape_lambda",
+      "camelcase": "RedextapeLambda",
+      "scope": "source.rxlambda",
+      "path": ".",
+      "file-types": ["rxlambda"],
+      "highlights": ["queries/highlights.scm"],
+      "injection-regex": "^rxlambda$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "GPL-3.0-only",
+    "description": "Redextape λ text form grammar for tree-sitter",
+    "authors": [{ "name": "davey" }],
+    "links": { "repository": "https://git.daveynet.xyz/davey/redextape" }
+  }
+}

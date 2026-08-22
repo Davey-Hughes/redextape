@@ -2,7 +2,7 @@
 
 use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
-use redextape_grammar_check::compare;
+use redextape_grammar_check::mini::compare;
 use redextape_test_support::arb_expr_over;
 
 proptest! {

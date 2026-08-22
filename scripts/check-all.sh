@@ -544,11 +544,12 @@ check_grammars() {
   # from the reader. `git diff --exit-code` sees only TRACKED modifications — a regenerated file that
   # was never `git add`ed reports clean, since diff has nothing to compare it against. That is not
   # hypothetical: a reviewer of this leg dropped an untracked file under `grammars/` and this check
-  # returned clean. Only one grammar exists today and every one of its generated files is tracked, so
-  # nothing is broken yet — but a later grammar (`tree-sitter-redextape-lambda`, `-tm`) whose `src/`
-  # was never staged would regenerate green FOREVER, silently, which is exactly the gap this leg
-  # exists to close. `git ls-files --others --exclude-standard` is what actually lists it. Restricted
-  # to `grammars/` so an unrelated dirty or untracked file elsewhere in the tree does not fail this leg.
+  # returned clean. Two grammars exist today (`tree-sitter-redextape`, `tree-sitter-redextape-lambda`)
+  # and every one of their generated files is tracked, so nothing is broken yet — but a later grammar
+  # (`-tm`) whose `src/` was never staged would regenerate green FOREVER, silently, which is exactly
+  # the gap this leg exists to close. `git ls-files --others --exclude-standard` is what actually lists
+  # it. Restricted to `grammars/` so an unrelated dirty or untracked file elsewhere in the tree does
+  # not fail this leg.
   if ! git diff --quiet --exit-code -- grammars/; then
     echo "error: the committed generated parsers differ from what grammar.js produces." >&2
     # NOT "run tree-sitter generate" — this leg already did, above, and the diff below is that

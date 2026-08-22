@@ -241,8 +241,10 @@ is printer-produced, **no generated corpus entry can ever contain a `\`**. The g
 has no authority to compare against for it.
 
 Handled by a small hand-written corpus of `\`-spelled terms checked with `tree-sitter test` for tree
-shape, plus the observation that `parse_lambda(text)` must succeed on each. That is weaker than the
-differential and is why it is written down here rather than left implicit.
+shape, plus a test in `crates/redextape-grammar-check` (`tests/lambda.rs`) asserting
+`parse_lambda(text)` succeeds on each. That is weaker than the differential — it checks that the term
+parses, not that any capture agrees with a classification — and is why it is written down here rather
+than left implicit.
 
 ### §6.3 TM comments are outside the differential entirely
 

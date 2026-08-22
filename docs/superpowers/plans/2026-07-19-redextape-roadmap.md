@@ -10543,3 +10543,450 @@ disclosed as not covering.
 269  comparisons       13 + 256, the two reproducible rows of the agreement table
 34   review sweep      NOT reproducible — a scratch harness during Task 3's review, never committed
 ```
+```
+
+#### PR 2 OF THE TREE-SITTER SLICE CLOSES — the λ text form gets a grammar held span-for-span against its printer, and the grammar was wrong exactly where nothing downstream was able to look (2026-08-21, branch `tree-sitter-lambda`, `648b7aa..13207e0`, 13 commits, plus this entry)
+
+Design: `docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md`, unchanged by this branch —
+§10 already set the order. Plan: `docs/superpowers/plans/2026-08-21-tree-sitter-lambda-grammar.md`.
+This is PR 2 of 3; PR 1 merged 2026-08-21 as #53, squash `648b7aa`. TM is PR 3.
+
+What ships, in two halves. First, `crates/redextape-grammar-check` generalised from one hard-wired
+grammar to a **`Grammar` value** carrying its own language, queries and capture table — design §5.1's
+per-grammar tables, made real — with the mini-language's constants relocated into `mini.rs` and no
+assertion changed. Second, `grammars/tree-sitter-redextape-lambda/`: `grammar.js`, the committed
+generated `src/` at ABI 15, `queries/highlights.scm`, `tree-sitter.json`, six `tree-sitter test` cases,
+and a README. **Its authority is `print_lambda_mapped`, a printer**, and the differential compares
+every highlight capture against it span for span. The lane is unchanged: highlighting for external
+editors, and **the grammar may never lower a CST into a term.** Nothing here touches `web/`, and
+`crates/redextape-core` is not modified.
+
+The trigger is still the one PR 1 opened the gate on without. The roadmap's extension-track entry
+(line 2643 today, its `When:` clause at 2652) still reads *"when an **external editor** needs it"*, and
+still nothing does. That entry stands unedited here for the second time, and for the same reason: the
+clause is not impossible to satisfy, it simply has not happened yet.
+
+##### THE FINDING THAT OUTRANKS THE FEATURE: A GRAMMAR CAN BE WRONG EXACTLY WHERE NOTHING DOWNSTREAM IS ABLE TO LOOK
+
+`_atom` was `choice($.parenthesized_term, $.identifier)` and `application`'s `argument` field was
+typed `_atom`, so **an abstraction was not a legal argument**. `f λx. x` therefore produced an ERROR
+node and **mis-parented the abstraction as a sibling of `source_file`** rather than as the
+application's argument.
+
+The authority accepts it, and says so in two places that have to be read together:
+`parse_application`'s loop tests for `'\\' | 'λ' | '(' | is_ident_start` before calling `parse_atom`,
+and `parse_atom`'s **first arm** on `\`/`λ` is `parse_abstraction`. So `f λx. x` is `f (λx. x)` to
+`parse_lambda` and was a syntax error to the grammar.
+
+**Nothing downstream could have caught this, and that is the part worth keeping.** Two independent
+reasons, either one sufficient:
+
+- `print_lambda` **always parenthesizes an abstraction in argument position**, so no printer-produced
+  corpus entry can ever contain the shape. λ's corpus is printer-produced by construction (§4), so the
+  differential would never be handed the input.
+- The differential compares **spans**, and is blind to tree shape regardless. Even fed `f (λx. x)`, it
+  compares byte ranges and classes; a mis-parented subtree with identical spans compares equal.
+
+So the layer that exists to catch grammar defects is structurally incapable of seeing this class of
+them, and the corpus generator is structurally incapable of producing the input. **It took a reviewer
+parsing inputs by hand against `syntax.rs`.** Fixed at `4732b77`: `argument` became
+`choice($._atom, $.abstraction)`, with `prec.right` on `abstraction` and `prec.left(1)` on
+`application` to resolve the shift/reduce choice the widening creates, and two corpus cases pin the
+result — `f λx. x` and the follow-on `λx. x λy. y`. `function` was deliberately **not** widened the
+same way: an unparenthesized abstraction always swallows everything to its right, so it can never be a
+function subterm unless parenthesized, and adding it there would describe a shape the authority cannot
+produce.
+
+**WHY IT SLIPPED, which is the transferable half.** This was a plan defect, not an implementation one:
+the plan's own survey of `syntax.rs` **read both relevant functions and put them in adjacent bullets**
+— `parse_application`'s loop in one, `parse_atom`'s λ arm in the next — and then concluded "no
+disagreement found". The two facts were both present and were never **composed**. A survey that
+enumerates call sites without following one into the other will produce exactly this: a correct list
+and a wrong conclusion.
+
+This is the λ twin of PR 1's `_expression_except_block`, where a rule barred a bare block from callee,
+receiver and condition position that `parse_postfix` accepts. Same shape, second occurrence, one PR
+apart. **The generalisation this branch is willing to state: a hand-written recursive-descent parser's
+"what may appear here" is spread across the function that dispatches and the function it dispatches
+into, and a grammar rule is one place. Reading either function alone gives a wrong answer that looks
+complete.**
+
+##### THE SAME SPECIES ONE LAYER UP: A QUERY PATTERN WITH ZERO COVERAGE ANYWHERE IN THE PIPELINE
+
+`(parenthesized_term (identifier) @variable)` — one of `queries/highlights.scm`'s nine patterns — was
+**never exercised by anything**. No corpus entry reached it, and it could not have been reached by the
+generated leg either: `print_lambda_mapped` can only emit `(` for an `Abs` in function position and
+for a non-`Var` atom, so **the printer can never write `(x)` at all.** The pattern is *correct* and it
+stays — an editor's user can type `(x)`, which is the whole point of shipping a grammar to editors —
+and what was missing was any proof that a test touched it.
+
+Closed by a new guard, `every_query_pattern_fires`: `Query::pattern_count` against the set of
+`pattern_index` values actually observed over a corpus, plus a `lambda::CORPUS` entry
+(`"a parenthesized variable"`, `f (x)`) that reaches it. **The guard was proved able to fail** —
+pattern index `[6]` of 9 — and re-proved after it was moved, because it was first written as a free
+function in `tests/lambda.rs`, which forced a *mini-language* test to live in a file named `lambda.rs`.
+It is now a `Grammar` method (`b620118`), so PR 3's TM grammar inherits it rather than reimplementing
+it.
+
+**It was run against the mini-language first, and all 12 of its patterns already fire.** That is
+stated as a measurement rather than an assumption, and it is the reason nothing was papered over: had
+mini failed too, the honest move would have been to say so rather than to scope the guard to λ.
+
+A second gap of the same shape was closed alongside it: λ's corpus had **no error-node check**, so
+"every entry parses cleanly" was an unverified claim. `Grammar::parse` *succeeds* on a syntax error —
+it returns a tree containing `ERROR`/`MISSING` nodes — and `captures` never inspects them, so an entry
+that stopped parsing would still have passed every capture test with a short-but-consistent list.
+`every_corpus_program_parses_without_error_nodes` now runs for λ as it already did for mini.
+
+##### THE SAME REGEX, TWO AUTHORITIES, ONE RIGHT AND ONE WRONG
+
+λ's grammar inherited `extras: $ => [/\s/]` from its sibling. **That regex is ASCII in tree-sitter, and
+λ's authority is not.** `syntax.rs`'s `skip_ws` tests `char::is_whitespace()`, the Unicode `White_Space`
+property; the mini-language's lexer tests `is_ascii_whitespace()`. So the identical line is *nearly*
+right next door — an exhaustive probe over every `char::is_whitespace()` code point plus U+FEFF against
+the merged mini grammar found one divergence, U+000B VERTICAL TAB, which the mini grammar's `/\s/`
+accepts and `is_ascii_whitespace()` rejects, a known open item left for a later PR — and wrong here
+regardless: U+2009 THIN SPACE separates two atoms to `parse_lambda` and would have been a parse error to
+the grammar.
+
+Widened, **for λ only**, to the exact class `char::is_whitespace()` accepts, with a comment naming both
+functions and instructing the next reader not to "harmonise" the two grammars. The class was not
+eyeballed: enumerating the predicate over `0..=0x10FFFF` with `rustc` gives **25 code points in 10
+maximal ranges**, matching what `grammar.js` spells out, and the boundary behaves — U+2009 parses under
+both, U+200B ERRORs under both:
+
+```
+$ char::is_whitespace over 0..=0x10FFFF   →  25 code points, 10 maximal ranges
+$ LAMBDA.parse("λx.\u{2009}x")            →  0 error nodes;  parse_lambda: parses
+$ LAMBDA.parse("λx.\u{200b}x")            →  2 error nodes;  parse_lambda: "expected a term"
+$ LAMBDA.parse("f\u{a0}x")                →  0 error nodes;  parse_lambda: "unbound variable `f`"
+```
+
+The third line is the one that proves the point rather than merely restating it: U+00A0 makes the
+authority see **two atoms** — `f` applied to `x`, which then fails as an unbound *variable* rather than
+as a lex error — so it really is separating identifiers on the authority's side too.
+
+**The generalisation: a constant copied between two grammars is not a shared constant. It is two
+constants that happen to be equal**, and they are only both correct while their authorities agree. The
+comment at the site now says which function each one answers to, which is the only thing that keeps a
+future "these should match" edit from reintroducing the defect.
+
+##### THE CAPTURE-MAP COLLISION PR 1's REVIEW PREDICTED ARRIVED EXACTLY AS PREDICTED, AND WAS ALREADY HANDLED
+
+PR 1's entry recorded that a single shared `capture → TokenClass` table could not serve three grammars,
+that `@variable.parameter` must be `Ident` in the mini-language and `Binder` in λ, and that **"the
+collision was scheduled for PR 2 and every test until then would have passed."**
+
+It landed on schedule and cost nothing, because the table had already been split. `mini::CAPTURE_CLASSES`
+keeps `("variable.parameter", TokenClass::Ident)`; `lambda::CAPTURE_CLASSES` carries
+`("variable.parameter", TokenClass::Binder)` beside `("keyword.function", TokenClass::Binder)`, because
+`print_lambda_mapped` classifies **both the binder head and the name it binds** as `Binder`. Two rows,
+one capture name, two grammars, no conflict — which is the whole return on splitting the table one PR
+early.
+
+Worth recording as an outcome rather than a prediction, because the two are not the same evidence: a
+design change justified by a hypothetical collision has now been paid off by the real one. Both
+tables are held total in both directions by their own tests (`the_capture_map_is_total_over_the_queries`,
+`every_map_row_is_used_by_a_query`), and reverse totality is the check that only exists *because* the
+tables are per-grammar.
+
+The λ table's shape also changes what design §6.1's known gap costs here. With five capture names and
+no `@function.call`, the only pair collapsing to one class is `@punctuation.bracket` /
+`@punctuation.delimiter`, both `Punct`. `@variable.parameter` (`Binder`) and `@variable` (`Ident`) are
+genuinely distinguished — **so a broad `(identifier) @variable` catch-all is not merely imprecise here,
+it is rejected.** It would capture a binder's name as `Ident` *and* `Binder` at one byte range, and
+`captures_with` refuses overlapping captures that disagree. The occurrence patterns are therefore
+scoped by position, and that scoping was verified exhaustive by tracing reachability rather than by
+sampling: `identifier` is reachable only through the hidden `_atom`, `_atom` appears in exactly three
+places, `_term` in exactly three, giving five occurrence positions and five patterns, with the
+parameter field reached by none of them. `a_conflicting_query_is_rejected` pins the failure mode.
+
+##### A TEST THAT FAILED FOR THE WRONG REASON, CAUGHT ONLY BY RUNNING IT
+
+`the_lambda_comparison_can_fail` exists to prove the differential can go red. The brief specified its
+source as `"let f = |x| x; f(1)"` with a parens-only query, and asserted the error would contain
+`"more span(s)"` — the **length** branch of `compare_classified`.
+
+It does not. That program's printed λ term is `"(λf. f (λf0. λx. f0 x)) (λx. x)"`, which contains
+literal parentheses, so the parens-only query captures something, and one of those captures lands at
+`want[1]` against a `Binder` — the **per-index** branch fires first and the stated assertion would have
+failed. The implementer found it by running it, not by re-reading it. Swapped to `"1"`, a Church
+numeral whose printed form `"λf. λx. f x"` has no parentheses at all: the query captures nothing, the
+zipped loop runs zero times, and all eight authority spans become extras — the length branch,
+unambiguously.
+
+**A test that fails is not the same as a test that fails for the reason its name gives.** The
+brief-specified version would still have gone red on a broken comparison and would have been recorded
+as proof of a property it was not testing. The two branches are separately load-bearing, and the
+reviewer confirmed it by isolating them: a per-index-only mutation reddens *mini's* class-disagreement
+test, a length-only mutation reddens *λ's* — the two languages pin different branches of the same
+shared function. A stronger mutation nobody asked for — flipping λ's `("punctuation.bracket", Punct)`
+row to `Ident` — turned **both** differential legs red, which is direct evidence that they compare
+rather than merely run.
+
+##### TWO FIGURES THIS BRANCH PRODUCED ABOUT ITS OWN WORK, BOTH WRONG, BOTH ABOUT COVERAGE
+
+Recorded because they are the same species as PR 1's node-free measurement, and because this entry's
+house rule is that a figure carries the command that produced it.
+
+**A doc-comment count reported a loss that was a gain — and then the CORRECTION did not reproduce
+either, which is the more useful half.** Task 1's report said doc lines dropped 122 → 101 across the
+`Grammar` refactor and flagged suspected loss. That grep anchored `'^///'` at column 0 and the
+relocated doc comments are **indented** inside `impl Grammar`, so it could not see them; the direction
+was wrong and the reviewer caught it. **The reviewer's replacement figure was 125 → 169.** Reviewing
+this entry, a third pass tried four plausible readings of that command — indent-anchored, unanchored,
+crate-wide, single-file — and got 115→150, 112→82 and 160→195. **None of them is 125→169.**
+
+So the number is struck rather than restated: **doc-comment content was carried across and grew, which
+is checkable by reading the diff, and no line count stated here reproduces.** What survives is the
+lesson, which is about method rather than arithmetic: the original measurement was constructed *after*
+the change, against a tree whose indentation the change itself had altered — and a correction issued in
+the same spirit inherited the same fault. **A figure that arrives without its command is not made sound
+by being someone else's figure.**
+
+**A fix report offered nine probes as coverage; two of them probed the thing.** The abstraction-as
+-argument fix added a `prec.left`/`prec.right` pair to resolve a shift/reduce ambiguity, and the report
+listed nine probes as evidence. Only **2 of 9** exercised that ambiguity at all; the reviewer's own set
+of ten superseded them. **A self-chosen probe set drifts toward inputs that already work**, and a
+report that supplies its own coverage as proof is supplying the weakest available evidence for the
+thing it most wants to establish.
+
+##### λ's AUTHORITY IS A PRINTER, SO ITS CORPUS IS PRODUCED — AND ITS COVERAGE WAS MEASURED, NOT ASSUMED
+
+This is design §4's central asymmetry arriving in code. The mini-language has `classify_source`, a
+function **from text to spans**, so its differential can classify any string a human types. λ has no
+such function: `print_lambda_mapped` produces text and spans **together** and accepts neither
+independently. A λ comparison entry therefore cannot be hand-typed and then classified — it has to
+come out of `parse → desugar → lambda::lower → print_lambda_mapped`, which is what `lambda::printed_term`
+is.
+
+Nothing in that pipeline reduces, and the crate was grepped to confirm it, with the reviewer separately
+confirming nothing reaches `run_lambda` indirectly. A λ measurement that reduces has previously cost
+this machine 60 GiB of RAM and all of swap.
+
+Because the corpus is produced, "does it cover anything" is a real question rather than a rhetorical
+one, and it was answered with numbers:
+
+| leg | measured | how |
+|---|---|---|
+| hand-written corpus | **12 of 13** `mini::CORPUS` programs lower to λ, **1270** spans compared | the test's own `eprintln!`, plus a span count |
+| smallest entry | **7** spans | so nothing passes on an empty `want` |
+| generated | **256/256** generated programs lowered and compared | the test's own `eprintln!` |
+
+The one program that does not lower is `"ufcs chain"` — list literals and UFCS sit outside
+`lambda::lower` entirely, which is expected rather than a failure, and the floor asserts `>= 12`
+against the measured rate rather than the `>= 5` a draft carried. `>= 5` against a real 12 is a floor
+low enough to sleep through a `lower()` regression that halved the corpus.
+
+The generated leg's floor is deliberately looser (`total / 2`) and that asymmetry is itself a decision:
+tightening it to the measured rate would pin a number against `arb_expr_over`'s own recursion
+parameters and arm set, and that generator's doc forbids doing so without re-measuring every other
+caller that records a rate against it.
+
+Both legs' `eprintln!` lines are written every run and **shown to nobody on a green run**, because
+`cargo nextest` discards a passing test's output. That is why the floors exist and why the numbers in
+this entry were obtained with `--no-capture` rather than read off a normal run.
+
+##### A DOC STRING IN ALREADY-MERGED CODE THAT WOULD HAVE INSTALLED A BROKEN BINARY
+
+`abi_version_is_pinned`, in **both** `mini.rs` and `lambda.rs`, told the reader to *"regenerate with
+the pinned tree-sitter CLI 0.26.12"*. **0.26.12 is the Rust crate version. The CLI pin is 0.25.10**, and
+they are different pins for a reason PR 1's entry spends three sections on: a 0.26 binary needs
+GLIBC_2.39 and the CI runner has 2.35. Following that message would have installed the exact binary the
+previous PR proved cannot run. Fixed in both files at `06a11d7`.
+
+The message only ever appears when the assertion fires, which is precisely when someone is already
+confused about a toolchain — the worst moment for the guidance to be wrong, and the reason a message
+nobody has seen fire is worth reading as carefully as code.
+
+Related, and held to a line rather than fixed wholesale: several permanent doc comments in this branch
+cited **`.superpowers/` task briefs**, which are git-ignored scratch a future reader cannot open, and
+one of them contradicted the sentence above it by implying a divergence was unfixed. Those were
+rewritten. **PR numbers and "see the roadmap" stay** — permanent git history and tracked `docs/` are
+things a reader can actually follow. `"the brief"` references that predate this slice survive in
+already-merged code (`crates/redextape-grammar-check/build.rs` from PR 1, and several in
+`crates/redextape-core` tests and examples); they are out of scope here and are named below.
+
+##### WHAT THIS DID NOT CLOSE
+
+**The `\` alias still rests on `tree-sitter test` alone, and it always will** — design §6.2, now
+carrying the code that proves it. `parse_lambda` takes `\` and `λ` interchangeably; `print_lambda`
+emits only `λ`; the λ corpus is printer-produced. So **no comparison entry can ever contain a `\`**,
+and the grammar's `'\\'` arm has no authority to be compared against. It is covered by one
+`tree-sitter test` case and by the observation that `parse_lambda("\\x. x")` succeeds. That is weaker
+than the differential and is written down rather than left implicit. Closing it properly means a
+`classify_lambda` over *authored* text, which is an LSP-shaped piece of work deferred to v2.
+
+**`?<index>` is the opposite and is not a gap at all.** A free variable prints as `?0`, which is not a
+valid identifier — deliberately, so that an open term fails to reparse loudly rather than silently
+rebinding. `parse_lambda` rejects it and so does this grammar: `LAMBDA.parse("?0")` yields **2 error
+nodes** and `parse_lambda("?0")` answers *"expected a term"*. Agreement, verified, and recorded here so
+that a later reader does not "fix" the grammar into accepting it.
+
+**`source_file` accepts empty and whitespace-only input where the authority does not**, and that
+divergence is deliberate and permanent. `parse_lambda` errors *"expected a term"* on both;
+`optional($._term)` at `source_file` is the tree-sitter convention and the right behaviour for an
+editor, where an empty or half-typed buffer is not an error worth underlining. It cannot reach the
+differential — the corpus is printed output — so it costs nothing there.
+
+**Design §6.1 is unchanged and still priced, not deferred.** It bites less here than next door (see
+above), but `@punctuation.bracket` and `@punctuation.delimiter` still both project to `Punct`, so the
+differential does not distinguish them. The two ways to close it were costed in PR 1 and both rejected.
+
+**PR 3, the TM grammar**, with design §6.3's gap waiting for it: `print_tm_mapped` emits no `Comment`
+class at all because the printer never writes a comment, while `;` comments are part of the form
+`parse_tm` accepts — the same weaker treatment as §6.2, arriving for a third time.
+
+**Three minor findings are carried to the whole-branch review rather than fixed in-task**, and are
+recorded here in case that review does not reach them: `captures_with`'s error string hardcodes the
+literal `"CAPTURE_CLASSES"` though the field is `self.capture_classes`, which is brittle if a grammar
+names its table differently; `Grammar::error_nodes` reads neither `self` nor `self.name` and would be
+equally honest as a free function (it is brief-mandated, so not the implementer's choice); and the
+pre-existing `"the brief"` references in already-merged code, above, want a later sweep.
+
+**`parse_asm` is still unclaimed**, exactly where Plan 6's survey left it, and still the reason the asm
+form cannot be a fourth grammar: it prints and cannot be read back, so a grammar for it would have no
+parser to be checked against.
+
+**The README's install snippets stay unchecked, permanently, and they do not work for anyone today.**
+Nothing in CI can execute them, so they were adapted from PR 1's verified set with the upstream facts
+re-checked on 2026-08-21 rather than assumed — nvim-treesitter `main` still joins `install_info.queries`
+to the **clone root** while applying `location` only to the compile directory, and Zed's
+`GrammarManifestEntry` still carries the undocumented `path` key with `commit` as a serde alias for
+`rev`. And the repository is **still not anonymously clonable**, re-probed today with the same result
+PR 1 recorded: `forge.daveynet.xyz` answers `401`, and `git.daveynet.xyz` over HTTPS answers the ref
+advertisement with **HTTP 200 and a zero-byte body**, which `git ls-remote` reads as a repository with
+no refs and reports as **exit 0 and no output.** A silent empty, again.
+
+**Everything in design §12 stays out**: no `locals.scm` — and for λ the case is sharper than for the
+mini-language, since `parse_lambda` already resolves names to de Bruijn indices and `print_lambda`
+freshens binders so that no binder shares a name with any binder enclosing it, so a query-language
+scope resolver would be a second implementation of a thing that already exists and is authoritative.
+No `injections.scm`, no folds, no indents (`print_lambda_mapped` writes a **single line**; there is no
+`redextape fmt` for this form), no editor-extension packaging, and nothing in `web/` — where
+`lambda-pane.ts` already draws over the printer's spans through `spans.ts`'s `decorationRanges` and has
+no use for a CST.
+
+**A one-line formatting repair, and nothing else above this entry is touched.** The file ended with an
+unclosed ` ``` ` fence left by PR 1's tail, which would have rendered this entry inside a code block.
+A closing fence was added immediately before this entry's heading; no existing line was modified.
+`git show --stat` on this commit is the check. The repository annotates rather than rewrites, and PR
+1's entry — including the four figures it re-measured at `badca12` — stands exactly as written.
+
+##### VERIFICATION
+
+All at `e3cfc9d`, on this machine, 2026-08-21.
+
+```
+$ cargo nextest run --workspace
+     Summary [  35.505s] 1108 tests run: 1108 passed, 8 skipped
+
+$ cargo nextest run -p redextape-grammar-check
+     Summary [   0.617s] 27 tests run: 27 passed, 0 skipped
+
+$ scripts/check-all.sh --no-llvm --no-browser
+==> using tree-sitter 0.25.10 at /home/davey/projects/redextape/.tools/tree-sitter
+==> regenerating and testing grammars/tree-sitter-redextape/
+…
+Total parses: 8; successful parses: 8; failed parses: 0; success percentage: 100.00%
+==> regenerating and testing grammars/tree-sitter-redextape-lambda/
+      1. ✓ application is left-associative
+      2. ✓ a binder body extends as far right as it can
+      3. ✓ the backslash alias parses identically
+      4. ✓ parentheses, and a compiler-generated $ name
+      5. ✓ a bare abstraction is legal in argument position
+      6. ✓ an abstraction argument's own body still extends as far right as it can
+
+Total parses: 6; successful parses: 6; failed parses: 0; success percentage: 100.00%
+…
+green, but PARTIAL — these tiers were SKIPPED: LLVM browser. This is NOT a full gate on its own.
+```
+
+The gate exits `0` and **says of itself that it is partial** — the LLVM coverage tier and the browser
+tier were skipped, so this is not the merge gate, and CI runs both. **Both grammars appear in its
+grammar leg**, each regenerated against its committed `src/` and each running its own corpus, which is
+what makes "the second grammar is an addition, not a copy" a checked claim rather than a description.
+
+```
+$ wc -c grammars/tree-sitter-redextape-lambda/src/parser.c
+11483 grammars/tree-sitter-redextape-lambda/src/parser.c
+
+$ grep -m1 LANGUAGE_VERSION grammars/tree-sitter-redextape-lambda/src/parser.c
+#define LANGUAGE_VERSION 15
+```
+
+**That number answers a question PR 1 left open on purpose.** PR 1 measured its own `parser.c` at
+103,342 bytes and extrapolated that λ and TM would be smaller, calling the ~300 KB ceiling *"an
+extrapolation, not a measurement"* and asking that PR 3 check it against a second real number. Here is
+the second real number, one PR early: **11,483 bytes, about 11% of the mini-language's**, from a
+75-line `grammar.js` against its 156. The extrapolation holds with room to spare, and PR 3's TM
+grammar now has two real points rather than one. Also worth recording because a ledger figure moved:
+this file measured **11,004** bytes when first generated at `1930100`; the widened Unicode `extras`
+accounts for the difference.
+
+Every count this entry quotes, with what produces it:
+
+```
+13    commits            git rev-list --count 648b7aa..13207e0
+6     tree-sitter test   the "Total parses: 6" line above
+75    grammar.js lines   wc -l < grammars/tree-sitter-redextape-lambda/grammar.js
+9     query patterns     grep -v '^;' grammars/tree-sitter-redextape-lambda/queries/highlights.scm \
+                           | grep -c '@'          — the `-v '^;'` matters; comments name captures too
+5     capture names      grep -v '^;' …/queries/highlights.scm | grep -oE '@[a-z.]+' | sort -u | wc -l
+5     capture-map rows   awk '/^pub const CAPTURE_CLASSES/,/^\];/' \
+                           crates/redextape-grammar-check/src/lambda.rs | grep -c '^    ("'
+10    lambda::CORPUS     awk '/^pub const CORPUS/,/^\];/' …/src/lambda.rs | grep -c '^    ("'
+12/13 corpus lowered     cargo nextest run -p redextape-grammar-check --no-capture \
+                           -E 'test(the_lambda_grammar_agrees_with_the_printer)'
+                         → "lambda corpus leg: 12/13 mini::CORPUS programs lowered to λ"
+256/256 generated        same command → "lambda generated leg: 256/256 generated … lowered to λ"
+1270  spans compared     sum of want.len() over the 12 that lower; 7 is the smallest entry.
+                         NOT reproducible from a committed test — no test prints it. Produced by a
+                         throwaway binary calling the crate's own public `lambda::printed_term` over
+                         `mini::CORPUS`, never committed. Stated as what it is.
+25/10 whitespace class   a throwaway binary enumerating char::is_whitespace over 0..=0x10FFFF;
+                         also never committed
+2/9   probes that probed the shift/reduce ambiguity — counted by the reviewer, not reproducible
+doc-comment lines        STRUCK — no stated command reproduces any of the three figures this branch
+                         quoted (122→101, then 125→169). That doc comments were carried across and
+                         grew is checkable by reading the diff; the counts are not. See above.
+```
+
+Two of those are deliberately marked non-reproducible rather than dressed up, which is the same
+treatment PR 1 gave its 34-source review sweep. A count nobody can re-run is doing rhetorical work,
+not evidentiary work, and saying so is cheaper than pretending otherwise.
+
+##### AND AS MERGED — THE SECOND TIME THIS ENTRY'S FIGURES WENT STALE THE SAME WAY
+
+The VERIFICATION block above was measured at `e3cfc9d`, the last task's commit. The whole-branch
+review then landed two more commits, and three of its figures moved. Re-measured at `13207e0`, the
+commit CI passed on:
+
+```
+$ cargo nextest run -p redextape-grammar-check
+     Summary 28 tests run: 28 passed          # was 27 — the review found design §6.2's `\`-alias
+                                              # mitigation was half-built: the design and the README
+                                              # both claimed `parse_lambda` was checked on each
+                                              # backslash-spelled entry, and nothing in the crate
+                                              # called it. That test now exists.
+
+$ cargo nextest run --workspace
+     Summary 1109 tests run: 1109 passed, 8 skipped    # was 1108, same test
+
+$ git rev-list --count 648b7aa..13207e0
+13                                            # was 10
+```
+
+Unmoved and re-checked at `13207e0`: `LANGUAGE_VERSION 15`, `parser.c` 11,483 bytes, 9 query
+patterns, 5 capture names, 5 map rows, 6 `tree-sitter test` cases.
+
+**THE CAUSE IS STRUCTURAL, AND PR 1'S ENTRY NEEDED THE IDENTICAL BLOCK FOR THE IDENTICAL REASON.** The
+closing entry is written in the last *task*; the whole-branch review runs *after* every task and
+reliably lands more commits. So an entry's figures are stale by construction the moment it is written,
+and both entries in this slice have now paid for it with an appended correction.
+
+**PR 3 should measure at PR time rather than at task time** — write the entry's prose in the last task
+if that is convenient, but take every number after the final review's fixes have landed, from the
+commit that CI actually passed on. An entry whose figures were true at a commit nobody merged is
+describing a tree that never shipped.
+
