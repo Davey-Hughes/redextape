@@ -55,9 +55,14 @@ repos:
       # README and the TM one, which cites λ's line count for comparison. The file that goes wrong is
       # never the file being staged, so a `files:`-scoped rule would fire on exactly the commits that
       # do not need it and stay silent on the ones that do.
-      # MEASURED, NOT ASSUMED, per the two hooks above: self-test plus scan is 136-143 ms over five
-      # runs and the scan alone is 97-105 ms — cheaper than either, because it reads three READMEs
+      # MEASURED, NOT ASSUMED, per the two hooks above: self-test plus scan is 142-159 ms over five
+      # runs and the scan alone is 106-111 ms — cheaper than either, because it reads four READMEs
       # rather than walking `git ls-files`.
+      # **THOSE FIGURES READ "136-143 ms" AND "THREE READMEs" UNTIL THE ROOT README GAINED ITS ROWS**,
+      # one branch later, which is this comment falsifying itself the same way the README's hook count
+      # did — a number describing a gate, invalidated by the gate growing. Re-measured rather than
+      # scaled: the sibling hooks cost 919 ms and 411 ms on the same machine in the same minute, so
+      # "cheaper than either" was re-established rather than carried forward on the old figures.
       # `--self-test` first, then the scan, for the reason `check-text-bytes` states: a gate that only
       # ever runs against a passing tree cannot tell you it still works.
       - id: check-doc-figures

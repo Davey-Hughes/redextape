@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hold the grammar READMEs' numeric claims to the tree they describe.
+# Hold the READMEs' numeric claims to the tree they describe.
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml) and so does the pre-commit hook
 # (.pre-commit-config.yaml), so the local and CI gates cannot drift — the convention
@@ -15,6 +15,14 @@
 # half the sibling's 156"* — became wrong in both halves of one sentence. Nothing failed. It was
 # found only because a third README was being written and happened to need the same two numbers for
 # a comparison. Had that PR not existed, the claim would still be there.
+#
+# **FOUR DOCUMENTS, AND THE ROOT README EARNED ITS ROWS BY BEING WRONG IN FOUR PLACES AT ONCE.**
+# The three grammar READMEs came first. The root README was added after a survey found it claiming
+# "Four crates" against seven, "841 tests" against 1,156, "six pre-commit hooks" against seven, and
+# "15 browser tests" against 26. **One of those was falsified by the very branch that introduced this
+# script** — adding `check-doc-figures` made the hook count seven — so the gate's own arrival broke a
+# figure in the one file it did not yet cover. Its repo-level rows (`.` as the scope) describe the
+# workspace rather than a grammar, and every one is a structural grep that compiles nothing.
 #
 # **THE CROSS-REFERENCES ARE WHY THIS IS WORTH A GATE RATHER THAN A HABIT.** These READMEs quote
 # each other: λ's cites the mini-language's line count AND its capture-name count, and TM's cites
@@ -77,7 +85,16 @@
 #      measurements or config, not properties a one-line command recovers. λ's *"Five positions,
 #      five patterns"* is a claim about where `_atom` and `_term` appear in the grammar, not a
 #      total, and is not derivable either. None are gated.
-#   5. A FIGURE WITH NO ROW HERE. Adding a claim to a README does not add it to this table. The
+#   5. THE WORKSPACE'S TEST COUNT, AND ANYTHING ELSE THAT NEEDS A BUILD. `cargo nextest list
+#      --workspace` costs 218 s warm; this whole script costs ~150 ms. Gating that figure would make
+#      every commit in this repository unusable, and putting it in CI alone would break the one
+#      invariant both sibling gates rest on — the same script in both places, so local and CI cannot
+#      drift. **The root README states it as a DATED OBSERVATION instead**, which is the same move
+#      `docs/` gets and for the same reason: a figure nothing can cheaply check should carry a date
+#      rather than a present tense. It had drifted by 315 tests and lost three crates from its
+#      breakdown before anyone noticed. A gate that cannot be cheap should not exist; a claim that
+#      cannot be gated should not be written in the present tense.
+#   6. A FIGURE WITH NO ROW HERE. Adding a claim to a README does not add it to this table. The
 #      gate covers what it lists and reports that count on success, rather than implying the prose
 #      is checked. Deleting a claimed figure, by contrast, fails loudly.
 set -euo pipefail
@@ -127,6 +144,14 @@ derive() {
     map_classes)      n=$(map_rows_raw "$dir" | sed -E 's/.*,[[:space:]]*(TokenClass::[A-Za-z]+).*/\1/' | sort -u | wc -l) ;;
     # Each `tree-sitter test` case is fenced by TWO `===` rules, so the count is half the rules.
     corpus_cases)     n=$(( $(cat "$dir"/test/corpus/* | grep -c '^===*$') / 2 )) ;;
+    # REPO-LEVEL KEYS. These ignore `$dir` (passed as `.`) and describe the workspace rather than a
+    # grammar. All three are structural greps — the reason they are gateable at all is that none
+    # compiles anything. The workspace's TEST COUNT is deliberately absent: `cargo nextest list
+    # --workspace` costs 218 s warm against this whole script's ~150 ms, so the root README states
+    # that figure as a dated observation instead. A gate that cannot be cheap should not exist.
+    workspace_crates)   n=$(find crates -mindepth 1 -maxdepth 1 -type d | wc -l) ;;
+    precommit_hooks)    n=$(grep -c '^      - id: ' .pre-commit-config.yaml) ;;
+    wasm_browser_tests) n=$(grep -c '#\[wasm_bindgen_test\]' crates/redextape-wasm/tests/browser.rs) ;;
     *) echo "check-doc-figures: unknown key '$key'" >&2; return 1 ;;
   esac
   echo "$((n))"
@@ -136,7 +161,9 @@ derive() {
 # own fix rather than only its own unhappiness.
 derive_cmd() {
   local dir="$1" key="$2" src
-  src="$(map_src "$dir")"
+  # Guarded: a REPO-LEVEL scope (`.`) has no capture-map module, and `map_src` returns non-zero for
+  # it. Unguarded under `set -e` that aborts the whole run while merely composing an error message.
+  src="$(map_src "$dir" 2>/dev/null || echo '<no capture-map module>')"
   case "$key" in
     grammar_js_lines) echo "wc -l < $dir/grammar.js" ;;
     parser_c_bytes)   echo "wc -c < $dir/src/parser.c" ;;
@@ -145,6 +172,9 @@ derive_cmd() {
     map_rows)         echo "awk '/pub const CAPTURE_CLASSES/,/^\\];/' $src | grep -c '^    (\"'" ;;
     map_classes)      echo "awk '/pub const CAPTURE_CLASSES/,/^\\];/' $src | grep '^    (\"' | sed -E 's/.*,[[:space:]]*(TokenClass::[A-Za-z]+).*/\\1/' | sort -u | wc -l" ;;
     corpus_cases)     echo "cat $dir/test/corpus/* | grep -c '^===*\$'  # halved" ;;
+    workspace_crates)   echo "find crates -mindepth 1 -maxdepth 1 -type d | wc -l" ;;
+    precommit_hooks)    echo "grep -c '^      - id: ' .pre-commit-config.yaml" ;;
+    wasm_browser_tests) echo "grep -c '#\[wasm_bindgen_test\]' crates/redextape-wasm/tests/browser.rs" ;;
   esac
 }
 
@@ -193,6 +223,10 @@ find_claim() {
 # ---------------------------------------------------------------------------
 claims() {
   cat <<'ROWS'
+README.md|.|workspace_crates|workspace crates under crates/|([0-9,]+|[A-Za-z]+) crates under
+README.md|.|precommit_hooks|pre-commit hooks (1 of 2: "There are N")|There are \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} pre-commit hooks
+README.md|.|precommit_hooks|pre-commit hooks (2 of 2: "All N are fast enough")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} are fast enough
+README.md|.|wasm_browser_tests|wasm browser tests|has \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} browser tests
 grammars/tree-sitter-redextape/README.md|grammars/tree-sitter-redextape|grammar_js_lines|mini grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
 grammars/tree-sitter-redextape-lambda/README.md|grammars/tree-sitter-redextape-lambda|grammar_js_lines|lambda grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
 grammars/tree-sitter-redextape-lambda/README.md|grammars/tree-sitter-redextape|grammar_js_lines|mini grammar.js lines (CROSS-REF from lambda)|under half the mini-language's \*{0,2}([0-9,]+|[A-Za-z]+)

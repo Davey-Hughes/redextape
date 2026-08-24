@@ -42,7 +42,7 @@ The plan sequence, and the running log of what implementation falsified:
 
 ## Architecture
 
-Four crates under `crates/`.
+Seven crates under `crates/`.
 
 **`redextape-core`** — the whole language, with **no dependencies** (`cargo tree -p redextape-core
 --edges normal` lists only itself), which is what keeps it WASM-clean:
@@ -72,6 +72,13 @@ JIT, **AOT object emission** with a linker driver that produces a real standalon
 seam. **`redextape-native-rt`** is its runtime — the `rt_*` heap/box/cap host functions — split out
 as `rlib` + `staticlib` so an AOT binary can link them without dragging Cranelift along.
 **`redextape-test-support`** holds the shared proptest generators.
+
+**`redextape-cli`** is the `redextape` command — `fmt`, `lint`, `run` and `emit`.
+**`redextape-wasm`** is the browser boundary the visualizer loads. **`redextape-grammar-check`**
+holds the tree-sitter differential that checks each editor grammar against the front end span for
+span. **These three went undescribed here while the count above still read "Four"**, which is the
+same defect the section below documents for test counts: a total and an enumeration that drift
+apart, where either alone looks right.
 
 ### The oracle
 
@@ -208,13 +215,21 @@ each of the four configurations: the default (`cranelift`), `--no-default-featur
 llvm`, and `--no-default-features --features llvm`. CI runs this same script. Pass `--no-llvm` to
 skip the LLVM configurations when no LLVM 22 toolchain is installed.
 
-That gate currently covers **841 tests** at default features (`redextape-core` 716,
-`redextape-wasm` 48, `redextape-native` 66, `redextape-native-rt` 11) — 3 are skipped, so 838 run —
-and `--features llvm` takes `redextape-native` to 104. Recount rather than trust those numbers:
-`cargo nextest list --workspace`.
+That gate covered **1,156 tests** at default features **when counted on 2026-08-24**
+(`redextape-core` 890, `redextape-cli` 78, `redextape-wasm` 67, `redextape-native` 66,
+`redextape-grammar-check` 44, `redextape-native-rt` 11; `redextape-test-support` carries none of its
+own) — 8 are skipped, so 1,148 run — and `--features llvm` takes `redextape-native` higher, 104 when
+last measured.
+
+**These are dated observations rather than current facts, and the tense is deliberate.** Recovering
+them costs `cargo nextest list --workspace`, measured at **218 s warm** — roughly **1,450x** the
+figure gate's own ~150 ms, and roughly **150x** the ~1.5 s the three unscoped pre-commit hooks cost
+together — so no gate holds them and none can. The
+figures above read 841/716/48 until 2026-08-24, having drifted by 315 tests and lost three crates
+from the breakdown entirely. Recount rather than trust them.
 
 **Two tiers sit outside that count**, because neither runs under `cargo nextest`. The wasm boundary
-has **15** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
+has **26** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
 `rust-browser` job. `web/` has **246** of its own across two Vitest projects — 187 in Node for the
 pure modules, 59 in real Chromium for the worker and the app end to end — run by CI's `web` job
 under the coverage gate. Recount with `pnpm test`.
@@ -231,11 +246,12 @@ nextest is missing rather than falling back, so the gate behaves the same everyw
 `scripts/setup-dev.sh` installs it. Because nextest does not run doctests, the script pairs every
 config with an explicit `cargo test --doc` at the same feature flags.
 
-There are **six** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
-heavier; a `web/` change runs `biome ci` and `tsc --noEmit`. The other two — `check-text-bytes` and
-`check-citations` — are unscoped and walk `git ls-files` on every commit whatever is staged, because
-both catch things that arrive in a path nobody thought to list. All six are fast enough for every
-commit. Run `scripts/check-all.sh` before merging.
+There are **seven** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
+heavier; a `web/` change runs `biome ci` and `tsc --noEmit`. The other three — `check-text-bytes`,
+`check-citations` and `check-doc-figures` — are unscoped and run on every commit whatever is staged,
+because all three catch things that arrive in a path nobody thought to list; the first two walk
+`git ls-files`, and the third reads four READMEs. All seven are fast enough for every commit. Run
+`scripts/check-all.sh` before merging.
 
 `scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps marked
 `#[ignore = "slow tier: ..."]` — three of them today — which `cargo test` skips by default and CI

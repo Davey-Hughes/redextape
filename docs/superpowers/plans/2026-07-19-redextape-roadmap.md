@@ -11812,3 +11812,164 @@ Every count this entry quotes, with what produces it:
 quoted because the pre-commit comment rests on the comparison — this gate is cheaper than either
 sibling (the citation hook ~250 ms, the control-byte hook ~574-594 ms, both per their own comments).
 The ordering is what matters; the digits will drift with the machine.
+
+#### THE ROOT README WAS WRONG IN FOUR PLACES AND ONE OF THEM WAS BROKEN BY THE BRANCH THAT ADDED THE FIGURE GATE (2026-08-24, branch `readme-figures`, `2ae1e09..bf34cca`, 1 commit, plus this entry)
+
+The previous entry's gate covered the three grammar READMEs and said so. Asked whether that scope was
+worth widening, the survey that followed found the root README — the repository's front page —
+claiming **"Four crates"** against seven, **"841 tests"** against 1,156, **"six pre-commit hooks"**
+against seven, and **"15 browser tests"** against 26. Four figures now corrected, four repo-level
+rows added, and the gate covers **24 figures across four documents**.
+
+##### THE GATE'S OWN ARRIVAL FALSIFIED ONE OF THEM
+
+`.pre-commit-config.yaml` gained `check-doc-figures` in the previous branch, taking the hook count
+from six to seven. **The branch that shipped a gate for stale figures made a figure stale**, and
+could not have caught it: the gate it shipped covered the grammar READMEs, and this file was not
+among them.
+
+**A gate arriving is itself a tree change, and prose describing the gate is prose the gate can
+invalidate.** That is not a special case — it is the ordinary cross-file staleness the previous entry
+argued for, arriving through the one door nobody watches, which is the door the tooling itself walks
+through. The hook count is now gated **twice**, because the paragraph states it in two places — *"There
+are seven pre-commit hooks"* and *"All seven are fast enough for every commit"* — and those drift
+independently, exactly as the λ README's three assertions of one figure do.
+
+##### A COUNT AND ITS ENUMERATION THAT WERE SELF-CONSISTENT AND BOTH WRONG
+
+*"Four crates under `crates/`"* was followed by four described crates — `redextape-core`,
+`redextape-native`, `redextape-native-rt`, `redextape-test-support`. The pair agreed with each other,
+which is why reading the section could not reveal the fault. **`redextape-cli`, `redextape-wasm` and
+`redextape-grammar-check` were absent from both**, so the total and the list were wrong in the same
+direction by the same three, and each corroborated the other.
+
+Correcting the number alone would have left a section claiming seven and describing four. All three
+are now described, so the count and the list agree *and* are true — and the count is gated, so the
+next crate added breaks the build rather than the sentence. That case was exercised: creating a
+directory under `crates/` fails the gate against `README.md`, a file the change never touched.
+
+##### THE TEST COUNT IS FIXED AND DELIBERATELY NOT GATED — THE TENSE IS THE FIX
+
+`cargo nextest list --workspace` costs **218 s warm**. This script costs **142-159 ms** over five
+runs, re-measured after the root README's rows took it from three documents to four. Gating that
+figure would make every commit in this repository unusable, and moving it to CI alone would break the
+one invariant both sibling gates rest on — the same script in both places, so local and CI cannot
+drift.
+
+**So the figure was re-tensed rather than gated.** It read *"That gate currently covers 841 tests"*;
+it now reads *"covered 1,156 tests when counted on 2026-08-24"*, with the cost of recovering it
+stated inline. **This is the `docs/` doctrine applied inside a present-tense document**: a number
+nothing can cheaply check should carry a date rather than a tense asserting it is still true. It had
+drifted by 315 tests and lost three crates from its breakdown.
+
+The README already half-knew this — it carried *"Recount rather than trust those numbers"* and a
+paragraph dating an earlier staleness to 2026-08-09 — but paired the disclaimer with figures written
+as current. **A disclaimer beside a present-tense number does not make it an observation; it makes it
+a wrong number with an excuse.**
+
+##### WHAT THIS DID NOT CLOSE
+
+**`46-program corpus` is untouched and is NOT claimed stale.** The oracle corpus is spread across
+`#[test]` functions and `FIRST_ORDER_DEMOS` rather than one array, no one-line command recovers it,
+and it was not measured. Asserting it wrong without measuring would be the defect this change exists
+to correct, committed inside the correction — the same trap the previous branch's own pull-request
+description fell into.
+
+**`web/`'s 246 and the LLVM 104 stay ungated and dated.** `web/pkg` is not checked in, so the Vitest
+suite needs `pnpm run build:wasm` before it can be counted, and the LLVM figure needs an LLVM 22
+build. Both are observations with dates, like the nextest total, for the same reason.
+
+**`web/` has no markdown at all**, so there is nothing there to gate — a scope flagged in the previous
+entry's hand-off as an open question and closed here by looking rather than by guessing. The CLI
+README carries no figures either. **Outside `docs/`, the four gated documents are now every tracked
+Markdown file in the repository that states a derivable figure**, `LICENSE.md` aside.
+
+##### VERIFICATION
+
+CI runs 282, 285 and 286 were green on `bf34cca`, `9bfe69a` and `16cc3bd` respectively — every job
+each time, including `rust`, `rust-slow`, `rust-llvm`, `rust-browser` and `web`; `docker` skipped, as
+it always is on a pull request. Each head SHA was confirmed against the PR's own `head.sha` rather
+than assumed, and a run's URL number is not its API id (286 is id 1108).
+
+**Those are three fixed facts about three fixed commits, and the phrasing is the point.** This
+sentence previously read *"run 285 green on `9bfe69a`, the branch head"* — and went stale one commit
+later, because "the branch head" is a claim about a MOVING target while a SHA is a claim about a
+fixed one. Correcting it would have moved the head again, and the entry chased its own tail through
+two rounds before the phrasing rather than the number was identified as the fault. **It is the same
+species as the λ README's *"the only names that collapse"*: a claim that names a relationship instead
+of a value cannot be held true, by a gate or by anyone.** Naming the SHAs ends it.
+
+**This block was held back rather than written ahead.** The entry was drafted before any run existed
+and deliberately left uncommitted until one was green, so that "CI green" was never committed as a
+claim about something that had not happened. That is the narrow lesson entry 51 paid for — its
+placeholders shipped — and the previous entry's irreducible tail still applies: the commit carrying
+these sentences trails by one run.
+
+##### THE PRE-MERGE SWEEP FOUND THE SAME DEFECT TWICE MORE, BOTH SELF-INFLICTED
+
+**A ratio was compared against a denominator it did not name.** The README said 218 s is *"some
+1,600x what `.pre-commit-config.yaml`'s whole hook set can carry"*. 1,600x is the ratio against THIS
+SCRIPT alone; against the three unscoped hooks together — 919 ms, 411 ms and 124 ms on the same
+machine in the same minute, about 1.5 s — it is roughly 150x. **Wrong by an order of magnitude, in
+the one sentence justifying the decision not to gate the test count.** Both ratios now name their
+bases, because a reader cannot check a ratio whose denominator is implied, and this entry's own
+argument rests on it.
+
+**The hook's own comment went stale by this branch's doing.** It read *"it reads three READMEs"* and
+*"136-143 ms"*; the root README's rows made it four documents and 142-159 ms. That is the failure
+this entry documents in the README's hook count, arriving one layer down — a number describing the
+gate, invalidated by the gate growing, in the comment that measures it. The 136 ms figure had
+propagated to four places. Re-measured rather than scaled, and *"cheaper than either sibling"*
+re-established against fresh sibling timings rather than carried on the old ones.
+
+**Neither was reachable by the gate**, and neither is a candidate to become so: one is a ratio
+between two timings, the other a timing. **Every figure this branch got wrong after the first commit
+was of exactly the kind the script header lists as out of scope** — which is the strongest available
+evidence that the header's limits describe where the risk actually lives rather than merely where the
+implementation stopped.
+
+```
+$ scripts/check-doc-figures.sh
+check-doc-figures: 24 documented figures match the tree.
+
+$ scripts/check-doc-figures.sh --self-test
+19 assertions, all passed
+```
+
+Each new row was exercised against the real tree by breaking what it watches, and restored after:
+
+```
+new crate           mkdir crates/redextape-experimental/    claims 7, tree says 8
+eighth hook         added an id: to .pre-commit-config.yaml claims 7, tree says 8  (BOTH rows fired)
+extra browser test  added a #[wasm_bindgen_test]            claims 26, tree says 27
+```
+
+The first is the one worth keeping: **a directory created under `crates/` fails a check against
+`README.md`**, which the change never opened.
+
+Every count this entry quotes, with what produces it:
+
+```
+1          commits           git rev-list --count 2ae1e09..bf34cca
+2026-08-24             branch date       git log -1 --format=%cs bf34cca
+24                     gated figures     scripts/check-doc-figures.sh   (it prints its own row count)
+4                      documents         sed -n '/^claims() {/,/^}/p' scripts/check-doc-figures.sh \
+                                           | grep -E '^README.md|^grammars/' | cut -d'|' -f1 | sort -u | wc -l
+4                      repo-level rows   ... same range ... | grep -c '^README.md'
+19                     self-test checks  scripts/check-doc-figures.sh --self-test | grep -c '^  ok'
+375                    script lines      wc -l < scripts/check-doc-figures.sh
+7                      workspace crates  find crates -mindepth 1 -maxdepth 1 -type d | wc -l
+7                      pre-commit hooks  grep -c '^      - id: ' .pre-commit-config.yaml
+26                     browser tests     grep -c '#\[wasm_bindgen_test\]' crates/redextape-wasm/tests/browser.rs
+1156 / 1148 / 8        nextest at default  cargo nextest list --workspace   — 218 s warm, WHICH IS WHY
+                                             IT IS NOT GATED. Dated, not current.
+218 s / 142-159 ms     the ratio above     wall clock; nextest one run, the script five
+                                             # the script's own cost GREW with this branch (three
+                                             # documents to four), so it was re-measured rather than
+                                             # carried forward — a figure about the gate, moved by
+                                             # the gate, which is this entry's whole subject
+```
+
+**The 218 s figure is the load-bearing one in this entry**, because the decision not to gate the test
+count rests on it alone. It was measured on a warm cache, which is the favourable case; a cold build
+is worse, so the conclusion holds in the direction that matters.
