@@ -1,0 +1,170 @@
+tapes 5
+start pc0
+version 1
+encoding unary
+width 4
+slots 3
+result Nat
+tape 0 #____#____#____#  ; reg
+
+state halt: accept
+state overflow:
+state pc0:
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto wl1s2.s.sk0
+state pc1:
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto wl2s3.s.sk0
+state pc2:
+  [* 1 * * *] -> write [* * * * *], move [S R S S S], goto pc2
+  [* _ * * *] -> write [* * * * *], move [S L S S S], goto add4.a.c.cwb
+state pc3:
+  [* * * * *] -> write [* * * * *], move [S S S S S], goto halt
+state wl1s2.s.sk0:
+  [1 * * * *] -> write [* * * * *], move [R S S S S], goto wl1s2.s.sk0
+  [_ * * * *] -> write [* * * * *], move [R S S S S], goto wl1s2.s.sk0
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto wl1s2.s.sk1
+state wl1s2.s.sk1:
+  [* * * * *] -> write [* * * * *], move [S S S S S], goto wl1s2.blank
+state wl1s2.blank:
+  [1 * * * *] -> write [_ * * * *], move [R S S S S], goto wl1s2.blank
+  [_ * * * *] -> write [_ * * * *], move [R S S S S], goto wl1s2.blank
+  [# * * * *] -> write [* * * * *], move [L S S S S], goto wl1s2.back
+state wl1s2.back:
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto wl1s2.back
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto wl1s2.start
+state wl1s2.start:
+  [_ * * * *] -> write [1 * * * *], move [R S S S S], goto wl1s2.m0
+state wl1s2.m0:
+  [1 * * * *] -> write [* * * * *], move [L S S S S], goto wl1s2.m0
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto wl1s2.m0
+  [# * * * *] -> write [* * * * *], move [L S S S S], goto wl1s2.r.rw0
+state wl1s2.r.rw0:
+  [1 * * * *] -> write [* * * * *], move [L S S S S], goto wl1s2.r.rw0
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto wl1s2.r.rw0
+  [# * * * *] -> write [* * * * *], move [S S S S S], goto wl1s2.r.home
+state wl1s2.r.home:
+  [* * * * *] -> write [* * * * *], move [S S S S S], goto pc1
+state wl2s3.s.sk0:
+  [1 * * * *] -> write [* * * * *], move [R S S S S], goto wl2s3.s.sk0
+  [_ * * * *] -> write [* * * * *], move [R S S S S], goto wl2s3.s.sk0
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto wl2s3.s.sk1
+state wl2s3.s.sk1:
+  [1 * * * *] -> write [* * * * *], move [R S S S S], goto wl2s3.s.sk1
+  [_ * * * *] -> write [* * * * *], move [R S S S S], goto wl2s3.s.sk1
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto wl2s3.s.sk2
+state wl2s3.s.sk2:
+  [* * * * *] -> write [* * * * *], move [S S S S S], goto wl2s3.blank
+state wl2s3.blank:
+  [1 * * * *] -> write [_ * * * *], move [R S S S S], goto wl2s3.blank
+  [_ * * * *] -> write [_ * * * *], move [R S S S S], goto wl2s3.blank
+  [# * * * *] -> write [* * * * *], move [L S S S S], goto wl2s3.back
+state wl2s3.back:
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto wl2s3.back
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto wl2s3.start
+state wl2s3.start:
+  [_ * * * *] -> write [1 * * * *], move [R S S S S], goto wl2s3.m0
+state wl2s3.m0:
+  [_ * * * *] -> write [1 * * * *], move [R S S S S], goto wl2s3.m1
+state wl2s3.m1:
+  [1 * * * *] -> write [* * * * *], move [L S S S S], goto wl2s3.m1
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto wl2s3.m1
+  [# * * * *] -> write [* * * * *], move [L S S S S], goto wl2s3.r.rw1
+state wl2s3.r.rw1:
+  [1 * * * *] -> write [* * * * *], move [L S S S S], goto wl2s3.r.rw1
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto wl2s3.r.rw1
+  [# * * * *] -> write [* * * * *], move [L S S S S], goto wl2s3.r.rw0
+state wl2s3.r.rw0:
+  [1 * * * *] -> write [* * * * *], move [L S S S S], goto wl2s3.r.rw0
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto wl2s3.r.rw0
+  [# * * * *] -> write [* * * * *], move [S S S S S], goto wl2s3.r.home
+state wl2s3.r.home:
+  [* * * * *] -> write [* * * * *], move [S S S S S], goto pc2
+state add4.a.c.cwb:
+  [* 1 * * *] -> write [* _ * * *], move [S L S S S], goto add4.a.c.cwb
+  [* _ * * *] -> write [* * * * *], move [S R S S S], goto add4.a.c.cwh
+state add4.a.c.cwh:
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto add4.a.s.sk0
+state add4.a.s.sk0:
+  [1 * * * *] -> write [* * * * *], move [R S S S S], goto add4.a.s.sk0
+  [_ * * * *] -> write [* * * * *], move [R S S S S], goto add4.a.s.sk0
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto add4.a.s.sk1
+state add4.a.s.sk1:
+  [* * * * *] -> write [* * * * *], move [S S S S S], goto add4.a.cp
+state add4.a.cp:
+  [1 * * * *] -> write [* 1 * * *], move [R R S S S], goto add4.a.cp
+  [_ * * * *] -> write [* * * * *], move [S S S S S], goto add4.a.rin
+  [# * * * *] -> write [* * * * *], move [S S S S S], goto add4.a.rin
+state add4.a.rin:
+  [1 * * * *] -> write [* * * * *], move [L S S S S], goto add4.a.rin
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto add4.a.rin
+  [# * * * *] -> write [* * * * *], move [L S S S S], goto add4.a.r.rw0
+state add4.a.r.rw0:
+  [1 * * * *] -> write [* * * * *], move [L S S S S], goto add4.a.r.rw0
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto add4.a.r.rw0
+  [# * * * *] -> write [* * * * *], move [S S S S S], goto add4.a.r.home
+state add4.a.r.home:
+  [* * * * *] -> write [* * * * *], move [S L S S S], goto add4.a.w.wk
+state add4.a.w.wk:
+  [* 1 * * *] -> write [* * * * *], move [S L S S S], goto add4.a.w.wk
+  [* _ * * *] -> write [* * * * *], move [S R S S S], goto add4.a.w.wkh
+state add4.a.w.wkh:
+  [* 1 * * *] -> write [* * * * *], move [S R S S S], goto add4.a.w.wkh
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto add4.b.s.sk0
+state add4.b.s.sk0:
+  [1 * * * *] -> write [* * * * *], move [R S S S S], goto add4.b.s.sk0
+  [_ * * * *] -> write [* * * * *], move [R S S S S], goto add4.b.s.sk0
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto add4.b.s.sk1
+state add4.b.s.sk1:
+  [1 * * * *] -> write [* * * * *], move [R S S S S], goto add4.b.s.sk1
+  [_ * * * *] -> write [* * * * *], move [R S S S S], goto add4.b.s.sk1
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto add4.b.s.sk2
+state add4.b.s.sk2:
+  [* * * * *] -> write [* * * * *], move [S S S S S], goto add4.b.cp
+state add4.b.cp:
+  [1 * * * *] -> write [* 1 * * *], move [R R S S S], goto add4.b.cp
+  [_ * * * *] -> write [* * * * *], move [S S S S S], goto add4.b.rin
+  [# * * * *] -> write [* * * * *], move [S S S S S], goto add4.b.rin
+state add4.b.rin:
+  [1 * * * *] -> write [* * * * *], move [L S S S S], goto add4.b.rin
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto add4.b.rin
+  [# * * * *] -> write [* * * * *], move [L S S S S], goto add4.b.r.rw1
+state add4.b.r.rw1:
+  [1 * * * *] -> write [* * * * *], move [L S S S S], goto add4.b.r.rw1
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto add4.b.r.rw1
+  [# * * * *] -> write [* * * * *], move [L S S S S], goto add4.b.r.rw0
+state add4.b.r.rw0:
+  [1 * * * *] -> write [* * * * *], move [L S S S S], goto add4.b.r.rw0
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto add4.b.r.rw0
+  [# * * * *] -> write [* * * * *], move [S S S S S], goto add4.b.r.home
+state add4.b.r.home:
+  [* * * * *] -> write [* * * * *], move [S L S S S], goto add4.b.w.wk
+state add4.b.w.wk:
+  [* 1 * * *] -> write [* * * * *], move [S L S S S], goto add4.b.w.wk
+  [* _ * * *] -> write [* * * * *], move [S R S S S], goto add4.b.w.wkh
+state add4.b.w.wkh:
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto add4.d.s.sk0
+state add4.d.s.sk0:
+  [* * * * *] -> write [* * * * *], move [S S S S S], goto add4.d.bl
+state add4.d.bl:
+  [1 * * * *] -> write [_ * * * *], move [R S S S S], goto add4.d.bl
+  [_ * * * *] -> write [_ * * * *], move [R S S S S], goto add4.d.bl
+  [# * * * *] -> write [* * * * *], move [L S S S S], goto add4.d.bk
+state add4.d.bk:
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto add4.d.bk
+  [# * * * *] -> write [* * * * *], move [R S S S S], goto add4.d.st
+state add4.d.st:
+  [* * * * *] -> write [* * * * *], move [S S S S S], goto add4.d.wr
+state add4.d.wr:
+  [# * * * *] -> write [* * * * *], move [S S S S S], goto overflow
+  [_ 1 * * *] -> write [1 * * * *], move [R R S S S], goto add4.d.wr
+  [* _ * * *] -> write [* * * * *], move [S S S S S], goto add4.d.rin
+state add4.d.rin:
+  [1 * * * *] -> write [* * * * *], move [L S S S S], goto add4.d.rin
+  [_ * * * *] -> write [* * * * *], move [L S S S S], goto add4.d.rin
+  [# * * * *] -> write [* * * * *], move [S S S S S], goto add4.d.r.home
+state add4.d.r.home:
+  [* * * * *] -> write [* * * * *], move [S L S S S], goto add4.d.w.wk
+state add4.d.w.wk:
+  [* 1 * * *] -> write [* * * * *], move [S L S S S], goto add4.d.w.wk
+  [* _ * * *] -> write [* * * * *], move [S R S S S], goto add4.d.w.wkh
+state add4.d.w.wkh:
+  [* * * * *] -> write [* * * * *], move [S S S S S], goto pc3

@@ -11302,3 +11302,315 @@ published 14 before running the command against its own claim.
 **Sizes and counts need no repetition; the two wall-clock figures above would**, and neither is
 load-bearing — the runner's variance swamps deltas at this scale and no claim in this entry rests on
 either.
+
+#### PLAN 6'S SECOND HALF CLOSES — `emit` then `run` is the oracle written as two shell commands, the previous slice had shipped an editor grammar for a file type nothing could produce, and a machine that never halted could print an answer and exit 0 (2026-08-23, branch `cli-emit-and-run`, `193225a..02f8682`, 20 commits, plus this entry)
+
+> **Every branch-dependent figure in this heading and in VERIFICATION was left as a clearly-marked
+> FILL placeholder until the branch was final.** PR 3's entry ends by ruling that filling them is
+> *part of the merge* rather than work that follows it, after that PR merged with its own placeholders
+> live and cost a follow-up PR. So: this entry may not reach `main` while a placeholder marker still
+> matches in it, and each one is listed at the end of VERIFICATION beside the exact command that
+> produces it. Figures that are pinned by a committed fixture are stated outright instead.
+
+Design: `docs/superpowers/specs/2026-08-22-cli-emit-and-run-design.md`, amended once by this branch —
+§9.2, and the amendment is one of the two findings below. Plan:
+`docs/superpowers/plans/2026-08-22-cli-emit-and-run.md`, amended twice before any code was written,
+both times because an expected test count had been derived rather than measured. Plan 6's first half
+— `fmt` and `lint` — closed 2026-08-19 on `cli-fmt-and-lint`; this is the other half and it closes
+Plan 6.
+
+What ships: two subcommands in `crates/redextape-cli`, one module each. **`run <path>` dispatches on
+the file extension** — a `.rxt` file is a program, a `.tm` file is a machine that gets parsed,
+simulated and decoded — with `--backend {reference,lambda,tm}` choosing the evaluator for a program,
+defaulting to `reference`, and rejected outright on a `.tm` file because the artifact already *is* a
+machine. **`emit <path> --lang {tm,lambda,asm}`** writes to stdout or to `-o <file>`, with
+`--encoding {unary,binary}` on the `tm` target only. `crates/redextape-core` is not modified; nothing
+here touches `web/`.
+
+**The exit codes follow one rule, and it is the rule rather than the table that is new: `1` means the
+PROGRAM is at fault, `2` means the TOOL could not answer.** `main.rs` already described `1` as *"the
+check failed"* and `2` as *"the work could not be done at all"*; applied to an evaluator, that
+separates a cap (the program ran and did not finish — `1`) from a ceiling (the tool declined to build
+the thing at all — `2`), and puts a function-typed result on the `2` side even though the program is
+perfectly good. Collapsing the two would tell a script the program failed when it did not.
+
+##### THE FINDING THAT OUTRANKS THE FEATURE: A MACHINE THAT NEVER HALTED COULD PRINT AN ANSWER AND EXIT 0
+
+`run_artifact_text` — the `.tm` arm — called `simulate` and **discarded its `Status`**, then decoded
+whatever was on the tapes. `simulate` returns `(tapes, status)` and returns *normally* on
+`TmStatus::HitCap`: the tapes it hands back are the half-finished ones from the step at which the
+budget ran out. So a `.tm` artifact that exhausted `TM_DEFAULT_CAPS` took one of two paths, and both
+were wrong:
+
+- the partial tapes did not decode, and the tool blamed **the result type** — *"the final tapes do not
+  decode as `Nat`"* — for a machine that had simply not finished, and exited `2`, calling a program's
+  non-termination the tool's limitation;
+- or the partial tapes **happened to decode**, and the tool **printed a value and exited 0**, reporting
+  an answer for a computation that never ran to completion.
+
+The second is the one that matters. Exit 0 with a value on stdout is the strongest claim this binary
+can make, and it was available to a machine that had not halted. Fixed at `dfd19a7`: `Status::HitCap`
+is checked **before** the decode and reported as `Outcome::ProgramFailed`, reusing the same
+"did not halt within N steps or N cells" message `run_tm_backend` already emitted a few functions
+above for the identical `TmRun::HitCap` case.
+
+**Why the suite could not have caught it, which is the transferable half.** Every `.tm` input the
+branch had was *emitted by this compiler*, and everything this compiler emits halts. The checked-in
+fixture halts; the round-trip artifact halts; `run_tm_described` will not produce a header without
+first fitting and running the machine. **A test corpus produced entirely by the thing under test
+cannot contain the input that breaks it** — the non-halting `.tm` had to be written by hand (a header
+that makes it runnable plus `state loop: [*] -> write [*], move [S], goto loop`, one state, no accept
+state), and there was no reason to write one until a reviewer asked what `simulate`'s second return
+value was for.
+
+This is the same species as the branch's other correction below and as the whole of PR 3's entry: the
+two `run` arms had **identical** logic to express and one of them expressed it and the other did not,
+and the one that did not was the one whose inputs all came from a friendly generator. The two arms now
+sit in the same file with the same message, which is what makes the omission visible on a read.
+
+##### THE SECOND CORRECTION: THE DESIGN ASSERTED A FAILURE MODE THAT CANNOT OCCUR
+
+Design §9.2, as written, said that a program which caps during `emit --lang tm` *"has not failed to
+compile — the header cannot be completed, which is a different message and a different exit code."*
+**There is no such branch.** `run_tm_described`'s `Err` side carries only `TooLarge` and `LowerError`;
+`HitCap`, and `Overflow` at the maximum width, fall through to its catch-all arm, which **builds the
+header and returns `Ok`**.
+
+It can do that because of what a header *is*: `TmHeader` records the INITIAL tapes and the decoding
+recipe — encoding, width, slots, result type — and **never the answer**. Nothing in it depends on how
+the fitting run ended, so it is complete and valid whether that run halted, capped, or overflowed.
+
+What actually happens is quieter and is now written down: **a program whose fitting run caps emits
+successfully, exit 0, with nothing on stderr, and the file it wrote will cap again when run.** The
+file is faithful — it describes exactly the machine that was built, at the width that was fitted — so
+this is not a defect, and `run` reports the cap at the point where a cap is an answerable fact.
+
+**No test could have caught this, and that is the point.** The code was always right; the *document*
+asserted a branch the code does not have. A test can only fail on behaviour that exists, and this was
+an assertion about behaviour that does not. It was found by a reviewer reading `run_tm_described`'s
+match arms against the sentence, and corrected in place at `768d8f0` with the original text quoted, as
+this repository does.
+
+##### `emit` THEN `run` IS THE ORACLE, AND IT IS THE FIRST TIME THAT AGREEMENT IS VISIBLE OUTSIDE RUST
+
+```
+$ redextape emit p.rxt --lang tm -o p.tm && redextape run p.tm
+[1, 2, 3]
+```
+
+That is an oracle assertion expressed as a shell transcript. The program is compiled all the way down
+to a Turing machine, **written to disk**, read back by `parse_tm_full` — a parser that shares no code
+with the compiler — simulated, and decoded to the same value the tree-walker gives. Until this branch
+the agreement between backends existed only inside `redextape-core`'s own tests, where the compiler
+and the checker are the same process and the machine never leaves memory.
+
+Two figures make the round trip concrete rather than decorative. `[1, 2, 3]` compiles to a **780-line,
+43,032-byte** machine, and the copy checked in as the transcript's sandbox fixture is **byte-identical
+to a fresh emit** — so `emit` is deterministic, and the fixture is a reproducible artifact rather than
+a snapshot someone once took. Both figures are stated rather than deferred because a committed golden
+pins them: if the review changed what `emit` writes, the `emit_tm` and `roundtrip` transcripts would
+fail before this entry could go stale.
+
+Three of the four oracle legs are reachable this way, not four. **`--backend native` is out of reach
+and deliberately so**: `redextape-native` is not a CLI dependency, which is why design §10 excludes it
+rather than weighing it. So the agreement stated here is three-way, and it is stated twice: as a unit
+test that loops all three backends over one program and asserts one expected stdout line
+(`all_three_backends_agree_on_a_value_program`, and its `[1, 2, 3]` twin), and as a `--backend tm`
+transcript that pins the exact line a user sees. Either fails if any backend disagrees with any other.
+
+##### `emit --lang lambda` IS THE FIRST THING IN THIS PROJECT'S HISTORY TO WRITE A λ FILE
+
+Measured at the branch point rather than supposed: at `193225a`, `rxlambda` appeared in **exactly
+three tracked files** — a plan, the λ tree-sitter grammar's README, and its `tree-sitter.json`. No
+code, no test, no script. **PR 2 of the tree-sitter slice shipped an editor grammar for a file
+extension the project could not produce**, and `emit --lang lambda` is its first producer.
+
+That is worth stating plainly because PR 2's own entry could not have. A grammar is checked against a
+*printer* through the differential, and `print_lambda` is reachable from inside Rust; what did not
+exist was any way for a **user** to get a λ term into a file an editor could open. The grammar was
+correct and unusable in the same breath.
+
+Verified after the fact, and with the trap PR 3 documented avoided: `tree-sitter parse` resolves a
+grammar through **the CLI's config file, not the working directory**, and with no `parser-directories`
+configured it prints a warning, parses nothing, and emits a line that reads as a clean parse. Re-run
+with an explicit `--config-path` and a real parse tree comes back:
+
+```
+$ redextape emit p.rxt --lang lambda -o p.rxlambda
+$ tree-sitter parse --config-path <cfg> p.rxlambda | grep -c ERROR
+0
+$ tree-sitter parse --config-path <cfg> --stat p.rxlambda | tail -1
+Total parses: 1; successful parses: 1; failed parses: 0; success percentage: 100.00%   (speed elided)
+```
+
+**`.rxlambda` is deliberately NOT a `run` input**, and the reason is structural rather than an
+omission: a bare λ term carries no result type, both decoders are type-directed, so there is nothing
+to decode against. `emit --lang lambda` writes files for `parse_lambda` and for an editor's grammar to
+read, and `run`'s dispatch is `.tm`-only by construction, which needed no code to enforce.
+
+##### THE TYPE-DIRECTED DECODE ASYMMETRY, AND WHY IT IS EXIT 2 RATHER THAN EXIT 1
+
+`decode_lambda_ty` and `decode_tape_ty` both refuse `Ty::Fun` and `Ty::Var`, so `--backend lambda` and
+`--backend tm` cannot answer for a function-typed program **while `--backend reference` can** — it
+never leaves the interpreter, and `format_value` renders a closure as the literal `<non-value>`, which
+is a *result* and not a failure.
+
+**It is reachable from a three-token program**, which is why it is stated in the crate README and in
+the diagnostic itself rather than left to arrive as a bug report:
+
+```
+$ redextape run g.rxt                     # g.rxt is `let g = |x| x; g`
+<non-value>                               # exit 0
+
+$ redextape run g.rxt --backend lambda
+error: `--backend lambda` cannot decode a result of type `(t2) -> t2`
+  the encodings cover Nat, Bool, Unit and List<T>; this type has none
+  `--backend reference` will evaluate it
+                                          # exit 2
+```
+
+A polymorphic identity types as `(t2) -> t2` and therefore carries **both** refused shapes at once.
+This is not an exotic corner, and it is the same restriction `HeaderParts::directive` (D5) already
+puts on a `.tm` header's `result`, arriving in a second place.
+
+**The exit code is the whole argument for stating the rule as "whose fault is it".** The program
+parses, typechecks and evaluates. Nothing about it is wrong. What is missing is an *encoding*, which
+is a property of the two lowerings and not of the source — so reporting `1` would tell a script the
+program failed when the only thing that failed was this tool's ability to answer that particular
+question about it. `a_function_typed_result_is_the_tools_limit_not_the_programs_fault` pins it for
+both backends.
+
+##### `--lang asm` EMITS INTO AN OPEN GAP ON PURPOSE, AND THE TEST SUITE CARRIES THE GAP'S SHAPE
+
+`parse_asm` was promised by **Plan 3's key interfaces** and never landed. The roadmap has recorded it
+as unclaimed in its preamble, in the Plan 6 survey that first called it *"genuinely missing and
+unclaimed"*, and in **seven closing entries since** — this is the eighth. `--lang asm` was shipped
+with that gap still open, on the reasoning that seven prose mentions have moved nothing and a
+user-facing artifact that admits the gap is more likely to force the issue than an eighth. Every
+emitted file opens with:
+
+```
+; This file cannot be read back. `parse_asm` is unclaimed — nothing, including
+; redextape itself, can parse the asm text form. Emitted for reading only.
+```
+
+**That comment is the entire mitigation, and the branch says so in three places** — the module doc,
+the constant's doc, and the test name — rather than letting a reader infer that it is enough.
+
+It breaks no stated rule. The visualizer design makes *"the source, lambda, and TM panes"* peer
+editable languages, each needing a parser as well as a printer; **asm is not one of the three and
+never was**, so emitting it is not an exception to the round-trip principle, it is a fourth thing that
+was never held to it.
+
+**The deliberate absence is in the suite, not only in prose.** `tm` has a round-trip test through
+`parse_tm_full`, `lambda` has one through `parse_lambda`, and `asm` has none and cannot have one. What
+is testable is that the file admits it: `emitted_asm_declares_that_it_cannot_be_read_back` asserts the
+leading comment and that it names the missing function. **The test directory now carries a gap shaped
+exactly like `parse_asm`**, which is better than the same gap living only in a paragraph.
+
+**One correction to the design's own count, made here rather than left standing.** Design §1.3 said
+*"four consecutive roadmap entries have said so."* That was true of an earlier window — entries 51
+through 54 — and is no longer the count: three narrow entries in between (the citation gate, the CI
+cache, the fork-quiescence flake) mention nothing about asm, and the three tree-sitter PRs pick it up
+again. Seven closing entries in all, the last three consecutive. The command is in VERIFICATION; the
+figure is not load-bearing, but a survey figure that has quietly gone stale is exactly what this
+roadmap exists to catch.
+
+##### WHAT THIS DID NOT CLOSE
+
+**`--help` does not carry either asymmetry in a form a CLI user can act on, and the design said it
+should.** §6 ends *"it belongs in `--help`, because a user who meets it by accident will read it as a
+bug in the flag."* What `redextape run --help` actually prints today is the `reference` variant's
+line — *"the only backend that can produce a result for every program that evaluates — **see the
+module doc** on `Lambda`/`Tm` and their type-directed decoders"* — which points a command-line user at
+a Rust source comment they cannot open, while `lambda` and `tm` carry no help text at all. `emit
+--help` says nothing at all about `asm` being unreadable. The facts are in the crate README, in the
+module docs, and in the diagnostics a user hits, so nothing is hidden; but the one surface the design
+named is the weakest of the four. Fixing it is doc comments on three `ValueEnum` variants plus a
+`run_help`/`emit_help` transcript to pin them, and it is left to the whole-branch review rather than
+done in the entry that found it.
+
+**`parse_asm` is still unclaimed**, exactly where Plan 3's key interfaces left it. This branch emits
+into the gap and does not fill it, and it is still the reason the asm form could never be a fourth
+tree-sitter grammar: it prints and cannot be read back, so a grammar for it would have no parser to be
+checked against.
+
+**Whether `emit --lang tm` should say something when its fitting run caps is left open, not decided.**
+Per the §9.2 correction above, such a program emits successfully and silently, and the file it writes
+will cap again when run. `DescribedRun` carries the outcome that `emit` currently discards, so noting
+it on stderr while still exiting 0 is available and cheap. It was raised in the design as an open
+question, carried to the whole-branch review, and is being filed rather than answered — the argument
+against is that a warning on a successful emit trains readers to ignore stderr on exit 0.
+
+**No `--backend native`.** `redextape-native` is not a CLI dependency, so the fourth oracle leg stays
+out of reach from the command line and the CLI shows three-way agreement, not four-way.
+
+**`run` reports values and nothing else** — no steps, no traces, no timings. The trace machinery
+exists and has consumers; a `--trace` flag is a separate design with its own output-format questions,
+and two of the four examples the roadmap credits as CLI prototypes call `reduce_trace`, which the
+probe-memory note says must stay away from anything unbounded.
+
+**`emit` has no `--width`.** `run_tm_described` fits the field width per program; overriding it is the
+config-file question the roadmap already tracks separately. Likewise `--deny-warnings`, a config file,
+and further lint rules — all tracked, none blocked by this slice.
+
+**The three cap constants a user can now meet are still three unrelated numbers.** `interp`'s step
+budget, `MAX_REDUCTION_STEPS` and `TM_DEFAULT_CAPS` have unrelated meanings and unrelated values; each
+`HitCap` diagnostic names which budget and which backend, which is mitigation rather than
+unification.
+
+**`"the brief"` references in merged code are still open**, unchanged from PR 3's entry — they cite a
+concept rather than a path and are a different piece of work.
+
+**`.tm` still collides with TeXmacs.** It affects editors, not this CLI, which dispatches on the
+extension it is given.
+
+##### VERIFICATION
+
+Filled from `02f8682`, the commit CI actually passed on — confirmed against that run's own
+`git log -1 --format=%H` rather than inferred from the run number (see this file's note on run ids not
+being run numbers). `crates/redextape-core` is untouched by this branch, so every figure below that is
+not a test count is a property of `emit`'s own output; those were measured at `1db393c`, before the
+whole-branch review, and each is re-checkable by the command beside it.
+
+```
+$ git rev-list --count 193225a..02f8682
+20
+
+$ cargo nextest run --workspace
+     Summary [  36.459s] 1148 tests run: 1148 passed, 8 skipped
+     # 1125 passed / 8 skipped at the branch point, per PR 3's entry
+
+$ cargo nextest run -p redextape-cli
+     Summary [   2.446s] 78 tests run: 78 passed, 0 skipped
+     # 55 at the branch point, measured in a worktree at 193225a rather than recalled
+
+$ scripts/check-all.sh --no-llvm --no-browser
+green, but PARTIAL — these tiers were SKIPPED: LLVM browser. This is NOT a full gate on its own.
+```
+
+Every count this entry quotes, with what produces it:
+
+```
+20        commits            git rev-list --count 193225a..02f8682
+2026-08-23           branch date        git log -1 --format=%cs 02f8682
+780                    roundtrip lines    wc -l < crates/redextape-cli/tests/cmd/roundtrip.in/p.tm
+43032                  roundtrip bytes    wc -c < crates/redextape-cli/tests/cmd/roundtrip.in/p.tm
+identical              emit determinism   redextape emit p.rxt --lang tm | diff - .../roundtrip.in/p.tm
+3                      rxlambda files     git grep -l rxlambda 193225a -- .
+9                      asm roadmap entries  awk '/^#### /{n++} /parse_asm/{h[n]=1} END{for(i=1;i<=n;i++)c+=h[i]; print c}' \
+                                              docs/superpowers/plans/2026-07-19-redextape-roadmap.md
+                                            # entry 23 is the Plan 6 SURVEY that first named it; the
+                                            # other EIGHT are closing entries, this one included
+0 err / 1 parse        lambda parse       tree-sitter parse --config-path <cfg> p.rxlambda   # NOT without --config-path
+```
+
+**The `--config-path` is not optional and PR 3's entry is why it is written down here.** Without it
+`tree-sitter parse` resolves no grammar, parses nothing, and prints a line a reader takes for a clean
+parse. The λ figure above was re-run with an explicit config and a real parse tree on screen before it
+was believed.
+
+**Wall-clock figures are placeholders and are not load-bearing.** The runner's variance swamps deltas
+at this scale and no claim in this entry rests on a timing; they are quoted only because the
+`nextest` summary line carries them and quoting a doctored line would be worse than quoting a noisy
+one.

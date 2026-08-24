@@ -1,0 +1,3 @@
+bin.name = "redextape"
+args = ["run", "p.tm"]
+fs.sandbox = true

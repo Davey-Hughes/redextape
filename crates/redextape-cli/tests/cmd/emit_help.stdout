@@ -1,0 +1,29 @@
+Compile a program to a backend text form
+
+Usage: redextape emit [OPTIONS] --lang <LANG> <PATH>
+
+Arguments:
+  <PATH>
+          The program to compile. `-` reads standard input
+
+Options:
+      --lang <LANG>
+          Which text form to write. `tm` and `lambda` can be read back — `redextape run` executes an emitted `.tm` — while `asm` CANNOT: nothing, this program included, parses the asm text form, and every emitted file opens by saying so
+
+          Possible values:
+          - tm:     A complete self-describing Turing machine, header included, that `redextape run` executes
+          - lambda: The λ-calculus lowering of the program, which `parse_lambda` and the editor grammar read
+          - asm:    The register-machine lowering. Write-only: nothing parses the asm text form, and the emitted file opens with a comment saying so
+
+      --encoding <ENCODING>
+          Tape encoding, defaulting to unary. `--lang tm` only: passing it with any other target is an error rather than a silent no-op. `binary` packs a far larger value into the same field width, so it can express programs unary refuses
+
+          Possible values:
+          - unary:  One cell per unit. The default, and the narrower of the two: the widest field there is holds values up to 63 (measured, not supposed)
+          - binary: Packed digits. Holds a far larger value in the same field, so it expresses programs unary refuses
+
+  -o, --out <OUT>
+          Write here instead of standard output
+
+  -h, --help
+          Print help (see a summary with '-h')

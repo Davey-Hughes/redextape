@@ -28,4 +28,33 @@ pub enum Command {
         #[arg(required = true)]
         paths: Vec<PathBuf>,
     },
+    /// Run a program and print its value.
+    Run {
+        /// The file to run. `.rxt` is a program; `.tm` is a machine. `-` reads standard input as a program.
+        path: PathBuf,
+        /// Which backend evaluates a `.rxt` program. All three agree on any program all three can
+        /// answer for; `lambda` and `tm` decode their result by type, so a function-typed result
+        /// exits 2 there and prints as `<non-value>` under `reference`. Rejected for a `.tm` file,
+        /// which is already a machine.
+        #[arg(long, value_enum, default_value_t = crate::run::Backend::Reference)]
+        backend: crate::run::Backend,
+    },
+    /// Compile a program to a backend text form.
+    Emit {
+        /// The program to compile. `-` reads standard input.
+        path: PathBuf,
+        /// Which text form to write. `tm` and `lambda` can be read back — `redextape run` executes an
+        /// emitted `.tm` — while `asm` CANNOT: nothing, this program included, parses the asm text
+        /// form, and every emitted file opens by saying so.
+        #[arg(long, value_enum)]
+        lang: crate::emit::Lang,
+        /// Tape encoding, defaulting to unary. `--lang tm` only: passing it with any other target is
+        /// an error rather than a silent no-op. `binary` packs a far larger value into the same field
+        /// width, so it can express programs unary refuses.
+        #[arg(long, value_enum)]
+        encoding: Option<crate::emit::EncodingArg>,
+        /// Write here instead of standard output.
+        #[arg(short = 'o', long)]
+        out: Option<PathBuf>,
+    },
 }

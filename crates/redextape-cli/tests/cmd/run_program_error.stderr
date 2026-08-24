@@ -1,0 +1,7 @@
+Error: expected `Nat`, found `Bool`
+   ╭─[ p.rxt:1:5 ]
+   │
+ 1 │ 1 + true
+   │     ──┬─  
+   │       ╰─── expected `Nat`, found `Bool`
+───╯

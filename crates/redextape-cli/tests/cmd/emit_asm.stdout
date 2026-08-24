@@ -1,0 +1,6 @@
+; This file cannot be read back. `parse_asm` is unclaimed — nothing, including
+; redextape itself, can parse the asm text form. Emitted for reading only.
+    li	r0, #1
+    li	r1, #2
+    add	rr, r0, r1
+    halt

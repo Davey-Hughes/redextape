@@ -1,0 +1,3 @@
+error: no machine was written: a value does not fit this encoding's widest tape field (64 cells, `MAX_FIELD_WIDTH`)
+  the program is fine — but the machine would HALT on truncated fields, and `redextape run` would decode them and print a wrong answer at exit 0
+  `--encoding binary` holds a far larger value in the same field and may succeed where unary did not

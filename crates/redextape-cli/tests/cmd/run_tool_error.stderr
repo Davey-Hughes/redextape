@@ -1,0 +1,3 @@
+error: `--backend lambda` cannot decode a result of type `(t2) -> t2`
+  the encodings cover Nat, Bool, Unit and List<T>; this type has none
+  `--backend reference` will evaluate it

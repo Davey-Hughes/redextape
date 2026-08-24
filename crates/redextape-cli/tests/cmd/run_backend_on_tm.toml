@@ -1,0 +1,4 @@
+bin.name = "redextape"
+args = ["run", "p.tm", "--backend", "tm"]
+fs.sandbox = true
+status.code = 2
