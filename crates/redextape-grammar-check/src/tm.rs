@@ -141,9 +141,11 @@ pub static TM: Grammar = Grammar {
 ///
 /// **THIS MUST NOT SIMULATE.** The pipeline stops at `lower_tm`, which builds a `Machine`, and
 /// `print_tm_mapped`, which prints one. Simulation is the TM-side analogue of the reduction the λ
-/// corpus is forbidden from doing, and `examples/state_cost_probe.rs` records `run_tm_described` — the
-/// function that does simulate — building an 8.6-million-state machine costing 6.0 GB on an unlucky
-/// input. A reviewer should treat a `simulate` in this function as a defect.
+/// corpus is forbidden from doing. The cost that makes it worth forbidding is the LOWERING, not the
+/// run: `run_tm_described` builds a whole `Machine` before it steps once, and `MAX_MACHINE_STATES`
+/// bounds that at 1,000,000 states — **roughly 700 MB at the 700-725 bytes per state
+/// `examples/state_cost_probe.rs` measures** — refusing past it rather than growing. A reviewer
+/// should treat a `simulate` in this function as a defect.
 ///
 /// **Lowering is allowed to fail and that is not this function's failure to report** — `lower_asm`
 /// returns `Result` because `LowerError` outcomes are expected for some programs. Callers filter on

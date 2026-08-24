@@ -310,9 +310,14 @@ there are two ways, neither free:
   **simulates**, and hands back `DescribedRun { machine, header, .. }`. `examples/tm_emit.rs` and
   `examples/regen_fixtures.rs` already call it, and the two checked-in `.tm` files under
   `crates/redextape-core/tests/fixtures/` are its output, comments and all. Its header is one the rest
-  of the project agrees is correct. Its price is the simulation — which is the TM-side analogue of the
-  reduction §7 forbids, and `examples/state_cost_probe.rs` records it building an 8.6-million-state
-  machine costing 6.0 GB on an unlucky input.
+  of the project agrees is correct. Its price is the LOWERING rather than the run — it builds a whole
+  `Machine` before stepping once, and `MAX_MACHINE_STATES` bounds that at 1,000,000 states, roughly
+  700 MB at the 700-725 bytes per state `examples/state_cost_probe.rs` measures, refusing past it
+  rather than growing. **This paragraph first cited that probe's 8.6-million-state, 6.0 GB row as if
+  it were reachable today. It is not** — the roadmap's own note records that the probe can no longer
+  produce that row or its `SIGKILL`, because the guard those numbers justified is now enforced. The
+  bound is still far too large to put on a generated corpus, which is why the headered corpus is a
+  fixed list; the reason is the guard's ceiling, not the pre-guard measurement.
 - **`TmHeader::new` by hand** runs nothing, and constructs a value that no other non-test caller in the
   tree constructs that way. A header built wrongly is a corpus that checks text nobody would ever
   write.
