@@ -11633,3 +11633,182 @@ was believed.
 at this scale and no claim in this entry rests on a timing; they are quoted only because the
 `nextest` summary line carries them and quoting a doctored line would be worse than quoting a noisy
 one.
+
+#### THE GRAMMAR READMEs' FIGURES GET A GATE — a README says what the tree IS and nothing checked that, the gate's own derivation found a claim that had been wrong since it was written, and the comment counting this job's hygiene steps was wrong for the second time (2026-08-24, branch `doc-figures-gate`, `7eec26f..48bf314`, 2 commits, plus this entry)
+
+`scripts/check-doc-figures.sh` derives **20 figures** across the three grammar READMEs and fails when
+a documented number no longer matches the tree. It runs in the `linear-history` CI job and in
+`.pre-commit-config.yaml`, from one implementation, per the convention `scripts/check-all.sh` states
+and the two siblings already follow.
+
+##### WHY A GATE AND NOT A HABIT, AND WHY IT STOPS AT THE README
+
+The measurement is entry 51's. One commit replaced `extras`'s `/\s/` with the five code points
+`is_ascii_whitespace()` accepts, adding one comment line to two `grammar.js` files. The λ README
+asserted *"75 lines — half the sibling's 156"* and became wrong in **both halves of one sentence**.
+Nothing failed. It was found only because a third README was being written and happened to need the
+same two numbers.
+
+**The cross-references are the argument, not the figures.** These READMEs quote each other, so adding
+one line to λ's `grammar.js` falsifies λ's own README *and* the TM one, which cites λ's count for
+comparison. **The file that goes stale is never the file being committed** — which is why the gate is
+unscoped, and why a rule keyed on changed paths would fire on exactly the commits that do not need it
+and stay silent on the ones that do. Four of the twenty rows are cross-references.
+
+**`docs/` — this file included — is out of scope, and that is a boundary rather than an exemption.**
+It is the same one `scripts/check-citations.sh` draws for the same reason. A README says what the tree
+**is**; an entry here says what it **was** on a date, and its figures are OBSERVATIONS. Entry 51
+records `156 grammar.js lines`. That file is 171 today and the entry is still correct — gating it
+would demand falsifying the record. The block below, *"Every count this entry quotes, with what
+produces it"*, is how these are held honest at the only time they can be: when they are written.
+
+##### THE INVERSION THAT MAKES IT WORK, AND THE THREE THINGS IT FORCED
+
+The obvious construction — scan the prose for number-shaped things and check the ones you find —
+passes when a rewording moves a figure out from under its pattern. **That is the defect it exists to
+catch, rebuilt inside the gate.** So the table is a REQUIRED set: every row must match EXACTLY once.
+Zero matches fails as loudly as a wrong number, and so do two or more, because an ambiguous locator
+may be reading a different sentence than the one intended.
+
+Not hypothetical in either direction. The first draft's cross-reference rows matched
+`mini-language's lexer` and `λ's 912` — a different figure sharing only the possessive — and the
+ambiguity rule turned that into an error message rather than a wrong number checked against the wrong
+sentence. The locators are anchored on their whole clause because of it.
+
+The required-set rule then forced three properties, **each surfaced by a check failing rather than by
+reading**:
+
+1. **NOT LINE-BASED, departing from `check-citations.sh` deliberately.** That script documents the
+   line wrap as its own blind spot. The TM README splits a claim across a wrap *today* —
+   `**13 patterns** over **11` / `capture names**` — so a line-based locator finds zero matches for
+   it, which under the rule above is a failure rather than a silent pass. Each README is normalized
+   to one line before matching.
+2. **NUMBERS ARE SPELLED THREE WAYS.** λ writes *"nine patterns over five capture names"* where TM
+   writes *"13 patterns over 11"*, and TM opens one sentence with a capitalised *"Eleven"*. A
+   digit-only locator finds nothing in the λ README and, without the required-set rule, would have
+   reported that whole file clean while checking none of it.
+3. **A FIGURE ASSERTED TWICE IS TWO ROWS.** λ states its capture-name count in three separate
+   sentences and TM states its own in two. Whoever edits one paragraph has no reason to suspect the
+   others.
+
+`--self-test` asserts all of that, plus that the two HISTORICAL figures living inside present-tense
+READMEs — *"156 until PR 3"*, *"read 75 and 156 before that"* — are NOT captured. It earned its place
+before the scan was ever run: the first draft had a locator whose leading backtick sat against `/`
+rather than `highlights`, so it matched nothing in the λ README, and the self-test failed on it
+immediately.
+
+##### THE CLAIM THAT HAD BEEN WRONG SINCE IT WAS WRITTEN, FOUND BY THE GATE'S OWN DERIVATION
+
+`map_classes` was added for the TM README's *"Eleven capture names for nine classes"*. Run against λ
+out of curiosity, it returned **3** where the prose implied 4.
+
+The λ README said *"the only names that collapse to one `TokenClass` are `@punctuation.bracket` and
+`@punctuation.delimiter`"*. **`@keyword.function` and `@variable.parameter` both project to `Binder`,
+so TWO pairs collapse.** Five rows over three classes; one collapsing pair would have left four.
+Nothing in this branch touched `lambda.rs` — the claim had been wrong since it was written, and
+survived the branch that wrote it, its review, and two later branches that edited the same file.
+
+**The shape of the defect is the transferable part. "The only names that collapse" has no number in
+it, and a gate can hold a number to the tree but cannot hold the word *only* to anything.** The
+sentence now states the count and a twentieth row holds it to `lambda::CAPTURE_CLASSES`. Quantifying
+the claim is what made it checkable at all — an argument for preferring numbers to adjectives in
+these READMEs generally, and the same reason the gate's stated limits below start with the adjective.
+
+##### AND THE COMMENT COUNTING THIS JOB'S OWN HYGIENE STEPS, FOR THE SECOND TIME
+
+`ci.yml` read **"THE FOUR HYGIENE STEPS BELOW"**, having already been corrected once from *"the
+control-byte steps"* by the citation branch — which noted, in that same sentence, that the pair
+falsifying it came from that same branch. This branch makes it six, and is the second falsification,
+committed by the change that adds a gate for exactly this failure. **The comment now states its own
+history rather than only its own count**, and names the merge-commit step as deliberately outside the
+six, since a step count that a reader must re-derive is what went wrong twice.
+
+##### WHAT THIS DID NOT CLOSE
+
+**The adjective beside the number is unchecked, and always will be by this design.** TM says *"nearly
+twice λ's 78"*. The gate holds the 78 to λ's line count; it cannot hold *"nearly twice"* to anything.
+If λ's grammar doubled, the gate would demand the 78 be corrected and then pass on prose calling the
+new figure "nearly twice" its own. Anchoring locators on the clause means EDITING an adjective trips
+the gate — a tripwire, not a check. *"Largest of the three"*, wrong for a whole PR per entry 51, is
+the same species and is not a number at all.
+
+**Figures that are not cheaply derivable are not gated**, and are listed in the script header rather
+than left to be discovered: TM's `18,905 bytes` / `6,865 spans` averages, its `282,006 spans in
+0.74 s`, the `32`/`256` proptest counts, and λ's *"Five positions, five patterns"* — a claim about
+where `_atom` and `_term` appear in the grammar rather than a total.
+
+**A figure with no row is not covered.** Adding a claim to a README does not add it to the table.
+Deleting a claimed figure, by contrast, fails loudly. The scan reports its own row count on success
+rather than implying the prose is checked.
+
+**Prose outside the three READMEs is untouched** — the CLI README carries no figures at all, `web/`
+was not surveyed, and a PR description lives in a web form the gate cannot reach. That last one was
+demonstrated the hard way: this branch's own pull-request description shipped two estimated figures,
+`+438/−6` against an actual `+386/−5` and `18` self-test assertions against `19`, in the pull request
+whose subject is figures that nothing checks. Corrected in place, with the correction left visible.
+
+**`"the brief"` references and `parse_asm` are still open**, unchanged from the previous entry.
+
+##### VERIFICATION
+
+CI run 279 green on `d774643` — the branch head, and this entry's own commit — every job including
+`rust`, `rust-slow`, `rust-llvm`, `rust-browser` and `web`; `docker` skipped, as it always is on a
+pull request. Head SHA confirmed against the PR's own `head.sha` rather than assumed.
+
+**This block first recorded run 277 on `b8c95a3` and said the λ correction's run was "in flight" —
+which is the shape entry 51 shipped and needed a follow-up entry to repair.** Run 279 covers all three
+commits, so the range is closed here rather than deferred to a later entry. What no entry can cover is
+the commit that rewrites these three sentences: it is docs-only and its own run is in flight as they
+are written. **That tail is irreducible, not an oversight** — a CI result recorded inside the tree the
+CI reads always trails by exactly one commit, and the honest move is to name the tail and close
+everything ahead of it rather than leave a placeholder that reads as unfinished work.
+
+```
+$ scripts/check-doc-figures.sh
+check-doc-figures: 20 documented figures match the tree.
+
+$ scripts/check-doc-figures.sh --self-test
+19 assertions, all passed
+
+$ pre-commit run check-doc-figures --all-files
+documented figures match the tree........................................Passed
+```
+
+All three failure paths were exercised against the real tree and restored after each:
+
+```
+stale figure     42,220 -> 41,004 bytes in the TM README     caught, named the deriving command
+deleted claim    removed a sentence from the lambda README   caught as NOT FOUND, named the row
+foreign edit     one line appended to lambda's grammar.js    caught in TWO READMEs, lambda's and TM's
+```
+
+The third is the one worth keeping: a single line added to one grammar's source failed its own README
+*and* the TM README that cites it, which is the case no author would have looked for.
+
+Every count this entry quotes, with what produces it:
+
+```
+2         commits           git rev-list --count 7eec26f..48bf314
+2026-08-24            branch date       git log -1 --format=%cs 48bf314
+20                    gated figures     scripts/check-doc-figures.sh   (it prints its own row count)
+20                    table rows        sed -n '/^claims() {/,/^}/p' scripts/check-doc-figures.sh | grep -c '^grammars/'
+4                     cross-ref rows    ... same range ... | grep -c 'CROSS-REF'
+3                     READMEs gated     ... same range ... | cut -d'|' -f1 | sort -u | wc -l
+19                    self-test checks  scripts/check-doc-figures.sh --self-test | grep -c '^  ok'
+341                   script lines      wc -l < scripts/check-doc-figures.sh
+5                     lambda map rows   awk '/pub const CAPTURE_CLASSES/,/^\];/' \
+                                          crates/redextape-grammar-check/src/lambda.rs | grep -c '^    ("'
+3                     lambda classes    ... same awk ... | sed -E 's/.*,[[:space:]]*(TokenClass::[A-Za-z]+).*/\1/' \
+                                          | sort -u | wc -l    — the figure that found the wrong claim
+6                     hygiene steps     grep -cE '^      - name: (Prove|Reject)' .forgejo/workflows/ci.yml
+                                        # prints 7: "Reject merge commits" is the merge check, which
+                                        # the comment above those steps excludes by name. SIX is right
+                                        # and the command is the reason to check rather than recount.
+136-143 ms            self-test + scan  five runs, wall clock
+97-105 ms             scan alone        three runs, wall clock
+```
+
+**The timing figures are the only ones here that are not reproducible on demand**, and they are
+quoted because the pre-commit comment rests on the comparison — this gate is cheaper than either
+sibling (the citation hook ~250 ms, the control-byte hook ~574-594 ms, both per their own comments).
+The ordering is what matters; the digits will drift with the machine.

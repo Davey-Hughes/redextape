@@ -116,11 +116,16 @@ jobs:
   # nothing in this repository could otherwise detect. Its own comment carries the settings it read
   # and the measurement that prompted the narrowing.
   #
-  # THE FOUR HYGIENE STEPS BELOW ARE UNCONDITIONAL AND ARE THE REASON THIS JOB IS STILL A REQUIRED
-  # CONTEXT ON PULL REQUESTS — two for control bytes and two for `file:line` citations, each pair a
-  # self-test followed by a scan. They are what a PR needs from this job; the merge check never was.
-  # **This sentence said "the control-byte steps" until the citation branch's whole-branch review, and
-  # the pair that falsified it was added by that same branch, into this same job.**
+  # THE SIX HYGIENE STEPS BELOW ARE UNCONDITIONAL AND ARE THE REASON THIS JOB IS STILL A REQUIRED
+  # CONTEXT ON PULL REQUESTS — two for control bytes, two for `file:line` citations and two for
+  # documented figures, each pair a self-test followed by a scan. They are what a PR needs from this
+  # job; the merge check never was.
+  # **THIS SENTENCE HAS NOW BEEN FALSIFIED TWICE, BOTH TIMES BY A PAIR ADDED INTO THIS SAME JOB.** It
+  # said "the control-byte steps" until the citation branch's whole-branch review, and it said "FOUR"
+  # until the branch that added the pair below — which exists to gate exactly this failure, a count in
+  # prose with nothing checking it. `check-doc-figures.sh` does not cover this line: its scope is the grammar
+  # READMEs, and a hand-maintained enumeration inside a CI comment is precisely what its header calls
+  # a review concern rather than a checkable figure.
   linear-history:
     runs-on: docker
     steps:
@@ -164,6 +169,25 @@ jobs:
         run: scripts/check-citations.sh --self-test
       - name: Reject file:line citations in tracked source
         run: scripts/check-citations.sh
+      # THE FIGURE GATE RIDES IN THIS JOB FOR THE REASONS THE TWO COMMENTS ABOVE ALREADY GIVE, and is
+      # unscoped for a SHARPER version of the citation gate's reason. A README's figure goes stale
+      # because a DIFFERENT file changed: adding one line to
+      # `grammars/tree-sitter-redextape-lambda/grammar.js` falsifies that grammar's own README AND the
+      # TM one, which cites λ's line count in a comparison. The file that goes wrong is never the file
+      # being committed, so nothing keyed on changed paths would fire. Same script as
+      # `.pre-commit-config.yaml` runs, so the local and CI gates cannot drift.
+      # SELF-TEST FIRST, AND IT HAS ALREADY EARNED ITS PLACE ONCE. The first draft of this script had
+      # a locator whose leading backtick sat against `/` rather than `highlights`, so it matched
+      # nothing in the λ README — and the self-test failed on it before the scan was ever run. It
+      # asserts that digits, spelled-out words and a capitalised word all read; that a claim split
+      # across a line wrap is still found; and that a missing, reworded or ambiguous claim is REFUSED
+      # rather than skipped, which is the property that keeps a rewording from silently disabling a
+      # row. Same `find_claim` and `derive` the scan uses, so it cannot drift into agreeing with a
+      # broken scan.
+      - name: Prove the figure detector still detects
+        run: scripts/check-doc-figures.sh --self-test
+      - name: Reject documented figures that no longer match the tree
+        run: scripts/check-doc-figures.sh
       # ON PUSHES TO `main` ONLY, AND THE NARROWING IS THE POINT RATHER THAN A RELAXATION. This job's
       # heading states the goal exactly: "a merge commit REACHING MAIN fails CI however it got there."
       # Running it on `pull_request` checked a different artifact — the PR branch's own shape — which

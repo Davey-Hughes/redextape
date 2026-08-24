@@ -161,8 +161,20 @@ asserting `parse_lambda` succeeds on the same string. That is weaker than the di
 why it is written here instead of left implicit.
 
 Design §6.1's other gap does *not* bite as hard here as it does next door: with five capture names and
-no `@function.call`, the only names that collapse to one `TokenClass` are `@punctuation.bracket` and
-`@punctuation.delimiter`, both `Punct`. `@variable.parameter` (`Binder`) and `@variable` (`Ident`) are
+no `@function.call`, those five names project onto three `TokenClass` values — `@keyword.function`
+and `@variable.parameter` are both `Binder`, and `@punctuation.bracket` and `@punctuation.delimiter`
+are both `Punct`.
+
+**This sentence read *"the only names that collapse to one `TokenClass` are `@punctuation.bracket`
+and `@punctuation.delimiter`"* until the branch that added `scripts/check-doc-figures.sh`, and it was
+wrong: `@keyword.function` and `@variable.parameter` project to `Binder` together, so TWO pairs
+collapse rather than one.** Found by that gate's `map_classes` derivation rather than by reading —
+five rows over three classes, where a single collapsing pair would have left four. The claim was
+UNQUANTIFIED, which is exactly why nothing could check it: a gate can hold a number to the tree and
+cannot hold the word "only" to anything. It now names a number, and a row in that script's table
+holds that number to `lambda::CAPTURE_CLASSES`.
+
+`@variable.parameter` (`Binder`) and `@variable` (`Ident`) are
 genuinely distinguished by the comparison — which is exactly why the occurrence patterns in
 `queries/highlights.scm` are scoped by position instead of being a single `(identifier) @variable`
 catch-all. A catch-all would capture a binder's name as `Ident` *and* `Binder` at one byte range, and

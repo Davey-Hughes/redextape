@@ -49,6 +49,23 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      # UNSCOPED FOR A SHARPER VERSION OF THE REASON THE TWO HOOKS ABOVE GIVE, and the sharpening is
+      # the whole argument. A README figure goes stale because a DIFFERENT file changed: one line
+      # added to `grammars/tree-sitter-redextape-lambda/grammar.js` falsifies both that grammar's
+      # README and the TM one, which cites λ's line count for comparison. The file that goes wrong is
+      # never the file being staged, so a `files:`-scoped rule would fire on exactly the commits that
+      # do not need it and stay silent on the ones that do.
+      # MEASURED, NOT ASSUMED, per the two hooks above: self-test plus scan is 136-143 ms over five
+      # runs and the scan alone is 97-105 ms — cheaper than either, because it reads three READMEs
+      # rather than walking `git ls-files`.
+      # `--self-test` first, then the scan, for the reason `check-text-bytes` states: a gate that only
+      # ever runs against a passing tree cannot tell you it still works.
+      - id: check-doc-figures
+        name: documented figures match the tree
+        entry: bash -c 'scripts/check-doc-figures.sh --self-test && scripts/check-doc-figures.sh'
+        language: system
+        always_run: true
+        pass_filenames: false
       - id: cargo-fmt
         name: cargo fmt
         entry: cargo fmt --all --check
