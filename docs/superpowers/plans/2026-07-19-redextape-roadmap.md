@@ -11573,6 +11573,25 @@ being run numbers). `crates/redextape-core` is untouched by this branch, so ever
 not a test count is a property of `emit`'s own output; those were measured at `1db393c`, before the
 whole-branch review, and each is re-checkable by the command beside it.
 
+**THE RANGE BELOW WAS SUPERSEDED BY A REBASE, AFTER THIS BLOCK WAS WRITTEN AND BEFORE THE MERGE.**
+The branch was rebased from `193225a` onto `aeb7754` (the #57 squash) and merged from
+`aeb7754..fff5dee`, **21 commits**. Every content figure in this section is unaffected — a rebase
+changed SHAs and nothing else, and CI passed on both tips (run 267 on `02f8682`, run 271 on
+`fff5dee`, all jobs green on each). The `193225a..02f8682` range and its count of 20 are left as
+written because they were true of the branch that produced them.
+
+Neither SHA is an ancestor of `main`, and that is normal here rather than a defect: squash is the only
+enabled merge style, so no branch commit ever lands on `main` and **every entry in this file cites
+SHAs a fresh clone will not have** — PR 2's `13207e0` included. What a rebase adds is that the cited
+range is no longer even the one that merged, which nothing but this note can say: Forgejo's squash
+template prepends the PR description, so `7c4ec50`'s own commit message repeats
+`193225a..02f8682` and "20 commits" permanently.
+
+**The transferable part is small and dull: a rebase invalidates every SHA an already-written entry
+cites.** If a branch carries a closing entry, either rebase before writing the figures or annotate
+after — and prefer the first, because the second costs a follow-up PR that runs the whole CI matrix
+for three lines of prose.
+
 ```
 $ git rev-list --count 193225a..02f8682
 20
