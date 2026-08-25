@@ -67,7 +67,7 @@ non-reference decoders are type-directed, so there would be nothing to decode ag
 lambda` writes those files for `parse_lambda` and for an editor's grammar to read, not for this
 command.
 
-## `emit` — three targets, two of which round-trip
+## `emit` — three targets, and every one reads back
 
     redextape emit p.rxt --lang tm                    the machine, to stdout
     redextape emit p.rxt --lang tm -o p.tm            …to a file
@@ -83,7 +83,15 @@ exits `2` rather than being a silent no-op.
 |---|---|---|
 | `tm` | a complete self-describing machine, header included | yes — `parse_tm_full`, and `redextape run` |
 | `lambda` | the λ-calculus lowering of the program | yes — `parse_lambda` |
-| `asm` | the register-machine lowering | **no** — see below |
+| `asm` | the register-machine lowering | yes — `parse_asm` |
+
+**All three emitted forms read back.** `parse_asm` is the newest of the three readers, landing
+alongside `Program::validate` and two round-trip properties, so nothing `emit` writes is write-only
+anymore — every emitted file opens by naming the parser that reads it back. What `asm` does not yet
+have is a place in `redextape run`: `run` still dispatches on extension between a `.tm` machine and
+`.rxt` (or stdin) source, and does not take a `.asm` file — running one from the command line is a
+later slice, not this one. Emit asm to read it back with `parse_asm`; to *run* a program through the
+TM backend from the command line, go through `--lang tm` instead.
 
 `--lang tm` goes through `run_tm_described` rather than a bare lowering, because that is what produces
 a `TmHeader`. It costs a bounded simulation, and it is what makes the emitted file runnable:
@@ -120,16 +128,6 @@ A polymorphic identity types as `(t2) -> t2`, which carries both refused shapes 
 is fine — it parses, it typechecks, and the reference backend evaluates it — so this is exit `2` and
 not exit `1`. The `<non-value>` on the reference line is a result, not a failure: the mini-language
 can produce a closure, and no text form encodes one.
-
-**`--lang asm` writes a file nothing can read back.** `parse_asm` was promised by an early plan's key
-interfaces and never landed, so no program — this one included — can parse the asm text form. The
-target ships anyway, and every emitted file opens by saying so:
-
-    ; This file cannot be read back. `parse_asm` is unclaimed — nothing, including
-    ; redextape itself, can parse the asm text form. Emitted for reading only.
-
-That comment is the entire mitigation. Emit asm to read it; do not build anything that expects to load
-it back.
 
 **`--lang tm` refuses a program whose values do not fit the tape**, and refusing is the whole point:
 

@@ -5,11 +5,17 @@
 //! the web UI), which keeps this crate WASM-clean and matches the model/renderer split §9.1 locks in.
 //!
 //! WHY THE PRINTERS REPORT SPANS INSTEAD OF SOMETHING RE-LEXING THEIR OUTPUT. Only the source language
-//! has a reusable lexer. λ's parser scans chars inline with no token type, TM's is line-oriented, and
-//! asm has no parser at all — so "re-lex the printed text" would mean three new scanners recovering
-//! structure the printer just discarded, each obliged to stay in step with its printer and nothing
-//! forcing them to agree. That is the second-parallel-implementation failure this project's
-//! conventions treat as a defect rather than a style choice.
+//! has a reusable lexer. λ's parser scans chars inline with no token type, and TM's and asm's are
+//! line-oriented and hand back a `Machine` and a `Program` — a shape, never a classified span. So
+//! "re-lex the printed text" would still mean three new scanners recovering structure the printer
+//! just discarded, each obliged to stay in step with its printer and nothing forcing them to agree.
+//! That is the second-parallel-implementation failure this project's conventions treat as a defect
+//! rather than a style choice.
+//!
+//! **This clause read "asm has no parser at all" until 2026-08-24, when `parse_asm` landed and made
+//! it false.** The count did not move: what rules a reader out here is that it returns a structure
+//! rather than spans, which is true of all three and was true of the two that already existed. The
+//! sentence named the wrong property — absence rather than shape — and a new parser exposed it.
 
 use crate::core::NodeId;
 use crate::lexer::lex;

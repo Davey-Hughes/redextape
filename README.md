@@ -30,8 +30,7 @@ it — a per-frame tree costs 850 MB against a 32 MB history ring, and most step
 any budget that is still affordable
 (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2). What the visualizer the
 project is *for* still lacks: click-linking between the panes, dual-focus highlight while running,
-editable λ/TM panes with detach-on-edit, the λ pane's structural tree (deliberately, see above), and the
-CLI's `run` and emit subcommands — `redextape fmt` and `redextape lint` ship as of 2026-08-19.
+editable λ/TM panes with detach-on-edit, and the λ pane's structural tree (deliberately, see above).
 See "Development & CI" below to build and run it, or still `cargo run --example` for the raw backends
 without a browser.
 
@@ -160,10 +159,12 @@ as it diverges. Both are reachable only because control now returns from each β
   unscheduled: a per-frame tree costs 850 MB against `HISTORY_BYTES`' 32 MB ring, and most steps have no
   tree to draw at any budget that is still affordable
   (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2).
-- **CLI, the second half** — `crates/redextape-cli` exists and `redextape fmt` / `redextape lint`
-  work (Roadmap Plan 6's first half, 2026-08-19); see that crate's own README. Still unbuilt:
-  `redextape run` and the subcommands to emit λ / TM artifacts, `parse_asm`, `--deny-warnings`, and a
-  config file. The comment-retention decision that used to block `fmt` closed one branch earlier.
+- **CLI, the last two knobs** — `crates/redextape-cli` exists and all four subcommands work:
+  `redextape fmt` / `redextape lint` (Roadmap Plan 6's first half, 2026-08-19) and `redextape run` /
+  the `emit` subcommands (Plan 6's second half, 2026-08-23); see that crate's own README. `parse_asm`
+  landed 2026-08-24, so all three of `emit`'s text forms round-trip; `redextape run`
+  still does not take a `.asm` file, though. Still unbuilt: `--deny-warnings` and a config file. The
+  comment-retention decision that used to block `fmt` closed one branch earlier.
 - **LSP** — `crates/redextape-lsp`, deferred to v2.
 
 Until those land, the examples are the interface:

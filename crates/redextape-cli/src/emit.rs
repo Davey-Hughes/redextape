@@ -1,9 +1,9 @@
 //! `redextape emit` — compile a program to a backend text form.
 //!
-//! **TWO OF THE THREE TARGETS ROUND-TRIP AND ONE DOES NOT.** `tm` re-parses through
-//! `parse_tm_full` and `lambda` through `parse_lambda`. `asm` cannot: `parse_asm` is unclaimed, so
-//! nothing — including this program — can read an emitted `.asm` back. That target writes a header
-//! comment saying so, which is the whole mitigation.
+//! **ALL THREE TARGETS ROUND-TRIP.** `tm` re-parses through `parse_tm_full` and `lambda` through
+//! `parse_lambda`, and `asm` through `parse_asm`. All three emitted forms read back. The asm target
+//! writes a header comment naming the function that reads it back, and warning that `redextape run`
+//! does not take the file it names.
 
 use crate::input::{Input, write_atomic};
 use crate::report;
@@ -17,19 +17,21 @@ pub enum Lang {
     Tm,
     /// The λ-calculus lowering of the program, which `parse_lambda` and the editor grammar read.
     Lambda,
-    /// The register-machine lowering. Write-only: nothing parses the asm text form, and the emitted
-    /// file opens with a comment saying so.
+    /// The register-machine lowering, read back by `parse_asm`. `redextape run` does not yet take a
+    /// `.asm` file — that is the next slice; the form is readable, not yet executable from the
+    /// command line.
     Asm,
 }
 
-/// **THE ONE EMITTED FORM THAT CANNOT BE READ BACK**, and the file says so rather than leaving a
-/// reader to discover it. `parse_asm` was promised by Plan 3's key interfaces and never landed;
-/// four consecutive roadmap entries have recorded it as unclaimed. Emitting into that gap was a
-/// deliberate choice — a user-facing artifact that admits the gap is more likely to close it than a
-/// fifth prose mention — and this comment is the whole mitigation.
+/// The asm form's emitted header comment. It used to exist to declare that the file could not be
+/// read back — `parse_asm` was unclaimed, and ten roadmap entries said so. It now names the function
+/// that reads it, because a file that states what opens it is worth more than a bare listing — and it
+/// still warns off the one action that fails: `redextape run` does not take a `.asm` file yet, and
+/// without this line that file falls through to the `.rxt` lexer and reports errors that point back
+/// at this very comment.
 const ASM_PREAMBLE: &str = "\
-; This file cannot be read back. `parse_asm` is unclaimed — nothing, including
-; redextape itself, can parse the asm text form. Emitted for reading only.
+; Register-assembly listing, read back by `parse_asm`.
+; `redextape run` does not yet take a `.asm` file.
 ";
 
 /// Tape encoding for `--lang tm`. `Default` is what an omitted `--encoding` means; the flag itself
@@ -309,14 +311,16 @@ mod tests {
         assert!(term.is_some());
     }
 
-    /// The asm target has NO round-trip test and cannot have one — `parse_asm` is unclaimed. What is
-    /// testable is that the file says so, which is the entire mitigation.
+    /// The asm target's round trip, which this crate could not test until `parse_asm` landed: what
+    /// `emit` writes, `parse_asm` reads — preamble comment and all.
     #[test]
-    fn emitted_asm_declares_that_it_cannot_be_read_back() {
+    fn emitted_asm_parses_back() {
         let (text, err, outcome) = emit_case("asm", "1 + 2", Lang::Asm, None);
-        assert!(matches!(outcome, Outcome::Emitted), "stderr: {err}");
-        assert!(text.starts_with("; This file cannot be read back."), "got: {}", &text[..80.min(text.len())]);
-        assert!(text.contains("parse_asm"), "the comment must name the missing function");
+        assert!(err.is_empty(), "no stderr: {err}");
+        assert!(matches!(outcome, Outcome::Emitted), "emit succeeded");
+        let (prog, ds) = redextape_core::tm::parse_asm(&text);
+        assert!(ds.is_empty(), "the emitted file parses: {ds:?}");
+        assert!(!prog.expect("parses").code.is_empty(), "and it is not empty");
     }
 
     /// **BOTH VALUES, AND `Unary` IS THE ONE THAT USED TO PASS.** The flag carried a

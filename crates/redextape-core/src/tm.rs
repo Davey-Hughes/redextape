@@ -5,6 +5,7 @@
 //! delivering the intermediate oracle `reference == asm-interpreter`.
 
 pub mod asm;
+pub mod asm_syntax;
 pub mod attribute;
 pub mod build;
 pub mod decode;
@@ -21,6 +22,7 @@ pub use asm::{
     AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, Instr, Program, Reg, decode_asm, decode_asm_ty, print_asm,
     print_asm_mapped, run_asm,
 };
+pub use asm_syntax::parse_asm;
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
     AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP,

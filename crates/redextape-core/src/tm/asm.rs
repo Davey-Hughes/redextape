@@ -69,6 +69,77 @@ impl Program {
     pub fn label_index(&self, name: &str) -> Option<usize> {
         self.labels.iter().find(|(n, _)| n == name).map(|(_, i)| *i)
     }
+
+    /// Every way a `Program` can be ill-formed, as messages. Empty means valid.
+    ///
+    /// **This is `run_asm`'s lazy faults, hoisted.** An undefined target and an over-cap register
+    /// already fault, but only when the instruction executes, so a typo on a branch that never fires
+    /// runs clean to completion. Two further checks have no runtime counterpart at all: a duplicate
+    /// name, which `label_index` resolves by silently taking the first, and a name or index the
+    /// PRINTER cannot represent — a label past the end is dropped and an unrepresentable name is
+    /// written unquoted, both silently (design §3.1, §3.3).
+    ///
+    /// `Vec<String>` and not `Vec<Diagnostic>`: a `Program` carries no spans, and one built by
+    /// `lower_asm` has no text for a span to point into. `Machine::validate` returns strings for the
+    /// same reason.
+    ///
+    /// `run_asm` is deliberately unchanged. The two ways to obtain a `Program` must behave
+    /// identically, so this is a check callers opt into rather than a gate on execution.
+    #[must_use]
+    pub fn validate(&self) -> Vec<String> {
+        let mut errs = Vec::new();
+        let n = self.code.len();
+
+        let mut seen: Vec<&str> = Vec::new();
+        for (name, at) in &self.labels {
+            if !label_name_representable(name) {
+                errs.push(format!("label name {name:?} is not representable (empty, or contains whitespace or ; : ,)"));
+            }
+            if seen.contains(&name.as_str()) {
+                errs.push(format!("duplicate label `{name}` (label_index resolves to the first)"));
+            } else {
+                seen.push(name.as_str());
+            }
+            // `n` itself is legal: a trailing skip target points one past the last instruction and the
+            // printer emits it. Anything beyond that is dropped when printed.
+            if *at > n {
+                errs.push(format!("label `{name}` at index {at} is past the end (code length {n})"));
+            }
+        }
+
+        for (i, instr) in self.code.iter().enumerate() {
+            if instr_reg_over_cap(instr) {
+                errs.push(format!("instruction {i} uses a register at or over MAX_REGISTERS ({MAX_REGISTERS})"));
+            }
+            let target = match instr {
+                Instr::Jz(_, l) | Instr::Jmp(l) | Instr::Call(l) => Some(l),
+                _ => None,
+            };
+            if let Some(l) = target
+                && self.label_index(l).is_none()
+            {
+                errs.push(format!("instruction {i} jumps to undefined label `{l}`"));
+            }
+        }
+
+        errs
+    }
+}
+
+/// Whether a label name survives a print-then-parse trip. The rejected set is derived from the
+/// format's own separators rather than chosen: whitespace splits a mnemonic from its operands, `,`
+/// splits operands, `:` ends a label line, and `;` starts a comment.
+///
+/// **Conservative, not precise.** Whether a name actually survives is not a property of its
+/// characters alone — it depends on whether the name sits in a label DECLARATION or a jump/call
+/// OPERAND, and, for whitespace, on whether it sits at an edge or in the interior. Several rejected
+/// names round-trip byte-identically in one or both of those positions; the worst case is the
+/// opposite failure — a name ENDING in `:` used as an operand makes the whole instruction line read
+/// back as a label declaration, mnemonic included, silently and with no diagnostic (design §3.3).
+/// Rejecting the set uniformly anyway is deliberate: `validate` checks names, not occurrences — it
+/// has no way to know where a given label will be used.
+fn label_name_representable(name: &str) -> bool {
+    !name.is_empty() && !name.chars().any(|c| c.is_whitespace() || matches!(c, ';' | ':' | ','))
 }
 
 fn reg_str(r: Reg) -> String {
@@ -93,9 +164,18 @@ fn bin_mnemonic(op: BinOp) -> &'static str {
     }
 }
 
+/// An operand's kind with no value attached. `Operand` itself borrows, so it cannot be compared
+/// across the printer/parser boundary; this can.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum OperandKind {
+    Reg,
+    Imm,
+    Label,
+}
+
 /// One operand, classified by what it IS rather than how it prints — so a label named `retry` can
 /// never be mistaken for a register, which any spelling-based rule would get wrong.
-enum Operand<'a> {
+pub(super) enum Operand<'a> {
     Reg(Reg),
     Imm(u64),
     Label(&'a str),
@@ -108,6 +188,23 @@ impl Operand<'_> {
             Operand::Reg(_) => C::Register,
             Operand::Imm(_) => C::Nat,
             Operand::Label(_) => C::Label,
+        }
+    }
+
+    /// The operand's kind, stripped of its value — what `asm_syntax`'s table has to agree with. This
+    /// is `class` without the `TokenClass` vocabulary, which carries highlighting concerns the parser
+    /// has no use for.
+    #[allow(
+        dead_code,
+        reason = "called only by the differential test `table_agrees_with_the_printer`, which compares this \
+                  against `Shape::kinds`; the parser itself reads operands positionally off the shape and \
+                  never calls it"
+    )]
+    pub(super) fn kind(&self) -> OperandKind {
+        match self {
+            Operand::Reg(_) => OperandKind::Reg,
+            Operand::Imm(_) => OperandKind::Imm,
+            Operand::Label(_) => OperandKind::Label,
         }
     }
 }
@@ -123,7 +220,7 @@ fn operand_str(o: &Operand<'_>) -> String {
 /// The mnemonic and operands of one instruction. `print_asm_mapped` is the only place that joins
 /// them into text, so the listing's separator and its classification cannot disagree about where an
 /// operand starts.
-fn instr_parts(i: &Instr) -> (&'static str, Vec<Operand<'_>>) {
+pub(super) fn instr_parts(i: &Instr) -> (&'static str, Vec<Operand<'_>>) {
     match i {
         Instr::Li(rd, n) => ("li", vec![Operand::Reg(*rd), Operand::Imm(*n)]),
         Instr::Mov(rd, rs) => ("mov", vec![Operand::Reg(*rd), Operand::Reg(*rs)]),
@@ -1291,5 +1388,72 @@ mod tests {
             None,
             "a {l_over}-element list costs one node over budget and must not decode"
         );
+    }
+
+    #[test]
+    fn validate_accepts_a_lowered_program() {
+        let prog = Program {
+            code: vec![Instr::Li(Reg::Loc(0), 1), Instr::Jmp("done".to_string()), Instr::Halt],
+            labels: vec![("done".to_string(), 2)],
+        };
+        assert_eq!(prog.validate(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn validate_flags_an_undefined_jump_target() {
+        let prog = Program { code: vec![Instr::Jmp("nowhere".to_string())], labels: Vec::new() };
+        let errs = prog.validate();
+        assert!(errs.iter().any(|e| e.contains("nowhere")), "{errs:?}");
+    }
+
+    /// Every jumping instruction, not just `Jmp` — the defect this exists to catch is a typo, and a
+    /// typo is as likely in a `jz` or a `call`.
+    #[test]
+    fn validate_flags_undefined_targets_of_jz_and_call() {
+        let prog = Program {
+            code: vec![Instr::Jz(Reg::Rr, "a".to_string()), Instr::Call("b".to_string())],
+            labels: Vec::new(),
+        };
+        let errs = prog.validate();
+        assert!(errs.iter().any(|e| e.contains('a')), "{errs:?}");
+        assert!(errs.iter().any(|e| e.contains('b')), "{errs:?}");
+    }
+
+    #[test]
+    fn validate_flags_a_register_over_the_cap() {
+        let prog = Program { code: vec![Instr::Nil(Reg::Loc(MAX_REGISTERS))], labels: Vec::new() };
+        let errs = prog.validate();
+        assert!(errs.iter().any(|e| e.contains("register")), "{errs:?}");
+    }
+
+    /// `label_index` takes the first match, so a duplicate is silently shadowed rather than reported.
+    #[test]
+    fn validate_flags_a_duplicate_label_name() {
+        let prog =
+            Program { code: vec![Instr::Halt, Instr::Halt], labels: vec![("f".to_string(), 0), ("f".to_string(), 1)] };
+        let errs = prog.validate();
+        assert!(errs.iter().any(|e| e.contains("duplicate")), "{errs:?}");
+    }
+
+    /// Design §3.3: `String` admits names the form cannot represent. This is the asm counterpart of
+    /// `Machine::validate`'s `name_representable` check.
+    #[test]
+    fn validate_flags_an_unrepresentable_label_name() {
+        for bad in ["", "two words", "colon:", "semi;colon", "com,ma"] {
+            let prog = Program { code: vec![Instr::Halt], labels: vec![(bad.to_string(), 0)] };
+            let errs = prog.validate();
+            assert!(!errs.is_empty(), "`{bad}` must be rejected as a label name");
+        }
+    }
+
+    /// Design §3.1: the printer drops these silently. Validation is what makes the loss loud.
+    #[test]
+    fn validate_flags_a_label_index_past_the_end() {
+        let prog = Program { code: vec![Instr::Halt], labels: vec![("far".to_string(), 2)] };
+        let errs = prog.validate();
+        assert!(errs.iter().any(|e| e.contains("far")), "{errs:?}");
+        // One past the end is legal — the printer emits it, and a trailing skip target needs it.
+        let ok = Program { code: vec![Instr::Halt], labels: vec![("end".to_string(), 1)] };
+        assert_eq!(ok.validate(), Vec::<String>::new());
     }
 }

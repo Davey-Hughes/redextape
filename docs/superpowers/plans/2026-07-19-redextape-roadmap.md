@@ -11973,3 +11973,321 @@ Every count this entry quotes, with what produces it:
 **The 218 s figure is the load-bearing one in this entry**, because the decision not to gate the test
 count rests on it alone. It was measured on a warm cache, which is the favourable case; a cold build
 is worse, so the conclusion holds in the direction that matters.
+
+#### PR 1 OF THE ASM-READER SLICE CLOSES — `parse_asm` gets written, a test built to confirm the design's own round-trip claim falsified it instead, and the worst-case label name silently deletes the instruction that carries it (2026-08-25, branch `asm-reader`, `91bda96..1050a19`, 19 commits, plus this entry)
+
+Design: `docs/superpowers/specs/2026-08-24-asm-reader-design.md`. Plan:
+`docs/superpowers/plans/2026-08-24-asm-reader.md`. This is PR 1 of 3 — the header and the CLI path
+follow in PR 2, the fourth tree-sitter grammar in PR 3.
+
+**What closed.** `parse_asm`, promised by Plan 3's key-interface list and named as unclaimed by **10**
+roadmap entries, counted with the command the design carried for the purpose and re-run here rather
+than copied — against this file BEFORE this entry was appended, since the entry being written names
+`parse_asm` itself and would otherwise count its own heading:
+
+```
+$ awk '/^#### /{n++} /parse_asm/{h[n]=1} END{for(i=1;i<=n;i++)c+=h[i]; print c}' \
+    docs/superpowers/plans/2026-07-19-redextape-roadmap.md
+10
+```
+
+Re-run against the file as it stands now, with this entry appended, the same command returns **11** —
+this entry's own heading is the eleventh, not a tenth roadmap entry rediscovering the same gap.
+
+What ships: `crates/redextape-core/src/tm/asm_syntax.rs` (a new file, **505 lines** — `wc -l <
+crates/redextape-core/src/tm/asm_syntax.rs`), holding `parse_asm`, the 24-mnemonic table and the
+`Shape`/`OperandKind` machinery it is checked against; `Program::validate()` in `asm.rs` beside
+`label_index`; the two round-trip properties of design §3.4; and the retirement of six current-tense
+claims across the tree that said the asm form could not be read.
+
+##### THE FINDING THAT OUTRANKS THE FEATURE
+
+`parse(print(p)) == p` is false for an arbitrary `Program`, in three independent ways, and **all three
+were found by reading `print_asm_mapped`, not by testing it.** Two of the three already had a code
+comment admitting them before this branch existed: the printer's own comment records that a label past
+`code.len()` is dropped by `get_mut`, and a second records that label order is normalized across
+indices while preserved within one. Neither comment was wrong. The third asymmetry — label names — had
+no such comment. Instead it had a categorical claim in the design itself, and that claim was false.
+
+##### DESIGN §3.3 CLAIMED NO UNREPRESENTABLE NAME COULD BE READ BACK, AND A TEST WRITTEN TO CONFIRM THAT FALSIFIED IT
+
+The design's original §3.3 read: *"`String` admits a space, a `:`, a newline, and the empty string.
+None can be read back."* Task 6 wrote `a_label_name_with_a_space_does_not_survive_the_trip` to pin the
+second sentence, asserting `!survived`. **The assertion failed**, loudly, on the first run — a
+space-bearing label round-trips byte-identically. The implementer investigated rather than weakening
+the assertion, which is exactly what tightening it from a bare `!survived` (pre-flight fix PF5) was
+for.
+
+**Whether a label name survives print-then-parse is not a property of its characters. It depends on
+POSITION** — whether the name is a label DECLARATION or a jump/call OPERAND — and, for whitespace, on
+whether it sits at an edge or in the interior. Measured across three independent probes (implementer,
+controller, reviewer) and then re-verified row by row by a fourth pass:
+
+| name | as a DECLARATION | as an OPERAND |
+| --- | --- | --- |
+| interior space | survives byte-identically | survives byte-identically |
+| leading/trailing space | silently trimmed, no diagnostic | silently trimmed, no diagnostic |
+| `,` | survives byte-identically | parse error (operand count) |
+| interior `:` | survives byte-identically | survives byte-identically |
+| name ENDING in `:` | survives (`foo::` strips back to `foo:`) | **the instruction vanishes**, no diagnostic |
+| `;` | parse error (the comment split cuts the line) | silently truncated to a shorter name |
+| empty | parse error | parse error |
+
+**The worst case is silent, and it is now pinned by
+`a_label_name_ending_in_a_colon_used_as_an_operand_silently_drops_the_instruction`.** A label named
+`target:`, used as a `Jmp` operand, prints as `"    jmp\ttarget:\ntarget::\n    halt\n"` — three lines,
+and both the first and second end in `:`. `parse_asm`'s line-level label check does not require column
+0, so it reads the WHOLE first line — mnemonic included — as a declaration of a label named
+`jmp\ttarget`, and the second line strips its outer `:` back to the genuine label `target:`. Measured on
+the committed test: the program comes back as `code: [Halt]`, `labels: [("jmp\ttarget", 0), ("target:",
+0)]`, and **zero diagnostics** — the `Jmp` is gone, the real label is replaced by two spurious ones (both
+now bound to index 0, since nothing precedes either declaration), and nothing says so. `validate()`
+rejects the name before anything prints it, which is what keeps this shape out of any program the
+project itself produces; the same test asserts that too, so the guard is shown load-bearing rather than
+decorative.
+
+**Why §3.3 was wrong is worth more than the correction.** It was written from the format's own
+separator list — reasoning about what the grammar *ought* to do to those characters — and never run.
+Survival turned out to depend on which of two independent parsing paths (the label-declaration line
+scan, or the operand-list split) a name passes through, which no amount of reading the separator list
+would have revealed. The design is corrected in place (`7591e2e`) rather than left standing beside a
+disagreeing test; `label_name_representable` itself needed no behaviour change — only its doc, which
+made the same false claim for the same reason — because `validate()` checks names, not occurrences, and
+stays correctly conservative either way.
+
+##### WHAT THE CORPUS ACTUALLY COVERS, AS A LIMIT ON P1'S EVIDENCE
+
+`the_demo_corpus_covers_thirteen_of_the_sixteen_instr_variants` asserts **13 of the 16** `Instr`
+variants are reachable from `DEMOS`, absent `Box`, `BoxGet` and `BoxSet` — re-run here rather than
+trusted:
+
+```
+$ cargo test -p redextape-core --test asm_roundtrip \
+    the_demo_corpus_covers_thirteen_of_the_sixteen_instr_variants -- --nocapture
+test the_demo_corpus_covers_thirteen_of_the_sixteen_instr_variants ... ok
+```
+
+That number moved twice before landing. The plan predicted 13 with only the `Box` family absent — a
+guess, stated as one. Running it measured **12**, because `DEMOS` called `head(cons(7, nil))` and no
+demo called `tail(...)`, so `Tail` was also unreached. One deliberate addition,
+`"tail(cons(7, nil))"`, brought the measured count back to 13 — `DEMOS` now holds **12** entries (`awk
+'/^const DEMOS/,/^\];/' crates/redextape-core/tests/asm_roundtrip.rs | grep -c '^    "'`), eleven of
+them a byte-for-byte copy of `asm_oracle.rs`'s corpus (a different question — backend agreement — reused
+because it was at hand) plus that one deliberate line.
+
+**The `Box`/`BoxGet`/`BoxSet` gap is structural, not a fixture that a better `DEMOS` string could
+close.** Those three variants are emitted only by `defunc`'s mutable-capture boxing rewrite — a `let
+mut` captured by a closure and used as a value — and `asm_roundtrip.rs`'s `lower` helper calls
+`lower_asm` directly on `desugar`'s output; it never invokes `defunc`, which only runs through
+`tm.rs`'s `lower_program`. No string added to `DEMOS` can reach them under this helper. Closing it needs
+a structural change — routing the helper through `lower_program` — which this PR does not make.
+
+##### SIX FALSE CLAIMS RETIRED, AND THE PROCESS FAILURE THAT LEFT A README QUOTING DELETED CODE AS CURRENT
+
+Once `parse_asm` existed, six current-tense claims elsewhere in the tree became false:
+
+1. `ASM_PREAMBLE` (`emit.rs`) — *"This file cannot be read back… Emitted for reading only"* — now
+   names the function that reads it back.
+2. `emit.rs`'s module doc — *"TWO OF THE THREE TARGETS ROUND-TRIP AND ONE DOES NOT"* — now *"ALL THREE
+   TARGETS ROUND-TRIP."*
+3. `Lang::Asm`'s doc — *"Write-only: nothing parses the asm text form"* — now names `parse_asm` and
+   notes `redextape run` does not yet take a `.asm` file (PR 2).
+4. The test `emitted_asm_declares_that_it_cannot_be_read_back`, which asserted the gap was permanent —
+   renamed `emitted_asm_parses_back` and now round-trips an emitted file through `parse_asm` for real.
+5. `cli.rs`'s `--lang` flag doc, user-facing (it feeds `--help`) — the same false claim duplicated onto
+   the clap help text. Outside the brief's named file, found by its own sweep instruction.
+6. `redextape-core/src/analysis.rs`'s module doc — *"asm has no parser at all."* Found by the same
+   sweep, correctly left alone by the implementer (its brief forbade touching `redextape-core`), then
+   fixed by the controller: the constraint existed to protect the finished reader, not to license a
+   false claim shipping in the crate the branch is about. The surrounding argument survives — all three
+   readers (`parse_lambda`, `parse_tm`, `parse_asm`) hand back a structure rather than classified spans,
+   which is what actually rules them out as a re-lexing source, and was true of the two that already
+   existed. The sentence named absence where it meant shape.
+
+**The process failure is worth keeping on its own.** Three separate sweeps — the brief's, the
+implementer's widened one, and the controller's own — all scoped themselves to `.rs` and its siblings
+and never searched Markdown. The controller's sweep reported clean. A later review looked at `.md` and
+found `crates/redextape-cli/README.md` — the crate's own user guide — still titling its `emit` section
+*"three targets, two of which round-trip,"* marking the `asm` row of its capability table `**no**`, and
+quoting the deleted `ASM_PREAMBLE` verbatim as current fact. All three are corrected (`9e634e0`). **A
+sweep's file-type list is a claim about where the risk lives, and all three of us wrote the same wrong
+one.**
+
+**The root README was stale by two earlier PRs, not only this branch.** Its "Still unbuilt" list named
+`redextape run`, the `emit` subcommands, and `parse_asm`; the first two shipped in PR #58
+(`cli-emit-and-run`, 2026-08-23). PR #61 corrected that same README's figures and walked past the false
+prose sitting beside them. This branch fixed all three claims, plus a fourth stale spot beyond the ones
+named — the "CLI, the second half" status paragraph, which still called `run` and `emit` unbuilt. One
+correction then needed a second: the new text first read *"`parse_asm` landed on this branch
+(2026-08-24)"* — a permanent document naming a moving target that stops meaning anything once the
+branch merges, the same species as PR #61's "the branch head" correction and the lambda README's "the
+only names that collapse." Re-worded to name the date alone (`cb28bd7`).
+
+##### THE CONTROLLER'S OWN INSTRUCTION WAS WRONG, AND THE ARBITER IT NAMED WAS SILENT IN BOTH DIRECTIONS
+
+Task 1 opened with seven `#[allow(dead_code)]` placeholders on table machinery with no caller yet. The
+controller told Task 3's implementer that clippy flags an unnecessary `#[allow(dead_code)]` as an
+`unused_attribute`-class warning, and to use that as the arbiter for which allows to remove once
+`parse_instr` became real. **It does not, on stable.** Clippy stayed silent with all seven allows still
+in place after six of them had gained real callers — the prescribed arbiter would have reported success
+while leaving every needless allow in the tree, because it was silent in both the pass case and the
+fail case. The implementer caught this before trusting it, and substituted manual reachability analysis
+— tracing each item's first non-test caller — plus the `dead_code` lint run in the *other* direction:
+removing an allow that should still be needed and confirming `-D warnings` then errors. The reviewer
+independently re-tested both directions, adding a needless allow to a live item (clippy silent,
+confirming the uselessness) and removing the allow from the one genuine survivor (clippy immediately
+errored). Six of the seven allows came off; exactly one remains, and it is permanent:
+
+```
+$ grep -n dead_code crates/redextape-core/src/tm/asm.rs crates/redextape-core/src/tm/asm_syntax.rs
+crates/redextape-core/src/tm/asm.rs:198:        dead_code,
+```
+
+on `Operand::kind`, whose reason now names its only caller, the differential test
+`table_agrees_with_the_printer`. **An instrument that cannot fail cannot verify** — the same lesson this
+file has paid for before, arriving here from the controller's own dispatch rather than from an
+implementer's shortcut.
+
+##### WHAT THIS DID NOT CLOSE
+
+**No CLI path for `.asm`, and no optional header — both PR 2.** `redextape run` still dispatches only
+between a `.tm` machine and `.rxt`/stdin source; a `.asm` file is not yet a `run` input. `AsmHeader` and
+`print_asm_with` do not exist; `emit --lang asm` writes the same headerless form it always has.
+
+**No fourth tree-sitter grammar — PR 3**, and PR 3 needs PR 2 first: the grammar must cover the
+headered form the same way the TM grammar covers `tape <i>` and `result <Ty>`, so it cannot be written
+until the header exists.
+
+**`run_asm`'s faults stay lazy, by design, not as an oversight.** An undefined label or an over-cap
+register still faults only when the instruction executes; `Program::validate()` hoists the same checks
+out for a caller who wants them eagerly, but the two ways to obtain a `Program` are required to behave
+identically, so `run_asm` itself is untouched.
+
+**The `Box`/`BoxGet`/`BoxSet` round-trip gap stays open**, for the structural reason above — it needs
+`asm_roundtrip.rs`'s helper routed through `defunc`, not a new demo string.
+
+**`"the brief"` references in tracked `.rs` source are still open, and this branch added one rather
+than closing any.** At the branch point (`91bda96`) there were 13 occurrences across 8 files; at
+`1050a19` there are 14 across 9 — the new occurrence is in `asm_roundtrip.rs`'s own doc comment on
+§3.3's test, a file this branch created. Re-measured directly rather than carried forward:
+
+```
+$ git ls-tree -r --name-only 91bda96 | grep '\.rs$' | while read -r f; do \
+    git show "91bda96:$f" 2>/dev/null; done | grep -c "the brief"
+13
+$ grep -rn "the brief" --include='*.rs' . | grep -v /target/ | wc -l
+14
+```
+
+**The printer/parser file split was not attempted.** `parse_asm` and its mnemonic table live in the new
+`asm_syntax.rs`, but `Program::validate()` — the domain check design §3.4's P2 rests on — landed in
+`asm.rs` beside `label_index` and `print_asm`, mirroring where `Machine::validate` sits next to the TM
+printer. A reader-only file holding every reader-adjacent piece of `asm.rs` does not exist.
+
+**~~One reachable branch of `parse_instr` is still untested.~~ CLOSED before merge, by the
+whole-branch review's own fix round — and this paragraph is the reason it is worth reading.**
+`parse_asm("    jz\tr0,\n")` is the counterexample a Task 3 reviewer built to disprove a report claim
+of unreachability: `jz` is `Shape::RL`, and `"r0,"` splits to `["r0", ""]` — length 2, which matches
+`RL`'s arity, so the arity check does not trip and the label closure's `is_empty()` arm receives the
+empty string. `a_trailing_comma_with_no_label_reaches_the_empty_label_error` now pins it, asserting the
+exact message ``jz` expects a label`.
+
+**THIS ITEM WENT FALSE BETWEEN BEING WRITTEN AND THE BRANCH MERGING, WHICH IS THIS ENTRY'S OWN SUBJECT
+ARRIVING ONE LAYER UP.** It was written when the claim was true, in the section whose entire job is to
+be honest about what remains open — and then the fix round closed it and nothing re-read the sentence.
+The branch that exists to retire six false current-tense claims had a seventh in its own closing entry,
+caught by a pre-merge sweep rather than by any gate. **A "did not close" list is as perishable as any
+other current-tense prose, and it perishes in the one direction nobody watches: work getting DONE.**
+
+Its embedded `grep` had rotted twice over — two line numbers shifted by edits above them, and a third
+match appeared that the old output could not show. Re-run rather than adjusted:
+
+```
+$ grep -n '"jz' crates/redextape-core/src/tm/asm_syntax.rs
+60:    ("jz", Shape::RL),
+202:        "jz" => Ok(Instr::Jz(reg(0)?, label(1)?)),
+396:            ("jz\tr0, skip0", Instr::Jz(Reg::Loc(0), "skip0".to_string())),
+416:        assert_eq!(parse_instr("jz\trr, rr"), Ok(Instr::Jz(Reg::Rr, "rr".to_string())));
+432:        let e = parse_instr("jz\tr0,").expect_err("the label operand is empty, not present");
+```
+
+##### VERIFICATION
+
+CI run 289 — API id 1132, which is not the run number, per this file's own note — was green on
+`175b137`, every job: `detect`, `linear-history`, `rust`, `rust-slow`, `rust-llvm`, `rust-browser`,
+`web` and `gate`. `docker` skipped, as it always is on a pull request, and `rust-scoped` skipped
+because the unscoped `rust` job ran instead. **`175b137` was read from the pull request's own
+`head.sha` rather than assumed from the branch**, which is the check entry 61 added after stating a
+run against a moving target.
+
+**This block trails by one commit and cannot do otherwise.** The commit that replaces this sentence
+is not inside the run it describes; its own CI is in flight as the words are written. That tail is
+irreducible — a CI result recorded inside the tree it describes always is — and naming `175b137`
+rather than "the branch head" is what keeps the claim true anyway.
+
+**This block resolves two lessons this file has already paid for, in tension with each other.** PR
+#55's entry deferred its own figures to "fill at PR time" and was then merged with the blanks still
+live — `2026-08-2X`, `80ec6d4..TBD`, `N commits` reached `main` unnoticed inside `76ba136`, and a whole
+follow-up PR was needed to repair it. A placeholder that is not loud enough to be caught can merge.
+PR #61's entry separately stated *"run 285 green on `9bfe69a`, the branch head"* — a relationship, not
+a fixed value — and it went stale one commit later, needing its own subsequent correction; naming the
+SHA is what ended it. Predicting a run and SHA here would repeat #61's mistake, since neither exists
+yet. Leaving the sentence blank or omitting it would risk repeating #55's. The line above is a single,
+`grep`-able marker rather than either: it names nothing false, and it cannot merge without being
+found and replaced.
+
+Every other figure in this entry was measured locally, on `1050a19`, and reproduced here rather than
+carried from the ledger:
+
+```
+22          commits                  git rev-list --count 91bda96..1050a19
+2026-08-25  branch date              git log -1 --format=%cs 1050a19
+14 files, +3074/-51  whole-branch diff  git diff --shortstat 91bda96..1050a19
+505         asm_syntax.rs lines      wc -l < crates/redextape-core/src/tm/asm_syntax.rs
+1459        asm.rs lines now         wc -l < crates/redextape-core/src/tm/asm.rs
+1295        asm.rs lines at 91bda96  git show 91bda96:crates/redextape-core/src/tm/asm.rs | wc -l
+10          unclaimed-entry count    the awk command above, re-run against this file before this entry
+                                      was appended
+13          Instr variants covered   cargo test -p redextape-core --test asm_roundtrip \
+                                        the_demo_corpus_covers_thirteen_of_the_sixteen_instr_variants
+12          DEMOS entries            awk '/^const DEMOS/,/^\];/' \
+                                        crates/redextape-core/tests/asm_roundtrip.rs | grep -c '^    "'
+1           dead_code allow left     grep -n dead_code crates/redextape-core/src/tm/asm.rs \
+                                        crates/redextape-core/src/tm/asm_syntax.rs
+14 / 9      "the brief" hits/files   grep -rn "the brief" --include='*.rs' . | grep -v /target/
+                                        | wc -l ; grep -rl … | wc -l
+13 / 8      same, at 91bda96         git ls-tree -r --name-only 91bda96 | grep '\.rs$' | while read \
+                                        -r f; do git show "91bda96:$f"; done | grep -c "the brief"
+                                        (hits); file count by the analogous per-file loop
+21          asm_syntax.rs tests      cargo nextest run -p redextape-core --lib -E 'test(asm_syntax)'
+8           asm_roundtrip.rs tests   cargo nextest run -p redextape-core --test asm_roundtrip
+917         redextape-core suite     cargo nextest run -p redextape-core
+1184        workspace suite          cargo nextest run --workspace
+78          redextape-cli suite      cargo nextest run -p redextape-cli
+```
+
+```
+$ cargo nextest run -p redextape-core
+     Summary [  34.276s] 917 tests run: 917 passed, 8 skipped
+
+$ cargo nextest run --workspace
+     Summary [  38.094s] 1184 tests run: 1184 passed, 8 skipped
+
+$ cargo nextest run -p redextape-cli
+     Summary [   1.178s] 78 tests run: 78 passed, 0 skipped
+
+$ scripts/check-doc-figures.sh
+check-doc-figures: 24 documented figures match the tree.
+
+$ scripts/check-citations.sh
+no file:line citations in tracked source: 386 files scanned, 0 violations, 2 escape-hatch marker(s)
+honoured (185 out of scope, binary or recording, 0 skipped — 571 tracked paths in all)
+```
+
+Neither gate's figures moved: this branch adds no new documented figure to a gated README, and touched
+one of the four gated documents — the root README, in two commits (`9e634e0`, `cb28bd7`) — without
+touching any of its four gated figures (workspace crate count, both pre-commit-hook sentences, wasm
+browser test count); the edits landed in the "CLI, the last two knobs" status paragraph, which none of
+those rows locate. It adds no `file:line` citation to tracked source — the design's own
+`file:line` pointers are `docs/`, which both scripts and this file's own convention treat as an
+observation about `91bda96` rather than a pointer, and no symbol-cited claim in this entry needed one.

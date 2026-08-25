@@ -43,9 +43,9 @@ pub enum Command {
     Emit {
         /// The program to compile. `-` reads standard input.
         path: PathBuf,
-        /// Which text form to write. `tm` and `lambda` can be read back — `redextape run` executes an
-        /// emitted `.tm` — while `asm` CANNOT: nothing, this program included, parses the asm text
-        /// form, and every emitted file opens by saying so.
+        /// Which text form to write. All three read back — `tm` through `parse_tm_full`, `lambda`
+        /// through `parse_lambda`, `asm` through `parse_asm`. Only `tm` is also executable from the
+        /// command line: `redextape run` takes an emitted `.tm`, not yet an emitted `.asm`.
         #[arg(long, value_enum)]
         lang: crate::emit::Lang,
         /// Tape encoding, defaulting to unary. `--lang tm` only: passing it with any other target is
