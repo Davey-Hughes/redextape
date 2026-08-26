@@ -255,14 +255,42 @@ ASCII-case-insensitive, because `M.ASM` is as much an artifact as `m.asm`, which
 `run.rs:403` already records for `.tm`. A `.asm` file is a program, not a source, so it takes no
 `--backend`, same as `.tm`.
 
-The pipeline is `parse_asm_full` → `validate()` → `run_asm` with `DEFAULT_CAPS` → `decode_asm_ty`
-against the header's `result`. A file with no header runs and reports that it cannot decode without
-one, which is a diagnostic about the FILE rather than about the tool — the same distinction
-`run --backend lambda` already draws for a function-typed result (exit 2, the program is fine).
+The pipeline is `parse_asm_full` → `validate()` → **header check** → `run_asm` with `DEFAULT_CAPS` →
+`decode_asm_ty` against the header's `result`.
+
+**CORRECTED 2026-08-25, before PR 2 was planned.** This section first read *"A file with no header runs
+and reports that it cannot decode without one"* — run first, refuse after. **The header check now comes
+BEFORE the run**, because a run whose answer can never be printed is work done for nothing: without a
+`result` type there is no decode, so up to `DEFAULT_CAPS.steps` (5,000,000) would be spent to reach a
+value the tool must then decline to name. Refusing first costs one field test.
+
+**The asymmetry with `.tm` is the reason this needed deciding at all, and it runs the opposite way to
+intuition.** A header-less `.tm` has *nothing to run*: the header records the initial tapes, so without
+it there is no input, and `run_artifact_text` already refuses before simulating. A header-less `.asm` is
+**fully runnable** — the `Program` carries its own code, and the header supplies only the result TYPE.
+So for `.tm` refusing early is forced, while for `.asm` it is a choice, and the choice is the same one
+for a different reason: not "there is nothing to run" but "there is nothing that could be printed".
+
+Exit 2, matching the header-less `.tm` path: `Outcome::ToolFailed` means the tool could not answer and
+the program may be perfectly good, which is exactly this case. The message must say so — the file is a
+valid program, it simply declares no result type — and point at `emit --lang asm`, which always writes
+one.
+
+**What is given up, stated rather than discovered later:** a header-less program that FAULTS or caps is
+now refused for its missing header instead of being diagnosed on its own terms. That is the honest cost
+of the ordering, and it is accepted because the fault would be reported for a run whose answer was never
+printable anyway.
 
 `emit --lang asm` writes the header through `print_asm_with`, so an emitted file is
-self-describing and the emit-then-run pair is a fourth leg of the oracle expressible as two shell
-commands, which is what `emit --lang tm` plus `run` already is.
+self-describing and the emit-then-run pair is the second of the two artifact forms `run` executes,
+expressible as two shell commands, which is what `emit --lang tm` plus `run` already is.
+
+**The printer/parser file split stays unmade, decided 2026-08-25.** PR 1's entry records it as not
+attempted and files it here on the grounds that PR 2 touches the printer anyway. It does — `print_asm_with`
+is new — but the move would render the whole printer as relocated lines in a diff whose subject is the
+header, which is the same objection that deferred it once. `print_asm_with` lands beside `print_asm` in
+`asm.rs`; header PARSING joins `asm_syntax.rs`. The mirror to `tm/syntax.rs` stays imperfect and the
+roadmap keeps recording it as open, which is the price of keeping this diff readable.
 
 **The write-only claims come out in PR 1, not here.** `ASM_PREAMBLE` (`emit.rs:30`), the `emit.rs`
 module doc (`:4`), `Lang::Asm`'s doc (`:20`) and the test
@@ -345,5 +373,5 @@ rather than a pointer that must stay true.
 - **A `version` directive.** §5.
 - **`locals.scm`, `injections.scm`, folds, indents, editor packaging, anything in `web/`.** §8, and
   design §12 of the tree-sitter spec, which this slice does not reopen.
-- **`--backend native`.** Still not a CLI dependency; the fourth oracle leg this slice adds is asm,
-  not native.
+- **`--backend native`.** Still not a CLI dependency; the artifact form this slice adds to `run` is
+  asm, not native.

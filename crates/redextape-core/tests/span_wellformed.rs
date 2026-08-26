@@ -22,8 +22,8 @@ use redextape_core::core::{BinOp, Core, NodeId};
 use redextape_core::lambda::{lower, print_lambda_mapped};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::{
-    Binary, EncodingKind, Machine, Move, Program, Rule, State, TmHeader, Unary, defunc, lower_asm, lower_tm,
-    print_asm_mapped, print_tm_mapped, print_tm_with_mapped,
+    AsmHeader, Binary, EncodingKind, Machine, Move, Program, Rule, State, TmHeader, Unary, defunc, lower_asm, lower_tm,
+    print_asm_mapped, print_asm_with_mapped, print_tm_mapped, print_tm_with_mapped,
 };
 use redextape_core::ty::Ty;
 
@@ -131,6 +131,13 @@ fn every_classifier_produces_well_formed_spans() {
         let (at, asm_spans) = print_asm_mapped(&prog);
         check(&at, &asm_spans, &format!("asm {src:?}"));
 
+        // The HEADERED asm form too, for the same reason as the headered TM form below: until now
+        // nothing put `print_asm_with_mapped`'s spans through `check`, so the header's own `result`
+        // and `Ident` spans, and the listing spans shifted by the header's byte length, had their
+        // coverage, ordering and bounds unproven while the bare form's were pinned.
+        let (aht, ahs) = print_asm_with_mapped(&prog, &AsmHeader { result: Ty::Nat });
+        check(&aht, &ahs, &format!("asm+header {src:?}"));
+
         let (mt, ms) = print_tm_mapped(&m);
         check(&mt, &ms, &format!("tm {src:?}"));
 
@@ -144,9 +151,9 @@ fn every_classifier_produces_well_formed_spans() {
         let (ht, hs) = print_tm_with_mapped(&m, &header);
         check(&ht, &hs, &format!("tm+header {src:?}"));
 
-        checked += 5;
+        checked += 6;
     }
-    assert_eq!(checked, CORPUS.len() * 5, "every source must reach all five classified forms");
+    assert_eq!(checked, CORPUS.len() * 6, "every source must reach all six classified forms");
 }
 
 #[test]

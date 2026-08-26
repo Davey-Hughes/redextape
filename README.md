@@ -162,9 +162,11 @@ as it diverges. Both are reachable only because control now returns from each β
 - **CLI, the last two knobs** — `crates/redextape-cli` exists and all four subcommands work:
   `redextape fmt` / `redextape lint` (Roadmap Plan 6's first half, 2026-08-19) and `redextape run` /
   the `emit` subcommands (Plan 6's second half, 2026-08-23); see that crate's own README. `parse_asm`
-  landed 2026-08-24, so all three of `emit`'s text forms round-trip; `redextape run`
-  still does not take a `.asm` file, though. Still unbuilt: `--deny-warnings` and a config file. The
-  comment-retention decision that used to block `fmt` closed one branch earlier.
+  landed 2026-08-24, so all three of `emit`'s text forms round-trip, and `redextape run` now takes
+  `.rxt` source and both runnable artifacts, `.tm` and `.asm`, alike. `.rxlambda` is the one emitted
+  form `run` still does not take — a bare λ term carries no result type to decode against. Still
+  unbuilt: `--deny-warnings` and a config file. The comment-retention decision that used to block
+  `fmt` closed one branch earlier.
 - **LSP** — `crates/redextape-lsp`, deferred to v2.
 
 Until those land, the examples are the interface:
@@ -255,7 +257,7 @@ because all three catch things that arrive in a path nobody thought to list; the
 `scripts/check-all.sh` before merging.
 
 `scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps marked
-`#[ignore = "slow tier: ..."]` — three of them today — which `cargo test` skips by default and CI
+`#[ignore = "slow tier: ..."]` — nine of them today — which `cargo test` skips by default and CI
 runs in its own job. The marker is deliberate: `cargo test` prints the ignored count, so a skipped
 sweep stays visible rather than looking like a passing one.
 

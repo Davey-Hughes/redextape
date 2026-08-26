@@ -12255,7 +12255,8 @@ carried from the ledger:
 1           dead_code allow left     grep -n dead_code crates/redextape-core/src/tm/asm.rs \
                                         crates/redextape-core/src/tm/asm_syntax.rs
 14 / 9      "the brief" hits/files   grep -rn "the brief" --include='*.rs' . | grep -v /target/
-                                        | wc -l ; grep -rl … | wc -l
+                                        | wc -l ; grep -rl "the brief" --include='*.rs' . \
+                                        | grep -v /target/ | wc -l
 13 / 8      same, at 91bda96         git ls-tree -r --name-only 91bda96 | grep '\.rs$' | while read \
                                         -r f; do git show "91bda96:$f"; done | grep -c "the brief"
                                         (hits); file count by the analogous per-file loop
@@ -12291,3 +12292,749 @@ browser test count); the edits landed in the "CLI, the last two knobs" status pa
 those rows locate. It adds no `file:line` citation to tracked source — the design's own
 `file:line` pointers are `docs/`, which both scripts and this file's own convention treat as an
 observation about `91bda96` rather than a pointer, and no symbol-cited claim in this entry needed one.
+
+#### PR 2 OF THE ASM-READER SLICE CLOSES — the asm form gets a `result` header and `run` gets a
+`.asm` path, the ordering between them reverses intuition and was measured rather than argued, and a
+stale README claim survived a second sweep that was the controller's own (2026-08-25, branch
+`asm-header-and-cli`, `76629bd..29137ca`, 15 commits, plus this entry and the whole-branch review's
+fixes)
+
+Design: `docs/superpowers/specs/2026-08-24-asm-reader-design.md` (§5 header, §6 CLI path). Plan:
+`docs/superpowers/plans/2026-08-25-asm-header-and-cli.md`. This is PR 2 of 3 — `parse_asm` landed in
+PR 1 (merged as `76629bd` / #62); the fourth tree-sitter grammar is PR 3, and it needs the headered
+form this PR ships.
+
+**What closed.** `AsmHeader { pub result: Ty }`; `print_asm_with` and `print_asm_with_mapped` beside
+the untouched `print_asm`; `parse_asm_full`'s header directive, with `span_wellformed.rs` extended to
+cover the new printer entry point and a deliberate `None`-header check that would catch a silently
+dropped header rather than pass vacuously; `emit --lang asm` writing the header when the result type
+is expressible and omitting it otherwise; and a `run.rs` `Artifact` enum (`Tm`, `Asm`) that gives
+`.asm` a real `run` path — `parse_asm_full` → `validate()` → header check → `run_asm` →
+`decode_asm_ty`. Confirmed by hand, not only by the test suite:
+
+```
+$ redextape run p.rxt
+[1, 2, 3]
+
+$ redextape emit p.rxt --lang asm -o p.asm && redextape run p.asm
+[1, 2, 3]
+```
+
+Both exit 0 and print the identical value — `emit` then `run` over the asm form is now a second oracle
+pair, reachable as two shell commands the same way the `.tm` pair already was.
+
+##### THE ORDERING DECISION REVERSES INTUITION, AND IT WAS MEASURED RATHER THAN ARGUED
+
+The design's original §6 read *"A file with no header runs and reports that it cannot decode without
+one"* — run first, refuse after. It was corrected in place at `348819d`, the first commit of this
+branch, before the plan (`0d22e1b`) existed: **the header check now runs BEFORE the run**, because a
+run whose answer can never be printed is work spent for nothing.
+
+**The reason is not the one `.tm` has, and that is worth stating precisely.** A header-less `.tm` has
+*nothing to run* — the header carries the initial tapes, so without one there is no input, and
+refusing early is forced. A header-less `.asm` is **fully runnable** — the `Program` carries its own
+code, and the header supplies only the result TYPE. Refusing it early is a choice, not a necessity,
+and it is the same choice for a different reason: not "there is nothing to run" but "there is nothing
+that could be printed." Same exit code, same `ToolFailed` shape, opposite justification.
+
+Measured directly rather than argued from the code: a program that never halts (`loop: jmp loop`)
+refused for its missing header, versus the identical program body with a `result Unit` header, both
+run through the debug binary (`cargo build -p redextape-cli`), timed by wrapping each invocation in
+`date +%s.%N`, five runs each:
+
+```
+$ printf 'loop:\n    jmp\tloop\n' > loop_noheader.asm
+$ printf 'result Unit\n\nloop:\n    jmp\tloop\n' > loop_headered.asm
+$ for f in loop_noheader.asm loop_headered.asm; do
+    for i in 1 2 3 4 5; do
+      s=$(date +%s.%N); target/debug/redextape run "$f" >/dev/null 2>/dev/null; e=$(date +%s.%N)
+      awk -v s="$s" -v e="$e" 'BEGIN{printf "%.4f\n", e-s}'
+    done
+  done
+loop_noheader.asm:  0.0019 0.0014 0.0015 0.0015 0.0014   (median 0.0015s)
+loop_headered.asm:  0.0817 0.0823 0.0835 0.0832 0.0820   (median 0.0823s)
+```
+
+**0.0015s refused versus 0.0823s capped on the identical loop body — a ratio between roughly 40x and
+75x depending on the sample.** The two ABSOLUTE figures are the stable claim and reproduce closely: an
+independent re-run over three further batches (5+5, 5+5, then 20+20 interleaved) put the refusal at
+0.0011-0.0021s and the capped run at 0.0813-0.0850s. **The RATIO is the unstable part and is quoted as
+a range for that reason** — that same re-run produced medians of 51x, 64x and 51.7x, and pairing
+extremes spans 40x to 74x, because a numerator of about a millisecond is dominated by process
+start-up. A single hedged number ("roughly 55x") was the first phrasing here; it sat inside the band
+but implied a precision five runs cannot buy. The gap is the
+`DEFAULT_CAPS.steps` budget (`5_000_000`) actually spent: the header-less run pays only process
+start-up plus the header check; the headered run pays that plus 5,000,000 simulated steps before
+`AsmRun::HitCap` gives up. Reading the code cannot show this — only running both paths can.
+
+**The capped-run band did not hold on a later independent run, and widening it is the honest fix.** A
+further five-run measurement of `loop_headered.asm` on the same debug binary gave 0.0785-0.0801s,
+entirely below the 0.0813-0.0850s band above. Re-measured again here, three more batches (5+5+10, same
+binary, same command, cold-start first sample of each batch discarded as the same effect the earlier
+batches already show): 0.0805 0.0805 0.0806 0.0807 0.0807 0.0809 0.0809 0.0810 0.0814 0.0815 0.0815
+0.0817 0.0817 0.0821 0.0822 (median 0.0810s), none below 0.0802s and none above 0.0827s. Three
+independent runs now disagree on the band's edges while agreeing closely on the median (0.0823s,
+somewhere in 0.0785-0.0801s, 0.0810s), which is the same lesson the RATIO paragraph above already
+drew about a millisecond-scale number dominated by process start-up jitter — it just took a third
+sample to show the ABSOLUTE figure has it too. **The band is widened to 0.0785-0.0850s**, the union of
+all three runs, rather than re-centred on whichever run happened to be measured last.
+
+**That widened band did not hold either, and a fourth round is why it is no longer stated as a bound.**
+Re-measured on the branch's final tree — this round's own debug binary, same command, cold-start first
+sample of each batch discarded — 25 runs across two batches (20 then 5): 0.0872 0.0857 0.0855 0.0872
+0.0867 0.0853 0.0847 0.0858 0.0853 0.0846 0.0857 0.0839 0.0838 0.0855 0.0847 0.0849 0.0851 0.0838 0.0844
+0.0848 0.0853 0.0850 0.0849 0.0846 0.0874 (median 0.0851s, min 0.0838s, max 0.0874s). 13 of these 25
+samples sit ABOVE the "widened" 0.0850s ceiling — not a rare exception, more than half the batch. Four
+independent rounds now on record, each falsifying the band the one before it stated: medians 0.0823s,
+~0.0793s (from the 0.0785-0.0801s band), 0.0810s, 0.0851s; extremes spanning 0.0785s to 0.0874s overall.
+**No band from any one round is restated as a bound on the next.** The honest claim left standing is
+the median plus an observed spread, stated as an observation about four measurement sessions rather
+than a prediction about a fifth: `loop_headered.asm` on the debug binary costs on the order of
+0.081-0.085s (the four medians), with individual runs observed as low as 0.0785s and as high as
+0.0874s.
+
+**What is given up, stated rather than discovered later.** A header-less program that would have
+FAULTED or CAPPED is now refused for its missing header instead of being diagnosed on its own terms.
+That is the accepted cost: the fault would have been reported for a run whose answer was never
+printable anyway, so nothing informative is lost — but a header-less program never gets the chance to
+prove it also has a runtime bug of its own.
+
+##### WHAT THE TYPE SYSTEM MADE UNNECESSARY
+
+No "already capped, do not decode" guard was added, and the reason is structural rather than a
+discipline the code has to keep. `AsmRun` is `Ran(AsmOutcome) | HitCap | Fault(String)`, and
+`AsmOutcome` — the `{ result, heap }` pair `decode_asm_ty` consumes — exists **only** inside `Ran`. The
+`match` in `run_asm_artifact` destructures `AsmRun` first, so `HitCap` and `Fault` are arms with no
+`AsmOutcome` value to pass to a decoder even if someone tried; there is nothing of that shape to
+mis-order.
+
+This is the same bug class PR #58 fixed on the `.tm` path — a run that never finished printing a value
+at exit 0 — and the contrast is the point: `simulate` there returned `(tapes, status)` as two
+*separate* values, so a capped run still had tapes a decoder could be called on unless a status check
+ran first. `run_asm` never returns anything of that shape; a capped or faulted run has no `AsmOutcome`
+to misapply. The type does the work a runtime guard would otherwise have to, so no such guard exists.
+
+##### THE ADMISSIBILITY TEST ASKS THE READER, NOT A SECOND COPY OF THE TYPE
+
+`emit --lang asm` decides whether to write a header by calling `parse_ty(&show(&ty))` and writing a
+header only if that round-trips. **This is not a second `matches!` on `Ty`**, restating which types
+are value types — that would be a second copy of `ty::parse_ty`'s admission rule, free to drift from
+the original the moment either changes. Calling `parse_ty` directly asks the actual reader whether it
+would accept what the writer is about to produce, so the two can never disagree.
+
+The one edge this leaves is not a false negative: `MAX_TY_DEPTH` (`64`) makes `parse_ty` refuse a
+deeply nested type, so a program computing one gets no header. But `parse_ty` *is* the reader, so a
+writer that mirrors the reader's own refusal is not wrong — nothing round-trips to a different `Ty`,
+and `Fun` and `Var` fail correctly whether bare or nested inside a `List`.
+
+##### THE PLAN NAMED A CASE THAT CANNOT OCCUR, AND THE FIX WAS FINDING THE ONE THAT CAN
+
+The decision note for this PR originally said a FUNCTION-typed program emits without a header. It
+never reaches that question. `lower_asm` has no register representation for a closure: a bare lambda
+in value position (`Core::Lambda`) is `Unsupported` unconditionally, and a bare function name
+(`Core::Var` naming an `fn`) resolves against the local-variable register environment and misses,
+because function names live in a separate scope the lookup never consults — both fail with "function
+used as a value" or "unbound" before `emit` ever asks whether a header is writable. Every fixture
+tried (`|x| x + 1`, a bare `fn` name, a `let`-bound closure) confirmed it, and the plan was corrected
+in place at `eca27e7` rather than left standing beside code that behaved differently from what it
+described.
+
+**The reachable inexpressible case is `Ty::Var`, from the empty list.** `[]`'s inference makes a fresh
+type variable and only unifies it against the list's items; an empty list leaves it unconstrained, so
+its type stays `List<t1>` — `parse_ty` rejects the free variable `t1` exactly as it would reject a
+`Fun`'s arrow syntax, so no header is written, but `lower_asm` accepts `[]` fine (`Instr::Nil` carries
+no type to check), so the program still emits. A listing is readable regardless of its result type;
+omission, not refusal, is what the optional header buys.
+
+##### A CONTRACT REGRESSION CAUGHT BY A CONTROL CASE
+
+`result :` — a label named `result`, with a space before its colon, legal for any identifier here —
+was being swallowed as a malformed `result` directive instead of read as the label it is, because the
+directive dispatch ran `strip_prefix("result")` before the label check ever saw the line. `foo :`
+still parsed correctly, which is the control that turns this from a curiosity into a demonstrated
+break: an input that worked before the task and stopped working after it, inside the same commit.
+
+**Fixed by reordering, not by adding a second `:` check to the directive guard**: "a line ending in
+`:` is a label declaration, full stop" is already this grammar's rule, so the label check now runs
+first and the directive dispatch never sees a line that already ended in `:`. The regression test
+failed against the pre-fix ordering and passed after; a reviewer then hand-traced the old ordering
+itself to confirm the two checks are now exhaustive and mutually exclusive, not merely passing by
+luck.
+
+##### THE BRANCH CONTRADICTED ITSELF INSIDE ONE COMMIT, AND BOTH NUMBERS WERE WRONG
+
+The same commit had `crates/redextape-cli/tests/roundtrip.rs` calling the asm emit-then-run pair "a
+fourth leg" of the oracle while `crates/redextape-cli/README.md` called it "a third oracle leg."
+**Resolved by rejecting both numbers rather than picking one.** "Oracle leg" already names one of four
+BACKENDS in this codebase — reference, λ, TM, native (the CLI reaches three of them;
+`redextape-native` is not a CLI dependency) — and the asm round trip is not a fifth backend. It
+re-exercises an existing one, TM, through a different code path, so counting it as a "leg" was the
+wrong noun, not the wrong number.
+
+The replacement is "the second of the two artifact forms `run` executes" — checkable against `run.rs`'s
+`Artifact` enum, which has exactly two variants:
+
+```
+$ sed -n '/^enum Artifact/,/^}/p' crates/redextape-cli/src/run.rs
+enum Artifact {
+    Tm,
+    Asm,
+}
+```
+
+Retiring the ambiguous noun beat picking either number, and both files now use the identical phrase.
+
+##### A STALE CLAIM SURVIVED TWO SWEEPS, AND THE SECOND WAS THE CONTROLLER'S OWN
+
+The root README still said *"`redextape run` still does not take a `.asm` file, though"* — a sentence
+written during PR 1's own fix round, describing a state this PR exists to end. Two sweeps missed it,
+both searching for the string "yet" (from PR 1's "does not **yet** take"), because PR 1's own lesson —
+"three sweeps missed Markdown" — was read as a scope problem and fixed by widening the file types
+searched. **This is the same failure one layer in: the sweep covered Markdown this time, but the
+pattern encoded a guess about the sentence's PHRASING rather than the CLAIM it was checking for.**
+Grepping for a claim's known wording finds every sentence written to match that wording, and nothing
+written differently to say the same false thing. Fixed by sweeping on the claim in both directions —
+on what the tree now makes true, not on what one earlier commit happened to write.
+
+##### THE WHOLE-BRANCH REVIEW FOUND A DECODE FAILURE NAMING THE WRONG FAULT, IN OPPOSITE DIRECTIONS ON THE TWO ARTIFACT FORMS
+
+Before this correction, `decode_asm_ty`/`decode_tape_ty` already collapsed two causes with opposite
+fault attributions into one `None`: a LYING HEADER (the file's own tapes disagree with the `result`
+type it declares — the file's fault) and `MAX_DECODE_NODES` budget exhaustion on an
+otherwise-truthful header (this tool's limit, and reachable from `emit`'s own output on an ordinary
+program whose heap outgrows the budget, not only from an adversarial file). The two artifact
+runners this PR added had to guess which cause applied to that collapsed `None`, and picked
+opposite, individually wrong defaults for the identical signal: `run_artifact_text` (`.tm`) always
+answered `ProgramFailed` (exit `1`, blaming the file) — right for a lying header, wrong for budget
+exhaustion; `run_asm_artifact` (`.asm`) always answered `ToolFailed` (exit `2`, blaming the tool) —
+right for budget exhaustion, wrong for a lying header. `crates/redextape-cli/README.md` stated both
+rules as written, in adjacent paragraphs, each refuting the other.
+
+Fixed by tagging the reason at the point of detection rather than collapsing to `None` at all:
+`decode_word_ty` now returns `Result<Value, DecodeFailure>` (`Mismatch` | `BudgetExhausted`);
+`decode_asm_ty_reason`/`decode_tape_ty_reason` are new, `pub`, and the two existing
+`Option`-returning functions become their `.ok()` — so no caller in `redextape-wasm`,
+`redextape-native-rt`, or the `.asm` example needed editing. Both `run.rs` runners now match on
+`DecodeFailure` and give the same cause the same exit code and an honest message on both artifact
+forms; four new tests cover both causes on both forms.
+
+**Two of those four tests are not free, and the fix's own report claimed otherwise.** The two
+`BudgetExhausted` tests (`an_asm_artifact_that_exhausts_the_decode_budget_is_the_tools_limit`,
+`a_tm_artifact_that_exhausts_the_decode_budget_is_the_tools_limit`) each construct and actually
+decode-attempt a ~36-million-node heap, and that decode is the entire cost of each test. Measured on
+`cargo nextest run -p redextape-cli`, debug build: both take about 4.2s (4.270s and 4.284s in the run
+below) against a suite whose next-longest test is 1.193s — they are now, by a wide margin, the two
+longest tests in this crate, and since `nextest` runs tests concurrently, they alone set the suite's
+4.304s wall time. The fix's own report justified the `.asm` one by pointing at an existing,
+already-un-`#[ignore]`d `redextape-core` test of the identical shape, and called this "pays no new
+cost for the default tier" — true for `redextape-core`'s suite, which was already paying it, false for
+`redextape-cli`'s: nothing of this cost existed in THIS crate's suite before these two tests, and it is
+now that suite's floor.
+
+**The part most worth writing down is what the fix did NOT do.** The first specification for this
+fix read "infer the cause by inspecting `budget` after the call" — leave `decode_word_ty` returning
+`Option<Value>`, and read a `None` as `BudgetExhausted` when `budget == 0`, a `Mismatch` otherwise.
+That is UNSOUND, and the implementer proved it rather than working around it: every mismatch arm in
+`decode_word_ty` (`Ty::Bool`'s bad word, an unrepresentable or out-of-range heap pointer, a cyclic
+heap, a non-value type, `read_result` failing) returns BEFORE touching `budget`, while `budget`
+legitimately reaches exactly `0` from prior, correctly-decremented nodes elsewhere in the same
+decode. A mismatch discovered in that exact state is indistinguishable, by reading `budget` alone,
+from real exhaustion — a real counterexample (any decode whose spend up to a point is exactly
+`MAX_DECODE_NODES`, followed immediately by a mismatched node), not a hypothetical one. Tagging at
+the point of detection removes the inference instead of correcting it.
+
+##### AND `Program::validate` WAS QUADRATIC, ON THE EXACT PATH THIS PR MADE REACHABLE FROM A USER'S OWN FILE
+
+`Program::validate`'s label-duplicate check was `Vec<&str>` plus `.contains()` inside a loop over
+`self.labels` — O(n) per lookup inside an O(n) loop, while the parser that builds `self.labels`
+stays linear. `validate()` predates this PR, but nothing exposed it to an arbitrary user-supplied
+file until now: `redextape run prog.asm` is its first CLI caller reachable from a file this tool
+did not itself write. Fixed to `HashSet<&str>` plus `.insert()`, matching `Machine::validate`'s
+existing `HashSet` sibling in `tm/machine.rs`. Diagnostic order and text are unchanged — every
+existing `validate_flags_*` test in `asm.rs` passes unmodified, and the label-duplicate test still
+finds a duplicate.
+
+**The sharpest form of the finding: it defeated this PR's own headline optimization.** The header
+check is placed before the run specifically to avoid up to `DEFAULT_CAPS.steps` (five million)
+simulated steps on an answer that can never be printed — the ordering decision the section above
+this one measured directly, at 0.0015s refused against 0.0823s capped. But `validate()` runs before
+the header check, not after, so a header-less file with a large enough label count burned the
+quadratic pass before ever reaching the refusal that ordering decision was supposed to make cheap.
+
+Re-measured directly, on the tree at `29137ca`, rather than carried from the fix's own report: a
+header-less `.asm` file of `l0:` through `l{n-1}:`, all labelling one trailing `halt`, run through
+the release binary, five runs each, `date +%s.%N` (this entry's own convention, above):
+
+```
+$ for i in 1 2 3 4 5; do
+    s=$(date +%s.%N); target/release/redextape run "noheader_$n.asm" >/dev/null 2>/dev/null
+    e=$(date +%s.%N); awk -v s="$s" -v e="$e" 'BEGIN{printf "%.4f\n", e-s}'
+  done
+n= 20000  0.0044 0.0042 0.0042 0.0044 0.0040  (median 0.0042s)
+n= 40000  0.0067 0.0066 0.0066 0.0066 0.0068  (median 0.0066s)
+n= 80000  0.0123 0.0130 0.0139 0.0140 0.0119  (median 0.0130s)
+n=200000  0.0221 0.0196 0.0208 0.0206 0.0199  (median 0.0206s)
+```
+
+**The `n=80000` median did not hold, and it is the one row of the four that did not.** `n=20000`,
+`n=40000` and `n=200000` reproduce closely on every later run; `n=80000` does not. An independent
+five-run measurement of the same fixture, same binary, same command gave 0.0088-0.0094s, a median of
+0.0089s — under a third of the 0.0130s above. Re-measured here, 30 further runs of `noheader_80000.asm`
+on the release binary across four separate batches (interleaved with fresh runs of the other three
+sizes, the same order the original table was produced in): the batch run immediately after `n=20000`
+and `n=40000` landed at 0.0084-0.0091s (median 0.0085s), matching the independent figure; three later,
+isolated batches — including one preceded by a discarded warm-up invocation, to rule out simple
+process cold-start — landed at 0.0117-0.0140s (medians 0.0126s, 0.0128s, 0.0124s), matching the
+original figure instead. Across all 30 runs: min 0.0084s, max 0.0140s, median 0.0124s. Nothing tried
+here isolates a cause (not cold start, not batch position within a run of sizes) — this row swings
+between two clusters roughly 40% apart depending on some machine state this entry cannot name, where
+the other three sizes do not. **Stated as what was actually measured rather than a single number: the
+`n=80000` refusal costs 0.0084-0.0140s, median 0.0124s across 30 runs**, covering both this entry's
+original 0.0130s and the independent 0.0089s report as points inside a real spread, not as two
+disagreeing claims.
+
+**"Where the other three sizes do not" above did not hold, and it took only one more measurement round
+to show it.** Re-measured on the branch's final tree — one release binary, two consecutive 20-run
+batches per size, back to back in the same session, same interleaving convention as the original
+table: `n=20000` gave medians of 0.0029s then 0.0040s (ranges 0.0027-0.0033s then 0.0037-0.0044s) — a
+swing as large, proportionally, as anything charged to `n=80000` above — and `n=40000` did the same,
+0.0049s then 0.0062s (0.0045-0.0053s then 0.0046-0.0070s). `n=80000` and `n=200000` were the STABLE
+pair between these same two batches: 0.0092s then 0.0088s, and 0.0209s then 0.0209s. That is the
+opposite assignment of which sizes swing from what this entry claimed above, gathered under conditions
+no different from the ones that produced the claim. **The sentence naming `n=80000` as the sole
+exception is not re-patched a third time; all four rows get a measured band instead of a single row
+getting a spread and the rest a point figure.** A combined 40-run measurement per size (release
+binary, same command):
+
+```
+n= 20000  min 0.0037s  median 0.0040s  max 0.0046s
+n= 40000  min 0.0045s  median 0.0049s  max 0.0067s
+n= 80000  min 0.0084s  median 0.0090s  max 0.0107s
+n=200000  min 0.0186s  median 0.0206s  max 0.0251s
+```
+
+None of the four sizes is uniquely stable and none is uniquely unstable — all four are millisecond
+figures on a shared, unisolated machine, and every band above is what this session observed, not a
+bound on what the next one will.
+
+200,000 labels — ten times this entry's own `loop_noheader.asm` example, and a size the fix's own
+report never ran — refuses in 21ms. Before this fix, the isolated cost of `validate()` alone (not
+process start-up, not the refusal path around it) was measured by the fix's implementer via a
+temporary release test since removed from the tree
+(`perf_measure_validate_quadratic_vs_linear`, not reproducible here without restoring it):
+134.6ms at 20,000 labels, 675.8ms at 40,000, 3.403s at 80,000 — ratios of 5.02x and 5.04x per
+doubling, the O(n²) signature — against 975µs, 1.972ms, 3.980ms for the `HashSet` fix, ratios of
+2.02x and 2.02x, clean O(n). The whole-branch review that filed the finding measured the same
+three sizes through the full CLI binary rather than `validate()` alone — 0.185s, 0.866s, 4.452s,
+larger by process start-up and file parsing but the same ~5x-per-doubling ratio — which, cited
+here rather than re-derived, is what a header-less file of that size cost a user before this fix.
+
+##### WHAT THIS DID NOT CLOSE
+
+**No fourth tree-sitter grammar.** That is PR 3, and PR 3 needs this PR: the grammar must cover the
+headered form the way the TM grammar covers `tape <i>` and `result <Ty>`, so it could not be written
+before `AsmHeader` existed.
+
+**The printer/parser file split stays unmade.** `print_asm_with` and `print_asm_with_mapped` land
+beside `print_asm` and `print_asm_mapped` in `asm.rs`; header PARSING joins `parse_asm_full` in
+`asm_syntax.rs`. `asm.rs` grew by exactly 92 lines and lost none across this PR's own 12 commits, to
+`04805ef`; the whole-branch review's correction round put the `DecodeFailure` split and the
+`validate()` `HashSet` fix in the same file, and is the first thing on this branch to remove lines
+from it:
+
+```
+$ git diff --stat 76629bd..29137ca -- crates/redextape-core/src/tm/asm.rs
+ crates/redextape-core/src/tm/asm.rs | 235 ++++++++++++++++++++++++++++++------
+ 1 file changed, 200 insertions(+), 35 deletions(-)
+```
+
+A reader-only file holding every reader-adjacent piece of `asm.rs` does not exist. The mirror to
+`tm/syntax.rs` stays imperfect, which is the price of keeping this branch's diff readable — the same
+trade-off PR 1's design entry recorded and did not reopen.
+
+**THE CRITICAL FINDING OF THIS ROUND: `725ac3e`'s two-pass split fixed the misattribution above but
+broke the rule that overrides every other property this tool has — no input may crash the process.**
+Pass 1 of `decode_word_ty`'s `Ty::List` arm collected head words into `cells: Vec<u64>` before pass 2
+allocated `heads = Vec::with_capacity(cells.len())` and decoded — and NEITHER allocation was bounded by
+`MAX_DECODE_NODES`, because pass 1 spends no budget at all. A nested list type descends up to
+`MAX_TY_DEPTH` (64) levels before the first `spend` call, allocating a `cells` and a `heads` vector at
+every level along the way, and `cells`'s allocation — lazily grown via `push`, not pre-sized, but still
+fully alive for the whole of pass 2 at that level — stayed alive INCLUDING while pass 2 recursed 64
+levels deeper decoding its first element. On a heap that is one shared spine (any pointer doubles as a
+valid pointer back into the SAME array — the sharing hazard `MAX_DECODE_NODES`'s own doc already
+names), that stacks up to 64 such vectors simultaneously.
+
+Measured directly: a 546-byte `.asm` file — a `nil`/`cons` loop building a 1,000,000-cell heap where
+each cell's head equals its own tail pointer (`heap[i] = (i-1, i-1)`, the same shared-spine
+construction `a_nested_type_over_a_large_heap_is_refused_rather_than_expanded` already uses, just
+nested 64 deep instead of 2), with a `result List<List<...(64 `List<`s)...><Bool>...>` header — peaked
+at 523,432 KiB (511.2 MiB) resident on `725ac3e`'s committed code versus 19,304 KiB (18.85 MiB) after
+the fix below, a 27.1x reduction, both runs correctly reporting the header's lie as `Mismatch`, exit
+`1`, uncapped. Run under `ulimit -v 2097152` (2 GiB): `725ac3e`'s code aborts, `rc=134`, `memory
+allocation of 39998280 bytes failed`, no diagnostic — an input this tool is supposed to never let crash
+the process, crashing it. After the fix: `rc=1`, same `Mismatch` diagnostic as the uncapped run.
+
+Fixed in two parts. First, `heads = Vec::with_capacity(cells.len())` becomes `Vec::new()` — `heads`
+grows only as heads are successfully decoded and every decoded head spends `budget`, so a
+lazily-grown `heads` is already bounded by `MAX_DECODE_NODES`; pre-committing the full capacity up
+front destroyed that property for no gain, and accounts for most of the regression on its own. Second,
+`cells` is eliminated entirely: pass 1 now walks the spine TWICE instead of buffering it — once, as
+before, to confirm the chain reaches nil, counting steps against `heap.len()` and allocating nothing,
+then a second time, re-reading the identical pointers (`word` and `heap` are unchanged between the two
+walks), decoding each head as it is reached instead of remembering it first. This keeps the whole
+point of the two-pass split — a cycle is still detected, at zero budget cost, before any of its own
+elements are decoded — while making the added memory `O(1)` per nesting level instead of
+`O(heap.len())` held alive throughout a `MAX_TY_DEPTH`-deep recursion. A new regression test added this
+round, `tm::asm::tests::a_cyclic_sibling_wins_only_against_its_own_spines_cost`, pins the resulting
+cyclic-vs-sibling behaviour directly; see below, in the paragraph on the doc comment's own overclaim,
+for what it demonstrates and why that claim needed weakening.
+
+**`crates/redextape-cli/README.md`'s `.asm` and `.tm` paragraphs both named the wrong exit code, and
+only one of the two was disclosed here.** At `29137ca` the `.asm` paragraph still read *"a run that
+finishes but whose result does not decode as the header's declared type is this tool's limit
+(`2`)"* — true before the whole-branch review's correction, false after: a lying-header mismatch on
+`.asm` is `1`, the file's fault, matching `.tm`. This bullet named that half. **It missed the `.tm`
+paragraph carrying the identical bug in the opposite direction, undisclosed until the final gate round
+found it.** `.tm`'s paragraph read *"exits `1` too"* unconditionally for a tapes-that-do-not-decode
+failure — true for `DecodeFailure::Mismatch`, false for `DecodeFailure::BudgetExhausted`: measured
+directly, a `.tm` whose decode exhausts the budget on an otherwise-truthful header exits `2`, not `1`.
+Both paragraphs are corrected in the final gate round to state the same two-outcome split
+(`Mismatch` exit `1`, `BudgetExhausted` exit `2`) `run.rs` has implemented since `29137ca`. Nothing
+gates this file — `scripts/check-doc-figures.sh` covers four documents and the CLI README is not one
+— which is why it drifted twice before the second half was caught.
+
+**And the fix the final gate round made TO that paragraph introduced a third drift, corrected only in
+this round.** `725ac3e`'s `.tm` paragraph named a cyclic heap as unconditionally a `Mismatch` — true of
+`decode_word_ty`'s `Ty::List` arm considered alone (its own spine's cycle check runs before it spends
+any `budget`), false of the whole decode: an EARLIER sibling element elsewhere in the type can exhaust
+`budget` first, so `decode_word_ty` never reaches the cyclic element at all, and the failure reported
+is `BudgetExhausted`. `725ac3e`'s asm.rs doc comment made the identical overclaim in the same words
+("A cyclic heap is UNCONDITIONALLY a `Mismatch`, never a `BudgetExhausted`"), copied from the same
+reasoning. Demonstrated directly by a new regression test,
+`tm::asm::tests::a_cyclic_sibling_wins_only_against_its_own_spines_cost`: the identical two-element
+heap (one expensive acyclic `List<Nat>` one element over `MAX_DECODE_NODES` on its own, one cyclic
+`List<Nat>`) decodes to `Mismatch` when the cyclic element comes first and `BudgetExhausted` when it
+comes second, behind the expensive one. Both the doc comment and the README paragraph are weakened in
+this round to state only what is actually guaranteed — a cycle wins against its OWN spine's cost, never
+unconditionally — and this round is the third correction to the same undated-by-a-gate file, for the
+third distinct reason: the exit code was named, then only half re-named, then the still-standing half
+over-claimed a guarantee the code never made.
+
+**No `version` directive.** The asm text form has had one encoding since it existed, and a directive
+with a single legal value is a field nothing can use. It is earned the same way TM's was: only if the
+form ever gains a second encoding, at which point a reader needs to be told which one a given file was
+written under.
+
+**`.rxlambda` is still not a `run` input, and the reason is structural rather than an unimplemented
+path.** No `LambdaHeader` type exists anywhere in the tree:
+
+```
+$ grep -rn LambdaHeader crates/ | grep -v /target/
+$
+```
+
+A bare λ term carries no result type, so there is nothing to decode a value against — the same shape
+of absence that makes a header-less `.asm` refuse, but for `.rxlambda` there is no header format at
+all to someday add, only a term.
+
+**`"the brief"` references in tracked `.rs` source are unchanged by this branch** — this PR touched
+`redextape-core`'s asm files and `redextape-cli`'s emit/run paths, none of which carry the phrase:
+
+```
+$ grep -rn "the brief" --include='*.rs' . | grep -v /target/ | wc -l
+14
+$ git ls-tree -r --name-only 76629bd | grep '\.rs$' | while read -r f; do \
+    git show "76629bd:$f" 2>/dev/null; done | grep -c "the brief"
+14
+```
+
+14 hits at the branch point, 14 now, the same 9 files — carried forward, not touched.
+
+**The `Box`/`BoxGet`/`BoxSet` round-trip gap PR 1 recorded stays open, unaffected by this branch.**
+`the_demo_corpus_covers_thirteen_of_the_sixteen_instr_variants` still asserts 13 of 16, unchanged,
+because the gap is structural — those three variants are emitted only by `defunc`'s mutable-capture
+boxing rewrite, and `asm_roundtrip.rs`'s `lower` helper still calls `lower_asm` directly rather than
+through `lower_program`. This PR did not touch that helper.
+
+**`run_asm`'s faults still resolve lazily, unchanged from PR 1.** An undefined label or an over-cap
+register still faults only when the instruction executes; `Program::validate()` remains the eager
+counterpart for a caller who wants those checks hoisted out, and the two ways of obtaining a `Program`
+are still required to behave identically. `run_asm` itself has no diff in this branch — Task 5's
+changes are confined to `redextape-cli`.
+
+**This block was written before any pull request existed, and held a single grep-able marker where
+the CI result belongs** — because writing a predicted run number or SHA would repeat the mistake entry
+61 paid to correct: a claim about something that had not happened, stated in the tense of something
+that had. The marker was replaced only once a run existed and was green, which is what follows.
+
+**And filling it turned the paragraph that introduced it false, which is worth recording rather than
+quietly tidying.** That paragraph read *"No pull request exists yet for this branch, so no CI run has
+produced a result to name … a marker stands in its place"* — true when written, false the moment the
+marker was replaced, and it sat directly above the result it denied. Caught by a pre-merge sweep, not
+by any gate. **A sentence explaining why something is absent is invalidated by that thing arriving**,
+and the arrival is exactly the moment nobody re-reads it — the same door PR 1's "WHAT THIS DID NOT
+CLOSE" went stale through, one section over.
+
+CI run 295 — API id 1175, which is not the run number, per this file's standing note — was green on
+`9b96393`, every job: `detect`, `linear-history`, `rust` (9m21s), `rust-slow` (5m4s), `rust-llvm`
+(2m21s), `rust-browser` (53s), `web` (1m43s) and `gate`. `docker` skipped, as it always is on a pull
+request, and `rust-scoped` skipped because the unscoped `rust` job ran instead. **`9b96393` was read
+from pull request 63's own `head.sha` rather than assumed from the branch.**
+
+**`rust` took 9m21s here against 3m25s on PR 62's run 289 — the same job, the same runner, 2.7x.**
+Recorded because this file's own note on CI timing variance says to repeat every wall-clock claim, and
+because a reader meeting the 3m25s figure alone would reasonably conclude something in this branch
+made it slower. Nothing here did: `rust` carries `check-all.sh`, whose grammar leg regenerates all
+three tree-sitter parsers from a clean checkout, and the runner's load is not this branch's property.
+The figure is an observation about one run, not a measurement of this change.
+
+**This block trails by one commit and cannot do otherwise.** The commit that replaces this sentence is
+not inside the run it describes; its own CI is in flight as the words are written. That tail is
+irreducible — a CI result recorded inside the tree it describes always is — and naming `9b96393`
+rather than "the branch head" is what keeps the claim true regardless.
+
+##### VERIFICATION
+
+Every figure below was measured on THIS commit — the one carrying this very paragraph, titled
+"docs: no CI run exists for this branch, and three places said one had passed" — rather than from
+an earlier round. The previous version of this block named `673b0ac` ("critical: the allocation
+counter was process-wide across cargo test's threads, and had no realloc") as this branch's last
+code commit; this round adds one more on top of it — the CI-tense corrections below, the corrected
+non-ignored test count, the `alloc_zeroed` implementation, and the spawn-hook hazard note — so
+every figure is re-measured against it instead of being left to describe a commit this branch had
+already grown past, the mistake this same block made once before (see the `29137ca`/`725ac3e`
+history below).
+**This commit is identified by its subject line rather than its own SHA, and that is not a
+stylistic choice: a commit cannot cite its own final hash inside the content that hash is computed
+FROM without invalidating the citation the moment it is written — writing the SHA changes the
+content, which changes the SHA. Every command below is written against `HEAD`, which resolves to
+this commit for as long as no later commit lands on top of it**; `76629bd`, `29137ca`, `725ac3e`,
+`c06632a`, `d0a6178` and `673b0ac` are all EARLIER, already-fixed commits and are cited by SHA as
+usual, because only a commit's reference to ITSELF has this problem. The range-anchored figures
+still cover `76629bd..HEAD`:
+
+```
+21                       commits                  git rev-list --count 76629bd..HEAD
+2026-08-25               branch date              git log -1 --format=%cs HEAD
+22 files, +2926/-132     whole-branch diff        git diff --shortstat 76629bd..HEAD
+1913                     asm.rs lines now         wc -l < crates/redextape-core/src/tm/asm.rs
+1459                     asm.rs lines at 76629bd  git show 76629bd:crates/redextape-core/src/tm/asm.rs
+                                                     | wc -l
+663                      asm_syntax.rs lines now  wc -l < crates/redextape-core/src/tm/asm_syntax.rs
+505                      asm_syntax.rs at 76629bd git show 76629bd:crates/redextape-core/src/tm/asm_syntax.rs
+                                                     | wc -l
+317                      decode.rs lines now      wc -l < crates/redextape-core/src/tm/decode.rs
+300                      decode.rs at 76629bd     git show 76629bd:crates/redextape-core/src/tm/decode.rs
+                                                     | wc -l
+726                      run.rs lines now         wc -l < crates/redextape-cli/src/run.rs
+437                      run.rs at 76629bd        git show 76629bd:crates/redextape-cli/src/run.rs
+                                                     | wc -l
+937, 9 skipped           core suite               cargo nextest run -p redextape-core
+89                       cli suite                cargo nextest run -p redextape-cli
+1215, 9 skipped          workspace suite          cargo nextest run --workspace
+13 of 16                 Instr variants covered   cargo test -p redextape-core --test asm_roundtrip \
+                                                     the_demo_corpus_covers_thirteen_of_the_sixteen_instr_variants
+2                        Artifact enum variants   sed -n '/^enum Artifact/,/^}/p'
+                                                     crates/redextape-cli/src/run.rs
+14 / 9                   "the brief" hits / files, now and at 76629bd (both commands above)
+```
+
+`935` and `1213` moved in the Pinning round (`d0a6178`), and by exactly two each: the whole-branch
+review that closed this PR found that neither of `decode_word_ty`'s two fixes above was pinned by
+any test — spliced back in turn over HEAD in a throwaway worktree, `42d60cc`'s old `Ty::List` arm
+and `725ac3e`'s both passed the entire suite. Two new tests close that,
+`tm::asm::tests::a_cyclic_heap_is_mismatch_even_when_its_own_head_is_expensive` and
+`tm::asm::tests::budget_zero_allocates_nothing_at_any_nesting_depth`, and NEITHER is `#[ignore]`d —
+both are small and fast enough for the default tier (a handful of heap cells at a hand-picked
+`budget` for the first; a 20,000-cell heap at `budget = 0` for the second) — so the Pinning round
+moved the two headline numbers by +2 apiece rather than the SKIPPED count, which stayed 9
+unchanged.
+Each test was confirmed to fail against the old implementation it pins (mutation-tested by splicing
+that implementation back over `decode_word_ty`'s `Ty::List` arm) before being confirmed to pass at
+HEAD; see `.superpowers/sdd/whole-branch-fix-report.md`'s "Pinning round" section for both tests
+verbatim and the mutation output.
+
+```
+$ cargo nextest run --workspace
+     Summary [  35.042s] 1215 tests run: 1215 passed, 9 skipped
+
+$ cargo nextest run -p redextape-cli
+     Summary [   4.419s] 89 tests run: 89 passed, 0 skipped
+
+$ scripts/check-doc-figures.sh
+check-doc-figures: 24 documented figures match the tree.
+
+$ scripts/check-citations.sh
+no file:line citations in tracked source: 388 files scanned, 0 violations, 2 escape-hatch marker(s)
+honoured (188 out of scope, binary or recording, 0 skipped — 576 tracked paths in all)
+```
+
+Neither gate's figures moved, and the precise statement of that matters. **This branch DOES edit a
+gated Markdown document** — `README.md` is one of the four `scripts/check-doc-figures.sh` watches, and
+`04805ef` changes eight of its lines, in the very bullet the stale-claim section above describes
+fixing. What it does not touch is any gated FIGURE: the four rows that gate reads from this file
+(workspace crate count, both pre-commit-hook sentences, wasm browser test count) sit in a section
+those edits never reach. It adds no `file:line` citation to tracked source either.
+
+**This sentence first read "touches no gated Markdown document", which is false and contradicted
+itself inside its own dash clause** — it denied the edits while naming them. PR 2 of this slice found
+that phrasing in a review; the entry immediately above this one, for PR 1, already draws the
+distinction correctly (*"touched one of the four gated documents — the root README — without touching
+any of its four gated figures"*). Losing precision the previous entry had, two paragraphs after this
+entry's own centrepiece about a sweep pattern that encoded a guess instead of a claim, is the same
+fault in the same document on the same day.
+
+By hand, the exit codes for the paths this PR adds: a good `.asm` run exits 0 (shown above); a
+header-less `.asm` exits 2 (`redextape run loop_noheader.asm`, above); `--backend` on a `.asm` file
+exits 2; a capped run exits 1, the same fault-class exit a `.tm` cap uses; a lying header — tapes
+that disagree with the `result` type they declare — exits 1 on both artifact forms (`redextape run
+mismatch.asm` → exit 1, confirmed by hand); and `MAX_DECODE_NODES` exhaustion on an
+otherwise-truthful header exits 2 on both, the tool's limit rather than the file's, reachable from
+`emit`'s own output on an ordinary program whose heap outgrows the budget, not only from a
+hand-written file.
+
+**This round edits `crates/redextape-cli/README.md` a third time, for the third reason named above,
+and moves no gated figure either.** The edit weakens the same `.tm` paragraph's cyclic-heap sentence
+(see the CRITICAL and doc-comment-overclaim paragraphs above) — prose, not one of the four rows
+`scripts/check-doc-figures.sh` reads from this file. `$ scripts/check-doc-figures.sh` in the code block
+above was run after this edit and still reports 24 of 24, unchanged.
+
+**AN ISOLATION ROUND CLOSES A DEFECT THE PINNING ROUND'S OWN NEW TEST CARRIED FORWARD, UNCAUGHT BY
+EITHER GATE.** `budget_zero_allocates_nothing_at_any_nesting_depth` (the Pinning round's second test,
+above) failed deterministically under plain `cargo test --release -p redextape-core --lib` — 5 of 5
+runs, `681 passed; 1 failed; 3 ignored`, reading `475569`/`392919`/`604451`/`548888`/`497866` bytes
+against the 4,096-byte bound — while every CI job would have stayed green: `rust-slow` runs
+`scripts/check-slow.sh`, which passes `--ignored` and filters this non-`#[ignore]`d test out entirely,
+and every other Rust job drives `cargo nextest`, which gives each test its own OS process.
+`scripts/check-slow.sh --all` — documented in its own usage as "fast tier + slow tier, i.e.
+everything" — is the one invocation that actually runs this test outside nextest, and it failed. At
+`c06632a`, one commit before the Pinning round added this test, the same command read `680 passed;
+0 failed`.
+
+The cause was exactly the risk the test's own doc comment already named and then accepted anyway:
+`BYTES_ALLOCATED` was one process-wide `AtomicUsize`, and plain `cargo test` runs all 682
+non-`#[ignore]`d `redextape-core` lib tests against that ONE counter at 32-way parallelism. A
+concurrent test's allocation landing inside this test's before/after window added to the count
+without this test's own behaviour changing at all — a probe read at HEAD before this round
+confirmed the true value was exactly zero bytes, so every one of those failing readings was 100%
+foreign noise.
+
+**Fixed per-thread, not per-process.** `libtest`'s default parallel runner spawns a genuinely new OS
+thread for every `#[test]` function — concurrency is bounded by `--test-threads`, but no two tests ever
+share a THREAD, only the process. Replacing `BYTES_ALLOCATED: AtomicUsize` with a
+`thread_local! { static BYTES_ALLOCATED: Cell<usize> }` makes the reading exact under every runner this
+repository has: nextest's one-process-per-test makes it exact trivially, and plain `cargo test`'s many
+concurrent threads each carry their own zero-initialized counter that only their own test ever touches.
+Confirmed: `cargo test --release -p redextape-core --lib` now reads `682 passed; 0 failed; 3 ignored`
+on three consecutive runs, matching its debug build and `--include-ignored` (`685 passed; 0 failed;
+0 ignored`), and `cargo nextest run --workspace` is unchanged at `1215 tests run: 1215 passed,
+9 skipped`.
+
+**The bound tightens from `< 4096` to `assert_eq!(.., 0)`.** With the counter now exact, the "generous
+margin, in case a future runner shares this binary's process across threads" reasoning the Pinning
+round's doc comment gave for `< 4096` no longer has a case to guard: a `thread_local!` counter cannot
+see a concurrent test's allocation regardless of how many share the process. Tracing the call graph
+confirms zero is not merely observed but exact: PASS 1 counts without allocating, PASS 2's `heads` is
+`Vec::new()` (no allocation before a first successful push), and at `budget = 0` the first `spend`
+anywhere in the call — reached by recursing to the innermost `Ty::Nat` before any `heads.push` on any
+level returns — fails via `?` before any `Vec` grows. Mutation-tested the same way as the Pinning
+round's two tests: `725ac3e`'s old `Ty::List` arm (buffers the spine into `cells: Vec<u64>`, pre-sizes
+`heads` via `Vec::with_capacity`) spliced back over HEAD reads `4,248,576` bytes against the `0` bound
+and fails; restored, the test is green again, `git diff` against the pre-splice file empty both times.
+
+**A second, IMPORTANT finding in the same allocator: no `realloc`.** `#[global_allocator]` is
+crate-global regardless of which module declares it, so `CountingAlloc` was already routing every
+allocation in all 685 of this binary's tests, not just this one test's — and inheriting
+`GlobalAlloc`'s default `realloc` (allocate the new size, copy, deallocate the old) defeated in-place
+`Vec`/`String` growth for every one of them. It is also most of why the shared-process noise floor read
+hundreds of KB: each foreign `Vec` growth was paying for a fresh allocation and copy it would not have
+paid running under `System` alone, and the default counts the FULL new size on every growth step
+rather than the net increase. Implemented `realloc` to delegate to `System::realloc` (which grows in
+place when the underlying allocator can) and count only `new_size`'s excess over the old layout's
+size. Measured effect on the mutation figure above: the identical `725ac3e` splice read `5,297,024`
+bytes under the Pinning round's process-wide, default-`realloc` counter and reads `4,248,576` bytes
+under this round's per-thread, real-`realloc` counter — smaller because growth is now counted once,
+net, instead of once per `Vec` growth step at the FULL new capacity — and decisively over the `0`-byte
+bound either way, by millions of bytes.
+
+**Why this test still cannot follow `viewmodel_contract.rs`'s own precedent — a dedicated integration
+binary — and why that divergence is now safe.** `decode_word_ty` is `pub(crate)` (see its doc:
+`tm::decode` must not carry a second copy of this decoder), so a `tests/`-directory integration crate
+cannot call it with a hand-picked `budget`; the counter has to live inside `redextape-core`'s own
+`#[cfg(test)]` unit tests, installed as `#[global_allocator]` over the crate's entire 685-test `--lib`
+binary rather than one 25-test integration binary. That is exactly the divergence that made the counter
+wrong the first time. What makes it safe now is the same thing that made it safe to fix: the counter is
+scoped per-thread, and `libtest` never shares a thread across two tests, so which OTHER tests share the
+binary no longer matters — only which tests share a THREAD, and none do.
+
+**A re-wrap artifact, unrelated to the two findings above, corrected in the same commit.**
+`decode_word_ty`'s doc comment (the paragraph on `Ty::List`'s cycle-vs-`Mismatch` guarantee) had one
+line — *"...such qualification — because the `Ty::List` arm below walks the"* — 69 characters against
+neighbouring lines running 89-104, ending mid-sentence with no content reason to break there. Re-flowed
+across the following three lines with no wording change.
+
+##### VERIFICATION (this round)
+
+```
+20                       commits                  git rev-list --count 76629bd..HEAD
+1893                     asm.rs lines now         wc -l < crates/redextape-core/src/tm/asm.rs
+22 files, +2899/-131     whole-branch diff        git diff --shortstat 76629bd..HEAD
+937, 9 skipped           core suite               cargo nextest run -p redextape-core
+89                       cli suite                cargo nextest run -p redextape-cli
+1215, 9 skipped          workspace suite          cargo nextest run --workspace
+```
+
+None of the three test-count rows moved — this round fixes an existing test's instrument, adding and
+removing none — so only `commits`, `asm.rs lines now`, and `whole-branch diff` differ from the block
+above.
+
+```
+$ cargo test --release -p redextape-core --lib   (run 1 of 3)
+test result: ok. 682 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 1.87s
+$ cargo test --release -p redextape-core --lib   (run 2 of 3)
+test result: ok. 682 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 2.00s
+$ cargo test --release -p redextape-core --lib   (run 3 of 3)
+test result: ok. 682 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 1.98s
+
+$ cargo test -p redextape-core --lib
+test result: ok. 682 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 5.72s
+
+$ cargo test --release -p redextape-core --lib -- --include-ignored
+test result: ok. 685 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.94s
+
+$ cargo nextest run --workspace
+     Summary [  35.658s] 1215 tests run: 1215 passed, 9 skipped
+
+$ cargo clippy --workspace --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.92s
+
+$ cargo fmt --all --check
+(no output — clean)
+
+$ cargo clean -p redextape-core --target wasm32-unknown-unknown && \
+  cargo build -p redextape-core --target wasm32-unknown-unknown
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.64s
+
+$ scripts/check-doc-figures.sh
+check-doc-figures: 24 documented figures match the tree.
+
+$ scripts/check-citations.sh
+no file:line citations in tracked source: 388 files scanned, 0 violations, 2 escape-hatch marker(s)
+honoured (188 out of scope, binary or recording, 0 skipped — 576 tracked paths in all)
+```
+
+Root README's slow-tier ignore count re-checked: `grep -rn '#\[ignore = "slow tier' --include="*.rs" .
+| wc -l` still reads `9`, unchanged (this round adds no `#[ignore]`d test), so `README.md`'s own "nine
+of them today" stays correct.
+
+`git diff --stat` (two tracked files): `crates/redextape-core/src/tm/asm.rs` (the per-thread counter,
+the `realloc` implementation, the tightened bound, and the doc-wrap fix) and this roadmap file (the
+re-measured VERIFICATION block above). `decode_word_ty`'s behaviour is byte-identical to `d0a6178` —
+the diff touches only the `#[cfg(test)] mod tests` block and the doc comment above `Ty::List`;
+`cargo build -p redextape-core --target wasm32-unknown-unknown` above, run after `cargo clean -p
+redextape-core --target wasm32-unknown-unknown`, confirms the `#[cfg(test)]`-only
+`#[global_allocator]` still does not reach the wasm32 library build. See
+`.superpowers/sdd/whole-branch-fix-report.md`'s "Isolation round" section for the test verbatim, all
+four runner shapes' output, and the mutation transcript.
+
+Committed as a single commit on top of `d0a6178`.

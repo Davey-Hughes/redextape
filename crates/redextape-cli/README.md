@@ -6,6 +6,7 @@
     redextape lint foo.rxt           parse, type and lint diagnostics
     redextape run foo.rxt            evaluate the program, print the value
     redextape run foo.tm             simulate the machine, decode its tapes
+    redextape run foo.asm            execute the listing, decode its result
     redextape emit foo.rxt --lang tm compile to a backend text form
 
 Exit codes: `0` success, `1` the check failed (`fmt --check` found a file it would rewrite, or `lint`
@@ -33,14 +34,15 @@ outcome across them is what sets the exit code.
 read. Name a binding `_x` to say you meant it. A warning does not fail the run — `lint` exits `0` and
 prints it — and there is no `--deny-warnings` yet.
 
-## `run` — one verb, two input kinds
+## `run` — one verb, three input kinds
 
-`run` dispatches on the file extension, and the two arms are different pipelines:
+`run` dispatches on the file extension, and the arms are different pipelines:
 
     redextape run p.rxt                    a program: parse, typecheck, evaluate, print
     redextape run p.rxt --backend lambda   the same program through the λ-calculus lowering
     redextape run p.rxt --backend tm       …and through the Turing machine
     redextape run p.tm                     a machine: parse, simulate, decode the tapes
+    redextape run p.asm                    a register-machine listing: parse, validate, require a header, execute, decode
     redextape run -                        stdin, always read as a program
 
 `--backend {reference,lambda,tm}` chooses the evaluator for a `.rxt` program and defaults to
@@ -49,18 +51,46 @@ prints it — and there is no `--deny-warnings` yet.
 decode the result back to a value. On a program all three can answer for, all three print the same
 line, and that agreement is the property the whole project is built on.
 
-**`--backend` on a `.tm` file is an error, not a silent ignore.** The artifact already *is* a Turing
-machine, so there is nothing left to choose, and accepting the flag would imply otherwise.
+**`--backend` on a `.tm` or `.asm` file is an error, not a silent ignore.** The artifact already *is* a
+Turing machine or a register-machine program, so there is nothing left to choose, and accepting the
+flag would imply otherwise.
 
 **A `.tm` file is runnable because it is self-describing.** Its header carries the encoding, the field
 width, the slot count and the result type — exactly what `TmHeader::init` needs to build the initial
 tapes and what `decode_tape_ty` needs to read the final ones. A header-less `.tm` still parses, and
 `run` still refuses it, with a message saying to re-emit through `redextape emit --lang tm`, which
 always writes a header. A machine that does not halt inside `TM_DEFAULT_CAPS` exits `1` and prints
-nothing: a partial tape that happens to decode is not an answer. A file whose final tapes do not
-decode as the `result` its own header declares exits `1` too — a header is a promise about the tapes,
-and a file that breaks its own promise is the file's fault, where the same decode refusal under
-`--backend tm` is a `2` because there the type comes from the program's own inference instead.
+nothing: a partial tape that happens to decode is not an answer. A file whose final tapes fail to
+decode as the `result` its own header declares is not one failure but two, with opposite fault
+attributions (`DecodeFailure::Mismatch` and `DecodeFailure::BudgetExhausted`). Tapes that contradict
+the header's own declared type — a `Bool` slot holding neither `0` nor `1`, a heap pointer out of
+range — are a `Mismatch`: a header is a promise about the tapes, and a file that breaks its own promise
+is the file's fault, exit `1`. A cyclic heap is caught the same way, but only against its OWN cost: a
+cycle reached before the decode's shared budget is exhausted by anything else is a `Mismatch`, exit
+`1`, same as above — but a cycle sitting behind an expensive sibling elsewhere in the type is never
+even reached once that sibling alone exhausts the budget, and the failure reported is
+`BudgetExhausted` like any other, exit `2`. Two files carrying the identical cyclic heap can exit
+differently depending only on where in the type the cyclic element sits relative to an expensive one.
+Tapes that are consistent with the header but too large to finish decoding within `MAX_DECODE_NODES`
+are `BudgetExhausted`: the header may be entirely truthful, and it is this tool's limit that stops the
+decode, exit `2`. The same decode refusal under `--backend tm` is always a `2`, for an unrelated
+reason: there the type comes from the program's own static inference rather than a file's `result`
+header, so there is nothing the file could have lied about.
+
+**A `.asm` file needs its header for the opposite reason a `.tm` file does.** A `.tm` header carries
+the *initial* tapes, so a header-less machine has nothing to run at all. A register-machine listing
+runs perfectly well with no header — it is a complete program — the header only names the type its
+result register should decode as. So a header-less `.asm` file parses, validates and would execute
+fine; `run` refuses it anyway, before running it, because it would otherwise spend up to
+`DEFAULT_CAPS.steps` (five million) reaching an answer it then has no declared type to print. The
+refusal points at `redextape emit --lang asm`, which writes a `result` header whenever the program's
+result type can be expressed. A run that hits the step, stack or heap cap, or that faults, is the
+program's fault (`1`). A run that finishes decodes its result against the header's declared type, and
+that decode has the same `DecodeFailure::Mismatch` / `DecodeFailure::BudgetExhausted` split `.tm` has,
+above: a result that contradicts the header's declared type is a `Mismatch` — the header lied about
+what the program computes — the program's fault (`1`), the same attribution `.tm` gives a lying
+header. A result that is consistent with the header but whose decode exhausts `MAX_DECODE_NODES`
+before finishing is `BudgetExhausted` — the header may be entirely truthful — this tool's limit (`2`).
 
 **`.rxlambda` is deliberately not a `run` input.** A bare λ term carries no result type, and both
 non-reference decoders are type-directed, so there would be nothing to decode against. `emit --lang
@@ -83,15 +113,20 @@ exits `2` rather than being a silent no-op.
 |---|---|---|
 | `tm` | a complete self-describing machine, header included | yes — `parse_tm_full`, and `redextape run` |
 | `lambda` | the λ-calculus lowering of the program | yes — `parse_lambda` |
-| `asm` | the register-machine lowering | yes — `parse_asm` |
+| `asm` | the register-machine lowering, headered when the result type can be expressed | yes — `parse_asm`, and `redextape run` |
 
-**All three emitted forms read back.** `parse_asm` is the newest of the three readers, landing
-alongside `Program::validate` and two round-trip properties, so nothing `emit` writes is write-only
-anymore — every emitted file opens by naming the parser that reads it back. What `asm` does not yet
-have is a place in `redextape run`: `run` still dispatches on extension between a `.tm` machine and
-`.rxt` (or stdin) source, and does not take a `.asm` file — running one from the command line is a
-later slice, not this one. Emit asm to read it back with `parse_asm`; to *run* a program through the
-TM backend from the command line, go through `--lang tm` instead.
+**All three emitted forms read back, and two of the three are also runnable from the command line.**
+`parse_asm` is the newest of the three readers, landing alongside `Program::validate` and two
+round-trip properties, so nothing `emit` writes is write-only anymore — every emitted file opens by
+naming the parser that reads it back. `run` dispatches on extension among a `.tm` machine, a `.asm`
+listing, and `.rxt` (or stdin) source, so
+
+    $ redextape emit p.rxt --lang asm -o p.asm && redextape run p.asm
+
+is the second of the two artifact forms `run` executes — `.tm`'s pair, below, is the first: compiled
+to the register machine, written to disk, read back by a parser that shares no code with the
+compiler, executed, and decoded — the same value the tree-walker gives. `.rxlambda` remains the one
+form `run` does not take; see above.
 
 `--lang tm` goes through `run_tm_described` rather than a bare lowering, because that is what produces
 a `TmHeader`. It costs a bounded simulation, and it is what makes the emitted file runnable:

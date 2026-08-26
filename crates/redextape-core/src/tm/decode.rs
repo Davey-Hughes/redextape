@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use crate::tm::asm::{MAX_DECODE_NODES, decode_word_ty};
+use crate::tm::asm::{DecodeFailure, MAX_DECODE_NODES, decode_word_ty};
 use crate::tm::build::{HEAP, REG};
 use crate::tm::encoding::Encoding;
 use crate::tm::sim::Tape;
@@ -44,8 +44,25 @@ pub fn decode_tape(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) -> Opti
 /// Seeds a fresh `MAX_DECODE_NODES` budget for this call, same as `decode_asm_ty` — `tapes` and `ty`
 /// both come from a `.tm` FILE here, so both the heap's acyclicity (the spine loop's job) and its
 /// decoded SIZE under nested types (the budget's job) are file-supplied and unchecked until now.
+///
+/// `decode_tape_ty_reason`'s `.ok()` — see that function and `asm::DecodeFailure` for why a caller
+/// (`redextape-cli::run`) might want the reason a decode failed instead of just that it did.
 pub fn decode_tape_ty(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Option<Value> {
-    let (word, heap) = read_result(tapes, enc)?;
+    decode_tape_ty_reason(tapes, ty, enc).ok()
+}
+
+/// `decode_tape_ty`, keeping WHY a failed decode failed.
+///
+/// `read_result` failing — a missing REG/HEAP tape, or a REG field this `enc` cannot parse as a Nat —
+/// is `DecodeFailure::Mismatch`: like every other mismatch arm in `decode_word_ty`, it is a claim
+/// about the DATA disagreeing with what the file's header/encoding say to expect, never about running
+/// out of decode budget (`budget` is not even allocated yet at this point).
+///
+/// # Errors
+///
+/// See `DecodeFailure`'s doc for the two causes.
+pub fn decode_tape_ty_reason(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Result<Value, DecodeFailure> {
+    let Some((word, heap)) = read_result(tapes, enc) else { return Err(DecodeFailure::Mismatch) };
     let mut budget = MAX_DECODE_NODES;
     decode_word_ty(word, &heap, ty, &mut budget)
 }

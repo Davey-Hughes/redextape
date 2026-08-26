@@ -15,7 +15,8 @@ use redextape_test_support::arb_expr_over;
 
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{Instr, Program, lower_asm, parse_asm, print_asm};
+use redextape_core::tm::{AsmHeader, Instr, Program, lower_asm, parse_asm, parse_asm_full, print_asm, print_asm_with};
+use redextape_core::ty::Ty;
 
 /// The programs P1 is held over, chosen for `Instr`-variant coverage — which is what P1's evidence
 /// base needs, and what the test below MEASURES rather than assumes.
@@ -258,4 +259,48 @@ fn a_label_name_ending_in_a_colon_used_as_an_operand_silently_drops_the_instruct
         vec![("jmp\ttarget".to_string(), 0), ("target:".to_string(), 0)],
         "two spurious labels replace the one real label and the one real jump"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The headered form: design §5's optionality property, restated over `parse_asm_full` and
+// `print_asm_with` rather than the bare printer/parser pair above.
+// ---------------------------------------------------------------------------
+
+/// P1 for the headered form: what `print_asm_with` writes reads back to identical text.
+#[test]
+fn headered_text_reads_back_to_identical_text() {
+    for src in DEMOS {
+        let prog = lower(src);
+        let h = AsmHeader { result: Ty::Nat };
+        let text = print_asm_with(&prog, &h);
+        let (back, header, ds) = parse_asm_full(&text);
+        assert!(ds.is_empty(), "diagnostics for {src}: {ds:?}");
+        assert_eq!(header, Some(h.clone()), "the header survives for {src}");
+        assert_eq!(print_asm_with(&back.expect("parses"), &h), text, "headered P1 failed for {src}");
+    }
+}
+
+/// Every result type the header admits must survive the trip, not just the common one.
+#[test]
+fn every_admissible_result_type_round_trips() {
+    let prog = lower("1 + 2");
+    for ty in
+        [Ty::Nat, Ty::Bool, Ty::Unit, Ty::List(Box::new(Ty::Nat)), Ty::List(Box::new(Ty::List(Box::new(Ty::Bool))))]
+    {
+        let h = AsmHeader { result: ty.clone() };
+        let (_, header, ds) = parse_asm_full(&print_asm_with(&prog, &h));
+        assert!(ds.is_empty(), "{ty:?}: {ds:?}");
+        assert_eq!(header, Some(h), "{ty:?} did not survive");
+    }
+}
+
+/// The optionality property design §5 rests on: the same bytes, read two ways, give the same program.
+#[test]
+fn a_header_changes_the_program_not_at_all() {
+    for src in DEMOS {
+        let prog = lower(src);
+        let bare = parse_asm(&print_asm(&prog)).0.expect("bare parses");
+        let with = parse_asm(&print_asm_with(&prog, &AsmHeader { result: Ty::Nat })).0.expect("headered parses");
+        assert_eq!(bare, with, "the header must not perturb the program for {src}");
+    }
 }

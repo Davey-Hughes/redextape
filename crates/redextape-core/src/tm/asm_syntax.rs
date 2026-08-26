@@ -10,7 +10,7 @@
 //! for the TM text form, and for the same reasons.
 
 use crate::core::BinOp;
-use crate::tm::asm::{Instr, OperandKind, Program, Reg};
+use crate::tm::asm::{AsmHeader, Instr, OperandKind, Program, Reg};
 use crate::{Diagnostic, Span};
 
 /// The positional operand kinds of one mnemonic. `RI` is `li rd, #n`; `RL` is `jz r, label`.
@@ -98,21 +98,24 @@ pub(super) fn bin_op_for(mnemonic: &str) -> Option<BinOp> {
     })
 }
 
-/// Parse the register-assembly text form. Iterative over a flat line grammar, no recursion, never
-/// panics — `parse_tm`'s shape and contract.
+/// Parse the register-assembly text form, returning the header too. Iterative over a flat line
+/// grammar, no recursion, never panics — `parse_tm_full`'s shape and contract.
 ///
 /// A `None` program means at least one diagnostic; an empty source is an empty program and no
-/// diagnostics, since a program with no instructions is well-formed and the printer emits one.
+/// diagnostics, since a program with no instructions is well-formed and the printer emits one. A
+/// `None` header means the file carried none, which is NOT an error — the header is optional (see
+/// `AsmHeader`'s doc).
 ///
 /// **This reader is deliberately more permissive than the printer is precise.** `r007` reads as
 /// `Reg::Loc(7)` and would print back as `r7`, so it is not a fixed point of print-then-parse. That
 /// costs nothing: the round-trip property this form guarantees is over text the PRINTER produced
 /// (design §3.4, P1), and rejecting a leading zero would buy a stricter grammar no writer needs.
 #[must_use]
-pub fn parse_asm(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
+pub fn parse_asm_full(src: &str) -> (Option<Program>, Option<AsmHeader>, Vec<Diagnostic>) {
     let mut diags: Vec<Diagnostic> = Vec::new();
     let mut code: Vec<Instr> = Vec::new();
     let mut labels: Vec<(String, usize)> = Vec::new();
+    let mut header: Option<AsmHeader> = None;
 
     let mut offset = 0usize;
     for raw_line in src.split_inclusive('\n') {
@@ -129,6 +132,10 @@ pub fn parse_asm(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
             continue;
         }
 
+        // The label check runs first: a line ending in `:` is a label declaration full stop, so it
+        // must win over the `result` directive dispatch below. Without this order, a label named
+        // `result` written with a space before its colon (`result :`, legal here exactly as `foo :`
+        // is) would be swallowed by the directive check instead of read as the label it is.
         if let Some(name) = text.strip_suffix(':') {
             let name = name.trim_end();
             if name.is_empty() {
@@ -139,13 +146,52 @@ pub fn parse_asm(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
             continue;
         }
 
+        if let Some(rest) = text.strip_prefix("result") {
+            // `result` is a directive only when a separator follows. Without this, a label named
+            // `resultset` would be read as a malformed directive rather than the label it is. A line
+            // ending in `:` never reaches here — the label check above already claimed it.
+            if rest.starts_with(char::is_whitespace) || rest.is_empty() {
+                if !code.is_empty() || !labels.is_empty() {
+                    diags.push(Diagnostic::error(
+                        span,
+                        "`result` must precede the first instruction or label (header directives come first)",
+                    ));
+                } else if header.is_some() {
+                    diags.push(Diagnostic::error(span, "duplicate `result` directive"));
+                } else {
+                    let ty_text = rest.trim();
+                    if let Some(t) = crate::ty::parse_ty(ty_text) {
+                        header = Some(AsmHeader { result: t });
+                    } else {
+                        diags.push(Diagnostic::error(
+                            span,
+                            format!("`result` must be a value type (Nat | Bool | Unit | List<T>), found `{ty_text}`"),
+                        ));
+                    }
+                }
+                continue;
+            }
+        }
+
         match parse_instr(text) {
             Ok(instr) => code.push(instr),
             Err(message) => diags.push(Diagnostic::error(span, message)),
         }
     }
 
-    if diags.is_empty() { (Some(Program { code, labels }), diags) } else { (None, diags) }
+    if diags.is_empty() { (Some(Program { code, labels }), header, diags) } else { (None, None, diags) }
+}
+
+/// Parse the register-assembly text form, dropping any header.
+///
+/// A thin wrapper over `parse_asm_full` rather than a second parser, for the reason `parse_tm` states
+/// about its own: this function MUST learn to skip directives regardless — otherwise a file carrying
+/// one hits the unknown-mnemonic path and is rejected — and once it must change anyway, delegating
+/// removes the failure mode where two parsers drift.
+#[must_use]
+pub fn parse_asm(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
+    let (prog, _, ds) = parse_asm_full(src);
+    (prog, ds)
 }
 
 /// One instruction line, already stripped of indentation and comments.
@@ -244,6 +290,7 @@ fn parse_imm(text: &str) -> Option<u64> {
 mod tests {
     use super::*;
     use crate::tm::asm::{Instr, Operand, Reg, instr_parts};
+    use crate::ty::Ty;
 
     /// One instance of all 16 `Instr` variants, with all nine `BinOp`s for `Bin`. The differential
     /// below is only as complete as this list, so it is written variant by variant rather than
@@ -501,5 +548,116 @@ mod tests {
             let line = format!("{mnemonic}{operands}");
             assert!(parse_instr(&line).is_ok(), "`{line}` must build an instruction");
         }
+    }
+
+    #[test]
+    fn a_headered_file_yields_both_halves() {
+        let (prog, header, ds) = parse_asm_full("result Nat\n\n    halt\n");
+        assert!(ds.is_empty(), "{ds:?}");
+        assert_eq!(header, Some(AsmHeader { result: Ty::Nat }));
+        assert_eq!(prog.expect("parses").code, vec![Instr::Halt]);
+    }
+
+    /// Optionality property: a header-less file is NOT an error, it simply has no header.
+    #[test]
+    fn a_header_less_file_is_not_an_error() {
+        let (prog, header, ds) = parse_asm_full("    halt\n");
+        assert!(ds.is_empty(), "{ds:?}");
+        assert_eq!(header, None);
+        assert_eq!(prog.expect("parses").code, vec![Instr::Halt]);
+    }
+
+    /// `parse_asm` must keep working on a headered file rather than choking on the directive.
+    #[test]
+    fn parse_asm_drops_a_header_instead_of_rejecting_it() {
+        let (prog, ds) = parse_asm("result List<Nat>\n\n    halt\n");
+        assert!(ds.is_empty(), "{ds:?}");
+        assert_eq!(prog.expect("parses").code, vec![Instr::Halt]);
+    }
+
+    #[test]
+    fn a_result_that_is_not_a_value_type_is_rejected_where_it_is_written() {
+        let (prog, header, ds) = parse_asm_full("result Fun\n\n    halt\n");
+        assert!(prog.is_none());
+        assert_eq!(header, None);
+        assert_eq!(ds.len(), 1, "{ds:?}");
+        assert!(ds[0].message.contains("value type"), "the message says what is admissible: {}", ds[0].message);
+    }
+
+    #[test]
+    fn a_duplicate_result_directive_is_an_error() {
+        let (_, _, ds) = parse_asm_full("result Nat\nresult Bool\n\n    halt\n");
+        assert_eq!(ds.len(), 1, "{ds:?}");
+        assert!(ds[0].message.contains("duplicate"), "{}", ds[0].message);
+    }
+
+    /// Mirrors `header_position` on the TM side: a directive after the body is rejected, so a file
+    /// written today cannot be broken by a later, stricter reader.
+    #[test]
+    fn a_directive_after_the_first_instruction_is_rejected() {
+        let (_, _, ds) = parse_asm_full("    halt\nresult Nat\n");
+        assert_eq!(ds.len(), 1, "{ds:?}");
+        assert!(ds[0].message.contains("precede"), "{}", ds[0].message);
+    }
+
+    /// A label counts as body, not header — the same rule, checked on the other line kind.
+    #[test]
+    fn a_directive_after_the_first_label_is_rejected() {
+        let (_, _, ds) = parse_asm_full("f:\nresult Nat\n    halt\n");
+        assert_eq!(ds.len(), 1, "{ds:?}");
+        assert!(ds[0].message.contains("precede"), "{}", ds[0].message);
+    }
+
+    /// `result` is a directive only when a separator follows it — a label named `result:` or
+    /// `resultset:` must still read as the label it is, not a malformed directive. This is the
+    /// property the `strip_prefix("result")` + separator check in `parse_asm_full` exists for.
+    #[test]
+    fn a_label_named_result_or_resultset_is_not_read_as_a_directive() {
+        let (prog, header, ds) = parse_asm_full("result:\nresultset:\n    halt\n");
+        assert!(ds.is_empty(), "{ds:?}");
+        assert_eq!(header, None, "no directive was written, so there is no header");
+        let prog = prog.expect("parses");
+        assert_eq!(prog.code, vec![Instr::Halt]);
+        assert_eq!(prog.labels, vec![("result".to_string(), 0), ("resultset".to_string(), 0)]);
+    }
+
+    /// THE REGRESSION: a label named `result` with a space before its colon must read as the label
+    /// `result`, not be swallowed by the `result` directive dispatch. Space-before-colon is legal for
+    /// every other identifier (see `a_label_named_foo_with_a_space_before_the_colon_is_a_label`, the
+    /// control case below) — `result :` is no different, and directive dispatch must not claim it just
+    /// because the line starts with the word `result`.
+    #[test]
+    fn a_label_named_result_with_a_space_before_the_colon_is_a_label() {
+        let (prog, header, ds) = parse_asm_full("result :\n    halt\n");
+        assert!(ds.is_empty(), "{ds:?}");
+        assert_eq!(header, None, "no directive was written, so there is no header");
+        let prog = prog.expect("parses");
+        assert_eq!(prog.code, vec![Instr::Halt]);
+        assert_eq!(prog.labels, vec![("result".to_string(), 0)]);
+    }
+
+    /// The control proving the case above is really a regression and not just how labels work: `foo`
+    /// is an ordinary identifier with no directive to compete with, and `foo :` has always read as the
+    /// label `foo`. If this ever stops passing, the fix for the regression above went too far and broke
+    /// label parsing generally, not just the `result` special case.
+    #[test]
+    fn a_label_named_foo_with_a_space_before_the_colon_is_a_label() {
+        let (prog, ds) = parse_asm("foo :\n    halt\n");
+        assert!(ds.is_empty(), "{ds:?}");
+        let prog = prog.expect("parses");
+        assert_eq!(prog.code, vec![Instr::Halt]);
+        assert_eq!(prog.labels, vec![("foo".to_string(), 0)]);
+    }
+
+    /// The fix must not overcorrect: `result Nat` does not end in `:`, so it is still read as a
+    /// directive, not a label — the label check only claims lines that end in `:`.
+    #[test]
+    fn result_nat_with_no_trailing_colon_is_still_a_directive() {
+        let (prog, header, ds) = parse_asm_full("result Nat\n\n    halt\n");
+        assert!(ds.is_empty(), "{ds:?}");
+        assert_eq!(header, Some(AsmHeader { result: Ty::Nat }));
+        let prog = prog.expect("parses");
+        assert_eq!(prog.code, vec![Instr::Halt]);
+        assert!(prog.labels.is_empty(), "`result Nat` is a directive, not a label: {:?}", prog.labels);
     }
 }

@@ -1,9 +1,10 @@
 //! `redextape emit` — compile a program to a backend text form.
 //!
-//! **ALL THREE TARGETS ROUND-TRIP.** `tm` re-parses through `parse_tm_full` and `lambda` through
-//! `parse_lambda`, and `asm` through `parse_asm`. All three emitted forms read back. The asm target
-//! writes a header comment naming the function that reads it back, and warning that `redextape run`
-//! does not take the file it names.
+//! **ALL THREE TARGETS ROUND-TRIP; TWO OF THE THREE ARE ALSO EXECUTABLE.** `tm` re-parses through
+//! `parse_tm_full` and `lambda` through `parse_lambda`, and `asm` through `parse_asm` — all three
+//! emitted forms read back. `redextape run` executes an emitted `.tm` or `.asm` file directly; a
+//! `.rxlambda` file carries no result type to decode against, so it stays read-only from the command
+//! line. The asm target writes a header comment naming the function that reads it back.
 
 use crate::input::{Input, write_atomic};
 use crate::report;
@@ -17,21 +18,16 @@ pub enum Lang {
     Tm,
     /// The λ-calculus lowering of the program, which `parse_lambda` and the editor grammar read.
     Lambda,
-    /// The register-machine lowering, read back by `parse_asm`. `redextape run` does not yet take a
-    /// `.asm` file — that is the next slice; the form is readable, not yet executable from the
-    /// command line.
+    /// The register-machine lowering, read back by `parse_asm` and executable by `redextape run`.
     Asm,
 }
 
 /// The asm form's emitted header comment. It used to exist to declare that the file could not be
 /// read back — `parse_asm` was unclaimed, and ten roadmap entries said so. It now names the function
-/// that reads it, because a file that states what opens it is worth more than a bare listing — and it
-/// still warns off the one action that fails: `redextape run` does not take a `.asm` file yet, and
-/// without this line that file falls through to the `.rxt` lexer and reports errors that point back
-/// at this very comment.
+/// that reads it, because a file that states what opens it is worth more than a bare listing —
+/// `redextape run` takes the file it names, the same as it always has for a `.tm`.
 const ASM_PREAMBLE: &str = "\
-; Register-assembly listing, read back by `parse_asm`.
-; `redextape run` does not yet take a `.asm` file.
+; Register-assembly listing, read back by `parse_asm` and run by `redextape run`.
 ";
 
 /// Tape encoding for `--lang tm`. `Default` is what an omitted `--encoding` means; the flag itself
@@ -120,7 +116,18 @@ pub fn run(
             }
         },
         Lang::Asm => match redextape_core::tm::lower_asm(&core) {
-            Ok(prog) => format!("{ASM_PREAMBLE}{}", redextape_core::tm::print_asm(&prog)),
+            // A header only when the result type is one the directive can express. `parse_ty` admits
+            // exactly Nat/Bool/Unit/List<T>, and `AsmHeader` must not carry anything it would reject
+            // — a file whose own reader refuses its header is worse than one with no header at all.
+            Ok(prog) => {
+                let header = redextape_core::ty::parse_ty(&redextape_core::ty::show(&ty))
+                    .map(|result| redextape_core::tm::AsmHeader { result });
+                let listing = match &header {
+                    Some(h) => redextape_core::tm::print_asm_with(&prog, h),
+                    None => redextape_core::tm::print_asm(&prog),
+                };
+                format!("{ASM_PREAMBLE}{listing}")
+            }
             Err(e) => {
                 writeln!(err, "error: this program has no asm lowering: {e:?}")?;
                 return Ok(Outcome::ToolFailed);
@@ -383,5 +390,44 @@ mod tests {
         let (machine, header, ds) = redextape_core::tm::parse_tm_full(&text);
         assert!(ds.is_empty(), "the emitted file must still be a valid machine, got: {ds:?}");
         assert!(machine.is_some() && header.is_some());
+    }
+
+    /// `emit --lang asm`'s new behavior: the common path's `ty` (already computed before `match lang`)
+    /// becomes a header when `parse_ty(show(ty))` round-trips. A distinct case name from
+    /// `emitted_asm_parses_back`'s `"asm"` — `emit_case` keys a temp directory by case, and reusing
+    /// one is a race two tests should not share even though, here, they would have written identical
+    /// bytes.
+    #[test]
+    fn emitted_asm_carries_a_result_header() {
+        let (text, err, outcome) = emit_case("asm-header", "1 + 2", Lang::Asm, None);
+        assert!(err.is_empty(), "no stderr: {err}");
+        assert!(matches!(outcome, Outcome::Emitted));
+        assert!(text.contains("result Nat"), "the header names the result type:\n{text}");
+        let (prog, header, ds) = redextape_core::tm::parse_asm_full(&text);
+        assert!(ds.is_empty(), "the emitted file parses: {ds:?}");
+        assert_eq!(header.map(|h| h.result), Some(redextape_core::ty::Ty::Nat));
+        assert!(!prog.expect("parses").code.is_empty());
+    }
+
+    /// **NOT a function-typed fixture — `Fun` is unreachable here, and that is a real structural
+    /// fact, not a shortcut.** `lower_asm` has no register representation for a function value: a bare
+    /// lambda in value position (`Core::Lambda`) errors unconditionally, and a bare function name
+    /// (`Core::Var` naming an `fn`) resolves against `ctx.resolve`, which only tracks local variable
+    /// registers — function names live in `fn_scopes` instead, so the lookup misses and reports
+    /// "unbound". Every fixture tried (`|x| x + 1`, a bare `fn` name, a `let`-bound closure) fails at
+    /// `lower_asm` itself with `Unsupported`, so `Outcome::Emitted` is never reached for `Fun`.
+    ///
+    /// `[]` reaches the SAME outcome through the other type this task's decision names: an unresolved
+    /// `Ty::Var`. Never constrained by anything else in the program, its element type stays
+    /// `List<t1>` — `parse_ty` rejects `t1` exactly as it would reject a `Fun`'s arrow syntax — while
+    /// `lower_asm` accepts `[]` fine (`Instr::Nil` carries no type to check). So it still emits — a
+    /// listing is readable regardless — just without a header.
+    #[test]
+    fn a_program_with_no_expressible_result_type_emits_asm_without_a_header() {
+        let (text, err, outcome) = emit_case("asm-var", "[]", Lang::Asm, None);
+        assert!(matches!(outcome, Outcome::Emitted), "emitting a listing does not require a result type: {err}");
+        let (_, header, ds) = redextape_core::tm::parse_asm_full(&text);
+        assert!(ds.is_empty(), "{ds:?}");
+        assert_eq!(header, None, "no header, because no value type could be written");
     }
 }

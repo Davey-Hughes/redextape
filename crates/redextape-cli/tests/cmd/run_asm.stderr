@@ -1,0 +1,3 @@
+error: `p.asm` has no `result` directive
+  the listing is a valid program and would run, but nothing declares the type of its answer, so there is no way to print one
+  re-emit it with `redextape emit --lang asm`, which writes a header whenever the program's result type can be expressed

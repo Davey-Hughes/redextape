@@ -27,6 +27,13 @@ pub enum Backend {
     Tm,
 }
 
+/// Which already-compiled form a path names. A source file is neither.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Artifact {
+    Tm,
+    Asm,
+}
+
 /// What happened, in exactly the three shapes `main` maps to exit codes.
 pub enum Outcome {
     /// Ran and printed a value.
@@ -62,13 +69,30 @@ pub fn run(
     // ASCII-case-insensitive, because `M.TM` is a real artifact and a byte-for-byte `e == "tm"` sent
     // it down the `.rxt` path, where the lexer produced a cascade of errors and exit 1 blamed a
     // perfectly valid file on the program.
-    let is_artifact = matches!(input, Input::Path(p) if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("tm")));
-    if is_artifact {
+    let artifact = match input {
+        Input::Path(p) => p.extension().and_then(|e| {
+            let e = e.to_string_lossy().to_ascii_lowercase();
+            match e.as_str() {
+                "tm" => Some(Artifact::Tm),
+                "asm" => Some(Artifact::Asm),
+                _ => None,
+            }
+        }),
+        Input::Stdin => None,
+    };
+    if let Some(kind) = artifact {
         if backend != Backend::Reference {
-            writeln!(err, "error: `--backend` does not apply to a `.tm` file, which is already a machine")?;
+            let noun = match kind {
+                Artifact::Tm => "a `.tm` file, which is already a machine",
+                Artifact::Asm => "a `.asm` file, which is already a program",
+            };
+            writeln!(err, "error: `--backend` does not apply to {noun}")?;
             return Ok(Outcome::ToolFailed);
         }
-        return run_artifact_text(&src, &label, out, err, color);
+        return match kind {
+            Artifact::Tm => run_artifact_text(&src, &label, out, err, color),
+            Artifact::Asm => run_asm_artifact(&src, &label, out, err, color),
+        };
     }
     match backend {
         Backend::Reference => run_reference(&src, &label, out, err, color),
@@ -118,23 +142,150 @@ fn run_artifact_text(
         )?;
         return Ok(Outcome::ProgramFailed);
     }
-    if let Some(v) = redextape_core::tm::decode_tape_ty(&tapes, &header.result, &*enc) {
-        writeln!(out, "{}", redextape_core::value::format_value(&v))?;
-        Ok(Outcome::Ran)
-    } else {
-        // **EXIT 1 HERE AND EXIT 2 IN `run_tm_backend`, ON THE SAME EXPRESSION, DELIBERATELY.** There
-        // the type comes from the PROGRAM's own inference, so a function-typed result is a question
-        // this tool cannot answer about a program that is fine — code 2. Here it comes from the
-        // FILE's header, and `HeaderParts::directive` (D5) already refuses a `result` that is not a
-        // value type, so a function type cannot reach this line: every failure that can means the
-        // file's tapes disagree with the type the file itself declares. That is the file's fault.
+    // **TWO CAUSES REACH THIS DECODE, WITH OPPOSITE FAULT ATTRIBUTIONS — SEE `DecodeFailure`.** An
+    // earlier revision of this comment argued every failure here was the file's fault, on the strength
+    // of `HeaderParts::directive` (D5) already refusing a `result` that is not a value type — true, but
+    // not the whole story: `MAX_DECODE_NODES` bounds how many `Value` nodes a single decode may build
+    // (nested list types multiply the count; see that constant's doc), and a completely TRUTHFUL header
+    // can still exhaust it. So there are two causes, not one: `DecodeFailure::Mismatch` — the tapes
+    // disagree with the type the file itself declares — is the file's fault, exit 1, unchanged from
+    // before. `DecodeFailure::BudgetExhausted` is this tool's limit on an otherwise-good file, exit 2 —
+    // the SAME distinction `run_asm_artifact` draws for the identical two causes on the `.asm` form; the
+    // two runners used to give it opposite, and each individually wrong, treatments (see that function's
+    // doc).
+    match redextape_core::tm::decode_tape_ty_reason(&tapes, &header.result, &*enc) {
+        Ok(v) => {
+            writeln!(out, "{}", redextape_core::value::format_value(&v))?;
+            Ok(Outcome::Ran)
+        }
+        Err(redextape_core::tm::DecodeFailure::Mismatch) => {
+            writeln!(
+                err,
+                "error: `{label}`'s tapes do not decode as `{}`\n  \
+                 the file is inconsistent: its header declares that result type and its tapes do not hold one",
+                redextape_core::ty::show(&header.result)
+            )?;
+            Ok(Outcome::ProgramFailed)
+        }
+        Err(redextape_core::tm::DecodeFailure::BudgetExhausted) => {
+            writeln!(
+                err,
+                "error: `{label}`'s tapes ran out of decode budget before finishing\n  \
+                 `MAX_DECODE_NODES` limits how many values a single decode may build; the header's \
+                 declared result type may be entirely truthful — this is the tool's limit, not the file's"
+            )?;
+            Ok(Outcome::ToolFailed)
+        }
+    }
+}
+
+/// Run a `.asm` artifact: parse, validate, require a header, execute, decode.
+///
+/// **The header check precedes the run, and the ordering is the interesting part.** A header-less
+/// `.tm` has nothing to RUN — its header carries the initial tapes — so refusing early is forced
+/// there. A header-less `.asm` is fully runnable; what it lacks is a way to NAME its answer. Running
+/// first would spend up to `DEFAULT_CAPS.steps` reaching a value this function must then decline to
+/// print, so the check moves ahead of the work it would waste.
+///
+/// **On the parallel with `run_artifact_text`, which is deliberate and not shared.** The two runners
+/// have the same shape — parse, reject diagnostics, unwrap, require a header, execute, decode — and
+/// about ten lines of that preamble read alike. They are NOT factored together: `parse_tm_full` and
+/// `parse_asm_full` return different types, `simulate` and `run_asm` have different outcome shapes,
+/// and `TmHeader` carries four fields where `AsmHeader` carries one. A shared helper would have to
+/// abstract over two functions agreeing on nothing but their arity, to save ten lines that will
+/// diverge further when either form gains a directive.
+///
+/// **What this cannot get wrong, and does not guard against:** `AsmOutcome` lives *inside*
+/// `AsmRun::Ran`, so a capped run has no outcome to decode — unlike the `.tm` path, where `simulate`
+/// once returned tapes and status separately and a capped run still had tapes a decoder could read.
+/// Here the type itself makes a `HitCap` printing a value unrepresentable, so there is no redundant
+/// guard to add before the `match` below.
+///
+/// **THE FINAL DECODE HAS TWO FAILURE CAUSES WITH OPPOSITE FAULT ATTRIBUTIONS, MIRRORING
+/// `run_artifact_text`'s.** A `result` directive that lies about what `rr` (and the heap it may point
+/// into) actually hold is `DecodeFailure::Mismatch` — the file's own fault: exit 1, naming the file.
+/// `MAX_DECODE_NODES` exhaustion on an otherwise-truthful header is `DecodeFailure::BudgetExhausted` —
+/// this tool's limit: exit 2, naming the budget, never the type. `emit`'s own output can reach the
+/// second cause on a completely honest header: a program that nests list types over a large,
+/// heavily-shared heap (see `MAX_DECODE_NODES`'s doc on the `tails`-shaped sharing that makes this
+/// cheap to reach) can exhaust the budget without the type or the file being at fault in any way. An
+/// earlier revision of this function gave the whole decode ONE treatment — always `ToolFailed`, always
+/// "does not decode as `Ty`" — which was backwards for a lying header and right only by coincidence for
+/// a budget exhaustion; `run_artifact_text` had the opposite bug, always blaming the file. Both runners
+/// are now driven by the SAME `DecodeFailure` rather than guessing an answer from which artifact form
+/// asked.
+fn run_asm_artifact(
+    src: &str,
+    label: &str,
+    out: &mut impl std::io::Write,
+    err: &mut impl std::io::Write,
+    color: bool,
+) -> std::io::Result<Outcome> {
+    let (program, header, ds) = redextape_core::tm::parse_asm_full(src);
+    if !ds.is_empty() {
+        report::render(err, label, src, &ds, color)?;
+        return Ok(Outcome::ProgramFailed);
+    }
+    let Some(program) = program else {
+        writeln!(err, "error: `{label}` carries no program")?;
+        return Ok(Outcome::ProgramFailed);
+    };
+    let errs = program.validate();
+    if !errs.is_empty() {
+        for e in &errs {
+            writeln!(err, "error: `{label}`: {e}")?;
+        }
+        return Ok(Outcome::ProgramFailed);
+    }
+    let Some(header) = header else {
         writeln!(
             err,
-            "error: `{label}`'s tapes do not decode as `{}`\n  \
-             the file is inconsistent: its header declares that result type and its tapes do not hold one",
-            redextape_core::ty::show(&header.result)
+            "error: `{label}` has no `result` directive\n  \
+             the listing is a valid program and would run, but nothing declares the type of its \
+             answer, so there is no way to print one\n  \
+             re-emit it with `redextape emit --lang asm`, which writes a header whenever the \
+             program's result type can be expressed"
         )?;
-        Ok(Outcome::ProgramFailed)
+        return Ok(Outcome::ToolFailed);
+    };
+    match redextape_core::tm::run_asm(&program, redextape_core::tm::DEFAULT_CAPS) {
+        redextape_core::tm::AsmRun::Ran(outcome) => {
+            match redextape_core::tm::decode_asm_ty_reason(&outcome, &header.result) {
+                Ok(v) => {
+                    writeln!(out, "{}", format_value(&v))?;
+                    Ok(Outcome::Ran)
+                }
+                Err(redextape_core::tm::DecodeFailure::Mismatch) => {
+                    writeln!(
+                        err,
+                        "error: `{label}` ran, but its result does not decode as `{}`\n  \
+                         the file is inconsistent: its header declares that result type and the value \
+                         computed does not hold one",
+                        redextape_core::ty::show(&header.result)
+                    )?;
+                    Ok(Outcome::ProgramFailed)
+                }
+                Err(redextape_core::tm::DecodeFailure::BudgetExhausted) => {
+                    writeln!(
+                        err,
+                        "error: `{label}` ran, but decoding its result ran out of decode budget before \
+                         finishing\n  \
+                         `MAX_DECODE_NODES` limits how many values a single decode may build; the \
+                         declared result type may be entirely truthful — this is the tool's limit, not \
+                         the file's"
+                    )?;
+                    Ok(Outcome::ToolFailed)
+                }
+            }
+        }
+        redextape_core::tm::AsmRun::HitCap => {
+            writeln!(err, "error: `{label}` did not halt within the default step, stack or heap budget")?;
+            Ok(Outcome::ProgramFailed)
+        }
+        redextape_core::tm::AsmRun::Fault(m) => {
+            writeln!(err, "error: `{label}` faulted: {m}")?;
+            Ok(Outcome::ProgramFailed)
+        }
     }
 }
 
@@ -433,5 +584,143 @@ mod tests {
         assert_eq!(out, "");
         assert!(err.contains("header"), "the message must name the missing header, got: {err}");
         assert!(matches!(outcome, Outcome::ToolFailed));
+    }
+
+    #[test]
+    fn an_asm_artifact_runs_and_prints_its_value() {
+        let (out, err, outcome) =
+            run_case("asm-ok", "p.asm", "result Nat\n\n    li\trr, #7\n    halt\n", Backend::Reference);
+        assert!(err.is_empty(), "no stderr: {err}");
+        assert!(matches!(outcome, Outcome::Ran));
+        assert_eq!(out.trim(), "7");
+    }
+
+    #[test]
+    fn a_header_less_asm_artifact_is_refused_before_it_runs() {
+        let (out, err, outcome) = run_case("asm-nohdr", "p.asm", "    li\trr, #7\n    halt\n", Backend::Reference);
+        assert!(out.is_empty(), "nothing is printed: {out}");
+        assert!(matches!(outcome, Outcome::ToolFailed), "exit 2 — the tool cannot answer");
+        assert!(err.contains("result"), "the message names what is missing: {err}");
+        assert!(err.contains("emit --lang asm"), "and how to get one: {err}");
+    }
+
+    #[test]
+    fn backend_does_not_apply_to_an_asm_artifact() {
+        let (_, err, outcome) = run_case("asm-backend", "p.asm", "result Nat\n\n    halt\n", Backend::Lambda);
+        assert!(matches!(outcome, Outcome::ToolFailed));
+        assert!(err.contains("--backend"), "{err}");
+    }
+
+    #[test]
+    fn an_invalid_asm_artifact_reports_validation_rather_than_running() {
+        let (_, err, outcome) = run_case("asm-bad", "p.asm", "result Nat\n\n    jmp\tnowhere\n", Backend::Reference);
+        assert!(matches!(outcome, Outcome::ProgramFailed), "the FILE is at fault: exit 1");
+        assert!(err.contains("nowhere"), "the message names the undefined label: {err}");
+    }
+
+    // ---- `DecodeFailure`'s two causes, on both artifact forms (four cases) ----
+    //
+    // `Mismatch` (the file's fault, exit 1) and `BudgetExhausted` (the tool's limit, exit 2) used to be
+    // conflated on the `.asm` path (always `ToolFailed`) and on the `.tm` path (always `ProgramFailed`
+    // — the pre-existing bug `decode_tape_ty_reason` also fixes). These four tests pin the corrected,
+    // SYMMETRIC behaviour: both runners now give the same cause the same exit code and an honest
+    // message.
+
+    /// MISMATCH, `.asm` form. `result Bool` over a machine that leaves `rr = 7` (not `0`/`1`) is a
+    /// header that lies about its own program: the FILE's fault, exit 1.
+    #[test]
+    fn an_asm_artifact_with_a_lying_header_is_the_files_fault() {
+        let (out, err, outcome) =
+            run_case("asm-lying-header", "p.asm", "result Bool\n\n    li\trr, #7\n    halt\n", Backend::Reference);
+        assert!(out.is_empty(), "a mismatched decode must print no value: {out}");
+        assert!(matches!(outcome, Outcome::ProgramFailed), "the file's fault: exit 1");
+        assert!(err.contains("does not decode"), "{err}");
+        assert!(err.contains("file is inconsistent"), "the message must blame the file, got: {err}");
+    }
+
+    /// BUDGET, `.asm` form. `n` cells where cell `i` (1-based) is `(i-1, i-1)`, decoded against
+    /// `List<List<Nat>>`: the outer spine has `n` steps, each decoding an inner list of length up to
+    /// `n` that SHARES the same cells every other inner list walks (the way `tails` shares its input's
+    /// spine — see `MAX_DECODE_NODES`'s doc) — `n² + n + 1` decode nodes. `n = 6000` gives 36,006,001,
+    /// about 1.8x `MAX_DECODE_NODES` (20,000,000): decisively over without being absurdly large, and
+    /// the identical shape/`n` `asm::tests::a_nested_type_over_a_large_heap_is_refused_rather_than_expanded`
+    /// already exercises un-`#[ignore]`d, so this pays no new cost for the default tier. Built as a
+    /// flat, label-free `Program` (`n` straight-line `Cons` instructions, no loop), so `run_asm` itself
+    /// costs O(n) — the O(n²) cost is paid once, by the decoder under test, not twice.
+    #[test]
+    fn an_asm_artifact_that_exhausts_the_decode_budget_is_the_tools_limit() {
+        use redextape_core::tm::{AsmHeader, Instr, Program, Reg, print_asm_with};
+        use redextape_core::ty::Ty;
+
+        let n = 6000u32;
+        let mut code = vec![Instr::Nil(Reg::Loc(0))];
+        code.extend((0..n).map(|_| Instr::Cons(Reg::Loc(0), Reg::Loc(0), Reg::Loc(0))));
+        code.push(Instr::Mov(Reg::Rr, Reg::Loc(0)));
+        code.push(Instr::Halt);
+        let prog = Program { code, labels: vec![] };
+        let nested = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
+        let text = print_asm_with(&prog, &AsmHeader { result: nested });
+
+        let (out, err, outcome) = run_case("asm-budget", "p.asm", &text, Backend::Reference);
+        assert!(out.is_empty(), "a budget-exhausted decode must print no value: {out}");
+        assert!(matches!(outcome, Outcome::ToolFailed), "the tool's limit, not the program's: exit 2");
+        assert!(err.contains("budget"), "the message must name the budget, got: {err}");
+        assert!(!err.contains("List<Nat>"), "the message must not blame the type, got: {err}");
+    }
+
+    /// MISMATCH, `.tm` form. Exercises the `Ty::Bool` mismatch arm specifically (word `7` is not
+    /// `0`/`1`) with a full `tapes 5` layout — unlike
+    /// `tapes_that_contradict_the_headers_own_result_type_are_the_files_fault` above, whose `slots 0`
+    /// makes `read_result` itself fail (a missing REG field) rather than reaching `Ty::Bool`'s own
+    /// mismatch check.
+    #[test]
+    fn a_tm_artifact_with_a_lying_bool_header_is_the_files_fault() {
+        let text = "tapes 5\nstart s\nversion 1\nencoding unary\nwidth 4\nslots 1\nresult Bool\n\
+                     tape 0 #1111111#\n\nstate s: accept\n";
+        let (out, err, outcome) = run_case("tm-lying-bool", "m.tm", text, Backend::Reference);
+        assert!(out.is_empty(), "a mismatched decode must print no value: {out}");
+        assert!(matches!(outcome, Outcome::ProgramFailed), "the file's fault: exit 1");
+        assert!(err.contains("its header declares"), "the message must blame the file, got: {err}");
+    }
+
+    /// BUDGET, `.tm` form. Same shape and `n` as the `.asm` budget case above, but the heap is
+    /// hand-encoded straight into the header's literal `tape` content rather than produced by running
+    /// anything. Under `Unary`, a pointer near `n` costs `n` CHARACTERS — the node count and the unary
+    /// character count are the same order for this shape (see `MAX_DECODE_NODES`'s doc), so a real
+    /// `n = 6000` heap would be a ~36 MB text fixture. `Binary` at a fixed width sidesteps that: a
+    /// 16-bit pointer costs exactly 16 characters regardless of its value, so the whole heap is ~200 KB
+    /// — fast to build and fast to parse. The machine itself does no work (a single `accept` start
+    /// state), so `simulate` returns the header's literal tapes unchanged and the only real cost is the
+    /// decode under test — the same cost the `.asm` case above already pays.
+    #[test]
+    fn a_tm_artifact_that_exhausts_the_decode_budget_is_the_tools_limit() {
+        fn bits16(mut v: u64) -> String {
+            let mut s = String::with_capacity(16);
+            for _ in 0..16 {
+                s.push(if v & 1 == 1 { '1' } else { '0' });
+                v >>= 1;
+            }
+            s
+        }
+
+        let n: usize = 6000;
+        let reg_bits = bits16(n as u64);
+        let mut heap = String::with_capacity(n * 34);
+        for i in 1..=n as u64 {
+            heap.push('@');
+            heap.push_str(&bits16(i - 1));
+            heap.push('#');
+            heap.push_str(&bits16(i - 1));
+        }
+        let text = format!(
+            "tapes 5\nstart s\nversion 1\nencoding binary\nwidth 16\nslots 1\nresult List<List<Nat>>\n\
+             tape 0 #{reg_bits}#\ntape 3 {heap}\n\nstate s: accept\n"
+        );
+
+        let (out, err, outcome) = run_case("tm-budget", "m.tm", &text, Backend::Reference);
+        assert!(out.is_empty(), "a budget-exhausted decode must print no value: {out}");
+        assert!(matches!(outcome, Outcome::ToolFailed), "the tool's limit, not the program's: exit 2");
+        assert!(err.contains("budget"), "the message must name the budget, got: {err}");
+        assert!(!err.contains("List<Nat>"), "the message must not blame the type, got: {err}");
     }
 }

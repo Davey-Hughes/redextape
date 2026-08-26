@@ -30,12 +30,13 @@ pub enum Command {
     },
     /// Run a program and print its value.
     Run {
-        /// The file to run. `.rxt` is a program; `.tm` is a machine. `-` reads standard input as a program.
+        /// The file to run. `.rxt` is a program; `.tm` is a machine and `.asm` is a register-machine
+        /// listing, both already compiled. `-` reads standard input as a program.
         path: PathBuf,
         /// Which backend evaluates a `.rxt` program. All three agree on any program all three can
         /// answer for; `lambda` and `tm` decode their result by type, so a function-typed result
-        /// exits 2 there and prints as `<non-value>` under `reference`. Rejected for a `.tm` file,
-        /// which is already a machine.
+        /// exits 2 there and prints as `<non-value>` under `reference`. Rejected for a `.tm` or `.asm`
+        /// file, which is already compiled.
         #[arg(long, value_enum, default_value_t = crate::run::Backend::Reference)]
         backend: crate::run::Backend,
     },
@@ -44,8 +45,8 @@ pub enum Command {
         /// The program to compile. `-` reads standard input.
         path: PathBuf,
         /// Which text form to write. All three read back — `tm` through `parse_tm_full`, `lambda`
-        /// through `parse_lambda`, `asm` through `parse_asm`. Only `tm` is also executable from the
-        /// command line: `redextape run` takes an emitted `.tm`, not yet an emitted `.asm`.
+        /// through `parse_lambda`, `asm` through `parse_asm`. `tm` and `asm` are also executable from
+        /// the command line: `redextape run` takes an emitted `.tm` or `.asm` file directly.
         #[arg(long, value_enum)]
         lang: crate::emit::Lang,
         /// Tape encoding, defaulting to unary. `--lang tm` only: passing it with any other target is

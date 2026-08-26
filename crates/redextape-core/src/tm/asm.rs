@@ -7,6 +7,7 @@ use crate::analysis::push_span;
 use crate::core::BinOp;
 use crate::ty::Ty;
 use crate::value::Value;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 /// A register operand. `Loc` registers are function-local and frame-saved across `call`; `Arg`
@@ -90,15 +91,21 @@ impl Program {
         let mut errs = Vec::new();
         let n = self.code.len();
 
-        let mut seen: Vec<&str> = Vec::new();
+        // A `HashSet`, not the `Vec` + `.contains` this used to be: `.contains` on a `Vec` is O(n)
+        // inside a loop over `self.labels`, making the whole pass O(n²) — measured on the release
+        // binary at 20,000/40,000/80,000 labels, about 5x per doubling, while the parser that builds
+        // `self.labels` stays linear. `Machine::validate` (`tm/machine.rs`) already uses a `HashSet`
+        // for its own duplicate-name check; this matches that sibling rather than inventing a second
+        // way to do the same thing. The DIAGNOSTIC order and text are unchanged — a set changes lookup
+        // cost, not what is reported: `.insert` returns `false` on exactly the names `.contains` used
+        // to find already present, so the branch taken per label is identical.
+        let mut seen: HashSet<&str> = HashSet::new();
         for (name, at) in &self.labels {
             if !label_name_representable(name) {
                 errs.push(format!("label name {name:?} is not representable (empty, or contains whitespace or ; : ,)"));
             }
-            if seen.contains(&name.as_str()) {
+            if !seen.insert(name.as_str()) {
                 errs.push(format!("duplicate label `{name}` (label_index resolves to the first)"));
-            } else {
-                seen.push(name.as_str());
             }
             // `n` itself is legal: a trailing skip target points one past the last instruction and the
             // printer emits it. Anything beyond that is dropped when printed.
@@ -299,6 +306,56 @@ pub fn print_asm_mapped(prog: &Program) -> (String, crate::analysis::Classified)
     for name in labels_at.get(prog.code.len()).into_iter().flatten() {
         emit_label(&mut out, &mut spans, name);
     }
+    (out, spans)
+}
+
+/// The optional self-describing block an emitted `.asm` file may carry.
+///
+/// One directive, `result`, naming the type of the value the program computes. That is the whole
+/// header, and the omission is deliberate: TM carries a `version` because its tape encoding has
+/// evolved and a file must say which one it was written under, while the asm text form has had
+/// exactly one encoding since it existed. A directive with a single legal value is a field nothing
+/// can use. If the form ever gains a second encoding, that is when it earns a version.
+///
+/// The header is OPTIONAL in the same sense TM's is: a file without one is not malformed, it is
+/// simply a listing whose answer cannot be named. `parse_asm` drops it, `parse_asm_full` returns it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AsmHeader {
+    /// The type of the program's result value, read from `Reg::Rr`. Only `Nat`/`Bool`/`Unit`/`List<T>`
+    /// are admissible — `ty::parse_ty` yields nothing else, so the reader gets that restriction for
+    /// free and the writer must not construct one that violates it.
+    pub result: Ty,
+}
+
+/// `print_asm`, preceded by `h`'s directives and a blank line.
+///
+/// The listing's bytes are IDENTICAL to `print_asm`'s — this prepends and never perturbs — which is
+/// what lets every existing consumer keep its goldens while gaining a self-describing form.
+#[must_use]
+pub fn print_asm_with(prog: &Program, h: &AsmHeader) -> String {
+    print_asm_with_mapped(prog, h).0
+}
+
+/// `print_asm_with`, plus a class per span. Offsets are exact by construction: the header's spans are
+/// pushed as it is written, and the listing's are shifted by the header's byte length rather than
+/// recomputed, so the two halves cannot disagree about where the listing starts.
+#[must_use]
+pub fn print_asm_with_mapped(prog: &Program, h: &AsmHeader) -> (String, crate::analysis::Classified) {
+    use crate::analysis::TokenClass as C;
+    let mut out = String::new();
+    let mut spans: crate::analysis::Classified = Vec::new();
+    push_span(&mut out, &mut spans, "result", C::Keyword);
+    out.push(' ');
+    push_span(&mut out, &mut spans, &crate::ty::show(&h.result), C::Ident);
+    out.push('\n');
+    out.push('\n');
+
+    let offset = out.len();
+    let (listing, listing_spans) = print_asm_mapped(prog);
+    out.push_str(&listing);
+    spans.extend(
+        listing_spans.into_iter().map(|(s, c)| (crate::span::Span { start: s.start + offset, end: s.end + offset }, c)),
+    );
     (out, spans)
 }
 
@@ -708,19 +765,72 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
 #[allow(clippy::cast_possible_truncation)]
 pub(crate) const MAX_DECODE_NODES: usize = 4 * DEFAULT_CAPS.heap as usize;
 
+/// Why a type-directed decode failed. The two causes have OPPOSITE fault attributions (see
+/// `redextape-cli::run`'s module doc, "the exit-code rule is whose fault is it"), which is the whole
+/// reason this exists rather than collapsing straight to `None` the way `decode_word_ty` used to.
+///
+/// **Mismatch is a claim about the DATA, never about the budget — and vice versa.** `Ty::Nat` and
+/// `Ty::Unit` never mismatch (any word is a valid `Nat`; `Unit` ignores the word entirely), so every
+/// failure they can produce is `BudgetExhausted`. Every OTHER failure arm — an out-of-range `Bool`
+/// word, an unrepresentable or out-of-bounds heap pointer, a chain that never reaches nil (a cyclic
+/// heap), a non-value type — is `Mismatch`, and none of them touch `budget` at all before returning.
+///
+/// **Tagged at the point of detection, not inferred from `budget` afterward.** An earlier design
+/// considered leaving `decode_word_ty` returning `Option<Value>` and having the caller read `budget`
+/// after a `None`: `budget == 0` would mean exhaustion, anything else a mismatch. That is UNSOUND.
+/// `budget` can legitimately reach exactly `0` from prior, correctly-decremented nodes elsewhere in
+/// the same decode — a sibling `Nat` leaf, an earlier list's `Nil`/`Cons` nodes — and every mismatch
+/// arm (`Ty::Bool`'s `_ => ...`, both pointer-validity checks in `Ty::List`, the cyclic-heap fallback)
+/// checks its condition and returns BEFORE touching `budget`. So a mismatch discovered in that exact
+/// state would leave `budget == 0` behind it, identical to what real exhaustion leaves — a real
+/// counterexample, not a hypothetical one, which is why every arm below tags its own reason instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DecodeFailure {
+    /// The word/heap does not have the shape `ty` claims — a header (or a `result` directive) that
+    /// lies about what the run actually produced. The FILE's fault.
+    Mismatch,
+    /// `MAX_DECODE_NODES` ran out on an otherwise well-formed decode — the declared type may be
+    /// entirely truthful; the decoder simply built more `Value` nodes than the budget allows (nested
+    /// list types multiply node count; see `MAX_DECODE_NODES`'s doc). This TOOL's limit, not the
+    /// file's.
+    BudgetExhausted,
+}
+
+/// Spend one unit of `budget`, tagging exhaustion as `BudgetExhausted`. The ONE place that touches
+/// `budget`, so every arm of `decode_word_ty` reports the same reason for running out — no arm ever
+/// re-derives "exhausted" from `budget`'s value on its own.
+fn spend(budget: &mut usize) -> Result<(), DecodeFailure> {
+    *budget = budget.checked_sub(1).ok_or(DecodeFailure::BudgetExhausted)?;
+    Ok(())
+}
+
 /// Type-directed decode of a run's outcome to a `Value` (the AOT sibling of `decode_asm`, which is
 /// value-directed). Drives off the static `Ty` instead of a reference `Value`, so the standalone
 /// binary can decode without a reference run. Returns `None` on a representation mismatch, a
-/// non-value type (`Fun`/`Var`), or an exhausted `MAX_DECODE_NODES` budget.
+/// non-value type (`Fun`/`Var`), or an exhausted `MAX_DECODE_NODES` budget — `decode_asm_ty_reason`'s
+/// `.ok()`, for the many existing callers (`redextape-wasm`, `redextape-native-rt`, the `.asm`
+/// example, and this module's own tests) that only need to know THAT it failed, not why.
 #[must_use]
 pub fn decode_asm_ty(outcome: &AsmOutcome, ty: &Ty) -> Option<Value> {
+    decode_asm_ty_reason(outcome, ty).ok()
+}
+
+/// `decode_asm_ty`, keeping WHY a failed decode failed. See `DecodeFailure`'s doc for the two causes
+/// and why the distinction is worth keeping.
+///
+/// # Errors
+///
+/// `DecodeFailure::Mismatch` if `outcome`'s data does not have the shape `ty` claims — the file's own
+/// fault. `DecodeFailure::BudgetExhausted` if `MAX_DECODE_NODES` ran out on an otherwise-truthful
+/// decode — this tool's limit, not the file's.
+pub fn decode_asm_ty_reason(outcome: &AsmOutcome, ty: &Ty) -> Result<Value, DecodeFailure> {
     let mut budget = MAX_DECODE_NODES;
     decode_word_ty(outcome.result, &outcome.heap, ty, &mut budget)
 }
 
-/// Type-directed decode of one word. `pub(crate)` because `tm::decode::decode_tape_ty` decodes the
-/// same `(word, heap)` pair off a set of TAPES and must not carry a second copy of THIS decoder — a
-/// second budget/cycle-bound pair could silently disagree with this one. That claim is narrower than
+/// Type-directed decode of one word. `pub(crate)` because `tm::decode::decode_tape_ty_reason` decodes
+/// the same `(word, heap)` pair off a set of TAPES and must not carry a second copy of THIS decoder —
+/// a second budget/cycle-bound pair could silently disagree with this one. That claim is narrower than
 /// it sounds: the VALUE-directed sibling below, `decode_word`, IS duplicated — `tm::decode` has its
 /// own copy rather than calling this one — but safely, since both recurse structurally on a finite
 /// reference `Value` already in memory and need no budget at all (see `MAX_DECODE_NODES`'s doc above).
@@ -729,64 +839,139 @@ pub fn decode_asm_ty(outcome: &AsmOutcome, ty: &Ty) -> Option<Value> {
 ///
 /// - Recursion here is on the TYPE (strictly smaller at each `List` element), never on the heap
 ///   chain: the list SPINE is a loop, bounded by one step per heap cell. That bound is what makes a
-///   cyclic heap decode to `None` instead of overflowing the stack — a chain longer than the heap has
+///   cyclic heap decode to `Err` instead of overflowing the stack — a chain longer than the heap has
 ///   cells must have revisited one. It bounds CYCLES, not SIZE: it says nothing about how much a
-///   single acyclic decode may construct.
-/// - `budget` bounds SIZE. It is decremented once per constructed `Value` node (every `Nat`/`Bool`/
-///   `Unit` leaf and every `Cons`), and decode fails once it would go negative. It matters because
-///   nested list types multiply: for `List<List<Nat>>`, each of up to n spine steps decodes an inner
-///   list that itself walks up to n cells, so an acyclic n-cell heap can still expand to O(n²) nodes
-///   — and `MAX_TY_DEPTH` nesting makes that O(n^d). The spine loop does not catch this: every step
-///   makes cycle-bounded progress while still constructing an unbounded amount of output.
+///   single acyclic decode may construct. **A cycle wins a `Mismatch` against its OWN spine's cost,
+///   never UNCONDITIONALLY** — see the "does not reach a cycle sitting behind an expensive SIBLING"
+///   paragraph below, not `DecodeFailure`'s doc, which lists this arm's failure as `Mismatch` with no
+///   such qualification — because the `Ty::List` arm below walks the spine to completion (or to the
+///   cycle bound) in a pass that decodes no head and spends no `budget` at all, BEFORE a second pass
+///   decodes any head of THAT spine. An earlier version of this function interleaved the two —
+///   decoding each head as it walked past it — so a cyclic heap whose
+///   OWN elements were themselves expensive to decode could exhaust `budget` on an early, repeated
+///   element before the cycle bound ever fired, and get misreported as `BudgetExhausted`. Separating
+///   the passes closes exactly that hazard: a cycle cannot be starved by the cost of its own spine's
+///   elements.
 ///
-/// Both matter because `tm::decode::decode_tape_ty` reads a heap AND a type that can come from a
-/// `.tm` FILE, where neither acyclicity nor a small size is something the compiler guaranteed.
-pub(crate) fn decode_word_ty(word: u64, heap: &[(u64, u64)], ty: &Ty, budget: &mut usize) -> Option<Value> {
+///   **That guarantee does not reach a cycle sitting behind an expensive SIBLING.** If an earlier
+///   element of an enclosing `List` — decoded first, in a separate call to this function — exhausts
+///   `budget` before this cyclic `List` is ever reached, `decode_word_ty` returns `BudgetExhausted`
+///   for THAT element and the whole decode fails there, via `?`, without this arm ever running: the
+///   cycle is never walked, so it cannot "win" a `Mismatch` it never gets to claim. Two files carrying
+///   the identical cyclic heap can therefore exit differently depending only on where the cyclic
+///   element sits relative to an expensive one in the type: cyclic element decoded first, `Mismatch`;
+///   cyclic element decoded after a sibling that alone exhausts the budget, `BudgetExhausted`. Both
+///   are correct, and neither is a regression — a cycle is guaranteed to win only against its own
+///   cost, never against a budget already spent elsewhere.
+/// - `budget` bounds SIZE. It is decremented once per constructed `Value` node (every `Nat`/`Bool`/
+///   `Unit` leaf and every `Cons`), via `spend`, and decode fails with `BudgetExhausted` once it would
+///   go negative. It matters because nested list types multiply: for `List<List<Nat>>`, each of up to
+///   n spine steps decodes an inner list that itself walks up to n cells, so an acyclic n-cell heap can
+///   still expand to O(n²) nodes — and `MAX_TY_DEPTH` nesting makes that O(n^d). The spine loop does
+///   not catch this: every step makes cycle-bounded progress while still constructing an unbounded
+///   amount of output.
+///
+/// Both matter because `tm::decode::decode_tape_ty_reason` reads a heap AND a type that can come from
+/// a `.tm` FILE, where neither acyclicity nor a small size is something the compiler guaranteed. Only
+/// `.tm` can actually present a cyclic heap: the `.asm` heap is built exclusively by `Instr::Cons`,
+/// which only ever appends a new cell and never mutates an existing one (see its match arm above), so
+/// a cell can only reference cells that already existed before it — an `.asm` heap is acyclic by
+/// construction, and this guard exists for `.tm`'s hand-writable heap.
+pub(crate) fn decode_word_ty(
+    word: u64,
+    heap: &[(u64, u64)],
+    ty: &Ty,
+    budget: &mut usize,
+) -> Result<Value, DecodeFailure> {
     match ty {
         Ty::Nat => {
-            *budget = budget.checked_sub(1)?;
-            Some(Value::Nat(word))
+            spend(budget)?;
+            Ok(Value::Nat(word))
         }
         Ty::Bool => {
+            // The mismatch check runs BEFORE `spend` — see `DecodeFailure`'s doc on why that ordering
+            // is exactly the hazard this enum exists to sidestep, rather than something to "fix" by
+            // reordering: tagging the reason here, at the point of detection, is what makes the
+            // ordering harmless.
             let v = match word {
                 0 => Value::Bool(false),
                 1 => Value::Bool(true),
-                _ => return None,
+                _ => return Err(DecodeFailure::Mismatch),
             };
-            *budget = budget.checked_sub(1)?;
-            Some(v)
+            spend(budget)?;
+            Ok(v)
         }
         Ty::Unit => {
-            *budget = budget.checked_sub(1)?;
-            Some(Value::Unit)
+            spend(budget)?;
+            Ok(Value::Unit)
         }
         Ty::List(elem) => {
-            // Walk the spine forwards collecting heads, then rebuild back-to-front. At most one step
-            // per cell; falling out of the loop means the chain never reached nil, i.e. it is cyclic.
-            let mut heads = Vec::new();
+            // PASS 1 — walk the spine TWICE rather than buffering it: this walk confirms the chain
+            // reaches nil, decoding nothing and allocating nothing, so its cost is bounded purely by
+            // `heap.len()` (one counter), never by what the elements are and never by the heap's own
+            // size in memory. At most one step per cell; falling out of the loop means the chain never
+            // reached nil, i.e. it is cyclic — a `Mismatch` (the heap the file supplied is not
+            // acyclic, as a well-formed one must be), and this is checked to completion BEFORE any
+            // head is decoded, so an expensive element of THIS SPINE can never let `budget` run out
+            // first and hide the cycle behind a `BudgetExhausted` — an expensive element of an
+            // enclosing SIBLING, decoded first in a separate call, still can. See this function's doc.
+            //
+            // An earlier version of this pass collected each head WORD into a `Vec<u64>` here instead
+            // of just counting: cheap per element, but that `Vec` stays fully allocated for the whole
+            // of PASS 2 below, including while PASS 2 recurses into further `Ty::List` levels — so a
+            // heap that is one big shared spine (any `w` doubles as a valid pointer into the SAME
+            // array; see `MAX_DECODE_NODES`'s doc on sharing) stacked one such `Vec` per nesting level,
+            // up to `MAX_TY_DEPTH` deep, for a total memory cost that is `O(heap.len() * MAX_TY_DEPTH)`
+            // rather than the `O(budget)` this function's own doc claims. Counting instead of
+            // collecting removes the `Vec` entirely; the second walk below re-reads the same pointers
+            // from scratch instead of remembering them.
             let mut w = word;
-            for _ in 0..=heap.len() {
+            let mut steps: usize = 0;
+            loop {
                 if w == 0 {
-                    *budget = budget.checked_sub(1)?; // the Nil node
-                    let mut out = Value::Nil;
-                    for h in heads.into_iter().rev() {
-                        *budget = budget.checked_sub(1)?; // each Cons node
-                        out = Value::Cons(Rc::new(h), Rc::new(out));
-                    }
-                    return Some(out);
+                    break;
+                }
+                if steps > heap.len() {
+                    return Err(DecodeFailure::Mismatch); // the chain never reached nil: a cyclic heap
                 }
                 // `w` is read off a `.tm` FILE's tapes (see this function's doc: "neither acyclicity
                 // nor a small size is something the compiler guaranteed"), so it may not fit `usize` on
-                // a 32-bit target. `try_from` folds that into the existing "not a valid pointer" `None`
-                // instead of truncating into a wrong, in-range index.
-                let idx = usize::try_from(w - 1).ok()?;
-                let &(h, t) = heap.get(idx)?;
+                // a 32-bit target. `try_from` folds that into the existing "not a valid pointer"
+                // mismatch instead of truncating into a wrong, in-range index.
+                let Some(idx) = usize::try_from(w - 1).ok() else { return Err(DecodeFailure::Mismatch) };
+                let Some(&(_, t)) = heap.get(idx) else { return Err(DecodeFailure::Mismatch) };
+                steps += 1;
+                w = t;
+            }
+
+            // PASS 2 — the spine is now confirmed finite and acyclic, so decoding every head (the
+            // expensive part) and spending `budget` on it is honest: any exhaustion from here really
+            // is this decode being too large, not a cycle in disguise. Re-walks the identical pointers
+            // PASS 1 already validated (`word` and `heap` are unchanged), decoding each head as it is
+            // reached rather than buffering words first. `heads` grows only as heads are successfully
+            // decoded, and every decoded head spends `budget` (below), so this `Vec` is already bounded
+            // by `MAX_DECODE_NODES` — no `with_capacity` needed, and none is used. Same order as
+            // before: heads decoded front-to-back, then consed back-to-front.
+            let mut heads = Vec::new();
+            let mut w = word;
+            loop {
+                if w == 0 {
+                    break;
+                }
+                let Some(idx) = usize::try_from(w - 1).ok() else { return Err(DecodeFailure::Mismatch) };
+                let Some(&(h, t)) = heap.get(idx) else { return Err(DecodeFailure::Mismatch) };
                 heads.push(decode_word_ty(h, heap, elem, budget)?);
                 w = t;
             }
-            None
+            spend(budget)?; // the Nil node
+            let mut out = Value::Nil;
+            for h in heads.into_iter().rev() {
+                spend(budget)?; // each Cons node
+                out = Value::Cons(Rc::new(h), Rc::new(out));
+            }
+            Ok(out)
         }
-        Ty::Fun(..) | Ty::Var(_) => None,
+        Ty::Fun(..) | Ty::Var(_) => Err(DecodeFailure::Mismatch),
     }
 }
 
@@ -1390,6 +1575,233 @@ mod tests {
         );
     }
 
+    /// PASS 1 must confirm a cycle from the spine's SHAPE alone, decoding no heads and spending no
+    /// `budget` — never by decoding heads as it walks, the way an earlier version of this arm did (see
+    /// `decode_word_ty`'s doc, "An earlier version of this function interleaved the two"). Pins that
+    /// directly: a small 2-cell cycle (pointers 6 <-> 7) whose own head (pointer 1, shared by both
+    /// cells) is a 5-element acyclic `List<Nat>` — 11 nodes to decode in full (5 `Cons` + 5 `Nat` + 1
+    /// `Nil`) — against a `budget` of only 3, far below that. An interleaved implementation decodes
+    /// that head on the very first spine step, exhausts `budget` partway through it, and never gets far
+    /// enough into the spine walk to notice it never reaches nil — misreporting `BudgetExhausted`
+    /// instead of `Mismatch`.
+    ///
+    /// Calls `decode_word_ty` directly rather than through `decode_asm_ty_reason` (whose budget is
+    /// always `MAX_DECODE_NODES`), specifically so `budget` can be made this small: the whole point is
+    /// that the OWN-element hazard bites at any scale, so pinning it needs only a handful of heap cells
+    /// rather than the ~10,000,000 `a_cyclic_sibling_wins_only_against_its_own_spines_cost` below needs
+    /// to exceed the real budget.
+    #[test]
+    fn a_cyclic_heap_is_mismatch_even_when_its_own_head_is_expensive() {
+        use crate::ty::Ty;
+        let heap: Vec<(u64, u64)> = vec![
+            (10, 2), // idx0 (ptr 1): the acyclic sub-list 10 -> 20 -> 30 -> 40 -> 50 -> nil
+            (20, 3), // idx1 (ptr 2)
+            (30, 4), // idx2 (ptr 3)
+            (40, 5), // idx3 (ptr 4)
+            (50, 0), // idx4 (ptr 5): tail nil
+            (1, 7),  // idx5 (ptr 6): the cycle's first cell -- head -> the sub-list, tail -> ptr 7
+            (1, 6),  // idx6 (ptr 7): the cycle's second cell -- tail -> ptr 6, closing the loop
+        ];
+        let ty = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
+        let mut budget = 3;
+        assert_eq!(
+            decode_word_ty(6, &heap, &ty, &mut budget), // 6 = pointer to the cycle's first cell
+            Err(DecodeFailure::Mismatch),
+            "a cycle must win a Mismatch against its own spine's cost, however expensive its own head is"
+        );
+    }
+
+    /// Counts bytes requested through the global allocator for one call below, so
+    /// `budget_zero_allocates_nothing_at_any_nesting_depth` can measure what `decode_word_ty` commits
+    /// BEFORE its budget can act, instead of inferring it from wall-clock time (which this repository
+    /// has recorded enough measurement mistakes over to keep trusting).
+    ///
+    /// An integration test under `tests/` — a separate crate — is the shape `redextape-core/tests/
+    /// viewmodel_contract.rs` already uses for exactly this technique, and says so in its own comment,
+    /// but that shape cannot be used here: `decode_word_ty` is `pub(crate)` (see its doc for why:
+    /// `tm::decode` must not carry a second copy of this decoder), so only code inside THIS crate can
+    /// call it with a hand-picked `budget` — which is what the test below needs (`budget = 0`, never
+    /// reachable through the public `decode_asm_ty_reason`, whose budget is always `MAX_DECODE_NODES`).
+    /// So the counter lives here instead, in this module's own `#[cfg(test)]` unit tests, and
+    /// `#[global_allocator]` makes it install for `redextape-core`'s ENTIRE `--lib` unit test binary —
+    /// every `#[cfg(test)] mod tests` in the crate, not just this file's — rather than the one
+    /// integration-test binary `viewmodel_contract.rs` has to itself.
+    ///
+    /// THAT divergence is what made an earlier version of this counter wrong: it was one process-wide
+    /// `AtomicUsize`, exact under cargo-nextest (one OS process per test) but not under plain `cargo
+    /// test`, which runs every non-`#[ignore]`d lib test — all 682 of them — against the SAME counter.
+    /// `scripts/check-slow.sh --all` drives exactly that shared-process path and failed this test
+    /// deterministically (300KB-600KB of concurrent tests' allocations landing inside the before/after
+    /// window, against a 4,096-byte bound), even though every CI job would have stayed green: the
+    /// `rust-slow` job filters this test out via `--ignored`, and every other Rust job uses nextest.
+    ///
+    /// THE FIX below is per-THREAD, not per-process, and that is safe for a reason narrower than "less
+    /// sharing": `libtest`'s default parallel runner spawns a genuinely new OS thread for every
+    /// `#[test]` function (bounded concurrency via `--test-threads`, not a reused pool), so two tests
+    /// never share a THREAD even when they share a process. A `thread_local!` counter therefore reads
+    /// exact under every runner this repository has: nextest's one-process-per-test makes it exact
+    /// trivially, and plain `cargo test`'s many concurrent OS threads each carry their own
+    /// zero-initialized counter that only this test's own thread ever touches — a concurrent test on a
+    /// SIBLING thread cannot add to it no matter how much it allocates. Unlike the process-wide
+    /// version, this scoping no longer depends on which runner is asking, so it stays crate-global
+    /// (`#[global_allocator]` cannot be anything else) without reintroducing the hazard.
+    ///
+    /// A DIFFERENT hazard this thread-local scoping does not close: libtest's own spawn hook — the
+    /// closure that sets up each test's thread and clones its output-capture sink — runs on the PARENT
+    /// thread, not the new test thread, so any allocation IT does lands in the parent thread's counter.
+    /// Not live today: the only call this counter ever measures (`decode_word_ty`, from this file's own
+    /// tests) spawns no thread of its own, so that hook never runs inside a measurement window. But a
+    /// future measurement here that wrapped a call containing a `thread::spawn` would need to account
+    /// for that hook's allocation too — a hazard different in kind from a concurrent test on a SIBLING
+    /// thread, which this counter is genuinely immune to.
+    struct CountingAlloc;
+
+    thread_local! {
+        static BYTES_ALLOCATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    unsafe impl std::alloc::GlobalAlloc for CountingAlloc {
+        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            BYTES_ALLOCATED.with(|bytes| bytes.set(bytes.get() + layout.size()));
+            unsafe { std::alloc::System.alloc(layout) }
+        }
+
+        // The default `GlobalAlloc::alloc_zeroed` (inherited if this arm is omitted) is
+        // `self.alloc(layout)` followed by `write_bytes(.., 0, ..)`: it zeroes the memory itself
+        // instead of asking the underlying allocator for zeroed pages, which loses `calloc`'s
+        // zero-page fast path for every `vec![0; n]` in this binary's tests. Delegating to
+        // `System::alloc_zeroed` restores that path; accounting is unaffected either way, since
+        // both routes commit exactly `layout.size()` new bytes.
+        unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
+            BYTES_ALLOCATED.with(|bytes| bytes.set(bytes.get() + layout.size()));
+            unsafe { std::alloc::System.alloc_zeroed(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+            unsafe { std::alloc::System.dealloc(ptr, layout) }
+        }
+
+        // The default `GlobalAlloc::realloc` (inherited if this arm is omitted) is alloc-copy-dealloc:
+        // it always allocates `new_size` fresh, copies the old bytes in, and frees the original, even
+        // when the underlying allocator could have grown the same block in place. That default was
+        // live here for every one of this binary's 685 tests, not just this one — every in-place
+        // `Vec`/`String` growth anywhere in `redextape-core`'s lib tests was silently paying for a
+        // fresh allocation and a copy it would not have paid running under `System` alone, which is
+        // also most of why the noise floor a shared-process counter saw ran to hundreds of KB. Routing
+        // through `System::realloc` restores in-place growth, and counting only `new_size`'s excess
+        // over the OLD layout's size (never the full `new_size`, which would recount bytes the block
+        // already held) matches what `alloc`/`dealloc` count: bytes newly committed, not bytes moved.
+        unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
+            if let Some(grew_by) = new_size.checked_sub(layout.size()) {
+                BYTES_ALLOCATED.with(|bytes| bytes.set(bytes.get() + grew_by));
+            }
+            unsafe { std::alloc::System.realloc(ptr, layout, new_size) }
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: CountingAlloc = CountingAlloc;
+
+    /// Pins the SECOND fix: at `budget = 0`, the `Ty::List` arm must allocate NOTHING before the first
+    /// `spend` anywhere in the call can even run, at any nesting depth — `heads` grows lazily and
+    /// nothing buffers the spine's WORDS ahead of decoding them. `budget = 0` makes that first `spend`
+    /// fail immediately, so whatever the allocator saw during the call is exactly what was committed
+    /// before the budget could act.
+    ///
+    /// The heap is a single `l`-cell acyclic spine where EVERY cell's head word repoints at the spine's
+    /// own start — "one big shared spine" (`decode_word_ty`'s doc on `PASS 1` names this exact hazard),
+    /// so decoding any head at any nesting level re-walks the SAME `l` cells. `ty` nests that spine 4
+    /// levels deep (`List<List<List<List<Nat>>>>`). An earlier version of this arm collected the
+    /// spine's head WORDS into a `Vec<u64>` before decoding any of them (`PASS 1`'s doc, "An earlier
+    /// version of this pass collected each head WORD into a `Vec<u64>`") — one such `Vec`, sized to the
+    /// FULL spine, PER nesting level, all before `budget = 0` ever gets to refuse anything: roughly
+    /// `4 * l * 8` bytes for `l = 20,000`, around 640KB, decisively over the bound below. The current
+    /// arm allocates zero regardless of `l` or nesting depth.
+    ///
+    /// The bound is `assert_eq!(.., 0)`, not a generous margin, because the counter is now exact (see
+    /// `CountingAlloc`'s doc): a `thread_local!` counter cannot see a concurrent test's allocation, so
+    /// there is no foreign noise left to leave headroom FOR. What remains is only whether THIS call
+    /// allocates, and tracing it settles that exactly — PASS 1 counts without allocating, PASS 2's
+    /// `heads` is `Vec::new()` (no allocation until a first successful push), and at `budget = 0` the
+    /// first `spend` anywhere in the call — reached by recursing to the innermost `Ty::Nat`, before
+    /// `heads.push` on any level ever returns — fails via `?` before any `Vec` grows or any `Cons`
+    /// node's `Rc::new` runs. Confirmed directly: a probe read of `bytes_used` at HEAD prints `0`, on
+    /// every one of `cargo test --release`, its debug build, `--include-ignored`, and `cargo nextest`.
+    #[test]
+    fn budget_zero_allocates_nothing_at_any_nesting_depth() {
+        use crate::ty::Ty;
+        let l: u64 = 20_000;
+        // Every cell's head repoints at the spine's own start (`l`); tail counts down to nil, same
+        // acyclic shape as `a_long_acyclic_list_still_decodes` above.
+        let heap: Vec<(u64, u64)> = (1..=l).map(|i| (l, i - 1)).collect();
+        let ty = Ty::List(Box::new(Ty::List(Box::new(Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))))))));
+
+        let before = BYTES_ALLOCATED.with(std::cell::Cell::get);
+        let mut budget = 0;
+        let result = decode_word_ty(l, &heap, &ty, &mut budget);
+        let bytes_used = BYTES_ALLOCATED.with(std::cell::Cell::get) - before;
+
+        assert_eq!(result, Err(DecodeFailure::BudgetExhausted), "budget = 0 must fail on the very first spend");
+        assert_eq!(
+            bytes_used, 0,
+            "decoding at budget = 0 must allocate nothing before the first spend can act, got {bytes_used} bytes"
+        );
+    }
+
+    /// The doc comment above (and `redextape-cli/README.md`) claims only that a cycle wins a
+    /// `Mismatch` against ITS OWN spine's cost, never unconditionally: reached behind a SIBLING that
+    /// alone exhausts `budget`, the same cyclic heap is never even walked, and the failure is
+    /// `BudgetExhausted` instead. Pins that with one heap holding both an expensive, acyclic
+    /// `List<Nat>` (one element over `MAX_DECODE_NODES` on its own) and a cyclic `List<Nat>` (a
+    /// single self-referencing cell), assembled into a two-element `List<List<Nat>>` both ways: the
+    /// two orderings differ ONLY in which element is decoded first, and that alone flips the reported
+    /// `DecodeFailure`.
+    ///
+    /// Ignored by default: same scale as `the_node_budget_boundary_is_exact` above, for the same
+    /// reason — the expensive sibling alone needs ~10,000,000 heap cells to exceed the budget.
+    #[test]
+    #[ignore = "slow tier: allocates ~10,000,000 heap cells"]
+    fn a_cyclic_sibling_wins_only_against_its_own_spines_cost() {
+        use crate::ty::Ty;
+        let l_over = (MAX_DECODE_NODES as u64 - 1) / 2 + 1; // one element over budget, alone
+
+        // The expensive, acyclic sibling: a flat `List<Nat>` of `l_over` elements, same construction
+        // as `the_node_budget_boundary_is_exact`'s over-budget case. Its own pointer is `l_over`.
+        let mut heap: Vec<(u64, u64)> = (1..=l_over).map(|i| (i, i - 1)).collect();
+        let expensive_ptr = l_over;
+
+        // The cyclic sibling: one cell whose tail points at itself, same shape as
+        // `a_cyclic_heap_decodes_to_none_rather_than_overflowing`'s first case.
+        heap.push((7, heap.len() as u64 + 1));
+        let cyclic_ptr = heap.len() as u64;
+
+        // Append the two-element outer spine (`cons(first, cons(second, nil))`) to a COPY of the
+        // shared heap, so the two orderings below are otherwise identical.
+        let build_outer = |mut heap: Vec<(u64, u64)>, first: u64, second: u64| -> AsmOutcome {
+            heap.push((second, 0)); // second element, tail nil
+            let second_cell = heap.len() as u64;
+            heap.push((first, second_cell)); // first element, tail -> second cell
+            let top = heap.len() as u64;
+            AsmOutcome { result: top, heap }
+        };
+
+        let ty = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
+
+        let cycle_first = build_outer(heap.clone(), cyclic_ptr, expensive_ptr);
+        assert_eq!(
+            decode_asm_ty_reason(&cycle_first, &ty),
+            Err(DecodeFailure::Mismatch),
+            "decoded first, the cyclic element must win its own Mismatch before the expensive sibling ever runs"
+        );
+
+        let cycle_behind_expensive = build_outer(heap, expensive_ptr, cyclic_ptr);
+        assert_eq!(
+            decode_asm_ty_reason(&cycle_behind_expensive, &ty),
+            Err(DecodeFailure::BudgetExhausted),
+            "decoded first, the expensive sibling exhausts the budget before the cyclic element is ever reached"
+        );
+    }
+
     #[test]
     fn validate_accepts_a_lowered_program() {
         let prog = Program {
@@ -1455,5 +1867,47 @@ mod tests {
         // One past the end is legal — the printer emits it, and a trailing skip target needs it.
         let ok = Program { code: vec![Instr::Halt], labels: vec![("end".to_string(), 1)] };
         assert_eq!(ok.validate(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_header_prints_before_the_listing() {
+        let prog = Program { code: vec![Instr::Li(Reg::Rr, 7), Instr::Halt], labels: Vec::new() };
+        let h = AsmHeader { result: Ty::Nat };
+        let text = print_asm_with(&prog, &h);
+        assert!(text.starts_with("result Nat\n\n"), "header then a blank line, got:\n{text}");
+        assert!(text.ends_with(&print_asm(&prog)), "the listing follows unchanged");
+    }
+
+    /// The whole point of the optional model: adding a header must not perturb the listing's bytes.
+    #[test]
+    fn the_listing_is_byte_identical_with_and_without_a_header() {
+        let prog = Program {
+            code: vec![Instr::Li(Reg::Loc(0), 1), Instr::Jmp("done".to_string()), Instr::Halt],
+            labels: vec![("done".to_string(), 2)],
+        };
+        let bare = print_asm(&prog);
+        let headered = print_asm_with(&prog, &AsmHeader { result: Ty::Bool });
+        assert_eq!(headered.strip_prefix("result Bool\n\n"), Some(bare.as_str()));
+    }
+
+    #[test]
+    fn a_list_result_prints_through_ty_show() {
+        let prog = Program { code: vec![Instr::Halt], labels: Vec::new() };
+        let h = AsmHeader { result: Ty::List(Box::new(Ty::Nat)) };
+        assert!(print_asm_with(&prog, &h).starts_with("result List<Nat>\n"));
+    }
+
+    /// Spans must cover the header too, and by construction rather than by re-scanning.
+    #[test]
+    fn the_headered_printer_classifies_its_own_directive() {
+        use crate::analysis::TokenClass as C;
+        let prog = Program { code: vec![Instr::Halt], labels: Vec::new() };
+        let (text, spans) = print_asm_with_mapped(&prog, &AsmHeader { result: Ty::Nat });
+        // Every span must name the bytes it claims.
+        for (span, _) in &spans {
+            assert!(span.end <= text.len(), "span past end of text");
+        }
+        assert!(spans.iter().any(|(s, c)| *c == C::Keyword && &text[s.start..s.end] == "result"));
+        assert!(spans.iter().any(|(s, c)| *c == C::Ident && &text[s.start..s.end] == "Nat"));
     }
 }
