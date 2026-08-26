@@ -13038,3 +13038,658 @@ redextape-core --target wasm32-unknown-unknown`, confirms the `#[cfg(test)]`-onl
 four runner shapes' output, and the mutation transcript.
 
 Committed as a single commit on top of `d0a6178`.
+
+#### PR 3 OF THE ASM-READER SLICE CLOSES — the asm text form gets its grammar, held span-for-span against both printers, and the test written to cover the one hole the differential cannot see had that same hole (2026-08-26, branch `tree-sitter-asm`, `8d0fe0d..93097ca`, 14 commits, plus this entry and the whole-branch review's fixes)
+
+> **THIS NOTE WENT FALSE THE MOMENT THE THING IT DESCRIBED ARRIVED, WHICH IS THE FOURTH TIME THIS
+> BRANCH HAS REPRODUCED ITS OWN LESSON.** As written it said the heading's range and the VERIFICATION
+> block "ARE DELIBERATE PLACEHOLDERS" and that "Both carry a `<FILL:` marker" — true when written at
+> `cb5c662`, false at `6395715`, which filled both. It sat directly above the block it called empty.
+> PR 2's entry recorded this exact shape one entry above — *"a sentence explaining why something is
+> absent is invalidated by that thing arriving, and the arrival is exactly the moment nobody
+> re-reads it"* — and the agent that filled the block did not re-read the paragraph above it. Neither
+> did the instruction that told it to write a sentence which would survive being filled: that
+> instruction was aimed at VERIFICATION's own prose and never at this note.
+>
+> **What happened, in order, so no sentence here describes a state that can end.** The heading's
+> range and the VERIFICATION block were written as `<FILL:` markers at `cb5c662`; `6395715` filled
+> both from measurements taken at `93097ca`; a third marker held the CI result until a run existed,
+> and was filled once pull request 64's checks came back green. **Every one of those fills falsified
+> a sentence written above it**, and each correction stated a fresh count of the paragraph it was
+> written inside, which the next edit falsified in turn — four commits, then a fifth for this one.
+>
+> **The transferable rule, which cost five commits to arrive at: do not write a number about a
+> paragraph inside that paragraph.** A `grep -n '<FILL:'` over this file has always returned more
+> lines than there were markers, because this note quotes the marker's own syntax while explaining
+> it — so any count written here moves when the note is edited. The marker's closing bracket also
+> wrapped to a following line, so no line-based pattern ever matched a whole one: `check-citations.sh`'s
+> documented line-wrap blind spot, met while writing the sentence trying to route around it.
+>
+> Figures in the PROSE below carry the SHA they were measured at — `ca69acb` for those taken before
+> the whole-branch review, `93097ca` for the VERIFICATION block and anything that review moved. A
+> figure here without a SHA beside it is a defect, not a shorthand.
+
+Design: `docs/superpowers/specs/2026-08-24-asm-reader-design.md` §8, plus
+`docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md` §§5.1, 5.2 and 8.1. Plan:
+`docs/superpowers/plans/2026-08-25-tree-sitter-asm-grammar.md`, committed at `4b2496b` before any
+code. This is PR 3 of 3 — `parse_asm` landed in PR 1 (merged as `76629bd` / #62), the `result`
+header and the `.asm` `run` path in PR 2 (merged as `8d0fe0d` / #63) — and it needed both: the
+parser to be checked against, and the headered form to cover.
+
+**What closed.** `grammars/tree-sitter-redextape-asm`, held span-for-span against BOTH asm printers
+by `redextape-grammar-check`: `print_asm_mapped` for the header-less listing (five `TokenClass`
+values — `Label`, `Mnemonic`, `Nat`, `Punct`, `Register`) and `print_asm_with_mapped` for the
+headered form (those plus `Keyword` and `Ident`). With it: `crates/redextape-grammar-check/src/asm.rs`
+(the `ASM` `Grammar`, a 12-entry hand-written `CORPUS`, `CAPTURE_CLASSES`, the two printer wrappers
+and the 17-entry `FIXED_CORPUS`), `crates/redextape-grammar-check/tests/asm.rs`, a corrected
+`TokenClass::Label` doc comment, eight falsified claims retired from two already-merged sibling
+READMEs, and a new `grammar_count` key in `scripts/check-doc-figures.sh` so the next COUNT claim of
+that kind cannot be written silently. Five of the eight are counts and the gate now holds all five.
+**Three are not, and no gate reaches those** — one was found in the first pass and two by the
+whole-branch review, after the gate was already in.
+
+Measured at `ca69acb`, each with its command:
+
+```
+4        grammar directories       find grammars -mindepth 1 -maxdepth 1 -type d | wc -l
+165      asm grammar.js lines      wc -l < grammars/tree-sitter-redextape-asm/grammar.js
+44,324   asm parser.c bytes        wc -c < grammars/tree-sitter-redextape-asm/src/parser.c
+15       generated ABI             grep -m1 LANGUAGE_VERSION \
+                                     grammars/tree-sitter-redextape-asm/src/parser.c
+17       tree-sitter test cases    cat grammars/tree-sitter-redextape-asm/test/corpus/* \
+                                     | grep -c '^===*$'   # halved
+10       query pattern occurrences grep -v '^;' grammars/tree-sitter-redextape-asm/queries/highlights.scm \
+                                     | grep -oE '@[a-z._]+' | wc -l
+9        capture NAMES             the same command, | sort -u | wc -l
+9 / 8    CAPTURE_CLASSES rows / distinct classes
+                                   awk '/pub const CAPTURE_CLASSES/,/^\];/' \
+                                     crates/redextape-grammar-check/src/asm.rs | grep -c '^    ("'
+                                   ...and the same, | sed -E 's/.*,[[:space:]]*(TokenClass::[A-Za-z]+).*/\1/' \
+                                     | sort -u | wc -l
+60       grammar-check suite       cargo nextest run -p redextape-grammar-check   (44 at 8d0fe0d)
+38       gated doc figures         scripts/check-doc-figures.sh                   (24 at 8d0fe0d)
+```
+
+The nine capture names over ten pattern occurrences, projecting onto eight distinct `TokenClass`
+values through nine map rows, is the whole shape of this grammar's disagreement with itself, and
+every one of those four numbers matters below.
+
+##### THE FIX FOR THE BLIND SPOT HAD THE BLIND SPOT
+
+This grammar's own reason for existing beyond the three siblings is that it has a hole the
+differential structurally cannot see. `@label` (a declaration) and `@label.reference` (a `jz`/`jmp`/
+`call` target) BOTH project to `TokenClass::Label`, because `Operand::class` gives a jump target the
+same class `print_asm_mapped` gives a declaration. `compare_classified` compares a sequence of
+`(Span, TokenClass)` pairs — so with the two captures swapped, every span still lands on the byte
+range the printer named, carrying the class the printer said, and the differential passes. TM has no
+such hole: its printer distinguishes `Label` from `StateName`, so the same swap there fails
+immediately.
+
+`each_label_capture_lands_on_its_own_positions` was written to close it, and shipped in `a536f07`.
+**It could not.** It passed HARDCODED query text to `captures_with` and never read
+`ASM.highlights` — so what it actually pinned was that two literal patterns, spelled inside the test
+file, land on disjoint positions in the tree. An edit to the real `queries/highlights.scm` moved
+nothing. Two shipped comments said otherwise: `queries/highlights.scm`'s own header and
+`src/asm.rs`'s `CAPTURE_CLASSES` doc both name this test as what holds the two captures apart.
+
+Fixed in `cda971c` by `ranges_by_capture`, which compiles `ASM.highlights` — the shipped file,
+`include_str!`d into the binary — and collects byte ranges per capture NAME rather than per class,
+because the class is exactly what the two captures share. **Proven by an actual swap rather than by
+report, twice: once by the controller before the fix was specified, and once here.** Swapping
+`@label` and `@label.reference` on lines 37-39 of the shipped `queries/highlights.scm` at `ca69acb`
+and running `cargo nextest run -p redextape-grammar-check`:
+
+```
+        FAIL [ 0.003s] ( 8/60) redextape-grammar-check::asm each_label_capture_lands_on_its_own_positions
+    assertion `left == right` failed: @label must land on declarations only
+      left: ["else0", "endif1", "else0"]   (the three jump targets)
+     right: ["else0", "endif1"]            (the two declarations)
+     Summary [ 0.141s] 39/60 tests run: 38 passed, 1 failed, 0 skipped
+```
+
+then `git checkout -- grammars/tree-sitter-redextape-asm/queries/highlights.scm`, `git status
+--porcelain` empty. **Exactly one test in the crate reacts, and before `cda971c` it was zero** — the
+controller ran the same swap against `a536f07` and all 60 passed, and the diff `git diff
+a536f07..cda971c -- crates/redextape-grammar-check/tests/asm.rs` shows the mechanism directly: the
+old body's queries are string literals in the test's own source.
+
+**Why this is worth the top of the entry.** This file's headings already name the same species
+twice: *"the grammar was wrong exactly where nothing downstream was able to look"* (PR 2 of the
+tree-sitter slice, `648b7aa..13207e0`) and *"a grammar was wrong where its AUTHORITY could not look"*
+(PR 3, merged `76ba136` / #55). This branch adds two more at once — the projection map's own
+coarseness, and then the instrument built to watch it sharing it. **An instrument that models what it
+watches cannot notice that thing changed**, which is the lesson the λ-hang thread already paid for in
+a different subsystem; here it arrived as a test that modelled the query file instead of reading it.
+(The branch ledger calls this the fourth variation and attributes the first to PR 1 of the
+tree-sitter slice's corpus. That entry's heading and body do not carry the finding under that name,
+so only the two quoted above are cited here; the count is left to the ledger.)
+
+##### THE PLAN'S OWN SIZING FIGURES WERE WRONG BY ABOUT 2x, AND THE IMPLEMENTER MEASURED RATHER THAN ADJUSTED
+
+The plan set `cases: 256` on the generated leg and justified it with 297 bytes and 73 spans per
+generated entry. Both figures were wrong by roughly a factor of two, and the fault is the
+controller's: the probe behind them approximated `arb_expr_over` with a hand-rolled generator that
+ignored `prop_recursive`'s `desired_size = 8`, so it drew roughly double-size programs. **A
+measurement that could not see what it was measuring** — the same species this branch's headline
+section is about, arriving one layer out, in the plan's own research rather than in shipped code.
+
+The implementer measured the real path through the shipped builders, found ~146 bytes / ~36 spans,
+and **left the given numbers in place while flagging the discrepancy** rather than silently adjusting
+either the figure to match reality or the report to match the figure. `61d6746` then corrected all
+six places at once. Ground truth, re-measured through the shipped builders (256 cases):
+
+```
+GENERATED  print_asm_mapped, 256 cases:  mean 146 B / 36 spans, max 393 B / 99 spans,
+                                         total 37,605 B / 9,408 spans, 256/256 lowered
+FIXED      print_asm_with_mapped, 17:    mean 198 B / 47 spans, max 713 B / 170 spans,
+                                         total 3,374 B / 810 spans
+```
+
+Every mean above is a FLOOR of the total over the case count, not a rounding — `9,408 / 256 = 36.75`
+reads as 36 and `37,605 / 256 = 146.9` reads as 146, consistently in both directions. Stated because
+the two numbers do not reconcile by rounding and a reader checking the arithmetic would otherwise
+find a discrepancy that is not one.
+
+The shipped leg prints its own live total on every run, which is what makes the figure checkable
+rather than archival:
+
+```
+$ cargo nextest run -p redextape-grammar-check --no-capture \
+    -E 'test(the_asm_grammar_agrees_with_the_printer_on_generated_programs)'
+asm generated leg: 256/256 programs lowered, 9252 spans compared
+```
+
+That is a fourth independent observation, at `ca69acb`, against the branch's earlier three (8,978 /
+9,088 / 9,208 — the seed varies) and the throwaway harness's 9,408.
+
+**These do not BRACKET a figure, they RANGE — and the whole-branch review caught the word.** All four
+shipped-leg observations above sit strictly BELOW the throwaway's 9,408, so nothing in that list
+brackets it. A wider sample says why: fifteen further runs of the shipped leg at `cb5c662` on
+2026-08-26 spanned 8,384 to 9,620, mean 9,071, with exactly one run above 9,408. That is a spread of
+1,236 spans across fifteen runs of the same test on the same tree, so 9,408 sits near the TOP of the
+observed range rather than at its centre, and no single figure here is a bound on the next.
+
+**The fixed-corpus figures were not wrong, they measured a different printer.** The plan's numbers
+were taken through `print_asm_mapped` where the shipped test drives `print_asm_with_mapped`, and the
+two are exactly 2 spans per entry apart — `776 + 17*2 = 810` — with a byte delta of about 12.8 per
+entry for `result <Ty>\n\n`. Both sets are kept, each labelled with its printer, rather than one
+being dropped as "stale".
+
+**The conclusion is unchanged and strengthened, and `cases: 256` is a MEASUREMENT.** 9,400 spans is
+about a seventeenth of what λ's 256-case leg already compares (163K) and about a thirtieth of TM's
+32-case leg (282,006). This is the cheapest of the four corpora; it was affordable at the wrong
+figure and is more so at the right one. No `cases` value moved in the correction, and the shipped
+test's doc comment says outright that 256 is measured rather than an inherited default, so a reader
+does not have to assume.
+
+##### A RULE THAT WOULD HAVE REJECTED INPUT THE REAL PARSER ACCEPTS, CAUGHT IN THE DESIGN PHASE
+
+`parse_asm_full` accepts `add:` as a label declaration. Its `strip_suffix(':')` check runs BEFORE the
+`result` directive dispatch and before the mnemonic dispatch, deliberately, and its own comment says
+so — the same ordering PR 2's entry records fixing for `result :`.
+
+The obvious grammar spells the mnemonics as string literals and adds `word: $ => $.identifier` for
+keyword extraction. Under that rule tree-sitter claims `add` as the `reg_reg_reg_instruction`
+keyword everywhere that text appears, INCLUDING at label position — so `add:` becomes an ERROR node
+while `foo:` parses clean. **That is a rule REJECTING input the real parser accepts, which is the
+divergence direction this slice has recorded as the defect to avoid**, and it was measured on a
+throwaway grammar under the pinned `.tools/tree-sitter` 0.25.10 *before the plan was written* rather
+than found in review.
+
+The fix is `_label_name: $ => choice($.identifier, ...RESERVED.map(w => alias(w, $.identifier)))`,
+giving the lexer a second, equally valid reading of that exact text in label position; LR(1)
+lookahead on what follows (`:` versus an operand, versus a type name for `result`) settles which
+applies. `RESERVED` is the 24 mnemonics plus `result` — 25 words, re-derived here from `grammar.js`
+rather than taken from a report: `NULLARY` 2 + `R` 1 + `RR` 7 + `RRR` 10 + `RI` 1 + `RL` 1 + `L` 2 =
+24, plus `RESULT`. **No `conflicts` declaration was needed** — the plan flagged the 25-word list as
+the one thing a two-word probe could not settle, and `tree-sitter generate` reported no conflict.
+
+The aliases are needed ONLY at line start. Tree-sitter's keyword substitution fires only where the
+keyword token is valid in the current parser state, which the TM grammar already demonstrates — it
+parses `state state:` with the second `state` as a plain identifier today — so `target:` and `type:`
+positions need no aliasing: `$.identifier` already accepts any reserved spelling there.
+
+**And `result` is spelled once.** `RESULT = 'result'` feeds both `RESERVED` and the `result` rule,
+because if the two ever disagreed a label literally named `result:` would stop parsing —
+`parse_asm_full` handles that case explicitly, so the grammar must too. `CORPUS`'s last entry
+(`"halt:\nresult:\n    halt\n"`) is what holds it.
+
+##### EIGHT CLAIMS THIS BRANCH FALSIFIED IN ALREADY-MERGED SIBLING READMEs, THREE OF THEM IN SUBSTANCE, AND THE GATE REACHES ONLY THE FIVE THAT ARE COUNTS
+
+A fourth grammar makes any sentence counting three of them false. Surveyed after the implementer
+flagged one, and fixed here on the precedent this file already carries — *"AND TWO FIGURES THIS
+BRANCH INVALIDATED IN ALREADY-MERGED READMEs, WHICH IS THE SAME DEFECT SELF-INFLICTED"*. The branch
+that breaks them fixes them. Four in `grammars/tree-sitter-redextape-tm/README.md`:
+
+1. *"Third and last of the three grammars in this repository"* — now "One of four grammars", naming
+   all three siblings rather than two.
+2. *"All three install from the same clone at different subdirectories"* — now "All four".
+3. *"now with **three** grammars in one clone"* (the Zed section) — now "**four**".
+4. *"`@punctuation.bracket` and `@punctuation.delimiter` both project to `Punct`, as in both
+   siblings."* — **wrong in substance, not merely arithmetic.** Verified against the tables rather
+   than assumed: `mini.rs`, `lambda.rs` and `tm.rs` each carry both rows; `asm.rs` carries only
+   `punctuation.delimiter`, and its own doc says why. The rewrite names the two grammars that do
+   share the pair and states asm's absence with the reason.
+
+Two in `grammars/tree-sitter-redextape-lambda/README.md`: *"The sibling grammar … **Both are
+installed from** the same clone"*, and *"**two grammars, one clone, two `path` values.**"*
+`grammars/tree-sitter-redextape/README.md` carried nothing that needed changing.
+
+**Two more, both in `grammars/tree-sitter-redextape-tm/README.md`, found by the whole-branch review
+after the gate was already in — and NEITHER IS A NUMBER, so nothing in the gate could have found
+them:**
+
+7. *"The queries must be TOTAL over this grammar's own tokens, which is a constraint **neither
+   sibling** carries."* — **wrong in substance.** The asm grammar carries it:
+   `grammars/tree-sitter-redextape-asm/queries/highlights.scm`'s header states the same requirement
+   in the same terms, and `crates/redextape-grammar-check/tests/asm.rs` carries an
+   `every_printed_token_is_captured` — which is the same test NAME TM's own README cites in the same
+   paragraph as what pins the property. The rewrite names asm as the sibling that shares it and the
+   mini-language and λ as the two that do not.
+8. *"Four things about it are unlike **either sibling** form"* — a presupposition of exactly two
+   siblings, in a repository that now has three. Rewritten to *"Four things about it shaped this
+   grammar"*, the asm README's own wording, rather than widened to a three-way comparison that would
+   then need checking three ways.
+
+**The recurrence is now a hook failure rather than a review burden.** `scripts/check-doc-figures.sh`
+gains a repo-level `grammar_count` key (`find grammars -mindepth 1 -maxdepth 1 -type d | wc -l`, the
+same shape as the existing `workspace_crates` key) plus a locator row per surviving claim: five
+count rows and nine asm-README rows, taking the gate from 24 documented figures to 38
+(`scripts/check-doc-figures.sh`). Proven to bite before it was trusted — editing *"now with
+**four**"* to *"**five**"* produced
+
+```
+error: ... 'grammar count (3 of 3: "now with N grammars in one clone")' claims 5, the tree says 4.
+```
+
+and reverting returned it to 38 of 38.
+
+**What that closes is the COUNTS, and it is five of the eight rather than all of them.** Claims 4, 7
+and 8 above are sibling comparisons written in prose, which is exactly what the gate's own header
+names as beyond it (*"largest of the three … was wrong for a whole PR and is not a number"*); a
+review pass is still the only thing that reaches one, and two of the three were found by the last
+review pass this branch got rather than by the first.
+
+**And the gate had a hole in the file it was written alongside.** The nine rows Task 5 added for the
+NEW README were all figure rows: **not one was a count row**, so a fifth grammar would have falsified
+the newest README in four places while the gate reported 38 of 38 green — the exact outcome the
+`grammar_count` key exists to prevent, reproduced inside the commit that introduced it. The fix round
+added the four missing rows, each a copy of an existing TM row with the path changed, taking the gate
+to 42. All four were proven to bite the same way the first three were: state the wrong count, watch
+the scan name that row, revert, confirm green.
+
+`scripts/check-all.sh`'s grammar leg carried its own version. Its comment named `-tm` as a
+hypothetical fourth grammar until `-tm` arrived, was corrected, and would now be wrong a second
+time. **The implementer went past the ask** — rather than bumping "three" to "four" and naming a
+hypothetical fifth, it removed the hypothetical entirely: the comment still names the four grammars
+that exist, but names no specific NEXT one, because the hazard is the untracked file rather than any
+particular grammar or count. `check_grammars` still globs `grammars/*/`; the change is comment-only.
+
+##### THE DESIGN'S §8 USED THE WRONG WORD FOR A RIGHT NUMBER
+
+§8 reads *"Five captures header-less (§1), more with the header block."* Five is right for
+`TokenClass` VALUES — §1 of the same design says *"The five token classes are `Label`, `Mnemonic`,
+`Nat`, `Punct`, `Register`"*, using the accurate word — and wrong for captures: the shipped
+`queries/highlights.scm` carries nine capture NAMES over ten pattern occurrences, and
+`CAPTURE_CLASSES` carries nine rows onto eight distinct classes (the ninth row is the `label` /
+`label.reference` collapse the section above is about).
+
+Worth recording because the slice's previous two entries each found a design claim that was outright
+false, and this one is a claim that is TRUE under one reading and false under the obvious one — a
+shape neither a differential nor a figure gate can see, because both numbers it could be checked
+against are correct. The design is not edited here; the correction lives in three shipped places
+instead. `src/asm.rs`'s module table and the asm README's *The form, in one page* section both state
+five classes header-less and seven headered, as a per-printer table rather than a count of captures;
+the README's *What the grammar covers* section states 10 patterns, 9 capture names, 9 rows and 8
+classes separately, and the figure gate holds all four of those numbers to the tree.
+
+**§12 of the same design carries a second stale claim, and it is a PREMISE rather than a word.** Its
+last bullet reads *"The asm text form. Not one of the three, and it could not be one: `parse_asm`
+remains unclaimed, so the asm form prints and cannot be read back. A grammar for it would have no
+parser to be checked against — the differential of §4 has no authority to call."* PR 1 of THIS slice
+retired that premise: `parse_asm` landed in `76629bd` (#62), which is the only reason this grammar
+has a differential at all. Recorded here rather than edited, on the same rule the section above
+follows — and the distinction matters because the asm README cites §12 as authority for putting
+folds and indents out of scope, a ruling §12 still carries correctly. The stale half is that one
+bullet, not the ones the README leans on.
+
+##### A DOC COMMENT AND A TEST, TWO LINES APART, CONTRADICTING EACH OTHER, WITH NOTHING ABLE TO NOTICE
+
+`TokenClass::Label`'s doc comment read *"An asm or TM label / state name in DEFINING position."*
+`Operand::class` has been mapping a `jz`/`jmp`/`call` target to `Label` since the asm printer's
+classification was written, and the tree's own test asserts it — `("done", TokenClass::Label)` twice
+inside one ordered `assert_eq!`, once as the `jz` operand and once as the trailing declaration, with
+a comment directly above saying exactly that:
+
+```
+$ grep -n '"done", TokenClass::Label' crates/redextape-core/src/tm/asm.rs
+1106:                ("done", TokenClass::Label),
+1108:                ("done", TokenClass::Label),
+```
+
+Two lines apart, in a test written to be the strongest form of that assertion, under a comment
+explaining that `"done"` is both the operand and the definition. Nothing could notice, because no
+gate compares a doc comment to a test. Corrected in `6028d97`: `Label` now says "an asm label in
+EITHER position … or a TM state name in DEFINING position", and `StateName` says it is TM-only.
+**Comment text only — the classification is unchanged**, and this is the one relaxation of the
+branch's "core is not modified" constraint, stated in the plan's Global Constraints and reported
+before execution began. Same shape as the TM grammar's PR relaxing the same constraint for `web/`
+comment text.
+
+##### THE THREE `Instr` VARIANTS PR 2 LEFT OPEN ARE NOW INSIDE A DIFFERENTIAL, AND ONE ASSERTION STILL READS 13 OF 16
+
+PR 1's entry recorded, and PR 2's repeated, that `Box`, `BoxGet` and `BoxSet` are emitted only by
+`defunc`'s mutable-capture boxing rewrite, so `crates/redextape-core/tests/asm_roundtrip.rs`'s
+`lower` helper — which calls `lower_asm` directly — cannot reach them from any demo string.
+
+This crate's builders reproduce `lower_program`'s TEMPLATE instead: `lower_asm` first, `defunc` retry
+on `LowerError::Unsupported` only, `TooDeep` returned immediately. The order is load-bearing and the
+match is exhaustive over `LowerError`'s two variants with no catch-all, so a future third variant
+fails to compile rather than being silently misrouted into the retry. `redextape_core::tm`'s
+`lower_program` is private (`fn lower_program`, no `pub`), and this is the **third** documented
+duplicate of it in the workspace — `redextape-native`'s `tests/native_oracle.rs` and
+`redextape-core`'s `tests/guard_counterexamples.rs` are the other two, both of which say so in a doc
+comment; verified here rather than carried from the report.
+
+`FIXED_CORPUS` reaches all 24 mnemonics through it — the first twelve entries are
+`asm_roundtrip.rs`'s `DEMOS` in order, plus a mutable-capture closure (the only entry needing the
+`defunc` retry, and the only one reaching `box`/`box_get`/`box_set`) and four comparisons for
+`cmpne`, `cmplt`, `cmple` and `cmpge`. `the_fixed_corpus_reaches_every_mnemonic` counts them from the
+printed TEXT rather than by matching on `Instr`, so it needs nothing `pub(super)` out of
+`redextape-core` and stays a claim about what an editor would actually see.
+
+**Which gap this closes, and which it does not.** What closes: a differential over all 24 mnemonics
+now exists, and `box`/`box_get`/`box_set` are inside it. What does not:
+`the_demo_corpus_covers_thirteen_of_the_sixteen_instr_variants` in `asm_roundtrip.rs` is **unchanged
+by this branch and still asserts 13 of 16** — `git diff --stat 8d0fe0d..ca69acb --
+crates/redextape-core/tests/asm_roundtrip.rs` is empty. The two answer different questions: that one
+is about a round-trip corpus in `redextape-core`, this one about mnemonic coverage in a highlighting
+differential, and closing the first still needs that helper routed through `lower_program`.
+
+##### THE DECISIONS MADE DELIBERATELY, EACH WITH WHAT SETTLED IT
+
+**`oneOf`, and the noise that would otherwise have been permanent.** The plan wrote all seven
+instruction rules as a uniform `choice(...SHAPE)`, which warns three times on `tree-sitter generate`
+because `R`, `RI` and `RL` hold one mnemonic each. The controller measured the consequence rather
+than taking the reviewer's word: the other three grammars generate with ZERO warnings, and
+`check-all.sh`'s grammar leg regenerates every grammar on every run — so this would have been the
+one grammar printing noise on every local run and every CI base tier, indefinitely. Fixed with
+`const oneOf = xs => (xs.length === 1 ? xs[0] : choice(...xs))`, used by all seven rules, which is
+MORE uniform than the plan's version rather than less: the collapse lives in one place instead of
+three rules being special-cased. **The fix was verified, not reported**: generate emits 0 bytes where
+it emitted 3 warnings, and `src/parser.c` and `src/node-types.json` are BYTE-IDENTICAL across it —
+the collapse changed no parse table. A re-reviewer corroborated the mechanism from `grammar.json`'s
+own diff: exactly the three singleton `CHOICE` wrappers became bare `STRING`s, and `RR`/`RRR`/
+`NULLARY` were untouched. The plan's `grammar.js` block was corrected in the same commit rather than
+left disagreeing with the tree.
+
+**A test the implementer overturned, and was right to.** The plan copied TM's conflicting-query test
+verbatim, with `(identifier) @variable`. TM has a bare `variable` row (`encoding`'s operand); asm has
+only `variable.builtin`, and `Grammar::class_for` is an exact string match with no dotted fallback —
+so `captures_with` would have hit the MISSING-ROW guard and returned before the DISAGREEMENT guard
+ever ran, and `assert!(err.contains("disagree"))` would have failed. The shipped test uses
+`(identifier) @type`, asm's one `Ident`-projecting row. The reviewer traced `captures_with` and
+`class_for` to confirm the mechanism rather than accepting the report, and hand-traced `"halt\nfoo:\n"`
+to confirm exactly one `identifier` node exists, so the disagreement is real rather than a
+coincidental error string.
+
+**Two forward-referencing comments were allowed to ship for one task, on a stated precedent.**
+`queries/highlights.scm` and `src/asm.rs` both named `each_label_capture_lands_on_its_own_positions`,
+and `src/asm.rs`'s `CORPUS` doc claimed `tests/asm.rs` asserts `parse_asm_full` accepts every entry,
+while neither test existed yet — both arrived a task later. Ruled Minor and not blocking on the
+previous slice's identical case, with the follow-up task required to make all three true, and
+reported to Davey with an explicit offer to override. Two things make it safe: Forgejo squash-merges,
+so no intermediate commit reaches `main`, and the claims were held to a named task rather than to
+intent. **`parse_asm_accepts_every_corpus_entry` was then proven capable of failing** by a deliberate
+bogus corpus entry (rejected with "unknown mnemonic `nope`") before being reverted, with the
+`src/asm.rs` diff confirmed empty before commit.
+
+##### THE MINOR FINDINGS, WHICH WERE CARRIED AND WHICH WERE FIXED, WITH WHY
+
+- **The generated leg's floor is 50% against a measured 100%.** `assert!(lowered >= total / 2)`
+  catches a catastrophic collapse of the lowering path, not a partial one. `256/256` lowered on every
+  run observed on this branch.
+- **`every_printed_token_is_captured` is a legibility aid, not new coverage.** It restates what
+  `compare_printed`'s length branch already checks; its own doc says so.
+- **The residue test pins by PROPERTY, not by the named entries.**
+  `the_corpus_carries_the_comment_positions_no_printer_emits` filters on `> 0`, so a future `CORPUS`
+  addition carrying a stray `;`
+  could mask deletion of the real residue entry, while its doc says "pinned by name". This is
+  `tests/tm.rs`'s existing sibling verbatim, so it is consistency rather than a weak assertion
+  invented here.
+- **`ranges_by_capture`'s `sort_unstable`/`dedup` now carries the comment it was missing.** It
+  collapses only exact-duplicate `(start, end)` TUPLES, not duplicate text — which is why `ref_text`
+  legitimately carries `"else0"` twice at two ranges — and that is safe only because
+  `@label.reference`'s two patterns are structurally mutually exclusive. A future overlapping pattern
+  under one name would be masked silently. Carried as a finding when the entry was written; written
+  into the file in the fix round, because an instrument whose limits are undocumented is this
+  branch's own species of defect.
+- **`oneOf` branches only on `length === 1`,** so a `length === 0` array would yield `choice()` with
+  zero members. Unreachable today: all seven arrays are hardcoded non-empty literals partitioning the
+  24 mnemonics. Worth a guard only if they ever become derived.
+- **One of the three unguarded "only" claims in the asm README was FALSE, and the whole-branch
+  review is what found it.** *"the only check in this tree that reaches all 24 mnemonics"*
+  overreached: `asm_syntax.rs` reaches the whole table by CONSTRUCTION three times over, in
+  `table_agrees_with_the_printer` (every `Instr` variant built with every `BinOp`),
+  `every_table_mnemonic_builds_an_instruction` (every `MNEMONICS` row parsed) and
+  `the_table_has_one_row_per_mnemonic_and_no_duplicates` (the table asserted to hold 24). The
+  surrounding paragraph's actual argument was true all along and is now what the sentence says: the
+  only DIFFERENTIAL that reaches all 24, by lowering real mini-language programs and printing them
+  rather than by constructing `Instr` values. Both the README and `tests/asm.rs`'s doc comment
+  carried the overreach and both were narrowed. A second sentence of the same shape was false for a
+  different reason: *"the header `Option` is the only difference between the entry points"* was
+  inherited from TM, whose `print_tm_inner(m, Option<&TmHeader>)` makes it true; asm's two entry
+  points are `print_asm_mapped(prog)` and `print_asm_with_mapped(prog, h)` and neither takes an
+  `Option`. `src/asm.rs`'s module doc had the right wording (*"TWO PRINTER ENTRY POINTS, ONE
+  PRINTER"*) and the README it describes contradicted it.
+- **What is left unguarded after those two, re-checked here rather than carried forward on trust.**
+  *"the only pair in this grammar's table that collapses"* — true: `CAPTURE_CLASSES` has 9 rows onto
+  8 distinct classes, so exactly one class takes two rows, and it is `label`/`label.reference`.
+  *"the only punctuation pattern here"* — true: `[":" ","] @punctuation.delimiter` is the one
+  punctuation capture in the shipped queries. And *"the cheapest of the four corpora"*, which is a
+  superlative whose referent is not defined anywhere: nothing measures a span total for the
+  mini-language's generated leg, so the comparison cannot be checked in the fourth direction. None
+  of the three is a number, so the figure gate cannot reach any of them — which is the class its own
+  header names as un-gateable, and this round is the evidence that only a review pass does.
+- **The λ README's OCaml-shape line lost an enumeration.** *"two grammars, one clone, two `path`
+  values"* became *"four grammars, one clone"*; true, but the original's third term is gone.
+
+##### WHAT THIS DID NOT CLOSE
+
+**The whole `Comment` class is outside this differential, and the CLI writes one into every `.asm`
+file it produces.** No asm printer emits a `;` at all — `grep -n Comment
+crates/redextape-core/src/tm/asm.rs` is empty — so `TokenClass::Comment` never appears on the
+authority side, and `@comment` rests entirely on `tree-sitter test` plus
+`parse_asm_accepts_every_corpus_entry`. **This is WIDER than TM's residue**, and the difference is
+exact rather than rhetorical: TM's header writer pushes a real `Comment` span for its tape-name
+comments, so `Comment` is INSIDE TM's differential and only three comment POSITIONS sit outside it.
+For asm the whole class sits outside. And it is not hypothetical text: `emit --lang asm`
+unconditionally prepends `ASM_PREAMBLE` — a one-line `;` comment — to every file it writes, so the
+first line of every emitted `.asm` file is in the part of the grammar this differential does not
+check.
+
+**`emit --lang asm` cannot produce the programs `FIXED_CORPUS` uses to reach `box`/`box_get`/
+`box_set`.** `emit.rs`'s `Lang::Asm` arm calls `lower_asm` DIRECTLY with no `defunc` retry, so a
+mutable-capture closure fails there with "this program has no asm lowering".
+`printed_program_with_header`'s claim that the header is built the way `emit` builds it is true of
+the HEADER sub-logic only — `ty::show` through `ty::parse_ty`, byte for byte — and not of the whole
+lowering pipeline.
+
+**`asm_roundtrip.rs`'s coverage assertion still reads 13 of 16**, unchanged by this branch, for the
+structural reason above.
+
+**No `locals.scm`, and the argument is earned rather than deferred.** A label reference resolves
+against the program's own label table, which `parse_asm` builds and `Program::validate()` checks.
+Name resolution has an owner and it is not the grammar — the same ruling the TM grammar made.
+
+**The one accept-MORE divergence stays, deliberately.** A newline is structural to the authority
+(`parse_asm_full` walks `src.split_inclusive('\n')`) and is in this grammar's `extras`, so the
+grammar accepts `halt jmp foo` on one line where the authority rejects it. That is the right
+direction for an editor, where a half-typed buffer is not an error worth underlining, and it is
+unreachable by the differential, whose corpus is printed output and therefore always one construct
+per line. The opposite direction — a rule rejecting input the parser accepts — is the one the
+`_label_name` aliases exist to prevent.
+
+**No `version` directive and no `fmt`**, unchanged from what design §10 put out of scope, and
+`web/` is untouched: this grammar's consumer is external editors, and a tree-sitter CST may never be
+lowered to `Core`.
+
+**The plan's 34 step checkboxes are all unticked.** Checked rather than assumed: the previous slice's
+merged plan is also 0 ticked of 36, so this matches current precedent rather than departing from it.
+No action taken.
+
+##### VERIFICATION
+
+**This block is a marker on purpose, and this paragraph is written to survive the marker being
+replaced.** Every entry in this slice has needed an appended correction for one structural reason:
+the closing entry is written in the last task, the whole-branch review then runs and reliably lands
+more commits, and the entry's figures are stale by construction the moment they are written. Both
+neighbours in this file show it without needing a count taken on faith: PR 1 of this slice carries a
+struck-through "did not close" item that the review closed before merge, plus an embedded `grep`
+whose line numbers had rotted twice over; PR 2 carries four successive re-measurement rounds, each
+falsifying the band the round before it stated, and a second `VERIFICATION (this round)` block
+appended under the first. So the figures here are to be taken from the commit CI actually passed on,
+read from the pull request's own `head.sha` rather than assumed from the branch, and this branch's
+own heading range carries the same marker for the same reason.
+**Whoever fills it: the prose above is anchored at `ca69acb` and says so; re-check
+those figures in the same pass, and do not delete this paragraph** — it explains a choice that was
+made, which stays true after the choice's effect is gone, unlike the sentence PR 2's entry recorded
+("no CI run has produced a result to name") that went false the instant the result arrived and sat
+directly above the result it denied.
+
+Figures taken at `93097ca`, working tree clean, each with the command that produced it, and the
+values at `8d0fe0d` for comparison:
+
+```
+14                    commits                    git rev-list --count 8d0fe0d..93097ca
+25 files, +6923/-35   whole-branch diff          git diff --shortstat 8d0fe0d..93097ca
+1231, 9 skipped       workspace suite            cargo nextest run --workspace
+                                                    (1,215 run / 9 skipped at 8d0fe0d — this
+                                                    branch adds 16)
+60, 0 skipped         grammar-check suite        cargo nextest run -p redextape-grammar-check
+                                                    (44 tests / 1.042s at 8d0fe0d, by the anchored
+                                                    `git grep -hE '^[[:space:]]*#\[test\]$' <sha> --
+                                                    'crates/redextape-grammar-check/**/*.rs' | wc -l`
+                                                    — a bare `grep -c '^#\[test\]'` undercounts at
+                                                    40, missing four indented `#[test]`s; nextest
+                                                    agrees with the anchored count at both ends,
+                                                    0.669s now)
+42                    gated doc figures          scripts/check-doc-figures.sh
+                                                    (24 at 8d0fe0d; 38 at ca69acb, before the
+                                                    four-row fix recorded above)
+4                     grammar directories        find grammars -mindepth 1 -maxdepth 1 -type d \
+                                                    | wc -l
+165                   asm grammar.js lines       wc -l < grammars/tree-sitter-redextape-asm/grammar.js
+                                                    (siblings at ca69acb: 171 mini, 78 λ, 147 TM)
+44,324                asm parser.c bytes         wc -c < grammars/tree-sitter-redextape-asm/src/parser.c
+                                                    (siblings at ca69acb: 103,482 / 11,483 / 42,220)
+15                    generated ABI              grep -m1 LANGUAGE_VERSION \
+                                                    grammars/tree-sitter-redextape-asm/src/parser.c
+17                    tree-sitter test parses    cd grammars/tree-sitter-redextape-asm && \
+                                                    ../../.tools/tree-sitter test
+                                                    ("Total parses: 17; successful parses: 17;
+                                                    failed parses: 0; success percentage: 100.00%")
+17                    corpus entries, halved     cat test/corpus/* | grep -c '^===*$'
+10                    query pattern occurrences  grep -v '^;' queries/highlights.scm | grep -oE
+                                                    '@[a-z._]+' | wc -l
+9                     capture NAMES              same command, | sort -u | wc -l
+9                     CAPTURE_CLASSES rows       awk '/pub const CAPTURE_CLASSES/,/^\];/'
+                                                    crates/redextape-grammar-check/src/asm.rs
+                                                    | grep -c '^    ("'
+```
+
+None of the nine grammar-shape rows above — grammar directories, `grammar.js` lines, `parser.c`
+bytes, the ABI, the parse count, the corpus count, the query-pattern occurrences, the capture-name
+count, the `CAPTURE_CLASSES` row count — moved from the `ca69acb` figures already quoted earlier in
+this entry: the whole-branch review's fixes touched documentation and a test file, not the grammar
+itself.
+
+```
+$ cargo nextest run --workspace
+     Summary [  35.409s] 1231 tests run: 1231 passed, 9 skipped
+
+$ cargo nextest run -p redextape-grammar-check
+     Summary [   0.669s] 60 tests run: 60 passed, 0 skipped
+
+$ scripts/check-doc-figures.sh --self-test
+(passes)
+
+$ scripts/check-doc-figures.sh
+check-doc-figures: 42 documented figures match the tree.
+
+$ scripts/check-citations.sh
+no file:line citations in tracked source: 404 files scanned, 0 violations, 2 escape-hatch marker(s)
+honoured (189 out of scope, binary or recording, 0 skipped — 593 tracked paths in all)
+
+$ scripts/check-text-bytes.sh
+no control bytes in tracked text files
+```
+
+`scripts/check-all.sh --no-llvm --no-browser` exited 0, regenerating all four grammars in this
+order — `tree-sitter-redextape`, `tree-sitter-redextape-asm`, `tree-sitter-redextape-lambda`,
+`tree-sitter-redextape-tm` — with `git status` clean afterwards. **Its own final line is quoted
+rather than the run called green unqualified, on purpose**: `green, but PARTIAL — these tiers were
+SKIPPED: LLVM browser. This is NOT a full gate on its own.` This file's convention is to repeat what
+a tool actually said rather than summarise a partial run as a bare pass.
+
+**The generated leg's span total is a measured RANGE, not a point figure, for the same reason the
+section above corrected "bracket" to "range."** Fifteen further runs of
+`the_asm_grammar_agrees_with_the_printer_on_generated_programs` at `cb5c662`, all 256/256 programs
+lowered: 9162, 9392, 8956, 9202, 9148, 9172, 8586, 8926, 8910, 9392, 9620, 9252, 8384, 8718, 9248.
+Minimum 8,384, maximum 9,620, mean 9,071.2 — a spread of 1,236 across fifteen runs of the same test
+on the same tree, not a figure this or any later run is bound to reproduce.
+
+**This block trails the commit it describes, and cannot do otherwise.** Every figure above was
+measured at `93097ca`; the commit that filled these markers is not itself inside the measurements it
+reports, and neither are the ones that corrected this entry afterwards. That tail is irreducible — a
+verification block recorded inside the tree it describes always has one.
+
+**The two entries above each said "trails by ONE commit", and that is the sentence to avoid copying.**
+Written here it was false within the hour: filling the markers took one commit, and correcting the
+note introducing them took three more, because each correction stated a count of the paragraph it
+was written inside and the next edit falsified it. **Naming `93097ca` rather than a distance or "the
+branch head" is the whole defence** — a SHA stays true however many commits land on top of it, and a
+count does not. The heading's `8d0fe0d..93097ca` is likewise the range these figures describe, not
+the range the pull request will contain; `git rev-list --count 8d0fe0d..HEAD` is what answers that,
+and it answers it correctly at any time.
+
+**No CI run existed when this paragraph was written, on `93097ca` — the branch had not been pushed
+to a remote, and no pull request existed.** That record now follows, and it belongs here, read from the pull request's own `head.sha` rather than assumed from
+the branch — this file's convention since entry 61, and the one PR 1 of this slice's own
+VERIFICATION block followed for `175b137`. This sentence states a fact about the moment of writing
+rather than an ongoing condition, so filling the marker above does not make it false.
+
+**CI run 301 — API id 1207, which is not the run number, per this file's standing note — was green
+on `609464c`, and that SHA was read from pull request 64's own `head.sha` rather than assumed from
+the branch.** Every job: `detect`, `linear-history`, `rust`, `rust-slow`, `rust-llvm`,
+`rust-browser`, `web` and `gate` all `success`; `rust-scoped` skipped because the unscoped `rust`
+job ran instead, and `docker` skipped, as it always is on a pull request.
+
+**The tie between the run and the SHA is keyed by the SHA, not inferred from the branch.** The run
+endpoint on this Forgejo instance returns `head_sha`, `run_number`, `started_at` and `completed_at`
+as null, so a run object alone cannot say what it ran against. `GET /repos/davey/redextape/commits/
+609464ce62a105f6f2d21ef215d90ad18f810b8c/status` answers `state: success` over 10 statuses whose
+`target_url`s every one point at `/actions/runs/301/jobs/N` — which is what actually establishes
+that run 301 is this commit's run.
+
+**NO WALL-CLOCK FIGURE IS QUOTED FOR THIS RUN, AND THAT IS A LIMIT RATHER THAN AN OMISSION.** The
+API exposes no per-job timings and no start or finish timestamps here, so the per-job seconds the
+two entries above quote have no equivalent available. What can be said is bounded and coarse: a
+poll at 30-second granularity, started after the pull request was created, observed the run terminal
+within 300 s of starting. That is an upper bound on the tail of the run, not its duration, and it is
+recorded that way because this file's own note on CI timing variance says to repeat every wall-clock
+claim — a figure that cannot be measured is one to decline rather than to estimate.
+
+**Every wall-clock claim gets repeated, and the CI job timings are not this branch's property.** This
+runner's variance for the same job exceeds 2x with nothing in the branch responsible: PR 2 of this
+slice records `rust` at 9m21s against PR 1's 3m25s, same job, same runner. Any figure recorded here
+is an observation about one run rather than a measurement of this change, and the `rust` job carries
+`check-all.sh`, whose grammar leg now regenerates FOUR parsers from a clean checkout rather than
+three.
+
+**`docker` is skipped on a pull request, always, and `rust-scoped` is skipped whenever the unscoped
+`rust` job runs instead.** Both were, on run 301. Neither is evidence of anything about this branch,
+which is why they are stated as the standing rule rather than as a result — the version of this
+sentence written before the run said "will be skipped", and was still saying it after they had been. Use the
+gitea MCP rather than `tea api get`, which 404s everything AND exits 0; the API's run id is not the
+run number in the URL; and there is no rerun endpoint, so editing the PR body is what retriggers.

@@ -40,9 +40,12 @@ pub enum TokenClass {
     Mnemonic,
     /// An asm register (`r0`, `a1`, `rr`).
     Register,
-    /// An asm or TM label / state name in DEFINING position.
+    /// An asm label in EITHER position — a definition or a `jz`/`jmp`/`call` target — or a TM state
+    /// name in DEFINING position. Asm's printer collapses both label positions into this one class;
+    /// TM keeps them apart, which is what `StateName` below is for.
     Label,
-    /// A TM state name in REFERENCE position (a `goto` target).
+    /// A TM state name in REFERENCE position (a `start`/`goto` target). TM-only: asm has no
+    /// equivalent row, because asm folds a label reference into `Label` above instead.
     StateName,
     /// A symbol on a TM tape, or a wildcard.
     TapeSymbol,

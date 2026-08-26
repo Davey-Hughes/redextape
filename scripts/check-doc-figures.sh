@@ -16,7 +16,7 @@
 # found only because a third README was being written and happened to need the same two numbers for
 # a comparison. Had that PR not existed, the claim would still be there.
 #
-# **FOUR DOCUMENTS, AND THE ROOT README EARNED ITS ROWS BY BEING WRONG IN FOUR PLACES AT ONCE.**
+# **THE ROOT README EARNED ITS ROWS BY BEING WRONG IN FOUR PLACES AT ONCE.**
 # The three grammar READMEs came first. The root README was added after a survey found it claiming
 # "Four crates" against seven, "841 tests" against 1,156, "six pre-commit hooks" against seven, and
 # "15 browser tests" against 26. **One of those was falsified by the very branch that introduced this
@@ -24,11 +24,17 @@
 # figure in the one file it did not yet cover. Its repo-level rows (`.` as the scope) describe the
 # workspace rather than a grammar, and every one is a structural grep that compiles nothing.
 #
+# **HOW MANY DOCUMENTS THIS TABLE COVERS IS DELIBERATELY NOT STATED HERE.** This header used to open
+# by counting them, and that count went stale the moment a fourth grammar README got rows — the same
+# failure the gate exists to stop, one level up, in the gate's own file. `scripts/check-all.sh`
+# removed its own count for the same reason rather than bumping it. Read the table.
+#
 # **THE CROSS-REFERENCES ARE WHY THIS IS WORTH A GATE RATHER THAN A HABIT.** These READMEs quote
-# each other: λ's cites the mini-language's line count AND its capture-name count, and TM's cites
-# both siblings' line counts. So editing ONE `grammar.js` can falsify THREE READMEs, only one of
-# which the editor has any reason to open. Four of the rows below are cross-references, and they are
-# the ones nobody is looking at.
+# each other: λ's cites the mini-language's line count AND its capture-name count, and TM's and
+# asm's each cite the mini-language's line count and λ's. So editing ONE `grammar.js` can falsify
+# several READMEs at once, and only one of them is the one the editor has any reason to open. The
+# cross-reference rows below — the ones whose grammar-dir column is not their own README's — are the
+# ones nobody is looking at. No count of them is given here, for the reason above.
 #
 # **A FIGURE ASSERTED TWICE IS TWO ROWS, BECAUSE IT DRIFTS TWICE.** The λ README states its
 # capture-name count in three separate sentences — *"entire capture vocabulary is five names"*,
@@ -105,6 +111,7 @@ cd "$ROOT"
 readonly G_MINI="grammars/tree-sitter-redextape"
 readonly G_LAM="grammars/tree-sitter-redextape-lambda"
 readonly G_TM="grammars/tree-sitter-redextape-tm"
+readonly G_ASM="grammars/tree-sitter-redextape-asm"
 
 # ---------------------------------------------------------------------------
 # THE ONE DERIVATION IMPLEMENTATION. The scan and `--self-test` both call this, so the self-test
@@ -118,6 +125,7 @@ map_src() {
     "$G_MINI") echo "crates/redextape-grammar-check/src/mini.rs" ;;
     "$G_LAM")  echo "crates/redextape-grammar-check/src/lambda.rs" ;;
     "$G_TM")   echo "crates/redextape-grammar-check/src/tm.rs" ;;
+    "$G_ASM")  echo "crates/redextape-grammar-check/src/asm.rs" ;;
     *) echo "check-doc-figures: no capture-map module for $1" >&2; return 1 ;;
   esac
 }
@@ -150,6 +158,7 @@ derive() {
     # --workspace` costs 218 s warm against this whole script's ~150 ms, so the root README states
     # that figure as a dated observation instead. A gate that cannot be cheap should not exist.
     workspace_crates)   n=$(find crates -mindepth 1 -maxdepth 1 -type d | wc -l) ;;
+    grammar_count)      n=$(find grammars -mindepth 1 -maxdepth 1 -type d | wc -l) ;;
     precommit_hooks)    n=$(grep -c '^      - id: ' .pre-commit-config.yaml) ;;
     wasm_browser_tests) n=$(grep -c '#\[wasm_bindgen_test\]' crates/redextape-wasm/tests/browser.rs) ;;
     *) echo "check-doc-figures: unknown key '$key'" >&2; return 1 ;;
@@ -173,6 +182,7 @@ derive_cmd() {
     map_classes)      echo "awk '/pub const CAPTURE_CLASSES/,/^\\];/' $src | grep '^    (\"' | sed -E 's/.*,[[:space:]]*(TokenClass::[A-Za-z]+).*/\\1/' | sort -u | wc -l" ;;
     corpus_cases)     echo "cat $dir/test/corpus/* | grep -c '^===*\$'  # halved" ;;
     workspace_crates)   echo "find crates -mindepth 1 -maxdepth 1 -type d | wc -l" ;;
+    grammar_count)      echo "find grammars -mindepth 1 -maxdepth 1 -type d | wc -l" ;;
     precommit_hooks)    echo "grep -c '^      - id: ' .pre-commit-config.yaml" ;;
     wasm_browser_tests) echo "grep -c '#\[wasm_bindgen_test\]' crates/redextape-wasm/tests/browser.rs" ;;
   esac
@@ -237,6 +247,8 @@ grammars/tree-sitter-redextape-lambda/README.md|grammars/tree-sitter-redextape-l
 grammars/tree-sitter-redextape-lambda/README.md|grammars/tree-sitter-redextape|capture_names|mini capture names (CROSS-REF from lambda)|against the mini-language's \*{0,2}([0-9,]+|[A-Za-z]+)
 grammars/tree-sitter-redextape-lambda/README.md|grammars/tree-sitter-redextape-lambda|map_classes|lambda distinct capture classes|project onto \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} `TokenClass`
 grammars/tree-sitter-redextape-lambda/README.md|grammars/tree-sitter-redextape-lambda|map_rows|lambda CAPTURE_CLASSES rows|CAPTURE_CLASSES` has \*{0,2}([0-9,]+|[A-Za-z]+) rows
+grammars/tree-sitter-redextape-lambda/README.md|.|grammar_count|grammar count (1 of 2: "All N are installed from the same clone")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} are installed from the same clone
+grammars/tree-sitter-redextape-lambda/README.md|.|grammar_count|grammar count (2 of 2: "N grammars, one clone")|\*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars, one clone
 grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-tm|grammar_js_lines|tm grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
 grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape|grammar_js_lines|mini grammar.js lines (CROSS-REF from tm)|close to the mini-language's \*{0,2}([0-9,]+|[A-Za-z]+)
 grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-lambda|grammar_js_lines|lambda grammar.js lines (CROSS-REF from tm)|nearly twice λ's \*{0,2}([0-9,]+|[A-Za-z]+)
@@ -247,6 +259,22 @@ grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-tm|ma
 grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-tm|map_rows|tm CAPTURE_CLASSES rows|CAPTURE_CLASSES` has \*{0,2}([0-9,]+|[A-Za-z]+) rows
 grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-tm|parser_c_bytes|tm parser.c bytes|`src/parser\.c` is \*{0,2}([0-9,]+|[A-Za-z]+) bytes
 grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-tm|corpus_cases|tm tree-sitter test cases|`test/corpus/` holds \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} `tree-sitter test` cases
+grammars/tree-sitter-redextape-tm/README.md|.|grammar_count|grammar count (1 of 3: "One of N grammars in this repository")|One of \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in this repository
+grammars/tree-sitter-redextape-tm/README.md|.|grammar_count|grammar count (2 of 3: "All N install from the same clone")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} install from the same clone
+grammars/tree-sitter-redextape-tm/README.md|.|grammar_count|grammar count (3 of 3: "now with N grammars in one clone")|now with \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in one clone
+grammars/tree-sitter-redextape-asm/README.md|grammars/tree-sitter-redextape-asm|grammar_js_lines|asm grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
+grammars/tree-sitter-redextape-asm/README.md|grammars/tree-sitter-redextape|grammar_js_lines|mini grammar.js lines (CROSS-REF from asm)|under the mini-language's \*{0,2}([0-9,]+|[A-Za-z]+)
+grammars/tree-sitter-redextape-asm/README.md|grammars/tree-sitter-redextape-lambda|grammar_js_lines|lambda grammar.js lines (CROSS-REF from asm)|over twice λ's \*{0,2}([0-9,]+|[A-Za-z]+)
+grammars/tree-sitter-redextape-asm/README.md|grammars/tree-sitter-redextape-asm|query_patterns|asm query patterns|highlights\.scm` holds \*{0,2}([0-9,]+|[A-Za-z]+) patterns
+grammars/tree-sitter-redextape-asm/README.md|grammars/tree-sitter-redextape-asm|capture_names|asm capture names|over \*{0,2}([0-9,]+|[A-Za-z]+) capture names
+grammars/tree-sitter-redextape-asm/README.md|grammars/tree-sitter-redextape-asm|map_rows|asm CAPTURE_CLASSES rows|CAPTURE_CLASSES` has \*{0,2}([0-9,]+|[A-Za-z]+) rows
+grammars/tree-sitter-redextape-asm/README.md|grammars/tree-sitter-redextape-asm|map_classes|asm distinct capture classes|onto \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} distinct `TokenClass`
+grammars/tree-sitter-redextape-asm/README.md|grammars/tree-sitter-redextape-asm|parser_c_bytes|asm parser.c bytes|`src/parser\.c` is \*{0,2}([0-9,]+|[A-Za-z]+) bytes
+grammars/tree-sitter-redextape-asm/README.md|grammars/tree-sitter-redextape-asm|corpus_cases|asm tree-sitter test cases|`test/corpus/` holds \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} `tree-sitter test` cases
+grammars/tree-sitter-redextape-asm/README.md|.|grammar_count|grammar count (1 of 4: "One of N grammars in this repository")|One of \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in this repository
+grammars/tree-sitter-redextape-asm/README.md|.|grammar_count|grammar count (2 of 4: "across all N grammars in this repository")|across all \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in this repository
+grammars/tree-sitter-redextape-asm/README.md|.|grammar_count|grammar count (3 of 4: "All N install from the same clone")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} install from the same clone
+grammars/tree-sitter-redextape-asm/README.md|.|grammar_count|grammar count (4 of 4: "now with N grammars in one clone")|now with \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in one clone
 ROWS
 }
 

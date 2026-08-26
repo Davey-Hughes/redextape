@@ -1,9 +1,9 @@
 # tree-sitter-redextape-tm
 
 A tree-sitter grammar for the **Redextape TM text form** — the flat, line-oriented, human-readable
-language a `Machine` prints to and `parse_tm` reads back. Third and last of the three grammars in this
-repository, alongside `tree-sitter-redextape` (the mini-language) and `tree-sitter-redextape-lambda`
-(the λ form).
+language a `Machine` prints to and `parse_tm` reads back. One of four grammars in this repository,
+alongside `tree-sitter-redextape` (the mini-language), `tree-sitter-redextape-lambda` (the λ form), and
+`tree-sitter-redextape-asm` (the asm form).
 
 **It is for highlighting in external editors and it is not authoritative.** The hand-written parser in
 `redextape_core::tm::syntax` is the semantic source of truth and owns the canonical printer. This
@@ -27,7 +27,7 @@ MOVE       := 'L' | 'R' | 'S'
 Every line kind also accepts a trailing `;` comment: the parser splits each line at its **first** `;`
 before doing anything else.
 
-Four things about it are unlike either sibling form, and each one shaped this grammar:
+Four things about it shaped this grammar:
 
 **1. State names are extremely permissive.** The rule is "no whitespace or reserved `; * : [ ]`", so
 `wl1s2.s.sk0` and `add4.a.c.cwb` are single names — dots and digits are ordinary characters anywhere.
@@ -75,11 +75,14 @@ A **span-for-span differential** in `crates/redextape-grammar-check`: parse the 
 equals the printer's own classification of the same text, byte range for byte range, in offset order.
 The printer is the authority; a divergence is always a defect here.
 
-**The queries must be TOTAL over this grammar's own tokens**, which is a constraint neither sibling
-carries. TM's printer emits a span for every non-whitespace byte it writes — separators included — so
-there is no unclassified text a query could legitimately miss, and a dropped pattern shows up as a
-length mismatch rather than as a merely uncoloured character. `every_printed_token_is_captured` names
-that property directly.
+**The queries must be TOTAL over this grammar's own tokens** — a constraint exactly one of the three
+siblings shares. The asm grammar does: its `queries/highlights.scm` header states the same
+requirement, and `crates/redextape-grammar-check/tests/asm.rs` carries an
+`every_printed_token_is_captured` of its own. The mini-language and λ grammars do not. TM's printer
+emits a span for every non-whitespace byte it writes — separators included — so there is no
+unclassified text a query could legitimately miss, and a dropped pattern shows up as a length
+mismatch rather than as a merely uncoloured character. `every_printed_token_is_captured` names that
+property directly.
 
 Two corpora, because the two printers reach different classes:
 
@@ -197,10 +200,10 @@ is no way for this grammar to resolve that for you.
 ### The name is `redextape_tm`
 
 Every editor loads the parser by looking up the C symbol `tree_sitter_<name>`, and this grammar
-exports `tree_sitter_redextape_tm` (`grep -n 'TS_PUBLIC const TSLanguage' src/parser.c`). Its two
-siblings in the same repository export `tree_sitter_redextape` and `tree_sitter_redextape_lambda`.
-**All three install from the same clone at different subdirectories**, so getting the name wrong loads
-a different language rather than failing to find one.
+exports `tree_sitter_redextape_tm` (`grep -n 'TS_PUBLIC const TSLanguage' src/parser.c`). Its three
+siblings in the same repository export `tree_sitter_redextape`, `tree_sitter_redextape_lambda`, and
+`tree_sitter_redextape_asm`. **All four install from the same clone at different subdirectories**, so
+getting the name wrong loads a different language rather than failing to find one.
 
 The snippets below are adapted from the sibling READMEs, where the non-obvious parts were verified
 against upstream source. Re-checked 2026-08-21: nvim-treesitter `main`'s `install.lua` still joins
@@ -314,7 +317,7 @@ pub struct GrammarManifestEntry {
 
 `extension_builder.rs` clones the repository and joins `path` before looking for `src/parser.c`. Two
 shipped extensions rely on it; `zed-extensions/ocaml` uses two `path` values from one repository,
-which is exactly the shape this repository is in — now with **three** grammars in one clone.
+which is exactly the shape this repository is in — now with **four** grammars in one clone.
 
 ```
 redextape-tm-zed/
@@ -378,7 +381,9 @@ exercised at least once over the corpus (`every_tm_query_pattern_fires_over_the_
 (`encoding`'s operand) and `@type` (`result`'s operand) both project to `Ident` — `write_header`'s own
 comment says why the class is `Ident` for each, and splitting the *capture* is what gets
 `result List<Nat>` coloured as a type in an editor. `@punctuation.bracket` and
-`@punctuation.delimiter` both project to `Punct`, as in both siblings.
+`@punctuation.delimiter` both project to `Punct`, as in the mini-language and λ grammars. The asm
+grammar does not share this: its `CAPTURE_CLASSES` table has no `punctuation.bracket` row at all,
+because the asm form has no brackets.
 
 **`@label` and `@label.reference` are the pair the design's capture vocabulary section exists for.**
 `TokenClass` distinguishes `Label` (a state name where it is defined) from `StateName` (the same name

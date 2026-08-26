@@ -9,11 +9,13 @@
 //! lane and forbids a second authoritative grammar; its test for "authoritative" is lowering. A
 //! tree-sitter node reaching a `redextape_core` AST type is the line this crate must not cross.
 
+pub mod asm;
 pub mod grammar;
 pub mod lambda;
 pub mod mini;
 pub mod tm;
 
+pub use asm::ASM;
 pub use grammar::{Grammar, compare_classified};
 pub use lambda::LAMBDA;
 pub use mini::MINI;

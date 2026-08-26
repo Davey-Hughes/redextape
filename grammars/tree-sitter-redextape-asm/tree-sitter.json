@@ -1,0 +1,20 @@
+{
+  "grammars": [
+    {
+      "name": "redextape_asm",
+      "camelcase": "RedextapeAsm",
+      "scope": "source.asm",
+      "path": ".",
+      "file-types": ["asm"],
+      "highlights": ["queries/highlights.scm"],
+      "injection-regex": "^asm$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "GPL-3.0-only",
+    "description": "Redextape asm text form grammar for tree-sitter",
+    "authors": [{ "name": "davey" }],
+    "links": { "repository": "https://git.daveynet.xyz/davey/redextape" }
+  }
+}

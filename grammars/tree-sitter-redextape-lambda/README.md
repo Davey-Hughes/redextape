@@ -146,8 +146,8 @@ everything else:
   the pipeline**: no corpus entry reached it, and `print_lambda_mapped` can never emit `(x)` at all,
   since `parens` is reached only for an `Abs` in function position and for a non-`Var` atom. The
   pattern is *correct* and stays — an editor's user can type `(x)` — and what was missing was proof
-  that anything exercised it. The guard is on `Grammar`, so both grammars carry it and the TM grammar
-  will inherit it.
+  that anything exercised it. The guard is on `Grammar`, so every grammar in this repository carries
+  it — the TM and asm grammars inherited it when they arrived.
 - **`every_corpus_program_parses_without_error_nodes`** — `Grammar::parse` **succeeds on a syntax
   error**, returning a tree that contains `ERROR`/`MISSING` nodes, and `captures` never inspects them.
   Without this, a corpus entry that stopped parsing cleanly would still pass every capture test with a
@@ -248,9 +248,10 @@ The snippets below are written with the plain HTTPS URL because that is the addr
 Every editor below loads the parser by looking up the C symbol `tree_sitter_<name>`, and the symbol
 this grammar exports is `tree_sitter_redextape_lambda` — `grammar.js` declares
 `name: 'redextape_lambda'`, and `grep -n 'TS_PUBLIC const TSLanguage' src/parser.c` shows the result.
-The sibling grammar in the same repository exports `tree_sitter_redextape`. **Both are installed from
-the same clone at different subdirectories**, so getting the name wrong loads the wrong language
-rather than failing to find one — the two live side by side and neither shadows the other.
+The other grammars in this repository export `tree_sitter_redextape`, `tree_sitter_redextape_tm`, and
+`tree_sitter_redextape_asm`. **All four are installed from the same clone at different
+subdirectories**, so getting the name wrong loads the wrong language rather than failing to find one —
+they live side by side and none shadows another.
 
 The install snippets are otherwise adapted from `grammars/tree-sitter-redextape/README.md`, where the
 non-obvious parts (nvim-treesitter's two incompatible branches, Zed's undocumented `path` key,
@@ -374,7 +375,8 @@ pub struct GrammarManifestEntry {
 `extension_builder.rs` clones the repository and then joins `path` before looking for `src/parser.c`.
 Two shipped extensions rely on it — `zed-extensions/ocaml` uses `path = "grammars/ocaml"` and
 `path = "grammars/interface"` from a single repository, and `zed-extensions/php` uses `path = "php"`.
-The OCaml case is the shape this repository is in: **two grammars, one clone, two `path` values.**
+The OCaml case is the shape this repository is in, just with more of it: **four grammars, one
+clone.**
 
 Zed has no equivalent of nvim's `install_info`: a grammar is installed by *an extension*, so this is a
 small repository of its own rather than a config block.
