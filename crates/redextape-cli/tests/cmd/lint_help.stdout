@@ -1,9 +1,13 @@
 Report parse, type and lint diagnostics
 
-Usage: redextape lint <PATHS>...
+Usage: redextape lint [OPTIONS] <PATHS>...
 
 Arguments:
   <PATHS>...  Files to check. `-` reads standard input
 
 Options:
-  -h, --help  Print help
+      --config <PATH>     Read settings from this file instead of searching for one. Naming a file that does not exist is an error, where finding no file during the search is not
+      --deny-warnings     Make a warning fail the run: exit 1 rather than 0. Overrides `lint.deny-warnings` in `redextape.toml`
+      --no-config         Ignore any `redextape.toml` and use built-in defaults
+      --no-deny-warnings  Report warnings without failing, overriding `lint.deny-warnings` in `redextape.toml`
+  -h, --help              Print help

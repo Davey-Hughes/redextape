@@ -32,7 +32,12 @@ const ASM_PREAMBLE: &str = "\
 
 /// Tape encoding for `--lang tm`. `Default` is what an omitted `--encoding` means; the flag itself
 /// is an `Option` so that passing `--encoding unary` off the `tm` target is still an error.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+///
+/// `Deserialize` is what lets `redextape.toml`'s `emit.encoding` name the same two values the flag
+/// does. `rename_all` makes the TOML spellings `"unary"` and `"binary"`, matching what `clap` prints
+/// in `--help`: one set of names for a user to learn, not two.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum, serde::Deserialize)]
+#[serde(rename_all = "lowercase", deny_unknown_fields)]
 pub enum EncodingArg {
     /// One cell per unit. The default, and the narrower of the two: the widest field there is holds
     /// values up to 63 (measured, not supposed).
@@ -58,6 +63,60 @@ pub enum Outcome {
     ToolFailed,
 }
 
+/// The `[emit]` defaults a flag may override. Two values rather than a `&Config` so this module
+/// still knows nothing about the config file's shape or how it was discovered.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Defaults {
+    pub encoding: EncodingArg,
+    pub field_width: usize,
+}
+
+/// The TM field width in effect, and — when it was pinned — WHICH setting pinned it.
+///
+/// **THE NUMBER ALONE IS NOT ENOUGH, WHICH IS THE WHOLE REASON THIS IS NOT A `usize`.** `4` reaches
+/// `emit_tm` identically whether it was typed as `--field-width 4` or read from a config file's
+/// `emit.field-width`, and the two users need different sentences: one can drop a flag they just
+/// typed, the other has to be told a file they may not have written is in effect at all. A refusal
+/// that names neither — which is what shipped — sends both of them looking at `--encoding` instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Width {
+    /// No pin. The fitting search runs: `MIN_FIELD_WIDTH`, doubling, to at most `MAX_FIELD_WIDTH`.
+    AutoFit,
+    /// `--field-width N` was typed, with `N` not the auto-fit sentinel.
+    Flag(usize),
+    /// No flag, and the config file's `emit.field-width` is not the auto-fit sentinel.
+    Config(usize),
+}
+
+impl Width {
+    /// Flag > config > default, with `0` from EITHER side meaning auto-fit — the sentinel is a
+    /// value of the setting, not an absence of it, so `--field-width 0` is a request for the search
+    /// and not a pin at zero.
+    fn resolve(flag: Option<usize>, configured: usize) -> Self {
+        match (flag, configured) {
+            (Some(0), _) | (None, 0) => Width::AutoFit,
+            (Some(n), _) => Width::Flag(n),
+            (None, n) => Width::Config(n),
+        }
+    }
+}
+
+/// What `emit` was asked for: the flags as the user typed them, and the defaults to fall back on.
+///
+/// **THE FLAGS STAY `Option` AND THE DEFAULTS ARE PLAIN VALUES, AND THAT SEPARATION IS THE WHOLE
+/// POINT OF THIS STRUCT.** `run`'s guard has to distinguish "the user typed `--encoding`" from "a
+/// value is in effect", and merging the two before the guard is the bug design §7 is about. Keeping
+/// them in different fields makes the wrong version hard to write by accident.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Options {
+    /// `--encoding`, or `None` when it was not passed.
+    pub encoding: Option<EncodingArg>,
+    /// `--field-width`, or `None` when it was not passed.
+    pub field_width: Option<usize>,
+    /// `[emit]` from `redextape.toml`, or `Defaults::default()` under `--no-config`.
+    pub defaults: Defaults,
+}
+
 /// Compile `input` to `lang` and write it to `dest`, or to `out` when `dest` is `None`.
 ///
 /// # Errors
@@ -67,7 +126,7 @@ pub enum Outcome {
 pub fn run(
     input: &Input,
     lang: Lang,
-    encoding: Option<EncodingArg>,
+    opts: Options,
     dest: Option<&Path>,
     out: &mut impl std::io::Write,
     err: &mut impl std::io::Write,
@@ -77,11 +136,30 @@ pub fn run(
     // in, an explicitly passed `--encoding unary` and an omitted flag arrive here as the same value,
     // so the guard below used to read `encoding != EncodingArg::default()` and let
     // `--lang lambda --encoding unary` through at exit 0 while the README promised a 2.
-    if lang != Lang::Tm && encoding.is_some() {
-        writeln!(err, "error: `--encoding` applies to `--lang tm` only")?;
-        return Ok(Outcome::ToolFailed);
+    //
+    // **THE CONFIG LAYER CAN RE-ENTER THAT SAME BUG ONE LEVEL UP, AND THIS IS WHERE IT DOES NOT.**
+    // Both guards test whether the FLAG was typed. A config-set value merged in before them would
+    // make `emit --lang lambda` exit 2 for every user whose repository configures an encoding — a
+    // config file must never trip THIS GUARD on a command line that used to work. Design §7.
+    //
+    // Scoped to the guard, and deliberately not the absolute it used to be stated as: a config file
+    // CAN make a previously-working command line fail, and `emit.field-width` is how. Pinning a
+    // width refuses programs auto-fit accepts — that is the point of the key — so `field-width = 4`
+    // turns a working `emit --lang tm` into an exit 2, and the refusal names the key so the cause is
+    // visible. What must never happen is a refusal about a flag nobody typed, which is this branch.
+    if lang != Lang::Tm {
+        if opts.encoding.is_some() {
+            writeln!(err, "error: `--encoding` applies to `--lang tm` only")?;
+            return Ok(Outcome::ToolFailed);
+        }
+        if opts.field_width.is_some() {
+            writeln!(err, "error: `--field-width` applies to `--lang tm` only")?;
+            return Ok(Outcome::ToolFailed);
+        }
     }
-    let encoding = encoding.unwrap_or_default();
+    // AFTER the guard, never before. See the comment above and design §7.
+    let encoding = opts.encoding.unwrap_or(opts.defaults.encoding);
+    let width = Width::resolve(opts.field_width, opts.defaults.field_width);
     let src = match input.read() {
         Ok(s) => s,
         Err(e) => {
@@ -104,7 +182,7 @@ pub fn run(
     };
     let core = redextape_core::desugar::desugar(&program);
     let text = match lang {
-        Lang::Tm => match emit_tm(&core, ty, encoding, err)? {
+        Lang::Tm => match emit_tm(&core, ty, encoding, width, err)? {
             Some(t) => t,
             None => return Ok(Outcome::ToolFailed),
         },
@@ -155,10 +233,22 @@ fn emit_tm(
     core: &redextape_core::core::Core,
     ty: redextape_core::ty::Ty,
     encoding: EncodingArg,
+    width: Width,
     err: &mut impl std::io::Write,
 ) -> std::io::Result<Option<String>> {
-    match redextape_core::tm::run_tm_described(core, encoding.into(), ty, redextape_core::tm::TM_DEFAULT_CAPS) {
-        Ok(d) => emit_described(&d, encoding, err),
+    // `AutoFit` is the fitting search, which is what this command has always done. A pin skips the
+    // search, which can refuse a program the search would have accepted — the whole reason to ask
+    // for it, and the reason `Width` carries where the pin came from rather than just its value.
+    let described = match width {
+        Width::AutoFit => {
+            redextape_core::tm::run_tm_described(core, encoding.into(), ty, redextape_core::tm::TM_DEFAULT_CAPS)
+        }
+        Width::Flag(n) | Width::Config(n) => {
+            redextape_core::tm::run_tm_described_at(core, encoding.into(), ty, redextape_core::tm::TM_DEFAULT_CAPS, n)
+        }
+    };
+    match described {
+        Ok(d) => emit_described(&d, encoding, width, err),
         Err(redextape_core::tm::TmRun::TooLarge) => {
             writeln!(
                 err,
@@ -202,13 +292,24 @@ fn emit_tm(
 /// * `Ran` — emit, silently.
 /// * `HitCap` — emit, and say so. The file describes exactly the machine that was built at the width
 ///   that was fitted, so it is faithful; it will simply meet the same cap when `run` simulates it.
-/// * `Overflow` — REFUSE. A value did not fit the widest field this encoding has, so the machine
-///   halts on truncated fields and `decode_tape_ty` reads them without complaining: the file would
-///   report a wrong answer at exit 0. The program is fine and this tool cannot express it at any
-///   width this encoding offers, which is exit 2 under the whose-fault-is-it rule.
+/// * `Overflow` — REFUSE. A value did not fit the field the machine was actually built with, so the
+///   machine halts on truncated fields and `decode_tape_ty` reads them without complaining: the file
+///   would report a wrong answer at exit 0. Exit 2 under the whose-fault-is-it rule either way — the
+///   program is fine — but the two width paths overflow for DIFFERENT reasons and must say so.
+///
+/// **THE PINNED PATH USED TO SPEAK THE AUTO-FIT PATH'S SENTENCE, AND EVERY CLAUSE OF IT WAS FALSE
+/// THERE.** Under auto-fit the search really did reach `MAX_FIELD_WIDTH`, so "this encoding's widest
+/// tape field (64 cells)" is what was tried and `--encoding binary` is the remedy worth naming.
+/// Under a pin, 64 was never attempted; the width tried is the one that was pinned, and the setting
+/// that pinned it is what the message has to name — `--field-width` when it was typed,
+/// `emit.field-width` when a config file supplied it and the user typed nothing at all. Measured on
+/// `40 + 2`: `--field-width 4` refuses under BOTH encodings, and `--encoding binary --field-width 8`
+/// emits at exit 0 — so on the pinned path the encoding suggestion was not merely unhelpful, it
+/// pointed away from the one setting that actually caused the refusal.
 fn emit_described(
     d: &redextape_core::tm::DescribedRun,
     encoding: EncodingArg,
+    width: Width,
     err: &mut impl std::io::Write,
 ) -> std::io::Result<Option<String>> {
     match d.run {
@@ -226,19 +327,41 @@ fn emit_described(
             Ok(Some(redextape_core::tm::print_tm_with(&d.machine, &d.header)))
         }
         redextape_core::tm::TmRun::Overflow => {
-            let alternative = if encoding == EncodingArg::Unary {
-                "`--encoding binary` holds a far larger value in the same field and may succeed where unary did not"
-            } else {
-                "there is no wider field; `redextape run` without `--lang tm` still evaluates the program"
+            let (lo, hi) = (redextape_core::tm::MIN_FIELD_WIDTH, redextape_core::tm::MAX_FIELD_WIDTH);
+            // The auto-fit clause is unchanged, byte for byte: there the search DID reach the
+            // ceiling, so naming it is true and naming the encoding is the useful remedy. See this
+            // function's doc for why the pinned arms say something else entirely.
+            let (what, remedy) = match width {
+                Width::AutoFit => (
+                    format!("this encoding's widest tape field ({hi} cells, `MAX_FIELD_WIDTH`)"),
+                    if encoding == EncodingArg::Unary {
+                        "`--encoding binary` holds a far larger value in the same field and may succeed where unary did not".to_owned()
+                    } else {
+                        "there is no wider field; `redextape run` without `--lang tm` still evaluates the program"
+                            .to_owned()
+                    },
+                ),
+                Width::Flag(n) => (
+                    format!("a {n}-cell tape field, which is where `--field-width {n}` pinned it"),
+                    format!(
+                        "raise `--field-width`, or drop it and let the search fit one: auto-fit starts at {lo} cells and doubles to at most {hi} (`MAX_FIELD_WIDTH`)"
+                    ),
+                ),
+                Width::Config(n) => (
+                    format!(
+                        "a {n}-cell tape field, which is where the config file's `emit.field-width = {n}` pinned it"
+                    ),
+                    format!(
+                        "raise `emit.field-width`, set it to 0 to auto-fit, or override it for this run with `--field-width`: auto-fit starts at {lo} cells and doubles to at most {hi} (`MAX_FIELD_WIDTH`)"
+                    ),
+                ),
             };
             writeln!(
                 err,
-                "error: no machine was written: a value does not fit this encoding's widest tape field \
-                 ({} cells, `MAX_FIELD_WIDTH`)\n  \
+                "error: no machine was written: a value does not fit {what}\n  \
                  the program is fine — but the machine would HALT on truncated fields, and `redextape run` \
                  would decode them and print a wrong answer at exit 0\n  \
-                 {alternative}",
-                redextape_core::tm::MAX_FIELD_WIDTH
+                 {remedy}"
             )?;
             Ok(None)
         }
@@ -266,16 +389,79 @@ mod tests {
     /// separates "this encoding cannot express it" from "the program is wrong".
     const OVERFLOW_SRC: &str = "let mut i = 0; let mut n = 0; while i < 300 { n = n + 1; i = i + 1; } n";
 
-    /// Own directory per case, for the reason `run.rs`'s `run_case` gives: parallel test threads
-    /// share a process id, and a shared path makes one test read another's source.
-    fn emit_case(case: &str, src: &str, lang: Lang, encoding: Option<EncodingArg>) -> (String, String, Outcome) {
-        let dir = std::env::temp_dir().join(format!("rxt-emit-{}-{case}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+    /// Own `redextape_test_support::ScratchDir` per case, for the reason `run.rs`'s `run_case` gives:
+    /// parallel test threads share a process id, and a shared path makes one test read another's
+    /// source. The directory is fully done with by the time this function returns (its content has
+    /// already been read into `out`/`err`/`outcome`), so it is safe for `dir` to go out of scope, and
+    /// be removed, right here rather than surviving into the caller.
+    ///
+    /// Takes a whole `Options` so the flag and the config default can be set INDEPENDENTLY — which
+    /// is the distinction the pinned refusal message now draws, and which `emit_case`'s
+    /// encoding-only shape cannot express.
+    fn emit_opts(case: &str, src: &str, lang: Lang, opts: Options) -> (String, String, Outcome) {
+        let dir = redextape_test_support::ScratchDir::new(&format!("emit-{case}")).unwrap();
         let p = dir.join("p.rxt");
         std::fs::write(&p, src).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let outcome = run(&Input::from_arg(&p), lang, encoding, None, &mut out, &mut err, false).unwrap();
+        let outcome = run(&Input::from_arg(&p), lang, opts, None, &mut out, &mut err, false).unwrap();
         (String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap(), outcome)
+    }
+
+    /// The common case: no width anywhere, so every existing test still exercises auto-fit.
+    fn emit_case(case: &str, src: &str, lang: Lang, encoding: Option<EncodingArg>) -> (String, String, Outcome) {
+        emit_opts(case, src, lang, Options { encoding, field_width: None, defaults: Defaults::default() })
+    }
+
+    /// Values needing more than four cells under unary, so a pin at 4 overflows. The same source
+    /// `config_cli.rs` drives the flag case through the real binary with.
+    const PIN_SRC: &str = "40 + 2\n";
+
+    /// The sentinel from either side is auto-fit, and the flag beats the config — a flag `0`
+    /// included, which is the only way to ask for the search back for one invocation.
+    #[test]
+    fn the_width_resolves_flag_over_config_with_zero_meaning_auto_fit() {
+        assert_eq!(Width::resolve(None, 0), Width::AutoFit, "nothing set anywhere");
+        assert_eq!(Width::resolve(Some(0), 0), Width::AutoFit);
+        assert_eq!(Width::resolve(Some(0), 8), Width::AutoFit, "a flag 0 must beat a config pin");
+        assert_eq!(Width::resolve(Some(8), 0), Width::Flag(8));
+        assert_eq!(Width::resolve(Some(8), 16), Width::Flag(8), "flag beats config");
+        assert_eq!(Width::resolve(None, 16), Width::Config(16));
+    }
+
+    /// **THE PINNED REFUSAL NAMES THE WIDTH THAT WAS TRIED, NOT ONE THAT NEVER WAS.** The shipped
+    /// message said the value did not fit "the widest tape field (64 cells, `MAX_FIELD_WIDTH`)"
+    /// while the field was 4, then suggested `--encoding binary` — measured, that does not lift a
+    /// pin: `--encoding binary --field-width 4` refuses the same program, and
+    /// `--encoding binary --field-width 8` emits.
+    #[test]
+    fn a_pinned_overflow_names_the_width_tried_and_the_flag_that_pinned_it() {
+        let opts = Options { encoding: None, field_width: Some(4), defaults: Defaults::default() };
+        let (out, err, outcome) = emit_opts("pin-flag", PIN_SRC, Lang::Tm, opts);
+        assert_eq!(out, "", "an overflowing program writes no machine, pinned or not");
+        assert!(matches!(outcome, Outcome::ToolFailed));
+        assert!(err.contains("a 4-cell tape field"), "the width actually tried must be named: {err}");
+        assert!(err.contains("`--field-width 4` pinned it"), "and the setting that chose it: {err}");
+        assert!(err.contains("raise `--field-width`"), "and a remedy that works: {err}");
+        assert!(!err.contains("widest tape field"), "64 was never attempted, so it must not be blamed: {err}");
+        assert!(!err.contains("--encoding binary"), "the encoding is not what pinned the width: {err}");
+    }
+
+    /// The config case is the worse one: the user typed no flag at all, so a message naming
+    /// `--field-width` would point at something absent from their command line.
+    #[test]
+    fn a_config_pinned_overflow_names_the_key_rather_than_a_flag_nobody_typed() {
+        let opts = Options {
+            encoding: None,
+            field_width: None,
+            defaults: Defaults { encoding: EncodingArg::Unary, field_width: 4 },
+        };
+        let (out, err, outcome) = emit_opts("pin-config", PIN_SRC, Lang::Tm, opts);
+        assert_eq!(out, "");
+        assert!(matches!(outcome, Outcome::ToolFailed));
+        assert!(err.contains("a 4-cell tape field"), "the width actually tried: {err}");
+        assert!(err.contains("`emit.field-width = 4`"), "and the KEY, since no flag was typed: {err}");
+        assert!(!err.contains("`--field-width 4` pinned it"), "no flag was typed, so none may be blamed: {err}");
+        assert!(!err.contains("widest tape field"), "64 was never attempted: {err}");
     }
 
     /// The emitted file must be a complete, self-describing `.tm` — the property `run` (Task 4)

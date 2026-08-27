@@ -1,7 +1,15 @@
 //! `redextape lint` — every static diagnostic `analyze` produces, rendered.
 //!
-//! A STATIC CHECKER, NOT A RUNNER: `Analysis::core` is ignored entirely. Warnings are reported and do
-//! not fail the run — making them fatal is a `--deny-warnings` flag and no consumer has asked for one.
+//! A STATIC CHECKER, NOT A RUNNER: `Analysis::core` is ignored entirely. A warning is reported and,
+//! by default, does not fail the run; `--deny-warnings` (or `lint.deny-warnings` in
+//! `redextape.toml`) makes it exit 1 instead.
+//!
+//! **`Outcome::Warned` STAYS A DISTINCT VARIANT UNDER DENIAL, AND THE MAPPING IS `main`'s JOB.**
+//! Collapsing it into `Errored` would lose the declaration order
+//! `the_variant_order_is_the_severity_order` pins — the order that makes `.max()` the merge rule with
+//! no rank table — and would print "Error" for a warning. The severity a user reads and the exit code
+//! a script reads are different questions, and this flag answers only the second. It is also why
+//! `run` gains no parameter: what was found does not change, only what an exit code makes of it.
 //!
 //! One bad input does not stop the others, the same reason `fmt` gives for the same shape: a
 //! repo-wide invocation that aborts on the first unreadable file is useless.
@@ -83,33 +91,26 @@ mod tests {
     use super::*;
     use crate::input::Input;
 
-    // Mirrors fmt.rs's `tmpdir`: mixing this process's id into the directory name keeps concurrent
-    // test runs (nextest gives each test its own process, but every process on the same machine
-    // shares `std::env::temp_dir()`) from colliding on a fixed name.
-    // Carries the same per-call counter as `fmt::tests::tmpdir`, and for the reason spelled out there:
-    // under `cargo test` every test in this binary shares one process id, so a repeated `name` hands
-    // two tests the same directory and the `remove_dir_all` below deletes one fixture out from under
-    // the other. No label is currently repeated in THIS module — the guard is here so that stops being
-    // something a reader has to verify, and so the two helpers cannot drift in robustness.
-    fn tmpdir(name: &str) -> std::path::PathBuf {
-        static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let d = std::env::temp_dir().join(format!("redextape-lint-{name}-{}-{seq}", std::process::id()));
-        std::fs::remove_dir_all(&d).ok();
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    // Carries the same pid-plus-atomic-counter idiom `fmt::tests::tmpdir` does — see
+    // `redextape_test_support::ScratchDir`'s doc for why (that crate now owns the implementation both
+    // this and `fmt.rs`'s helper used to duplicate) and for the panicking()-gated cleanup a value this
+    // returns provides once it goes out of scope.
+    fn tmpdir(name: &str) -> redextape_test_support::ScratchDir {
+        redextape_test_support::ScratchDir::new(&format!("lint-{name}")).unwrap()
     }
 
-    fn write(name: &str, src: &str) -> std::path::PathBuf {
+    // Returns the guard alongside the path it governs: the caller must keep `.0` alive for as long as
+    // it uses `.1`, since the directory is removed (on a passing run) the moment the guard drops.
+    fn write(name: &str, src: &str) -> (redextape_test_support::ScratchDir, std::path::PathBuf) {
         let d = tmpdir(name);
         let p = d.join("a.rxt");
         std::fs::write(&p, src).unwrap();
-        p
+        (d, p)
     }
 
     #[test]
     fn a_clean_program_reports_nothing() {
-        let p = write("clean", "let x = 1;\nx + 1");
+        let (_d, p) = write("clean", "let x = 1;\nx + 1");
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let got = run(&[Input::from_arg(&p)], &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Clean), "got {got:?}");
@@ -119,7 +120,7 @@ mod tests {
 
     #[test]
     fn a_warning_is_reported_but_does_not_fail_the_run() {
-        let p = write("warn", "let mut x = 1;\nx + 1");
+        let (_d, p) = write("warn", "let mut x = 1;\nx + 1");
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let got = run(&[Input::from_arg(&p)], &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Warned), "a warning is not a failure: {got:?}");
@@ -133,7 +134,7 @@ mod tests {
 
     #[test]
     fn an_error_fails_the_run() {
-        let p = write("err", "let x = ;");
+        let (_d, p) = write("err", "let x = ;");
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let got = run(&[Input::from_arg(&p)], &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Errored), "got {got:?}");

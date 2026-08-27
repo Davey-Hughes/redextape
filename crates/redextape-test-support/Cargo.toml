@@ -9,5 +9,13 @@ publish = false
 [lints]
 workspace = true
 
+# Default-on so `redextape-core` and `redextape-native`'s existing dev-dependency declarations (bare
+# `{ path = "../redextape-test-support" }`, no `features = [...]`) keep getting `arb_expr_over` exactly
+# as before. `redextape-cli` is the one consumer that wants ONLY `ScratchDir`, and opts out with
+# `default-features = false` on its own declaration — see that crate's `Cargo.toml`.
+[features]
+default = ["proptest"]
+proptest = ["dep:proptest"]
+
 [dependencies]
-proptest = "1"
+proptest = { version = "1", optional = true }

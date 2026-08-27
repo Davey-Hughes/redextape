@@ -13693,3 +13693,419 @@ which is why they are stated as the standing rule rather than as a result — th
 sentence written before the run said "will be skipped", and was still saying it after they had been. Use the
 gitea MCP rather than `tea api get`, which 404s everything AND exits 0; the API's run id is not the
 run number in the URL; and there is no rerun endpoint, so editing the PR body is what retriggers.
+
+#### PLAN 6'S LAST TWO KNOBS CLOSE — a config file and a deny-warnings flag, the differential's own vacuous-test shape recurring one slice later in a different crate, and a verification that recreated the very thing it had just deleted (2026-08-27, branch `cli-config-and-deny-warnings`, `2f81985..0a57f55`, 24 commits, plus this entry)
+
+Design: [`../specs/2026-08-26-cli-config-and-deny-warnings-design.md`](../specs/2026-08-26-cli-config-and-deny-warnings-design.md).
+Plan: [`2026-08-26-cli-config-and-deny-warnings.md`](2026-08-26-cli-config-and-deny-warnings.md).
+
+**What closed.** A `redextape.toml` with four keys — `lint.deny-warnings`, `fmt.width`,
+`emit.encoding`, `emit.field-width` — discovered by walking up from the current directory and
+stopping at the first `.git`, the config file checked before the stop in each directory so a
+repository root holding both is not missed one directory short; strict refusal at exit 2 for anything
+the schema does not admit; a CLI flag for every key so precedence is uniform (flag > config file >
+built-in default) rather than "some keys are overridable"; and one exit-code branch,
+`lint::Outcome::Warned` mapping to `1` under `--deny-warnings` instead of `0`, with `Warned` staying a
+distinct variant so the severity a user reads and the exit code a script reads stay two different
+questions. Two additive `redextape-core` entry points carry the two knobs that needed one:
+`print_with_width` / `format_with_width` beside the unchanged `print` / `format`, and
+`run_tm_described_at` beside the unchanged `run_tm_described`. **This is Plan 6's last two knobs.**
+`crates/redextape-cli/README.md` no longer has anything left to call unbuilt, which leaves Plan 5's
+own accessibility pass — unblocked since 5d-iv and still not run — as the only remaining v1 work.
+
+**§2 of the design was wrong before the plan even existed, and the design's own text says so.** It
+first read "one core change," naming only the printer; amended at `af9b525`, before a single task was
+written, once reading `run_tm_described` found it hard-codes the fitting search while the two
+functions a pinned-width caller would need, `attempt` and `lower_and_size`, are both private.
+`emit.field-width` needed a second core entry point for that reason, and §7 had already asserted a
+pinned width "skips the fitting" without ever naming what would do the skipping — found by reading the
+function while writing the task list, later than it should have been but before any task code existed
+to inherit the gap.
+
+**`toml` 1.1.4 and `serde` 1.0.229** are what `cargo add` chose, not what the design assumed. The
+design's `e.message()`-style error handling is 0.8-era API, flagged ahead of Task 2 as evidence the
+method had survived into 0.9 rather than proof it existed in whatever 1.x `cargo add` would actually
+install. It does: `toml::de::Error::message()` exists in the installed 1.1.4, and the
+snake-case-is-refused test needed no weakening. `redextape-core` still has exactly one dependency —
+`serde`, optional and default-off — confirmed below by `cargo tree -p redextape-core --edges normal`
+rather than asserted from the crate's own doc comment.
+
+##### FOUR DEFECTS IN THE PLAN ITSELF, ALL FOUND BY EXECUTING IT RATHER THAN BY READING IT
+
+**1. A test written to prove the width parameterization was itself unable to notice the
+parameterization missing.** Task 4's sabotage test,
+`the_budget_holds_at_widths_other_than_the_default`, used the fixture `fn wide(a) { a } wide([1, 2,
+3])`, which never overflows at any of the four widths it was run at (40/60/80/200) — so `fill_rows`,
+one of the printer's three width-reading sites, is never invoked at all. The implementer reverted all
+three of the newly-threaded width sites at once and the test still passed, 14/14. Two more tests in
+the same task — `the_default_entry_point_agrees_with_the_parameterized_one_at_the_default` and one of
+two close-bracket fixtures — turned out to share the same two toy inputs, vacuous for the same reason.
+**This is the same shape PR #64's own entry recorded for the asm-grammar differential** — a test built
+to cover the one hole the differential could not see, sharing that exact hole — one slice later, in a
+different crate, over a different mechanism entirely. Fixed first by building fixtures that actually
+reach all three sites (`bf12a05`), confirmed by a per-site sabotage matrix (revert one site, the new
+test fails; the fixed-120 control still passes); then by a second round that swept a mutation of the
+printer's own default width and checked the new fixture notices (`e29ca10`). **This entry said that
+round "swept across every width from 60 through 119 … verified exhaustively rather than
+spot-checked"; it did not.** What ran is four spot values — 60, 100, 110 and 119 — which is what the
+shipped test's own doc says, and it hedges: "confirmed by mutation for all four", "no width between 1
+and 119 was *found* to escape it". What covers the gaps between those four is an argument, not a
+sweep: the fixture's inline length is exactly 120 bytes, so its close-bracket check reads `120 <= w`,
+false for every `w` under 120. 119 is the spot value that tests that argument's edge. The argument is
+sound and the four values support it — but four measurements plus a structural reason is not an
+exhaustive verification, and calling it one is exactly the substitution this branch's other entries
+are about.
+
+**2. An assertion pair that could not both hold.** Task 7's brief specified a `fmt --check` helper
+asserting exit code 0 on every call, inside a test whose whole point was `assert_ne!(from_config,
+from_flag)`. `fmt --check` exits 0 only when nothing would change — `fmt::one` returns `Clean` and
+exits before ever writing a diff to stdout — so demanding 0 at both a config-set width and a
+flag-overridden width forces both diffs empty and therefore equal, contradicting the very assertion
+the test exists to make. True of any fixture, not a defect of the one the brief chose. The first fix
+loosened the exit assertion to accept `{0, 1}`; a reviewer then constructed the mutation the loosened
+assertion misses that the brief's strict `{0}` would have caught — deleting `fmt::one`'s clean
+short-circuit — showing the loosening cost real discriminating power, though not a live gap, since
+three pre-existing tests already catch that exact mutation by name. The fix that shipped (`d53a268`)
+asserts the expected code per call instead — width 40 exits 1, width 120 exits 0 — satisfiable and
+strict at once, with no contradiction and nothing loosened.
+
+**3. A test fixture that wrote the fixed path `/tmp/redextape.toml`.** Task 3's
+`the_dot_git_stop_prevents_climbing_out_of_the_repository` planted its "outside the repository" config
+one directory too shallow, landing it at the fixed, shared path `/tmp/redextape.toml` on this
+machine's 30 GiB RAM tmpfs. Task 1 had already measured that every one of the 29 `trycmd` cases that
+existed before this slice sits exactly one directory below `/tmp` (`/tmp/.tmp0GpIWc`, observed
+directly under `strace -f -e trace=chdir,execve`), so once Task 6 wired discovery into every real
+invocation, that fixed file's existence window would have overlapped every `trycmd` case's own walk —
+races against concurrent runs of itself, and a `SIGKILL` leaves it forever on a tmpfs that only clears
+on reboot. Fixed (`34e9253`) by nesting the fixture one level deeper, giving the "outside" config a
+private per-test root instead of the shared global one. Nine stray `redextape-config-stop-*`
+directories found in `/tmp` from earlier runs of the unfixed version were physical proof the leak had
+been real rather than theoretical.
+
+**4. A fixture the plan required to be checked in and named `.git`.** Task 9's brief called for
+committing a fixture file literally named `.git` inside a `trycmd` case's `.in` directory. Git refuses
+to track any path with that name — confirmed directly rather than assumed: `git add -A` over a tree
+containing `case.in/.git` tracks nothing at all, silently, with no error. Resolved by planting the
+`.git` marker at test-run time from `tests/cli.rs` instead of checking it in — the same pattern
+`config.rs`'s own discovery tests already use for the identical hazard.
+
+**What shipped is narrower than the sentence above once said, re-read off the tree rather than off
+the plan.** Only `.git` is planted: `cli_transcripts` has exactly one `fs::write`, and it writes that
+name. The two `redextape.toml` fixtures are ordinary checked-in files —
+`git ls-files 'crates/redextape-cli/tests/cmd/*.in/*'` lists
+`config_bad_width.in/redextape.toml` and `config_unknown_key.in/redextape.toml` alongside the `.rxt`
+inputs — because nothing prevents git from tracking a file by that name; the whole difficulty was
+`.git` and `.git` alone. And the ignore file is one file at `tests/cmd/.gitignore`, not a per-case
+`*.in/.gitignore`, carrying a single pattern, `*.in/.git`. `tests/cli.rs`'s own doc comment describes
+the shipped arrangement correctly; this entry described the plan.
+
+##### THE `dead_code` SHIELDING MECHANISM, A FACT ABOUT THE COMPILER RATHER THAN ABOUT THIS BRANCH
+
+`config.rs` needed ten `#[allow(dead_code)]` placeholders in Task 2 because the whole module was
+reachable only from `#[cfg(test)]` until `main.rs` wired real dispatch to it in Task 6. **rustc treats
+an item carrying `#[allow(dead_code)]` as a synthetic reachability root**: an item reachable only
+through the BODY of an allowed function stops being flagged as dead, even though nothing outside
+`#[cfg(test)]` calls it either. Measured directly — stripping all ten allows and running `cargo clippy
+-p redextape-cli --all-targets` flagged only three of them (`parse`, `FILE_NAME`, `Error::Read`) as
+independently dead; the other seven produced no diagnostic at all while `parse`'s allow stood over
+them, because `parse` calls `validate`, which is what actually uses the rest. The retirement procedure
+this forces: remove the root's allow (`parse`'s) FIRST, re-run `-D warnings`, and only then start
+removing what stops erroring — clearing them in any other order yields silence, not feedback, at every
+step but the first. **Clippy on stable does not flag a stale `#[allow(dead_code)]` left on an item
+that has since gained a real caller** — verified earlier in this same slice, when six of seven
+placeholders already had real callers and clippy stayed silent with all seven allows still in place —
+so nothing in this toolchain catches an allow nobody remembered to remove. Task 6 removed all ten in
+one pass once `main.rs` made the whole module reachable for real, and re-running `-D warnings`
+produced no error at all, which is the only confirmation available that none of them was still
+shielding anything.
+
+##### A VERIFICATION THAT MEASURED THE WRONG THING, A DIFFERENT FAILURE FROM A TEST THAT ASSERTS NOTHING
+
+Task 9's `.git` markers were reported "verified load-bearing" by deleting them and re-running the
+suite. **That report was the wrong experiment**: the planting code in `tests/cli.rs` recreates every
+marker before the cases start, every time, so deleting one on disk and then running `cargo nextest`
+tests recreation, not necessity — the experiment passes whether or not the marker matters at all. The
+right experiment, run by a reviewer, found the markers were inert exactly where they had first been
+placed: `discover` checks a directory's config file BEFORE its `.git` stop, and both of Task 9's new
+cases put their `redextape.toml` in the sandbox root itself, so `discover` returns on the very first
+directory and never reads `.git` at all. **The deeper miss**: of the `trycmd` suite's `.in`
+directories, **18 of 20 carry no config file of their own** (re-confirmed directly: `find tests/cmd
+-maxdepth 1 -iname '*.in' -type d | wc -l` → 20, of which 2 contain a `redextape.toml`) — those are the
+walks that actually climb toward `/tmp`, and none of them had ever carried a marker. The fix extended
+planting to every `.in` directory rather than only the two Task 9 added, read from the filesystem at
+test-run time so a future case is covered automatically, and demonstrated the markers mattered rather
+than asserting it: a hostile `/tmp/redextape.toml` (`[lint]` `deny-warnings = true`) flips `lint_warn`'s
+exit code from 0 to 1 with the markers absent, and back to 0 with them restored, the hostile file
+unchanged throughout. The first attempted payload (`[fmt]` `width = 30`) moved nothing — the three fmt
+fixtures are single-line inputs of 11 bytes or fewer, far under the 20-column floor — and the agent
+said so plainly rather than inventing a rationale before finding one that actually discriminates.
+
+##### TWO THINGS FILED RATHER THAN FIXED, BOTH DELIBERATELY OUT OF THIS SLICE'S SCOPE
+
+**Every `tmpdir`/`tree`-style test fixture helper in this crate clears at the start of a run and never
+at the end.** `config.rs`'s own `tree()`, `fmt::tests::tmpdir` and `lint::tests::tmpdir` all
+`remove_dir_all` the PREVIOUS run's directory before building a fresh one, so a passing run always
+leaves its own directories behind on the 30 GiB RAM tmpfs this machine keeps `/tmp` on. Measured once,
+during Task 3, at 1,180 `redextape-config-*` and 1,106 `redextape-lint-*` directories (5.6 MB) — a
+snapshot rather than a current count, since `/tmp` is a RAM tmpfs a reboot clears and every run grows
+again: re-measured for this entry, the same two globs now read 351 and 1,309 respectively, which is
+not a shrink, it is a different day's accumulation on the same never-cleaned mechanism. Pre-existing
+and repo-wide — this slice's own fixture helper copied an established convention rather than inventing
+the leak — so it is filed here rather than fixed: the fix is "every helper of this shape should clean
+up at the end of a passing run, not only clear stale state at the start of the next one," and it
+touches test infrastructure well outside a config-file-and-a-flag slice's scope.
+
+**Nothing tests `main`'s `current_dir()` → `Source::Defaults` fallback.** `main` falls back to
+built-in defaults when `std::env::current_dir()` fails rather than treating an unreadable working
+directory as a config error, and nothing exercises that arm. Proven reachable rather than merely
+asserted so: a reviewer deleted a running process's own working directory out from under it and traced
+`getcwd` down to `-1 ENOENT`, confirming the branch fires rather than merely compiling. Banked as a
+hardening candidate, not a defect of this task — the branch is two lines of fallback logic, and
+nothing in this slice's own scope needed it exercised by a test.
+
+##### A CORRECTION TO THE DESIGN'S OWN §1.5
+
+§1.5 states that `printer::print` "has exactly one non-test caller outside its own file," naming the
+call inside `lib.rs`'s `format`. **There is a second** — this entry first said "a third", miscounting
+the one §1.5 itself named:
+`crates/redextape-core/examples/rustfmt_calibration_probe.rs` imports `redextape_core::printer::print`
+and calls it directly, printing a program's canonical form beside `rustfmt`'s own output for
+comparison. "Exactly one" was wrong the day it was written, because the survey behind that claim never
+looked inside `examples/`.
+
+**AND THIS BRANCH MOVED THE COUNT AGAIN, IN THE OTHER DIRECTION, WHICH IS WHY A COUNT WAS THE WRONG
+THING TO WRITE DOWN.** `format` now delegates to `format_with_width`, which calls
+`printer::print_with_width`, so `format` does not call `printer::print` at all any more. Re-measured
+on this branch: `grep -rn 'printer::print' --include='*.rs'` over the working tree, excluding
+`target/`, returns exactly two lines — `lib.rs`'s `print_with_width` call and the probe's `use` — and
+a second grep for a bare `print(` outside `printer.rs` finds nothing but that same probe and
+`printer.rs`'s own `#[cfg(test)]` helper. So the probe is now the *only* non-test caller of
+`printer::print` outside its own file. §1.5's "exactly one" is true today by accident, of a different
+caller than the one it named.
+
+##### WHAT SHIPPED, READ BACK BY HAND
+
+`redextape lint --deny-warnings` on a file with an unread `let mut` binding prints the identical
+warning `redextape lint` alone prints, and exits 1 where the plain form exits 0. A `redextape.toml`
+carrying `width = 4` makes `redextape fmt` refuse at exit 2, naming the file and the key — the message
+reads `error: /path/redextape.toml: fmt.width must be in 20..=1000, got 4` — and the identical `4`
+passed as `redextape fmt --width 4` with no config file present is accepted and formats at exit 0, the
+deliberate asymmetry §8 of the
+design argues for and `crates/redextape-cli/README.md` now states plainly: a config value silently
+governs every future invocation for everyone who inherits the file, so it is caught once and strictly;
+a flag misfires once, visibly, for the one person who typed it, and refusing it would protect nobody
+who was not already looking at the mistake.
+
+##### THE WHOLE-BRANCH REVIEW: A FLAG THAT VALIDATED NOTHING, GUARDING A CORE PATH THAT PANICKED
+
+**`redextape.toml`'s `emit.field-width` was range-checked from the day it landed. The flag that
+overrides it was not, and the two failures that bought were different in kind.**
+`--field-width 65 -o p.tm` exited **0** and wrote a machine whose header says `width 65`; `redextape
+run p.tm` then refused its own artifact — `expected `width <1..=64>`, found `65`` — so the mistake
+outlived the invocation as a file on disk that nothing downstream could open.
+`--field-width 18446744073709551615` **panicked**: `capacity overflow`, exit 101, through
+`emit_tm` → `run_tm_described_at` → `describe_at` → `attempt` → `Unary::init_reg`. The workspace
+manifest's rule is verbatim — "No library path may panic: every failure is a `Diagnostic`, a
+`RuntimeError`, or a typed `Err`."
+
+**The core half is the one worth remembering: the additive entry point inherited a bound it never
+restored.** `run_tm_described`'s search runs `MIN_FIELD_WIDTH`, doubling, to `MAX_FIELD_WIDTH`, so a
+width outside that range was *unreachable by construction* and no check was needed.
+`run_tm_described_at` is "the same single attempt with the search skipped" — and skipping the search
+also skipped the only thing that had ever bounded the width. Nothing in the design, the plan or the
+review of the design noticed, because the bound was never written down as a precondition; it was a
+property of the loop. `run_tm_described_at` now checks `MIN_FIELD_WIDTH..=MAX_FIELD_WIDTH` before
+lowering and answers `Err(TmRun::TooLarge)` outside it. **The transferable shape: when you factor a
+searching function into a parameterized one, the search's own domain is a precondition you have just
+deleted, and it will not appear in any diff.**
+
+**The `Overflow` refusal was false on the pinned path and never once said so.** Measured on `40 + 2`
+at `--field-width 4`, it read "a value does not fit this encoding's widest tape field (64 cells,
+`MAX_FIELD_WIDTH`)" — 64 was never attempted, the field was 4 — and offered `--encoding binary`, which
+does not lift a pin: `--encoding binary --field-width 4` refuses the same program and
+`--encoding binary --field-width 8` emits it. Through the config it was worse: `[emit] field-width =
+4` with no flag typed produced that same sentence with nothing naming `emit.field-width` or the width
+in effect. The cause was a type: a bare `usize` reached `emit_described`, which therefore knew a width
+had been *used* and not whether it had been *chosen*, nor by whom. A three-variant `Width`
+(`AutoFit` / `Flag(n)` / `Config(n)`) is the fix, and the auto-fit message is unchanged byte for byte
+— there the search really did reach the ceiling.
+
+**And `emit.field-width` was the only one of the four keys whose effect no test could fail on.**
+Measured: discarding the configured value outright — `Width::resolve(opts.field_width, 0)` — left the
+whole workspace passing at 1277/1277. The other three keys each had a takes-effect test; this one had
+only refusal tests, and a sabotage that reads a key, validates it and then ignores it passes every
+refusal test there is. Two new tests fail under that same sabotage. **A validated key is not a tested
+key**, and the four-key symmetry made the gap invisible: every key had tests, so the table looked full.
+
+Nine further corrections landed in the same review, each a claim that had been asserted where it could
+have been measured: this entry's own fixture description (which named a `redextape.toml` planting that
+never shipped and a per-case `.gitignore` that does not exist), its §1.5 correction (off by one, and
+stale twice over), its "verified exhaustively" sweep (four spot values and a structural argument),
+`config.rs`'s shielding direction (backwards — an `#[allow(dead_code)]` shields caller → callee,
+probed directly), design §7's absolute (true of the guard, false of the feature — `[emit] field-width
+= 4` genuinely turns a working `emit --lang tm` into an exit 2), `--field-width`'s help text, two
+symbol citations the branch itself broke, the root README's date for `parse_asm`, and `tests/cli.rs`'s
+claim that a `.gitignore` is what keeps the `.git` markers out of `git status` — measured false, git
+skips a `.git` directory entry during traversal whatever the ignore rules say.
+
+##### VERIFICATION
+
+Every figure below was measured at `0a57f55`. **That was this slice's last code commit when this block
+was written and it is no longer the branch head** — the whole-branch review above landed four further
+commits, whose own figures are in the block after this one. These are left exactly as measured rather
+than re-run against a moving head: they describe `0a57f55` and nothing else.
+
+```
+24                      commits                    git rev-list --count 2f81985..0a57f55
+34 files, +4017/-67     whole-branch diff          git diff --shortstat 2f81985..0a57f55
+1.1.4+spec-1.1.0        toml version               grep -A1 '^name = "toml"$' Cargo.lock
+1.0.229                 serde version              grep -A1 '^name = "serde"$' Cargo.lock
+20 / 2                  .in dirs / with own config (cd crates/redextape-cli && find tests/cmd
+                                                      -maxdepth 1 -iname '*.in' -type d | wc -l; find
+                                                      tests/cmd -maxdepth 1 -iname '*.in' -type d
+                                                      -exec sh -c 'test -f "$1/redextape.toml"' _ {} \;
+                                                      -print | wc -l)
+```
+
+```
+$ cargo tree -p redextape-core --edges normal
+redextape-core v0.0.0 (/home/davey/projects/redextape/crates/redextape-core)
+
+$ cargo nextest run --workspace
+     Summary [  41.033s] 1277 tests run: 1277 passed, 9 skipped
+
+$ cargo nextest run -p redextape-cli
+     Summary [   4.635s] 129 tests run: 129 passed, 0 skipped
+
+$ cargo clippy --workspace --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+
+$ scripts/check-citations.sh
+no file:line citations in tracked source: 413 files scanned, 0 violations, 2 escape-hatch marker(s)
+honoured (195 out of scope, binary or recording, 0 skipped — 608 tracked paths in all)
+
+$ scripts/check-doc-figures.sh
+check-doc-figures: 42 documented figures match the tree.
+
+$ pre-commit run --all-files
+no control bytes in tracked text.........................................Passed
+no file:line citations in tracked source.................................Passed
+documented figures match the tree........................................Passed
+cargo fmt................................................................Passed
+cargo clippy.............................................................Passed
+biome ci.................................................................Passed
+web typecheck............................................................Passed
+```
+
+`scripts/check-all.sh --no-llvm --no-browser`'s own final line, quoted rather than the run called
+green unqualified, per this file's own convention of repeating what a tool said rather than
+summarising a partial run as a bare pass: `green, but PARTIAL — these tiers were SKIPPED: LLVM
+browser. This is NOT a full gate on its own.`
+
+**CI RUN 306 WAS GREEN ON `c57f7bd`, AND THAT SHA WAS READ FROM PULL REQUEST 65'S OWN `head.sha`
+RATHER THAN ASSUMED FROM THE BRANCH** — this file's convention since entry 61. Every job: `detect`
+5s, `linear-history` 7s, `rust-browser` 1m16s, `web` 1m42s, `rust-llvm` 5m17s, `rust-slow` 12m24s,
+`rust` 16m25s, `gate` 1s. `rust-scoped` skipped because the unscoped `rust` ran instead, and `docker`
+skipped, as it always is on a pull request. Note that 306 is the run NUMBER from the status
+`target_url`; the API's own run id is a different value, and asking the jobs endpoint for 306 returns
+404.
+
+**THE PARAGRAPH THIS REPLACES SAID "No CI run exists for this entry, and none is claimed," AND IT WAS
+TRUE WHEN WRITTEN.** It stopped being true about an hour later, when the branch was pushed and pull
+request 65 opened. That is the failure this entry is largely about, committed inside the entry
+itself: a sentence stating a condition of the moment as though it were a standing fact. Entry 64
+avoided it by carrying a `<FILL:` marker for exactly this and filling it once a run existed; this one
+asserted the absence instead. The lesson is not "remember to update it" — it is that a permanent
+document should not assert the non-existence of something it has no way to keep watching.
+
+**THIS BLOCK TRAILS THE COMMIT IT DESCRIBES, AND CANNOT DO OTHERWISE.** Run 306 ran on `c57f7bd`; the
+commit that fills this paragraph is a later one, so it is not inside the run it reports, and its own
+run is not reported anywhere. That tail is irreducible — a verification block recorded inside the
+tree it describes always has one — and naming `c57f7bd` rather than "the branch head" is the whole
+defence, because a SHA stays true however many commits land on top of it.
+
+**NO CAUSAL CLAIM IS MADE ABOUT ANY OF THESE DURATIONS, AND ONE WAS RETRACTED TO GET HERE.** An
+earlier run, 305 on `c3131fa`, was also green, with `rust` at 16m3s and `rust-slow` at 6m19s. The
+Forgejo runner is on the development machine itself (`/bin/forgejo-runner daemon`, verified by
+`pgrep`), and a subagent was running full-workspace `cargo` builds throughout 305, so contention was
+offered as the explanation. Run 306, with the machine idle, then moved `rust-slow` the OTHER way —
+6m19s to 12m24s — while `rust` stayed flat at 16m3s against 16m25s. One run against one run cannot
+carry that argument, which is what this file's own standing note on CI timing already says. The
+figures above are quoted; nothing is inferred from them.
+
+##### VERIFICATION — THE WHOLE-BRANCH REVIEW
+
+Measured at `fa35a05`, the review's last code commit; this section is one further commit on top of
+it, so it names no hash of its own. The block above is NOT re-run against this head — it describes
+`0a57f55` and is left alone.
+
+```
+28                      commits on the branch      git rev-list --count 2f81985..fa35a05
+37 files, +4749/-103    whole-branch diff          git diff --shortstat 2f81985..fa35a05
+4                       review commits             git rev-list --count 0a57f55..fa35a05
+13 files, +478/-91      review diff                git diff --shortstat 4e8bbc2..fa35a05
+```
+
+```
+$ cargo nextest run --workspace
+     Summary [  52.673s] 1284 tests run: 1284 passed, 9 skipped
+
+$ cargo nextest run -p redextape-cli
+     Summary [   4.874s] 134 tests run: 134 passed, 0 skipped
+
+$ cargo clippy --workspace --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+
+$ cargo fmt --all --check
+(no output)
+
+$ scripts/check-citations.sh
+no file:line citations in tracked source: 413 files scanned, 0 violations, 2 escape-hatch marker(s)
+honoured (195 out of scope, binary or recording, 0 skipped — 608 tracked paths in all)
+
+$ scripts/check-doc-figures.sh
+check-doc-figures: 42 documented figures match the tree.
+
+$ pre-commit run --all-files
+no control bytes in tracked text.........................................Passed
+no file:line citations in tracked source.................................Passed
+documented figures match the tree........................................Passed
+cargo fmt................................................................Passed
+cargo clippy.............................................................Passed
+biome ci.................................................................Passed
+web typecheck............................................................Passed
+```
+
+`scripts/check-all.sh --no-llvm --no-browser`'s own final line, quoted rather than summarised:
+`green, but PARTIAL — these tiers were SKIPPED: LLVM browser. This is NOT a full gate on its own.`
+
+**The two Critical reproductions, re-run against `fa35a05` and shown refused rather than asserted
+fixed:**
+
+```
+$ redextape --no-config emit p.rxt --lang tm --field-width 65 -o p.tm
+error: `--field-width` must be 0 (auto-fit) or in 4..=64, got 65
+# exit 2, and p.tm was NOT written
+
+$ redextape --no-config emit p.rxt --lang tm --field-width 18446744073709551615
+error: `--field-width` must be 0 (auto-fit) or in 4..=64, got 18446744073709551615
+# exit 2, was exit 101 with `capacity overflow`
+```
+
+`0`, `4` and `64` are each still accepted, each emit a file, and each of those files runs back to `3`
+for `1 + 2` — the property `65` broke, and what
+`an_out_of_range_field_width_flag_is_refused_and_writes_nothing` asserts. `1284` is 1277 plus seven: three
+tests from the Critical commit and four from the message-and-coverage one. The suite read 1277 at
+`0a57f55` and at `4e8bbc2`, the branch head the review started from.
+
+**The sabotage for the untested config key, re-run:** with
+`Width::resolve(opts.field_width, 0)` in `emit.rs::run`, `cargo nextest run --workspace` reports
+`63/1284 tests run: 61 passed, 2 failed` — `a_configured_field_width_reaches_the_emitted_header_and_the_flag_beats_it`
+(the emitted header reads `width 4`, auto-fit's first attempt, where the config said 8) and
+`emit::tests::a_config_pinned_overflow_names_the_key_rather_than_a_flag_nobody_typed`. Reverted, the
+suite is back to 1284/1284.
+
+**THIS SECTION'S FIGURES ARE LOCAL AND PREDATE RUN 306**, which is the honest statement rather than
+the one this line used to carry ("No CI run exists for this section either"). The run recorded above
+covers the tree at `c57f7bd`; the measurements in this section were taken locally at the commits they
+name, and CI was not asked to reproduce any of them individually.

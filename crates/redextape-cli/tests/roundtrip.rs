@@ -6,8 +6,7 @@
 
 #[test]
 fn emit_then_run_reproduces_the_reference_answer() {
-    let dir = std::env::temp_dir().join("rxt-roundtrip");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = redextape_test_support::ScratchDir::new("roundtrip").unwrap();
     let src = dir.join("p.rxt");
     let art = dir.join("p.tm");
     std::fs::write(&src, "[1, 2, 3]").unwrap();
@@ -32,8 +31,7 @@ fn emit_then_run_reproduces_the_reference_answer() {
 /// `run` on a `.asm` file fell through to the `.rxt` lexer.
 #[test]
 fn emit_then_run_asm_reproduces_the_reference_answer() {
-    let dir = std::env::temp_dir().join("rxt-roundtrip-asm");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = redextape_test_support::ScratchDir::new("roundtrip-asm").unwrap();
     let src = dir.join("p.rxt");
     let art = dir.join("p.asm");
     std::fs::write(&src, "[1, 2, 3]").unwrap();

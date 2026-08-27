@@ -19,7 +19,15 @@ redextape-core = { path = "../redextape-core" }
 clap = { version = "4", features = ["derive"] }
 ariadne = "0.6"
 similar = "3"
+toml = "1.1.4"
+serde = { version = "1.0.229", features = ["derive"] }
 
 [dev-dependencies]
 assert_cmd = "2"
 trycmd = "1"
+# `default-features = false`: this crate wants only `ScratchDir`, not `arb_expr_over`'s `proptest`
+# dependency — see `redextape-test-support`'s own `Cargo.toml` and `lib.rs` doc for the feature gate
+# that makes that possible. (A `--workspace` build still unifies features across every crate that
+# depends on this one, so `proptest` may still get built in that mode; built alone — `cargo build -p
+# redextape-cli` or `cargo test -p redextape-cli` — it does not.)
+redextape-test-support = { path = "../redextape-test-support", default-features = false }

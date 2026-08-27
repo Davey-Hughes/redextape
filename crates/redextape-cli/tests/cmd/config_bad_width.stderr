@@ -1,0 +1,1 @@
+error: [CWD]/redextape.toml: `fmt.width` must be in 20..=1000, got 4

@@ -17,5 +17,11 @@ Options:
           
           [default: reference]
 
+      --config <PATH>
+          Read settings from this file instead of searching for one. Naming a file that does not exist is an error, where finding no file during the search is not
+
+      --no-config
+          Ignore any `redextape.toml` and use built-in defaults
+
   -h, --help
           Print help (see a summary with '-h')

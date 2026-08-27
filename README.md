@@ -152,24 +152,29 @@ as it diverges. Both are reachable only because control now returns from each β
   against a viewport-derived bound, which is 24 rows of `map_fold`'s 25,852 at CI's window size, and a
   flat ceiling of 200 that a whole-table renderer would miss by two orders of magnitude — both legs
   independently steppable forward and backward
-  through a recorded history with a caps affordance for a run that exceeds it. Still missing:
-  click-linking between the panes, dual-focus highlight while running (blocked — see the roadmap's Plan
-  5 entry), and editable λ / TM panes with detach-on-edit and recompile-from-source. **The λ pane's
-  structural tree is not one of these** — Plan 5a-ii measured it and cut it rather than leaving it
-  unscheduled: a per-frame tree costs 850 MB against `HISTORY_BYTES`' 32 MB ring, and most steps have no
-  tree to draw at any budget that is still affordable
+  through a recorded history with a caps affordance for a run that exceeds it. Click-linking between
+  the panes (Plan 5b, 2026-08-09), dual-focus highlight while running (Plan 5c plus region-path
+  tagging, 2026-08-10), and editable λ / TM panes with detach-on-edit and recompile-from-source
+  (through Plan 5d-iv, 2026-08-18) have all since shipped — an earlier version of this bullet still
+  listed the three as missing after each had landed. What is left is Plan 5's own accessibility pass:
+  deliberately deferred to one pass once the pane set stopped changing shape, and unblocked but not yet
+  run now that 5d-iv has landed. **The λ pane's structural tree is a deliberate cut, not part of that
+  remaining work** — Plan 5a-ii measured it and cut it rather than leaving it unscheduled: a per-frame
+  tree costs 850 MB against `HISTORY_BYTES`' 32 MB ring, and most steps have no tree to draw at any
+  budget that is still affordable
   (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2).
-- **CLI, the last two knobs** — `crates/redextape-cli` exists and all four subcommands work:
-  `redextape fmt` / `redextape lint` (Roadmap Plan 6's first half, 2026-08-19) and `redextape run` /
-  the `emit` subcommands (Plan 6's second half, 2026-08-23); see that crate's own README. `parse_asm`
-  landed 2026-08-24, so all three of `emit`'s text forms round-trip, and `redextape run` now takes
-  `.rxt` source and both runnable artifacts, `.tm` and `.asm`, alike. `.rxlambda` is the one emitted
-  form `run` still does not take — a bare λ term carries no result type to decode against. Still
-  unbuilt: `--deny-warnings` and a config file. The comment-retention decision that used to block
-  `fmt` closed one branch earlier.
 - **LSP** — `crates/redextape-lsp`, deferred to v2.
 
-Until those land, the examples are the interface:
+`crates/redextape-cli` is no longer on this list. All four subcommands work — `redextape fmt` /
+`redextape lint` (Roadmap Plan 6's first half, 2026-08-19), `redextape run` / `emit` (Plan 6's second
+half, 2026-08-23), and `parse_asm` (2026-08-25) rounding out `emit`'s three text forms so all of them
+round-trip — and a `redextape.toml` for four settings plus `--deny-warnings` close Plan 6's remaining
+two knobs; see that crate's own README for the schema, discovery and precedence. `.rxlambda` is the
+one emitted form `redextape run` still does not take — a bare λ term carries no result type to decode
+against.
+
+The CLI and the web visualizer are both usable today. The examples below remain the most direct way to
+drive the raw backends, with no binary or browser involved:
 
     cargo run --example lambda_demo -p redextape-core     # compile to λ, reduce it step by step
     cargo run --example tm_demo     -p redextape-core     # compile to a TM, simulate, decode

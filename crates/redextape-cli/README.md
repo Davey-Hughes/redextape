@@ -8,6 +8,7 @@
     redextape run foo.tm             simulate the machine, decode its tapes
     redextape run foo.asm            execute the listing, decode its result
     redextape emit foo.rxt --lang tm compile to a backend text form
+    redextape.toml                   repo-level defaults for four settings (see below)
 
 Exit codes: `0` success, `1` the check failed (`fmt --check` found a file it would rewrite, or `lint`
 found an error-severity diagnostic), `2` the work could not be done (an unreadable or missing file,
@@ -26,13 +27,89 @@ script the program failed when it did not. The `2`s a user is most likely to mee
 fine are written out at the end of this file, because each reads as a bug in the flag until you know
 the rule.
 
-`fmt` is exactly `print ∘ parse` — `redextape_core::format`. A file that does not parse is reported
-and left untouched. Every other file named on the same command line is still processed, and the worst
+`fmt` is exactly `print ∘ parse` — `redextape_core::format_with_width`, which is `format` with the
+line budget passed in rather than read off `printer::MAX_WIDTH`, so the one flag and the one config
+key both land in the same place. A file that does not parse is reported and left untouched. Every other file named on the same command line is still processed, and the worst
 outcome across them is what sets the exit code.
 
 `lint` reports errors and two warnings: a `let mut` that is never assigned, and a binding that is never
-read. Name a binding `_x` to say you meant it. A warning does not fail the run — `lint` exits `0` and
-prints it — and there is no `--deny-warnings` yet.
+read. Name a binding `_x` to say you meant it. A warning does not fail the run by default — `lint`
+exits `0` and prints it — but `--deny-warnings` (or `lint.deny-warnings = true` in `redextape.toml`)
+makes it exit `1` instead, with the warning still on stderr either way. `--no-deny-warnings` overrides
+a config `true` back off for one invocation.
+
+## `redextape.toml`
+
+`redextape` reads at most one config file per invocation, and every key it can set has a matching
+flag, so precedence is the same everywhere: **flag > config file > built-in default.**
+
+    [lint]
+    deny-warnings = false     # default
+
+    [fmt]
+    width = 120               # default; the value printer::MAX_WIDTH still holds
+
+    [emit]
+    encoding = "unary"        # unary | binary; applies to --lang tm only
+    field-width = 0           # 0 = auto-fit (the default); otherwise 4..=64
+
+`--deny-warnings` / `--no-deny-warnings` on `lint`, `--width` on `fmt`, `--field-width` on `emit`
+(`--encoding` already existed) each override the matching key for one invocation. `emit`'s two keys
+apply only to `--lang tm`; a config file setting them does not make `--encoding`'s or
+`--field-width`'s existing rule — an error, not a silent no-op, on any other target — start firing on
+a command line that used to work, because the guard tests whether the *flag* was typed, not what
+value is in effect. A config file must never be able to trip *that guard* on an invocation that used
+to work. It is not an absolute about config files as a whole: `field-width` pins a width, and a pinned
+width can refuse a program auto-fitting accepts, so `field-width = 4` really can turn a working
+`emit --lang tm` into an exit `2` — the refusal names the key, so the cause is visible.
+
+**Discovery walks up from the current directory, checking for the file before checking for `.git` in
+each directory, and stops at the first `.git` it crosses.** A repository root normally holds both, so
+checking `.git` first would stop one directory short of the file the walk exists to find. `.git` is
+tested with `exists()`, not `is_dir()`, because a worktree or a submodule writes it as a *file* — this
+repository uses worktrees, so the wrong predicate would fail exactly where it is most likely to be
+exercised. Finding no file during discovery is the normal case and is silent. `--config PATH` names a
+file explicitly instead of searching, and *that* file being missing is an error, exit `2` — naming a
+file that is not there is a mistake, where finding none during discovery is not. `--no-config` skips
+discovery and uses built-in defaults. Both flags are global and so appear under every subcommand's
+`--help`.
+
+**A config file that cannot be understood stops the run before any work, exit `2`, naming the file and
+the key** — deliberately strict rather than forward-compatible, because the config's most important
+key is a CI gate and a typo that silently disarms one is worse than no config file at all:
+
+    $ redextape lint a.rxt
+    error: /repo/redextape.toml: unknown field `deny_warnings`, expected `deny-warnings`
+    # exit 2
+
+    $ redextape fmt a.rxt
+    error: /repo/redextape.toml: `fmt.width` must be in 20..=1000, got 4
+    # exit 2
+
+**`fmt.width` is a budget, not a bound, whether it comes from the flag or the file.** Three constructs
+already exceed it, and `redextape-core`'s own property tests assert that they do: a binary chain never
+breaks across lines; a parameter list is printed with `join(", ")` and has no width handling at all;
+and indentation costs 4 columns per nesting level with no fill rule, so a program nested ten levels
+deep can overrun on whitespace alone with nothing else on the line. A narrower width makes all three
+bite more often — setting `width = 40` and then seeing a 60-column line is meeting a documented
+property, not hitting a bug.
+
+**`--width` is the one flag whose value is not range-checked, and that is deliberate.** `fmt.width`
+outside `20..=1000` in `redextape.toml` is refused at exit `2`; the identical value passed as
+`--width` is accepted and used exactly as given. Who is affected is the reason: a config value
+silently governs every future invocation for everyone who inherits the file, so a bad one is caught
+once, strictly, before it can do that, where a `--width` someone types misfires once, visibly, for
+the person who typed it, and refusing it would protect nobody who was not already looking at the
+mistake. `--width 0`, `--width 1` and `--width 18446744073709551615` all exit `0` and print
+degenerate but valid output — every construct over budget, or none of them.
+
+**`--field-width` is range-checked, at the same `0` or `4..=64` its config key uses and the same exit
+`2`, and the difference is what a bad value leaves behind.** A bad `--width` prints ugly output once
+and the invocation is over. A bad `--field-width` writes a *file*: `--field-width 65` emitted a `.tm`
+whose header says `width 65`, at exit `0`, which this tool's own reader then refuses — the mistake
+outlives the command as an artifact on disk that nothing downstream can open. A width past what the
+encodings can allocate a tape bank for was worse still: it aborted the process from inside a library
+path that is not allowed to panic. Neither is a mistake the person who typed it is still looking at.
 
 ## `run` — one verb, three input kinds
 
@@ -107,7 +184,14 @@ command.
 
 Output goes to stdout unless `-o` names a file, so `emit` composes with a pipe. `--encoding
 {unary,binary}` selects the tape encoding and applies to `--lang tm` only; passing it anywhere else
-exits `2` rather than being a silent no-op.
+exits `2` rather than being a silent no-op. `--field-width CELLS` pins the TM tape field width instead
+of auto-fitting; it is `--lang tm`-only under the same rule, for the same reason — a config file or a
+flag must not be able to change what a non-`tm` invocation does. Omitting it auto-fits, which is
+today's behaviour and starts narrow and widens on overflow; a pinned width skips that search entirely
+and can therefore refuse a program auto-fitting would have accepted, at the same exit `2` the encoding
+section below shows — but with a *different message*, because on a pinned run `MAX_FIELD_WIDTH` was
+never attempted and `--encoding binary` is not the remedy. The pinned refusal names the width it
+actually tried and the setting that chose it; the two are written out at the end of this file.
 
 | target | what it writes | can `redextape` read it back? |
 |---|---|---|
@@ -128,8 +212,10 @@ to the register machine, written to disk, read back by a parser that shares no c
 compiler, executed, and decoded — the same value the tree-walker gives. `.rxlambda` remains the one
 form `run` does not take; see above.
 
-`--lang tm` goes through `run_tm_described` rather than a bare lowering, because that is what produces
-a `TmHeader`. It costs a bounded simulation, and it is what makes the emitted file runnable:
+`--lang tm` goes through `run_tm_described` — or through `run_tm_described_at` when a width is pinned,
+which is the same single attempt with the search skipped — rather than a bare lowering, because those
+are what produce a `TmHeader`. It costs a bounded simulation, and it is what makes the emitted file
+runnable:
 
     $ redextape emit p.rxt --lang tm -o p.tm && redextape run p.tm
 
@@ -180,3 +266,26 @@ width holds values up to 63. A machine emitted past that point still HALTS — o
 nothing downstream notices: `run`'s cap guard never fires and the decode succeeds on corrupt tapes.
 That is why this is a refusal rather than a warning, and the binary line above is the proof it is the
 encoding rather than the program that could not express the answer.
+
+**A PINNED width refuses with a different message, because a different thing went wrong.** Above, the
+search really did reach 64 cells and the encoding is what ran out. Pinned, 64 was never tried at all —
+so the message names the width that *was*, and the setting that chose it:
+
+    $ redextape --no-config emit q.rxt --lang tm --field-width 4    # q.rxt is `40 + 2`
+    error: no machine was written: a value does not fit a 4-cell tape field, which is where `--field-width 4` pinned it
+      the program is fine — but the machine would HALT on truncated fields, and `redextape run` would decode them and print a wrong answer at exit 0
+      raise `--field-width`, or drop it and let the search fit one: auto-fit starts at 4 cells and doubles to at most 64 (`MAX_FIELD_WIDTH`)
+    # exit 2
+
+With `field-width = 4` in `redextape.toml` and no flag typed, the same program hits the same wall — and
+the remedy is in a file the user may not have written, so the message says which key:
+
+    $ redextape emit q.rxt --lang tm
+    error: no machine was written: a value does not fit a 4-cell tape field, which is where the config file's `emit.field-width = 4` pinned it
+      …
+      raise `emit.field-width`, set it to 0 to auto-fit, or override it for this run with `--field-width`: auto-fit starts at 4 cells and doubles to at most 64 (`MAX_FIELD_WIDTH`)
+    # exit 2
+
+`--encoding binary` is deliberately *not* offered on either: it does not lift a pin. Measured on this
+same program, `--encoding binary --field-width 4` refuses exactly as unary does, and
+`--encoding binary --field-width 8` emits — the width is what had to move.

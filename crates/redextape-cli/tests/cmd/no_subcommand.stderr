@@ -1,6 +1,6 @@
 The redextape mini-language toolchain
 
-Usage: redextape <COMMAND>
+Usage: redextape [OPTIONS] <COMMAND>
 
 Commands:
   fmt   Format source files in place
@@ -10,5 +10,7 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help     Print help
-  -V, --version  Print version
+      --config <PATH>  Read settings from this file instead of searching for one. Naming a file that does not exist is an error, where finding no file during the search is not
+      --no-config      Ignore any `redextape.toml` and use built-in defaults
+  -h, --help           Print help
+  -V, --version        Print version

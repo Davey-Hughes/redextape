@@ -27,6 +27,13 @@ use crate::token::Comment;
 /// on screen — a line of two-byte characters is cut at 60 of them. Stated rather than fixed, because
 /// the only inputs this language admits outside comments are ASCII, and a grapheme-aware width would
 /// be a second measurement to keep in step with the first.
+///
+/// **THIS IS THE DEFAULT, NOT THE RULE, AND IT IS BOTH OF THOSE WORDS THAT MATTER.** A caller may
+/// choose another width through `print_with_width`, so a reader who meets this constant learns what
+/// an un-parameterized `print` uses and nothing about what any given output is bounded by. It is
+/// also not a bound at the default: `tests/format_properties.rs`'s
+/// `no_line_exceeds_the_budget_except_the_three_documented_constructs` enumerates three constructs
+/// that overrun it and pins each with an input that does.
 pub const MAX_WIDTH: usize = 120;
 
 /// Spaces per nesting level — rustfmt's default `tab_spaces`.
@@ -82,6 +89,9 @@ struct Printer<'a> {
     line_start: usize,
     /// Nesting level, in units of `INDENT`.
     level: usize,
+    /// The line budget this printer is working to. `MAX_WIDTH` unless a caller chose otherwise —
+    /// see that constant's doc for why it is a budget rather than a bound at any value.
+    width: usize,
     /// End offset of the last item written — construct OR comment. Gaps measure from here, so a
     /// comment sitting between two statements does not swallow the blank line on one side of it and
     /// invent one on the other.
@@ -119,6 +129,10 @@ struct Printer<'a> {
 
 impl<'a> Printer<'a> {
     fn new(src: &'a str, comments: &'a [Comment]) -> Self {
+        Printer::with_width(src, comments, MAX_WIDTH)
+    }
+
+    fn with_width(src: &'a str, comments: &'a [Comment], width: usize) -> Self {
         Printer {
             src,
             comments,
@@ -128,6 +142,7 @@ impl<'a> Printer<'a> {
             level: 0,
             last_end: 0,
             speculating: 0,
+            width,
             #[cfg(test)]
             prints: 0,
             #[cfg(test)]
@@ -181,7 +196,7 @@ impl<'a> Printer<'a> {
     /// MONOTONE, which is what lets a caller stop the moment it goes false: absent a newline the
     /// buffer only grows, so the column only rises, and a newline cannot be unwritten.
     fn fits_inline_since(&self, mark: Mark) -> bool {
-        self.col() <= MAX_WIDTH && self.line_start <= mark.out_len
+        self.col() <= self.width && self.line_start <= mark.out_len
     }
 
     /// Called by every construct that is about to print a form containing a newline. Inside an
@@ -542,7 +557,7 @@ impl<'a> Printer<'a> {
             if fits {
                 self.out.push(close);
                 // The close bracket is the one character the loop could not account for.
-                if self.col() <= MAX_WIDTH {
+                if self.col() <= self.width {
                     return;
                 }
             }
@@ -590,7 +605,7 @@ impl<'a> Printer<'a> {
                 // `saturating_add`: `width_of` returns `usize::MAX` as its own-line sentinel, and
                 // plain `+` would overflow on it. Unreachable today — `fill` requires every element
                 // `<= SHORT_ELEMENT` — but this keeps it that way if `fill`'s predicate ever loosens.
-                if self.col().saturating_add(width_of(item)).saturating_add(3) > MAX_WIDTH {
+                if self.col().saturating_add(width_of(item)).saturating_add(3) > self.width {
                     self.out.push(',');
                     self.newline();
                     self.indent();
@@ -988,6 +1003,19 @@ impl Printer<'_> {
 #[must_use]
 pub fn print(parsed: &Parsed<'_>) -> String {
     let mut p = Printer::new(parsed.src, &parsed.comments);
+    p.program(&parsed.program);
+    p.out
+}
+
+/// Print `parsed` to a chosen line budget.
+///
+/// `print` is this at `MAX_WIDTH`. **`width` IS NOT VALIDATED HERE**: core prints to whatever it is
+/// given, and what a human may write in a config file is a CLI policy that lives in
+/// `redextape-cli`'s `config::WIDTH_RANGE`. Keeping the range in one place is what stops two
+/// definitions of "a legal width" drifting apart.
+#[must_use]
+pub fn print_with_width(parsed: &Parsed<'_>, width: usize) -> String {
+    let mut p = Printer::with_width(parsed.src, &parsed.comments, width);
     p.program(&parsed.program);
     p.out
 }

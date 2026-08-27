@@ -441,16 +441,17 @@ fn run_tm_backend(
 mod tests {
     use super::*;
 
-    /// **EVERY TEST GETS ITS OWN DIRECTORY, KEYED BY `case`.** `cargo test` runs the tests in one
-    /// binary on parallel threads, so they share a process id — a single shared path would let one
-    /// test read another's source. That fails intermittently rather than outright, which is worse
-    /// than a broken test. `filename` carries the extension, because Task 4 dispatches on it.
+    /// **EVERY TEST GETS ITS OWN `redextape_test_support::ScratchDir`, KEYED BY `case`.** `cargo test`
+    /// runs the tests in one binary on parallel threads, so they share a process id — a single shared
+    /// path would let one test read another's source. That fails intermittently rather than outright,
+    /// which is worse than a broken test. `filename` carries the extension, because Task 4 dispatches
+    /// on it. The directory is done with (its content already read into `out`/`err`/`outcome`) by the
+    /// time this function returns, so it is safe to remove it right here.
     ///
     /// This is the only helper in this module; Tasks 2 and 4 parameterise it rather than adding
     /// near-identical copies.
     fn run_case(case: &str, filename: &str, src: &str, backend: Backend) -> (String, String, Outcome) {
-        let dir = std::env::temp_dir().join(format!("rxt-cli-{}-{case}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = redextape_test_support::ScratchDir::new(&format!("cli-{case}")).unwrap();
         let p = dir.join(filename);
         std::fs::write(&p, src).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());

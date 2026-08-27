@@ -1,0 +1,9 @@
+# Git refuses to track any path literally named `.git`, so these sandbox markers cannot be
+# checked-in fixtures — `cli.rs`'s `cli_transcripts` test writes one into every `tests/cmd/*.in`
+# directory, via an inline loop, before each test run instead. See that test's doc comment for why
+# the marker exists, which cases it actually protects, and why it cannot be tracked.
+#
+# This pattern is belt-and-braces, not load-bearing: measured, `git status --untracked-files=all`
+# lists none of the markers with this file moved aside, because git skips a `.git` directory entry
+# during traversal unconditionally. It is kept as a statement of intent.
+*.in/.git

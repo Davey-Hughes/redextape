@@ -167,24 +167,20 @@ mod tests {
 
     #[test]
     fn non_utf8_bytes_are_reported_rather_than_lossily_decoded() {
-        let dir = std::env::temp_dir().join("redextape-cli-nonutf8");
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = redextape_test_support::ScratchDir::new("input-nonutf8").unwrap();
         let p = dir.join("bad.rxt");
         std::fs::write(&p, [0xff, 0xfe, 0x00]).unwrap();
         let e = Input::from_arg(&p).read().unwrap_err();
         assert!(e.to_string().contains("not valid UTF-8"), "got {e}");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn an_atomic_write_replaces_the_file_contents() {
-        let dir = std::env::temp_dir().join("redextape-cli-atomic");
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = redextape_test_support::ScratchDir::new("input-atomic").unwrap();
         let p = dir.join("out.rxt");
         std::fs::write(&p, "old").unwrap();
         write_atomic(&p, "new").unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "new");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     // M2 (mechanism): the previous test only pins the end state, which a plain `std::fs::write`
@@ -196,8 +192,7 @@ mod tests {
     fn an_atomic_write_goes_through_a_rename_rather_than_truncating_in_place() {
         use std::os::unix::fs::MetadataExt;
 
-        let dir = std::env::temp_dir().join("redextape-cli-atomic-inode");
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = redextape_test_support::ScratchDir::new("input-atomic-inode").unwrap();
         let p = dir.join("out.rxt");
         std::fs::write(&p, "old").unwrap();
         let before = std::fs::metadata(&p).unwrap().ino();
@@ -207,7 +202,6 @@ mod tests {
         let after = std::fs::metadata(&p).unwrap().ino();
         assert_ne!(before, after, "write_atomic should replace the file via rename, not truncate it in place");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "new");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     // S2: a source file that was privately-permissioned before `fmt` touched it must come out with
@@ -218,8 +212,7 @@ mod tests {
     fn an_atomic_write_preserves_the_target_s_permissions() {
         use std::os::unix::fs::PermissionsExt;
 
-        let dir = std::env::temp_dir().join("redextape-cli-atomic-perms");
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = redextape_test_support::ScratchDir::new("input-atomic-perms").unwrap();
         let p = dir.join("out.rxt");
         std::fs::write(&p, "old").unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
@@ -228,7 +221,6 @@ mod tests {
 
         let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "write_atomic must not widen the target's permissions");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     // S1: the temporary's name is deterministic (this process's id plus the target's file name), so
@@ -239,8 +231,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn write_atomic_refuses_to_follow_a_symlink_planted_at_the_temp_path() {
-        let dir = std::env::temp_dir().join("redextape-cli-atomic-symlink");
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = redextape_test_support::ScratchDir::new("input-atomic-symlink").unwrap();
         let target = dir.join("out.rxt");
         std::fs::write(&target, "old").unwrap();
         let victim = dir.join("victim.txt");
@@ -256,8 +247,6 @@ mod tests {
             "victim-untouched",
             "the symlink target must be untouched"
         );
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     // M1: if the write succeeds but the rename fails, the temporary must not be left behind. Force
@@ -265,8 +254,7 @@ mod tests {
     // directory — renaming a regular file onto that is refused by the OS.
     #[test]
     fn a_failed_rename_does_not_leave_the_temporary_behind() {
-        let dir = std::env::temp_dir().join("redextape-cli-atomic-rename-fails");
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = redextape_test_support::ScratchDir::new("input-atomic-rename-fails").unwrap();
         let target = dir.join("out.rxt");
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("occupant"), "keeps the directory non-empty").unwrap();
@@ -276,8 +264,6 @@ mod tests {
 
         let tmp = dir.join(format!("out.rxt.redextape-tmp.{}", std::process::id()));
         assert!(!tmp.exists(), "the temporary should be removed after a failed rename");
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     // M2 (boundary): a weakened `starts_with('-')` check would wrongly route `-foo` and `--` to

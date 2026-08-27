@@ -60,9 +60,19 @@ pub enum TmRun {
     Ran { tapes: Vec<Tape> },
     /// The simulation hit a step / tape-cells cap.
     HitCap,
-    /// A value did not fit the encoding's field width at ANY width up to `MAX_FIELD_WIDTH` — the
-    /// program is not representable on this tape. Distinct from `HitCap`: nothing diverged, the tape is
-    /// simply too narrow, which is a property of the encoding rather than of the program's semantics.
+    /// A value did not fit the encoding's field width at a width that was TRIED. Distinct from
+    /// `HitCap`: nothing diverged, the tape is simply too narrow, which is a property of the encoding
+    /// rather than of the program's semantics.
+    ///
+    /// **WHICH WIDTHS WERE TRIED DEPENDS ON THE PRODUCER, AND THIS DOC USED TO ASSUME ONE OF THEM.**
+    /// It read "at ANY width up to `MAX_FIELD_WIDTH`", which was true while `run_tm_fitted` and
+    /// `run_tm_described` — both of which search — were the only ways to reach this variant, and became
+    /// false when `run_tm_described_at` arrived: that one attempts exactly the width its caller pinned,
+    /// so its `Overflow` says nothing about any other width. A consumer that reports this variant to a
+    /// user must therefore name the width it actually ran at rather than `MAX_FIELD_WIDTH`, and must not
+    /// suggest a remedy that only holds for the searching case — `redextape-cli`'s `emit_described`
+    /// shipped exactly that wrong message once, recommending a different encoding for a program a wider
+    /// field would have accepted.
     Overflow,
     /// `lower_tm` REFUSED to build a machine for this program at all. FOUR conditions produce it: an
     /// absurd register file (`lower_tm::MAX_SLOTS`), an absurd `Loc` bank in a call-containing program
@@ -269,6 +279,25 @@ pub struct DescribedRun {
     pub steps: u64,
 }
 
+/// One lowering, one machine at `width`, one run, one header. No search.
+///
+/// The single place either public entry point builds a `DescribedRun`, so the pinned path cannot
+/// drift from the fitted one.
+fn describe_at(
+    prog: &Program,
+    n_slots: u32,
+    kind: EncodingKind,
+    result: Ty,
+    caps: TmCaps,
+    width: usize,
+) -> Option<DescribedRun> {
+    let fitted = kind.at(width);
+    let (run, machine, init, steps) = attempt(prog, &*fitted, n_slots, caps)?;
+    let tapes = init.into_iter().enumerate().collect();
+    let header = TmHeader::new(kind, width, n_slots, result, tapes);
+    Some(DescribedRun { run, machine, header, steps })
+}
+
 /// Lower, auto-fit the width, run — and return the machine and header that together form a complete
 /// `.tm` file for that run.
 ///
@@ -293,24 +322,75 @@ pub struct DescribedRun {
 /// is recoverable by retrying: the caller's only recourse is rewriting `core`. `TmRun::Overflow` and
 /// `TmRun::HitCap`, by contrast, are NOT errors here — they are `Ok(DescribedRun)` results, because a
 /// run that started (even one that overflowed or hit a cap) still has a configuration to describe.
+//
+// `result: Ty` is taken by value even though the loop below only ever `.clone()`s it. **TWO
+// ALTERNATIVES WERE TRIED AND MEASURED RATHER THAN REASONED ABOUT, AND BOTH ARE WORSE.**
+//
+// Narrowing this parameter to `&Ty` does NOT silence the lint — it spreads it. `describe_at` would
+// then take `&Ty` and clone internally, which leaves this function still flagged AND flags
+// `run_tm_described_at` too: two errors where there was one. It would also churn four owning call
+// sites outside this function — `emit_tm` in the CLI, `compile` in the WASM session,
+// `printed_machine_with_header` in the grammar-check crate, and this crate's own tests and
+// examples — for a lint's sake alone.
+//
+// Probing for the width with a bare `attempt` and building the `DescribedRun` once afterwards DOES
+// compile clean with no allow. It pays for that by running `attempt` — the real TM simulation —
+// TWICE at the winning width, where this shape runs it once per width plus a `Ty::clone`. Doubling
+// simulation cost on the common no-retry path is not a free win in a crate whose own probes record
+// an 8.6-million-state machine costing 6.0 GB. The clone is the cheaper of the two.
+//
+// So the allow is a deliberate trade, not an unexamined one. Anyone reopening it should re-measure
+// rather than re-argue: the reason it stands is a cost, and costs move.
+#[allow(clippy::needless_pass_by_value)]
 pub fn run_tm_described(core: &Core, kind: EncodingKind, result: Ty, caps: TmCaps) -> Result<DescribedRun, TmRun> {
     let (prog, sm) = lower_and_size(core)?;
     let n_slots = sm.n_slots();
     let mut width = MIN_FIELD_WIDTH;
     loop {
-        let fitted = kind.at(width);
-        let Some((run, machine, init, steps)) = attempt(&prog, &*fitted, n_slots, caps) else {
-            return Err(TmRun::TooLarge);
-        };
-        match run {
+        let described = describe_at(&prog, n_slots, kind, result.clone(), caps, width).ok_or(TmRun::TooLarge)?;
+        match described.run {
             TmRun::Overflow if width < MAX_FIELD_WIDTH => width = (width * 2).min(MAX_FIELD_WIDTH),
-            run => {
-                let tapes = init.into_iter().enumerate().collect();
-                let header = TmHeader::new(kind, width, n_slots, result, tapes);
-                return Ok(DescribedRun { run, machine, header, steps });
-            }
+            _ => return Ok(described),
         }
     }
+}
+
+/// `run_tm_described` at a width the caller chose, with the fitting search skipped.
+///
+/// **THIS CAN REFUSE A PROGRAM THE SEARCH WOULD HAVE ACCEPTED, AND THAT IS THE POINT OF ASKING FOR
+/// IT.** `run_tm_described` starts at `MIN_FIELD_WIDTH` and doubles until the values fit; pinning a
+/// width means the values fit there or they do not.
+///
+/// **`TmRun::Overflow` COMES BACK AS `Ok`, exactly as it does from `run_tm_described`** — a run that
+/// started still has a configuration to describe, and the caller decides what an overflow means. It
+/// is `emit`'s existing "a value does not fit this encoding's widest tape field" refusal that reads
+/// it, unchanged by this function existing.
+///
+/// **THE WIDTH IS CHECKED BEFORE ANY WORK, AND THAT CHECK IS WHAT `run_tm_described` GETS FOR FREE
+/// FROM ITS SEARCH.** The search only ever reaches `MIN_FIELD_WIDTH..=MAX_FIELD_WIDTH`; taking the
+/// width from the caller removed that bound and restored nothing, so a width the encodings cannot
+/// build a machine at reached `Unary::init_reg` and panicked on a capacity overflow — a library path
+/// that panics, which the workspace manifest forbids outright.
+///
+/// # Errors
+///
+/// `Err(TmRun::TooLarge)` when `width` is outside `MIN_FIELD_WIDTH..=MAX_FIELD_WIDTH`, checked first
+/// and before `core` is even lowered: no machine can be built at such a width, which is exactly what
+/// that variant means. Then the same two as `run_tm_described`: `Err(TmRun::LowerError(_))` when
+/// `core` has no asm lowering, and `Err(TmRun::TooLarge)` when `lower_tm` refuses to build a machine
+/// at all.
+pub fn run_tm_described_at(
+    core: &Core,
+    kind: EncodingKind,
+    result: Ty,
+    caps: TmCaps,
+    width: usize,
+) -> Result<DescribedRun, TmRun> {
+    if !(MIN_FIELD_WIDTH..=MAX_FIELD_WIDTH).contains(&width) {
+        return Err(TmRun::TooLarge);
+    }
+    let (prog, sm) = lower_and_size(core)?;
+    describe_at(&prog, sm.n_slots(), kind, result, caps, width).ok_or(TmRun::TooLarge)
 }
 
 /// Lower then simulate ONCE, at `enc`'s own width, with no search. What the step-count goldens and the
@@ -647,5 +727,69 @@ mod run_tm_tests {
         let described = run_tm_described(&core, EncodingKind::Unary, Ty::Nat, TM_DEFAULT_CAPS)
             .expect("an ordinary program must not be refused");
         assert!(matches!(described.run, TmRun::Ran { .. }), "got {:?}", described.run);
+    }
+
+    /// The fitted and pinned paths agree when the pinned width is the one fitting would have chosen.
+    ///
+    /// This is the test that catches `describe_at` being wired into only one of the two entry
+    /// points, or the two disagreeing about how a header is built.
+    #[test]
+    fn the_pinned_path_agrees_with_the_fitted_one_at_the_width_fitting_chose() {
+        let core = desugar(&crate::parser::parse("1 + 2").0.unwrap());
+        let ty = crate::ty::Ty::Nat;
+        let fitted = run_tm_described(&core, EncodingKind::Unary, ty.clone(), TM_DEFAULT_CAPS).unwrap();
+        let width = fitted.header.width;
+        let pinned = run_tm_described_at(&core, EncodingKind::Unary, ty, TM_DEFAULT_CAPS, width).unwrap();
+        assert_eq!(pinned.header.width, fitted.header.width);
+        assert_eq!(pinned.steps, fitted.steps, "the same machine must take the same number of steps");
+    }
+
+    /// A width too narrow for the program's values comes back as `Ok` carrying `Overflow`, NOT as an
+    /// `Err`. `emit`'s refusal reads that variant, so turning it into an error here would change a
+    /// user-visible message in a different crate.
+    #[test]
+    fn a_pinned_width_that_is_too_narrow_returns_ok_with_overflow() {
+        // A value needing more than MIN_FIELD_WIDTH cells under unary, pinned at MIN_FIELD_WIDTH.
+        let core = desugar(&crate::parser::parse("40 + 2").0.unwrap());
+        let got = run_tm_described_at(&core, EncodingKind::Unary, crate::ty::Ty::Nat, TM_DEFAULT_CAPS, MIN_FIELD_WIDTH)
+            .unwrap();
+        assert!(matches!(got.run, TmRun::Overflow), "got {:?}", got.run);
+        assert_eq!(got.header.width, MIN_FIELD_WIDTH, "the header records the width it was pinned to");
+    }
+
+    /// **A WIDTH OUTSIDE THE ENCODINGS' RANGE IS A `TooLarge`, NEVER A PANIC.** `usize::MAX` reached
+    /// `Unary::init_reg` and aborted the process on a `capacity overflow` — the workspace manifest's
+    /// "no library path may panic" rule, broken by an entry point that took the width from a caller
+    /// and never bounded it. Both directions are pinned: one below `MIN_FIELD_WIDTH`, one above
+    /// `MAX_FIELD_WIDTH`, and `usize::MAX` because that is the value that actually panicked.
+    #[test]
+    fn a_width_outside_the_encodings_range_is_refused_rather_than_panicking() {
+        let core = desugar(&crate::parser::parse("1 + 2").0.unwrap());
+        for width in [0, MIN_FIELD_WIDTH - 1, MAX_FIELD_WIDTH + 1, usize::MAX] {
+            let got = run_tm_described_at(&core, EncodingKind::Unary, crate::ty::Ty::Nat, TM_DEFAULT_CAPS, width);
+            assert!(matches!(got, Err(TmRun::TooLarge)), "width {width} must be refused, got {got:?}");
+        }
+    }
+
+    /// And both bounds themselves are still admitted, so the guard above is not an off-by-one that
+    /// refuses the widths the search itself uses.
+    #[test]
+    fn the_pinned_width_bounds_themselves_are_accepted() {
+        let core = desugar(&crate::parser::parse("1 + 2").0.unwrap());
+        for width in [MIN_FIELD_WIDTH, MAX_FIELD_WIDTH] {
+            let got = run_tm_described_at(&core, EncodingKind::Unary, crate::ty::Ty::Nat, TM_DEFAULT_CAPS, width)
+                .unwrap_or_else(|e| panic!("width {width} must be accepted, got {e:?}"));
+            assert_eq!(got.header.width, width);
+        }
+    }
+
+    /// The same program the pinned narrow width overflows on is accepted by the search, which is the
+    /// difference the flag exists to express.
+    #[test]
+    fn the_search_accepts_what_a_narrow_pin_refuses() {
+        let core = desugar(&crate::parser::parse("40 + 2").0.unwrap());
+        let fitted = run_tm_described(&core, EncodingKind::Unary, crate::ty::Ty::Nat, TM_DEFAULT_CAPS).unwrap();
+        assert!(!matches!(fitted.run, TmRun::Overflow), "the search must widen past the overflow");
+        assert!(fitted.header.width > MIN_FIELD_WIDTH, "and must have actually widened");
     }
 }

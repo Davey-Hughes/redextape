@@ -15,7 +15,7 @@ use redextape_core::analysis::{TokenClass, classify_source};
 use redextape_core::printer::MAX_WIDTH;
 use redextape_core::span::Span;
 use redextape_core::value::format_value;
-use redextape_core::{format, run};
+use redextape_core::{format, format_with_width, run};
 use redextape_test_support::arb_expr_over;
 
 /// Programs exercising every construct the printer prints, each with trivia in a different place.
@@ -169,6 +169,116 @@ fn no_line_exceeds_the_budget_except_the_three_documented_constructs() {
         out.lines().any(|l| l.len() > MAX_WIDTH),
         "deep nesting is a DOCUMENTED exception (§17); if this now fits, that changed"
     );
+}
+
+/// The budget holds at widths other than the default, and each of the three `self.width`
+/// comparisons in `printer.rs` is individually load-bearing: reverting any ONE of them to
+/// `MAX_WIDTH` fails one of the three fixtures below.
+///
+/// **THIS REPLACES A SABOTAGE CHECK THAT COULD NOT SABOTAGE ANYTHING.** Its predecessor,
+/// `the_budget_holds_at_widths_other_than_the_default`, checked `"fn wide(a) { a } wide([1, 2, 3])"`
+/// at widths `[40, 60, 80, 200]` — small enough that it never overflowed at any of them, so
+/// `fill_rows` was never entered and neither `bracketed` check was ever pushed past its boundary.
+/// Reverting all THREE sites to `MAX_WIDTH` at once still passed it. The fix was not a wider net of
+/// widths; it was fixtures sized against the specific comparison each one exercises, confirmed by
+/// actually reverting each site in turn (task report, "Fix round 1" — the sabotage matrix) rather
+/// than by inspection.
+#[test]
+fn reverting_any_single_width_site_fails_one_of_these_fixtures() {
+    // `fits_inline_since`, and — jointly, since this fixture cannot tell the two apart — the
+    // `bracketed`-close check: a single 150-byte identifier as the lone element of a one-item list,
+    // checked at width 200. Printed inline it is 152 bytes: over `MAX_WIDTH` (120) but comfortably
+    // under the configured 200, so the only way this can be forced onto more than one line is a
+    // check somewhere reading 120 instead of 200. `fits_inline_since` runs once, right after that one
+    // item is printed; the close-bracket check runs immediately after that. Either one hard-coded to
+    // `MAX_WIDTH` rejects the inline form at 152 > 120. The boundary fixture below isolates the
+    // close-bracket check on its own, which is what tells the two apart.
+    let long_ident = "a".repeat(150);
+    let one_long_element = format!("[{long_ident}]");
+    let out = format_with_width(&one_long_element, 200).unwrap();
+    assert_eq!(out.lines().count(), 1, "a 152-byte line fits in 200 columns and must stay inline: {out:?}");
+
+    // The `bracketed`-close check, isolated from `fits_inline_since`: two identifiers whose combined
+    // inline length — brackets included, the CLOSING bracket excluded — lands exactly on the
+    // configured width (60): `1 + 28 + 2 + 29 == 60`. Every per-item check inside the inline loop
+    // therefore reads `col() <= 60`, which is `true` whether that comparison is wired to 60 or
+    // hard-coded to 120 — the two cannot disagree below 120, so `fits_inline_since` is a bystander
+    // here. Only the close-bracket check, evaluated after the loop with the closing `]` already
+    // counted, sees the one extra byte that pushes the line to 61: over 60, but still under a
+    // hard-coded 120. A correctly wired printer rewinds that attempt and breaks the list onto rows of
+    // its own; a `MAX_WIDTH`-wired close check accepts the 61-byte line and returns it inline.
+    let (first, second) = ("a".repeat(28), "b".repeat(29));
+    let close_bracket_boundary = format!("[{first}, {second}]");
+    for line in format_with_width(&close_bracket_boundary, 60).unwrap().lines() {
+        assert!(line.len() <= 60, "the bracketed-close check let a 61-byte line through as inline: {line:?}");
+    }
+
+    // `fill_rows`: forty 3-digit numbers, every one well under `SHORT_ELEMENT` (10), so the list
+    // breaks into fill rows rather than one element per line. Printed on a single row the whole list
+    // is roughly 200 bytes — over `MAX_WIDTH` before the width parameter enters the picture at all —
+    // so the decision to reject the inline form is the same regardless of which `bracketed` check is
+    // wired correctly; only `fill_rows`'s own row-packing loop is what this fixture puts on trial. At
+    // the configured width (60) every row must stay near 60 bytes; a `fill_rows` hard-coded to
+    // `MAX_WIDTH` packs each row to roughly 118 bytes instead.
+    let items = (100..140).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+    let many_short_elements = format!("[{items}]");
+    for line in format_with_width(&many_short_elements, 60).unwrap().lines() {
+        assert!(line.len() <= 60, "fill_rows packed a row past the configured width: {line:?}");
+    }
+}
+
+#[test]
+fn the_three_documented_exceptions_are_still_exceptions_at_a_narrow_width() {
+    let width = 60;
+
+    // §6.6: binary expressions never break.
+    let binary = format_with_width(&vec!["1"; 200].join(" + "), width).unwrap();
+    assert!(
+        binary.lines().any(|l| l.len() > width),
+        "a long binary chain is a DOCUMENTED exception at every width, not only at 120"
+    );
+
+    // §17, first divergence: parameter lists have no width handling at all.
+    let params = (0..30).map(|i| format!("param_number_{i}")).collect::<Vec<_>>().join(", ");
+    let out = format_with_width(&format!("fn wide({params}) {{ 1 }}\n0"), width).unwrap();
+    assert!(out.lines().any(|l| l.len() > width), "a parameter list is a DOCUMENTED exception: {out}");
+
+    // §17, second divergence: indentation is 4 columns per level with no fill rule, so a narrower
+    // budget reaches the exception with LESS nesting than the default does.
+    let mut deep = String::from("[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]");
+    for _ in 0..40 {
+        deep = format!("[{deep}]");
+    }
+    let out = format_with_width(&deep, width).unwrap();
+    assert!(out.lines().any(|l| l.len() > width), "deep nesting is a DOCUMENTED exception");
+}
+
+/// `format` and `format_with_width(.., MAX_WIDTH)` are the same function.
+///
+/// **THE FIRST TWO FIXTURES BELOW ARE WIDTH-INSENSITIVE, AND THAT COST A DETECTION.** Both stay
+/// under budget across nearly the whole realistic width range, so a mutation of `format` to hard-code
+/// `format_with_width(src, 60)` in place of `printer::MAX_WIDTH` passed this test undetected;
+/// binary-searching the threshold, it only starts failing once the hard-coded width drops to 14 or
+/// below — 60, 100, and 110 all slip through. `close_bracket_boundary` is the fix: built the same way
+/// as the fixture of that name in `reverting_any_single_width_site_fails_one_of_these_fixtures`
+/// (above), but re-sized for a boundary at `MAX_WIDTH` (120) instead of 60, so it is sensitive to a
+/// drift anywhere below 120 rather than only below 15.
+#[test]
+fn the_default_entry_point_agrees_with_the_parameterized_one_at_the_default() {
+    // `1 + 58 + 2 + 58 + 1 == 120`: brackets, separator, and both identifiers included, this list's
+    // printed length lands EXACTLY on `MAX_WIDTH`. The close-bracket check
+    // (`self.col() <= self.width`, evaluated once the closing `]` is already counted) reads
+    // `120 <= 120` at width 120 and keeps the list on one line; at any width below 120 that same
+    // check fails instead and the list breaks into `vertical_rows`, one element per line. A `format`
+    // hard-coded to 60, 100, 110, or even 119 therefore prints this fixture differently than
+    // `format_with_width(_, MAX_WIDTH)` does — confirmed by mutation for all four in the task report,
+    // "Fix round 2." No width between 1 and 119 was found to escape it; 119 is caught along with the
+    // rest, so there is no known drift this fixture misses short of 120 itself.
+    let close_bracket_boundary = format!("[{}, {}]", "a".repeat(58), "b".repeat(58));
+    for src in ["let x = 1;\nx + 1".to_string(), "fn wide(a) { a } wide([1, 2, 3])".to_string(), close_bracket_boundary]
+    {
+        assert_eq!(format(&src).unwrap(), format_with_width(&src, MAX_WIDTH).unwrap());
+    }
 }
 
 /// Where a comment sits, structurally: how deeply nested it is, and the nearest real tokens either

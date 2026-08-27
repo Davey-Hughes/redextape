@@ -1,0 +1,4 @@
+bin.name = "redextape"
+args = ["lint", "a.rxt"]
+fs.sandbox = true
+status.code = 2

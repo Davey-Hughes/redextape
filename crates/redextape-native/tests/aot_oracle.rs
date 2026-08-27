@@ -49,13 +49,19 @@ fn concretize(ty: Ty) -> Ty {
 ///
 /// Mirrors `run_native`'s (private) lowering template exactly: try `lower_asm` first, only retry
 /// through `defunc` when it rejects the program as higher-order -- see this crate's `lib.rs`.
+///
+/// The binary lives under its own `redextape_test_support::ScratchDir` rather than directly in
+/// `std::env::temp_dir()`, so it is removed once this function returns (it has already been run and
+/// its output captured by then, so nothing outside this function needs it to survive) instead of
+/// accumulating under `/tmp` on every call, forever, the way it did before.
 fn run_binary(src: &str, name: &str) -> (String, i32) {
     let ast = parse(src).0.unwrap();
     let ty = concretize(result_type(&ast).unwrap());
     let core = desugar(&ast);
     let prog = lower_asm(&core).or_else(|_| defunc(&core).and_then(|d| lower_asm(&d))).unwrap();
     let obj = emit_object(&prog, DEFAULT_CAPS, &ty, OptLevel::default()).unwrap();
-    let out = std::env::temp_dir().join(format!("redextape_aot_{name}"));
+    let dir = redextape_test_support::ScratchDir::new(&format!("aot-{name}")).unwrap();
+    let out = dir.join(name);
     link_executable(&obj, &out, &LinkOptions::default()).expect("link");
     let output = std::process::Command::new(&out).output().expect("run binary");
     (String::from_utf8_lossy(&output.stdout).trim().to_string(), output.status.code().unwrap_or(-1))

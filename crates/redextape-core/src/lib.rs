@@ -103,9 +103,19 @@ pub fn run(src: &str) -> Result<value::Value, RunError> {
 /// Returns the parse diagnostics when `src` does not parse. There is no partial format: a file that
 /// does not parse is returned untouched to the caller, which is the only safe thing to do with it.
 pub fn format(src: &str) -> Result<String, Vec<Diagnostic>> {
+    format_with_width(src, printer::MAX_WIDTH)
+}
+
+/// `format`, to a chosen line budget.
+///
+/// # Errors
+///
+/// The parse diagnostics when `src` does not parse — identical to `format`, which is this at
+/// `printer::MAX_WIDTH`.
+pub fn format_with_width(src: &str, width: usize) -> Result<String, Vec<Diagnostic>> {
     let (parsed, diagnostics) = parser::parse_full(src);
     match parsed {
-        Some(p) => Ok(printer::print(&p)),
+        Some(p) => Ok(printer::print_with_width(&p, width)),
         None => Err(diagnostics),
     }
 }

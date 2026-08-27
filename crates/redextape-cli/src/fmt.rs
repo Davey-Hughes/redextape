@@ -36,13 +36,14 @@ pub enum Outcome {
 pub fn run(
     inputs: &[Input],
     check: bool,
+    width: usize,
     out: &mut impl std::io::Write,
     err: &mut impl std::io::Write,
     color: bool,
 ) -> std::io::Result<Outcome> {
     let mut worst = Outcome::Clean;
     for input in inputs {
-        worst = worst.max(one(input, check, out, err, color)?);
+        worst = worst.max(one(input, check, width, out, err, color)?);
     }
     Ok(worst)
 }
@@ -60,6 +61,7 @@ pub fn diff(label: &str, before: &str, after: &str) -> String {
 fn one(
     input: &Input,
     check: bool,
+    width: usize,
     out: &mut impl std::io::Write,
     err: &mut impl std::io::Write,
     color: bool,
@@ -72,7 +74,7 @@ fn one(
             return Ok(Outcome::Failed);
         }
     };
-    let formatted = match redextape_core::format(&src) {
+    let formatted = match redextape_core::format_with_width(&src, width) {
         Ok(f) => f,
         Err(ds) => {
             render(err, &label, &src, &ds, color)?;
@@ -143,25 +145,15 @@ fn one(
 mod tests {
     use super::*;
 
-    // M3: a fixed name under the system temp directory collides across concurrent runs — one run's
-    // `remove_dir_all` can delete another's fixture mid-test, and a foreign-owned leftover makes
-    // `create_dir_all(..).unwrap()` panic. Mixing in this process's id keeps every run's fixtures apart.
-    // UNIQUE PER CALL, not merely per `name`, and the gap between those two is invisible to the gate.
-    // `std::process::id()` alone is enough under nextest, which runs every test in its own process —
-    // but `cargo test` runs them as threads in ONE process, so two tests passing the same `name` got
-    // the SAME directory, and this function's own `remove_dir_all` then deleted one test's fixture out
-    // from under the other while it was running. Not hypothetical: the two `--check`-on-a-clean-file
-    // tests below both asked for "check-clean" and failed 4 of 15 `cargo test -p redextape-cli` runs,
-    // while every `cargo nextest` run stayed green — so the gate could not see it and never will. The
-    // counter makes a repeated label harmless rather than relying on nobody ever repeating one, which
-    // is the property that survives the next test being added by copying an existing one.
-    fn tmpdir(name: &str) -> std::path::PathBuf {
-        static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let d = std::env::temp_dir().join(format!("redextape-fmt-{name}-{}-{seq}", std::process::id()));
-        std::fs::remove_dir_all(&d).ok();
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    // Not hypothetical: the two `--check`-on-a-clean-file tests below both ask for "check-clean", and
+    // used to fail 4 of 15 `cargo test -p redextape-cli` runs on exactly the collision
+    // `redextape_test_support::ScratchDir`'s per-call counter now rules out, while every `cargo
+    // nextest` run (one process per test) stayed green — so the gate could not see it and never will.
+    //
+    // The directory this returns removes itself once the calling test's scope ends, but ONLY if that
+    // test passed — see `ScratchDir`'s own doc.
+    fn tmpdir(name: &str) -> redextape_test_support::ScratchDir {
+        redextape_test_support::ScratchDir::new(&format!("fmt-{name}")).unwrap()
     }
 
     #[test]
@@ -170,14 +162,14 @@ mod tests {
         let p = d.join("a.rxt");
         std::fs::write(&p, "let   x=1;\nx+1").unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&p)], false, &mut out, &mut err, false).unwrap();
+        let got =
+            run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Rewritten), "got {got:?}");
         let after = std::fs::read_to_string(&p).unwrap();
         assert_eq!(after, redextape_core::format("let   x=1;\nx+1").unwrap());
         // I3: nothing stops the path arm from also dumping the formatted text to stdout, which would
         // make a repo-wide `fmt` unusable (and would silently double as a `cat` of every file touched).
         assert!(out.is_empty(), "formatting a path in place must not print to stdout: {out:?}");
-        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]
@@ -186,14 +178,14 @@ mod tests {
         let p = d.join("a.rxt");
         std::fs::write(&p, "let   x=1;\nx+1").unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        run(&[Input::from_arg(&p)], false, &mut out, &mut err, false).unwrap();
+        run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
         let once = std::fs::read_to_string(&p).unwrap();
         out.clear();
-        let got = run(&[Input::from_arg(&p)], false, &mut out, &mut err, false).unwrap();
+        let got =
+            run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Clean), "the second run has nothing to do: {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), once);
         assert!(out.is_empty(), "a clean path input must not print to stdout: {out:?}");
-        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]
@@ -203,14 +195,14 @@ mod tests {
         let original = "let x = ;";
         std::fs::write(&p, original).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&p)], false, &mut out, &mut err, false).unwrap();
+        let got =
+            run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Failed), "got {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), original, "THE FILE MUST NOT BE TOUCHED");
         // M2: `!err.is_empty()` also passes for a one-byte stderr; require the message name the file,
         // the way the missing-file diagnostic below already is required to.
         assert!(String::from_utf8(err).unwrap().contains("bad.rxt"), "the diagnostic must name the file");
         assert!(out.is_empty());
-        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]
@@ -221,10 +213,17 @@ mod tests {
         std::fs::write(&bad, "let x = ;").unwrap();
         std::fs::write(&good, "let   y=2;\ny+1").unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&bad), Input::from_arg(&good)], false, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&bad), Input::from_arg(&good)],
+            false,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Failed), "the worst outcome wins: {got:?}");
         assert_eq!(std::fs::read_to_string(&good).unwrap(), redextape_core::format("let   y=2;\ny+1").unwrap());
-        std::fs::remove_dir_all(&d).ok();
     }
 
     // M1: the case above only pins that an earlier worse outcome is not overwritten by a later better
@@ -238,10 +237,17 @@ mod tests {
         std::fs::write(&good, "let   y=2;\ny+1").unwrap();
         std::fs::write(&bad, "let x = ;").unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&good), Input::from_arg(&bad)], false, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&good), Input::from_arg(&bad)],
+            false,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Failed), "the worst outcome wins regardless of order: {got:?}");
         assert_eq!(std::fs::read_to_string(&good).unwrap(), redextape_core::format("let   y=2;\ny+1").unwrap());
-        std::fs::remove_dir_all(&d).ok();
     }
 
     // I1 (the real bug): a write failure on one target must not abort the loop and skip every input
@@ -276,8 +282,15 @@ mod tests {
         std::fs::write(&good, "let   y=2;\ny+1").unwrap();
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got =
-            run(&[Input::from_arg(&unwritable), Input::from_arg(&good)], false, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&unwritable), Input::from_arg(&good)],
+            false,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
 
         assert!(matches!(got, Outcome::Failed), "got {got:?}");
         let err = String::from_utf8(err).unwrap();
@@ -293,7 +306,6 @@ mod tests {
             redextape_core::format("let   y=2;\ny+1").unwrap(),
             "THE INPUT AFTER THE FAILING ONE MUST STILL BE FORMATTED"
         );
-        std::fs::remove_dir_all(&d).ok();
     }
 
     // I2: nothing pins that `fmt` calls `write_atomic` rather than some plain `std::fs::write` — every
@@ -312,13 +324,13 @@ mod tests {
         let before = std::fs::metadata(&p).unwrap().ino();
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&p)], false, &mut out, &mut err, false).unwrap();
+        let got =
+            run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Rewritten), "got {got:?}");
 
         let after = std::fs::metadata(&p).unwrap().ino();
         assert_ne!(before, after, "fmt must write through write_atomic (rename), not truncate the file in place");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), redextape_core::format("let   x=1;\nx+1").unwrap());
-        std::fs::remove_dir_all(&d).ok();
     }
 
     // I5: formatting a symlinked source must rewrite the REAL file and leave the link standing, not
@@ -334,7 +346,8 @@ mod tests {
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&link)], false, &mut out, &mut err, false).unwrap();
+        let got = run(&[Input::from_arg(&link)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false)
+            .unwrap();
         assert!(matches!(got, Outcome::Rewritten), "got {got:?} (stderr: {})", String::from_utf8_lossy(&err));
 
         assert!(
@@ -345,7 +358,6 @@ mod tests {
         let formatted = redextape_core::format("let   x=1;\nx+1").unwrap();
         assert_eq!(std::fs::read_to_string(&real).unwrap(), formatted, "the REAL file must be the one rewritten");
         assert_eq!(std::fs::read_to_string(&link).unwrap(), formatted, "reading through the link sees the same text");
-        std::fs::remove_dir_all(&d).ok();
     }
 
     // The real file need not share the link's directory — canonicalizing must resolve to wherever the
@@ -364,7 +376,8 @@ mod tests {
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&link)], false, &mut out, &mut err, false).unwrap();
+        let got = run(&[Input::from_arg(&link)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false)
+            .unwrap();
         assert!(matches!(got, Outcome::Rewritten), "got {got:?} (stderr: {})", String::from_utf8_lossy(&err));
 
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the link must survive");
@@ -373,7 +386,6 @@ mod tests {
         // Nothing must have been created in the link's own directory besides the link itself.
         let entries: Vec<_> = std::fs::read_dir(&link_dir).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(entries, vec![std::ffi::OsString::from("link.rxt")], "no stray file beside the link: {entries:?}");
-        std::fs::remove_dir_all(&d).ok();
     }
 
     // A chain of links must resolve all the way down, not just one hop.
@@ -389,14 +401,14 @@ mod tests {
         std::os::unix::fs::symlink(&middle, &link).unwrap();
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&link)], false, &mut out, &mut err, false).unwrap();
+        let got = run(&[Input::from_arg(&link)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false)
+            .unwrap();
         assert!(matches!(got, Outcome::Rewritten), "got {got:?} (stderr: {})", String::from_utf8_lossy(&err));
 
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the outer link must survive");
         assert!(std::fs::symlink_metadata(&middle).unwrap().file_type().is_symlink(), "the middle link must survive");
         let formatted = redextape_core::format("let   x=1;\nx+1").unwrap();
         assert_eq!(std::fs::read_to_string(&real).unwrap(), formatted, "the file at the end of the chain is rewritten");
-        std::fs::remove_dir_all(&d).ok();
     }
 
     // A symlink pointing at nothing must be a clean `Failed`, not a panic — and in fact never reaches
@@ -411,11 +423,11 @@ mod tests {
         std::os::unix::fs::symlink(&nowhere, &link).unwrap();
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&link)], false, &mut out, &mut err, false).unwrap();
+        let got = run(&[Input::from_arg(&link)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false)
+            .unwrap();
         assert!(matches!(got, Outcome::Failed), "got {got:?}");
         assert!(String::from_utf8(err).unwrap().contains("link.rxt"), "the failure must name the link the user passed");
         assert!(out.is_empty());
-        std::fs::remove_dir_all(&d).ok();
     }
 
     // C1: `--check` had zero coverage — every existing test above passes `check = false`. These three
@@ -432,10 +444,10 @@ mod tests {
         let original = "let   x=1;\nx+1";
         std::fs::write(&p, original).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&p)], true, &mut out, &mut err, false).unwrap();
+        let got =
+            run(&[Input::from_arg(&p)], true, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::WouldChange), "got {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), original, "--check must never write the file");
-        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]
@@ -445,11 +457,11 @@ mod tests {
         let formatted = redextape_core::format("let   x=1;\nx+1").unwrap();
         std::fs::write(&p, &formatted).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&p)], true, &mut out, &mut err, false).unwrap();
+        let got =
+            run(&[Input::from_arg(&p)], true, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Clean), "got {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), formatted);
         assert!(out.is_empty());
-        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]
@@ -460,10 +472,16 @@ mod tests {
         std::fs::write(&would_change, "let   x=1;\nx+1").unwrap();
         std::fs::write(&bad, "let x = ;").unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got =
-            run(&[Input::from_arg(&would_change), Input::from_arg(&bad)], true, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&would_change), Input::from_arg(&bad)],
+            true,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Failed), "Failed still outranks WouldChange: {got:?}");
-        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]
@@ -473,10 +491,10 @@ mod tests {
         let clean = redextape_core::format("let x = 1;\nx + 1").unwrap();
         std::fs::write(&p, &clean).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&p)], true, &mut out, &mut err, false).unwrap();
+        let got =
+            run(&[Input::from_arg(&p)], true, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Clean), "got {got:?}");
         assert!(out.is_empty() && err.is_empty(), "a clean --check is silent");
-        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]
@@ -486,7 +504,8 @@ mod tests {
         let original = "let   x=1;\nx+1";
         std::fs::write(&p, original).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&p)], true, &mut out, &mut err, false).unwrap();
+        let got =
+            run(&[Input::from_arg(&p)], true, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::WouldChange), "got {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), original, "--check writes NOTHING");
         let text = String::from_utf8(out).unwrap();
@@ -500,7 +519,6 @@ mod tests {
         assert!(text.contains("@@"), "a unified diff has a hunk header: {text}");
         assert!(text.contains("-let   x=1;"), "the diff must show the original line being removed: {text}");
         assert!(text.contains("+let x = 1;"), "the diff must show the formatted line being added: {text}");
-        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]
@@ -509,10 +527,9 @@ mod tests {
         let p = d.join("a.rxt");
         std::fs::write(&p, "let   x=1;\nx+1").unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        run(&[Input::from_arg(&p)], true, &mut out, &mut err, false).unwrap();
+        run(&[Input::from_arg(&p)], true, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
         let text = String::from_utf8(out).unwrap();
         assert!(!text.contains(".redextape-tmp"), "the temporary file is an implementation detail: {text}");
-        std::fs::remove_dir_all(&d).ok();
     }
 
     // M4: a relative path resolves against the test process's cwd, which is incidental and shared with
@@ -522,10 +539,10 @@ mod tests {
         let d = tmpdir("missing");
         let p = d.join("nope.rxt");
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&p)], false, &mut out, &mut err, false).unwrap();
+        let got =
+            run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Failed));
         assert!(String::from_utf8(err).unwrap().contains("nope.rxt"));
-        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]
