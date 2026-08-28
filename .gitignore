@@ -42,3 +42,10 @@ coverage/
 .playwright-mcp/
 # ...and stray screenshots a browser tool wrote to a relative path outside it.
 redextape-*.png
+
+# `tree-sitter build -o parser.so` writes here, and it is an EDITOR that runs it rather than anything
+# in this repository: nvim-treesitter's local-path install compiles in place, inside whichever
+# checkout it was pointed at. `plugin/redextape.lua` points it at this one, so a developer who
+# installs the grammars through Neovim gets four untracked binaries in a tree that was clean before.
+# Not swept up by `/target/` above — these sit beside the committed `src/parser.c`, not under it.
+grammars/*/parser.so

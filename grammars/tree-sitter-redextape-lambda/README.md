@@ -215,33 +215,39 @@ different metadata and reddens the very check that exists to catch a stale `pars
 
 ## Installing it in an editor
 
-### Read this before any snippet: the repository is not anonymously clonable
+### Read this before any snippet: use the public mirror, not the address in `tree-sitter.json`
 
-Every snippet below makes the editor clone this repository, and **it cannot do so without
-credentials.** Re-measured 2026-08-21:
+`tree-sitter.json` records `https://git.daveynet.xyz/davey/redextape`, which is where this project
+actually lives — and **no editor can fetch it.** Re-measured 2026-08-27, unchanged from when this
+section was first written on 2026-08-21:
 
 ```
 $ curl -sS -o /dev/null -w '%{http_code}\n' \
-    https://forge.daveynet.xyz/davey/redextape/info/refs?service=git-upload-pack
+    'https://forge.daveynet.xyz/davey/redextape/info/refs?service=git-upload-pack'
 401
 
-$ curl -sS https://git.daveynet.xyz/davey/redextape/info/refs?service=git-upload-pack | wc -c
+$ curl -sS 'https://git.daveynet.xyz/davey/redextape/info/refs?service=git-upload-pack' | wc -c
 0
-
-$ GIT_TERMINAL_PROMPT=0 GIT_CONFIG_GLOBAL=/dev/null git ls-remote https://git.daveynet.xyz/davey/redextape
-   (no output, exit 0)
 ```
 
 `forge.daveynet.xyz` is the HTTP git host and refuses anonymous access outright, which is the honest
 failure. `git.daveynet.xyz` is the **SSH** clone host; over HTTPS it answers the ref advertisement with
-**HTTP 200 and a zero-byte body**, which git reads as *a repository with no refs* — `git ls-remote`
-exits `0` and prints nothing. **That is a silent empty, not an error**, and an editor pointed at the
-HTTPS `git.` URL will report something unhelpful rather than "you are not authorized".
+**HTTP 200 and a zero-byte body**, which git reads as *a repository with no refs* — `git ls-remote` exits
+`0` and prints nothing. **That is a silent empty, not an error**, and an editor pointed at the HTTPS
+`git.` URL reports something unhelpful rather than "you are not authorized".
 
-So: use `ssh://git@git.daveynet.xyz/davey/redextape.git` if you have a key on the instance, or an
-authenticated `https://forge.daveynet.xyz/davey/redextape` if you have a token in a credential helper.
-The snippets below are written with the plain HTTPS URL because that is the address recorded in
-`tree-sitter.json`; substitute whichever of the two actually authenticates for you.
+**So every snippet below names the public GitHub mirror instead**, which needs no credentials at all:
+
+```
+$ curl -sS -L -o /dev/null -w '%{http_code}\n' \
+    https://github.com/Davey-Hughes/redextape/archive/main.tar.gz
+200
+```
+
+**The mirror is a mirror, and `tree-sitter.json` is not wrong to keep pointing past it.** Pull
+requests, CI and the roadmap live on the Forgejo instance; GitHub carries a copy of the refs so that
+an editor has something to fetch. If you have a key on the instance,
+`ssh://git@git.daveynet.xyz/davey/redextape.git` is the same tree and works too.
 
 ### The name is `redextape_lambda`, and it is not interchangeable with `redextape`
 
@@ -252,6 +258,11 @@ The other grammars in this repository export `tree_sitter_redextape`, `tree_sitt
 `tree_sitter_redextape_asm`. **All four are installed from the same clone at different
 subdirectories**, so getting the name wrong loads the wrong language rather than failing to find one —
 they live side by side and none shadows another.
+
+(**"clone" is loose for one of the three editors below.** Helix and Zed both really do clone this
+repository. nvim-treesitter's `main` branch fetches a per-grammar tarball instead — see the Neovim
+section. The point survives either way: one source repository, four subdirectories, four distinct
+symbols.)
 
 The install snippets are otherwise adapted from `grammars/tree-sitter-redextape/README.md`, where the
 non-obvious parts (nvim-treesitter's two incompatible branches, Zed's undocumented `path` key,
@@ -266,6 +277,49 @@ has no comment syntax, so an editor configured with one would comment code out i
 
 ### Neovim — nvim-treesitter
 
+**If you use lazy.nvim, the whole configuration is one line.** This repository ships its own
+`plugin/redextape.lua`, and lazy sources `plugin/**/*.lua` from a plugin's root directory when it
+loads that plugin:
+
+```lua
+{ "Davey-Hughes/redextape", lazy = false }
+```
+
+That registers all four grammars, claims the four extensions, **and starts the highlighter** — which
+is a separate thing that nothing else does. Neovim auto-starts treesitter only for its own bundled
+filetypes, and nvim-treesitter ships no `FileType` autocmd, so a parser can be installed and a
+filetype set and the buffer still open with no colour at all.
+
+`.rxt` and `.rxlambda` are claimed by extension. `.asm` and `.tm` are claimed by **sniffing the
+buffer**, because Neovim already maps them to `asm` and `tcl`: a listing that is not this project's
+keeps the filetype it had. `lazy = false` is required — filetype registration has to happen at
+startup, and a lazy-loaded spec would not register this project's extensions until something had
+already loaded it. Then, once:
+
+```vim
+:TSInstall redextape redextape_asm redextape_lambda redextape_tm
+```
+
+**That one line requires nvim-treesitter's `main` branch**, and the next paragraph explains why that
+is a real fork in the road rather than a version number. `plugin/redextape.lua` uses `main`'s
+registration API and `main`'s `User TSUpdate` event, neither of which exists on `master`; on `master`
+the autocmd never fires, no parser is registered, and the filetype mappings still apply — leaving the
+four extensions claimed with nothing to parse them. **If you are on `master`, skip the one-liner and
+use the hand-written block below.**
+
+**Everything below is for everyone else** — `master`, a different plugin manager, or nvim-treesitter
+driven by hand. It is close to what `plugin/redextape.lua` does, with two deliberate differences
+worth knowing before you copy it: the blocks below claim `.asm` and `.tm` **unconditionally by
+extension**, which is simpler and takes every such file on your machine away from `asm` and `tcl`,
+and they do not start the highlighter. If you want colour you need a `FileType` autocmd calling
+`vim.treesitter.start()` as well — see the end of this section.
+
+**nvim-treesitter's `main` branch does not clone.** Its installer strips a trailing `.git` from
+`url`, builds `<url>/archive/<revision>.tar.gz`, and fetches that with `curl`, then expects the
+archive to expand to a directory named `<repo>-<revision>`. GitHub's archive endpoint matches that
+shape exactly — including stripping a leading `v` from a tag — which is why the snippets below work.
+It also means each of the four grammars downloads the whole repository separately.
+
 nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is the
 current rewrite and needs Neovim 0.12+; `master` is frozen and works with Neovim ≤ 0.11. Pick the one
 you have installed — the `install_info` field sets are different, and fields from one are silently
@@ -279,7 +333,7 @@ vim.api.nvim_create_autocmd("User", {
   callback = function()
     require("nvim-treesitter.parsers").redextape_lambda = {
       install_info = {
-        url = "https://git.daveynet.xyz/davey/redextape",
+        url = "https://github.com/Davey-Hughes/redextape",
         location = "grammars/tree-sitter-redextape-lambda",
         queries = "grammars/tree-sitter-redextape-lambda/queries",
         -- revision = "<commit sha>",   -- optional; pins the grammar
@@ -308,7 +362,7 @@ alone; a different filetype name would need
 local parser_config = require("nvim-treesitter.parsers").get_parser_configs()
 parser_config.redextape_lambda = {
   install_info = {
-    url = "https://git.daveynet.xyz/davey/redextape",
+    url = "https://github.com/Davey-Hughes/redextape",
     files = { "src/parser.c" },
     location = "grammars/tree-sitter-redextape-lambda",
   },
@@ -322,6 +376,21 @@ vim.filetype.add({ extension = { rxlambda = "rxlambda" } })
 `queries/highlights.scm` to `queries/redextape_lambda/highlights.scm` somewhere on your `runtimepath`
 yourself.
 
+**One more step the snippets above do not include.** Installing a parser does not turn highlighting
+on. Neovim auto-starts treesitter only for its own bundled filetypes — lua, markdown, help, query —
+and nvim-treesitter ships no `FileType` autocmd of its own, so without something like this the buffer
+opens with the right filetype, a working parser, and no colour:
+
+```lua
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = { "redextape", "redextape_asm", "redextape_lambda", "redextape_tm" },
+  callback = function(args) pcall(vim.treesitter.start, args.buf) end,
+})
+```
+
+This was measured rather than assumed, and it was measured only after a review pointed out that every
+earlier check had supplied this autocmd itself and was therefore testing the harness.
+
 ### Helix
 
 In `~/.config/helix/languages.toml`, which merges over the shipped one:
@@ -329,7 +398,7 @@ In `~/.config/helix/languages.toml`, which merges over the shipped one:
 ```toml
 [[grammar]]
 name = "redextape_lambda"
-source = { git = "https://git.daveynet.xyz/davey/redextape", rev = "<commit sha>", subpath = "grammars/tree-sitter-redextape-lambda" }
+source = { git = "https://github.com/Davey-Hughes/redextape", rev = "<commit sha>", subpath = "grammars/tree-sitter-redextape-lambda" }
 
 [[language]]
 name = "redextape_lambda"
@@ -399,10 +468,10 @@ description = "Redextape λ text form support."
 version = "0.1.0"
 schema_version = 1
 authors = ["davey"]
-repository = "https://git.daveynet.xyz/davey/redextape"
+repository = "https://github.com/Davey-Hughes/redextape"
 
 [grammars.redextape_lambda]
-repository = "https://git.daveynet.xyz/davey/redextape"
+repository = "https://github.com/Davey-Hughes/redextape"
 commit = "<full 40-character commit sha>"
 path = "grammars/tree-sitter-redextape-lambda"
 ```

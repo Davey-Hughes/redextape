@@ -71,6 +71,18 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      # SCOPED, unlike the three unscoped hooks above it, because what it checks is a property of
+      # `plugin/redextape.lua` and the parsers beside it rather than of the whole tree — a Lua file
+      # arriving anywhere else does not invalidate the symbol agreement this gate exists for. It is
+      # here at all because that file shipped into a repository gating every other language it
+      # carries, covered by nothing: its own commit's pre-commit run reported `(no files to check)
+      # Skipped` for all four hooks below, which was the honest reading of a tree with no Lua gate.
+      - id: check-lua
+        name: lua parses and parser names agree
+        entry: bash -c 'scripts/check-lua.sh --self-test && scripts/check-lua.sh'
+        language: system
+        files: (\.lua$|^grammars/.*/src/parser\.c$)
+        pass_filenames: false
       - id: cargo-fmt
         name: cargo fmt
         entry: cargo fmt --all --check

@@ -116,14 +116,16 @@ jobs:
   # nothing in this repository could otherwise detect. Its own comment carries the settings it read
   # and the measurement that prompted the narrowing.
   #
-  # THE SIX HYGIENE STEPS BELOW ARE UNCONDITIONAL AND ARE THE REASON THIS JOB IS STILL A REQUIRED
-  # CONTEXT ON PULL REQUESTS — two for control bytes, two for `file:line` citations and two for
-  # documented figures, each pair a self-test followed by a scan. They are what a PR needs from this
-  # job; the merge check never was.
-  # **THIS SENTENCE HAS NOW BEEN FALSIFIED TWICE, BOTH TIMES BY A PAIR ADDED INTO THIS SAME JOB.** It
-  # said "the control-byte steps" until the citation branch's whole-branch review, and it said "FOUR"
-  # until the branch that added the pair below — which exists to gate exactly this failure, a count in
-  # prose with nothing checking it. `check-doc-figures.sh` does not cover this line: its scope is the grammar
+  # THE EIGHT HYGIENE STEPS BELOW ARE UNCONDITIONAL AND ARE THE REASON THIS JOB IS STILL A REQUIRED
+  # CONTEXT ON PULL REQUESTS — two for control bytes, two for `file:line` citations, two for
+  # documented figures and two for the tracked Lua, each pair a self-test followed by a scan. They are
+  # what a PR needs from this job; the merge check never was.
+  # **THIS SENTENCE HAS NOW BEEN FALSIFIED THREE TIMES, EVERY TIME BY A PAIR ADDED INTO THIS SAME
+  # JOB.** It said "the control-byte steps" until the citation branch's whole-branch review, "FOUR"
+  # until the branch that added the figure pair, and "SIX" until the branch that added the Lua pair —
+  # which is a count in prose with nothing checking it, falsified three times, sitting directly above
+  # the steps whose entire purpose is to catch counts in prose with nothing checking them.
+  # `check-doc-figures.sh` does not cover this line: its scope is the grammar
   # READMEs, and a hand-maintained enumeration inside a CI comment is precisely what its header calls
   # a review concern rather than a checkable figure.
   linear-history:
@@ -188,6 +190,33 @@ jobs:
         run: scripts/check-doc-figures.sh --self-test
       - name: Reject documented figures that no longer match the tree
         run: scripts/check-doc-figures.sh
+      # THE LUA GATE RIDES HERE FOR THE REASON THE THREE ABOVE GIVE, but it is the first of them whose
+      # subject is a file this repository ships FOR ANOTHER PROGRAM TO RUN. Nothing in CI loads
+      # `plugin/redextape.lua`; only an editor does, on a user's machine, where a syntax error is a
+      # stack trace at startup rather than a red build. It arrived covered by nothing at all — the
+      # commit that added it reported `(no files to check) Skipped` for every language hook this repo
+      # has, which was accurate and is exactly the hole.
+      # THE SYMBOL CHECK IS WHY THIS IS A SCRIPT RATHER THAN A `luac -p`. Editors load a parser by the
+      # C symbol `tree_sitter_<name>`, so a typo in that file's `GRAMMARS` table loads a DIFFERENT
+      # language instead of failing — a wrong colour with no error anywhere. Demonstrated failing on a
+      # planted `redextape_tmm` before being trusted, per the convention the sibling gates state.
+      # THE RUNNER IMAGE HAS NO LUA AND NO NEOVIM, AND THE FIRST VERSION OF THIS GATE ASSUMED IT DID.
+      # `catthehacker/ubuntu:act-latest` carries node, git and curl; `scripts/check-lua.sh` originally
+      # ran `nvim --headless`, which is present on any machine that can actually use the plugin and
+      # absent here. It failed in this job at 9s — and it failed in the SELF-TEST rather than the scan,
+      # because with no interpreter "an invalid file is rejected" passes for the wrong reason while
+      # "a valid file is accepted" does not. That is the self-test-before-scan order the three sibling
+      # gates argue for, catching the exact class of thing they argue it catches.
+      # `lua5.4` from the distro archive rather than a pinned download like the tree-sitter and nextest
+      # installs, because nothing depends on WHICH Lua reads the file — every implementation agrees on
+      # what a syntax error is, and the script probes for whatever it finds and fails loudly if that is
+      # nothing rather than quietly checking less than it does locally.
+      - name: Install a Lua interpreter for the gate below
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends lua5.4
+      - name: Prove the lua detector still detects
+        run: scripts/check-lua.sh --self-test
+      - name: Reject unparsable lua or parser names that disagree with the exported symbols
+        run: scripts/check-lua.sh
       # ON PUSHES TO `main` ONLY, AND THE NARROWING IS THE POINT RATHER THAN A RELAXATION. This job's
       # heading states the goal exactly: "a merge commit REACHING MAIN fails CI however it got there."
       # Running it on `pull_request` checked a different artifact — the PR branch's own shape — which
