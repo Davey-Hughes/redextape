@@ -14239,3 +14239,65 @@ web typecheck............................................................Passed
 **FOUR EARLIER RUNS ON THIS BRANCH ARE NOT FAILURES AND ONE IS.** Runs 311, 312 and 313 report every job `Has been cancelled`, because each was superseded mid-flight by the next push; Forgejo surfaces a cancellation as a failed status, so the combined state reads `failure` for a run that was never allowed to finish. That is an artifact of pushing three times while CI was in flight and is recorded so the PR's own history is legible rather than alarming. **Run 315 on `f0a2b6e` carried a real failure**, in `linear-history` at 9s, reading `check-lua: self-test: a valid file was rejected` — the runner has no Lua and no Neovim, and the commit after it is what fixed that. Its run-level status also reads `cancelled` rather than `failure`, because the sibling jobs were stopped once it failed; the job log is what distinguishes it from the three supersessions, not the run status. Run 310 on `7a166e9` and run 314 on `3a9fed0` were both green on the trees they describe.
 
 **No causal claim is made about any duration above**, per this file's standing note on CI timing variance — `rust` read 4m10s on run 310 and 15m27s here, on the same runner, and nothing in this branch touches Rust at all.
+
+#### THE PROSE FOUR READMEs EACH CARRIED A COPY OF GETS ONE SOURCE AND A GATE, AND IT HAD ALREADY DRIFTED INTO THREE WORDINGS BEFORE ANYONE MEASURED IT (2026-08-27, branch `shared-doc-blocks`, `de984ed..c55b12c`, 3 commits, plus the entry commits)
+
+No design and no plan. This is the one finding PR 66's whole-branch review raised and its own entry recorded as **deliberately not acted on** — *"about 25 lines of install prose are now duplicated across the four grammar READMEs, and `check-doc-figures.sh` has no rows for prose. Deduplicating four documents is a restructuring decision rather than a cleanup, so it is flagged here instead of taken."* It was taken on the next branch, at the owner's request, and the first thing that changed was the number.
+
+**IT WAS 184 LINES, NOT 25, AND ONE OF THE BLOCKS HAD ALREADY DRIFTED.** Measured across all four READMEs rather than estimated from the diff that introduced it: 18 runs of three or more identical lines, 184 lines in total, the longest a contiguous 83. Three of those runs are the whole of the duplication worth acting on — the mirror preamble, the Neovim one-liner section, and the note that installing a parser does not start the highlighter. Two were byte-identical in all four files. **The third existed in three different wordings.** The `main`-versus-`master` paragraph reads one way in the mini-language README, is re-wrapped to a different line width in λ's, and in the asm and TM copies has lost the clause *"Pick the one you have installed — the `install_info` field sets are different"* altogether. Nobody chose that: four copies of a paragraph, edited across four branches, is the entire mechanism. **The duplication had been a defect for some time before it was a finding**, and nothing in this repository could have said so — `check-doc-figures.sh` derives numbers from the tree and has no opinion about prose.
+
+##### THE COPIES STAY, AND THAT IS THE DECISION RATHER THAN A COMPROMISE
+
+Two shapes were on the table. Move the shared lines into one document and have each README link to it, which genuinely removes the bytes; or keep the text inline in every README, give it one editable source, and gate the copies. **The second was chosen because of what these documents are for.** A grammar README is landed on from its own directory and read end to end — the asm one opens by explaining that `.asm` collides with every assembler in existence, and a reader working out why their file is not coloured should not be sent to a second document for the setup steps. So the bytes are repeated on purpose and the repetition is made unbreakable instead: 96 canonical lines under `grammars/shared/`, 384 lines rendered into the four READMEs, and 288 lines that can no longer be edited in the wrong place.
+
+`scripts/check-shared-docs.sh` holds every `<!-- BEGIN shared: <name> -->` region to `grammars/shared/<name>.md`. It carries `--fix`, so bringing a copy back into line is a command rather than a hand edit — which matters more than it sounds, because the failure this gate catches is someone editing a copy, and a gate that only reports it invites the same wrong fix a second time. Its self-test plants drift and asserts it is caught, runs `--fix` and asserts the result is byte-equal to the source, and refuses both a region naming a source that does not exist and an unterminated `BEGIN`. Consumers are discovered by walking `git ls-files` for the marker rather than enumerated, so a fifth grammar is covered the moment it uses one, and an orphaned source nothing references is a failure rather than a shrug.
+
+##### TWO TOOLS ASSUMED EVERY DIRECTORY UNDER `grammars/` IS A GRAMMAR, AND THE NEW DIRECTORY PROVED IT IN ONE COMMIT
+
+`grammars/shared/` holds prose. It has no `grammar.js` and no `tree-sitter.json`, and adding it broke two things at once. `check_grammars` in `scripts/check-all.sh` globbed `grammars/*/` and died with `Failed to load grammar.js -- No such file or directory`. `check-doc-figures.sh`'s `grammar_count` ran `find grammars -mindepth 1 -maxdepth 1 -type d | wc -l` and reported the tree had five grammars, failing nine figure rows across three READMEs.
+
+**Neither was wrong to fire and both were measuring a proxy.** "How many grammars are there" was being answered by "how many directories are there", which had been true for as long as the answer happened to coincide. Both now select on `tree-sitter.json` — the file that actually makes a directory a grammar, and the one whose absence the grammar READMEs already document as making the CLI silently generate the wrong ABI. **This is the third time on two branches that a row was found measuring a proxy rather than its subject**, after the roadmap's own "grammars registered" row counted directories instead of reading the Lua table it was named for. The corrected derivation was demonstrated both ways before being trusted: a planted fifth grammar fails the gate, and a plain directory under `grammars/` does not.
+
+##### VERIFICATION
+
+Figures measured at `c55b12c`, the branch's last commit before the one that revises this block. **This entry's header read `de984ed..a19b9d3`, 1 commit until that same revision** — accurate when written and stale one commit later, which is precisely the failure the previous entry records the review catching in ITS header. It is corrected here rather than after the fact because the check that would have caught it is the one this file keeps having to learn: re-derive every figure against the head you are about to push, not the head you had when you wrote them.
+
+```
+3                       commits                    git rev-list --count de984ed..c55b12c
+14 files, +427/-23      whole-branch diff          git diff --shortstat de984ed..c55b12c
+3                       shared sources             ls grammars/shared/*.md | wc -l
+96                      canonical lines            cat grammars/shared/*.md | wc -l
+12                      marked regions             grep -c '^<!-- BEGIN shared: ' grammars/*/README.md
+                                                     | cut -d: -f2 | paste -sd+ | bc
+9                       pre-commit hooks           grep -c '^      - id: ' .pre-commit-config.yaml
+4                       grammars                   find grammars -mindepth 2 -maxdepth 2 -name tree-sitter.json | wc -l
+```
+
+```
+$ scripts/check-shared-docs.sh --self-test
+self-test passed: drift is caught, --fix repairs it exactly, and a missing source or an unterminated
+marker is refused
+
+$ scripts/check-shared-docs.sh
+check-shared-docs: 12 shared region(s) in 4 file(s) match their 3 source(s).
+
+$ scripts/check-doc-figures.sh
+check-doc-figures: 42 documented figures match the tree.
+
+$ pre-commit run --all-files
+no control bytes in tracked text.........................................Passed
+no file:line citations in tracked source.................................Passed
+documented figures match the tree........................................Passed
+shared doc regions match their source....................................Passed
+lua parses and parser names agree........................................Passed
+cargo fmt................................................................Passed
+cargo clippy.............................................................Passed
+biome ci.................................................................Passed
+web typecheck............................................................Passed
+```
+
+The drift gate was demonstrated on a real edit rather than only in its self-test: changing *"Pick the one you"* to *"Pick whichever one you"* in the asm README alone fails the scan by name, `--fix` restores it, and the scan passes again. `scripts/check-all.sh --no-llvm --no-browser` exits 0 with all four grammars regenerating — the run that proves the `check_grammars` fix, since the same command failed before it — and its own final line reads `green, but PARTIAL — these tiers were SKIPPED: LLVM browser. This is NOT a full gate on its own.`
+
+**CI RUN 323 WAS GREEN ON `f02b4f0`, AND THAT SHA WAS READ FROM PULL REQUEST 67'S OWN `head.sha` RATHER THAN ASSUMED FROM THE BRANCH** — this file's convention since entry 61. Every job: `gate` 1s, `detect` 4s, `linear-history` 8s, `rust-browser` 1m4s, `web` 1m51s, `rust-llvm` 1m55s, `rust-slow` 10m14s, `rust` 10m18s. `rust-scoped` skipped because the unscoped `rust` ran instead, and `docker` skipped, as it always is on a pull request. The run NUMBER from the status `target_url` is 323 and the API's own id for the same run is `1242`; both are recorded because neither can be guessed from the other.
+
+**Run 322 on `74fc5f7` reads red and is a supersession, not a failure** — `docker`, `gate` and `rust` report `Has been cancelled` because the next push replaced the run mid-flight, the same artifact the previous entry documents three times over. One thing survived it worth keeping: `linear-history` succeeded there in 14s, which is this branch's own gate passing in CI — self-test included — before the run was stopped. It reads 8s on run 323. **No causal claim is attached to either figure**, per this file's standing note on CI timing variance; the two runs differ in what they were allowed to finish, not measurably in what they did.

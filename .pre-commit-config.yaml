@@ -77,6 +77,25 @@ repos:
       # here at all because that file shipped into a repository gating every other language it
       # carries, covered by nothing: its own commit's pre-commit run reported `(no files to check)
       # Skipped` for all four hooks below, which was the honest reading of a tree with no Lua gate.
+      # UNSCOPED, like the three gates above it and unlike `check-lua` below, and for the sharpest
+      # version of the reason: a shared region goes stale because a DIFFERENT file changed — someone
+      # edits `grammars/shared/<name>.md` and the four copies of it are now wrong, in four paths the
+      # commit never touched. A `files:`-scoped rule would fire on exactly the commits that do not
+      # need it.
+      # MEASURED, NOT ASSUMED, per the three hooks above — and this comment first asserted "the
+      # cheapest of the four" before anything had been timed, which is the habit those hooks exist to
+      # break. It is: self-test plus scan is 197-212 ms over five runs, the scan alone 88-89 ms,
+      # against 281 ms, 535 ms and 1123 ms for the figure, citation and control-byte gates on the same
+      # machine. The comparison with the next-cheapest was re-taken INTERLEAVED in the same minute —
+      # 258-281 ms against 207-211 ms across three alternating pairs — because absolute figures here
+      # vary by more than the gap does. It is cheap because it reads only the files that carry a
+      # marker, rather than walking `git ls-files` as two of its siblings do.
+      - id: check-shared-docs
+        name: shared doc regions match their source
+        entry: bash -c 'scripts/check-shared-docs.sh --self-test && scripts/check-shared-docs.sh'
+        language: system
+        always_run: true
+        pass_filenames: false
       - id: check-lua
         name: lua parses and parser names agree
         entry: bash -c 'scripts/check-lua.sh --self-test && scripts/check-lua.sh'

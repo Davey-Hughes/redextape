@@ -254,15 +254,16 @@ nextest is missing rather than falling back, so the gate behaves the same everyw
 `scripts/setup-dev.sh` installs it. Because nextest does not run doctests, the script pairs every
 config with an explicit `cargo test --doc` at the same feature flags.
 
-There are **eight** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
+There are **nine** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
 heavier; a `web/` change runs `biome ci` and `tsc --noEmit`; a Lua or `parser.c` change runs
 `check-lua`, which parses the tracked Lua and asserts `plugin/redextape.lua`'s parser names still
 equal the `tree_sitter_*` symbols the committed parsers export — a mismatch there loads the wrong
 language in an editor rather than failing, so nothing else in this tree could see it. The other
-three — `check-text-bytes`, `check-citations` and `check-doc-figures` — are unscoped and run on every
-commit whatever is staged, because all three catch things that arrive in a path nobody thought to
-list; the first two walk `git ls-files`, and the third reads four READMEs. All eight are fast enough
-for every commit. Run `scripts/check-all.sh` before merging.
+four — `check-text-bytes`, `check-citations`, `check-doc-figures` and `check-shared-docs` — are
+unscoped and run on every commit whatever is staged, because all four catch things that arrive in a
+path nobody thought to list; the first two walk `git ls-files`, the third reads four READMEs, and the
+fourth holds every marked region in a document to the single copy under `grammars/shared/`. All nine
+are fast enough for every commit. Run `scripts/check-all.sh` before merging.
 
 `scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps marked
 `#[ignore = "slow tier: ..."]` — nine of them today — which `cargo test` skips by default and CI

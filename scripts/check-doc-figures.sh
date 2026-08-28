@@ -158,7 +158,7 @@ derive() {
     # --workspace` costs 218 s warm against this whole script's ~150 ms, so the root README states
     # that figure as a dated observation instead. A gate that cannot be cheap should not exist.
     workspace_crates)   n=$(find crates -mindepth 1 -maxdepth 1 -type d | wc -l) ;;
-    grammar_count)      n=$(find grammars -mindepth 1 -maxdepth 1 -type d | wc -l) ;;
+    grammar_count)      n=$(find grammars -mindepth 2 -maxdepth 2 -name tree-sitter.json | wc -l) ;;
     precommit_hooks)    n=$(grep -c '^      - id: ' .pre-commit-config.yaml) ;;
     wasm_browser_tests) n=$(grep -c '#\[wasm_bindgen_test\]' crates/redextape-wasm/tests/browser.rs) ;;
     *) echo "check-doc-figures: unknown key '$key'" >&2; return 1 ;;
@@ -182,7 +182,7 @@ derive_cmd() {
     map_classes)      echo "awk '/pub const CAPTURE_CLASSES/,/^\\];/' $src | grep '^    (\"' | sed -E 's/.*,[[:space:]]*(TokenClass::[A-Za-z]+).*/\\1/' | sort -u | wc -l" ;;
     corpus_cases)     echo "cat $dir/test/corpus/* | grep -c '^===*\$'  # halved" ;;
     workspace_crates)   echo "find crates -mindepth 1 -maxdepth 1 -type d | wc -l" ;;
-    grammar_count)      echo "find grammars -mindepth 1 -maxdepth 1 -type d | wc -l" ;;
+    grammar_count)      echo "find grammars -mindepth 2 -maxdepth 2 -name tree-sitter.json | wc -l" ;;
     precommit_hooks)    echo "grep -c '^      - id: ' .pre-commit-config.yaml" ;;
     wasm_browser_tests) echo "grep -c '#\[wasm_bindgen_test\]' crates/redextape-wasm/tests/browser.rs" ;;
   esac

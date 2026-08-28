@@ -36,7 +36,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # THE SCRIPT ALREADY ASSUMED CWD == REPO ROOT IN SEVERAL PLACES BEFORE THIS LINE EXISTED — it was
-# just never enforced. `check_grammars` globs `grammars/*/`, the browser leg passes the relative
+# just never enforced. `check_grammars` walks `grammars/` for `tree-sitter.json`, the browser leg passes the relative
 # `crates/redextape-wasm` straight to `wasm-pack test`, and `ensure_treesitter`'s probe list checks
 # the relative `.tools/tree-sitter`: every one of those already broke, silently or with a raw `cd:
 # ...: No such file or directory`, when run from a subdirectory. Nothing else in this file depends on
@@ -525,7 +525,14 @@ ensure_chromedriver() {
 
 check_grammars() {
   local g status=0 untracked
-  for g in grammars/*/; do
+  # SELECTED BY `tree-sitter.json`, NOT BY BEING A DIRECTORY, and the difference is not hypothetical.
+  # This loop globbed `grammars/*/` and so treated every directory under `grammars/` as a grammar; the
+  # branch that added `grammars/shared/` — prose, no `grammar.js` — made it die with `Failed to load
+  # grammar.js -- No such file or directory`. `scripts/check-doc-figures.sh`'s `grammar_count` broke in
+  # the same commit for the same reason and is corrected the same way. A directory under `grammars/`
+  # is now a grammar when it says so, which is also what makes `tree-sitter.json` load-bearing
+  # everywhere else: without it the CLI silently generates the wrong ABI.
+  for g in $(find grammars -mindepth 2 -maxdepth 2 -name tree-sitter.json -printf '%h/\n' | sort); do
     echo "==> regenerating and testing ${g}"
     # SAME SUBSHELL AS THE REGENERATE STEP, and `test` runs only if `generate` succeeded — a stale or
     # broken `parser.c` is not a corpus the tests below should even attempt to read. Neither command is

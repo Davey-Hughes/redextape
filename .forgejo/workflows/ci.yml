@@ -116,15 +116,17 @@ jobs:
   # nothing in this repository could otherwise detect. Its own comment carries the settings it read
   # and the measurement that prompted the narrowing.
   #
-  # THE EIGHT HYGIENE STEPS BELOW ARE UNCONDITIONAL AND ARE THE REASON THIS JOB IS STILL A REQUIRED
+  # THE TEN HYGIENE STEPS BELOW ARE UNCONDITIONAL AND ARE THE REASON THIS JOB IS STILL A REQUIRED
   # CONTEXT ON PULL REQUESTS — two for control bytes, two for `file:line` citations, two for
-  # documented figures and two for the tracked Lua, each pair a self-test followed by a scan. They are
-  # what a PR needs from this job; the merge check never was.
-  # **THIS SENTENCE HAS NOW BEEN FALSIFIED THREE TIMES, EVERY TIME BY A PAIR ADDED INTO THIS SAME
+  # documented figures, two for shared doc regions and two for the tracked Lua, each pair a self-test
+  # followed by a scan. They are what a PR needs from this job; the merge check never was.
+  # **THIS SENTENCE HAS NOW BEEN FALSIFIED FOUR TIMES, EVERY TIME BY A PAIR ADDED INTO THIS SAME
   # JOB.** It said "the control-byte steps" until the citation branch's whole-branch review, "FOUR"
-  # until the branch that added the figure pair, and "SIX" until the branch that added the Lua pair —
-  # which is a count in prose with nothing checking it, falsified three times, sitting directly above
-  # the steps whose entire purpose is to catch counts in prose with nothing checking them.
+  # until the branch that added the figure pair, "SIX" until the branch that added the Lua pair, and
+  # "EIGHT" until the branch that added the shared-doc pair — a count in prose with nothing checking
+  # it, falsified four times, sitting directly above the steps whose entire purpose is to catch counts
+  # in prose with nothing checking them. The shared-doc gate below cannot cover it either: this is a
+  # comment, not a marked region, and marking it would be the cure being worse than the disease.
   # `check-doc-figures.sh` does not cover this line: its scope is the grammar
   # READMEs, and a hand-maintained enumeration inside a CI comment is precisely what its header calls
   # a review concern rather than a checkable figure.
@@ -200,6 +202,16 @@ jobs:
       # C symbol `tree_sitter_<name>`, so a typo in that file's `GRAMMARS` table loads a DIFFERENT
       # language instead of failing — a wrong colour with no error anywhere. Demonstrated failing on a
       # planted `redextape_tmm` before being trusted, per the convention the sibling gates state.
+      # THE SHARED-DOC GATE RIDES HERE FOR THE REASON THE THREE ABOVE GIVE, and its failure mode is the
+      # one they all describe: a region goes stale because a DIFFERENT file changed. It exists because
+      # the branch that gave Neovim a one-line install copied the same prose into all four grammar
+      # READMEs, and by the time anyone measured it — 184 identical lines — one of the three blocks had
+      # already drifted into three wordings, with two of them having silently lost a clause. No gate
+      # here could see that: `check-doc-figures.sh` derives NUMBERS and has no opinion about prose.
+      - name: Prove the shared-doc detector still detects
+        run: scripts/check-shared-docs.sh --self-test
+      - name: Reject shared doc regions that no longer match their source
+        run: scripts/check-shared-docs.sh
       # THE RUNNER IMAGE HAS NO LUA AND NO NEOVIM, AND THE FIRST VERSION OF THIS GATE ASSUMED IT DID.
       # `catthehacker/ubuntu:act-latest` carries node, git and curl; `scripts/check-lua.sh` originally
       # ran `nvim --headless`, which is present on any machine that can actually use the plugin and

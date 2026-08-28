@@ -162,6 +162,7 @@ naming the real cause.
 
 ## Installing it in an editor
 
+<!-- BEGIN shared: mirror-preamble -->
 ### Read this before any snippet: use the public mirror, not the address in `tree-sitter.json`
 
 `tree-sitter.json` records `https://git.daveynet.xyz/davey/redextape`, which is where this project
@@ -195,6 +196,7 @@ $ curl -sS -L -o /dev/null -w '%{http_code}\n' \
 requests, CI and the roadmap live on the Forgejo instance; GitHub carries a copy of the refs so that
 an editor has something to fetch. If you have a key on the instance,
 `ssh://git@git.daveynet.xyz/davey/redextape.git` is the same tree and works too.
+<!-- END shared: mirror-preamble -->
 
 ### `.tm` collides with TeXmacs
 
@@ -226,6 +228,7 @@ alias for `rev`.
 **Unlike the λ grammar, this form HAS comment syntax**, so the comment settings below are real rather
 than omitted: `;` starts a line comment.
 
+<!-- BEGIN shared: neovim-intro -->
 ### Neovim — nvim-treesitter
 
 **If you use lazy.nvim, the whole configuration is one line.** This repository ships its own
@@ -272,8 +275,10 @@ shape exactly — including stripping a leading `v` from a tag — which is why 
 It also means each of the four grammars downloads the whole repository separately.
 
 nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is the
-current rewrite and needs Neovim 0.12+; `master` is frozen and works with Neovim ≤ 0.11. Fields from
-one are silently ignored by the other.
+current rewrite and needs Neovim 0.12+; `master` is frozen and works with Neovim ≤ 0.11. Pick the one you
+have installed — the `install_info` field sets are different, and fields from one are silently ignored by
+the other.
+<!-- END shared: neovim-intro -->
 
 **`main` branch:**
 
@@ -324,6 +329,7 @@ vim.filetype.add({ extension = { tm = "tm" } })
 `queries/highlights.scm` to `queries/redextape_tm/highlights.scm` somewhere on your `runtimepath`
 yourself.
 
+<!-- BEGIN shared: filetype-autocmd -->
 **One more step the snippets above do not include.** Installing a parser does not turn highlighting
 on. Neovim auto-starts treesitter only for its own bundled filetypes — lua, markdown, help, query —
 and nvim-treesitter ships no `FileType` autocmd of its own, so without something like this the buffer
@@ -338,6 +344,7 @@ vim.api.nvim_create_autocmd("FileType", {
 
 This was measured rather than assumed, and it was measured only after a review pointed out that every
 earlier check had supplied this autocmd itself and was therefore testing the harness.
+<!-- END shared: filetype-autocmd -->
 
 ### Helix
 
