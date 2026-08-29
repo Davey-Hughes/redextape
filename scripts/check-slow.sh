@@ -11,9 +11,12 @@
 #   scripts/check-slow.sh            # the slow tier ONLY (what CI's slow job runs)
 #   scripts/check-slow.sh --all      # fast tier + slow tier, i.e. everything
 #
-# Slow tests rot if nothing runs them, so CI runs this on `main` (.forgejo/workflows/ci.yml, the
-# `rust-slow` job) in its own job — a slow sweep must never delay the fast signal, the same reasoning
-# the `rust-llvm` job already uses.
+# Slow tests rot if nothing runs them, so CI runs this (.forgejo/workflows/ci.yml, the `rust-slow`
+# job) on every push to `main`, every `v*` tag, `workflow_dispatch`, AND every push to a non-draft pull
+# request (its `if:` is `github.event_name != 'pull_request' || !github.event.pull_request.draft`) —
+# so a green PR always describes the head commit before merge. A draft PR gets `rust-scoped` instead.
+# It runs in its own job — a slow sweep must never delay the fast signal, the same reasoning the
+# `rust-llvm` job already uses.
 set -euo pipefail
 
 run() { echo; echo "==> $*"; "$@"; }

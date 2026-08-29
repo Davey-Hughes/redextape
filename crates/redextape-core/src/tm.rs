@@ -19,8 +19,9 @@ pub mod sim;
 pub mod syntax;
 
 pub use asm::{
-    AsmHeader, AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, DecodeFailure, Instr, Program, Reg, decode_asm, decode_asm_ty,
-    decode_asm_ty_reason, print_asm, print_asm_mapped, print_asm_with, print_asm_with_mapped, run_asm,
+    AsmHeader, AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, DecodeFailure, Instr, Program, Reg, decode_asm,
+    decode_asm_reason, decode_asm_ty, decode_asm_ty_reason, print_asm, print_asm_mapped, print_asm_with,
+    print_asm_with_mapped, run_asm,
 };
 pub use asm_syntax::{parse_asm, parse_asm_full};
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
@@ -28,7 +29,7 @@ pub use build::{
     AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP,
     STACK, Slot, TAPE_NAMES, TAPES, WORK, ZERO,
 };
-pub use decode::{decode_tape, decode_tape_ty, decode_tape_ty_reason};
+pub use decode::{decode_tape, decode_tape_reason, decode_tape_ty, decode_tape_ty_reason};
 pub use defunc::{defunc, defunc_mapped};
 pub use encoding::{Binary, Encoding, Unary};
 pub use header::{EncodingKind, HEADER_VERSION, TmHeader};

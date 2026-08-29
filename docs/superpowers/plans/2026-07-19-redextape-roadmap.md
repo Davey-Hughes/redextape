@@ -2101,14 +2101,22 @@ produce. The oracle validates every combination.
 
   **Still open after slice 2**, in rough order of how likely they are to bite:
 
-  1. **`decode_word_ty` is not sharing-aware.** `Instr::Tail` is a pointer READ, not an allocation, so
+  1. ~~**`decode_word_ty` is not sharing-aware.** `Instr::Tail` is a pointer READ, not an allocation, so
      an ordinary `tails`-style function returns a `List<List<Nat>>` whose inner lists share the outer
      spine — `~2m` heap cells but `m² + m + 1` decode nodes, because the decoder re-walks each shared
      sub-list once per pointer into it. Breakeven `m ≈ 4,471`, three orders of magnitude below the heap
      cap, so **a correct, fast, cap-respecting program can still be refused** (a refusal, never a wrong
      answer — which is why it does not block). No constant closes it: raising the budget to cover
      `d = 2` reopens `d = 3`. The fix is memoizing on `(pointer, type)`. **This applies to
-     `decode_asm_ty` on the AOT path too** — a second consumer that will not read this branch's specs.
+     `decode_asm_ty` on the AOT path too** — a second consumer that will not read this branch's specs.~~
+     **CLOSED (2026-08-28, branch `sharing-aware-decode`).** The mechanism is right and the fix is the
+     one named. **Two things it got wrong, and both cost the closing branch real work.** It extends the
+     finding to `decode_asm_ty`, which is the same function through a second entry point rather than a
+     second consumer — the second DECODER is the value-directed one, which has the identical quadratic
+     blowup and, having no budget at all, does not refuse but allocates until the OOM killer arrives.
+     And "a refusal, never a wrong answer — which is why it does not block" stopped being true the
+     moment the refusal was removed: the decode budget was also the only thing keeping a value the
+     printer cannot render away from the printer. See the closing entry at the end of this file.
   2. ~~`attribute.rs` builds an `init` setting only REG.~~ **FIXED (2026-07-28) — and it was a LIVE bug,
      not the latent one this entry predicted.** `lower_mapped`'s doc claimed it mirrored `run_tm`'s
      lowering "step for step" while seeding only REG. Under `Binary`, `init_work()` lays out a real
@@ -14301,3 +14309,121 @@ The drift gate was demonstrated on a real edit rather than only in its self-test
 **CI RUN 323 WAS GREEN ON `f02b4f0`, AND THAT SHA WAS READ FROM PULL REQUEST 67'S OWN `head.sha` RATHER THAN ASSUMED FROM THE BRANCH** — this file's convention since entry 61. Every job: `gate` 1s, `detect` 4s, `linear-history` 8s, `rust-browser` 1m4s, `web` 1m51s, `rust-llvm` 1m55s, `rust-slow` 10m14s, `rust` 10m18s. `rust-scoped` skipped because the unscoped `rust` ran instead, and `docker` skipped, as it always is on a pull request. The run NUMBER from the status `target_url` is 323 and the API's own id for the same run is `1242`; both are recorded because neither can be guessed from the other.
 
 **Run 322 on `74fc5f7` reads red and is a supersession, not a failure** — `docker`, `gate` and `rust` report `Has been cancelled` because the next push replaced the run mid-flight, the same artifact the previous entry documents three times over. One thing survived it worth keeping: `linear-history` succeeded there in 14s, which is this branch's own gate passing in CI — self-test included — before the run was stopped. It reads 8s on run 323. **No causal claim is attached to either figure**, per this file's standing note on CI timing variance; the two runs differ in what they were allowed to finish, not measurably in what they did.
+
+#### THE DECODERS LEARN THAT AN ALIASED SUB-LIST IS ONE SUB-LIST, THE FILING NAMED THE WRONG FAMILY, AND THE SABOTAGE FOR THE CENTRAL MECHANISM DID NOT FIRE (2026-08-28, branch `sharing-aware-decode`, `26ea3c4..21f284f`, 34 commits, plus the entry commits)
+
+Design: [`../specs/2026-08-28-sharing-aware-decode-design.md`](../specs/2026-08-28-sharing-aware-decode-design.md). Plan: [`2026-08-28-sharing-aware-decode.md`](2026-08-28-sharing-aware-decode.md).
+
+Closes item 1 of the TM-header slice's "Still open after slice 2", struck above. Four decoders turned a run's `(word, heap)` pair into a `Value` by re-walking every shared sub-list once per pointer into it. `Instr::Tail` is a pointer read rather than an allocation, so an ordinary `tails`-style function returns `2m` heap cells carrying `m² + m + 1` logical nodes, and the decode was quadratic on output no one crafted.
+
+##### THE FILING WAS RIGHT ABOUT THE MECHANISM AND WRONG ABOUT WHICH FAMILY BITES
+
+It extended the finding from `decode_word_ty` to `decode_asm_ty` — the same function through a second entry point, not a second consumer. The second DECODER is the value-directed one, and its situation is worse in the way that matters. Measured before the branch, release build, `List<List<Nat>>`:
+
+| m | heap cells | logical nodes | type-directed | value-directed | RSS high-water |
+|---|---|---|---|---|---|
+| 1,000 | 2,000 | 1,003,001 | 41 ms | 37 ms | 125 MiB |
+| 2,000 | 4,000 | 4,006,001 | 137 ms | 145 ms | 492 MiB |
+| 4,000 | 8,000 | 16,012,001 | 544 ms | 652 ms | 1,959 MiB |
+
+All three rows in one process, so `VmHWM` is cumulative and the run holds both decoders' results live at once; read it as roughly 1 GiB per decode at m = 4,000, on a heap that is 0.16% of `DEFAULT_CAPS.heap`. The type-directed path **refused** past m ≈ 4,471 — a wrong-but-safe answer. The value-directed path had no budget, so it did not refuse: under `systemd-run -p MemoryMax=6G -p MemorySwapMax=0` it was **killed by the kernel OOM killer in 4.7 s**. Its doc said the reference value's size was the bound, which is true of that value's DISTINCT nodes and false of what the walk constructs — `interp.rs`'s `Builtin::Tail` returns `(**t).clone()`, an `Rc` bump, so the reference value is itself a DAG and the decoder expanded it back into a tree.
+
+After: the same `tails` fixture at **m = 64,000** — a 128,000-cell heap, `~4.1e9` logical nodes against a 20,000,000 budget — decodes in about **192,000** distinct nodes, on both families.
+
+##### THE SABOTAGE FOR THE BRANCH'S CENTRAL MECHANISM DID NOT FIRE, AND THAT IS THE ENTRY'S MAIN RESULT
+
+Two sabotages were designed. The first fires: delete the suffix-memoization insert and the m = 64,000 fixture goes back to refusing, in 1.21 s, panicking at `sharing_aware_decode.rs`'s `.expect("type-directed decode of tails")`.
+
+**The second did not.** Removing PASS 1's mid-spine memo exit left the entire `redextape-core` suite green — 692 tests, nothing red. The test that names that mechanism asserts on budget units, and **PASS 1 spent no budget**, so it had been measuring PASS 2's exit the whole time. The mechanism had no test that bites, and every task review after it landed read that code and agreed with its documentation — because the documentation was accurate about what the mechanism DOES, and silent about the fact that nothing exercised it.
+
+Measuring what the exit was worth, on `k` one-cell prefixes converging on one shared tail, with the decode **succeeding in every row** so no guard reacts:
+
+| cells | with the exit | without | ratio |
+|---|---|---|---|
+| 15,000 | 3 ms | 46 ms | 15x |
+| 30,000 | 8 ms | 174 ms | 22x |
+| 60,000 | 19 ms | 673 ms | 35x |
+| 120,000 | 35 ms | 2,659 ms | 76x |
+
+Linear against quadratic, and the budget never fires. At the 5,000,000-cell heap cap that shape is roughly `6.25e12` pointer steps — hours — reachable from a `.tm` file with nothing reacting. **The spine charge therefore moved from PASS 2 to PASS 1**, the pass that can be re-walked. Both passes walk the same chain, so this is a move rather than an addition: a flat list still costs `3L + 1` and `MAX_DECODE_NODES`'s derivation needed no new arithmetic. The sabotage now fires with `spent 4622 for 280 cells — the shared tail is being re-walked`, against the test's own threshold of `4 * 280 = 1120`.
+
+**A pre-existing test then refused to be adjusted, and it was right.** `a_cyclic_heap_is_mismatch_even_when_its_own_head_is_expensive` pins a cycle winning `Mismatch` against a deliberately tiny budget; charging PASS 1 made cycle detection cost budget, so it reported `BudgetExhausted` instead. That is a fault-attribution regression, not a test failure — `DecodeFailure`'s arms carry opposite blame and drive different CLI exit codes, and a cyclic heap is unambiguously the file's fault. The implementer left it red and reported it rather than tuning the number. The fix defers exhaustion inside PASS 1: record that the budget ran out, keep walking so the step bound still fires, and report `BudgetExhausted` only if the walk finishes without finding a cycle. That restores the guarantee in its strongest form rather than widening the caveat, and the extra work is paid once per decode rather than once per element.
+
+##### THE DESIGN'S OWN §9 WAS WRONG, AND IT TOOK TWO REVIEWS TO FINISH CORRECTING
+
+§9 said the decoded value becoming a DAG "makes decoding cheap without making printing cheap — not a regression; printing was already the logical size." The cost half is right and the conclusion is not. **The decode budget was doing double duty**: it also kept a value the printer cannot render away from the printer. Removing half of it opened a hazard on untrusted input, against this file's cardinal rule that no input may crash any process.
+
+Correcting it took three passes, each finding the previous one had stopped short. A new slice added `value::MAX_PRINT_NODES` and `format_value_capped`, sharing one walk with an unchanged `format_value` — unchanged because the AOT oracle compares a compiled binary's stdout against it. **Its own review then found it had capped two of five CLI sites**, leaving `run_reference` — the DEFAULT backend — open, reachable by an ordinary program using only `nil`/`cons`/`tail`/`is_empty`/`while`, at m ≈ 4,471 against a 5,000,000-step budget. **The whole-branch review then found the uncapped printer still live in `redextape-wasm`**, at three `#[wasm_bindgen]` sites reachable from the browser playground, and in `redextape-native-rt`. **No task review could have found it**, and that is a structural fact rather than a lapse: `redextape-wasm` appears in no task's diff, and a task review is scoped to one task's diff. The hazard was in UNCHANGED code whose safety depended on a property the changed code removed. That is the case the whole-branch review exists for, and it is the second time this file has recorded it finding something no per-task review could see.
+
+**And the Rust side gained a variant the TypeScript union did not know about.** `Decoded::TooLargeToPrint` reaches `web/src/types.ts`'s `decodedText`, which tests its bare-string variants and then evaluates `'Value' in d` — and `in` raises a `TypeError` on a string primitive. An unhandled string variant does not degrade to a fallback; it throws. The playground would have crashed on exactly the case the branch introduced.
+
+##### A TEST WRITTEN FOR THE ONE SHAPE THE NEW EXIT COULD WAVE THROUGH COVERED AN UNSATISFIABLE SHAPE
+
+The plan specified a test for "a cycle reached through a memo hit". Its review traced the fixture and found the memo exit never satisfied: the first element memoizes `(1,1)` and `(2,1)`, the cyclic element's walk only ever asks about `(3,1)` and `(4,1)`, and deleting the exit would not change the outcome. That is structural rather than a bad fixture — a pointer enters the memo only after a decode proved its tail-chain reaches nil, that property belongs to the raw pointer graph and is depth-independent, so a pointer inside a non-terminating cycle can never be memoized at any depth. **No fixture can produce the shape.** The impossibility argument is worth more than the test would have been, so it is recorded at the site and the test was renamed to what it actually proves. Same shape as PR 64's finding, one level up.
+
+##### WHAT STAYS OPEN
+
+- **`Value`'s `PartialEq` and `Debug` walk the LOGICAL size.** Both are iterative over the spine but recurse into heads with no `Rc::ptr_eq` short-circuit, so comparing two DAG-shaped decoded values costs `m²` where the decode costs `m`. `Drop` is already sharing-aware. Verified unreachable from any production path — neither the CLI nor the WASM UI compares or `Debug`-formats a decoded value — so this is named, not fixed. The one place it runs at scale is this branch's own m = 64,000 equivalence test, which is CPU-bound and completes.
+- **The λ decoder was not measured.** `decode_list_ty`'s doc argues no budget is needed because a normal form is "a finite tree already in memory" — structurally the same argument the value-directed TM decoder made, which this branch falsified, and `lambda/term.rs`'s `subst` shares rather than copies. Not measured, not claimed either way, deliberately not fixed: widening to a third family on an unmeasured suspicion is how a slice stops landing.
+- **Deep sharing is bounded, not free.** Distinct `(pointer, depth)` pairs are at most `heap.len() * (depth + 1)`, so a 5,000,000-cell heap under a 64-deep type can still present 320,000,000 distinct nodes and be refused. That refusal is now honest — those nodes are real memory — where the old one fired on nodes that need not exist.
+- **`web/src/types.ts` learned the new variant; nothing gates that it will learn the next one.** The Rust `Decoded` enum and the TypeScript union are kept in agreement by hand.
+
+##### VERIFICATION
+
+Figures measured at `21f284f`, the branch's last commit before the one that adds this entry. The CI paragraph at the end was added in a second commit, once a run existed to describe — so the figures above and the CI figures below are measured at two different heads, on purpose, and each names its own.
+
+```
+34                      commits                    git rev-list --count 26ea3c4..21f284f
+16 files, +3455/-355    whole-branch diff          git diff --shortstat 26ea3c4..21f284f
+2                       memo types                 grep -c '^type [A-Za-z]*Memo = HashMap'
+                                                     crates/redextape-core/src/tm/asm.rs
+4                       `_reason` entry points     grep -rho 'pub fn decode_[a-z_]*_reason'
+                                                     --include='*.rs' crates | wc -l
+5                       capped print sites, CLI    grep -c 'format_value_capped('
+                                                     crates/redextape-cli/src/run.rs
+0                       uncapped `format_value`    grep -rn 'format_value(' --include='*.rs' crates/*/src
+                        calls outside `value.rs`     | grep -v 'src/value.rs' | grep -v 'fn [a-z_]*format_value'
+                                                     | grep -v '///' | wc -l
+7                       tests in the new file      grep -c '#\[test\]'
+                                                     crates/redextape-core/tests/sharing_aware_decode.rs
+```
+
+`MAX_DECODE_NODES` is unchanged at `20_000_000`, and `value::MAX_PRINT_NODES` is the branch's one new constant. The plan's "no new constant" rule was amended in place rather than quietly broken: its target was inventing a bigger DECODE budget to paper over the sharing gap, which still stands.
+
+```
+$ cargo nextest run --workspace
+     Summary [  40.743s] 1305 tests run: 1305 passed, 10 skipped
+
+$ scripts/check-citations.sh
+no file:line citations in tracked source: 420 files scanned, 0 violations, 2 escape-hatch marker(s)
+honoured (197 out of scope, binary or recording, 0 skipped — 617 tracked paths in all)
+
+$ scripts/check-doc-figures.sh
+check-doc-figures: 42 documented figures match the tree.
+
+$ scripts/check-shared-docs.sh
+check-shared-docs: 12 shared region(s) in 4 file(s) match their 3 source(s).
+
+$ pre-commit run --all-files
+no control bytes in tracked text.........................................Passed
+no file:line citations in tracked source.................................Passed
+documented figures match the tree........................................Passed
+shared doc regions match their source....................................Passed
+lua parses and parser names agree........................................Passed
+cargo fmt................................................................Passed
+cargo clippy.............................................................Passed
+biome ci.................................................................Passed
+web typecheck............................................................Passed
+```
+
+`scripts/check-all.sh --no-llvm --no-browser` exited 0, its own final line quoted rather than the run called green: `green, but PARTIAL — these tiers were SKIPPED: LLVM browser. This is NOT a full gate on its own.`
+
+**BOTH SABOTAGES WERE RUN, NOT REASONED ABOUT, AND ONE OF THEM CHANGED THE BRANCH.** Each was applied to the working tree under `systemd-run --user --scope -p MemoryMax=6G -p MemorySwapMax=0`, observed, and reverted; `git status --porcelain` was empty after each. The first fires. The second did not, which is what produced the spine-charge move recorded above, and fires afterward with the text quoted there. **A subagent measuring an earlier version of this branch without a memory cap took the machine down**, which is why every measurement here names one — the thing being measured is unbounded allocation.
+
+**THE THREE `#[ignore]` MARKERS RUN IN CI**, in the `rust-slow` job. `scripts/check-slow.sh`'s header claimed CI runs it on `main`; it actually runs on every push to `main`, every `v*` tag, `workflow_dispatch`, AND every push to a non-draft pull request. That header was corrected on this branch, because the justification for one of the three markers is precisely that CI still runs the test before merge, and a reader checking that justification would have read the header and concluded the opposite.
+
+**CI RUN 327 WAS GREEN ON `67bb5ec`, AND THAT SHA WAS READ FROM PULL REQUEST 68'S OWN `head.sha` RATHER THAN ASSUMED FROM THE BRANCH** — this file's convention since entry 61, and it matters here for the usual reason: the commit adding this paragraph necessarily sits outside the run it reports. Every job: `gate` 1s, `detect` 4s, `linear-history` 8s, `rust-browser` 58s, `web` 2m17s, `rust-llvm` 2m33s, `rust-slow` 10m25s, `rust` 11m43s. `rust-scoped` skipped because the unscoped `rust` ran instead, and `docker` skipped, as it always is on a pull request — this branch touches no `Dockerfile`, `.forgejo/` or compose file, so that exemption costs nothing here. The run NUMBER from the status `target_url` is 327 and the API's own id for the same run is `1247`; both are recorded because neither can be guessed from the other.
+
+**`rust-slow` IS THE JOB THIS BRANCH MOST NEEDED, AND IT IS THE ONE A LOCAL GATE CANNOT SUBSTITUTE FOR.** It is the only thing that runs the three `#[ignore]`d tests, one of which is new here and exists precisely because it overflows a debug build's 32 MiB stack. `scripts/check-all.sh --no-llvm --no-browser`, the local run quoted above, does not reach them; neither does `cargo nextest run --workspace`. Its 10m25s here is the whole slow tier, not this branch's addition.
+
+**No causal claim is attached to any duration above**, per this file's standing note on CI timing variance. This branch's local `cargo nextest run --workspace` read 40.743s and its `check-all.sh` leg ran the same suite again; the CI `rust` job reads 11m43s for work that includes a cold build.

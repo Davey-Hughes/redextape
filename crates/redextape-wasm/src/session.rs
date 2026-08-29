@@ -123,7 +123,7 @@ pub enum RunStatus {
 
 /// A leg's answer, or why there is not one.
 ///
-/// **FOUR STATES RATHER THAN `Option<String>`, for the reason `RunStatus` has four rather than
+/// **FIVE STATES RATHER THAN `Option<String>`, for the reason `RunStatus` has four rather than
 /// three.** `decode_lambda_ty` and `decode_tape_ty` both answer `Option<Value>`, and "the run has
 /// not finished" and "it finished and the result is not a recognizable encoding" are different facts
 /// about the program. A renderer that flattens them shows one blank field for two situations that
@@ -131,11 +131,11 @@ pub enum RunStatus {
 ///
 /// **NOT EVERY PRODUCER REACHES EVERY STATE, and the asymmetry is real rather than incidental:**
 ///
-/// | | `Value` | `Undecodable` | `Unfinished` | `Fault` |
-/// | --- | --- | --- | --- | --- |
-/// | `lambda_value` | ✅ | ✅ | the cursor has not reached `Ended` | — |
-/// | `tm_value` | ✅ | ✅ | a capped compile whose cursor has not since halted | — |
-/// | `evaluate` | ✅ | — | — | ✅ |
+/// | | `Value` | `TooLargeToPrint` | `Undecodable` | `Unfinished` | `Fault` |
+/// | --- | --- | --- | --- | --- | --- |
+/// | `lambda_value` | ✅ | ✅ | ✅ | the cursor has not reached `Ended` | — |
+/// | `tm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since halted | — |
+/// | `evaluate` | ✅ | ✅ | — | — | ✅ |
 ///
 /// `tm_value`'s `Unfinished` is NOT λ-specific: `compile` gives both `Ran` and `HitCap` a working
 /// cursor, so a capped machine is a live session with no tapes to decode. It is also not permanent —
@@ -148,15 +148,36 @@ pub enum RunStatus {
 /// on — and which BOTH backends nonetheless lower and run to an end. A ✅ in a reachability table that
 /// no test can demonstrate is a claim, and this one is not.
 ///
-/// `text` IS `format_value` OUTPUT, AND `Value` ITSELF CANNOT CROSS. `Value::Closure { params, body:
-/// Rc<Core>, env: Env }` carries an environment and a Core subtree; it has no serde derive and should
-/// not acquire one. That is a property of the type, not a convenience.
+/// **`TooLargeToPrint` IS A DIFFERENT FACT THAN `Undecodable`, AND THE FIX THAT ADDED IT IS THE WHOLE
+/// REASON THIS VARIANT EXISTS.** `Undecodable` means the decode itself found no value of a
+/// representable type. `TooLargeToPrint` means the decode SUCCEEDED — `decode_lambda_ty`/
+/// `decode_tape_ty` answered `Some(v)`, or the reference interpreter answered `Ok(v)` — and only the
+/// PRINT refused, because `v`'s LOGICAL size (an `Rc` DAG's printed size, not its allocation count —
+/// see `redextape_core::value::MAX_PRINT_NODES`'s doc) exceeds what `format_value_capped` will walk.
+/// Collapsing the two into one `Undecodable` would tell a renderer the value has no encoding when it
+/// is, in fact, a real answer this tool merely cannot afford to print — the same distinction
+/// `redextape-cli`'s `Outcome::ToolFailed` draws against `Outcome::ProgramFailed` for the identical
+/// hazard on the CLI's own five print sites (`run.rs`). Each producer's own test below pins that this
+/// state is reachable from a small-in-memory, logically enormous fixture, the same one `run.rs`'s
+/// tests use.
+///
+/// `text` IS `format_value_capped` OUTPUT, AND `Value` ITSELF CANNOT CROSS. `Value::Closure { params,
+/// body: Rc<Core>, env: Env }` carries an environment and a Core subtree; it has no serde derive and
+/// should not acquire one. That is a property of the type, not a convenience.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Decoded {
-    Value { text: String },
+    Value {
+        text: String,
+    },
+    /// Decoded to a real value, but its logical size exceeds
+    /// `redextape_core::value::MAX_PRINT_NODES` — this tool's limit on the PRINT, not a fact about
+    /// whether the program's answer exists. See this enum's own doc for why it is not `Undecodable`.
+    TooLargeToPrint,
     Undecodable,
     Unfinished,
-    Fault { message: String },
+    Fault {
+        message: String,
+    },
 }
 
 /// Whether the λ leg is there, why not when it is not, and how far its run has got.
@@ -397,11 +418,43 @@ fn run_lambda_cursor(c: &mut LambdaCursor, budget: u64) -> RunStatus {
     lambda_run_status(c)
 }
 
+/// A `Value` already in hand — decoded or freshly evaluated — printed through the CAPPED printer.
+/// **THE ONE PLACE ANY OF THE THREE PRODUCERS (`decoded_of`, `lambda_value`, `tm_value`) TURNS A
+/// `Value` INTO EITHER `Decoded::Value` OR `Decoded::TooLargeToPrint`.**
+///
+/// **THIS IS THE FIX, AND EVERY CALLER MUST GO THROUGH IT RATHER THAN `format_value` DIRECTLY.** All
+/// three producers are `#[wasm_bindgen]`-reachable from an ordinary user-typed program (`evaluate`,
+/// `evaluateWithBudget`, `lambdaValue`, `tmValue`), and `format_value` is an uncapped tree walk over a
+/// `Value` whose printed size is its LOGICAL size once a decoder memoizes sharing — `tm_value`'s own
+/// decode (`tm::decode_tape_ty`) is the exact function this branch made sharing-aware, and a
+/// `tails`-shaped program that used to be refused around the decode budget now decodes in ~192,000
+/// nodes and would hand the uncapped printer a walk of billions. See `redextape_core::value::
+/// MAX_PRINT_NODES`'s doc and `redextape-cli/src/run.rs`'s five capped print sites for the same fix on
+/// the CLI's own side of this hazard.
+fn decoded_value(v: &redextape_core::value::Value) -> Decoded {
+    match redextape_core::value::format_value_capped(v, redextape_core::value::MAX_PRINT_NODES) {
+        Some(text) => Decoded::Value { text },
+        None => Decoded::TooLargeToPrint,
+    }
+}
+
+/// `decode_lambda_ty`/`decode_tape_ty`'s `Option<Value>` answer, turned into a `Decoded` — the shared
+/// "decode answered, print-or-refuse" step for `lambda_value` and `tm_value`. Extracted (mirroring
+/// `redextape-cli/src/run.rs`'s `report_tm_decode`/`report_asm_decode`) so a test can drive the
+/// too-large-to-print refusal directly from a fixture `Value`, without an actual reduction or
+/// simulation that could build the shared DAG itself — forbidden by this task's own safety note.
+fn decoded_or_undecodable(v: Option<redextape_core::value::Value>) -> Decoded {
+    match v {
+        Some(v) => decoded_value(&v),
+        None => Decoded::Undecodable,
+    }
+}
+
 /// The ONE place an interpreter run becomes a `Decoded`. `evaluate` and `evaluate_with_budget` differ
 /// only in the budget they pass, so they must not be able to differ in the shape they answer with.
 fn decoded_of(run: Result<redextape_core::value::Value, redextape_core::interp::RuntimeError>) -> Decoded {
     match run {
-        Ok(v) => Decoded::Value { text: redextape_core::value::format_value(&v) },
+        Ok(v) => decoded_value(&v),
         Err(e) => Decoded::Fault { message: e.message },
     }
 }
@@ -613,15 +666,16 @@ impl Session {
     /// `Undecodable` IS A REAL OUTCOME, not a failure: a normal form of a type the decoder has no
     /// encoding for is a fact about this pair of program and backend, and the UI should say so
     /// rather than show an empty field.
+    ///
+    /// `TooLargeToPrint` IS A THIRD OUTCOME, DISTINCT FROM BOTH: `decode_lambda_ty` answered
+    /// `Some(v)` — the decode succeeded — and only `decoded_value`'s capped print refused, because
+    /// `v`'s logical size exceeds `MAX_PRINT_NODES`. See `Decoded`'s own doc.
     pub fn lambda_value(&self) -> Result<Decoded, SessionError> {
         let c = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
         if self.lambda_status().run != Some(RunStatus::Ended) {
             return Ok(Decoded::Unfinished);
         }
-        Ok(match lambda::decode_lambda_ty(c.term(), &self.ty) {
-            Some(v) => Decoded::Value { text: redextape_core::value::format_value(&v) },
-            None => Decoded::Undecodable,
-        })
+        Ok(decoded_or_undecodable(lambda::decode_lambda_ty(c.term(), &self.ty)))
     }
 
     /// Rebuild the λ cursor with a small cap, so a test has something to raise from. TEST-ONLY: there
@@ -746,6 +800,10 @@ impl Session {
     /// `Unfinished` therefore means there is no final configuration ANYWHERE — no halted run recorded
     /// at compile time and a cursor that has not itself halted.
     ///
+    /// `TooLargeToPrint` IS A REAL OUTCOME TOO: `decode_tape_ty` answered `Some(v)` and only
+    /// `decoded_value`'s capped print refused — `decode_tape_ty` is the exact function this branch
+    /// memoized, so a `tails`-shaped program reaches this at ~4,471 elements, far below any run cap.
+    ///
     /// **THE `HitCap` THAT PUTS IT THERE HAS TWO PRODUCERS, NOT ONE.** `TmCursor` caps on the step
     /// budget and on the live-CELL budget, and `trace.rs` says outright that no test can tell those two
     /// apart. Under the second, `total_steps` is the count reached when cells ran out — well below
@@ -758,10 +816,7 @@ impl Session {
             None => return Ok(Decoded::Unfinished),
         };
         let enc = self.kind.at(tm::MIN_FIELD_WIDTH);
-        Ok(match tm::decode_tape_ty(tapes, &self.ty, &*enc) {
-            Some(v) => Decoded::Value { text: redextape_core::value::format_value(&v) },
-            None => Decoded::Undecodable,
-        })
+        Ok(decoded_or_undecodable(tm::decode_tape_ty(tapes, &self.ty, &*enc)))
     }
 
     // --- the reference leg --------------------------------------------------------------------
@@ -794,6 +849,12 @@ impl Session {
     /// that way deliberately: a cache would have to be keyed by budget, since a `Fault` produced by
     /// exhausting a small budget is not an answer about the program and must not be served to a caller
     /// who asked for a larger one.
+    ///
+    /// **CAN ANSWER `Decoded::TooLargeToPrint`, THE SAME AS THE TWO DECODED LEGS.** `Builtin::Tail` is
+    /// `Ok((**t).clone())` — an `Rc` clone, O(1), no allocation — structurally the same sharing
+    /// mechanism `Instr::Tail` uses on the asm heap, so an ordinary non-recursive `tails`-style program
+    /// builds an `m`-suffix shared `Value` in O(m) interpreter steps, and `decoded_value` refuses to
+    /// print it past `MAX_PRINT_NODES` rather than handing it to the uncapped `format_value`.
     pub fn evaluate(&self) -> Decoded {
         decoded_of(redextape_core::interp::eval(&self.core))
     }
@@ -809,7 +870,8 @@ impl Session {
     /// A BUDGET TOO SMALL IS NOT AN ERROR CONDITION. It arrives as `Fault { message }`, the same shape a
     /// genuine runtime fault takes, with the message naming the budget it exceeded — so a caller
     /// wanting to tell "it needs longer" from "it is wrong" reads the message. Flattening them would
-    /// have needed a fifth `Decoded` state for something the interpreter itself does not distinguish.
+    /// have needed a `Decoded` state of its own for something the interpreter itself does not
+    /// distinguish.
     ///
     /// NOT CACHED, exactly like `evaluate`, and for the reason recorded there.
     pub fn evaluate_with_budget(&self, budget: u64) -> Decoded {
@@ -1213,6 +1275,21 @@ mod tests {
     /// refuses and the TM backend runs. Copied rather than imported: integration tests are separate
     /// crates and this is a different crate again.
     const LAMBDA_DECLINES: &str = "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)";
+
+    /// The same fixture `redextape-cli/src/run.rs`'s tests use: 64 levels of self-sharing, 65
+    /// allocations, 2^64 logical nodes — small enough to build here, but far too large for
+    /// `format_value_capped` to walk within `MAX_PRINT_NODES`. Never fed to the UNCAPPED
+    /// `format_value`; every test below drives it through `decoded_value`/`decoded_of`/
+    /// `decoded_or_undecodable`, the capped seams this fix pass adds.
+    fn tiny_but_logically_enormous_dag() -> redextape_core::value::Value {
+        use redextape_core::value::Value;
+        let mut v = Value::Cons(Rc::new(Value::Nat(1)), Rc::new(Value::Nil));
+        for _ in 0..64 {
+            let shared = Rc::new(v);
+            v = Value::Cons(Rc::clone(&shared), Rc::new(Value::Cons(shared, Rc::new(Value::Nil))));
+        }
+        v
+    }
 
     #[test]
     fn a_clean_program_compiles_to_a_session_with_no_diagnostics() {
@@ -2275,6 +2352,36 @@ state halt: accept
         let c = Session::compile("[1, 2, 3]", EncodingKind::Unary);
         let s = c.session.expect("compiles");
         assert_eq!(s.evaluate(), Decoded::Value { text: "[1, 2, 3]".to_string() });
+    }
+
+    /// **THE CRITICAL FINDING THIS TEST PINS.** `evaluate`/`evaluateWithBudget` are
+    /// `#[wasm_bindgen]`-reachable from an ordinary user-typed program, and before this fix both
+    /// printed through the uncapped `format_value` — a `tails`-shaped program builds a small-in-memory,
+    /// logically enormous `Value` in O(m) interpreter steps (`Builtin::Tail` is an O(1) `Rc` clone) and
+    /// the uncapped printer would then walk it forever. `decoded_of` now routes every `Ok(v)` through
+    /// `decoded_value`, which refuses past `MAX_PRINT_NODES` instead. Drives `decoded_of` directly with
+    /// the fixture rather than running a program that builds one, per this task's own safety note.
+    #[test]
+    fn evaluate_reports_too_large_to_print_for_a_logically_enormous_value() {
+        assert_eq!(decoded_of(Ok(tiny_but_logically_enormous_dag())), Decoded::TooLargeToPrint);
+    }
+
+    /// `lambda_value` sibling of the test above. `lambda_value` calls `decoded_or_undecodable` directly
+    /// with `decode_lambda_ty`'s answer, so driving THAT function with `Some(fixture)` exercises the
+    /// exact code path `lambdaValue()` runs, without a reduction that could build the shared term
+    /// itself.
+    #[test]
+    fn lambda_value_reports_too_large_to_print_for_a_logically_enormous_decode() {
+        assert_eq!(decoded_or_undecodable(Some(tiny_but_logically_enormous_dag())), Decoded::TooLargeToPrint);
+    }
+
+    /// `tm_value` sibling of the test above. `tm_value` calls the SAME `decoded_or_undecodable` with
+    /// `decode_tape_ty`'s answer — `decode_tape_ty` is the exact function this branch made
+    /// sharing-aware, so this is the sharpest of the three: a `tails`-shaped `.tm` program reaches this
+    /// refusal at ~4,471 elements, far below any run cap.
+    #[test]
+    fn tm_value_reports_too_large_to_print_for_a_logically_enormous_decode() {
+        assert_eq!(decoded_or_undecodable(Some(tiny_but_logically_enormous_dag())), Decoded::TooLargeToPrint);
     }
 
     /// `RunError::Runtime` is the one genuinely new failure shape this slice adds, and it must arrive as

@@ -13,6 +13,19 @@ describe('Decoded', () => {
     expect(decodedText('Undecodable')).toBe('no encoding for this type')
   })
 
+  // `TooLargeToPrint` says the decode SUCCEEDED and the rendering did not, so it must not read as
+  // `Undecodable` — that would blame the program for a limit of the printer.
+  //
+  // This case would have THROWN before the union learned the variant, rather than falling back to
+  // anything: `decodedText` reaches `'Value' in d` once the bare-string checks miss, and `in` raises
+  // a TypeError on a string primitive. The Rust side gained the variant first, so the crash was
+  // reachable from the playground in between.
+  it('reads the too-large-to-print refusal without confusing it for an undecodable type', () => {
+    expect(decodedText('TooLargeToPrint')).toBe('value too large to print')
+    expect(decodedText('TooLargeToPrint')).not.toBe(decodedText('Undecodable'))
+    expect(() => decodedText('TooLargeToPrint')).not.toThrow()
+  })
+
   it('reads a fault as a tagged object carrying its message', () => {
     expect(decodedText({ Fault: { message: 'budget exhausted' } })).toBe('fault: budget exhausted')
   })

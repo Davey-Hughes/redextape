@@ -50,6 +50,21 @@ pub enum Value {
 /// A head's own nesting is the value's TYPE depth (e.g. `List<List<Nat>>` is 2), never its length, so
 /// recursing into `==` on a head is bounded the same way `lambda::decode_lambda_ty`'s spine walk
 /// bounds its recursion into heads.
+///
+/// **THIS WALKS THE VALUE'S LOGICAL SIZE, NOT ITS DISTINCT-NODE COUNT, AND THAT IS A KNOWN, UNCLOSED
+/// PART OF THE SAME HAZARD CLASS `MAX_PRINT_NODES` CLOSES FOR PRINTING.** There is no `Rc::ptr_eq`
+/// short-circuit here: a shared head reached through two different spine positions is re-walked in
+/// full each time it is compared, so `==` on a DAG-shaped decoded value pays the same super-linear
+/// blowup `format_value` (uncapped) pays and `format_value_capped` refuses rather than pay — cost
+/// scales with the shared heads' own logical sizes, not with either value's distinct-node count.
+/// **Currently safe because nothing on a production path ever compares a decoded `Value`** —
+/// neither the CLI (`redextape-cli`) nor the WASM UI (`redextape-wasm`) does; every `==` on a decoded
+/// value in this workspace is test or oracle code running a small, trusted program. See this crate's
+/// `tests/sharing_aware_decode.rs`, whose `tails_decodes_far_past_the_unmemoized_budget` compares two
+/// `m = 64,000` values with `==` — an O(m²) walk that is CPU-bound rather than memory-bound and does
+/// complete, but is the one place in this branch where this exact gap is exercised at scale. `Drop`
+/// (below) does not share this defect: its `Rc::try_unwrap`-gated worklist already refuses to descend
+/// into a cell it does not uniquely own.
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         let mut a = self;
@@ -83,6 +98,12 @@ impl PartialEq for Value {
 /// below cites (a per-cell `format!` into a growing accumulator would be O(n²): a hang at that length,
 /// not a stack overflow, but no less a totality failure). Output is byte-for-byte what the naive
 /// recursive `"Cons({h:?}, {t:?})"` produced.
+///
+/// **SAME GAP AS `PartialEq` ABOVE, FOR THE SAME REASON: NO `Rc::ptr_eq` SHORT-CIRCUIT ON HEADS.**
+/// Formatting a shared head reached from two spine positions walks it twice in full, so `Debug`-ing a
+/// DAG-shaped decoded value costs its LOGICAL size, not its distinct-node count — see `PartialEq`'s own
+/// doc for why that is currently safe (no production path ever `Debug`-formats a decoded value) and for
+/// the one test that exercises it at scale.
 impl std::fmt::Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -166,34 +187,113 @@ impl Value {
     }
 }
 
+/// The most LOGICAL value nodes `format_value_capped` will walk.
+///
+/// A totality guard on untrusted input, and it exists because the decode budget stopped covering
+/// this case. `MAX_DECODE_NODES` bounds how many DISTINCT nodes a decode builds; once the decoder
+/// memoizes, distinct and logical diverge without limit — a 65-allocation value can have 2^64
+/// logical nodes. Printing is a tree walk, so printing pays the logical size. Until the decoder
+/// memoized, the decode budget refused such a value before the printer could see it; it no longer
+/// does, and this is the replacement for the half of that guard that was lost.
+///
+/// DERIVED, not picked: a run under `tm::DEFAULT_CAPS` may build `5_000_000` heap cells. `fmt_into`
+/// charges one unit to enter the outer value, one per spine step, and one per head entry (see that
+/// function's doc for why the charge is split that way) — `2L + 1` for a flat `List<Nat>` of length
+/// `L`, `10_000_001` at `L = 5_000_000`. This sits at `20_000_000`, just under 2x that, so no FLAT
+/// output a correct program can produce is refused.
+///
+/// Shared output above the cap is a different story, and refusing it is the whole point of this
+/// task, not an accident of the arithmetic above: a correct, cap-respecting program using
+/// `Instr::Tail`-style sharing (`tails` at `m` ~= 4,471, far under every run cap) is *supposed* to be
+/// refused here, because its LOGICAL size, not its allocation count, is what this cap bounds.
+///
+/// `MAX_PRINT_NODES` is numerically equal to `MAX_DECODE_NODES` because the same run cap drives both
+/// derivations, NOT because either is defined in terms of the other — they are independently
+/// changeable and bound different quantities.
+pub const MAX_PRINT_NODES: usize = 20_000_000;
+
+/// `format_value`, refusing rather than walking forever when the value's LOGICAL size exceeds
+/// `budget`. Returns `None` on refusal — the caller reports it as the tool's limit, never as the
+/// file's fault, exactly as `DecodeFailure::BudgetExhausted` is reported.
+///
+/// Use this on any value that came from a FILE. `format_value` remains correct for values the tree
+/// produced itself, and the AOT oracle depends on its exact output.
+#[must_use]
+pub fn format_value_capped(v: &Value, budget: usize) -> Option<String> {
+    let mut out = String::new();
+    let mut left = budget;
+    fmt_into(v, &mut out, &mut left).then_some(out)
+}
+
 /// Canonical textual form of a decoded value, shared by the AOT runtime (which prints it) and the
 /// oracle (which compares it to the binary's stdout). Lists render `[a, b, c]`; `Nat`/`Bool` render
 /// plainly; `Unit` renders `()`. Non-value variants (closures/builtins/boxes) never reach here as a
 /// top-level result, but render a stable placeholder to keep this total.
 #[must_use]
 pub fn format_value(v: &Value) -> String {
+    let mut out = String::new();
+    let mut left = usize::MAX;
+    // On a 64-bit target, `usize::MAX` (~1.8e19) cannot be reached by a walk that terminates at
+    // all, so this is the uncapped walk and the bool is always true there. That is NOT true on a
+    // 32-bit target such as wasm32 — a gate `redextape-core` must build for — where `usize::MAX` is
+    // only ~4.29e9, below logical sizes this branch shows are reachable (see `value::tests`'s
+    // 65-allocation, 2^64-logical-node DAG). There, this same walk would not run forever; it would
+    // silently STOP EARLY and return truncated text once the budget hit zero. Ignored rather than
+    // asserted: an `assert!` here would be a panic in a library path, and `debug_assert!` would drop
+    // the call in release.
+    let _ = fmt_into(v, &mut out, &mut left);
+    out
+}
+
+/// The one value-printing walk, shared by `format_value` and `format_value_capped` so the two
+/// cannot drift. Returns `false` once `budget` would go negative, leaving `out` truncated —
+/// callers discard it in that case.
+///
+/// **Charges two units per list cell, not one, and that is what makes `2L + 1` the cost of a flat
+/// `List<Nat>` of length `L` (`L` `Nat`s + `L` `Cons`es + one `Nil`).** The `checked_sub` at the top
+/// of this function charges for entering a node at all — a `Nat`, `Nil`, or a `Cons`'s head — and
+/// that alone would charge only the OUTERMOST `Cons` once, because the `Cons` arm below walks the
+/// rest of the spine ITERATIVELY (`cur = t.as_ref()`), never re-entering `fmt_into` for the cells it
+/// steps past. That iteration is deliberate and pre-existing, not incidental: a runtime list's
+/// spine length is bounded only by the step budget (millions of cells), so recursing once per cell
+/// would overflow the stack long before any budget check fired. So the `while` loop spends a SECOND
+/// charge itself, once per spine step, to account for the cell the entry charge does not reach. A
+/// flat list of `L` elements is then: 1 (the entry charge for the outer value) + `L` (one spine-step
+/// charge per cell) + `L` (one entry charge per head, via the recursive `fmt_into(h, ..)` call) =
+/// `2L + 1`. Drop the spine-step charge and a long flat list is bounded only by the budget spent on
+/// its elements — the spine itself would be free to grow forever, which is exactly the shape a
+/// `.tm` file can hand this printer.
+fn fmt_into(v: &Value, out: &mut String, budget: &mut usize) -> bool {
+    let Some(next) = budget.checked_sub(1) else { return false };
+    *budget = next;
     match v {
-        Value::Nat(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Unit => "()".to_string(),
-        Value::Nil => "[]".to_string(),
+        Value::Nat(n) => out.push_str(&n.to_string()),
+        Value::Bool(b) => out.push_str(&b.to_string()),
+        Value::Unit => out.push_str("()"),
+        Value::Nil => out.push_str("[]"),
         Value::Cons(_, _) => {
-            let mut out = String::from("[");
+            out.push('[');
             let mut cur: &Value = v;
             let mut first = true;
             while let Value::Cons(h, t) = cur {
+                // The spine-step charge: see this function's doc for why the entry charge above
+                // does not already cover it.
+                let Some(next) = budget.checked_sub(1) else { return false };
+                *budget = next;
                 if !first {
                     out.push_str(", ");
                 }
                 first = false;
-                out.push_str(&format_value(h));
+                if !fmt_into(h, out, budget) {
+                    return false;
+                }
                 cur = t.as_ref();
             }
             out.push(']');
-            out
         }
-        Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => "<non-value>".to_string(),
+        Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => out.push_str("<non-value>"),
     }
+    true
 }
 
 #[cfg(test)]
@@ -328,5 +428,37 @@ mod tests {
             Rc::new(Value::Cons(Rc::new(Value::list_of_nats(&[3])), Rc::new(Value::Nil))),
         );
         assert_eq!(format!("{v:?}"), "Cons(Cons(Nat(1), Cons(Nat(2), Nil)), Cons(Cons(Nat(3), Nil), Nil))");
+    }
+
+    /// A value can be SMALL in memory and astronomically large printed, because `Value::Cons` holds
+    /// `Rc`s and a decoded value is now a DAG. 64 levels of self-sharing is 65 allocations and 2^64
+    /// logical nodes — the shape a `.tm` file can hand the CLI after the decoder learned to memoize.
+    ///
+    /// `format_value` walks it as a tree and would not return in any useful time; `format_value_capped`
+    /// must refuse. The test asserts the refusal, and never calls the uncapped form on this value.
+    #[test]
+    fn a_shared_dag_is_small_in_memory_and_refused_by_the_capped_printer() {
+        let mut v = Value::Cons(Rc::new(Value::Nat(1)), Rc::new(Value::Nil));
+        for _ in 0..64 {
+            let shared = Rc::new(v);
+            v = Value::Cons(Rc::clone(&shared), Rc::new(Value::Cons(shared, Rc::new(Value::Nil))));
+        }
+        assert_eq!(format_value_capped(&v, MAX_PRINT_NODES), None);
+    }
+
+    /// The cap does not refuse anything a correct program can produce. The derivation in
+    /// `MAX_PRINT_NODES`'s doc says a flat `List<Nat>` at the heap cap costs `2L + 1` logical nodes;
+    /// this pins the equation at a small `L` so a constant offset cannot pass.
+    #[test]
+    fn the_capped_printer_agrees_with_the_uncapped_one_below_the_cap() {
+        for l in [0_u64, 1, 3, 50] {
+            let ns: Vec<u64> = (1..=l).collect();
+            let v = Value::list_of_nats(&ns);
+            assert_eq!(format_value_capped(&v, MAX_PRINT_NODES).as_deref(), Some(format_value(&v).as_str()));
+            // `2L + 1` logical nodes: L `Nat`s, L `Cons`es, one `Nil`. One unit short must refuse.
+            let exact = 2 * l as usize + 1;
+            assert!(format_value_capped(&v, exact).is_some(), "L={l} must fit in exactly 2L+1");
+            assert_eq!(format_value_capped(&v, exact - 1), None, "L={l} must refuse at 2L");
+        }
     }
 }

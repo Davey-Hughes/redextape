@@ -1,11 +1,9 @@
 //! Final tapes -> `Value`, type-directed like the asm/lambda decoders: the reference value supplies
 //! the type witness (a bare tape is ambiguous). Nat/Bool are decoded directly from the result word;
 //! Nil/Cons are decoded by parsing the HEAP tape into cons cells and following the pointer chain from
-//! the result word, mirroring `asm.rs`'s `decode_word`. `expected` is used ONLY for its shape, so a
+//! the result word, by calling `asm.rs`'s `decode_word`. `expected` is used ONLY for its shape, so a
 //! machine that computed the wrong value decodes to a different `Value` (or `None`), still failing the
 //! oracle.
-
-use std::rc::Rc;
 
 use crate::tm::asm::{DecodeFailure, MAX_DECODE_NODES, decode_word_ty};
 use crate::tm::build::{HEAP, REG};
@@ -26,9 +24,24 @@ fn read_result(tapes: &[Tape], enc: &dyn Encoding) -> Option<(u64, Vec<(u64, u64
 
 /// Decode the machine's final `tapes` to a `Value`, guided by `expected`'s SHAPE (never its contents).
 /// The result word is REG slot 0 (`Rr`): a Nat/Bool value, or a list pointer into the HEAP.
+///
+/// `decode_tape_reason`'s `.ok()`, for the callers that only need to know THAT it failed.
+#[must_use]
 pub fn decode_tape(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) -> Option<Value> {
-    let (word, heap) = read_result(tapes, enc)?;
-    decode_word(word, &heap, expected)
+    decode_tape_reason(tapes, expected, enc).ok()
+}
+
+/// `decode_tape`, keeping WHY a failed decode failed. `read_result` failing — a missing REG/HEAP tape,
+/// or a REG field this `enc` cannot parse as a Nat — is `DecodeFailure::Mismatch`, exactly as in
+/// `decode_tape_ty_reason`: a claim about the DATA, never about the budget, which is not allocated yet.
+///
+/// # Errors
+///
+/// See `DecodeFailure`'s doc for the two causes.
+pub fn decode_tape_reason(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) -> Result<Value, DecodeFailure> {
+    let Some((word, heap)) = read_result(tapes, enc) else { return Err(DecodeFailure::Mismatch) };
+    let mut budget = MAX_DECODE_NODES;
+    crate::tm::asm::decode_word(word, &heap, expected, &mut budget)
 }
 
 /// Decode the final `tapes` against a TYPE rather than a `Value` shape witness — what a reader holding
@@ -65,41 +78,6 @@ pub fn decode_tape_ty_reason(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Res
     let Some((word, heap)) = read_result(tapes, enc) else { return Err(DecodeFailure::Mismatch) };
     let mut budget = MAX_DECODE_NODES;
     decode_word_ty(word, &heap, ty, &mut budget)
-}
-
-/// Type-directed decode of a word (Nat/Bool value or list pointer), guided by `expected`'s shape.
-/// Mirrors `asm.rs::decode_word`. Terminates by STRUCTURAL RECURSION on `expected` (a finite reference
-/// `Value`), so it halts regardless of heap cycles; acyclicity of the compiled heap (a cons cell's tail
-/// points only at an EARLIER cell) is what makes the RESULT correct, not what makes decoding halt.
-/// `clippy::similar_names`: flags the local `head` against the `heap` parameter, same as
-/// `asm::decode_word` — see that function's `#[allow]` comment. This function mirrors it on purpose
-/// (see the module doc above), so the local names are kept identical rather than diverging to satisfy
-/// the lint.
-#[allow(clippy::similar_names)]
-fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value> {
-    match expected {
-        Value::Nat(_) => Some(Value::Nat(word)),
-        Value::Bool(_) => match word {
-            0 => Some(Value::Bool(false)),
-            1 => Some(Value::Bool(true)),
-            _ => None,
-        },
-        Value::Nil => (word == 0).then_some(Value::Nil),
-        Value::Cons(eh, et) => {
-            if word == 0 {
-                return None;
-            }
-            // `word` is read off a `.tm` file's REG tape through `enc` (see `decode_tape`'s doc), so it
-            // may not fit `usize` on a 32-bit target. `try_from` folds that into the existing "not a
-            // valid pointer" `None` instead of truncating into a wrong, in-range index.
-            let idx = usize::try_from(word - 1).ok()?;
-            let &(h, t) = heap.get(idx)?;
-            let head = decode_word(h, heap, eh)?;
-            let tail = decode_word(t, heap, et)?;
-            Some(Value::Cons(Rc::new(head), Rc::new(tail)))
-        }
-        Value::Unit | Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => None,
-    }
 }
 
 #[cfg(test)]

@@ -48,7 +48,12 @@ export type Diagnostic = { span: Span; severity: Severity; message: string }
 
 export type RunStatus = 'Running' | 'Ended' | 'Capped' | 'DepthRefused'
 
-export type Decoded = 'Unfinished' | 'Undecodable' | { Value: { text: string } } | { Fault: { message: string } }
+export type Decoded =
+  | 'Unfinished'
+  | 'Undecodable'
+  | 'TooLargeToPrint'
+  | { Value: { text: string } }
+  | { Fault: { message: string } }
 
 export type LambdaStatus = {
   available: boolean
@@ -153,10 +158,23 @@ export function ownerNode(o: Owner): number | null {
  *
  * `Undecodable` AND `Fault` ARE ANSWERS, not empty states: a normal form the decoder has no encoding
  * for is a fact about this pair of program and backend, and showing a blank field would hide it.
+ *
+ * `TooLargeToPrint` IS A THIRD ANSWER, AND IT IS NOT `Undecodable`. The decode SUCCEEDED; what failed
+ * is rendering it. A decoded value is an `Rc` DAG whose PRINTED size is its LOGICAL size, so an
+ * ordinary `tails`-shaped result is small in memory and astronomically large as text — the Rust side
+ * refuses past `MAX_PRINT_NODES` rather than walking it. Saying "no encoding for this type" here
+ * would blame the program for a limit of the printer.
+ *
+ * **THE ORDER OF THE STRING CHECKS IS LOAD-BEARING.** Every bare-string variant must be tested before
+ * the `'Value' in d` line: `in` throws a `TypeError` on a string primitive, so an unhandled string
+ * variant crashes this function rather than falling through to the `Fault` arm. That is not
+ * hypothetical — `TooLargeToPrint` was added on the Rust side first, and until this union learned
+ * about it, reaching that state would have thrown here.
  */
 export function decodedText(d: Decoded): string {
   if (d === 'Unfinished') return 'not finished'
   if (d === 'Undecodable') return 'no encoding for this type'
+  if (d === 'TooLargeToPrint') return 'value too large to print'
   if ('Value' in d) return d.Value.text
   return `fault: ${d.Fault.message}`
 }

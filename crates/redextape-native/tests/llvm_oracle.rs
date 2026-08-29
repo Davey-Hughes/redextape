@@ -29,7 +29,7 @@ use proptest::prelude::*;
 use redextape_core::core::Core;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{DEFAULT_CAPS, decode_asm};
+use redextape_core::tm::{DEFAULT_CAPS, decode_asm_reason};
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 use redextape_native::{Codegen, NativeRun, OptLevel, run_native_with};
@@ -51,7 +51,7 @@ fn core_of(src: &str) -> Core {
 /// bug the oracle exists to catch.
 fn ran(run: &NativeRun, expected: &Value, label: &str) -> Value {
     match run {
-        NativeRun::Ran(o) => decode_asm(o, expected).unwrap_or_else(|| panic!("{label}: decode failed")),
+        NativeRun::Ran(o) => decode_asm_reason(o, expected).unwrap_or_else(|e| panic!("{label}: decode failed: {e:?}")),
         other => panic!("{label}: expected Ran, got {other:?}"),
     }
 }
@@ -170,19 +170,19 @@ proptest! {
         let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt: OptLevel::default() });
         match (reference, cl) {
             (Ok(rv), NativeRun::Ran(cl_outcome)) => {
-                let cl_value = decode_asm(&cl_outcome, &rv).expect("decode cranelift");
+                let cl_value = decode_asm_reason(&cl_outcome, &rv).unwrap_or_else(|e| panic!("decode cranelift: {e:?}"));
                 prop_assert_eq!(&cl_value, &rv, "cranelift vs reference disagree: {}", src);
                 for opt in OPT_LEVELS {
                     match run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt }) {
                         NativeRun::Ran(o) => {
-                            let cl_at = decode_asm(&o, &rv).expect("decode cranelift");
+                            let cl_at = decode_asm_reason(&o, &rv).unwrap_or_else(|e| panic!("decode cranelift: {e:?}"));
                             prop_assert_eq!(&cl_at, &rv, "cranelift {:?} vs reference disagree: {}", opt, src);
                         }
                         other => prop_assert!(false, "cranelift {:?} did not run {}: {:?}", opt, src, other),
                     }
                     match run_native_with(&core, DEFAULT_CAPS, Codegen::Llvm { opt }) {
                         NativeRun::Ran(o) => {
-                            let llvm_value = decode_asm(&o, &rv).expect("decode llvm");
+                            let llvm_value = decode_asm_reason(&o, &rv).unwrap_or_else(|e| panic!("decode llvm: {e:?}"));
                             prop_assert_eq!(&llvm_value, &rv, "llvm {:?} vs reference disagree: {}", opt, src);
                             prop_assert_eq!(&llvm_value, &cl_value, "llvm {:?} vs cranelift disagree: {}", opt, src);
                         }

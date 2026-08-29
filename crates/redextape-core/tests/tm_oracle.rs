@@ -24,8 +24,8 @@
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::tm::{
-    AsmRun, Binary, DEFAULT_CAPS as ASM_CAPS, Encoding, TM_DEFAULT_CAPS, TmRun, Unary, decode_asm, decode_tape,
-    lower_asm, run_asm, run_tm, run_tm_fitted,
+    AsmRun, Binary, DEFAULT_CAPS as ASM_CAPS, Encoding, TM_DEFAULT_CAPS, TmRun, Unary, decode_asm_reason, decode_tape,
+    decode_tape_reason, lower_asm, run_asm, run_tm, run_tm_fitted,
 };
 use redextape_core::{RunError, run};
 
@@ -58,14 +58,14 @@ fn assert_asm_interp_matches_tm(src: &str, enc: &dyn Encoding) {
     let reference = run(src).expect("control-flow demos run to a value");
     let program = lower_asm(&core).expect("lowering to asm succeeds");
     let asm = match run_asm(&program, ASM_CAPS) {
-        AsmRun::Ran(o) => decode_asm(&o, &reference).expect("asm decode"),
+        AsmRun::Ran(o) => decode_asm_reason(&o, &reference).unwrap_or_else(|e| panic!("asm decode: {e:?}")),
         other => panic!("asm did not run for {src}: {other:?}"),
     };
     let (outcome, width) = run_tm_fitted(&core, enc, TM_DEFAULT_CAPS);
     let tm = match outcome {
         TmRun::Ran { tapes } => {
             let fitted = enc.at_width(width.unwrap_or(64));
-            decode_tape(&tapes, &reference, &*fitted).expect("tm decode")
+            decode_tape_reason(&tapes, &reference, &*fitted).unwrap_or_else(|e| panic!("tm decode: {e:?}"))
         }
         other => panic!("tm did not run for {src}: {other:?}"),
     };

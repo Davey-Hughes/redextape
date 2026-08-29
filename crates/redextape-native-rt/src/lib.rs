@@ -381,8 +381,40 @@ pub(crate) mod config {
     }
 }
 
+/// A decoded `Value` in hand, printed through the CAPPED printer rather than the uncapped
+/// `format_value` — the same defect class `redextape-cli/src/run.rs`'s five capped print sites and
+/// `redextape-wasm`'s `decoded_value` close, on this crate's own decode (`decode_asm_ty`, bounded by
+/// `MAX_DECODE_NODES` on DISTINCT nodes) whose answer can still be logically enormous once the memo
+/// shares Rc nodes across the output. `decode_asm_ty` succeeding is no guarantee `format_value` would
+/// ever return.
+///
+/// Extracted from `print_outcome` so a test can drive the too-large-to-print refusal directly from a
+/// small-in-memory fixture `Value`, without a run that could build one itself — this crate's own
+/// caller today is a trusted test harness on small fixtures (see this function's doc on `print_outcome`
+/// for the reachability note), but the crate is built as `rlib` + `staticlib` precisely so a future
+/// standalone AOT binary can link it, and closing this here is cheaper than leaving it for that binary
+/// to rediscover.
+fn print_value_or_refuse(
+    v: &redextape_core::value::Value,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> i32 {
+    if let Some(text) = redextape_core::value::format_value_capped(v, redextape_core::value::MAX_PRINT_NODES) {
+        // The value is the sole thing on `out` (stdout) — exit 0.
+        let _ = writeln!(out, "{text}");
+        0
+    } else {
+        // Too-large-to-print is a diagnostic → `err` (stderr), NOT `out`, for the same reason a decode
+        // failure is: a caller grepping stdout for the result must never mistake a refusal for one.
+        let _ = writeln!(err, "internal: decoded result is too large to print");
+        4
+    }
+}
+
 /// Classify + render a finished run. `outcome` is `Some` iff the run produced a value (not a
-/// fault/cap). Returns the process exit code: 0 value, 2 fault, 3 cap, 4 internal/decode failure.
+/// fault/cap). Returns the process exit code: 0 value, 2 fault, 3 cap, 4 internal/decode failure
+/// (which now also covers a value that decoded but is too large to print — see
+/// `print_value_or_refuse`).
 ///
 /// Two writers keep the "value → stdout; everything else → stderr" contract: the decoded value is
 /// the ONLY thing written to `out` (a caller can grep `out` for the result unambiguously), while a
@@ -408,9 +440,7 @@ pub(crate) fn print_outcome(
     // defensive exit-4 so `print_outcome` is total for any caller.
     let Some(o) = outcome else { return 4 };
     if let Some(v) = redextape_core::tm::decode_asm_ty(&o, ty) {
-        // The value is the sole thing on `out` (stdout) — exit 0.
-        let _ = writeln!(out, "{}", redextape_core::value::format_value(&v));
-        0
+        print_value_or_refuse(&v, out, err)
     } else {
         // Decode failure is a diagnostic → `err` (stderr), NOT `out`, so it can't be mistaken
         // for a value by a caller grepping stdout — exit 4.
@@ -638,5 +668,37 @@ mod tests {
         assert_eq!(code, 4);
         assert!(out.is_empty(), "decode failure must write NOTHING to stdout");
         assert_eq!(String::from_utf8(err).unwrap(), "internal: could not decode result\n");
+    }
+
+    /// The same fixture `redextape-cli/src/run.rs` and `redextape-wasm`'s `session.rs` tests use: 64
+    /// levels of self-sharing, 65 allocations, 2^64 logical nodes — small enough to build here, but far
+    /// too large for `format_value_capped` to walk within `MAX_PRINT_NODES`. Drives
+    /// `print_value_or_refuse` directly rather than through a run that could build one — this task's
+    /// own safety note forbids that, and `print_outcome`'s only path to a `Value` is `decode_asm_ty`,
+    /// which this fixture was never built to survive as a heap.
+    fn tiny_but_logically_enormous_dag() -> redextape_core::value::Value {
+        use redextape_core::value::Value;
+        use std::rc::Rc;
+        let mut v = Value::Cons(Rc::new(Value::Nat(1)), Rc::new(Value::Nil));
+        for _ in 0..64 {
+            let shared = Rc::new(v);
+            v = Value::Cons(Rc::clone(&shared), Rc::new(Value::Cons(shared, Rc::new(Value::Nil))));
+        }
+        v
+    }
+
+    /// **THE IMPORTANT FINDING THIS TEST PINS.** Before this fix, `print_outcome` printed a decoded
+    /// value through the uncapped `format_value` — the same defect class Fix 1 closes in
+    /// `redextape-wasm`. `print_value_or_refuse` now refuses past `MAX_PRINT_NODES` instead, reporting
+    /// exit 4 (this tool's own limit) with a message distinct from a decode failure, and writing
+    /// NOTHING to `out` so a caller grepping stdout can never mistake the refusal for a value.
+    #[test]
+    fn print_value_or_refuse_reports_a_logically_enormous_value_as_too_large_rather_than_hanging() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = super::print_value_or_refuse(&tiny_but_logically_enormous_dag(), &mut out, &mut err);
+        assert_eq!(code, 4);
+        assert!(out.is_empty(), "a too-large-to-print value must write nothing to stdout");
+        assert_eq!(String::from_utf8(err).unwrap(), "internal: decoded result is too large to print\n");
     }
 }

@@ -7,6 +7,7 @@ use crate::analysis::push_span;
 use crate::core::BinOp;
 use crate::ty::Ty;
 use crate::value::Value;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -663,47 +664,129 @@ pub fn run_asm(prog: &Program, caps: Caps) -> AsmRun {
 
 /// Decode a completed run's outcome to a `Value`, guided by the *shape* of `expected`. Returns the
 /// actual decoded value (equal to `expected` iff the machine computed the right answer), or `None`.
+///
+/// `decode_asm_reason`'s `.ok()`, for the callers that only need to know THAT it failed.
 #[must_use]
 pub fn decode_asm(outcome: &AsmOutcome, expected: &Value) -> Option<Value> {
-    decode_word(outcome.result, &outcome.heap, expected)
+    decode_asm_reason(outcome, expected).ok()
 }
+
+/// `decode_asm`, keeping WHY a failed decode failed — the value-directed twin of
+/// `decode_asm_ty_reason`, and for the same reason: the two causes have opposite fault attributions.
+///
+/// # Errors
+///
+/// `DecodeFailure::Mismatch` if `outcome`'s data does not have the shape `expected` describes.
+/// `DecodeFailure::BudgetExhausted` if `MAX_DECODE_NODES` ran out on an otherwise-truthful decode.
+pub fn decode_asm_reason(outcome: &AsmOutcome, expected: &Value) -> Result<Value, DecodeFailure> {
+    let mut budget = MAX_DECODE_NODES;
+    decode_word(outcome.result, &outcome.heap, expected, &mut budget)
+}
+
+/// Memo for the value-directed decode, keyed `(heap pointer, address of the expectation node)`.
+///
+/// **Why address identity is sound, as the two ways it could not be.** Two structurally-equal
+/// expectations at different addresses are different keys, so the memo MISSES — which costs time and
+/// cannot change an answer. Two DIFFERENT expectations cannot share an address while both are alive,
+/// and `expected` is borrowed for the whole decode, so nothing the memo has keyed is dropped and its
+/// address reissued mid-walk. No pointer here is ever dereferenced; they are hashed and compared.
+///
+/// Keying on the expectation's STRUCTURE instead would be slower — hashing a `Value` is proportional
+/// to the walk the memo exists to avoid — and no more correct, since sharing is precisely what
+/// address identity detects and structure does not.
+///
+/// **Bounded now, the same way `TyMemo` is.** Every insert happens in the `Cons` arm, right after the
+/// `Cons`-node `spend` (see `MAX_DECODE_NODES`'s doc), and nothing else inserts — so the table can hold
+/// at most one entry per budget unit spent, at most `MAX_DECODE_NODES` entries, on the order of a
+/// gigabyte at the current constant, same as `TyMemo`.
+type ValMemo = HashMap<(u64, *const Value), Value>;
 
 /// `clippy::similar_names`: flags the local `head` against the `heap` parameter. Both are the
 /// established domain terms (a cons cell's head; the HEAP tape/table) and neither can rename without
-/// losing that — `head` least of all, since `tm::decode::decode_word` mirrors this function on
-/// purpose (see its doc: "Mirrors `asm.rs::decode_word`") and a reader checking the two stay in step
-/// wants matching local names, not divergent ones.
+/// losing that.
 #[allow(clippy::similar_names)]
-fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value> {
+pub(crate) fn decode_word(
+    word: u64,
+    heap: &[(u64, u64)],
+    expected: &Value,
+    budget: &mut usize,
+) -> Result<Value, DecodeFailure> {
+    let mut memo = ValMemo::new();
+    decode_word_memo(word, heap, expected, &mut memo, budget)
+}
+
+/// `decode_word`'s recursion, carrying the memo. Split out so the public path seeds one per decode.
+///
+/// **Recurses once per list element, unlike its type-directed sibling.** `decode_word_ty_at` is
+/// iterative over the list spine — that two-pass loop structure is what it is for. This function
+/// instead calls itself on `tail` for every `Cons`, so its stack depth is the list length. That is a
+/// property of this recursion's SHAPE, pre-existing before this branch's memo and not introduced or
+/// worsened by it — the memo changes how much work a frame does, not how many frames there are (see
+/// `crates/redextape-core/tests/sharing_aware_decode.rs`'s `value_directed_tails_is_linear` for a
+/// measured depth).
+///
+/// **Accounting matches `decode_word_ty_at`'s `3L + 1` exactly: one unit per constructed node, one per
+/// `Cons` descent.** A `Nat`/`Bool`/`Nil` leaf spends one unit for the node it constructs; a `Cons`
+/// spends one unit for the descent (the value-directed twin of a spine step) plus one more for the
+/// node it builds from the decoded head/tail — see `MAX_DECODE_NODES`'s doc. A memo hit spends
+/// nothing, exactly as `decode_word_ty_at`'s does, for the same reason: it constructs nothing.
+///
+/// `clippy::similar_names`: flags the local `head` against the `heap` parameter — see `decode_word`.
+#[allow(clippy::similar_names)]
+fn decode_word_memo(
+    word: u64,
+    heap: &[(u64, u64)],
+    expected: &Value,
+    memo: &mut ValMemo,
+    budget: &mut usize,
+) -> Result<Value, DecodeFailure> {
     match expected {
-        Value::Nat(_) => Some(Value::Nat(word)),
-        Value::Bool(_) => match word {
-            0 => Some(Value::Bool(false)),
-            1 => Some(Value::Bool(true)),
-            _ => None,
-        },
+        Value::Nat(_) => {
+            spend(budget)?;
+            Ok(Value::Nat(word))
+        }
+        Value::Bool(_) => {
+            let v = match word {
+                0 => Value::Bool(false),
+                1 => Value::Bool(true),
+                _ => return Err(DecodeFailure::Mismatch),
+            };
+            spend(budget)?;
+            Ok(v)
+        }
         Value::Nil => {
             if word == 0 {
-                Some(Value::Nil)
+                spend(budget)?;
+                Ok(Value::Nil)
             } else {
-                None
+                Err(DecodeFailure::Mismatch)
             }
         }
         Value::Cons(exp_h, exp_t) => {
-            if word == 0 {
-                return None; // expected a cons, got nil
+            // Only the `Cons` arm memoizes: a leaf costs one construction, where an entry costs a
+            // hash, a key and a clone. `from_ref` rather than `as *const _` per `clippy::pedantic`.
+            let key = (word, std::ptr::from_ref::<Value>(expected));
+            if let Some(v) = memo.get(&key) {
+                return Ok(v.clone());
             }
+            if word == 0 {
+                return Err(DecodeFailure::Mismatch); // expected a cons, got nil
+            }
+            spend(budget)?; // this descent — the value-directed twin of a spine step
             // `word` comes from a public, caller-supplied `AsmOutcome` (see `decode_asm`), not only
             // from a `run_asm` run of this module's own bounded heap — a hand-built `word` may not fit
-            // `usize` on a 32-bit target. Fold that into the existing "not a valid pointer" `None`
+            // `usize` on a 32-bit target. Fold that into the existing "not a valid pointer" mismatch
             // rather than truncating into a wrong, in-range index.
-            let idx = usize::try_from(word - 1).ok()?;
-            let &(h, t) = heap.get(idx)?;
-            let head = decode_word(h, heap, exp_h)?;
-            let tail = decode_word(t, heap, exp_t)?;
-            Some(Value::Cons(Rc::new(head), Rc::new(tail)))
+            let Some(idx) = usize::try_from(word - 1).ok() else { return Err(DecodeFailure::Mismatch) };
+            let Some(&(h, t)) = heap.get(idx) else { return Err(DecodeFailure::Mismatch) };
+            let head = decode_word_memo(h, heap, exp_h, memo, budget)?;
+            let tail = decode_word_memo(t, heap, exp_t, memo, budget)?;
+            spend(budget)?; // the Cons node
+            let out = Value::Cons(Rc::new(head), Rc::new(tail));
+            memo.insert(key, out.clone());
+            Ok(out)
         }
-        Value::Unit | Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => None,
+        Value::Unit | Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => Err(DecodeFailure::Mismatch),
     }
 }
 
@@ -715,13 +798,6 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
 /// MULTIPLY — `List<List<Nat>>` over an n-cell heap is O(n²) nodes and `MAX_TY_DEPTH` nesting is
 /// O(n^d). Both factors come from the file. Neither guard implies the other.
 ///
-/// DERIVED, not picked: a flat `List<Nat>` over an `L`-cell heap costs `2L + 1` nodes, and a run under
-/// `DEFAULT_CAPS` may legitimately build `DEFAULT_CAPS.heap` cells — so anything at or below
-/// `2 * DEFAULT_CAPS.heap + 1` is reachable by a correct program and must NOT be refused. The budget
-/// sits above that with room to spare, which is what keeps it a totality guard on untrusted input
-/// rather than a language limit. A constant below the runtime's own ceiling would reject programs
-/// that ran correctly, reporting them as "could not decode result".
-///
 /// **That derivation is written for the ASM consumer; the other one is bounded by a DIFFERENT
 /// constant.** `tm::decode::decode_tape_ty` reads a heap off a TM tape, bounded by `sim::DEFAULT_CAPS`
 /// `.cells` (total tape cells), not by `asm::DEFAULT_CAPS.heap`. It works out with room to spare —
@@ -730,34 +806,41 @@ fn decode_word(word: u64, heap: &[(u64, u64)], expected: &Value) -> Option<Value
 /// constants are numerically equal today and independently changeable: raising `sim`'s cell cap
 /// without revisiting this would silently break the property on the TM path.
 ///
-/// THE RESIDUAL GAP, stated in numbers because no constant closes it and an adjective would hide it.
+/// DERIVED, not picked, and the derivation counts WORK rather than nodes. A decode spends one unit
+/// per constructed `Value` node and one per spine step, so a flat `List<Nat>` over an `L`-cell heap
+/// costs `3L + 1`: `L` steps, `L` `Nat` leaves, one `Nil`, `L` `Cons` nodes. A run under
+/// `DEFAULT_CAPS` may legitimately build `DEFAULT_CAPS.heap` = `5_000_000` cells, so the largest
+/// legitimate flat decode is `3 * 5_000_000 + 1` = `15_000_001` against this constant's `20_000_000`.
+/// It fits with `4_999_999` units of headroom, which is the figure to re-derive if `DEFAULT_CAPS.heap`
+/// ever rises: above `6_666_666` cells the flat case alone exceeds the budget. The margin is 1.33x,
+/// where the earlier `2L + 1` accounting left 2.0x.
 ///
-/// The derivation above covers a FLAT list exactly. It does not cover a nested one, and the reason is
-/// SHARING: `Instr::Tail` is a pointer read, not an allocation, so an ordinary function like
+/// **WHY STEPS COST, AND NOT ONLY NODES.** The decode memoizes on `(pointer, depth)`, and a memo hit
+/// constructs nothing. Charging only constructed nodes would therefore leave a way to make progress
+/// for free — and PASS 1's spine walk, which allocates nothing and stops the instant it reaches nil or
+/// a pointer already in the memo, would be re-walkable for free from every spine that reaches it: `k`
+/// distinct prefixes converging on one shared tail of length `s` each re-walk that whole tail before
+/// PASS 1's own memo exit can answer, so an unbudgeted PASS 1 costs `k * s` rather than `k + s` —
+/// quadratic on a convergent heap, and nothing else bounds it (see
+/// `convergent_chains_walk_the_shared_tail_once`). Charging the step restores the bound. The invariant
+/// that follows, and the one worth keeping in mind when editing either loop: **every memo entry is paid
+/// for by exactly one budget unit, so the memo cannot outgrow the budget** — still true here: every
+/// insert happens in PASS 2's cons-up loop, one per `Cons` `spend`, which moving the spine-step charge
+/// to PASS 1 does not touch.
 ///
-/// ```text
-/// fn tails(xs) = if is_empty(xs) { cons(nil, nil) } else { cons(xs, tails(tail(xs))) }
-/// ```
+/// **WHAT THIS CONSTANT NO LONGER HAS TO ABSORB.** It used to carry a documented residual gap:
+/// `Instr::Tail` is a pointer read rather than an allocation, so an ordinary `tails`-style function
+/// returns a `List<List<Nat>>` whose inner lists share the outer spine — `~2m` heap cells but
+/// `m^2 + m + 1` decode nodes, because the decoder re-walked each shared sub-list once per pointer
+/// into it. Breakeven was `m ~ 4_471`, three orders of magnitude below `DEFAULT_CAPS.heap`, so a
+/// correct, fast, cap-respecting program could be refused. Memoization closes it: the same fixture at
+/// `m = 64_000` decodes in about 192,000 nodes. What remains is honest — distinct `(pointer, depth)`
+/// pairs are at most `heap.len() * (depth + 1)`, so a 5,000,000-cell heap under a 64-deep type can
+/// still present 320,000,000 distinct nodes and be refused, and 320,000,000 distinct nodes is
+/// 320,000,000 nodes of real memory.
 ///
-/// returns a `List<List<Nat>>` whose inner lists all SHARE the outer spine's cells — about `2m` heap
-/// cells for an `m`-element input, but `m² + m + 1` decode nodes, because this decoder walks each
-/// shared sub-list again for every pointer into it. **That is not a crafted heap; it is what `tails`
-/// produces.** Breakeven is `m ≈ 4,471` — three orders of magnitude below `DEFAULT_CAPS.heap`, and a
-/// perfectly ordinary input size. So a correct, fast, cap-respecting program CAN still be refused
-/// here, and calling this case adversarial (as an earlier revision of this comment did) was wrong.
-///
-/// Where the budget IS exactly as protective as intended is DEPTH, which is the hazard `MAX_TY_DEPTH`
-/// opens up. For the same maximally-shared shape, cost is `~n^d`, so breakeven `n ≈ 20_000_000^(1/d)`:
-///
-/// | `d` | 2 | 3 | 4 | 64 |
-/// |---|---|---|---|---|
-/// | breakeven `n` | ~4,471 | ~271 | ~67 | ~1.3 — i.e. **2 cells** already exceed it by ~9 orders |
-///
-/// Closing the `d = 2` gap properly needs a SHARING-AWARE decode — memoizing on `(pointer, type)` so
-/// an aliased sub-list is built once — not a bigger number. Filed in the spec's "What stays open".
-///
-/// `decode_asm`/`decode_word`, the Value-directed siblings, need no budget: they recurse on a finite
-/// reference `Value` already in memory, so its size is the bound.
+/// `decode_asm`/`decode_word`, the Value-directed siblings, are bounded the same way and for the same
+/// reason; see `decode_word`.
 ///
 /// Bounded by construction, not by a runtime check: `DEFAULT_CAPS.heap` is the literal constant
 /// `5_000_000` (see `DEFAULT_CAPS`), so `4 * DEFAULT_CAPS.heap` is `20_000_000` — far under both
@@ -828,12 +911,32 @@ pub fn decode_asm_ty_reason(outcome: &AsmOutcome, ty: &Ty) -> Result<Value, Deco
     decode_word_ty(outcome.result, &outcome.heap, ty, &mut budget)
 }
 
+/// Memo for the type-directed decode, keyed `(heap pointer, depth)`.
+///
+/// **Depth identifies the type, and that is a property of this decoder rather than a convenience.**
+/// `decode_word_ty_at` recurses in exactly one arm, `Ty::List(elem)`, and recurses on `elem` — so the
+/// types visited from the root form a suffix chain of the root type, and a position in that chain
+/// names one of them uniquely. A `usize` is therefore a complete key, with no `Ty` hashing and no
+/// `Hash` impl on a public type.
+///
+/// Only LIST values are memoized. A `Nat`/`Bool`/`Unit` leaf costs one construction, where an entry
+/// costs a hash, a key and a clone.
+///
+/// **The table's total size is bounded too, and by the same unit `MAX_DECODE_NODES` counts.** Every
+/// insert happens in the cons-up loop, one per `Cons` `spend` (see `MAX_DECODE_NODES`'s doc), and
+/// nothing else inserts — so the table can hold at most one entry per budget unit spent, roughly
+/// 20,000,000 entries at the current constant, on the order of a gigabyte. That is a new term in the
+/// decoder's peak memory that did not exist before this branch.
+type TyMemo = HashMap<(u64, usize), Value>;
+
 /// Type-directed decode of one word. `pub(crate)` because `tm::decode::decode_tape_ty_reason` decodes
 /// the same `(word, heap)` pair off a set of TAPES and must not carry a second copy of THIS decoder —
-/// a second budget/cycle-bound pair could silently disagree with this one. That claim is narrower than
-/// it sounds: the VALUE-directed sibling below, `decode_word`, IS duplicated — `tm::decode` has its
-/// own copy rather than calling this one — but safely, since both recurse structurally on a finite
-/// reference `Value` already in memory and need no budget at all (see `MAX_DECODE_NODES`'s doc above).
+/// a second budget/cycle-bound pair could silently disagree with this one. **That claim used to be
+/// qualified, and the qualification was false.** It read: the VALUE-directed sibling `decode_word` IS
+/// duplicated, "but safely, since both recurse structurally on a finite reference `Value` already in
+/// memory and need no budget at all". A finite reference `Value` bounds TERMINATION and not COST — an
+/// `Rc`-shared one is a DAG, and walking it expands the DAG back into a tree. So `decode_word` is no
+/// longer duplicated either, for exactly the reason given above for this function.
 ///
 /// Two SEPARATE totality guards, neither implying the other:
 ///
@@ -842,34 +945,47 @@ pub fn decode_asm_ty_reason(outcome: &AsmOutcome, ty: &Ty) -> Result<Value, Deco
 ///   cyclic heap decode to `Err` instead of overflowing the stack — a chain longer than the heap has
 ///   cells must have revisited one. It bounds CYCLES, not SIZE: it says nothing about how much a
 ///   single acyclic decode may construct. **A cycle wins a `Mismatch` against its OWN spine's cost,
-///   never UNCONDITIONALLY** — see the "does not reach a cycle sitting behind an expensive SIBLING"
-///   paragraph below, not `DecodeFailure`'s doc, which lists this arm's failure as `Mismatch` with no
-///   such qualification — because the `Ty::List` arm below walks the spine to completion (or to the
-///   cycle bound) in a pass that decodes no head and spends no `budget` at all, BEFORE a second pass
-///   decodes any head of THAT spine. An earlier version of this function interleaved the two —
-///   decoding each head as it walked past it — so a cyclic heap whose
-///   OWN elements were themselves expensive to decode could exhaust `budget` on an early, repeated
-///   element before the cycle bound ever fired, and get misreported as `BudgetExhausted`. Separating
-///   the passes closes exactly that hazard: a cycle cannot be starved by the cost of its own spine's
-///   elements.
+///   unconditionally** — matching `DecodeFailure`'s doc, which lists this arm's failure as `Mismatch`
+///   with no qualification — because the `Ty::List` arm below walks the spine to completion (or to the
+///   cycle bound) in a pass that decodes no head at all, BEFORE a second pass decodes any head of THAT
+///   spine. An earlier version of this function interleaved the two — decoding each head as it walked
+///   past it — so a cyclic heap whose OWN elements were themselves expensive to decode could exhaust
+///   `budget` on an early, repeated element before the cycle bound ever fired, and get misreported as
+///   `BudgetExhausted`. Separating the passes closes that hazard: a cycle can never be starved by the
+///   cost of DECODING its own spine's elements. Nor, once PASS 1 started charging one unit per step
+///   (see `MAX_DECODE_NODES`'s doc on why), can it be starved by the cost of WALKING them: PASS 1 does
+///   not use `?` on its own `spend` — it records exhaustion and keeps walking, still bounded by
+///   `steps > heap.len()`, so the cycle bound gets its chance to fire regardless of how little budget
+///   the walk itself has left. Only if the walk reaches nil (or a memo hit) without ever tripping the
+///   cycle bound is the recorded exhaustion reported.
 ///
 ///   **That guarantee does not reach a cycle sitting behind an expensive SIBLING.** If an earlier
 ///   element of an enclosing `List` — decoded first, in a separate call to this function — exhausts
-///   `budget` before this cyclic `List` is ever reached, `decode_word_ty` returns `BudgetExhausted`
-///   for THAT element and the whole decode fails there, via `?`, without this arm ever running: the
-///   cycle is never walked, so it cannot "win" a `Mismatch` it never gets to claim. Two files carrying
-///   the identical cyclic heap can therefore exit differently depending only on where the cyclic
-///   element sits relative to an expensive one in the type: cyclic element decoded first, `Mismatch`;
-///   cyclic element decoded after a sibling that alone exhausts the budget, `BudgetExhausted`. Both
-///   are correct, and neither is a regression — a cycle is guaranteed to win only against its own
-///   cost, never against a budget already spent elsewhere.
-/// - `budget` bounds SIZE. It is decremented once per constructed `Value` node (every `Nat`/`Bool`/
-///   `Unit` leaf and every `Cons`), via `spend`, and decode fails with `BudgetExhausted` once it would
-///   go negative. It matters because nested list types multiply: for `List<List<Nat>>`, each of up to
-///   n spine steps decodes an inner list that itself walks up to n cells, so an acyclic n-cell heap can
-///   still expand to O(n²) nodes — and `MAX_TY_DEPTH` nesting makes that O(n^d). The spine loop does
-///   not catch this: every step makes cycle-bounded progress while still constructing an unbounded
-///   amount of output.
+///   `budget` to `0` before this cyclic `List` is ever reached, `decode_word_ty` returns
+///   `BudgetExhausted` for THAT element and the whole decode fails there, via `?`, without this arm
+///   ever running: the cycle is never walked, so it cannot "win" a `Mismatch` it never gets to claim.
+///   That is the only route: a sibling that leaves `budget` merely LOW rather than fully exhausted does
+///   not stop this arm from reaching its own cycle bound, because PASS 1's own exhaustion, if any, is
+///   deferred until the walk finishes — so a cycle reached with any amount of budget remaining,
+///   including exactly `0`, still wins its `Mismatch`. A cycle is guaranteed to win against its own
+///   cost always; the only way to see `BudgetExhausted` instead is for an earlier sibling to exhaust
+///   `budget` completely first (driving it negative via `?`), so this arm never runs at all.
+/// - `budget` bounds SIZE. It is decremented once per constructed `Value` node (every
+///   `Nat`/`Bool`/`Unit` leaf and every `Cons`), via `spend`; a memo hit (see `TyMemo`) returns a clone
+///   of a node already paid for and spends nothing. Decode fails with `BudgetExhausted` once `budget`
+///   would go negative.
+///
+///   **That collapses total spends to the memo's distinct-entry count, regardless of the order a
+///   spine's heads arrive in.** Both PASS 1 and PASS 2 in the `Ty::List` arm below stop the instant they
+///   reach a pointer already in the memo, not only at nil — so a spine first reached from a SHORTER
+///   suffix is never re-walked once a longer head later runs into it; it stops there instead, the same
+///   way it would at nil. Every `(pointer, depth)` key is therefore inserted at most once for the whole
+///   decode, never overwritten. So `n * (depth + 1)`, the count of distinct `(pointer, depth)` keys an
+///   n-cell heap can name across `MAX_TY_DEPTH` nesting, bounds both the memo's SIZE and
+///   `MAX_DECODE_NODES`'s spends — see `convergent_chains_walk_the_shared_tail_once` for the
+///   convergent-spine case this closes, and
+///   `a_nested_type_over_a_shared_spine_decodes_instead_of_refusing`'s doc for the increasing-order case
+///   it also closes.
 ///
 /// Both matter because `tm::decode::decode_tape_ty_reason` reads a heap AND a type that can come from
 /// a `.tm` FILE, where neither acyclicity nor a small size is something the compiler guaranteed. Only
@@ -881,6 +997,20 @@ pub(crate) fn decode_word_ty(
     word: u64,
     heap: &[(u64, u64)],
     ty: &Ty,
+    budget: &mut usize,
+) -> Result<Value, DecodeFailure> {
+    let mut memo = TyMemo::new();
+    decode_word_ty_at(word, heap, ty, 0, &mut memo, budget)
+}
+
+/// `decode_word_ty`'s recursion, carrying the depth (which names the type — see `TyMemo`) and the
+/// memo. Split out so the public path seeds one memo per decode and every recursive call shares it.
+fn decode_word_ty_at(
+    word: u64,
+    heap: &[(u64, u64)],
+    ty: &Ty,
+    depth: usize,
+    memo: &mut TyMemo,
     budget: &mut usize,
 ) -> Result<Value, DecodeFailure> {
     match ty {
@@ -906,68 +1036,93 @@ pub(crate) fn decode_word_ty(
             Ok(Value::Unit)
         }
         Ty::List(elem) => {
-            // PASS 1 — walk the spine TWICE rather than buffering it: this walk confirms the chain
-            // reaches nil, decoding nothing and allocating nothing, so its cost is bounded purely by
-            // `heap.len()` (one counter), never by what the elements are and never by the heap's own
-            // size in memory. At most one step per cell; falling out of the loop means the chain never
-            // reached nil, i.e. it is cyclic — a `Mismatch` (the heap the file supplied is not
-            // acyclic, as a well-formed one must be), and this is checked to completion BEFORE any
-            // head is decoded, so an expensive element of THIS SPINE can never let `budget` run out
-            // first and hide the cycle behind a `BudgetExhausted` — an expensive element of an
-            // enclosing SIBLING, decoded first in a separate call, still can. See this function's doc.
+            // This list has been decoded already, at this same type. Cloning a `Value::Cons(Rc, Rc)`
+            // bumps two refcounts, so the hit SHARES rather than rebuilds — which is not a side effect
+            // of memoizing, it is the point: this clone costs no `spend` at all, and (see `budget`'s own
+            // bullet on `decode_word_ty`'s doc) that holds for a spine reached from ANY suffix, not only
+            // its longest — the result is a DAG whose distinct-node count is exactly what the budget
+            // measures.
+            if let Some(v) = memo.get(&(word, depth)) {
+                return Ok(v.clone());
+            }
+
+            // PASS 1 — walk the spine, decoding no head and allocating nothing, charging one `spend`
+            // per step (see `MAX_DECODE_NODES`'s doc on why). Falling out of the loop means the chain
+            // never reached nil, i.e. it is cyclic — a `Mismatch`, checked to completion BEFORE any
+            // head of this spine is decoded, so an expensive element of THIS SPINE can never let
+            // `budget` run out first and hide the cycle behind a `BudgetExhausted`.
             //
-            // An earlier version of this pass collected each head WORD into a `Vec<u64>` here instead
-            // of just counting: cheap per element, but that `Vec` stays fully allocated for the whole
-            // of PASS 2 below, including while PASS 2 recurses into further `Ty::List` levels — so a
-            // heap that is one big shared spine (any `w` doubles as a valid pointer into the SAME
-            // array; see `MAX_DECODE_NODES`'s doc on sharing) stacked one such `Vec` per nesting level,
-            // up to `MAX_TY_DEPTH` deep, for a total memory cost that is `O(heap.len() * MAX_TY_DEPTH)`
-            // rather than the `O(budget)` this function's own doc claims. Counting instead of
-            // collecting removes the `Vec` entirely; the second walk below re-reads the same pointers
-            // from scratch instead of remembering them.
+            // The spend is NOT `?`-ed here. Exhaustion is recorded in `exhausted` and the walk keeps
+            // going — still bounded by `steps > heap.len()`, so the extra work past exhaustion is at
+            // most one more pass over the heap, paid once for the whole decode — so the cycle bound
+            // still gets its chance to fire even after `budget` is gone. Only once the walk finishes
+            // without finding a cycle (nil, or a memo hit) does `exhausted` get reported. That is what
+            // makes the cycle win unconditionally: neither an expensive head of THIS spine (PASS 2 never
+            // runs while PASS 1 is still walking) nor `budget` merely running low or out DURING the walk
+            // itself can stop PASS 1 short of the cycle bound.
             let mut w = word;
             let mut steps: usize = 0;
+            let mut exhausted = false;
             loop {
-                if w == 0 {
+                // Nil, or a pointer already proven finite and acyclic by a completed decode. The
+                // second exit is what keeps CONVERGENT chains linear: without it each spine that runs
+                // into a shared tail re-walks the whole tail before the memo can answer.
+                if w == 0 || memo.contains_key(&(w, depth)) {
                     break;
                 }
                 if steps > heap.len() {
                     return Err(DecodeFailure::Mismatch); // the chain never reached nil: a cyclic heap
                 }
-                // `w` is read off a `.tm` FILE's tapes (see this function's doc: "neither acyclicity
-                // nor a small size is something the compiler guaranteed"), so it may not fit `usize` on
-                // a 32-bit target. `try_from` folds that into the existing "not a valid pointer"
-                // mismatch instead of truncating into a wrong, in-range index.
                 let Some(idx) = usize::try_from(w - 1).ok() else { return Err(DecodeFailure::Mismatch) };
                 let Some(&(_, t)) = heap.get(idx) else { return Err(DecodeFailure::Mismatch) };
+                if !exhausted && spend(budget).is_err() {
+                    exhausted = true; // remember, but keep walking — the cycle bound still must fire
+                }
                 steps += 1;
                 w = t;
             }
+            if exhausted {
+                return Err(DecodeFailure::BudgetExhausted);
+            }
 
-            // PASS 2 — the spine is now confirmed finite and acyclic, so decoding every head (the
-            // expensive part) and spending `budget` on it is honest: any exhaustion from here really
-            // is this decode being too large, not a cycle in disguise. Re-walks the identical pointers
-            // PASS 1 already validated (`word` and `heap` are unchanged), decoding each head as it is
-            // reached rather than buffering words first. `heads` grows only as heads are successfully
-            // decoded, and every decoded head spends `budget` (below), so this `Vec` is already bounded
-            // by `MAX_DECODE_NODES` — no `with_capacity` needed, and none is used. Same order as
-            // before: heads decoded front-to-back, then consed back-to-front.
-            let mut heads = Vec::new();
+            // PASS 2 — the spine is confirmed finite and acyclic (or ends at a memo hit, which is
+            // proven finite and acyclic by the completed decode that produced it), so decoding every
+            // head and spending `budget` on it is honest. Each cell's POINTER is carried alongside its
+            // decoded head, which costs 8 bytes per entry and is what lets the cons-up loop below
+            // memoize every suffix rather than only the finished list.
+            let mut cells: Vec<(u64, Value)> = Vec::new();
             let mut w = word;
-            loop {
+            let base = loop {
                 if w == 0 {
-                    break;
+                    spend(budget)?; // the Nil node — only charged when the spine itself reaches nil; a
+                    // spine that stops at a memo hit below builds no `Nil` of its own
+                    break Value::Nil;
                 }
+                if let Some(v) = memo.get(&(w, depth)) {
+                    break v.clone(); // the rest of this spine is already built
+                }
+                // These two checks are unreachable in practice: PASS 1 above walks this identical chain
+                // over the same immutable heap first, so an invalid pointer is already a `Mismatch`
+                // raised there, before PASS 2 ever sees it. They stay rather than get deleted as dead
+                // code because they are what keeps this arm total if the two passes ever diverge — and
+                // that stays true after this mid-spine exit: both passes stop at the same memo hit, so
+                // the two chains still coincide. No `spend` here — PASS 1 already charged this step (see
+                // `MAX_DECODE_NODES`'s doc); charging it again would double-count.
                 let Some(idx) = usize::try_from(w - 1).ok() else { return Err(DecodeFailure::Mismatch) };
                 let Some(&(h, t)) = heap.get(idx) else { return Err(DecodeFailure::Mismatch) };
-                heads.push(decode_word_ty(h, heap, elem, budget)?);
+                cells.push((w, decode_word_ty_at(h, heap, elem, depth + 1, memo, budget)?));
                 w = t;
-            }
-            spend(budget)?; // the Nil node
-            let mut out = Value::Nil;
-            for h in heads.into_iter().rev() {
+            };
+
+            let mut out = base;
+            for (ptr, h) in cells.into_iter().rev() {
                 spend(budget)?; // each Cons node
                 out = Value::Cons(Rc::new(h), Rc::new(out));
+                // SUFFIX MEMOIZATION. `out` at this point is exactly the value of the list starting
+                // at `ptr`, so recording it here — rather than recording only the finished list once
+                // the loop ends — is what makes an aliased suffix a hit. `tails`'s m elements ARE the
+                // m suffixes of one spine, so the first element's decode answers all the others.
+                memo.insert((ptr, depth), out.clone());
             }
             Ok(out)
         }
@@ -981,6 +1136,122 @@ mod tests {
     use crate::desugar::desugar;
     use crate::parser::parse;
     use crate::tm::lower_asm::lower_asm;
+
+    /// A flat `List<Nat>` over L cells spends exactly `3L + 1`: L spine steps, L `Nat` leaves, one `Nil`,
+    /// L `Cons` nodes. Asserted as an EQUATION at more than one L, so a constant offset cannot pass it.
+    ///
+    /// This is the derivation `MAX_DECODE_NODES`'s doc states, and it is checked here rather than in
+    /// `tests/` because the budget is a parameter of `decode_word_ty` and readable only from inside.
+    #[test]
+    fn a_flat_list_spends_exactly_three_per_cell_plus_one() {
+        for l in [1_u64, 2, 7, 50] {
+            // cons(1, cons(2, ... nil)): cell i is (i+1, i+2), last tail nil. Pointer 1 is the head.
+            let heap: Vec<(u64, u64)> = (1..=l).map(|i| (i, if i == l { 0 } else { i + 1 })).collect();
+            let ty = Ty::List(Box::new(Ty::Nat));
+            let start = 1_000_usize;
+            let mut budget = start;
+            decode_word_ty(1, &heap, &ty, &mut budget).expect("flat list decodes");
+            let spent = start - budget;
+            assert_eq!(spent as u64, 3 * l + 1, "L={l}");
+        }
+    }
+
+    /// §6's invariant, which is what keeps the memo from outgrowing the budget: every memo entry is paid
+    /// for by exactly one budget unit. Checked on the sharing fixture, where hits actually happen.
+    #[test]
+    fn every_memo_entry_is_paid_for_by_one_budget_unit() {
+        // tails([1..m]) at a small m: inner cell i = (i, i+1); outer cell m+j = (j, next).
+        let m = 6_u64;
+        let mut heap: Vec<(u64, u64)> = (1..=m).map(|i| (i, if i == m { 0 } else { i + 1 })).collect();
+        for j in 1..=m {
+            heap.push((j, if j == m { 0 } else { m + j + 1 }));
+        }
+        let ty = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
+        let start = 100_000_usize;
+        let mut budget = start;
+        let mut memo = TyMemo::new();
+        decode_word_ty_at(m + 1, &heap, &ty, 0, &mut memo, &mut budget).expect("tails decodes");
+        let spent = start - budget;
+        // Every insert accompanies exactly one `spend` in the cons-up loop, and nothing else inserts, so
+        // entries can never exceed units spent. (A second assertion here used to claim linear-vs-quadratic
+        // too, `spent < 10 * (2 * m)`, but it never bit: decoding each of this fixture's `m` inner lists
+        // with NO memo at all — 3 * (m - j + 1) + 1 summed over j, plus the outer spine's 2m + 1 — spends
+        // exactly 82 against that 120 threshold at `m = 6`, since `m` is too small for the O(m^2) a
+        // no-memo run would actually cost to cross it. The linear-vs-quadratic claim belongs to
+        // `convergent_chains_walk_the_shared_tail_once` and its increasing-order case instead, which use
+        // thresholds a quadratic run actually exceeds.)
+        assert!(memo.len() <= spent, "memo {} entries against {spent} units spent", memo.len());
+    }
+
+    /// CONVERGENT CHAINS — the case suffix memoization alone does not fix, and the reason PASS 1 needs a
+    /// memo exit of its own.
+    ///
+    /// `k` distinct spines of length `p`, each ending by pointing into ONE shared tail of length `s`. The
+    /// answer is right with or without the exit; only the work differs, so this asserts on units spent.
+    /// Without the exit each spine re-walks the whole shared tail: `k * (p + s)`. With it, the tail is
+    /// walked once: `k * p + s`, plus nodes.
+    ///
+    /// A second, unrelated shape shares this test because both are what forced the mid-spine exit: an
+    /// outer list whose heads are pointers `1, 2, ..., n` in INCREASING order, over cells `i = (i - 1,
+    /// i - 1)` — the counterexample Task 3's review used to show the un-qualified size bound was false
+    /// (see `a_nested_type_over_a_shared_spine_decodes_instead_of_refusing`'s doc for the FAVOURABLE
+    /// order this one inverts). Head `j` misses `(j, depth)` — only shorter suffixes were recorded
+    /// before it runs — so without this exit PASS 2 re-decodes `j` heads per outer step: `Sigma(2j+1) ~=
+    /// n^2` spends on a `2n`-cell heap. With it, head `j` stops the instant it reaches `(j-1, depth)`, so
+    /// every cell is walked once across the whole decode.
+    #[test]
+    fn convergent_chains_walk_the_shared_tail_once() {
+        let (k, p, s) = (20_u64, 3_u64, 200_u64);
+        // Cells 1..=s are the shared tail: cell i = (i, i+1), last tail nil.
+        let mut heap: Vec<(u64, u64)> = (1..=s).map(|i| (i, if i == s { 0 } else { i + 1 })).collect();
+        // Then k prefixes of length p, each running into pointer 1 (the shared tail's head).
+        let mut starts = Vec::new();
+        for c in 0..k {
+            let base = s + c * p;
+            starts.push(base + 1);
+            for q in 0..p {
+                let tail = if q == p - 1 { 1 } else { base + q + 2 };
+                heap.push((7, tail)); // head value is arbitrary; `Ty::Nat` accepts any word
+            }
+        }
+        // An outer list whose j-th head is the pointer to the j-th prefix.
+        let outer_base = heap.len() as u64;
+        for (j, st) in starts.iter().enumerate() {
+            let j = j as u64;
+            let tail = if j == k - 1 { 0 } else { outer_base + j + 2 };
+            heap.push((*st, tail));
+        }
+        let ty = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
+        let start = 10_000_000_usize;
+        let mut budget = start;
+        decode_word_ty(outer_base + 1, &heap, &ty, &mut budget).expect("convergent chains decode");
+        let spent = start - budget;
+        // Without the PASS 1 exit this is >= k * s = 4,000 steps of re-walking alone. With it, the shared
+        // tail is walked once, so total work is linear in the heap: 3 * (s + k * p + k) + change.
+        let cells = s + k * p + k;
+        assert!(spent < 4 * cells as usize, "spent {spent} for {cells} cells — the shared tail is being re-walked");
+
+        // INCREASING-ORDER SPINE — see this test's doc for the shape. `n` inner cells at pointers
+        // `1..=n` (cell i = (i - 1, i - 1)), plus a SEPARATE outer spine of `n` more cells whose j-th
+        // head is pointer `j`, walked in increasing `j` order.
+        let n = 200_u64;
+        let mut heap2: Vec<(u64, u64)> = (1..=n).map(|i| (i - 1, i - 1)).collect();
+        for j in 1..=n {
+            heap2.push((j, if j == n { 0 } else { n + j + 1 }));
+        }
+        let ty2 = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
+        let start2 = 1_000_000_usize;
+        let mut budget2 = start2;
+        decode_word_ty(n + 1, &heap2, &ty2, &mut budget2).expect("increasing-order spine decodes");
+        let spent2 = start2 - budget2;
+        // Without the exit this is ~Sigma(2j+1) = n^2 + 2n, quadratic in a 2n-cell heap. With it, every
+        // cell is walked once, so total work is linear.
+        let cells2 = 2 * n;
+        assert!(
+            spent2 < 4 * cells2 as usize,
+            "spent {spent2} for {cells2} cells — increasing-order heads are being re-walked"
+        );
+    }
 
     #[test]
     fn decodes_nat_and_bool_by_expected_shape() {
@@ -1499,27 +1770,65 @@ mod tests {
         assert_eq!(heads, (1..=1000u64).rev().collect::<Vec<u64>>());
     }
 
-    /// The spine loop bounds CYCLES — one step per heap cell. It does not bound SIZE. For
-    /// `List<List<Nat>>`, each of up to n spine steps decodes an inner list that walks up to n cells:
-    /// O(n^2) nodes, and `MAX_TY_DEPTH` nesting makes it O(n^d). BOTH factors are file-supplied, because
-    /// a machine of `state s: accept` returns its initial tapes unchanged. The two guards are separate
-    /// guarantees and neither implies the other.
+    /// The spine loop bounds CYCLES — one step per heap cell. It does not bound the number of DISTINCT
+    /// nodes a decode with no sharing must construct. For a `List<List<Nat>>` where every inner list is
+    /// its own unshared cells, each of up to n spine steps decodes an inner list that walks up to n
+    /// cells: O(n^2) nodes, and `MAX_TY_DEPTH` nesting makes it O(n^d).
+    ///
+    /// **This heap is not that case, and that is the point.** Every cell here doubles as the next OUTER
+    /// spine pointer AND the root of an INNER list — the identical "one big shared spine" shape `tails`
+    /// exhibits (see `tests/sharing_aware_decode.rs`), just self-referential instead of split across two
+    /// halves. Before `TyMemo`, decoding inner list `q` re-walked cells `q, q-1, ..., 1` from scratch on
+    /// every outer step, for the O(n^2) total the first paragraph derives — this test used to pin
+    /// exactly that, asserting `None` at n = 6000 (`6000^2 + 6000 + 1` = 36,006,001 nodes, ~1.8x
+    /// `MAX_DECODE_NODES`). After `TyMemo`, the outer spine's first step decodes inner list `n - 1` in
+    /// full and records every one of its suffixes at depth 1 (§4.1 of the design doc), so every later
+    /// outer step's inner decode is a memo hit. The heap and the answer are unchanged; only the work to
+    /// reach it dropped from ~36,006,001 nodes to a few thousand. Refusing this decode would now be the
+    /// WRONG answer — `MAX_DECODE_NODES` measures DISTINCT nodes, and this decode produces far fewer
+    /// than n^2 of them — so the assertion below is on the correct VALUE, not on refusal.
+    ///
+    /// **That DISTINCT-nodes claim holds in general, not only for this test's own spine order.** This
+    /// outer spine walks pointers `n → 1`, so it reaches every inner list at its LONGEST suffix first —
+    /// the same favorable order `tails`-shaped input has, and on its own that order is enough for the
+    /// collapse above. A spine reached from a SHORTER suffix first (heads arriving in INCREASING order)
+    /// used to be the counterexample: PASS 1 and PASS 2 only checked the memo at the very top of the arm,
+    /// never mid-spine, so a later, longer head would re-walk and re-charge a suffix already recorded.
+    /// Both passes now stop the instant they reach a pointer already in the memo, not only at nil, so the
+    /// same collapse holds for that order too — see `convergent_chains_walk_the_shared_tail_once`'s
+    /// second case, which walks this identical heap shape in increasing order and pins the same
+    /// distinct-node bound.
     #[test]
-    fn a_nested_type_over_a_large_heap_is_refused_rather_than_expanded() {
+    fn a_nested_type_over_a_shared_spine_decodes_instead_of_refusing() {
         use crate::ty::Ty;
-        // Every cell points at the previous one, so each of the n spine steps decodes an inner list of
-        // length up to n. Costing it out: the outer spine takes n steps, each contributing 1 outer
-        // `Cons` plus an inner `List<Nat>` decode of length m (m running 0..=n-1), which costs 2m + 1
-        // nodes. Summing the inner costs over m = 0..=n-1 gives n^2 (sum of the first n odd numbers),
-        // plus n outer `Cons` nodes, plus 1 final outer `Nil`: n^2 + n + 1 total.
-        //
-        // n = 6000 gives 6000^2 + 6000 + 1 = 36,006,001 nodes — about 1.8x MAX_DECODE_NODES
-        // (4 * DEFAULT_CAPS.heap = 20,000,000), decisively over without being absurdly large.
+        // Every cell points at the previous one, so the SAME n cells serve as both the outer spine and
+        // every inner list's suffixes — see this test's doc.
         let n = 6000u64;
         let heap: Vec<(u64, u64)> = (1..=n).map(|i| (i - 1, i - 1)).collect();
         let o = AsmOutcome { result: n, heap };
         let nested = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
-        assert_eq!(decode_asm_ty(&o, &nested), None, "must exhaust the node budget, not expand");
+
+        // Independently-built expected value. Inner list `q` (the decode of pointer `q`) is
+        // `[q-1, q-2, ..., 0]`, `q` elements long; the outer spine's `p`-th cell (p = n downto 1) heads
+        // with inner list `p - 1`. Each inner list is built once and shared via `Rc`, the same suffix
+        // sharing `tests/sharing_aware_decode.rs::tails_value` relies on.
+        let mut inner_by_q: Vec<Rc<Value>> = vec![Rc::new(Value::Nil)]; // inner_by_q[0] = []
+        for q in 1..n {
+            let prev = Rc::clone(&inner_by_q[(q - 1) as usize]);
+            inner_by_q.push(Rc::new(Value::Cons(Rc::new(Value::Nat(q - 1)), prev)));
+        }
+        let mut want = Value::Nil;
+        for q in 0..n {
+            want = Value::Cons(Rc::clone(&inner_by_q[q as usize]), Rc::new(want));
+        }
+
+        let got = decode_asm_ty(&o, &nested);
+        assert!(
+            got == Some(want),
+            "the (pointer, depth) memo must decode this shared spine, not refuse it; mismatch omitted \
+             here because at n={n} the two structures would Debug-format to on the order of n^2 \
+             (~36,000,000) nodes"
+        );
     }
 
     /// The budget must not reject legitimate decodes. A flat list well under the cap still decodes, and
@@ -1538,23 +1847,24 @@ mod tests {
     }
 
     /// Pins the per-node accounting exactly, in both directions: a flat `List<Nat>` of `L` elements
-    /// costs `2L + 1` nodes (L `Cons` + L `Nat` leaves + 1 `Nil`), so it must decode iff
-    /// `2L + 1 <= MAX_DECODE_NODES`. `L` is chosen at that boundary — `(MAX_DECODE_NODES - 1) / 2` is
-    /// the largest `L` for which `2L + 1` still fits, so it must decode; `L + 1` pushes `2L + 1` one
-    /// past the budget, so it must not. Neither an over-count nor an under-count of what a node costs
-    /// (e.g. charging only for `Cons`, not for `Nat` leaves) could pass both assertions at once — unlike
-    /// the nested-heap test above, which a same-order miscount could still slip past.
+    /// costs `3L + 1` units (L spine steps + L `Cons` + L `Nat` leaves + 1 `Nil`), so it must decode iff
+    /// `3L + 1 <= MAX_DECODE_NODES`. `L` is chosen at that boundary — `(MAX_DECODE_NODES - 1) / 3` is
+    /// the largest `L` for which `3L + 1` still fits, so it must decode; `L + 1` pushes `3L + 1` one
+    /// past the budget, so it must not. Neither an over-count nor an under-count of what a step or node
+    /// costs (e.g. charging only for `Cons`, not for `Nat` leaves or spine steps) could pass both
+    /// assertions at once — unlike the nested-heap test above, which a same-order miscount could still
+    /// slip past.
     ///
-    /// Ignored by default: `L` is ~10,000,000, so this allocates ~`MAX_DECODE_NODES` heap cells and
-    /// `Value`s, which is slow under a debug build. Run explicitly, or via the slow tier
-    /// (`scripts/check-slow.sh`).
+    /// Ignored by default: allocates ~`L` (~6,666,666) heap cells and ~`MAX_DECODE_NODES` (~20,000,000)
+    /// `Value`s — three `Value`s per cell, per the `3L + 1` accounting above — which is slow under a
+    /// debug build. Run explicitly, or via the slow tier (`scripts/check-slow.sh`).
     #[test]
     #[ignore = "slow tier: allocates ~MAX_DECODE_NODES values"]
     fn the_node_budget_boundary_is_exact() {
         use crate::ty::Ty;
-        let l_ok = (MAX_DECODE_NODES as u64 - 1) / 2;
-        let cost_ok = 2 * l_ok + 1;
-        let cost_over = 2 * (l_ok + 1) + 1;
+        let l_ok = (MAX_DECODE_NODES as u64 - 1) / 3;
+        let cost_ok = 3 * l_ok + 1;
+        let cost_over = 3 * (l_ok + 1) + 1;
         assert!(cost_ok <= MAX_DECODE_NODES as u64, "sanity: l_ok must fit the budget");
         assert!(cost_over > MAX_DECODE_NODES as u64, "sanity: l_ok must be the largest such L");
 
@@ -1571,7 +1881,7 @@ mod tests {
         assert_eq!(
             decode_asm_ty(&o, &Ty::List(Box::new(Ty::Nat))),
             None,
-            "a {l_over}-element list costs one node over budget and must not decode"
+            "a {l_over}-element list costs one unit over budget and must not decode"
         );
     }
 
@@ -1703,18 +2013,18 @@ mod tests {
     static ALLOCATOR: CountingAlloc = CountingAlloc;
 
     /// Pins the SECOND fix: at `budget = 0`, the `Ty::List` arm must allocate NOTHING before the first
-    /// `spend` anywhere in the call can even run, at any nesting depth — `heads` grows lazily and
+    /// `spend` anywhere in the call can even run, at any nesting depth — `cells` grows lazily and
     /// nothing buffers the spine's WORDS ahead of decoding them. `budget = 0` makes that first `spend`
     /// fail immediately, so whatever the allocator saw during the call is exactly what was committed
     /// before the budget could act.
     ///
     /// The heap is a single `l`-cell acyclic spine where EVERY cell's head word repoints at the spine's
-    /// own start — "one big shared spine" (`decode_word_ty`'s doc on `PASS 1` names this exact hazard),
-    /// so decoding any head at any nesting level re-walks the SAME `l` cells. `ty` nests that spine 4
-    /// levels deep (`List<List<List<List<Nat>>>>`). An earlier version of this arm collected the
-    /// spine's head WORDS into a `Vec<u64>` before decoding any of them (`PASS 1`'s doc, "An earlier
-    /// version of this pass collected each head WORD into a `Vec<u64>`") — one such `Vec`, sized to the
-    /// FULL spine, PER nesting level, all before `budget = 0` ever gets to refuse anything: roughly
+    /// own start — "one big shared spine", so decoding any head at any nesting level re-walks the SAME
+    /// `l` cells. `ty` nests that spine 4 levels deep (`List<List<List<List<Nat>>>>`). An earlier
+    /// version of this arm (in what is now `decode_word_ty_at`) collected the spine's head WORDS into a
+    /// `Vec<u64>` before decoding any of them — a paragraph PASS 1's own comment used to carry, removed
+    /// when that comment was shortened — one such `Vec`, sized to the FULL spine, PER nesting level, all
+    /// before `budget = 0` ever gets to refuse anything: roughly
     /// `4 * l * 8` bytes for `l = 20,000`, around 640KB, decisively over the bound below. The current
     /// arm allocates zero regardless of `l` or nesting depth.
     ///
@@ -1722,9 +2032,9 @@ mod tests {
     /// `CountingAlloc`'s doc): a `thread_local!` counter cannot see a concurrent test's allocation, so
     /// there is no foreign noise left to leave headroom FOR. What remains is only whether THIS call
     /// allocates, and tracing it settles that exactly — PASS 1 counts without allocating, PASS 2's
-    /// `heads` is `Vec::new()` (no allocation until a first successful push), and at `budget = 0` the
+    /// `cells` is `Vec::new()` (no allocation until a first successful push), and at `budget = 0` the
     /// first `spend` anywhere in the call — reached by recursing to the innermost `Ty::Nat`, before
-    /// `heads.push` on any level ever returns — fails via `?` before any `Vec` grows or any `Cons`
+    /// `cells.push` on any level ever returns — fails via `?` before any `Vec` grows or any `Cons`
     /// node's `Rc::new` runs. Confirmed directly: a probe read of `bytes_used` at HEAD prints `0`, on
     /// every one of `cargo test --release`, its debug build, `--include-ignored`, and `cargo nextest`.
     #[test]
@@ -1752,18 +2062,24 @@ mod tests {
     /// `Mismatch` against ITS OWN spine's cost, never unconditionally: reached behind a SIBLING that
     /// alone exhausts `budget`, the same cyclic heap is never even walked, and the failure is
     /// `BudgetExhausted` instead. Pins that with one heap holding both an expensive, acyclic
-    /// `List<Nat>` (one element over `MAX_DECODE_NODES` on its own) and a cyclic `List<Nat>` (a
-    /// single self-referencing cell), assembled into a two-element `List<List<Nat>>` both ways: the
-    /// two orderings differ ONLY in which element is decoded first, and that alone flips the reported
-    /// `DecodeFailure`.
+    /// `List<Nat>` (one element over the `3L + 1` boundary `the_node_budget_boundary_is_exact` derives,
+    /// on its own) and a cyclic `List<Nat>` (a single self-referencing cell), assembled into a
+    /// two-element `List<List<Nat>>` both ways: the two orderings differ ONLY in which element is
+    /// decoded first, and that alone flips the reported `DecodeFailure`.
     ///
     /// Ignored by default: same scale as `the_node_budget_boundary_is_exact` above, for the same
-    /// reason — the expensive sibling alone needs ~10,000,000 heap cells to exceed the budget.
+    /// reason — the expensive sibling alone needs ~6,666,667 heap cells to exceed the budget.
     #[test]
-    #[ignore = "slow tier: allocates ~10,000,000 heap cells"]
+    #[ignore = "slow tier: allocates ~6,666,667 heap cells"]
     fn a_cyclic_sibling_wins_only_against_its_own_spines_cost() {
         use crate::ty::Ty;
-        let l_over = (MAX_DECODE_NODES as u64 - 1) / 2 + 1; // one element over budget, alone
+        // The `3L + 1` boundary `the_node_budget_boundary_is_exact` derives: `l_ok` is the largest `L`
+        // for which `3L + 1` still fits `MAX_DECODE_NODES`, so `l_ok + 1` is one element past it —
+        // "one element over budget, alone" for the expensive sibling below. (A stale `(MAX_DECODE_NODES
+        // - 1) / 2 + 1` used to stand here: the pre-branch `2L + 1` boundary, millions of elements
+        // short of the true one under this branch's `3L + 1` accounting.)
+        let l_ok = (MAX_DECODE_NODES as u64 - 1) / 3;
+        let l_over = l_ok + 1;
 
         // The expensive, acyclic sibling: a flat `List<Nat>` of `l_over` elements, same construction
         // as `the_node_budget_boundary_is_exact`'s over-budget case. Its own pointer is `l_over`.

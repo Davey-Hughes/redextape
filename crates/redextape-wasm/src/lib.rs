@@ -467,8 +467,9 @@ impl Session {
     /// # Errors
     ///
     /// Returns `Err` only if `to_value` cannot marshal the decoded result; not expected for this
-    /// crate's own types. The interpreter's own failure modes (budget exhaustion, an undecodable type)
-    /// are not errors here — they arrive as `Decoded::Fault`/`Decoded::Undecodable`.
+    /// crate's own types. The interpreter's own failure modes (budget exhaustion, a value too
+    /// logically large to print) are not errors here — they arrive as `Decoded::Fault`/
+    /// `Decoded::TooLargeToPrint`.
     #[wasm_bindgen]
     pub fn evaluate(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.evaluate())
