@@ -850,6 +850,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build the WASM package (its .d.ts is what typecheck resolves `../pkg` against)
         run: pnpm run build:wasm
+      - name: Generate the wire-type bindings (web/bindings is gitignored; typecheck resolves against it)
+        run: pnpm run build:bindings
       - name: Install the Chromium Playwright needs
         run: pnpm exec playwright install --with-deps chromium
       - name: Lint + format check

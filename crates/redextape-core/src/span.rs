@@ -4,6 +4,7 @@
 /// A half-open byte range `[start, end)` into the source string.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Span {
     pub start: usize,
     pub end: usize,

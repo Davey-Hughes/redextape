@@ -3,8 +3,9 @@
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml), so the local and CI gates cannot drift.
 # The pre-commit hooks deliberately do NOT run it — they stay fast: fmt and clippy on a Rust change,
-# biome and tsc on a web/ one, plus two unscoped tree-wide gates (control bytes, `file:line`
-# citations) on every commit. Six hooks; this is the before-a-merge check.
+# biome and tsc on a web/ one, the Lua/parser check on a grammar one, plus four `always_run` tree-wide
+# gates (control bytes, `file:line` citations, documented figures, shared doc regions) on every commit.
+# Nine hooks; this is the before-a-merge check.
 #
 #   scripts/check-all.sh                  # everything: base, LLVM and browser configs
 #   scripts/check-all.sh --no-llvm        # skip LLVM (no toolchain installed)
@@ -34,6 +35,13 @@
 # Kept separate deliberately — a merge gate that takes minutes stops being run before merges.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# ts-rs writes its generated TypeScript during `cargo test`, and resolves this variable relative to
+# each crate's MANIFEST directory rather than the workspace root — so leaving it unset makes the
+# `--features ts` test leg scatter a `bindings/` directory into `crates/redextape-core/`, untracked and
+# outside `.gitignore`'s `/web/bindings/` entry. Absolute, and set once for every leg, so the gate
+# writes the same bindings the web build consumes instead of a stray copy nobody reads.
+export TS_RS_EXPORT_DIR="$PWD/web/bindings"
 
 # THE SCRIPT ALREADY ASSUMED CWD == REPO ROOT IN SEVERAL PLACES BEFORE THIS LINE EXISTED — it was
 # just never enforced. `check_grammars` walks `grammars/` for `tree-sitter.json`, the browser leg passes the relative
@@ -138,7 +146,13 @@ LEGS=(
   "base|test|-p redextape-core --features serde"
   "base|wasm|-p redextape-core --lib"
   "base|wasm|-p redextape-core --lib --features serde"
+  "base|clippy|-p redextape-core --features ts --all-targets"
+  "base|test|-p redextape-core --features ts"
+  "base|wasm|-p redextape-core --lib --features ts"
   "base|wasm|-p redextape-wasm --lib"
+  "base|clippy|-p redextape-wasm --features ts --all-targets"
+  "base|test|-p redextape-wasm --features ts"
+  "base|wasm|-p redextape-wasm --lib --features ts"
   "base|build|-p redextape-native --no-default-features"
   "base|clippy|-p redextape-native --no-default-features --all-targets"
   "base|test|-p redextape-native --no-default-features"
@@ -253,13 +267,16 @@ test_cfg() { run cargo nextest run "$@"; run cargo test "$@" --doc; }
 # box without rustup. Distro-packaged Rust without rustup is a real configuration, so rustup's
 # presence is checked first and reported honestly before the target is checked at all.
 #
-# CALLED FROM THREE ROWS ON PURPOSE, and the redundancy is the cheaper mistake. `base|wasmprobe|` runs
-# it FIRST in its tier so a missing target fails in seconds rather than after the workspace clippy and
-# test legs have already run — the same reason `llvm|probe|` leads the LLVM tier. Each `wasm` row (the
-# default build and the `--features serde` one) then calls it again so every leg is correct on its own:
+# CALLED FROM `base|wasmprobe|` AND AGAIN FROM EVERY `wasm` ROW, and the redundancy is the cheaper
+# mistake. NO COUNT IS GIVEN, deliberately: this paragraph said "THREE ROWS" while the table held four
+# `wasm` rows, having been written when it held two — the stale-figure failure this repository keeps
+# finding, here in the comment explaining why the redundancy is deliberate. `base|wasmprobe|` runs it
+# FIRST in its tier so a missing target fails in seconds rather than after the workspace clippy and
+# test legs have already run — the same reason `llvm|probe|` leads the LLVM tier. Each `wasm` row then
+# calls it again so every leg is correct on its own:
 # a future edit that drops or reorders the probe row degrades the error message, where removing this
 # call would let a leg run without its precondition and fail inside cargo instead. It is a `grep`
-# against a list rustup already has in memory, so running it three times costs nothing worth saving.
+# against a list rustup already has in memory, so repeating it per row costs nothing worth saving.
 # `ensure_llvm_prefix` is NOT called this way for a different reason: its own guard (`if [ -z
 # "${LLVM_SYS_221_PREFIX:-}" ]`) memoizes the probe, so the exported variable persists for the rest of
 # the process and a repeat call would add nothing but a duplicate log line. One call suffices — that is

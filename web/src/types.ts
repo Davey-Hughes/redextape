@@ -5,8 +5,18 @@
 // because serde does not rename. A fieldless enum variant crosses as the bare variant NAME, and a
 // struct variant as a one-key object — so `Decoded` is a union of two strings and two objects rather
 // than a discriminated union with a `kind` field.
+//
+// TYPES RE-EXPORTED FROM `../bindings/` ARE GENERATED FROM THE RUST DECLARATION and are not edited
+// here — `pnpm run build:bindings` writes them. The directory is gitignored, so there is no
+// committed copy to go stale.
+//
+// THE MIGRATION IS PARTIAL AND THIS COMMENT TRACKS IT. `Span` is generated; every other type below is
+// still declared by hand and still agrees with its Rust counterpart only by someone remembering to.
+// Two more PRs move the remaining seventeen.
 
-export type Span = { start: number; end: number }
+import type { Span } from '../bindings/Span'
+
+export type { Span }
 
 /**
  * Every `TokenClass` variant, in the Rust enum's declaration order.

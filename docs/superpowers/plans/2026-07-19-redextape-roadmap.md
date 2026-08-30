@@ -14427,3 +14427,193 @@ web typecheck............................................................Passed
 **`rust-slow` IS THE JOB THIS BRANCH MOST NEEDED, AND IT IS THE ONE A LOCAL GATE CANNOT SUBSTITUTE FOR.** It is the only thing that runs the three `#[ignore]`d tests, one of which is new here and exists precisely because it overflows a debug build's 32 MiB stack. `scripts/check-all.sh --no-llvm --no-browser`, the local run quoted above, does not reach them; neither does `cargo nextest run --workspace`. Its 10m25s here is the whole slow tier, not this branch's addition.
 
 **No causal claim is attached to any duration above**, per this file's standing note on CI timing variance. This branch's local `cargo nextest run --workspace` read 40.743s and its `check-all.sh` leg ran the same suite again; the CI `rust` job reads 11m43s for work that includes a cold build.
+
+#### THE WIRE TYPES GET A GENERATOR AND IT SHIPS PROVING ITSELF ON ONE TYPE ON PURPOSE, THE DESIGN WAS WRONG ABOUT WHERE THE BOUNDARY ENDS, EVERY CORRECTION ROUND THE FOUR TASK REVIEWS FOUND WAS PROSE — FIVE OF THE SIX WRITTEN BY THE PLAN OR THE SPEC RATHER THAN BY AN IMPLEMENTER — AND THE WHOLE-BRANCH REVIEW THEN FOUND A CRITICAL IN A FILE NO TASK EDITED (2026-08-29, branch `wire-type-generation`, `b77fd04..a61db33`, 22 commits, plus the entry commits)
+
+Design: [`../specs/2026-08-29-wire-type-generation-design.md`](../specs/2026-08-29-wire-type-generation-design.md). Plan: [`2026-08-29-wire-type-generation-plumbing.md`](2026-08-29-wire-type-generation-plumbing.md).
+
+Opens the slice filed at the close of `sharing-aware-decode` under "WHAT STAYS OPEN" — *"`web/src/types.ts` learned the new variant; nothing gates that it will learn the next one. The Rust `Decoded` enum and the TypeScript union are kept in agreement by hand."* What ships here is the plumbing that ends the hand-keeping: a default-off `ts` feature on `redextape-core` and `redextape-wasm`, `ts-rs` derives generating TypeScript into a gitignored `web/bindings/`, `web/src/types.ts` re-exporting a generated type instead of declaring it, and generation wired into `pnpm run typecheck`, `test` and `build` — deliberately NOT into `build:app`, which is the one script the Dockerfile's Rust-free stage runs — into the CI `web` job as a step of its own, and into `scripts/setup-dev.sh` so a fresh clone typechecks.
+
+**IT GENERATES EXACTLY ONE TYPE, AND THAT IS THE DESIGN'S §11 RATHER THAN AN UNFINISHED JOB.** `Span` is the whole of `web/bindings/` at this commit. `grep -c '^export type [A-Za-z]' web/src/types.ts` reads 17, and **all but one of those are derivable**: sixteen name a Rust `struct` or `enum` that can carry a `TS` derive — eleven in `redextape-core`, five in `redextape-wasm` — and PRs 2 and 3 move those sixteen, together with roughly 87 lines of prose that relocate from TypeScript comments into Rust doc comments. The exception is `Classified`, and it is named here rather than only under WHAT STAYS OPEN because a bare "seventeen" beside the spec's "sixteen" was two counts of overlapping sets with neither set defined where it was used. Prose relocation is where a slice of this shape stops landing, so the pipeline is proved end to end before any of it moves: the generated `Span` was compared field by field against the hand-written one it replaced, `usize` generated `number` rather than `bigint`, and the plan's stop condition for the `bigint` class did not fire.
+
+##### THE ONE OPEN QUESTION THE DESIGN CARRIED IS SETTLED, AND THE ROW WAS SHOWN CAPABLE OF FAILING BEFORE IT WAS RELIED ON
+
+Design §14 question 1 — does `ts-rs` 10.1.0's runtime build for `wasm32-unknown-unknown`? — was not measured when the design was written. It does: `cargo check --target wasm32-unknown-unknown -p redextape-core --lib --features ts` is clean, and `scripts/check-all.sh` now carries a clippy row, a test row and a wasm32 row for the `ts` configuration of each of the two crates that have the feature — that row among them.
+
+A gate row that passes is worth nothing until it has been shown able to fail, which is this repository's standing rule — *a gate that would pass anything is worse than no gate*, the bar the wasm gate was written to. So `mimalloc` was forced into the `ts` feature and the row was run: it failed on `libmimalloc-sys v0.1.49`, C code compiled under `--target=wasm32-unknown-unknown` that cannot find `wchar.h`, exit 101. The edit was then reverted and the row went green again. The demonstration is the record that the leg is live, and it stands whichever way the answer had gone.
+
+##### THE DESIGN WAS WRONG ABOUT WHERE THE BOUNDARY ENDS, AND A REVIEW OF A COMMENT IS WHAT FOUND IT
+
+Task 1's review was scoped to a Cargo.toml comment. It counted the `serde` derives in `redextape-core` and got fifteen, against the twelve the design's inventory implied. Chasing that gap produced a distinction the design had never drawn: **the boundary has classes, and §1 had inventoried one of them.**
+
+`Session::link_index` does not go through serde at all. It hand-assembles a columnar JS value with `js_sys::Uint32Array` and `Reflect::set`, and its TypeScript mirror is `LinkIndexWire` in `web/src/link.ts` — twelve fields, camelCase names, typed-array columns. `LinkIndex`'s `Serialize` derive is dead weight for the wire, and **`ts-rs` cannot generate `LinkIndexWire`**, because the shape is produced by marshalling code rather than by a type; generating from the Rust declaration would emit a confidently wrong file describing snake_case fields and `Array<[Span, TokenClass]>` where the wire carries `lambdaSpanStart: Uint32Array`. `compile`'s return value is assembled the same way.
+
+That type lives in `web/src/link.ts`, **not in `web/src/types.ts`** — outside the single file the design's inventory was built from, which is exactly why the first draft could imply that file was the whole boundary. The correction is recorded as spec §1.1, which now carries the full four-class table and accounts for all fifteen core derives so that nobody recounts: eleven generated, one hand-assembled (`LinkIndex`), two serialized with no TypeScript consumer yet (`TermTree`, `TermNode`), and one whose only use site is `serde(skip)`ped (`Dir`). So this slice, complete, makes seventeen types undriftable and leaves a twelve-field wire type hand-written and unwatched. Naming that is the point of the correction.
+
+##### EVERY CORRECTION ROUND ON THIS BRANCH WAS PROSE, AND FIVE OF THE SIX WERE THE PLAN'S OR THE SPEC'S OWN TEXT
+
+**The implementation was approved on its first PER-TASK review, every task.** Four tasks, four Approved verdicts, and no mechanism — no `.rs`, no manifest key, no shell, no `package.json` wiring — was changed because a review of ONE TASK'S DIFF asked for it. The only non-prose fix inside the task sequence, `b7202a4`, came from running the gate rather than from reading a diff, and has its own section below. Every task-review finding was about a sentence, and the sentences were mostly not written by the people implementing:
+
+**THE QUALIFIER "PER-TASK" IS DOING REAL WORK IN THAT PARAGRAPH, AND IT WAS ADDED AFTER THE FACT.** The sentence originally read "approved on its first review, every task", and offered "no mechanism was changed because a review asked for it" as the branch's summary. **The whole-branch review then changed three mechanisms** — `web/package.json`, `scripts/setup-dev.sh` and `scripts/check-all.sh`, one of them a Critical — and each is recorded in its own section below. Four green task reviews were the CONDITION for that review being worth running, not a reason to skip it, which is the standing conclusion this file already holds. A branch summary written before the last review is a summary of part of the branch.
+
+1. `102391c` — a count of core's wire types asserted in a Cargo.toml comment without being run. Replaced with the property rather than a bigger number.
+2. `130fc6d` — a causal mechanism. The comment justified forwarding the `ts` feature to core by a dangling-import hazard; the review looked for an instance and found none. Every field across the wasm crate's five wire types is `bool`, `String`, `usize`, `u64`, the wasm-local `RunStatus`, or `NodeId`, and `NodeId` is a transparent alias for `u32` that inlines as a TypeScript `number` and generates no import at all. **The forwarding is right and the stated reason was not**, so the comment now says the switch is coherent rather than load-bearing, and names what would make it load-bearing later.
+3. `9820b6a` — that same field-type list, imprecise: several of those fields are `Option`-wrapped.
+4. `4750abf` — a wrong class framing in the spec, which had called Class A "serialized by serde" when `Move` carries no serde derive at all. `Move` never crosses the wire; `RuleView.moves` is `Vec<String>`, stringified by `viewmodel::move_text`, and `Move` gains a `TS` derive only as that field's override target.
+5. `3014def` — a `.gitignore` comment asserting that `typecheck`, `test` and `build:app` regenerate the bindings, which was Task 4's wiring and not yet true of the tree. Fixed by **deleting** the clause rather than rewording it, on the ground that a removal cannot introduce a fifth false claim.
+6. `6b98a25` — the same class again, in a different file: `web/src/types.ts`'s new header asserting the same run-order that Task 4 had not yet wired.
+
+**Five of those six sentences were written in a task brief, the plan or the spec and applied verbatim by an implementer** — rounds 1 and 2 are the two lines Task 1's brief printed for `redextape-wasm`'s `[features]` block, round 4 is the spec's own §1.1, round 5 is the five-line `.gitignore` comment Task 2's brief printed, and round 6 is the header paragraph Task 3's brief printed. **The sixth is the interesting one: round 3's defect was introduced by round 2's fix.** Correcting the mechanism required naming the field types, the naming was wrong in detail, and the only text on this branch that no brief authored is text written to correct a brief.
+
+Rounds 1 through 3 are all the same comment block above `redextape-wasm`'s `ts` feature, which now runs to nine comment lines and was corrected three times. **The rule this branch earned and wrote into its own plan: write the tree you have, not the tree the next task will build.** Both of the last two rounds are a comment describing a state a later task creates, and both were caught by a reviewer reading the comment against the tree in front of it rather than against the plan. A seventh prose fix landed for the same reason one step out: `86ada48` corrects `check-all.sh`'s own header, which said "Six hooks" and named two tree-wide gates, when the file it describes has nine hooks and four `always_run` ones — a stale count nobody had re-derived, and `scripts/setup-dev.sh` printed the same six to anyone running it.
+
+##### A DEFECT NO TASK'S DIFF CONTAINED, FOUND BY RUNNING THE GATE RATHER THAN BY REVIEWING IT
+
+`scripts/check-all.sh` gained a `base|test|-p redextape-core --features ts` row in Task 1. Task 4 ran the gate, and the run left an untracked file behind.
+
+`ts-rs` writes its generated TypeScript during `cargo test`, and it resolves `TS_RS_EXPORT_DIR` **against each crate's manifest directory**, not against the workspace root — so "unset" does not mean "nowhere", it means "beside the crate". Every gate run was therefore writing `crates/redextape-core/bindings/Span.ts`, untracked, and outside `.gitignore`'s `/web/bindings/` entry. A `git add -A` would have committed it.
+
+**This is the exact hazard the design had already documented, reached by a second route nobody guarded.** §9 records it as a probe finding for `build:bindings`, which is why the `package.json` script sets the variable explicitly; nothing carried that reasoning across to the gate's own Rust leg, and no task's diff contains the defect, because the row and the derive that makes it write anything landed in two different tasks. The fix is both halves: `check-all.sh` exports `TS_RS_EXPORT_DIR="$PWD/web/bindings"` once for every leg, **and** `.gitignore` ignores `crates/*/bindings/` — because the by-hand `cargo test -p redextape-core --features ts` that this branch's own steps tell a developer to run still scatters, and ignoring it is the only thing that protects a tree where the gate was not the thing that ran.
+
+##### AND THE DESIGN'S CLAIM THAT THE TREE'S ONE RUNTIME AGREEMENT CHECK "RUNS IN NOTHING" IS FALSE
+
+Design §1.1 records, as a finding about the tree independent of this slice, that `assertTokenClasses` is called from exactly one place — `web/src/main.ts:201`, immediately after `init()` — and that *"the browser tests under `web/tests/browser/` build their own DOM shell and import modules directly; none imports `main.ts`. So the one runtime agreement check in the tree fires only when a human opens the app."* This entry was scheduled to file that as an open item. **It does not survive being run.**
+
+`web/src/main.ts:1532` is `export const ready = main()`, evaluated at module scope, and twenty-six of the forty-four browser test files in the default set import `../../src/main`, most of them as `await (await import('../../src/main')).ready`. Importing that module runs `main()`, which awaits `init()` and then calls `assertTokenClasses(tokenClasses())` against the real wasm export. Measured by sabotage rather than by reading: appending a `'Drifted'` member to `TOKEN_CLASSES` and running the browser project fails **26 of 44 files**, each at `assertTokenClasses` reached through `main src/main.ts:201`, with
+
+```
+Error: TOKEN_CLASSES has drifted from the Rust enum:
+  ts:   Ident,Nat,...,TapeSymbol,Move,Drifted
+  rust: Ident,Nat,...,TapeSymbol,Move
+```
+
+The sabotage was reverted and `git status --porcelain` was empty afterward. The check runs in the `web` CI job on every pull request, and a drifted `TOKEN_CLASSES` reddens it. **What is true of the tree is the narrower half of the claim** — `assertTokenClasses` covers `TokenClass` and nothing else, and `encodings()` covers `EncodingKind`; every other type on the boundary has no runtime check at all. That is still the argument for generation. It is not the argument the spec printed, and the spec no longer prints it: `3bb2de8` struck the claim through in §1.1 and marked it *FALSE, AND RETRACTED*, recording the sabotage, the 26-of-44 result, and the reason the original grep — `from '.*main'` — could not have matched a dynamic import. The same commit corrected §5, whose "strictly stronger" comparison of the compile-time pin against `assertTokenClasses` had rested on the retracted claim and now reads "earlier, not stronger". **The claim survived a design, a plan and four task reviews because nobody ran it**, and the thing that falsified it took one sabotage and thirty seconds.
+
+##### AND THE FRESH-CLONE STEP COULD NOT RUN ON A FRESH CLONE
+
+`scripts/setup-dev.sh` gained a generation block guarded on `if [ -d web/node_modules ]`. **That script never runs `pnpm install`**, so on a genuinely fresh clone the directory does not exist and the block is skipped — in exactly the case its own comment and this entry's opening paragraph claim it closes. It fired only on a re-run, after someone had already done the thing that made it unnecessary. Measured by moving `web/node_modules` aside and running the block both ways: the old guard skips, the new one writes `web/bindings/Span.ts`.
+
+The precondition was also the wrong one. `pnpm run build:bindings` reads no `node_modules` at all — it shells out to `cargo`, which the nextest block above it already establishes — so pnpm's presence is the real requirement, and `command -v pnpm` is what every other optional block in the file tests.
+
+**AND IT WAS THE ONE BLOCK THAT COULD KILL THE SCRIPT FOR A REASON THAT IS NOT A MISSING TOOL.** The blocks above abort on a missing hard precondition of `scripts/check-all.sh`, which is the honest answer to an environment that cannot run the gate. This one is a BUILD: it fails on no network during a first clone, or on `ts-rs` not yet being in the cargo registry cache. Under `set -euo pipefail` that killed the script before `pre-commit install`, **leaving a clone with no hooks because a download timed out**. It is non-fatal now and names the cause rather than swallowing it; verified by shimming `pnpm` to exit 1 and confirming the script reaches its next step at exit 0.
+
+##### AND A SECOND CONFIG THE GATE BUILT BUT NEVER LINTED OR TESTED, WHICH IS THE ONE THING ITS OWN LEG TABLE FORBIDS
+
+`scripts/check-all.sh`'s leg table states the rule it is built around: *"Every config gets clippy AND tests; a config that is built but never tested is a blind spot."* This branch created TWO feature configurations and gave one of them its three rows. `redextape-core --features ts` got clippy, tests and a wasm32 build; `redextape-wasm --features ts` — created by the same task, and compiled by `pnpm run build:bindings` on every typecheck — got none. The crate's only row was `base|wasm|-p redextape-wasm --lib`, which is default-features, and pre-commit's `cargo clippy --workspace --all-targets` is default-features too, so `-D warnings` never ran against that configuration anywhere.
+
+**A rule stated in the file that breaks it is not self-enforcing, and nothing else was going to notice.** `check_legs()` validates that every row's tier and kind are dispatchable; it cannot know which configurations exist. The three matching rows are added, mirroring the core triple's shape and placed with the crate's existing row, and each was run before being committed: clippy clean, `70 tests run: 70 passed, 0 skipped` under nextest with the paired `--doc` run, and the wasm32 check clean.
+
+**One stale figure fell out of the same edit.** `ensure_wasm_target`'s comment opened "CALLED FROM THREE ROWS ON PURPOSE" while the table already held four `wasm` rows — it had been written when there were two. It now names the property (`base|wasmprobe|`, then every `wasm` row) and gives no count, for the reason `check-doc-figures.sh`'s own header gives for not counting the documents it covers.
+
+##### AND A CRITICAL IN A FILE NO TASK EDITED: `build:app` STARTED NEEDING CARGO, AND THE DOCKER STAGE THAT RUNS IT HAS NONE
+
+Task 4 chained generation onto three scripts, `build:app` among them. `Dockerfile` stage 2 is `FROM node:26-slim`, copies only `web/` and the `/app/pkg` stage 1 produced, and runs exactly `pnpm run build:app` — under a comment that states the invariant being broken: *"`build:app`, not `build`: this stage has no Rust toolchain — stage 1 already produced /app/pkg."* Installing Rust would not have rescued it either; that stage has no `Cargo.toml`, no `Cargo.lock` and no `crates/`.
+
+**IT WAS REPRODUCED RATHER THAN REASONED ABOUT.** `docker build .` was run to completion against the tree as Task 4 left it, and failed at stage 2's last step:
+
+```
+ > [web 8/8] RUN pnpm run build:app:
+0.374 $ pnpm run build:bindings && vite build
+0.591 $ TS_RS_EXPORT_DIR=$PWD/bindings cargo test -p redextape-core --features ts export_bindings && ...
+0.594 sh: 1: cargo: not found
+0.604 [ELIFECYCLE] Command failed.
+------
+Dockerfile:38
+ERROR: failed to build: failed to solve: process "/bin/sh -c pnpm run build:app" did not complete successfully: exit code: 1
+```
+
+The fix restores the split: `build:app` is `vite build` again, and `build` chains `build:wasm && build:bindings && build:app` so a local full build still generates. `typecheck` and `test` keep their chain — neither is in the image. `web/bindings/` also joins `.dockerignore`, beside `web/dist/` and `web/coverage/` and for the same reason: generated output, never an input. Leaving it in the context would let a developer's already-generated copy hide exactly this dependency from a local build, on a directory a fresh CI checkout does not have. With that exclusion in place `docker build .` completes, exit 0, and stage 2 logs `$ vite build` / `✓ built in 129ms` — the type-only `import type { Span } from '../bindings/Span'` is erased by the bundler, so `vite build` never looks for the file.
+
+**NO CI JOB WOULD HAVE SAID SO, WHICH IS WHY IT HAD TO BE BUILT BY HAND.** The `docker` job is `if: github.event_name != 'pull_request'` and is not in `gate`'s `needs`. The pull request goes green; the post-merge push to `main` fails; the image tag `docker-compose.yml` deploys from stops being published. This is the second invariant in that one file whose only possible check is a human running the build — the `HEALTHCHECK` comment records the first, reached by a different route and for the same structural reason.
+
+**NO PER-TASK REVIEW COULD HAVE FOUND IT, AND THIS IS THE THIRD TIME THIS FILE HAS RECORDED THAT.** `Dockerfile` appears in no task's diff on this branch, and a task review is scoped to one task's diff. The hazard was in UNCHANGED code whose correctness depended on a property the changed code removed — the same shape as the uncapped printer found in `redextape-wasm` two entries above, and the same shape as the `TS_RS_EXPORT_DIR` scatter recorded in this one. **What hid it from the design as well was a false premise.** §9 claimed `typecheck`, `test` and `build:app` would depend on `build:bindings` *"as they already depend on `build:wasm`"*, and nothing did except `build`. That sentence made the edit a no-op by construction, so the enumeration of who else calls `build:app` never happened: **a premise asserting that a change is not a change deletes the audit that would have found the change.** §9 now says so in place of the claim.
+
+##### WHAT STAYS OPEN
+
+- **PR 2 — the eleven derivable core types**, their prose relocated, the four fidelity overrides of design §6, and the no-`bigint` test shown failing with an override removed. **PR 3 — the five wasm types**, the `TOKEN_CLASSES` compile-time pin shown failing with a name removed, and `types.ts` reduced to the barrel it becomes. `grep -c '^export type [A-Za-z]' web/src/types.ts` reads 17 at this commit and **sixteen of those are derivable**; the seventeenth is `Classified`, `pub type Classified = Vec<(Span, TokenClass)>`, a type alias with no derive site, which stays hand-written over two generated types permanently. Design §11 calls PR 2 "the twelve core types": twelve core DECLARATIONS, eleven of which move.
+- **`LinkIndexWire` stays hand-written and unwatched.** Twelve fields in `web/src/link.ts` mirroring a columnar value `Session::link_index` assembles by hand. Generation cannot reach it. Closing it needs a different mechanism than a derive — either the marshalling moves behind a serde-serializable type, or the columnar shape gets a gate of its own — and neither is attempted in this slice.
+- **`TermTree` and `TermNode` will generate files nothing imports** once PR 2 lands, being serialized with no TypeScript consumer yet. Harmless, and named so their appearance in `bindings/` is not read as a bug.
+- **Nothing compares the generated types against the measured wire.** `crates/redextape-wasm/tests/browser.rs` pins runtime shapes measured out of a real browser and the generator asserts static types; no test compares the two. That is the division of labour the tree already had, made no worse.
+- **`build:bindings` WRITES BUT NEVER PRUNES, AND NOTHING WILL NOTICE A STALE GENERATED FILE.** `ts-rs` only writes; no step removes a `web/bindings/*.ts` whose Rust type was renamed or deleted. The orphan survives and the tree still typechecks, because `web/src/types.ts` names each import explicitly rather than re-exporting the directory — so a renamed type generates a second file and the first one simply stays, describing a shape that no longer exists. **Immaterial at one type and a real hazard from PR 2 onward**, where eleven files land at once and a rename during prose relocation is the likely trigger. The likely fix is a `rm -rf bindings &&` prefix inside `build:bindings`, which makes the directory a pure function of the current Rust declarations. **Deferred to PR 2 deliberately**: it costs a full regeneration on every typecheck, and that trade is worth measuring against the twelve-type run rather than the one-type run.
+- **`web/bindings/` is generated and gitignored, so a stale one typechecks.** A tree where generation has not run since a Rust edit is internally consistent and wrong. The build wiring makes that hard rather than impossible, and `assertTokenClasses` — which does run, see above — is the only check that compares against the loaded module.
+
+##### VERIFICATION
+
+Figures measured at `86ada48`, the branch's last commit before the one that adds this entry. **No CI paragraph appears here on purpose:** no pull request exists yet and no run has happened, and this file's convention is that the CI paragraph is added in a later commit once there is a run to describe.
+
+```
+17                      commits                    git rev-list --count b77fd04..86ada48
+12 files, +1168/-7      whole-branch diff          git diff --shortstat b77fd04..86ada48
+1                       generated .ts file         ls web/bindings | wc -l
+1                       `TS` derive site           grep -rn 'feature = "ts"' --include='*.rs' crates | wc -l
+17                      types still declared by    grep -c '^export type [A-Za-z]' web/src/types.ts
+                        hand in `types.ts`
+12                      `LinkIndexWire` fields     awk '/^export type LinkIndexWire = \{/,/^\}/' web/src/link.ts
+                                                     | grep -cE '^  [a-zA-Z]+:'
+15                      core serde derives         grep -rn 'serde::Serialize' --include='*.rs'
+                                                     crates/redextape-core/src | wc -l
+3                       `--features ts` gate legs  grep -c '^  "base|.*--features ts' scripts/check-all.sh
+9                       pre-commit hooks           grep -c '^      - id: ' .pre-commit-config.yaml
+10.1.0                  ts-rs resolved             grep -A1 '^name = "ts-rs"' Cargo.lock
+26 of 44                browser test files the     see the sabotage above; the static count is
+                        drift check gates            `grep -rl 'src/main' web/tests/browser/ | wc -l`, which
+                                                     reads 27 and includes one REDEXTAPE_PROBE-only file
+```
+
+`web/bindings/` was deleted and regenerated from nothing before these figures were read, so the "one file" row is what the pipeline produces rather than what happened to be on disk:
+
+```
+$ rm -rf web/bindings && pnpm run build:bindings && find web/bindings -type f
+web/bindings/Span.ts
+
+$ cat web/bindings/Span.ts
+// This file was generated by [ts-rs](https://github.com/Aleph-Alpha/ts-rs). Do not edit this file manually.
+
+/**
+ * A half-open byte range `[start, end)` into the source string.
+ */
+export type Span = { start: number, end: number, };
+```
+
+The Rust doc comment came across with it, `usize` generated `number`, and the only differences from the hand-written `export type Span = { start: number; end: number }` it replaced are the generated header, a trailing comma and a trailing semicolon.
+
+**THE SCATTER WAS REPRODUCED AND THE FIX WAS SHOWN TO COVER IT**, rather than reasoned about from the code:
+
+```
+$ env -u TS_RS_EXPORT_DIR cargo test -p redextape-core --features ts export_bindings
+$ find crates -maxdepth 3 -name '*.ts' -path '*bindings*'
+crates/redextape-core/bindings/Span.ts
+
+$ git status --porcelain
+$ git check-ignore -v crates/redextape-core/bindings/Span.ts
+.gitignore:22:crates/*/bindings/	crates/redextape-core/bindings/Span.ts
+```
+
+`git status` is silent, which is the whole point of the second half of the fix: before `b7202a4` that file was untracked and unignored, and `git show b7202a4^:.gitignore | grep bindings` shows no `crates/*/bindings/` entry. After the full gate run below, `find crates -maxdepth 2 -name bindings -type d` prints nothing at all — the exported variable keeps the gate itself from scattering.
+
+```
+$ pnpm run test
+ Test Files  69 passed (69)
+      Tests  676 passed (676)
+
+$ pre-commit run --all-files
+no control bytes in tracked text.........................................Passed
+no file:line citations in tracked source.................................Passed
+documented figures match the tree........................................Passed
+shared doc regions match their source....................................Passed
+lua parses and parser names agree........................................Passed
+cargo fmt................................................................Passed
+cargo clippy.............................................................Passed
+biome ci.................................................................Passed
+web typecheck............................................................Passed
+```
+
+`scripts/check-all.sh --no-llvm --no-browser` exited 0, its own final line quoted rather than the run called green: `green, but PARTIAL — these tiers were SKIPPED: LLVM browser. This is NOT a full gate on its own.` It ran all three new `ts` legs — `cargo clippy -p redextape-core --features ts --all-targets -- -D warnings`, `cargo nextest run -p redextape-core --features ts`, and `cargo check --target wasm32-unknown-unknown -p redextape-core --lib --features ts` — and `git status --porcelain` was empty when it finished.
+
+**GENERATION RUNS TWICE IN THE CI `web` JOB AND THAT IS DELIBERATE.** The explicit step, then again inside `pnpm run typecheck`. The two later steps — `test:coverage`, which is what that job runs instead of `test`, and `build:app`, the job's last step — do not regenerate and rely on an earlier step having done so. **`build:app` must not regenerate, and the branch shipped a version that did**; see the Critical section above. A warm re-run costs `0.706s` total for both crates under `time pnpm run build:bindings`, and the core leg's own `cargo test` reports `Finished ... in 0.03s` with `1 passed; 695 filtered out` — the single `export_bindings_span` test `ts-rs` generates. The explicit step is kept so that a generation failure is attributed to generation rather than surfacing as a typecheck error.
+
+**CI RUN 330 WAS GREEN ON `6f6bbb4`, AND THAT SHA WAS READ FROM PULL REQUEST 69'S OWN `head.sha` RATHER THAN ASSUMED FROM THE BRANCH** — this file's convention since entry 61, and it holds here for the usual reason: the commit adding this paragraph necessarily sits outside the run it reports. Every job: `gate` 1s, `detect` 3s, `linear-history` 13s, `rust-browser` 1m28s, `web` 3m47s, `rust-llvm` 5m32s, `rust-slow` 11m48s, `rust` 21m18s. `rust-scoped` skipped because the unscoped `rust` ran instead. The run NUMBER from the status `target_url` is 330 and the API's own id for the same run is `1295`; both are recorded because neither can be guessed from the other. The per-job durations came from the pull request's `get_status` endpoint — `list_jobs` 404s on this Forgejo build, and `list_run_jobs` returns statuses without timings, so `get_status` is the one surface that carries both.
+
+**`docker` SKIPPED, AS IT ALWAYS DOES ON A PULL REQUEST — AND ON THIS BRANCH THAT EXEMPTION WAS NOT FREE.** Every previous entry could record the skip as costing nothing because the branch touched no `Dockerfile`, `.forgejo/` or compose file. This one broke the image build and no CI job on the pull request could have said so: `docker` is gated off for pull requests AND is absent from `gate`'s `needs` list, so it is doubly invisible. `docker build .` was therefore run by hand at `6f6bbb4`, to completion, exit 0, with stage 2 executing `pnpm run build:app` — and that hand-run is the only evidence that exists for the fix. **A job that never runs on a pull request is not a gate, and a branch that changes what its stages can execute has to supply the evidence itself.**
+
+**NO CAUSAL CLAIM IS ATTACHED TO ANY DURATION ABOVE**, per this file's standing note on CI timing variance. What can be stated without inference is what the branch added for `rust` to do: six new `LEGS` rows — clippy, test and a wasm32 `cargo check` for `redextape-core --features ts`, and the same three for `redextape-wasm --features ts` — a feature configuration nothing compiled before. `web` gained one cargo-invoking step. Run 327, the previous entry's, read `rust` 11m43s and `web` 2m17s on a different branch, a different tree and a different runner state; the two runs are not a controlled comparison and the difference is not attributed here.

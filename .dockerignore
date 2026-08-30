@@ -10,6 +10,12 @@ web/dist/
 # CI is unaffected (fresh checkout); this is for local builds, which is where the `docker` job's PR
 # exemption means the image actually gets exercised.
 web/coverage/
+# Generated TypeScript for the wasm boundary's wire types. Generated output, never an input to this
+# image: stage 2 has no Rust toolchain and so cannot run `build:bindings`, and it does not need to —
+# `web/src/types.ts` re-exports the generated types with `import type`, which the bundler erases.
+# Excluded so a LOCAL build sees the same absent directory a fresh CI checkout does; leaving it in the
+# context would let a developer's already-generated copy hide a stage-2 dependency on Rust.
+web/bindings/
 pkg/
 
 # Docs, VCS, and local cruft aren't needed to build or run the static site.

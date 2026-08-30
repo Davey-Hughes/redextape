@@ -18,9 +18,19 @@ workspace = true
 # It is here rather than in a wrapper crate because §9.1's view models are CORE outputs and there is a
 # second consumer coming: Plan 6's CLI wants them and cannot depend on a cdylib.
 serde = { version = "1", features = ["derive"], optional = true }
+# THE CRATE'S SECOND DEPENDENCY, AND THE FIRST THAT IS NOT `serde`. It exists so `web/src/types.ts`
+# stops being a hand-written copy of this crate's wire types: `ts-rs` derives generate the TypeScript
+# from these declarations, which is the only arrangement in which a variant added here cannot reach
+# the browser unhandled. Optional and default-off, so the browser build never sees it — and
+# `scripts/check-all.sh` builds the `ts` configuration for wasm32 anyway rather than trusting that.
+ts-rs = { version = "10", optional = true }
 
 [features]
 serde = ["dep:serde"]
+# `ts` IMPLIES `serde` RATHER THAN STANDING BESIDE IT. The generated TypeScript describes what serde
+# puts on the wire, so a `TS` derive on a type whose `Serialize` is compiled out would describe a
+# shape nothing produces.
+ts = ["dep:ts-rs", "serde"]
 
 [dev-dependencies]
 # Examples and tests only.

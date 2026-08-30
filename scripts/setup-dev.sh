@@ -99,9 +99,40 @@ else
   echo "==> no Chrome found; scripts/check-all.sh's browser tier will fail — install Chrome, or pass --no-browser" >&2
 fi
 
+# The web tree imports generated TypeScript from `web/bindings/`, which is gitignored — so a fresh
+# clone does not typecheck, and an editor's language server reports unresolved imports, until this has
+# run once. `pnpm run typecheck` runs it too; doing it here means the tree is coherent before anyone
+# opens it.
+#
+# GUARDED ON `pnpm`, NOT ON `web/node_modules`, and the difference is the whole point of the step. This
+# script never runs `pnpm install`, so on the fresh clone this block exists to serve that directory does
+# not exist — the guard would skip the block in exactly the case it was written for, and fire only on a
+# re-run, after someone had already done the thing that made it unnecessary. `pnpm run build:bindings`
+# does not read `node_modules` at all: it shells out to `cargo`, which the nextest block above has
+# already established, so pnpm's presence is the real precondition and is what is tested. Same shape as
+# every other optional block in this file.
+#
+# NON-FATAL, WHICH THE BLOCKS ABOVE ARE NOT. Those abort on a missing hard precondition of
+# `scripts/check-all.sh` — no nextest, no wasm32 target, no pinned tree-sitter — and aborting is the
+# honest answer to an environment that cannot run the gate. This one is a BUILD, and a build fails for
+# reasons that are not the environment being wrong: no network on a first clone, `ts-rs` not yet in the
+# cargo registry cache. Under `set -euo pipefail` that would kill the script before `pre-commit install`
+# below, leaving a clone with no hooks because a download timed out. Reported loudly instead of
+# swallowed: unresolved `../bindings/` imports are the symptom, and this names the cause.
+if command -v pnpm >/dev/null 2>&1; then
+  echo "==> generating wire-type bindings (web/bindings)"
+  if (cd web && pnpm run build:bindings); then
+    echo "==> wire-type bindings generated (web/bindings)"
+  else
+    echo "==> wire-type bindings FAILED to generate; web/ will not typecheck until 'cd web && pnpm run build:bindings' succeeds" >&2
+  fi
+else
+  echo "==> pnpm not found; skipping wire-type bindings (web/ will not typecheck until 'cd web && pnpm run build:bindings' has run)" >&2
+fi
+
 if command -v pre-commit >/dev/null 2>&1; then
   pre-commit install
-  echo "==> pre-commit hooks installed (6: control bytes, citations, cargo fmt, clippy, biome, web typecheck)"
+  echo "==> pre-commit hooks installed (9: control bytes, citations, doc figures, shared docs, lua, cargo fmt, clippy, biome, web typecheck)"
 else
   echo "==> pre-commit not found; skipping hook install (pip install pre-commit)" >&2
 fi
