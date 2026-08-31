@@ -8,6 +8,7 @@ use crate::span::Span;
 // is what made this the third and fourth types to need it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Severity {
     Error,
     Warning,
@@ -15,6 +16,7 @@ pub enum Severity {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Diagnostic {
     pub span: Span,
     pub severity: Severity,

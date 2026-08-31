@@ -16,6 +16,13 @@ web/coverage/
 # Excluded so a LOCAL build sees the same absent directory a fresh CI checkout does; leaving it in the
 # context would let a developer's already-generated copy hide a stage-2 dependency on Rust.
 web/bindings/
+# ...and the scratch directories scripts/build-web-bindings.sh swaps through to write the one above
+# without deleting a last-good copy first — per-process names (mktemp's random suffix, `.old` appended
+# for the swap's holding spot), plus the web/bindings.lock/ mutex directory the swap is guarded by.
+# Same reason: never an input, and should not be able to hide anything a local build would fail to
+# reproduce.
+web/bindings.tmp.*/
+web/bindings.lock/
 pkg/
 
 # Docs, VCS, and local cruft aren't needed to build or run the static site.

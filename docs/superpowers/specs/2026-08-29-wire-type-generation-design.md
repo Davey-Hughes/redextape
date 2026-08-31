@@ -41,7 +41,7 @@ twelve in `redextape-core`, five in `redextape-wasm` — and the eighteenth, `Cl
 | core | `viewmodel.rs` | `LambdaState`, `RuleView`, `StateView`, `TmProgram`, `TmState` |
 | wasm | `session.rs` | `RunStatus`, `Decoded`, `LambdaStatus`, `TmStatus`, `TmScratchStatus` |
 
-`Classified` is `pub type Classified = Vec<(Span, TokenClass)>` (`crates/redextape-core/src/analysis.rs:88`)
+`Classified` is `pub type Classified = Vec<(Span, TokenClass)>` (`crates/redextape-core/src/analysis.rs`)
 — a type alias, so it has no derive site. It stays a one-line hand-written alias in the barrel, over
 two generated types. Every count below that says "seventeen" excludes it.
 
@@ -96,14 +96,21 @@ hand-written and unwatched, and §13 now says so rather than leaving a reader to
 `web/src/types.ts` was the whole surface.
 
 **Two agreement mechanisms already exist, and both are narrower than they look.**
-`TOKEN_CLASSES` (`types.ts:35`) is a const array with `TokenClass` derived from it, asserted at
-startup against the `tokenClasses()` wasm export by `assertTokenClasses` (`types.ts:247`).
+`TOKEN_CLASSES` (`web/src/types.ts`) is a const array, no longer the source `TokenClass` derives from —
+generation deletes that derivation, which is exactly §11's correction below — and instead pinned to the
+generated `TokenClass` union in both directions at compile time (§5). It is separately asserted at
+startup against the `tokenClasses()` wasm export by `assertTokenClasses` (also `web/src/types.ts`); the
+pin and the runtime assert catch different things, neither subsumes the other, and §5 says why.
 
-> **Both numbers were `25` and `237` until 2026-08-29, and this branch is what invalidated them.**
-> Task 3 added a ten-line header to `web/src/types.ts`, so every line below it moved down ten; `237`
-> now lands on a bare `*/`. `docs/` is exempt from `scripts/check-citations.sh`, deliberately — these
-> citations are the reason the exemption exists — so nothing fired. **A citation a gate does not cover
-> is one a human has to re-derive, and the commit that moves the lines is the one that has to do it.**
+> **This paragraph used to carry two `file:line` citations, and now carries none.** They read
+> `types.ts:25` and `types.ts:237` until 2026-08-29, when this branch's Task 3 added a ten-line header
+> to `web/src/types.ts` and moved every line below it down ten — corrected that same day to `types.ts:35`
+> and `types.ts:247`. Further edits later on this branch moved the lines again, and by the time the
+> whole-branch review caught the second drift, both citations were rewritten to the bare/symbol form
+> the paragraph above uses now, rather than re-derived a third time. `docs/` is exempt from
+> `scripts/check-citations.sh`, deliberately — these citations are the reason the exemption exists — so
+> neither drift ever fired a gate. **A citation a gate does not cover is one a human has to re-derive,
+> and the commit that moves the lines is the one that has to do it.**
 `encodings()` does the same for `EncodingKind`. Every other type on the list is unwatched.
 
 ~~**`assertTokenClasses` runs in nothing.** It is called from exactly one place, `web/src/main.ts`,
@@ -133,8 +140,11 @@ error TS2339: Property 'Fault' does not exist on type '"Aborted" | { Fault: ... 
 ```
 
 So once the union knows a variant, `tsc --strict` forces every consumer to handle it, and
-`web typecheck` is already both a pre-commit hook and a CI job. **The gap is exactly one step wide:
-the union learning the name.** That is what makes generation sufficient rather than merely helpful —
+`web typecheck` already runs at CI's `web` job on every push — not reliably at the pre-commit hook,
+which is scoped to commits touching a `.ts`/`.tsx` file and so does not fire on a Rust-only commit; §5
+says why that distinction matters and does not weaken the conclusion. **The gap is exactly one step
+wide: the union learning the name.** That is what makes generation sufficient rather than merely
+helpful —
 it closes the only step the compiler cannot take itself.
 
 ---
@@ -231,8 +241,11 @@ type _NoneMissing = Assert<Missing>
 type _NoneExtra   = Assert<Extra>
 ```
 
-It fires at `pnpm typecheck`, which is a pre-commit hook and a CI job. **It is EARLIER than
-`assertTokenClasses`, not stronger** — an earlier draft called it "strictly stronger" on the strength
+It fires at `pnpm typecheck` and at CI's `web` job, both of which always run it. It does NOT reliably
+fire at the pre-commit hook: `web-typecheck` is scoped `files: ^web/.*\.(ts|tsx)$`, so a commit that
+adds a variant on the Rust side and touches no `.ts`/`.tsx` file — the exact drift this pin exists to
+catch — never triggers that hook locally; CI's `web` job still catches it once the commit is pushed.
+**It is EARLIER than `assertTokenClasses`, not stronger** — an earlier draft called it "strictly stronger" on the strength
 of the retracted §1 claim that the runtime assert ran in nothing. It does run: 26 of 44 browser test
 files redden when the array is sabotaged. The two catch different things, which is §5's whole reason
 for keeping both, and neither dominates the other.
@@ -261,8 +274,8 @@ barrel re-exports. This is what keeps the slice from touching 44 files for no be
 | field | ts-rs default | what the wire carries | evidence |
 |---|---|---|---|
 | `TmStatus.total_steps` | `bigint \| null` | `number \| null` | `crates/redextape-wasm/tests/browser.rs:884` asserts `2870.0`, read out of a real browser |
-| `LambdaState.step` | `bigint` | `number` | same class — `crates/redextape-core/src/viewmodel.rs:69` |
-| `TmState.step` | `bigint` | `number` | same class — `crates/redextape-core/src/viewmodel.rs:178` |
+| `LambdaState.step` | `bigint` | `number` | same class — `crates/redextape-core/src/viewmodel.rs` |
+| `TmState.step` | `bigint` | `number` | same class — `crates/redextape-core/src/viewmodel.rs` |
 | `RuleView.moves` | `Array<string>` | `Array<Move>` | today's hand-written file is more precise than the generator |
 
 The three `u64` fields get `#[ts(type = "number")]`. `serde_wasm_bindgen` serializes `u64` as a JS
@@ -276,14 +289,28 @@ commit that adds it, rather than in Chrome. The test is written to be non-vacuou
 repository requires: it must be shown to fail with an override removed, not merely observed passing.
 
 **`RuleView.moves` takes the override rather than a Rust change.** `moves` is `Vec<String>`, stringified
-by `viewmodel::move_text`, whose own comment (`crates/redextape-core/src/viewmodel.rs:409`) records the
+by `viewmodel::move_text`, whose own comment (`crates/redextape-core/src/viewmodel.rs`, inside `move_text`) records the
 decoupling deliberately: *"kept as an explicit match rather than `Move`'s `Debug` output so the two
 cannot drift independently even though today they happen to agree."* Changing the field to `Vec<Move>`
 would be wire-identical — `Move`'s variants are literally `L`, `R`, `S` — and would collapse exactly
 that decoupling. So the Rust is left alone, `Move` gains a `TS` derive, and the field gets
 `#[ts(type = "Array<Move>")]`. The claim that override makes is already pinned by
-`move_text_matches_the_text_forms_own_vocabulary` (`crates/redextape-core/src/viewmodel.rs:683`), which
+`move_text_matches_the_text_forms_own_vocabulary` (`crates/redextape-core/src/viewmodel.rs`), which
 asserts the three strings by name.
+
+**CORRECTION (2026-08-31, found by PR 2's implementation) — `#[ts(type = "Array<Move>")]`, THE FORM
+JUST PRESCRIBED, IS WRONG, AND FAILS SILENTLY.** Measured directly: `#[ts(type = "Array<Move>")]`
+generates the literal field `moves: Array<Move>` in `web/bindings/RuleView.ts` with **no
+`import type { Move }` line anywhere in the file** — the generated file references a name it never
+imports. `tsc` cannot see the gap from the TypeScript side, because `RuleView.ts` only enters the
+TypeScript program when something imports it, and at PR 2's own commit nothing yet did. No Rust-side
+gate can see it either: `no_generated_type_carries_bigint` and `the_gate_covers_every_exported_type`
+both read the strings `ts-rs` writes, and an absent import is not a string that is present.
+`#[ts(as = "Vec<Move>")]` emits both the `Array<Move>` reference and its import, because it routes the
+override through `Vec`'s own `TS` implementation rather than substituting a bare rendered type name,
+and that path is what registers the dependency `ts-rs` uses to decide which imports a file needs. PR 2
+ships `#[ts(as = "Vec<Move>")]`, not the form this section prescribed above; see the PR 2 roadmap
+entry for the measurement in full.
 
 ---
 
@@ -421,6 +448,25 @@ no-`bigint` test.
 **PR 3 — the five wasm types.** Derives, prose relocated, the `TOKEN_CLASSES` compile-time pin, the
 `assertTokenClasses` retention note, the header prose to the barrel, and `types.ts` reduced to the
 barrel it becomes.
+
+**CORRECTION (2026-08-31, found while writing PR 2's own roadmap entry) — "THE FOUR FIDELITY
+OVERRIDES" IS THE WRONG COUNT FOR PR 2.** §6 lists four; only three sit on a `redextape-core` type and
+are reachable from PR 2's own scope (`LambdaState.step`, `TmState.step`, `RuleView.moves`). The fourth,
+`TmStatus.total_steps`, is declared on `redextape-wasm`'s `TmStatus` — one of PR 3's five wasm types,
+named two paragraphs above — and ships there instead. PR 2's own plan states this discrepancy before
+implementing around it; this paragraph is the design catching up to say the same thing, rather than
+leaving "the four fidelity overrides" standing as something PR 2 alone was going to close.
+
+**CORRECTION (2026-08-30, found by PR 2's whole-branch review) — THE PIN LANDED IN PR 2, NOT PR 3.**
+PR 2 is what generates `TokenClass` and re-exports it from `../bindings/`, which is also the commit
+that deletes `export type TokenClass = (typeof TOKEN_CLASSES)[number]` — the derivation this pin
+replaces. Deferring the pin to PR 3 as this section originally planned would have left the array and
+the union as two independent declarations, agreeing only by nobody touching either, for one full PR —
+exactly the drift this whole design exists to close, and precisely the trap Finding 1 of that review
+caught: the `TOKEN_CLASSES` doc block still claimed the array was the union's source after the
+derivation beneath it was gone. **The replacement belongs with the branch that removes what it
+replaces, not one PR later.** §2 item 5 already states the pin as something this design ships without
+naming a PR; this correction is what makes §11 agree with it and with the tree.
 
 Each PR needs a roadmap entry before it opens.
 

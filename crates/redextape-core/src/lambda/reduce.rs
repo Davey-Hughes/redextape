@@ -209,6 +209,7 @@ pub struct Trace {
 /// feature and is deliberately not here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Owner {
     /// The contracted `App` carried this construct's own tag.
     Exact(NodeId),

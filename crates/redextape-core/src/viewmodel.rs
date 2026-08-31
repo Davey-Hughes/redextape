@@ -62,10 +62,12 @@ use crate::trace::{LambdaCursor, TmCursor};
 /// is scoped to the frame that carries it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct LambdaState {
     pub text: String,
     pub spans: Vec<(Span, TokenClass)>,
     pub cut: Option<Cut>,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub step: u64,
     /// The redex contracted by the step that produced this frame; `None` at step 0.
     ///
@@ -115,6 +117,10 @@ pub struct LambdaState {
     /// draws for the PATH, cashed here as printed bytes: the text under this span is the subterm the
     /// step PRODUCED, because the redex `App` this path was recorded against no longer exists in the
     /// term being printed.
+    ///
+    /// **BYTES, LIKE EVERY OTHER SPAN ON THIS TYPE.** A consumer indexing into a JS string converts
+    /// first — `web/src/spans.ts`'s `byteToIndex`/`byteIndexAt` — and `web/src/lambda-pane.ts`'s
+    /// frame view is the one place this crosses into a DOM range.
     pub redex_span: Option<Span>,
     /// The source construct the step belonged to.
     pub owner: Owner,
@@ -122,23 +128,47 @@ pub struct LambdaState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct StateView {
     pub name: String,
     pub accept: bool,
     pub rules: Vec<RuleView>,
 }
 
+/// One transition, projected for a renderer. `read`/`write` carry one entry PER TAPE and `None` is a
+/// wildcard — `RuleSpec` defaults every untouched tape to (wildcard read, unchanged write, `Stay`),
+/// which is what lets a gadget name only the tapes it touches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct RuleView {
     pub read: Vec<Option<Symbol>>,
     pub write: Vec<Option<Symbol>>,
+    /// Head moves, one per tape, as `move_text` prints them.
+    ///
+    /// `Vec<String>` AND GENERATED AS `Array<Move>`, WHICH IS NOT A CONTRADICTION. `TmProgram::of`
+    /// stringifies through `move_text`, whose own comment records why that is an explicit match
+    /// rather than `Move`'s `Debug`: the text form and this projection must not drift independently
+    /// even though today they agree. Changing the field to `Vec<Move>` would be wire-identical —
+    /// the variants are literally `L`, `R`, `S` — and would collapse exactly that decoupling, so the
+    /// field stays stringly typed and the TypeScript is narrowed by attribute instead.
+    ///
+    /// THE OVERRIDE SPELLS `as`, NOT `type`, AND THE DIFFERENCE IS NOT COSMETIC. `type` substitutes
+    /// rendered text and registers no dependency, so it would generate a `RuleView.ts` that names
+    /// `Move` without importing it — a file no `tsc` run in this repository would see until
+    /// `web/src/types.ts` imports it. `as` routes through `Vec<Move>`'s own `TS` impl, so the import
+    /// is emitted with the name. `move_text_matches_the_text_forms_own_vocabulary` is what pins the
+    /// three strings this override claims.
+    #[cfg_attr(feature = "ts", ts(as = "Vec<Move>"))]
     pub moves: Vec<String>,
     pub next: StateId,
 }
 
+/// The machine, projected ONCE per compile and never per step — see the module doc for the
+/// measurement behind that split, and `TmProgram::of` for what `width` is doing in the signature.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TmProgram {
     pub states: Vec<StateView>,
     pub alphabet: Vec<Symbol>,
@@ -173,8 +203,10 @@ pub struct TmProgram {
 /// caveat on what "materialized" bounds this coordinate to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TmState {
     pub state: StateId,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub step: u64,
     /// Each tape's head index in materialized-tape coordinates (see the struct doc).
     pub heads: Vec<usize>,

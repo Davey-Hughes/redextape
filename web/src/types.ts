@@ -10,27 +10,55 @@
 // here — `pnpm run build:bindings` writes them. The directory is gitignored, so there is no
 // committed copy to go stale.
 //
-// THE MIGRATION IS PARTIAL AND THIS COMMENT TRACKS IT. `Span` is generated; every other type below is
-// still declared by hand and still agrees with its Rust counterpart only by someone remembering to.
-// Two more PRs move the remaining seventeen.
+// THE MIGRATION IS PARTIAL AND THIS COMMENT TRACKS IT. Every type re-exported from `../bindings/`
+// above is generated from its Rust declaration. The types still DECLARED below are the ones
+// `redextape-wasm` owns; they agree with their Rust counterparts only by someone remembering to,
+// and PR 3 is what moves them. `Classified` is not waiting for a PR — it is a structural alias over
+// two generated types, with no Rust declaration to derive from, and stays here permanently.
 
+import type { Owner } from '../bindings/Owner'
 import type { Span } from '../bindings/Span'
+import type { TokenClass } from '../bindings/TokenClass'
 
-export type { Span }
+export type { Cut } from '../bindings/Cut'
+export type { Diagnostic } from '../bindings/Diagnostic'
+export type { LambdaState } from '../bindings/LambdaState'
+export type { Move } from '../bindings/Move'
+export type { RuleView } from '../bindings/RuleView'
+export type { Severity } from '../bindings/Severity'
+export type { StateView } from '../bindings/StateView'
+export type { TmProgram } from '../bindings/TmProgram'
+export type { TmState } from '../bindings/TmState'
+export type { Owner, Span, TokenClass }
 
 /**
  * Every `TokenClass` variant, in the Rust enum's declaration order.
  *
- * THE ARRAY IS THE SOURCE AND THE UNION IS DERIVED FROM IT, not the other way round. Written as a
- * standalone union with a separate array beside it, the two drift the moment a variant is added — and
- * they drift into agreement with each other, which is worse than disagreeing. Deriving means a name
- * missing from this array cannot be used anywhere in the app, and the compiler says so.
+ * THE UNION NO LONGER DERIVES FROM THIS ARRAY. Before generation, `TokenClass` was
+ * `(typeof TOKEN_CLASSES)[number]`, so a name missing from the array could not be used anywhere in the
+ * app — the array was the source. `TokenClass` is now generated from the Rust enum
+ * (`../bindings/TokenClass`), and this array is an independent runtime value: a generated *type*
+ * cannot supply an array, and this one is read in `link.ts`'s `lambdaSpans` getter to turn a
+ * `Uint8Array` discriminant into a class name. Written as a standalone array with a separately-sourced union
+ * beside it, the two drift the moment a variant is added on the Rust side and not here — which is
+ * exactly the shape the pin below exists to close, now that neither derives from the other.
  *
- * IT IS NOW CHECKED AGAINST THE RUST ENUM, which it was not through 5a. `tokenClasses()` returns the
- * same names in the same declaration order, and `assertTokenClasses` below fails loudly at startup if
- * the two disagree. That matters more from Plan 5b on than it did before: `LinkIndex` ships span
- * classes as a `Uint8Array` of DISCRIMINANTS, so a reordering here mis-colours silently rather than
- * producing an unrecognised string.
+ * THE PIN BELOW FIRES AT `pnpm typecheck` AND AT CI'S `web` JOB, in both directions: a name this array
+ * is missing, and a name this array has that the union does not. See the pin's own comment for the
+ * error each direction produces. IT DOES NOT RELIABLY FIRE AT THE PRE-COMMIT HOOK: `web-typecheck` is
+ * scoped `files: ^web/.*\.(ts|tsx)$`, so a commit that adds a variant on the Rust side and touches no
+ * `.ts`/`.tsx` file — the exact drift this pin exists to catch — never runs that hook locally; CI's
+ * `web` job still catches it once the commit is pushed.
+ *
+ * THE PIN IS EARLIER THAN `assertTokenClasses` BELOW, NOT STRONGER, AND NEITHER SUBSUMES THE OTHER.
+ * The pin compares this array against `../bindings/TokenClass.ts`, a FILE ON DISK — a tree where
+ * `build:bindings` has not been re-run since a Rust edit satisfies the pin while still being wrong.
+ * `assertTokenClasses` compares this array against the LOADED WASM MODULE at startup, via
+ * `tokenClasses()`, and is the only one of the two that can see that class of staleness. THE PIN IS
+ * ALSO SET-BASED AND BLIND TO ORDER: `Missing`/`Extra` below are `Exclude<...>` over the two SETS of
+ * names, so swapping two entries in this array still typechecks — see `assertTokenClasses`'s own
+ * comment for the check that does see a reorder, and why that matters more from Plan 5b on. Keep both;
+ * each catches a disagreement the other cannot.
  */
 export const TOKEN_CLASSES = [
   'Ident',
@@ -49,12 +77,17 @@ export const TOKEN_CLASSES = [
   'Move',
 ] as const
 
-export type TokenClass = (typeof TOKEN_CLASSES)[number]
+// Pins `TOKEN_CLASSES` to the generated `TokenClass` union in both directions (see the doc comment
+// above `TOKEN_CLASSES`). `Missing` is non-empty when the array lacks a name the union has; `Extra` is
+// non-empty when the array has a name the union does not. `Assert` only accepts `never`, so either
+// one being non-empty fails `pnpm typecheck` and names the offending member in the error.
+type Missing = Exclude<TokenClass, (typeof TOKEN_CLASSES)[number]>
+type Extra = Exclude<(typeof TOKEN_CLASSES)[number], TokenClass>
+type Assert<T extends never> = T
+type _NoneMissing = Assert<Missing>
+type _NoneExtra = Assert<Extra>
 
 export type Classified = [Span, TokenClass][]
-
-export type Severity = 'Error' | 'Warning'
-export type Diagnostic = { span: Span; severity: Severity; message: string }
 
 export type RunStatus = 'Running' | 'Ended' | 'Capped' | 'DepthRefused'
 
@@ -107,56 +140,6 @@ export type TmScratchStatus = {
   header: boolean
 }
 
-export type Cut = 'Bytes' | 'Depth'
-
-/**
- * Which source construct a β-step belongs to.
- *
- * Three states rather than two, and the renderer must keep them apart: `Exact` says this step IS that
- * construct, `Within` says only that it happened somewhere inside it. Collapsing them would re-adopt
- * the shape 5b refused on the TM leg, where "nearest enclosing linkable node" frequently means
- * "highlight the entire program".
- *
- * `'None'` is common and correct — most of a λ term is Church/Scott encoding, which belongs to no
- * source construct at all.
- */
-export type Owner = 'None' | { Exact: number } | { Within: number }
-
-export type LambdaState = {
-  text: string
-  spans: Classified
-  cut: Cut | null
-  step: number
-  /**
-   * The byte span IN `text`, ABOVE — i.e. in THIS frame's own text — of the redex this frame's own step
-   * contracted. `null` when there is no redex (step 0) or its subterm fell past the truncation cut (see
-   * `Cut`) — never a span clamped to where the print stopped.
-   *
-   * THE PATH BEHIND IT IS NOT ON THE WIRE. `LambdaState.redex` exists on the Rust type and is
-   * `serde(skip)`ped there (see its own doc): the span is resolved on the Rust side, by the same walk
-   * that prints `text`, and only the span crosses. A structural consumer — the planned `TermTree` view,
-   * which has no text to index into — is what would bring the path across; a renderer of `text` does not
-   * need it.
-   *
-   * RESOLVED AGAINST THE TERM THIS FRAME HOLDS, which is what makes it trustworthy where 5b's deleted
-   * `node_to_lambda`-derived `source_node` was not: that field's span was fixed once, against the
-   * INITIAL term, and went stale the moment reduction contracted a root redex. `redex_span` is computed
-   * fresh every frame, from the redex path walked against `text`'s own print, so it never outlives the
-   * frame it was computed for.
-   *
-   * NAMED FOR THE REDEX, BUT WHAT IT COVERS IS THE CONTRACTUM. The path behind it named the redex `App`
-   * as it stood in the PRE-step term; β consumed that `App` and its `Abs`, so the subterm standing at
-   * that path in THIS frame's term — the text this span covers — is the contractum the step PRODUCED.
-   * A renderer painting it is showing "what just changed", not "what is about to be contracted".
-   *
-   * BYTES, LIKE EVERY OTHER SPAN ON THIS TYPE — convert through `spans.ts`'s `byteToIndex`/`byteIndexAt`
-   * before indexing into a JS string. `lambda-pane.ts`'s frame view is the one place this crosses into a
-   * DOM range; see its `#redraw` for where that conversion happens.
-   */
-  redex_span: Span | null
-  owner: Owner
-}
-
 /** The `NodeId` under either claim, or `null`. A consumer that renders the two claims differently must match on the variant instead of calling this. */
 export function ownerNode(o: Owner): number | null {
   if (o === 'None') return null
@@ -190,59 +173,17 @@ export function decodedText(d: Decoded): string {
 }
 
 /**
- * A head move, as `viewmodel::move_text` prints it.
- *
- * A STRING UNION RATHER THAN AN ENUM, because `RuleView.moves` is `Vec<String>` on the Rust side —
- * the projection stringifies `Move` during `TmProgram::of`. `viewmodel::move_text` is the only
- * producer, and its three arms are exactly this union, so `L` | `R` | `S` is exhaustive.
- */
-export type Move = 'L' | 'R' | 'S'
-
-/**
- * One transition. `read`/`write` carry one entry PER TAPE, and `null` is a wildcard — `RuleSpec`
- * defaults every untouched tape to (wildcard read, unchanged write, Stay), which is what lets a
- * gadget name only the tapes it touches.
- */
-export type RuleView = { read: (string | null)[]; write: (string | null)[]; moves: Move[]; next: number }
-
-export type StateView = { name: string; accept: boolean; rules: RuleView[] }
-
-/**
- * The machine, projected ONCE per compile and never per step. `TmProgram::of`'s doc records why:
- * the `map` demo is 3,203 states over 344,999 steps, and re-projecting per frame is the cost this
- * split exists to avoid.
- */
-export type TmProgram = { states: StateView[]; alphabet: string[]; tapes: number; width: number; start: number }
-
-/**
- * One configuration, windowed. `heads` AND `window_start` ARE BOTH MATERIALIZED-TAPE COORDINATES,
- * not window-relative ones: the head's position inside `window[i]` is `heads[i] - window_start[i]`,
- * which is `tape.ts`'s whole job and is node-tested there.
- *
- * `source_node` is honestly `null` for machine scaffolding, `defunc`-minted constructs, and any state
- * this lowering did not produce. It has no consumer until 5b.
- */
-export type TmState = {
-  state: number
-  step: number
-  heads: number[]
-  window_start: number[]
-  window: string[][]
-  source_node: number | null
-  /**
-   * The index into `tmProgram().states[state].rules` of the rule ABOUT TO FIRE, or `null` when nothing
-   * matches — at an accept state, at `halt`, or at a stuck configuration.
-   *
-   * NAMES WHAT HAPPENS NEXT, NOT WHAT PRODUCED THIS FRAME. See `viewmodel.rs`'s field doc.
-   */
-  rule: number | null
-}
-
-/**
  * Fail loudly if the hand-written `TOKEN_CLASSES` has drifted from the Rust enum.
  *
  * AT STARTUP, NOT IN A TEST ONLY. A test can be skipped, a CI job can be scoped out, and the failure
  * this guards is silent mis-colouring rather than a crash. Called once from `main.ts` after `init()`.
+ *
+ * THIS IS THE CHECK THAT CATCHES A REORDER, NOT THE PIN ABOVE. It joins both arrays into strings and
+ * compares them (`ours !== theirs`, below), so it is sensitive to ORDER — unlike the compile-time pin
+ * above `TOKEN_CLASSES`, which is set-based (`Exclude<...>`) and typechecks clean if two names swap
+ * places. That matters more from Plan 5b on than it did before: `LinkIndex` ships span classes as a
+ * `Uint8Array` of DISCRIMINANTS, so a reordering here mis-colours silently rather than producing an
+ * unrecognised string, and this runtime check is what stands between that and shipping.
  */
 export function assertTokenClasses(fromWasm: string[]): void {
   const ours = TOKEN_CLASSES.join(',')

@@ -6,7 +6,7 @@
   "scripts": {
     "build:wasm": "wasm-pack build ../crates/redextape-wasm --release --target web --out-dir ../../pkg",
     "build:wasm:dev": "wasm-pack build ../crates/redextape-wasm --dev --target web --out-dir ../../pkg",
-    "build:bindings": "TS_RS_EXPORT_DIR=$PWD/bindings cargo test -p redextape-core --features ts export_bindings && TS_RS_EXPORT_DIR=$PWD/bindings cargo test -p redextape-wasm --features ts export_bindings",
+    "build:bindings": "bash ../scripts/build-web-bindings.sh",
     "build:app": "vite build",
     "build": "pnpm run build:wasm && pnpm run build:bindings && pnpm run build:app",
     "dev": "vite",

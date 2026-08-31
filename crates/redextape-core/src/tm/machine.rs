@@ -16,6 +16,7 @@ pub type StateId = u32;
 
 /// A head move.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Move {
     L,
     R,

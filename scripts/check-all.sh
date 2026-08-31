@@ -38,9 +38,12 @@ cd "$(dirname "$0")/.."
 
 # ts-rs writes its generated TypeScript during `cargo test`, and resolves this variable relative to
 # each crate's MANIFEST directory rather than the workspace root — so leaving it unset makes the
-# `--features ts` test leg scatter a `bindings/` directory into `crates/redextape-core/`, untracked and
-# outside `.gitignore`'s `/web/bindings/` entry. Absolute, and set once for every leg, so the gate
-# writes the same bindings the web build consumes instead of a stray copy nobody reads.
+# `--features ts` test leg scatter a `bindings/` directory into `crates/redextape-core/`. `.gitignore`'s
+# `crates/*/bindings/` entry (beside `/web/bindings/`) keeps that scatter from ever showing up as an
+# untracked file, but it is still the wrong copy: not what the web build consumes, and silently stale
+# the moment `web/bindings/` and `crates/redextape-core/bindings/` disagree. Absolute, and set once for
+# every leg, so the gate writes the same bindings the web build consumes instead of a stray copy
+# nobody reads.
 export TS_RS_EXPORT_DIR="$PWD/web/bindings"
 
 # THE SCRIPT ALREADY ASSUMED CWD == REPO ROOT IN SEVERAL PLACES BEFORE THIS LINE EXISTED — it was

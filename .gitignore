@@ -15,6 +15,16 @@
 # reformat and lint them.
 /web/bindings/
 
+# ...and the scratch directories `scripts/build-web-bindings.sh` uses to swap a fresh generation into
+# `/web/bindings/` above without ever deleting the last-good copy before the new one is ready. Named
+# per-process (`mktemp`'s random suffix, `.old` appended for the swap's holding spot) so two concurrent
+# runs can never collide on either name — see that script's header for why a fixed shared name was a
+# Critical this glob replaces. Present only mid-regeneration, or if a run was killed before cleaning up
+# after itself; `/web/bindings.lock/` is the mutex directory the swap itself is guarded by, present only
+# while a run holds it or if a run was killed while holding it.
+/web/bindings.tmp.*/
+/web/bindings.lock/
+
 # ...and the crate-relative copy `cargo test -p redextape-core --features ts` writes when
 # TS_RS_EXPORT_DIR is unset. `scripts/check-all.sh` exports it so the gate never lands here, but a
 # developer running that cargo command directly still does — ts-rs resolves the variable against each

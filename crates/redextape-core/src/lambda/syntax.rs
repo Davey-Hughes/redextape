@@ -339,6 +339,7 @@ enum Role {
 /// tell them apart cannot defend against it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Cut {
     Bytes,
     Depth,

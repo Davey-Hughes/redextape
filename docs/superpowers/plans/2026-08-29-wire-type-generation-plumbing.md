@@ -649,6 +649,16 @@ generated" — which is false while seventeen types are still declared by hand, 
 self-review had waved it through as "describes what the file is becoming". A comment asserting a
 property the tree does not have is the defect class this repository has recorded most often.
 
+**CORRECTION (2026-08-31, found while closing out PR 2 of the wire-type-generation slice) — THE
+`TOKEN_CLASSES` PIN DID NOT LAND IN PR 3; IT SHIPPED IN PR 2, ONE OF THIS BULLET'S THREE ITEMS.** PR 2
+is the commit that deletes `export type TokenClass = (typeof TOKEN_CLASSES)[number]` — the derivation
+the pin replaces — and PR 2's own whole-branch review found the array's doc comment still claiming
+that derivation existed one commit after it was gone, so the pin had to land with the deletion rather
+than a PR later. This is the third place that carried the stale assignment: the same claim was already
+corrected in PR 1's own roadmap bullet and in design §11, and neither correction's own search caught
+this copy, a plan's self-review note rather than a design section or a roadmap bullet. The
+`assertTokenClasses` retention note and reducing `types.ts` to a barrel remain PR 3's, unaffected.
+
 **Open question this plan does not answer.** Design §14 question 1, whether `ts-rs`'s runtime builds
 for wasm32, is answered by Task 1 Step 5 rather than assumed. Step 8 is the stop condition if the
 answer is no.
