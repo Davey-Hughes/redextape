@@ -20,6 +20,13 @@
 // consistency with the other crates in this workspace, which do have inline test modules.
 #![cfg_attr(test, allow(clippy::pedantic))]
 
+//! `ts_derive_scan` (below) is the second thing this crate holds for the same structural reason as
+//! the first: two crates need one definition and neither can own it. It needs no `proptest` and is
+//! not behind that feature — it is plain `std`, so a consumer that opts out of `proptest` compiles it
+//! at no dependency cost.
+
+pub mod ts_derive_scan;
+
 #[cfg(feature = "proptest")]
 use proptest::prelude::*;
 

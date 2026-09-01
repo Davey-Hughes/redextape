@@ -15,6 +15,20 @@
 
 mod session;
 
+/// The five wire types this crate declares, re-exported for `tests/ts_bindings.rs`.
+///
+/// **FEATURE-GATED, AND NARROWED TO FIVE NAMES, BECAUSE IT EXISTS FOR A GATE.** `mod session` is
+/// private and stays private: `Session`, `Compiled`, `TmScratch` and the rest are this crate's
+/// internals, reached from JavaScript through `#[wasm_bindgen]` rather than from Rust. But the two
+/// fidelity gates are integration tests, and an integration test links against this crate the way any
+/// consumer would — it cannot see into a private module. `pub mod session` would export everything to
+/// enable one test; an inline `#[cfg(test)]` gate inside `session.rs` cannot work at all, because the
+/// coverage scanner reads that file and a bare import of `ts-rs`'s `TS` trait anywhere in it fails the
+/// canonical-line check. Under default features — which is every browser build — this line does not
+/// exist.
+#[cfg(feature = "ts")]
+pub use session::{Decoded, LambdaStatus, RunStatus, TmScratchStatus, TmStatus};
+
 use redextape_core::tm::EncodingKind;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;

@@ -104,6 +104,7 @@ impl std::fmt::Display for SessionError {
 /// cannot tell a finished run from one that spent its budget — and "continue" is meaningful for
 /// exactly one of those. §3.3 justifies `raise_cap` existing by §6.4's "still running — hit 50k steps
 /// ... continue"; this is the half of that affordance which is data rather than rendering.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RunStatus {
     /// The run may still advance.
@@ -164,6 +165,7 @@ pub enum RunStatus {
 /// `text` IS `format_value_capped` OUTPUT, AND `Value` ITSELF CANNOT CROSS. `Value::Closure { params,
 /// body: Rc<Core>, env: Env }` carries an environment and a Core subtree; it has no serde derive and
 /// should not acquire one. That is a property of the type, not a convenience.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Decoded {
     Value {
@@ -187,6 +189,7 @@ pub enum Decoded {
 /// assigns a captured variable" is the whole point of showing the pane at all. `node` is the Core node
 /// the refusal names, so the source pane can highlight it. `run` is `None` exactly when the leg is
 /// absent — there is no run to report on.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LambdaStatus {
     pub available: bool,
@@ -196,6 +199,7 @@ pub struct LambdaStatus {
 }
 
 /// Whether the TM leg is there, the width it fitted, and how far its run has got.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TmStatus {
     pub available: bool,
@@ -219,6 +223,53 @@ pub struct TmStatus {
     /// **`LambdaStatus` HAS NO COUNTERPART, and the asymmetry is real.** The TM's length is known at
     /// compile time because `compile` already ran the machine; λ's is not, because `compile` builds
     /// the cursor and never reduces. There is no honest number to put there.
+    ///
+    /// **`ts(type = "number | null")`, NOT `ts(type = "number")` — AND THE DESIGN PRESCRIBED THE
+    /// SECOND.** `ts-rs` maps `u64` to `bigint` unconditionally, which is not what the wire carries:
+    /// `serde_wasm_bindgen` puts it across as a JS number, which
+    /// `all_three_legs_agree_across_the_boundary` in `crates/redextape-wasm/tests/browser.rs`
+    /// measures directly against a real browser. So an override is needed. But `ts(type = ...)`
+    /// substitutes the WHOLE field type, `Option` and all, so the prescribed `ts(type = "number")`
+    /// generates `total_steps: number` and silently drops the `| null` that `None` puts on the wire.
+    /// `LambdaState::step` and `TmState::step` take that same override correctly, because they are
+    /// bare `u64` with no `Option` around them.
+    ///
+    /// **NO RUST-SIDE GATE CAN SEE THE DROPPED `| null`.** `no_generated_type_carries_bigint` passes
+    /// on `total_steps: number` — there is no `bigint` in it to find — and
+    /// `the_gate_covers_every_exported_type` only checks which types derive `TS`, not what their
+    /// fields say.
+    ///
+    /// **WHAT CAN CATCH IT IS `tsc`, AND ONLY WHILE `web/src/types.ts` TAKES `TmStatus` FROM
+    /// `../bindings/`.** `tsconfig.json`'s `include` is `["src", "tests", "vite.config.ts"]`, so
+    /// `web/bindings/TmStatus.ts` enters the TypeScript program at all only through that import.
+    ///
+    /// **NO PRODUCTION SOURCE FILE CATCHES THIS.** `resultRows` in `web/src/results.ts` reads
+    /// `total_steps` and narrows it on `!== null`, and that narrowing compiles clean against the wrong
+    /// type — a `number` compared against `null` is not an error TypeScript reports here. What catches
+    /// it is three TEST FIXTURES that assign a literal `null` to the field, and nothing else. So the
+    /// check exists only because tests happen to construct a `TmStatus` with `total_steps: null` in it;
+    /// a refactor that stopped doing so would remove the last thing watching this class, with no other
+    /// signal that anything had changed.
+    ///
+    /// **MEASURED, AT THE COMMIT THAT ADDED THESE DERIVES AND BEFORE `web/src/types.ts` CONSUMED THE
+    /// GENERATED FILES: UNDER EXACTLY THIS SABOTAGE, BOTH RUST GATES PASSED AND `pnpm run typecheck`
+    /// EXITED 0.** `TmStatus` was still hand-declared there, so nothing imported
+    /// `web/bindings/TmStatus.ts` and `tsc` never opened it — the condition above did not hold, and
+    /// there was nothing watching to catch it.
+    ///
+    /// **MEASURED AGAIN, AT THE COMMIT THAT MAKES `web/src/types.ts` THE BARREL: UNDER THE SAME
+    /// SABOTAGE, THE RUST GATES STILL PASSED AND `pnpm run typecheck` NOW EXITED 1.** With the override
+    /// changed to `ts(type = "number")` and `pnpm run build:bindings` re-run,
+    /// `cargo nextest run -p redextape-wasm --features ts -E 'binary(ts_bindings)'` still reported
+    /// `2 tests run: 2 passed` — neither Rust gate moved — but `tsc` reported three `TS2322` errors, one
+    /// per call site assigning a literal `null` to the now-narrowed field: `replies.test.ts`'s
+    /// `compiled` fixture, `results.test.ts`'s `TmLeg` fixture in `'shows the TM reason and no width
+    /// when that backend declines'`, and `session-client.test.ts`'s `compiled` fixture, each
+    /// `Type 'null' is not assignable to type 'number'.` Restoring
+    /// `ts(type = "number | null")` and re-running `build:bindings` returns `pnpm run typecheck` to exit
+    /// 0. The condition named above holds, on this tree, on this measurement: with the barrel importing
+    /// `TmStatus` from `../bindings/`, `tsc` does refuse the dropped `| null`.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub total_steps: Option<u64>,
 }
 
@@ -1098,6 +1149,10 @@ impl LambdaScratch {
 /// leg. The `tm` field's doc records at length what the last fabricated-status-for-an-unreachable-state
 /// cost this file; this type is that lesson applied before the fact.
 ///
+/// The Rust side pins the field list by an exhaustive destructuring in this module's own tests
+/// (`let TmScratchStatus { available, reason, width, run, header } = sc.tm_status();`), so a sixth
+/// field added here fails to compile there with `E0027` rather than merely going unrendered.
+///
 /// **`width` AND `run` ARE NOT `Option`, WHICH IS THE SAME ARGUMENT IN THE OTHER DIRECTION.** They are
 /// optional on `TmStatus` because a `Session`'s TM backend can decline; a `TmScratch` exists only for
 /// text that parsed to a machine, so both are always answerable and an `Option` would be a state
@@ -1108,6 +1163,7 @@ impl LambdaScratch {
 /// renderer reads a status off either session kind. That is the same call `LambdaScratch::lambda_status`
 /// makes; `total_steps` is different in kind, not merely in degeneracy, which is why it is absent
 /// rather than constant.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TmScratchStatus {
     pub available: bool,

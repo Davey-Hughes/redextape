@@ -45,3 +45,12 @@ ts = ["dep:ts-rs", "redextape-core/ts"]
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.76"
+
+# `redextape-test-support` HOLDS THE DERIVE-SITE SCANNER `tests/ts_bindings.rs` RUNS, and it is behind
+# a target gate for the same reason `redextape-core`'s `mimalloc` is: `wasm-pack test` builds this
+# crate's dev-dependency graph for wasm32, and nothing in that graph may be able to break the browser
+# leg. The gate this pulls in is `#![cfg(feature = "ts")]` and never compiled for wasm32 anyway, so the
+# dependency has no business being in that graph at all. `default-features = false` drops `proptest`,
+# which this crate does not use — the same opt-out `redextape-cli` takes.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+redextape-test-support = { path = "../redextape-test-support", default-features = false }

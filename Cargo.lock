@@ -1094,6 +1094,7 @@ dependencies = [
  "console_error_panic_hook",
  "js-sys",
  "redextape-core",
+ "redextape-test-support",
  "serde",
  "serde-wasm-bindgen",
  "ts-rs",

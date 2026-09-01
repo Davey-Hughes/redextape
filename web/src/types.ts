@@ -1,21 +1,31 @@
-// The wasm boundary's wire shapes, as TypeScript.
+// The wasm boundary's wire shapes, as TypeScript — a barrel now, not a file of declarations.
 //
-// EVERY SHAPE HERE IS MEASURED, not designed: `crates/redextape-wasm/tests/browser.rs` reads each one
-// out of a real browser and pins it. Two of them look wrong and are not. `total_steps` is snake_case
-// because serde does not rename. A fieldless enum variant crosses as the bare variant NAME, and a
-// struct variant as a one-key object — so `Decoded` is a union of two strings and two objects rather
-// than a discriminated union with a `kind` field.
+// MOST OF WHAT THIS FILE ONCE DECLARED IS GENERATED AND RE-EXPORTED INSTEAD, from `../bindings/`,
+// which `pnpm run build:bindings` writes from each type's Rust declaration; the directory is
+// gitignored, so there is no committed copy to go stale. `crates/redextape-wasm/tests/browser.rs` is
+// what measures each generated shape against a real browser and pins it — not this file, which
+// declares none of them any more.
 //
-// TYPES RE-EXPORTED FROM `../bindings/` ARE GENERATED FROM THE RUST DECLARATION and are not edited
-// here — `pnpm run build:bindings` writes them. The directory is gitignored, so there is no
-// committed copy to go stale.
+// TWO FACTS ABOUT HOW THE BOUNDARY ENCODES THINGS STILL LIVE HERE, because they are facts about the
+// boundary as a whole rather than about any one type, and moving them into one generated type's Rust
+// doc would strand them there. Both look like bugs and are not. `total_steps` is snake_case because
+// serde does not rename. A fieldless enum variant crosses as the bare variant NAME, and a struct
+// variant as a one-key object — so `Decoded` is a union of three strings and two objects rather than
+// a discriminated union with a `kind` field.
 //
-// THE MIGRATION IS PARTIAL AND THIS COMMENT TRACKS IT. Every type re-exported from `../bindings/`
-// above is generated from its Rust declaration. The types still DECLARED below are the ones
-// `redextape-wasm` owns; they agree with their Rust counterparts only by someone remembering to,
-// and PR 3 is what moves them. `Classified` is not waiting for a PR — it is a structural alias over
-// two generated types, with no Rust declaration to derive from, and stays here permanently.
+// WHAT IS STILL DECLARED BELOW IS EVERYTHING THAT HAS NO RUST DECLARATION TO GENERATE FROM, and that
+// is now the whole of it — there is no remaining migration and no later PR to wait for. `Classified`
+// is a structural alias over two generated types, with no derive site to attach a `#[derive(TS)]` to.
+// `TOKEN_CLASSES` is a runtime array, which a generated *type* cannot supply; the pin below it is what
+// holds the two together. `ownerNode`, `decodedText` and `assertTokenClasses` are consumers, not
+// shapes.
+//
+// `LinkIndexWire` IS THE ONE WIRE TYPE THIS FILE NEVER COVERED, and it is still hand-written and
+// still unwatched — see `link.ts`, where `Session::link_index` assembles a columnar value by hand at
+// the boundary rather than serializing a struct. Generation cannot reach it. It is named here so this
+// header is not read as claiming the whole boundary is generated.
 
+import type { Decoded } from '../bindings/Decoded'
 import type { Owner } from '../bindings/Owner'
 import type { Span } from '../bindings/Span'
 import type { TokenClass } from '../bindings/TokenClass'
@@ -23,13 +33,17 @@ import type { TokenClass } from '../bindings/TokenClass'
 export type { Cut } from '../bindings/Cut'
 export type { Diagnostic } from '../bindings/Diagnostic'
 export type { LambdaState } from '../bindings/LambdaState'
+export type { LambdaStatus } from '../bindings/LambdaStatus'
 export type { Move } from '../bindings/Move'
 export type { RuleView } from '../bindings/RuleView'
+export type { RunStatus } from '../bindings/RunStatus'
 export type { Severity } from '../bindings/Severity'
 export type { StateView } from '../bindings/StateView'
 export type { TmProgram } from '../bindings/TmProgram'
+export type { TmScratchStatus } from '../bindings/TmScratchStatus'
 export type { TmState } from '../bindings/TmState'
-export type { Owner, Span, TokenClass }
+export type { TmStatus } from '../bindings/TmStatus'
+export type { Decoded, Owner, Span, TokenClass }
 
 /**
  * Every `TokenClass` variant, in the Rust enum's declaration order.
@@ -88,57 +102,6 @@ type _NoneMissing = Assert<Missing>
 type _NoneExtra = Assert<Extra>
 
 export type Classified = [Span, TokenClass][]
-
-export type RunStatus = 'Running' | 'Ended' | 'Capped' | 'DepthRefused'
-
-export type Decoded =
-  | 'Unfinished'
-  | 'Undecodable'
-  | 'TooLargeToPrint'
-  | { Value: { text: string } }
-  | { Fault: { message: string } }
-
-export type LambdaStatus = {
-  available: boolean
-  reason: string
-  node: number | null
-  run: RunStatus | null
-}
-
-export type TmStatus = {
-  available: boolean
-  reason: string
-  width: number | null
-  run: RunStatus | null
-  total_steps: number | null
-}
-
-/**
- * A `TmScratch`'s status — **five fields, and the missing one is the point**.
- *
- * NO `total_steps`. `Session.tmStatus` reports one from the run `compile` performed; a scratch is
- * stepped rather than described-run, so any value here would be invented. The Rust side pins this by
- * an exhaustive destructuring, so a sixth field fails to compile there with `E0027` — this type is the
- * wire's copy of that shape and must be edited in step with it.
- *
- * `header` IS THE FIELD `TmStatus` HAS NO COUNTERPART FOR. `false` means the text carried no header,
- * so the machine runs from blank tapes at `MIN_FIELD_WIDTH` — explicitly not an error, and a fact the
- * pane must surface rather than let the user assume they are watching the machine they pasted.
- *
- * `width` AND `run` ARE NOT `| null`, WHICH IS THE SAME ARGUMENT AS `TmStatus`'S NULLABILITY IN THE
- * OTHER DIRECTION. `TmStatus`'s pair is nullable because a `Session` can decline the TM leg entirely —
- * `available: false` with nothing behind it. A `TmScratch` has no such leg to decline: it is built from
- * text that already parsed to a machine (`TmScratchStatus` in `crates/redextape-wasm/src/session.rs`,
- * and its own doc there), so `width` and `run` are always answerable and an `Option` around either
- * would be a state no worker can produce. See that Rust struct for the argument in full.
- */
-export type TmScratchStatus = {
-  available: boolean
-  reason: string
-  width: number
-  run: RunStatus
-  header: boolean
-}
 
 /** The `NodeId` under either claim, or `null`. A consumer that renders the two claims differently must match on the variant instead of calling this. */
 export function ownerNode(o: Owner): number | null {

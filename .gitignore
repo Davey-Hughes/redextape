@@ -25,10 +25,11 @@
 /web/bindings.tmp.*/
 /web/bindings.lock/
 
-# ...and the crate-relative copy `cargo test -p redextape-core --features ts` writes when
-# TS_RS_EXPORT_DIR is unset. `scripts/check-all.sh` exports it so the gate never lands here, but a
-# developer running that cargo command directly still does — ts-rs resolves the variable against each
-# crate's manifest directory, so "unset" means "beside the crate", not "nowhere".
+# ...and the crate-relative copy `cargo test -p redextape-core --features ts` (or
+# `-p redextape-wasm`) writes when TS_RS_EXPORT_DIR is unset. `scripts/check-all.sh` exports it so the
+# gate never lands here, but a developer running that cargo command directly still does — ts-rs
+# resolves the variable against each crate's manifest directory, so "unset" means "beside the crate",
+# not "nowhere".
 crates/*/bindings/
 
 # Web frontend

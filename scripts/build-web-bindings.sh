@@ -75,11 +75,25 @@
 # silent data loss and never an indefinite hang. `web/bindings` itself is restored by the next
 # successful run the normal way, from a fresh generation.
 #
-# THE SWAP IS ALSO GUARDED ON THE SCRATCH DIRECTORY ACTUALLY CONTAINING GENERATED FILES, not merely on
-# `cargo test` exiting 0. A test filter that matches nothing exits 0 having written nothing — this is
-# not exotic, `redextape-wasm`'s leg legitimately runs 0 tests today — so "cargo exited 0" was never
-# proof that generation happened, only that nothing failed. The check below is a literal file-existence
-# test, not a trust in the exit code.
+# THE SWAP IS ALSO GUARDED ON EACH LEG'S OWN SCRATCH SUBDIRECTORY ACTUALLY CONTAINING GENERATED FILES,
+# not merely on `cargo test` exiting 0. A test filter that matches nothing exits 0 having written
+# nothing, so "cargo exited 0" was never evidence that generation happened, only that nothing failed —
+# the checks below are literal file-existence tests, not a trust in the exit code.
+#
+# THE CHECK IS PER LEG, NOT ONE COMBINED CHECK OVER A SHARED SCRATCH DIRECTORY. Before `redextape-wasm`
+# had its own `ts-rs` derives, its leg ran 0 tests and wrote nothing, so "at least one `.ts` file exists
+# anywhere in the scratch directory" and "the leg that matters produced something" were the same
+# question — one file existing was equivalent to the producing leg having produced. Once
+# `redextape-wasm` gained its own derives and started writing files too, that equivalence broke
+# silently: either leg's output alone now satisfies a combined check, so a regression that made ONE
+# leg's filter match nothing — a removed derive, a `ts`-feature regression on that crate, a `ts-rs`
+# upgrade that renames the `export_bindings_*` test prefix — would ride in on the OTHER leg's files,
+# exit 0, and destroy the last-good `web/bindings` at swap: the single outcome this whole script exists
+# to prevent. So each leg writes into its own subdirectory of the scratch directory (`$TMP_DIR/core`,
+# `$TMP_DIR/wasm`) instead of into the scratch directory directly, each subdirectory is checked non-empty
+# independently, and only once BOTH have proven non-empty are they merged into the flat tree that gets
+# swapped in. Neither subdirectory needs its own lock or trap entry: both live under the already unique-
+# per-process `$TMP_DIR`, so `rm -rf "${TMP_DIR:?}"` in cleanup already removes them.
 #
 # EVERY `rm -rf` BELOW USES A LITERAL PATH OR A VARIABLE WRITTEN `"${VAR:?}"` — the colon form is what
 # aborts if a variable is ever set but empty, which `set -u` does not catch and quoting does not save
@@ -99,6 +113,14 @@ TMP_DIR="$(mktemp -d "$PWD/web/bindings.tmp.XXXXXX")"
 OLD_DIR="${TMP_DIR}.old"   # never pre-created — appending to a unique name keeps this unique too, and
                            # `mv` onto a path that does not yet exist renames INTO that path rather than
                            # inside it, which is what closes the second, latent defect described above.
+
+# Each cargo leg below writes into its own subdirectory of TMP_DIR rather than into TMP_DIR itself — see
+# the header comment for why a single check over one shared directory can no longer tell "a leg produced
+# nothing" from "the other leg produced something". Both names are derived from the already per-process
+# TMP_DIR, so they carry the same collision-freedom without needing their own lock or trap entry.
+CORE_DIR="$TMP_DIR/core"
+WASM_DIR="$TMP_DIR/wasm"
+mkdir -p "$CORE_DIR" "$WASM_DIR"
 
 LOCK_HELD=0
 
@@ -164,17 +186,59 @@ acquire_lock() {
   done
 }
 
-TS_RS_EXPORT_DIR="$TMP_DIR" cargo test -p redextape-core --features ts export_bindings
-TS_RS_EXPORT_DIR="$TMP_DIR" cargo test -p redextape-wasm --features ts export_bindings
+TS_RS_EXPORT_DIR="$CORE_DIR" cargo test -p redextape-core --features ts export_bindings
+TS_RS_EXPORT_DIR="$WASM_DIR" cargo test -p redextape-wasm --features ts export_bindings
 
-if [ -z "$(find "$TMP_DIR" -maxdepth 1 -name '*.ts' -print -quit)" ]; then
-  echo "build-web-bindings.sh: both cargo legs exited 0 but $TMP_DIR contains no .ts files —" \
-    "refusing to touch the last-good $BINDINGS_DIR. A cargo test filter that matches nothing exits 0" \
-    "having written nothing (redextape-wasm's leg legitimately runs 0 tests, so '0 tests passed' is" \
-    "not itself evidence of a problem — an EMPTY export directory is). Check TS_RS_EXPORT_DIR and the" \
-    "export_bindings filter above." >&2
-  exit 1
-fi
+# Checked independently, one leg at a time: an empty CORE_DIR must fail loudly even when WASM_DIR is
+# full, and vice versa — see the header comment for why a single combined check can no longer catch that.
+check_leg_produced_files() {
+  local dir="$1" crate="$2"
+  if [ -z "$(find "$dir" -maxdepth 1 -name '*.ts' -print -quit)" ]; then
+    echo "build-web-bindings.sh: the $crate leg exited 0 but $dir contains no .ts files — refusing to" \
+      "touch the last-good $BINDINGS_DIR. A cargo test filter that matches nothing exits 0 having" \
+      "written nothing, so 'cargo exited 0' was never evidence that $crate's generation happened. Check" \
+      "TS_RS_EXPORT_DIR and the export_bindings filter for '-p $crate' above." >&2
+    exit 1
+  fi
+}
+check_leg_produced_files "$CORE_DIR" "redextape-core"
+check_leg_produced_files "$WASM_DIR" "redextape-wasm"
+
+# ONLY POSSIBLE SINCE redextape-wasm GAINED ITS OWN DERIVES. Before that, CORE_DIR was the only leg
+# that ever held anything, so two legs writing the same basename could not happen. Now a type of the
+# same name exported from BOTH crates — say a `Span` added to redextape-wasm carrying the canonical
+# derive — lands on that basename in each leg's own directory, and the plain `mv` below would merge
+# them onto one file, silently keeping whichever it happens to write last. NO COVERAGE GATE SEES THIS:
+# each crate's `the_gate_covers_every_exported_type` (in its own `tests/ts_bindings.rs`) compares only
+# that crate's derive sites against its own `generated()` list, so a same-named type declared in the
+# OTHER crate never enters the comparison — both gates pass, and the wrong file ships to every
+# TypeScript consumer. Checked here, before the merge and before anything under $BINDINGS_DIR is
+# touched, so a collision refuses loudly instead of being resolved by mv's last-write-wins.
+check_no_leg_collisions() {
+  local name collisions=""
+  for path in "$CORE_DIR"/*.ts; do
+    name="$(basename "$path")"
+    if [ -e "$WASM_DIR/$name" ]; then
+      collisions="$collisions $name"
+    fi
+  done
+  if [ -n "$collisions" ]; then
+    echo "build-web-bindings.sh: redextape-core and redextape-wasm both generated:$collisions —" \
+      "refusing to touch $BINDINGS_DIR. A type of that name is exported from both crates, so 'mv'" \
+      "would silently keep whichever leg it wrote last, and neither crate's coverage gate can see" \
+      "it — each only compares its own crate's derive sites against its own generated() list. Rename" \
+      "or remove the duplicate in one crate." >&2
+    exit 1
+  fi
+}
+check_no_leg_collisions
+
+# Both legs proved non-empty independently, and neither collides with the other: merge them into
+# TMP_DIR itself so the tree that gets swapped in below keeps the same flat layout web/bindings has
+# always had. mv's directory-destination form takes any number of sources, so a third leg added later
+# is one more argument here, not a new check shape.
+mv "$CORE_DIR"/*.ts "$WASM_DIR"/*.ts "$TMP_DIR/"
+rm -rf "${CORE_DIR:?}" "${WASM_DIR:?}"
 
 # Generation succeeded and produced files: web/bindings.tmp.* is a complete, good tree. Everything past
 # this point that touches the SHARED name web/bindings runs under the lock.

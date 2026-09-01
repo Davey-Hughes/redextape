@@ -111,7 +111,20 @@ pin and the runtime assert catch different things, neither subsumes the other, a
 > `scripts/check-citations.sh`, deliberately — these citations are the reason the exemption exists — so
 > neither drift ever fired a gate. **A citation a gate does not cover is one a human has to re-derive,
 > and the commit that moves the lines is the one that has to do it.**
-`encodings()` does the same for `EncodingKind`. Every other type on the list is unwatched.
+~~`encodings()` does the same for `EncodingKind`.~~ **FALSE, AND RETRACTED 2026-08-31 — no such
+mechanism exists.** `encodings()` (`web/src/main.ts`) is called once, to populate the encoding
+`<select>`'s options from the wasm export; it compares nothing against a hand-written array, and no
+function anywhere in `web/src/*.ts` plays `assertTokenClasses`'s role for `EncodingKind`.
+`TOKEN_CLASSES`/`assertTokenClasses` is this boundary's only agreement mechanism; every other type on
+the list, `EncodingKind` included, is unwatched.
+
+**RESTATED (2026-09-01, whole-branch review) — TRUE WHEN WRITTEN, NOT ON THIS TREE.** This closed at
+PR 1's landing, when only `Span` was generated and the other sixteen Class A types were still
+hand-mirrored and unwatched. PR 2 and PR 3 have since generated all seventeen from their Rust
+declarations — undriftable, not merely watched, which is the stronger guarantee this section's own
+"Generation makes Class A undriftable" already makes above. What remains genuinely unwatched today is
+Class B (`LinkIndex`, hand-assembled — §13 says so directly) and `EncodingKind`, which was never one
+of the seventeen and has no `TS` derive to gain one.
 
 ~~**`assertTokenClasses` runs in nothing.** It is called from exactly one place, `web/src/main.ts`,
 immediately after `init()`. The browser tests under `web/tests/browser/` build their own DOM shell and
@@ -129,6 +142,18 @@ shape this project's citation gate already has on record for a `grep '^//!'` tha
 reddens 26 of 44 browser test files. A claim about whether a guard fires is answerable by making it
 fire, and this one was asserted from a search pattern instead for long enough to reach two documents
 and a design decision.
+
+**RE-MEASURED (2026-09-01, whole-branch review at `27e1735`) — still 26 of 44.** A later round flagged
+this count as possibly stale from `find web/tests/browser -maxdepth 1 -name '*.test.ts' | wc -l`, which
+reports 47, of which 27 reference `../../src/main` — and left it unconfirmed rather than guess. This
+round ran the actual sabotage instead of the proxy count: baseline `44 passed (44)` / `269 passed
+(269)`; with `'Binder'` changed to `'Drifted'` in `TOKEN_CLASSES`, `26 failed | 18 passed (44)`. The
+proxy's 47 is not wrong, it is counting a different set: `web/vite.config.ts` defines `PROBE_FILES` —
+`buffer-affordability.test.ts`, `tm-fork-cost.test.ts`, `pane-floor.test.ts` — excluded from the browser
+project unless `REDEXTAPE_PROBE` is set, so the browser project runs 47 − 3 = 44 files, and one of the
+27 main-referencing files (`pane-floor.test.ts`) is a probe, leaving 26. The next person to run `find`
+or `ls` on that directory will get 47 and reach for the same wrong conclusion this branch already
+reached once; the discrepancy is `PROBE_FILES`, not a stale figure.
 
 **The compiler already covers the step after the one that is missing.** Measured directly, adding an
 `'Aborted'` variant to the hand-written `Decoded` union without touching `decodedText`:
@@ -273,7 +298,7 @@ barrel re-exports. This is what keeps the slice from touching 44 files for no be
 
 | field | ts-rs default | what the wire carries | evidence |
 |---|---|---|---|
-| `TmStatus.total_steps` | `bigint \| null` | `number \| null` | `crates/redextape-wasm/tests/browser.rs:884` asserts `2870.0`, read out of a real browser |
+| `TmStatus.total_steps` | `bigint \| null` | `number \| null` | `all_three_legs_agree_across_the_boundary` in `crates/redextape-wasm/tests/browser.rs` asserts `2870.0`, read out of a real browser |
 | `LambdaState.step` | `bigint` | `number` | same class — `crates/redextape-core/src/viewmodel.rs` |
 | `TmState.step` | `bigint` | `number` | same class — `crates/redextape-core/src/viewmodel.rs` |
 | `RuleView.moves` | `Array<string>` | `Array<Move>` | today's hand-written file is more precise than the generator |
@@ -311,6 +336,42 @@ override through `Vec`'s own `TS` implementation rather than substituting a bare
 and that path is what registers the dependency `ts-rs` uses to decide which imports a file needs. PR 2
 ships `#[ts(as = "Vec<Move>")]`, not the form this section prescribed above; see the PR 2 roadmap
 entry for the measurement in full.
+
+**CORRECTION (2026-08-31, found by PR 3's probe) — `#[ts(type = "number")]` ON `TmStatus.total_steps`
+IS THE WRONG FORM, FOR THE SAME REASON THE `Array<Move>` PRESCRIPTION ABOVE WAS.** `ts(type = ...)`
+substitutes the WHOLE field type, `Option` included. Measured on the five types: no override generates
+`bigint | null`; the prescribed `ts(type = "number")` generates `total_steps: number`, silently
+dropping the `| null` that `None` puts on the wire; and `ts(type = "number | null")`,
+`ts(as = "Option<u32>")` and `ts(as = "Option<f64>")` all generate `number | null`. PR 3 ships the
+first of those three — literal, needing no import, and claiming no narrower Rust integer than the
+field has. **The two `redextape-core` fields in the table above are unaffected**: `LambdaState.step`
+and `TmState.step` are bare `u64` with no `Option`, so `ts(type = "number")` is correct there and
+shipped in PR 2. **That scopes to the fields, not to the guidance.** Core's own
+`no_generated_type_carries_bigint` gate told the next person to add an `Option<u64>` field to write
+exactly `ts(type = "number")`, with no caveat — this branch's own defect, reproduced in the crate that
+found it. Corrected in `crates/redextape-core/tests/ts_bindings.rs` alongside `redextape-wasm`'s sibling
+gate. **And no Rust-side gate sees this class**, which is the sharper half: the no-`bigint`
+gate passes on `total_steps: number`. `tsc` can refuse it only while `web/src/types.ts` takes
+`TmStatus` from `../bindings/`, because `tsconfig.json`'s `include` is
+`["src", "tests", "vite.config.ts"]` and the generated file enters the TypeScript program no other
+way. **No production source file catches this**:
+`resultRows` in `web/src/results.ts` reads `total_steps` and narrows it on `!== null`, but that
+narrowing compiles clean against the wrong type — a `number` compared against `null` is not an error
+TypeScript reports here. What turns the import into a check is three test fixtures assigning a literal
+`null` to the field, and nothing else. Measured at PR 3's own commit, before `web/src/types.ts`
+consumed the generated files: under this sabotage both Rust gates passed and `pnpm run typecheck`
+exited 0 — see PR 3's roadmap entry for that measurement in full.
+
+**Measured again at the commit that makes `web/src/types.ts` the barrel: under the same sabotage the
+Rust gates still passed and `pnpm run typecheck` now exited 1.** `cargo nextest run -p redextape-wasm
+--features ts -E 'binary(ts_bindings)'` still reported `2 tests run: 2 passed` — neither Rust gate
+moved — but `tsc` reported three `TS2322` errors, one per call site assigning a literal `null` to the
+now-narrowed field: `replies.test.ts`'s `compiled` fixture, `results.test.ts`'s `TmLeg` fixture in
+`'shows the TM reason and no width when that backend declines'`, and `session-client.test.ts`'s
+`compiled` fixture, each `Type 'null' is not assignable to type 'number'.` Restoring `ts(type = "number | null")` and re-running `build:bindings` returns `pnpm run typecheck` to
+exit 0. The condition held on this measurement: with the barrel importing `TmStatus` from
+`../bindings/`, `tsc` does refuse the dropped `| null` — see PR 3's roadmap entry for the measurement in
+full.
 
 ---
 
