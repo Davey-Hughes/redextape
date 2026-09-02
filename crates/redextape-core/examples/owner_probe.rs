@@ -35,8 +35,7 @@
 
 use std::io::Write;
 
-use redextape_core::lambda::reduce::Owner;
-use redextape_core::lambda::{self, MAX_REDUCTION_STEPS};
+use redextape_core::lambda::{self, MAX_REDUCTION_STEPS, Owner};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::{self, EncodingKind};
 use redextape_core::{parser, trace};

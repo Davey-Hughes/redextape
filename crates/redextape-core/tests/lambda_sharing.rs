@@ -20,8 +20,7 @@
 use std::collections::HashSet;
 
 use redextape_core::desugar::desugar;
-use redextape_core::lambda::term::Node;
-use redextape_core::lambda::{LambdaTerm, MAX_REDUCTION_STEPS, lower, reduce_trace};
+use redextape_core::lambda::{LambdaTerm, MAX_REDUCTION_STEPS, Node, lower, reduce_trace};
 use redextape_core::parser::parse;
 
 /// `sum(5)` — row 9 of `three_way_oracle.rs::FIRST_ORDER_DEMOS`, and the program the Plan 4 design

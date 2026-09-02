@@ -44,9 +44,8 @@ use std::io::Write;
 use std::rc::Rc;
 
 use redextape_core::core::NodeId;
-use redextape_core::lambda::reduce::Owner;
 use redextape_core::lambda::term::{Node, abs, app_tagged_for_rebuild, beta};
-use redextape_core::lambda::{self, Dir, LambdaTerm, MAX_REDUCTION_STEPS, Path};
+use redextape_core::lambda::{self, Dir, LambdaTerm, MAX_REDUCTION_STEPS, Owner, Path};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::{self, EncodingKind};
 use redextape_core::{parser, trace};

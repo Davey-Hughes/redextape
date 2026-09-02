@@ -667,8 +667,28 @@ impl Drop for LambdaTerm {
         let mut stack: Vec<LambdaTerm> = Vec::new();
         // Unlink the root's children so the drop glue that runs after this function returns has
         // nothing to descend into. `get_mut` is `Some`: the strong count is 1 (checked above) and no
-        // `Weak` handle to a term is ever created.
-        if let Some(root) = Rc::get_mut(&mut self.0) {
+        // weak handle to a term is ever created — which `tests/no_weak_handles.rs` enforces rather
+        // than asserting in prose, and which this `debug_assert` catches at the moment of failure
+        // for anything that gate's four named routes let through.
+        //
+        // BOUND TO A LOCAL FIRST, RATHER THAN ASSERTED INSIDE THE `if let`. `debug_assert!(false)`
+        // in an `else` arm is `clippy::assertions_on_constants`, which `pedantic` warns on and this
+        // workspace forbids `#[allow]`ing.
+        //
+        // THE MESSAGE BELOW SAYS "a weak handle" IN LOWERCASE PROSE AND MUST NOT NAME ANY BANNED
+        // SPELLING: its continuation lines are ordinary code lines, and that gate scans code lines
+        // INCLUDING STRING LITERALS, so rewording this panic in the vocabulary it is about would
+        // make the gate fire on the prose explaining it. Comment lines like this one are skipped
+        // and are the safe place to be specific. The same rule is why that gate walks `src` rather
+        // than the whole crate: its own needle list would be its first hit.
+        let root = Rc::get_mut(&mut self.0);
+        debug_assert!(
+            root.is_some(),
+            "a weak handle to this term's allocation exists, so this destructor has degenerated to \
+             the compiler's recursive drop glue: a deep term overflows the stack on teardown, which \
+             is the one outcome this impl exists to prevent. See tests/no_weak_handles.rs."
+        );
+        if let Some(root) = root {
             match root {
                 Node::Abs(_, b) => stack.push(std::mem::replace(b, blank.clone())),
                 Node::App(f, a, _) => {
@@ -959,25 +979,44 @@ mod tests {
     fn a_real_multi_step_reduction_still_shares_allocations_across_steps() {
         use crate::lambda::encode::{church, plus};
         use crate::lambda::reduce::{MAX_REDUCTION_STEPS, reduce_trace};
-        use std::collections::HashSet;
 
-        fn alloc_ids(t: &LambdaTerm, out: &mut HashSet<usize>) {
-            out.insert(t.alloc_id());
-            match t.node() {
-                Node::Var(_) => {}
-                Node::Abs(_, b) => alloc_ids(b, out),
-                Node::App(f, a, _) => {
-                    alloc_ids(f, out);
-                    alloc_ids(a, out);
-                }
+        /// The allocation id of the UNTOUCHED SIBLING at every `App` branch on `path`, paired with
+        /// that branch's index so a mismatch names the level rather than just the count. Walking
+        /// `path` is valid in the after-term as well as the before-term: reduction rebuilds the
+        /// spine above the redex and leaves its shape intact, so the same directions reach the same
+        /// positions in both.
+        ///
+        /// `side` is in the panic because that claim is exactly what a panic from the after-term
+        /// walk falsifies, and the two calls sit inside one `assert_eq!`. Without the label the
+        /// reader is told a path step disagreed with a node shape but not which of the two terms
+        /// was being walked — which is the whole difference between a mis-stated path and
+        /// reduction having reshaped the spine.
+        fn sibling_ids_along(t: &LambdaTerm, path: &[Dir], side: &'static str) -> Vec<(usize, usize)> {
+            let mut cur = t;
+            let mut out = Vec::new();
+            for (i, d) in path.iter().enumerate() {
+                cur = match (cur.node(), d) {
+                    (Node::Abs(_, b), Dir::AbsBody) => b,
+                    (Node::App(f, a, _), Dir::AppL) => {
+                        out.push((i, a.alloc_id()));
+                        f
+                    }
+                    (Node::App(f, a, _), Dir::AppR) => {
+                        out.push((i, f.alloc_id()));
+                        a
+                    }
+                    (node, dir) => {
+                        panic!("in the {side} term, redex path step {i} is {dir:?} but the term is {node:?}")
+                    }
+                };
             }
+            out
         }
 
         let t = app(app(plus(), church(2)), church(3));
         let trace = reduce_trace(&t, MAX_REDUCTION_STEPS);
         assert!(trace.steps.len() > 1, "a multi-step reduction is the whole point of this test");
 
-        let mut inheriting_steps = 0usize;
         let mut app_branching_steps = 0usize;
         for (i, step) in trace.steps.iter().enumerate() {
             if !step.redex.iter().any(|d| matches!(d, Dir::AppL | Dir::AppR)) {
@@ -985,21 +1024,18 @@ mod tests {
             }
             app_branching_steps += 1;
             let after = trace.steps.get(i + 1).map_or(&trace.normal_form, |s| &s.term);
-            let mut before_ids = HashSet::new();
-            alloc_ids(&step.term, &mut before_ids);
-            let mut after_ids = HashSet::new();
-            alloc_ids(after, &mut after_ids);
-            if before_ids.intersection(&after_ids).next().is_some() {
-                inheriting_steps += 1;
-            }
+            assert_eq!(
+                sibling_ids_along(&step.term, &step.redex, "before"),
+                sibling_ids_along(after, &step.redex, "after"),
+                "step {i}: the untouched sibling at every App branch on the redex path must survive \
+                 the step as the SAME allocation. Each pair is (branch index along the redex path, \
+                 allocation id); a disagreement names the level that stopped being shared. This is \
+                 what makes `==` take the `ptr_eq` path, and checking the specific sibling at every \
+                 level is what the previous form of this assertion did not do — it accepted any one \
+                 surviving allocation anywhere in the term."
+            );
         }
         assert!(app_branching_steps > 0, "expected at least one step whose redex path branches through an App");
-        assert_eq!(
-            inheriting_steps, app_branching_steps,
-            "every step whose redex path passes through an App must inherit at least one allocation \
-             from its predecessor — that shared allocation is exactly what makes `==` take the \
-             `ptr_eq` path"
-        );
     }
 
     /// Exact small cases, countable by eye. A tree with no sharing has logical size == node count.

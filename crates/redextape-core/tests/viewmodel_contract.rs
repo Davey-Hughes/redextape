@@ -111,8 +111,7 @@ fn a_later_steps_redex_path_is_not_a_coordinate_into_the_initial_term() {
 /// exactly the check `owning_node` never performed, because it only ever tested path PREFIXES against
 /// `redex` as plain `Vec<Dir>`s, never whether `redex` itself still lands inside a real term.
 fn walk(term: &redextape_core::lambda::LambdaTerm, path: &[redextape_core::lambda::Dir]) -> Option<()> {
-    use redextape_core::lambda::Dir;
-    use redextape_core::lambda::term::Node;
+    use redextape_core::lambda::{Dir, Node};
 
     let mut cur = term;
     for dir in path {

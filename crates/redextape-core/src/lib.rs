@@ -316,6 +316,12 @@ mod drop_tests {
             .unwrap();
     }
 
+    /// The binding-value half of the pair: bindings deep, `body` shallow. Its twin above carries
+    /// the shared reason for building two chains rather than one; this one is what makes a
+    /// forgotten bindings-vec drain falsifiable. Verified by sabotage, not reasoned about: deleting
+    /// the bindings drain from `take_core_children`'s `LetRecGroup` arm aborts THIS test alone with
+    /// a stack overflow while the twin still passes, and deleting the `body` unlink instead aborts
+    /// the TWIN alone while this one still passes.
     #[test]
     fn dropping_deep_letrecgroup_chain_through_a_binding_value_does_not_overflow() {
         std::thread::Builder::new()
@@ -365,6 +371,9 @@ mod drop_tests {
     /// `Drop`, which unlinks TWO children rather than one. This is the left-nested half of a pair — the same
     /// device the `LetRecGroup` pair above uses — so it is falsifiable only for a forgotten `f`;
     /// its twin below (deep via `a`) is what makes a forgotten `a` falsifiable too.
+    ///
+    /// The model was the weaker of the two when this was written: that pair left its second member
+    /// undocumented entirely. It carries a doc now, and this pair is why.
     #[test]
     fn dropping_deep_lambda_app_chain_does_not_overflow() {
         std::thread::Builder::new()

@@ -41,9 +41,7 @@
 use std::collections::HashSet;
 use std::io::Write;
 
-use redextape_core::lambda::reduce::Owner;
-use redextape_core::lambda::term::Node;
-use redextape_core::lambda::{self, LambdaTerm, MAX_REDUCTION_STEPS};
+use redextape_core::lambda::{self, LambdaTerm, MAX_REDUCTION_STEPS, Node, Owner};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::{self, EncodingKind};
 use redextape_core::{parser, trace};

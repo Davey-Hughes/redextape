@@ -226,13 +226,38 @@ fixed before merge; the status below is what is true now, not what the review fi
   `tests/common/mod.rs`. Two copies remain inside `src/` `#[cfg(test)]` modules, unreachable from
   `tests/common`, and one of those differs on purpose.
 
-**STILL OPEN — five `unreachable!` on library paths.** `clippy::unreachable` is deliberately NOT enabled,
-so these are listed rather than silently pre-allowed: the arith/compare dispatch split in both encodings
-(`tm/encoding/binary.rs`, `tm/encoding/unary.rs`, two each) and `tm/lower_asm.rs`'s arity table. Each
-marks an invariant between two tables. Removing them means changing the *types* so the impossible arm
-cannot be written — a design change, not a cleanup. A sixth, a bare `unreachable!()` in `lambda/syntax.rs`'s
-`fresh`, WAS removed: its unbounded `0..` search is now bounded by a pigeonhole argument and returns a
-value instead of aborting a printer.
+**STILL OPEN — `unreachable!` on library paths, and this paragraph deliberately no longer says how many.**
+`clippy::unreachable` is deliberately NOT enabled, so these are listed rather than silently pre-allowed.
+**The property is what is stable, and it is the whole of what this entry claims:** each of these sites
+marks an invariant between two tables that the compiler cannot see — a dispatch that has already decided
+which of two arms runs, or a bound already checked above the arm that reaches it. Where they live, by
+symbol: the arith/compare dispatch split in both encodings (`tm/encoding/binary.rs` and
+`tm/encoding/unary.rs`, in each file's `arith` and its `compare`); `tm/lower_asm.rs`'s
+`lower_builtin_apply`, whose builtin-name match is already constrained by the arity table that
+dispatched to it; `trace/zipper.rs`'s `reduce_here`, twice, on the seek invariant that guarantees an
+`Abs` focus and an `AppL` top frame; `lambda/term.rs`'s `shift`, on a bound two asserts above it have
+already checked, documented in full at that site; and `redextape-native`'s `measure.rs`, whose
+`compile_runs` matches a `Backend` that `Backend::available` has already narrowed to the compiled-in
+ones, under an `#[allow(unreachable_patterns)]`, reachable from `pub fn measure_all`. **The verdict is
+unchanged:** removing them means changing the *types* so the impossible arm cannot be written — a design
+change, not a cleanup, and still not taken.
+
+**THE COUNT IS DROPPED BECAUSE IT WAS WRONG TWICE, which is a stronger reason than counting being
+tedious.** This paragraph read *"five"* from the day it was written until 2026-09-01. The branch that set
+out to correct it measured **eight** and wrote *eight* into its own plan as the prescribed correction;
+that branch's whole-branch review then measured **nine** — `measure.rs`'s arm above is on a library path
+in a crate nobody had thought to look in — and the verification command the prescribed correction shipped
+with printed **seventeen**, because its filter strips `//` only at column one and so
+counts the macro's own name wherever it appears inside an indented comment or a doc line. Four numbers
+for one list, two of them written down as corrections. `Cargo.toml`'s `[workspace.lints.clippy]` comment
+already handles this exact class without a number — it names `lambda/term.rs`'s `shift` and says it *"is
+not the only one"* — and this paragraph now does the same thing for the same reason. **No gate covers
+this list and none is planned:** `scripts/check-doc-figures.sh` reads a hard-coded table whose file
+column holds four grammar READMEs and the root `README.md`, and carries no `docs/superpowers/**` row at
+all, so nothing mechanical will ever notice the next site.
+
+A former site, a bare `unreachable!()` in `lambda/syntax.rs`'s `fresh`, WAS removed: its unbounded `0..`
+search is now bounded by a pigeonhole argument and returns a value instead of aborting a printer.
 
 5. ~~**`sim::run` and `TmCursor::next` are a duplicated 8-guard sequence (~29 lines).**~~ **CLOSED** —
    `sim::run` is now a consumer of `TmCursor`, so the δ-stepping loop exists once, matching what the λ
@@ -1108,26 +1133,65 @@ and a decision to make. **The decision is which of the four to take, or none.**
 Recorded here because the execution ledger they were logged in is git-ignored scratch, so leaving them
 there would have discarded them at merge — the same reason and the same treatment as the Plan 4 producer
 slice's minors above. The ledger held **fifteen**. **Nine were fixed before the branch landed and a
-tenth is fixed by this commit; the status below is what is true now, not what the review first found.**
-Four remain and two were judged not worth carrying — each for a stated reason rather than by omission.
+tenth was fixed by the commit that first wrote this section; the status below is what is true now, not
+what the review first found.** The four that remained open then are **all four closed as of 2026-09-01,
+branch `minor-findings-cleanup`** — see the closing entry at the end of this file — and two were judged
+not worth carrying, each for a stated reason rather than by omission.
 
-- **STILL OPEN — the `if let Some(root) = Rc::get_mut(..)` in `term.rs`'s `impl Drop for LambdaTerm` has a silently empty else-branch.**
+- ~~**the `if let Some(root) = Rc::get_mut(..)` in `term.rs`'s `impl Drop for LambdaTerm` has a silently empty else-branch.**
   Unreachable today (no `Weak` anywhere in the workspace, grep-verified) and the comment above it says
   why. But if a `Weak` is ever added, the destructor degenerates to compiler drop glue and overflows —
   the exact failure it exists to prevent, with nothing to catch it. A `debug_assert!` would make the
-  trap explicit. Not taken here because the blow-up commit is doc-and-example only by construction.
-- **STILL OPEN — `lambda.rs:16` re-exports `Dir`, `LambdaTerm` and `Path` but not `Node`,** so every
+  trap explicit.~~ — **CLOSED 2026-09-01, branch `minor-findings-cleanup`, Task 1.** Both halves shipped,
+  because a runtime trap and a compile-time gate answer different questions. The `debug_assert!` in
+  `Drop` fires the moment a live weak handle makes `Rc::get_mut` return `None`, and
+  `crates/redextape-core/tests/no_weak_handles.rs` refuses the spelling before it can run: it scans
+  `redextape-core/src` for a needle set and has its own self-test proving the scan catches every
+  spelling it claims to and fires on no prose. Both were demonstrated by sabotage rather than argued —
+  see the closing entry at the end of this file for the transcripts, and for the routes past the gate
+  that are named rather than closed.
+- ~~**`lambda.rs`'s `pub use term::{..}` re-exports `Dir`, `LambdaTerm` and `Path` but not `Node`,** so every
   consumer that matches on a term needs two imports (`lambda::LambdaTerm` + `lambda::term::Node`). A
   papercut paid by each of this branch's seven tasks in turn. It is a public-API addition, so it belongs
-  to a slice that is allowed to make one.
-- **STILL OPEN — the across-step sharing assertion in `term.rs`'s `a_real_multi_step_reduction_still_shares_allocations_across_steps` is weaker than its message.**
+  to a slice that is allowed to make one.~~ — **CLOSED 2026-09-01, branch `minor-findings-cleanup`,
+  Task 2.** `lambda.rs` now re-exports `Node` alongside its siblings, and
+  `grep -rn 'lambda::term::Node' crates/redextape-core | wc -l` went **6 → 2**. The two that remain are
+  deliberate, not residue: `src/lambda/lower.rs`'s `mod tests` block is mergeable but out of scope
+  (below), and `tests/viewmodel_contract.rs`'s `arena_matches_term` holds a function-local `use` inside
+  a fn whose own signature already spells `lambda::term::LambdaTerm` in full. **The count moved by four,
+  not by three, and the plan said three** — its rationale looked
+  only for braced `lambda::{..}` siblings and missed a bare single-item one in
+  `tests/viewmodel_contract.rs`'s `walk`, which collapses too. That is recorded here rather than
+  silently corrected because the fix commit for it left three of its own siblings stale; the closing
+  entry at the end of this file has that story.
+- ~~**the across-step sharing assertion in `term.rs`'s `a_real_multi_step_reduction_still_shares_allocations_across_steps` is weaker than its message.**
   `before_ids.intersection(&after_ids).next().is_some()` requires only SOME shared allocation, not the
   specific untouched sibling at each `App` branch, so on the two deepest steps a regression that broke
   sharing at one level but not another would pass. The realistic regression — total loss of sharing — is
-  still caught on all four asserted steps, which is why this was filed rather than blocking.
-- **STILL OPEN, cosmetic — doc-comment density on `lib.rs`'s new `App` drop-test trio** diverges from the
+  still caught on all four asserted steps, which is why this was filed rather than blocking.~~ —
+  **CLOSED 2026-09-01, branch `minor-findings-cleanup`, Task 3.** The assertion now compares, per step,
+  the `(branch index, allocation id)` of the untouched sibling at *every* `App` branch along the redex
+  path, before against after, so a disagreement names the level that stopped being shared.
+  **"Strictly stronger" is a sabotage contrast, not a claim:** with only `reduce_step_go`'s `AppR` carry
+  rebuilt structurally, the new form FAILS and the old `intersection(..).next().is_some()` form PASSES
+  on the same sabotaged reducer. Because step 4's redex path is `[AbsBody, AbsBody, AppR, AppR, AppL]`,
+  one assertion shows both directions at once — its two `AppR` branches broken and its `AppL` branch
+  bit-identical — which is a sharper demonstration than the two separate runs the plan asked for.
+  Transcripts in the closing entry at the end of this file.
+- ~~**cosmetic — doc-comment density on `lib.rs`'s new `App` drop-test trio** diverges from the
   `LetRecGroup` pair it invokes as its model: that pair documents the shared "why two chains" reason once,
-  on the first test only. Substantively the same device, stylistically not.
+  on the first test only. Substantively the same device, stylistically not.~~ — **CLOSED 2026-09-01,
+  branch `minor-findings-cleanup`, Task 4, IN THE OPPOSITE DIRECTION TO THE ONE FILED, because the
+  filing pointed the wrong way.** The pair named here as the model was the one missing a doc: the
+  `LetRecGroup` twin had **no doc comment at all**, while the λ trio's right-nested member carried a
+  sabotage record (*"a destructor that unlinked `f` and forgot `a` … Verified by sabotage, not reasoned
+  about"*) that its own sibling lacked. Trimming as filed would have deleted that record to buy
+  symmetry. The fix levels the `LetRecGroup` pair **up** instead — the diff is pure addition, no `-`
+  lines, which is what proves the twin had nothing to trim — and the doc it adds is measured rather than
+  reasoned: deleting the bindings drain from `take_core_children`'s `LetRecGroup` arm aborts
+  `dropping_deep_letrecgroup_chain_through_a_binding_value_does_not_overflow` alone, and deleting the
+  `body` unlink instead aborts `dropping_deep_letrecgroup_chain_through_body_does_not_overflow` alone.
+  **A cosmetic finding survived a month because nobody re-read the thing it was measured against.**
 - ~~`lib.rs:331` pointed a permanent source comment at the branch's review notes~~ — **fixed here.**
   `.superpowers/sdd/` is git-ignored, so it named an artifact nobody who clones the repo will have. The
   comment was otherwise self-contained (the O(1)-vs-O(depth) sabotage argument is spelled out in the
@@ -14924,3 +14988,212 @@ $ grep -rl '\.\./\.\./src/main' web/tests/browser | wc -l
 `scripts/check-all.sh --no-llvm --no-browser` exited 0, its own closing line quoted rather than the run called green: `green, but PARTIAL — these tiers were SKIPPED: LLVM browser. This is NOT a full gate on its own.` It ran the `ts` legs on both crates — clippy, nextest, doc tests and the wasm32 `cargo check`, for `redextape-core --features ts` and `redextape-wasm --features ts` alike — and `git status --porcelain` was empty when it finished. Its wasm32 check is the `--lib` form, so the `--all-targets` row above is not something this script covers.
 
 No stray generated artifact was left behind by any command in this entry, including the two sabotage reproductions, and the check is by name because these paths are gitignored and leave `git status` clean: `ls web/bindings | wc -l` reads 17, `find crates -maxdepth 2 -iname bindings -type d` and `find web -maxdepth 1 -iname 'bindings.*'` both print nothing, and `git status --porcelain` is empty. The `wasm-pack` run above wrote its `pkg` to a path outside the repository for the same reason.
+
+#### THE FOUR STANDING λ MINORS CLOSE, THE `unreachable!` LIST THAT HAD SAID FIVE SINCE JULY STOPS CARRYING A COUNT AT ALL BECAUSE FOUR DIFFERENT ANSWERS WERE PUT IN WRITING FOR IT AND TWO OF THEM WERE CORRECTIONS, THE WHOLE-BRANCH REVIEW DEFEATED THIS BRANCH'S OWN NEW GATE IN ONE COMPILE WITH THE EXACT CONSTRUCTION THE GATE'S MODEL FILE RECORDS AS HAVING BROKEN ITS OWN BLACKLIST, AND FOUR OF THIS BRANCH'S DEFECTS WERE WRITTEN BY THE PLAN RATHER THAN BY AN IMPLEMENTER (2026-09-01, branch `minor-findings-cleanup`, `65e8fac..c012754`, 10 commits, plus the entry commits)
+
+Plan: [`2026-09-01-minor-findings-cleanup.md`](2026-09-01-minor-findings-cleanup.md). **No design document, by explicit decision** — the scope and the one real design fork (how to trap the `Drop` else-branch: a runtime `debug_assert`, a compile-time gate, or both) were both settled in-session before the plan was written, so a spec would have recorded a decision already made. Both were taken.
+
+A cleanup slice with no new capability: it closes the four findings left STILL OPEN under *"Minor findings from the λ structural-sharing review (2026-07-31)"* above and re-files the `unreachable!` paragraph under *"Minor findings from the same review"* further up. Nothing in `src/` changed behaviour — the whole-branch diff is +62/−26 in `lambda/term.rs` (a `debug_assert`, a strengthened test), +9/−0 of `lib.rs` doc comment, one name added to `lambda.rs`'s re-export list, four import sites that got one line shorter, and one new 142-line test file. **The two lessons below are the entry's real content**, and both are about lists rather than about λ terms.
+
+##### WHAT SHIPPED, TASK BY TASK
+
+**Task 1 — the silently empty else-branch gets both a runtime trap and a compile-time gate**, because they answer different questions. `impl Drop for LambdaTerm` now reads `Rc::get_mut` into a binding, `debug_assert!`s that it is `Some`, and only then takes the iterative teardown path; if a live weak handle ever makes it `None`, the destructor has already degenerated to the compiler's recursive drop glue, and the assert says so in the message rather than leaving a deep term to overflow the stack. `crates/redextape-core/tests/no_weak_handles.rs` refuses the spelling before it can run: it walks `redextape-core/src`, flags any line carrying one of its `NEEDLES` spellings, and carries its own self-test — an offending half whose probes must all be caught and a benign half of comment lines that must not be. Both halves were demonstrated by sabotage, not argued.
+
+**Task 2 — `lambda.rs` re-exports `Node`**, so a consumer that matches on a term needs one import instead of two. `grep -rn 'lambda::term::Node' crates/redextape-core | wc -l` went 6 → 2. **Four sites got shorter, not the three the plan asserted**; the two survivors are named in the closed bullet above and neither is residue. The plan's rationale for "three" failed by looking only for braced `lambda::{…}` siblings and missing a bare single-item `use redextape_core::lambda::Dir;` sitting directly above the `Node` line in `tests/viewmodel_contract.rs`'s `walk`.
+
+**Task 3 — the across-step sharing assertion now checks the sibling its message names.** `before_ids.intersection(&after_ids).next().is_some()` asked only for *some* surviving allocation anywhere in the term; the new form collects `(branch index, allocation id)` for the untouched sibling at every `App` branch along the redex path and compares the two vectors, so a failure names the level that stopped being shared. The old form was not merely differently worded, and the proof is a contrast rather than a claim: see below.
+
+**Task 4 — the doc-comment finding was closed in the opposite direction to the one it was filed in.** Filed as *"the λ `App` drop-test trio is over-documented relative to the `LetRecGroup` pair it invokes as its model"*, it was measured and found inverted: the `LetRecGroup` twin had no doc comment at all, and the λ trio's right-nested member carries a sabotage record its own sibling lacks. The fix levels the `LetRecGroup` pair up. The diff is pure addition — no `-` lines — which is what proves there was nothing to trim, and had the finding been implemented as filed it would have deleted a sabotage record to buy stylistic symmetry.
+
+##### LESSON ONE — A LIST OF INSTANCES WITH NO GATE GOES STALE SILENTLY, AND THIS ONE PRODUCED FOUR DIFFERENT NUMBERS
+
+The `unreachable!` paragraph said **five** from July. The tree held **nine**. The correction this branch was told to make said **eight**. The verification command that correction shipped with printed **seventeen**, because its filter strips `//` only at column one and so counts the macro's own name inside indented comments and doc lines. The eight-versus-nine gap was `redextape-native`'s `measure.rs` — a library path in a crate nobody thought to look in, since every prior instance had been in `redextape-core`. **The decision — the repository owner's, overriding the correction the plan had prescribed — was to stop stating a count and state the property instead**, following `Cargo.toml`'s `[workspace.lints.clippy]` comment, which has been handling this identical class for months by naming `lambda/term.rs`'s `shift` and adding that it *"is not the only one"*. The re-filed paragraph names every site by symbol and says what they have in common; a tenth site added tomorrow makes the paragraph incomplete but does not make it wrong, which is the difference a count destroys.
+
+**Nothing mechanical was ever going to catch this, and nothing will.** `scripts/check-doc-figures.sh` — the gate this repo built precisely because a README figure went stale unnoticed — reads a hard-coded table whose file column holds four grammar READMEs and the root `README.md`. It has no `docs/superpowers/**` row, so every figure in this roadmap, including the ones in this entry, is held only by whoever re-measures it.
+
+**This is the second standing list in this file measured against the tree and found wrong, and the first one has the same shape down to the arithmetic.** The encoding-site survey filed under the extension tracks above — *"No structural link between `EncodingKind` and the files keeping local encoding lists"* — records of itself that *"the site survey undercounted three times, which is itself the finding worth recording"*: filed at 6 sites across 5 files, re-grepped to **13 sites across 10 files in 3 shapes**, then a **14th site in a 4th shape** during execution, then a **15th** found by a whole-branch review after the task was believed done. Six, thirteen, fourteen, fifteen for one list, two of them written down as corrections — against five, eight, nine, seventeen for this one, also two of them written down as corrections. **And this file already carried the measurement that predicts both**, in the *"grep the tree for a falsified claim"* lesson: *"The enumeration written before the grep was short again, for the fifth consecutive time on this class, which is now less a warning than a measurement: on this codebase, a list of consequence sites written from memory runs ~2x short."* Five to nine is 1.8x. The prediction was in the file, one screen from the list it predicted, and the list still shipped short.
+
+**What closed the encoding survey was not a better count.** It was `macro_rules! encoding_kinds!`, a registry that makes the enumeration complete by construction. No equivalent exists for `unreachable!` short of enabling `clippy::unreachable`, which is refused on its merits above, so this list gets the other available answer: state the property, name the sites, and carry no number. The deferred-accessibility list earlier in this file names the same failure mode about itself in its own opening sentence — *"The risk of deferring is that it silently never happens, which is why this is a list with instances rather than a note saying a11y is on the todo."* Instances make the drift findable. They do not make it fire.
+
+##### LESSON TWO — THE WHOLE-BRANCH REVIEW DEFEATED THIS BRANCH'S OWN GATE IN ONE COMPILE, WITH THE CONSTRUCTION THE GATE'S MODEL FILE RECORDS AS HAVING BROKEN ITS OWN BLACKLIST
+
+`use std::rc::Rc as Handle;` then `Handle::downgrade(&t.0)` mints a weak handle to a term's allocation under `src` and contains none of the three needles the gate shipped with — not `Rc::downgrade`, not `Weak<`, not `rc::Weak`. The gate reported `2 tests run: 2 passed, 0 skipped`. **The gate's own doc had asserted that `Rc::downgrade` "catches the only way to mint one", and that sentence is where the defect lives:** `Rc::downgrade` is the only *function*, but a needle matches a *spelling*, and the doc collapsed the two. The fourth needle is bare `downgrade`, which strictly subsumes the first and cost nothing to add — `grep -rn 'Weak\|downgrade' crates/*/src/` had no match workspace-wide.
+
+**The construction that beat it is a crate alias, and this repo has a file whose entire doc comment is about crate aliases beating a blacklist.** `redextape-test-support`'s `ts_derive_scan.rs` — the file this gate's doc cites as its model for the *name your routes* convention — records four review rounds in which a crate alias — `use ts_rs as tsrs;` then `derive(tsrs::TS)` — was one of four spellings that each walked past the previous wording, and states the conclusion in its own words: *"Four rounds, four spellings, because a blacklist can only ever enumerate the spellings someone has already thought of, and there is always one more — this function's own history is the proof."* **The new gate borrowed that file's convention and not the lesson that forced it.** Borrowing a document's form is not borrowing its content, and the tell is that the borrowed gate is still a blacklist while the file it was modelled on had already inverted to a whitelist for exactly this reason.
+
+##### FOUR OF THIS BRANCH'S DEFECTS WERE WRITTEN BY THE PLAN, NOT BY AN IMPLEMENTER, AND BOTH PER-TASK FIX ROUNDS WERE FOR PLAN-AUTHORED PROSE
+
+Task 1's Important was the plan's three benign gate fixtures, none of which contained any needle — so the comment filter they exist to exercise was unexercised by its own self-test *and* by the tree, and deleting the filter reddened nothing. Task 2's Important was the plan's "three sites get shorter" rationale, wrong by the braced-sibling blind spot above. The whole-branch review's I3 was the plan having stopped describing the code it ships. Its I4 was the correction the plan prescribed for Task 5 being itself wrong. **Both per-task fix rounds were dispatched against plan-authored prose:** each implementer built what the plan specified, and what needed repairing was what the plan specified — though repairing it took code changes in both cases, which is why "the plan was wrong" is not a cheaper finding than "the code was wrong". That is a recurring shape here — the wire-type entry above records three of its defects as prose the plan wrote asserting a mechanism nobody had measured, while its one *mechanical* plan defect was rejected by a gate the moment it landed — and the working conclusion is that a plan's prose is a claim exactly as much as its numbers are, and gets checked the same way or not at all.
+
+##### `42c985c`'S SUBJECT LINE WAS THE CORRECTION "THREE" → "FOUR", AND IT LEFT THREE SIBLINGS OF THAT ERROR IN THE FILE IT WAS CORRECTING
+
+The commit that fixed Task 2's miscount appended the corrected rationale and left the paragraph **62 lines above it still asserting three**. Step 5 still expected a grep of 3, where the true before/after is 6 → 2. The plan's File Structure table, its Files list and its `git add` line all still omitted `tests/viewmodel_contract.rs`, the fourth file the correction itself was about. **Fixing the instance and leaving its sibling one screen away, inside the very commit whose subject line was the correction.** The fix round that closed it found three further stale plan quotations beyond the one the review had named — its own edits had invalidated Task 1 Step 4, Task 3 Step 1 and Task 4 Step 2 — and resynced all four by programmatic extraction, machine-verified byte-identical against the shipped files, which is the only form of this that keeps holding.
+
+##### THE FOURTH NEEDLE'S ONLY EVIDENCE WAS A GITIGNORED TRANSCRIPT, AND `c012754` IS WHAT PINNED IT IN THE TREE
+
+The fix round added bare `downgrade` to `NEEDLES` and proved it by sabotage — but every one of the self-test's four offending probes also matched one of the other three needles, so **deleting `downgrade` from `NEEDLES` left the whole suite green**. The needle's only demonstration lived in `.superpowers/sdd/`, which is git-ignored and will not survive the merge. A fifth offending probe, `"    let w = Handle::downgrade(&t.0);"` — verified character by character to contain none of `Rc::downgrade`, `Weak<`, `rc::Weak` — now pins it, and removing the needle reddens `the_scan_catches_every_spelling_it_claims_to_and_no_prose` naming that exact string. **This is the same class as Task 1's own Important, one level up:** a check that cannot fail, inside a gate whose whole premise is that a check nobody has seen fail is worth nothing.
+
+##### TASK 4'S DOC CLAIM WAS MEASURED RATHER THAN REASONED
+
+The `LetRecGroup` pair's new doc says what makes the pair a pair, and it is falsifiable: deleting the bindings drain from `take_core_children`'s `LetRecGroup` arm aborts `dropping_deep_letrecgroup_chain_through_a_binding_value_does_not_overflow` **alone**, while the twin still passes; deleting the `body` unlink instead aborts `dropping_deep_letrecgroup_chain_through_body_does_not_overflow` **alone**, while the first still passes. Both were run, both mirror images reproduced, and `core.rs` was reverted after each. The alternative — writing "each test covers one child" and moving on — would have been one more prose mechanism nobody had measured, on a branch whose defects were largely exactly that.
+
+##### WHAT STAYS OPEN
+
+- **The third direct-then-`defunc` copy is untouched and still needs real design.** `tm.rs`'s `lower_program`, `sourcemap.rs`'s `tm_half` and `tm/attribute.rs`'s `lower_mapped` all answer *"lower this Core, retry through `defunc` only on `Unsupported`, never on `TooDeep`"*, and `sourcemap.rs` admits the duplication in a comment. It was excluded from this slice by decision, for the reason it has always carried: the three callers want different outputs from the same decision, so folding it is a design change and not a cleanup, and a slice scoped to four cosmetic minors is the wrong place for one.
+- **The `unreachable!` sites, with the verdict unchanged.** Removing them means changing the types so the impossible arm cannot be written. The paragraph above now states the property and names the sites by symbol; what it no longer states, permanently, is how many there are.
+- **`lambda::reduce::Owner` had the identical papercut `Node` had and was deliberately not taken; it is re-exported now.** Seven files imported it on a line of its own (`src/viewmodel.rs`, `tests/ts_bindings.rs`, `tests/lambda_provenance.rs`, `tests/zipper_equivalence.rs`, and the three `examples/*_probe.rs`), an eighth matches on it by fully-qualified path in `tests/viewmodel_contract.rs`, and `lambda.rs`'s `pub use reduce::{…}` line carried `Status`, `Step` and `Trace` but not `Owner` — the same shape as the `Node` bullet, where the module's other matched-on types were re-exported and one was not. It was not taken because **the bullet that slice closed named `Node`**: another re-export is another public-API addition, and a cleanup slice that starts generalising its own findings is how it stops being one. **The boundary moved because the repository's owner asked for it once the branch's other work was done and the cost had been measured at one line** — `Owner` joins the existing `pub use reduce::{…}`, colliding with nothing in `lambda`'s namespace. `grep -rn 'lambda::reduce::Owner' crates/ | wc -l` went **12 → 2 import lines and 5 fully-qualified uses, 6 hits in total**: six of the seven import sites collapsed into a sibling `use …lambda::…` line already in scope, and what is left is the one import that could not shorten plus the five fully-qualified matches in `tests/viewmodel_contract.rs`, which are not imports and were not touched.
+- **The seventh `Owner` site is `tests/lambda_provenance.rs`, and the reason it did not shorten is the whole reason this was measured site by site.** Its only `lambda` siblings are `use redextape_core::lambda::reduce::reduce_step;` and `use redextape_core::lambda::term::{LambdaTerm, Node, abs, app, app_owned, beta, var};`. `reduce_step` is not re-exported from `lambda.rs`, and the `term` line carries `abs`, `app`, `app_owned`, `beta` and `var`, which are not either — so merging `Owner` into either one adds a line instead of removing one. **The `Node` round got this class wrong in the opposite direction**, by looking only for already-braced `lambda::{…}` siblings and missing a bare single-item one, which is how it claimed three sites where four got shorter. The criterion used here is *any* other `use …lambda::…;` line in the same scope, braced or bare, naming something `lambda.rs` re-exports — and `tests/ts_bindings.rs`, whose only sibling was the bare `use redextape_core::lambda::Cut;`, is precisely the site that criterion catches and the earlier one would have missed. Each of the seven was checked against its own sibling lines rather than against a pattern.
+- **`Rc::new_cyclic` was a real route past the no-`Weak` gate, named and deliberately not gated — and it is gated now, as the fifth needle.** Its closure receives a weak handle to the allocation being built, and the call need name neither the type nor the method, so no spelling-based needle reached it. It was left open because adding bans is how a cleanup slice becomes unbounded, and the review had asked only that it be named. **The boundary moved because the repository's owner asked for it once this branch's other work was done and the cost had been measured at zero:** `grep -rn 'new_cyclic' crates/` matched exactly one line, the gate's own doc, so the needle bans nothing that exists. It is spelled bare rather than `Rc::new_cyclic` for the reason the fourth needle is bare — `use std::rc::Rc as Handle;` then `Handle::new_cyclic(..)` carries no path-qualified form, and that alias construction is precisely what walked past this gate mid-branch — and it is pinned by an offending probe matching `new_cyclic` and none of the other four, checked character by character and then by sabotage: removing the needle reddens `the_scan_catches_every_spelling_it_claims_to_and_no_prose` naming that exact string. **What stays open is the part gating one more spelling cannot touch.** `NEEDLES` is still a blacklist and still holds only the spellings somebody has already thought of; the routes the gate's doc names — a macro expanding to the construction at its call site, a `#[path]` resolving outside `src`, and a handle minted in `tests/` or `examples/` the day a public accessor hands out a term's `Rc` — got shorter by one without getting complete, and the file now says so in those words.
+- **The gate's ban is wider than the invariant, on purpose.** The invariant is about `Weak<Node>` specifically; the gate refuses any weak handle anywhere under `redextape-core/src`, because narrowing it to the one type means parsing Rust rather than scanning lines, and the false positives it would buy are cheap while the false negative is a stack overflow at teardown. Of the routes its doc still names, **the one that puts a handle in `tests/` or `examples/`, outside the walk root, is unreachable today only because `LambdaTerm`'s `Rc` field is private and no `pub fn` in the crate returns one** (`grep -rn -- '-> *Rc<\|-> *std::rc::Rc<\|-> *&Rc<' crates/redextape-core/src/` finds one hit, a private `fn` returning `Rc<Frame>`). Privacy, not the gate, is what confines minting to one file. It becomes a real route the day a public accessor hands out the `Rc`, and the doc now states it as that conditional rather than as a hole.
+- **`src/lambda/lower.rs`'s `mod tests` import block is mergeable and out of scope.** Its `crate::lambda::decode::decode`, `crate::lambda::reduce::{MAX_REDUCTION_STEPS, reduce_to_normal_form}` and `crate::lambda::term::Node` lines are all re-exported from `lambda.rs` and could be one line. It is excluded because the `decode` and `reduce` lines were spelled by submodule path *by choice* and were never forced by `Node`'s absence — the class this slice fixed is "the sites where `Node`'s absence forced an extra line", not "every mergeable `lambda` import in the crate". **That boundary currently lives only in a per-slice plan document**, which is why it is restated here.
+- **Two Minors stay deferred, and each now carries why it was declined in the round that took the other two.** `no_weak_handles.rs`'s `offending_lines` skips `//` comments but not `/* */` blocks — **declined because Rust block comments nest**, so handling them correctly is not a predicate over one line but a line-spanning nesting-depth state machine: parsing logic added to a scanner, bought for a construct that appears zero times under `redextape-core/src`, and bought against a failure mode that is already the safe one, since a needle inside a block comment is a loud false positive rather than a silent miss. And its `walk` duplicates in miniature the private recursive walker inside `redextape-test-support`'s `ts_derive_scan.rs` — **declined because sharing it means widening that crate's public API**, exporting a walker for roughly ten lines of `read_dir` boilerplate in order to couple two gates whose scan roots and needle sets both differ; the coupling is the cost, not the saving. **Both differ from `new_cyclic` and `Owner` in the same way, which is the answer to why two of the four moved:** those two cost zero lines and one line respectively and each closed something named, while these two each buy a new kind of surface — parsing logic in one, public API in the other — for nothing measurable in the tree today.
+
+##### VERIFICATION
+
+Figures measured at `c012754`, the branch's last commit before the one that adds this entry, and **every one of them re-run here rather than carried from a task report** — the reports were written at earlier commits on this branch, no report could have held the commit count or the whole-branch diffstat at all, and the two figures a report did state were re-run rather than copied. Each figure was captured into a freshly-named file, because the shell in use refuses `>` onto an existing path and leaves the previous occupant's contents in place, so a scratch name reused from an earlier session returns that session's output to a `tail` that looks exactly like this run's. **No CI paragraph appears here, on purpose**, per this file's own convention: no pull request exists yet and no run has happened.
+
+**The first two rows named `HEAD` when this entry was first committed, and that made them wrong one commit later** — `git rev-list --count 65e8fac..HEAD` read 10 while the entry was being written and 11 the moment the entry's own commit landed. Corrected to the explicit SHA in the commit that follows. It is a small thing and it is recorded rather than quietly fixed because it is this entry's first lesson happening inside this entry's own verification block: a figure is only as stable as the expression that produced it, and `HEAD` is not a value.
+
+```
+10                     commits              git rev-list --count 65e8fac..c012754
+9 files, +927/-35      whole-branch diff    git diff --shortstat 65e8fac..c012754
+958 passed, 10 skipped core test suite      cargo nextest run -p redextape-core
+2                      Node imports left    grep -rn 'lambda::term::Node' crates/redextape-core | wc -l
+6                      the same, at the     git grep -n 'lambda::term::Node' 65e8fac \
+                         branch base          -- crates/redextape-core | wc -l
+0                      block comments in    grep -rnE '(^|[^:/*])/\*' crates/redextape-core/src/
+                         redextape-core/src   — one hit, and it is `tests/*.rs` inside a doc comment,
+                                              not a `/* */` opener
+```
+
+The nine files are `crates/redextape-core/{examples/none_probe.rs, src/lambda.rs, src/lambda/term.rs, src/lib.rs, src/viewmodel.rs, tests/lambda_sharing.rs, tests/no_weak_handles.rs, tests/viewmodel_contract.rs}` and `docs/superpowers/plans/2026-09-01-minor-findings-cleanup.md`, which is 709 of the 927 added lines — the plan document is most of this branch's diff, which is what a four-minor cleanup slice should look like.
+
+**The sabotage transcripts below are quoted, not re-run at the branch head, and the distinction is deliberate.** Each one required a sabotage that must not be committed, at the commit where the thing it demonstrates was introduced; re-running them here would demonstrate the same property against a different tree and would not be the same evidence. Every one was produced by the run named beside it, and the ones marked as the whole-branch review's were re-run by that review in a throwaway worktree rather than copied from the task report that first stated them.
+
+**Task 1, sabotage 1 of 2 — the gate fires on a planted weak handle.** With `fn planted_sabotage(t: &LambdaTerm) -> std::rc::Weak<Node> { Rc::downgrade(&t.0) }` appended to `term.rs`:
+
+```
+$ cargo nextest run -p redextape-core -E 'binary(no_weak_handles)'
+        PASS [   0.002s] (1/2) redextape-core::no_weak_handles the_scan_catches_every_spelling_it_claims_to_and_no_prose
+        FAIL [   0.012s] (2/2) redextape-core::no_weak_handles no_weak_handle_to_a_term_is_ever_created
+    a weak handle now exists under `redextape-core/src`, and `LambdaTerm`'s hand-written `Drop` assumes none does. [...] Sites:
+    /home/davey/projects/redextape/crates/redextape-core/src/lambda/term.rs line 1250: fn planted_sabotage(t: &LambdaTerm) -> std::rc::Weak<Node> {
+    /home/davey/projects/redextape/crates/redextape-core/src/lambda/term.rs line 1251: Rc::downgrade(&t.0)
+     Summary [   0.013s] 2 tests run: 1 passed, 1 failed, 0 skipped
+```
+
+Both lines of the planted function are named — the signature carrying `Weak<` and the body carrying `Rc::downgrade`. **The reviewer corroborated this transcript by arithmetic rather than trusting it**: the hits land at 1250/1251 against a pre-diff file length of 1247 plus a four-line appended fn.
+
+**Task 1, sabotage 2 of 2 — the `debug_assert` fires.** With a test that holds `let _keep = Rc::downgrade(&t.0);` alive across `drop(t)`:
+
+```
+$ cargo nextest run -p redextape-core -E 'test(planted_sabotage)'
+        FAIL [   0.003s] (1/1) redextape-core lambda::term::tests::planted_sabotage_the_debug_assert_fires
+    thread '...' panicked at crates/redextape-core/src/lambda/term.rs:678:9:
+    a weak handle to this term's allocation exists, so this destructor has degenerated to the compiler's recursive drop glue: a deep term overflows the stack on teardown, which is the one outcome this impl exists to prevent. See tests/no_weak_handles.rs.
+     Summary [   0.004s] 1 test run: 0 passed, 1 failed, 968 skipped
+```
+
+Column 9 matches the `debug_assert`'s eight-space indent — the same arithmetic check, applied to the second transcript.
+
+**The benign-fixture sabotage — deleting the comment filter reddens the self-test**, which it did not before `5244dea` resynced the fixtures to carry needles. Removing `.filter(|(_, line)| !line.trim_start().starts_with("//"))` from `offending_lines`:
+
+```
+$ cargo nextest run -p redextape-core -E 'binary(no_weak_handles)'
+        FAIL [   0.002s] (1/2) redextape-core::no_weak_handles the_scan_catches_every_spelling_it_claims_to_and_no_prose
+    the scan fired on a comment, which would make it unkeepable: "// never calls Rc::downgrade anywhere in this crate"
+     Summary [   0.010s] 2 tests run: 1 passed, 1 failed, 0 skipped
+```
+
+**The alias sabotage, before and after the fourth needle.** With `use std::rc::Rc as Handle; let w = Handle::downgrade(&t.0);` inside a `pub fn` appended to `term.rs`, against the three-needle gate as this branch first shipped it:
+
+```
+        PASS [   0.003s] (1/2) redextape-core::no_weak_handles the_scan_catches_every_spelling_it_claims_to_and_no_prose
+        PASS [   0.013s] (2/2) redextape-core::no_weak_handles no_weak_handle_to_a_term_is_ever_created
+     Summary [   0.013s] 2 tests run: 2 passed, 0 skipped
+```
+
+The same sabotage against the four-needle gate:
+
+```
+        FAIL [   0.013s] (2/2) redextape-core::no_weak_handles no_weak_handle_to_a_term_is_ever_created
+    /home/davey/projects/redextape/crates/redextape-core/src/lambda/term.rs line 1272: let w = Handle::downgrade(&t.0);
+     Summary [   0.015s] 2 tests run: 1 passed, 1 failed, 0 skipped
+```
+
+And the probe that pins the needle in the tree, added at `c012754` — with `downgrade` removed from `NEEDLES` and the other three left in place:
+
+```
+        FAIL [   0.002s] (1/2) redextape-core::no_weak_handles the_scan_catches_every_spelling_it_claims_to_and_no_prose
+    assertion `left == right` failed: the scan missed a weak-handle spelling it claims to catch: "    let w = Handle::downgrade(&t.0);"
+      left: 0
+     right: 1
+```
+
+`left: 0, right: 1` on that probe and no other test moving is the point: the new fixture is the only thing in the suite that depends on the fourth needle.
+
+**Task 3's contrast — one sabotaged reducer, red under the new assertion and green under the old.** With only `reduce_step_go`'s `AppR` carry rebuilt structurally (`sabotage_deep_copy` preserves structure, binder names and owner tags exactly; only the allocations are fresh):
+
+```
+$ cargo nextest run -p redextape-core -E 'test(a_real_multi_step_reduction_still_shares_allocations_across_steps)'
+        FAIL [   0.003s] (1/1) redextape-core lambda::term::tests::a_real_multi_step_reduction_still_shares_allocations_across_steps
+    assertion `left == right` failed: step 4: the untouched sibling at every App branch on the redex path must survive the step as the SAME allocation. [...]
+      left: [(2, 139957817580384), (3, 139957817580448), (4, 139957817577136)]
+     right: [(2, 139957817581344), (3, 139957817581216), (4, 139957817577136)]
+```
+
+Step 4's redex path is `[AbsBody, AbsBody, AppR, AppR, AppL]`, so branches 2 and 3 are the `AppR` sites and branch 4 is the `AppL` one: **branch 4 is bit-identical across the step while 2 and 3 are not.** Sharing survives at one `App` level of the very path where it was destroyed at two others — the regression shape the finding named as undetectable, named down to the level. Reverting only the test body and leaving `reduce.rs` sabotaged:
+
+```
+        PASS [   0.002s] (1/1) redextape-core lambda::term::tests::a_real_multi_step_reduction_still_shares_allocations_across_steps
+     Summary [   0.003s] 1 test run: 1 passed, 967 skipped
+```
+
+The old form is green on a reducer that stopped sharing the `AppR` sibling at every level of every step, because the `AppL` sibling still supplies *some* member of `before_ids ∩ after_ids` and `intersection(..).next().is_some()` asks for nothing more than one. The review did not stop at the transcript: it read the real carry in `reduce_step_go` and confirmed the helper mirrors it, ruled out the vacuous pass by construction (the loop compares only steps whose path holds an `AppL` or `AppR`, and every such direction pushes unconditionally, so two empty vectors are never what gets compared — the one way the change could look right and be worthless), and proved NEW-pass ⟹ OLD-pass by the traversal argument, leaving the sabotage to supply the converse. *Strictly stronger* is a proof plus a counterexample here, not an assertion.
+
+**Task 4's two sabotages, re-run by the whole-branch review against the shipped tree rather than copied from the task report.** Deleting the bindings drain from `take_core_children`'s `LetRecGroup` arm:
+
+```
+        PASS [   0.022s] (1/2) redextape-core drop_tests::dropping_deep_letrecgroup_chain_through_body_does_not_overflow
+     SIGABRT [   0.179s] (2/2) redextape-core drop_tests::dropping_deep_letrecgroup_chain_through_a_binding_value_does_not_overflow
+    thread '<unknown>' has overflowed its stack
+    fatal runtime error: stack overflow, aborting
+```
+
+Deleting the `body` unlink instead:
+
+```
+        PASS [   0.015s] (1/2) redextape-core drop_tests::dropping_deep_letrecgroup_chain_through_a_binding_value_does_not_overflow
+     SIGABRT [   0.168s] (2/2) redextape-core drop_tests::dropping_deep_letrecgroup_chain_through_body_does_not_overflow
+    thread '<unknown>' has overflowed its stack
+    fatal runtime error: stack overflow, aborting
+```
+
+Exactly one of the two aborts in each direction, and they are mirror images. `core.rs` was reverted after each.
+
+```
+$ pre-commit run --all-files
+no control bytes in tracked text.........................................Passed
+no file:line citations in tracked source.................................Passed
+documented figures match the tree........................................Passed
+shared doc regions match their source....................................Passed
+lua parses and parser names agree........................................Passed
+cargo fmt................................................................Passed
+cargo clippy.............................................................Passed
+biome ci.................................................................Passed
+web typecheck............................................................Passed
+```
+
+**`documented figures match the tree` passing is not evidence for anything in this entry**, and saying so is the point of the first lesson above: its table covers four grammar READMEs and the root `README.md`, and no row in it reads a file under `docs/`. Every figure in this section is held by the fact that it was re-measured here, and by nothing else.
+
+**`scripts/check-all.sh` RAN IN ITS FULL FORM, AND THAT IS A DIFFERENCE FROM EVERY EARLIER ENTRY IN THIS FILE RATHER THAN A DETAIL.** Its own closing line is quoted rather than the run called green:
+
+```
+$ ./scripts/check-all.sh
+all configs green -- base, LLVM and browser
+(exit 0)
+```
+
+Every previous entry that runs this script quotes the other closing line -- `green, but PARTIAL -- these tiers were SKIPPED: LLVM browser. This is NOT a full gate on its own.` -- because every previous entry ran it with `--no-llvm --no-browser`. This one skipped no tier, so no such caveat applies and none is written here. **It ran at this branch's head, one commit past the commit the figures above were measured at**, and the two commits between them touch only this roadmap file, so nothing it exercised changed underneath them. `git status --porcelain` was empty when it finished.
+
+**No CI paragraph appears in this entry, per this file's convention**: no pull request exists at the time of writing and no run has happened. The local full gate above is not a substitute for one -- in particular the `docker` job is skipped on pull requests and absent from `gate`'s `needs`, and this branch changes no `Dockerfile` and adds no build step, so the first execution of that job on this work will be the post-merge push run.

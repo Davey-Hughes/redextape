@@ -16,8 +16,7 @@ use std::path::Path;
 
 use redextape_core::analysis::TokenClass;
 use redextape_core::diagnostic::{Diagnostic, Severity};
-use redextape_core::lambda::Cut;
-use redextape_core::lambda::reduce::Owner;
+use redextape_core::lambda::{Cut, Owner};
 use redextape_core::span::Span;
 use redextape_core::tm::machine::Move;
 use redextape_core::viewmodel::{LambdaState, RuleView, StateView, TmProgram, TmState};

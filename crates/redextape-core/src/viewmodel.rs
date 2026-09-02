@@ -16,9 +16,7 @@ use std::collections::BTreeMap;
 
 use crate::analysis::TokenClass;
 use crate::core::NodeId;
-use crate::lambda::reduce::Owner;
-use crate::lambda::term::Node;
-use crate::lambda::{Cut, LambdaTerm, Path, print_lambda_linked};
+use crate::lambda::{Cut, LambdaTerm, Node, Owner, Path, print_lambda_linked};
 use crate::sourcemap::SourceMap;
 use crate::span::Span;
 use crate::tm::machine::{Machine, Move, StateId, Symbol};
