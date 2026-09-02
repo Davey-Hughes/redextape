@@ -97,7 +97,8 @@ describe('the TM pane editor region', () => {
   })
 
   /**
-   * `.tm-row` DOES NOT EXIST — the brief's own sketch guessed at a class name. The δ-table's rows carry
+   * `.tm-row` DOES NOT EXIST — `2026-08-17-plan5d-iv-editable-tm.md`'s own sketch guessed at a class
+   * name. The δ-table's rows carry
    * `.state-row` (`TmPane`'s `#drawTable`), which is what "the table renderer below" names in design
    * §4.1's split-body note; `.tape` is the separate five-tape-row block above it.
    *

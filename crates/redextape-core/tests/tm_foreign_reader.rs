@@ -40,15 +40,16 @@
 //!    through tape 3. *Closed:* that doc now says so explicitly and no longer says "final tape".
 //!
 //! **THE RESIDUAL, WHICH THOSE FIXES DO NOT REMOVE AND WHICH THIS FILE MUST NOT BE READ AS CLOSING.**
-//! `decode_unary_heap` below took its `@ head # tail` layout **from this task's brief, not from a doc
-//! comment** — and the docs that now describe that layout were written afterwards, partly informed by
-//! the same brief. So no independent implementer has re-derived the heap format from the corrected
-//! documentation, and **this test does not establish that one could.** What it establishes today is
-//! narrower than its own title suggests: the SCALAR register-field decode is doc-derivable (that half
+//! `decode_unary_heap` below took its `@ head # tail` layout **from the out-of-band task instructions
+//! given to whoever wrote it, not from a doc comment** — and the docs that now describe that layout
+//! were written afterwards, partly informed by those same instructions. So no independent implementer
+//! has re-derived the heap format from the corrected documentation, and **this test does not establish
+//! that one could.** What it establishes today is narrower than its own title suggests: the SCALAR
+//! register-field decode is doc-derivable (that half
 //! was genuinely reconstructed from `unary.rs`'s original three lines), and the run semantics are
 //! (tape count, head start, two-way growth, halt-on-no-rule, wildcards, first-match-wins). The
 //! compound decode is *asserted* to be doc-derivable and *not yet demonstrated*. Re-deriving it from
-//! HEAD's docs, by someone who has not seen the brief, is a separate slice.
+//! HEAD's docs, by someone who never saw those original instructions, is a separate slice.
 //!
 //! What the docs DID cover cleanly, no gap: tape count/head start/two-way-infinite growth/halt-on-no-
 //! rule (`syntax.rs`), rule matching/wildcards/first-match-wins/write-`None`-is-unchanged (`machine.rs`),

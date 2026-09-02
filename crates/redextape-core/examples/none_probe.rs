@@ -58,9 +58,10 @@ fn head(s: &str) {
 }
 
 /// The four programs to contrast: two loop programs (`while4`, `countdown4` — the pair `owner_probe.rs`
-/// measured at 397 `None` each) against two from the recursive family, which is "already well covered"
-/// per this probe's brief. `sum5` and `map_fold` are copied VERBATIM from `owner_probe.rs`'s
-/// `programs()` so the source strings cannot drift between the two probes.
+/// measured at 397 `None` each) against two from the recursive family, which
+/// `2026-08-10-region-path-tagging-design.md` calls "already well covered" in the same sentence that
+/// calls the loop programs "an order of magnitude worse". `sum5` and `map_fold` are copied VERBATIM
+/// from `owner_probe.rs`'s `programs()` so the source strings cannot drift between the two probes.
 fn programs() -> Vec<(&'static str, &'static str)> {
     vec![
         ("while4", "let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc"),

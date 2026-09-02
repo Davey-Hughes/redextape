@@ -51,7 +51,7 @@ pub const RUNS: usize = 5;
 ///
 /// Sized, not just shaped: native ticks the step counter only on backward edges and calls, not per
 /// instruction, so a loop's cost scales with its iteration count and a recursive program's with its
-/// call depth — NOT with how much arithmetic each iteration/call does. At the brief's original sizes
+/// call depth — NOT with how much arithmetic each iteration/call does. At the original sizes
 /// (100/100/50/a 3-element list) every program ran in low single-digit microseconds against a JIT
 /// compile of tens of microseconds to several milliseconds (worse at `-O3`/LLVM), so execution was
 /// under 1% of `compile_and_run` (measured directly with a temporary split timer around just the
@@ -69,13 +69,13 @@ pub const RUNS: usize = 5;
 /// matching rename would silently mislabel that row (e.g. a `loop100` that actually runs a million
 /// iterations).
 pub const CORPUS: [(&str, &str); 4] = [
-    // The brief's `loop100` source was missing the `;` after `i = i + 1` (a while-loop body's last
+    // The original `loop100` source was missing the `;` after `i = i + 1` (a while-loop body's last
     // statement needs one — see e.g. `count_down` throughout redextape-core's own tests); fixed here,
     // then scaled from 100 to 1,000,000 iterations for the reason given above.
     ("loop1000000", "let mut i = 0; let mut acc = 0; while i < 1000000 { acc = acc + i; i = i + 1; } acc"),
     ("sum30000", "fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(30000)"),
     ("list30000", "fn build(n){ if n==0 {nil} else { cons(n, build(n-1)) } } build(30000)"),
-    // Builds its own 30,000-element list (rather than the brief's 3-element literal) so `map`'s
+    // Builds its own 30,000-element list (rather than a 3-element literal) so `map`'s
     // recursion is deep enough to matter; `build`'s and `map`'s recursions run one after the other
     // (the argument is fully evaluated before `map` is called), so peak call depth is ~30,000, not
     // ~60,000.

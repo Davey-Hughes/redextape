@@ -727,11 +727,12 @@ describe('the no-session report for a failed fork', () => {
  * `SHELL` `scratch-app.test.ts` uses and for the same "one page per test FILE" reason its own comment
  * states.
  *
- * `WHILE4` IS THE FIXTURE, AND IT WAS MEASURED TO TRUNCATE BEFORE BEING TRUSTED TO — the brief's own
- * instruction, followed literally: a probe run against this exact string during this task's
- * development (`compile(WHILE4, 'unary')`, then `lambdaState(FRAME_BYTES)` and
- * `lambdaState(LAMBDA_BYTE_BUDGET)` at each step) found `cut === 'Bytes'` at the 512-byte budget on
- * EVERY one of steps 0 through 9, while the 65,536-byte budget stayed `cut === null` throughout
+ * `WHILE4` IS THE FIXTURE, AND IT WAS MEASURED TO TRUNCATE BEFORE BEING TRUSTED TO — which
+ * `2026-08-11-plan5d-iii-editable-lambda.md` asked for in as many words ("verify it does before
+ * relying on it"), rather than being this file's own initiative: a probe run against this exact
+ * string during this task's development (`compile(WHILE4, 'unary')`, then `lambdaState(FRAME_BYTES)`
+ * and `lambdaState(LAMBDA_BYTE_BUDGET)` at each step) found `cut === 'Bytes'` at the 512-byte budget
+ * on EVERY one of steps 0 through 9, while the 65,536-byte budget stayed `cut === null` throughout
  * (777-2,095 bytes printed, nowhere near that budget) — truncated at the frame's own print, whole at
  * the readout's, exactly the pairing this test needs. `frame-cost.test.ts` uses the same source for
  * an unrelated reason (span cost, not truncation) and never checks `cut`; this file's own `BIG` was

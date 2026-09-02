@@ -339,7 +339,7 @@ fn both_beta_loops_agree_on_the_owner() {
             Owner::Exact(21),
         ),
         // A tagged term that never normalizes, so the comparison covers 50 steps rather than a handful.
-        // This is the brief's original single case, kept as the long-run row.
+        // This is the original single case, kept as the long-run row.
         (
             "a diverging tagged term",
             app_owned(abs("f", omega_body.clone()), abs("y", app_owned(var(0), var(0), 42)), 7),

@@ -247,16 +247,17 @@ describe('the blank TM buffer', () => {
    * control the class `buffer-retire`; `.retire` matches nothing, and a query that finds nothing here
    * would still pass this test on a build where the last buffer was never actually retired.
    *
-   * **`.focus()` BEFORE EVERY OPEN, WHICH THE BRIEF'S OWN TEST CODE DID NOT CALL FOR — VERIFIED
-   * AGAINST THE TREE RATHER THAN TAKEN ON FAITH.** A bare scripted `.click()` does not focus its target
-   * in this tier (`scratch-buffers.test.ts`'s own STAGE 2 comment: "a pointer press focuses the button
-   * and so does Enter on a tabbed-to one," neither of which a synthetic `.click()` is), so without this
-   * the popover's hide algorithm has nothing recorded as "focus was inside the popover" to hand back —
-   * `document.activeElement` is `<body>` both before and after a retire, which would pass the final
-   * assertion for no reason connected to the fix. Measured on the single-retire version of this test: it
-   * failed on exactly that line, on the fully fixed source, until the explicit `.focus()` was added — the
-   * same precondition `scratch-buffers.test.ts`'s own STAGE 3 assertion depends on, repeated here before
-   * every retire in the loop rather than only the last.
+   * **`.focus()` BEFORE EVERY OPEN, WHICH `2026-08-17-plan5d-iv-editable-tm.md`'S TEST CODE DID NOT
+   * CALL FOR — VERIFIED AGAINST THE TREE RATHER THAN TAKEN ON FAITH.** A bare scripted `.click()`
+   * does not focus its target in this tier (`scratch-buffers.test.ts`'s own STAGE 2 comment: "a
+   * pointer press focuses the button and so does Enter on a tabbed-to one," neither of which a
+   * synthetic `.click()` is), so without this the popover's hide algorithm has nothing recorded as
+   * "focus was inside the popover" to hand back — `document.activeElement` is `<body>` both before
+   * and after a retire, which would pass the final assertion for no reason connected to the fix.
+   * Measured on the single-retire version of this test: it failed on exactly that line, on the fully
+   * fixed source, until the explicit `.focus()` was added — the same precondition
+   * `scratch-buffers.test.ts`'s own STAGE 3 assertion depends on, repeated here before every retire
+   * in the loop rather than only the last.
    */
   it('keeps focus on the buffers button when the last buffer is retired', async () => {
     const app = await mountApp('let x = 40; x + 2')

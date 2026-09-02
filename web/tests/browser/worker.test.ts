@@ -63,9 +63,10 @@ describe('session-worker', () => {
     expect(reply.lambda.status.available).toBe(false)
     expect(reply.lambda.status.reason).not.toBe('')
     expect(reply.tm.status.available).toBe(true)
-    // The brief guessed '0' here; the actual run says '10'. The TM leg has no closures to capture `n` at
-    // `f`'s creation, so `apply0(f)` reads `n`'s value at the point `g(0)` runs — after `n = 10` — giving
-    // `0 + 10`. That mutable-capture ambiguity is exactly why the λ leg declines this program instead.
+    // `2026-08-07-web-app-first-consumer.md` guessed '0' here; the actual run says '10'. The TM leg
+    // has no closures to capture `n` at `f`'s creation, so `apply0(f)` reads `n`'s value at the point
+    // `g(0)` runs — after `n = 10` — giving `0 + 10`. That mutable-capture ambiguity is exactly why
+    // the λ leg declines this program instead.
     expect(reply.tm.value).toEqual({ Value: { text: '10' } })
   })
 

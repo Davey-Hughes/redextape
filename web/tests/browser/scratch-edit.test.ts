@@ -14,13 +14,14 @@ import { beforeAll, describe, expect, it } from 'vitest'
  * running, and STAGE 5 — new with the rewrite — types into it afterwards to prove the buffer's own
  * worker is still answering rather than merely that its box is still on screen.
  *
- * **ONE SEQUENCED `it`, NOT THREE INDEPENDENT ONES, AND THAT IS A DELIBERATE DEPARTURE FROM THE
- * BRIEF'S SKETCH.** `scratch-app.test.ts` already states the house rule this follows: the states here
- * are ordered — there is no bad-edit case to test until a good fork exists, and no retirement to test
- * until an editor exists to retire — and `beforeAll` mounts ONE app for the file (ES module imports
- * are cached, so `main()` runs once per page), so three separate `it`s would make each depend on the
- * previous having actually run, which is exactly the shared-mutable-fixture shape that file's own
- * comment rejects. Every stage below asserts before it acts, same as there.
+ * **ONE SEQUENCED `it`, NOT THREE INDEPENDENT ONES, AND THAT IS A DELIBERATE DEPARTURE FROM
+ * `2026-08-11-plan5d-iii-editable-lambda.md`'s SKETCH.** `scratch-app.test.ts` already states the
+ * house rule this follows: the states here are ordered — there is no bad-edit case to test until a
+ * good fork exists, and no retirement to test until an editor exists to retire — and `beforeAll`
+ * mounts ONE app for the file (ES module imports are cached, so `main()` runs once per page), so
+ * three separate `it`s would make each depend on the previous having actually run, which is exactly
+ * the shared-mutable-fixture shape that file's own comment rejects. Every stage below asserts before
+ * it acts, same as there.
  *
  * **`EditorView.findFromDOM` PLUS A REAL CHANGE TRANSACTION, NOT `ScratchEditor#setText`.**
  * `scratch-editor.test.ts`'s own file doc records why: `setText` sets a `#seeding` flag for the

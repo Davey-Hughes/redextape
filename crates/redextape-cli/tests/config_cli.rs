@@ -135,7 +135,7 @@ fn denial_changes_nothing_for_a_clean_file_or_an_errored_one() {
 
 /// A narrower width really does change the output, and the flag beats the config.
 ///
-/// **THE SOURCE IS ALREADY `w.rxt`'s OWN WIDTH-120 CANONICAL FORM**, not the brief's literal
+/// **THE SOURCE IS ALREADY `w.rxt`'s OWN WIDTH-120 CANONICAL FORM**, not the literal
 /// `"fn f(a) { a }\n..."` one-liner — that fixture never reaches `--check` exit 0 at ANY width,
 /// because `printer::braced` always breaks a function body onto its own lines regardless of the
 /// budget (see `printer.rs`'s own comment on `braced`: "A block ALWAYS breaks"), so

@@ -155,7 +155,7 @@ fn compile_step_and_read_both_legs() {
     // the NORMAL FORM (step 7, after all 7 β-steps), where `owner` is genuinely `Owner::None` again —
     // most of Church 42 is arithmetic machinery no source construct owns. The risk this guards is
     // `Owner::None` (a fieldless enum VARIANT) crossing as, or being mistaken in TypeScript for, JS
-    // `null` — the confusion the brief calls out by name. It must be the STRING `"None"`, not `null`.
+    // `null` — a confusion worth guarding against explicitly. It must be the STRING `"None"`, not `null`.
     let owner = get(&state, "owner");
     assert_ne!(owner, JsValue::NULL, "Owner::None is a variant name, not Option::None -- it must not be null");
     assert_eq!(owner.as_string().as_deref(), Some("None"), "a fieldless enum variant crosses as its bare name");
@@ -597,7 +597,7 @@ fn the_ast_tolerates_the_deepest_term_a_reduction_reaches() {
     assert_eq!(diagnostics.length(), 0, "a 600-deep cons spine is inside every front-end guard");
     assert!(!session.is_null(), "and it compiles at 8 MiB");
 
-    // MEASURED, NOT THE BRIEF'S DRAFTED `2_000`: this program normalizes in exactly 1,200 β-steps
+    // MEASURED, NOT THE ORIGINALLY DRAFTED `2_000`: this program normalizes in exactly 1,200 β-steps
     // (confirmed via `lambdaState`'s `step` field in a headless-Chrome run), so a 100-step chunk gives
     // roughly a dozen samples across the run rather than four (this run took fourteen, see below) — a
     // spacing dense enough that the earlier 300-step version, which sampled the same run in only four
@@ -708,7 +708,7 @@ fn v8_native_limits_on_a_nested_plain_js_object() {
         Reflect::apply(walker, &JsValue::UNDEFINED, &args).is_ok()
     }
 
-    /// Coarse bisection, per this test's brief — exact-frame precision is not the point. `probe` is
+    /// Coarse bisection, by design — exact-frame precision is not the point. `probe` is
     /// assumed true-then-false as `n` grows (more nesting only costs more stack, never less): doubles
     /// `hi` until `probe` fails or `cap` is hit, then narrows to within 50.
     fn find_breakpoint(cap: u32, mut probe: impl FnMut(u32) -> bool) -> (u32, u32) {

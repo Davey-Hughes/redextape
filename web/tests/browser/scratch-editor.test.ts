@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ScratchEditor } from '../../src/scratch-editor'
 
 /**
- * **A MISMATCH FOUND AGAINST THE BRIEF, AND HOW THIS FILE RESOLVES IT.**
+ * **A MISMATCH FOUND AGAINST `2026-08-11-plan5d-iii-editable-lambda.md`, AND HOW THIS FILE RESOLVES
+ * IT.**
  *
- * The brief's Step 1 sketch simulated "a burst of keystrokes" by calling `ScratchEditor#setText`
+ * That plan's Step 1 sketch simulated "a burst of keystrokes" by calling `ScratchEditor#setText`
  * three times. Run as written, that test fails: `setText` sets `#seeding` for the duration of its
  * dispatch (see `scratch-editor.ts`'s own doc on that field — "the fork's seed, and nothing else"),
  * so the update listener never schedules a recompile and `onEdit` is called zero times, not one.
@@ -75,8 +76,8 @@ describe('ScratchEditor', () => {
 
   // Step 5's mutation (deleting the `#seeding` guard) predicted zero failures among the tests above,
   // on the grounds that none of them seeds a fresh editor and then checks for an absent recompile.
-  // That prediction held here too, which per the brief's own instruction means the mutation exposed a
-  // missing test rather than a harmless one. This is that test.
+  // That prediction held here too, which per that same plan's own instruction means the mutation
+  // exposed a missing test rather than a harmless one. This is that test.
   it('does not treat a seed as an edit', () => {
     const { ed, onEdit } = make()
     ed.setText('\\y. y')

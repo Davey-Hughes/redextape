@@ -66,7 +66,7 @@ function renderRows(host: HTMLElement, rows: Row[]): void {
  * An injected function with exactly one implementation is a parameter pretending to be a choice.
  *
  * **`sourceSession: SessionId` LEFT WITH THE RETIRE, AND THIS PARAGRAPH IS WHERE IT WAS ARGUED FOR.**
- * It read: *"IS NOT IN THE TASK BRIEF'S SIGNATURE, AND IS NEEDED ANYWAY. `onScratchReply`'s
+ * It read: *"WAS NOT PART OF THE SPECIFIED SIGNATURE, AND IS NEEDED ANYWAY. `onScratchReply`'s
  * `no-session` arm calls `scratchpad.noSessionReply(session, reply.diagnostics, SOURCE_SESSION, ...)` —
  * the literal source-session id `main.ts` names once at construction and passes to `noSessionReply` as
  * the session a retiring scratchpad rebinds its slots back to."* Nothing retires here now (5d-ii-c
@@ -92,7 +92,7 @@ function renderRows(host: HTMLElement, rows: Row[]): void {
  * that are not retires read it: `scratch-compiled` mounts text onto the home pane, and `worker-error`
  * unmounts from a pane whose session is still live and still bound.
  *
- * `root: HTMLElement` IS IN THE BRIEF'S SIGNATURE AND IS NOT HERE. Neither handler reads it —
+ * `root: HTMLElement` WAS PART OF THE SPECIFIED SIGNATURE AND IS NOT HERE. Neither handler reads it —
  * `showBanner(root, ...)` is `main.ts`'s wasm-load and worker-spawn failure surface (`banner.ts`'s own
  * doc has the split), and both of those failures happen before or outside a reply ever exists. The
  * failure surface a reply handler DOES use is `showWorkerError(results, ...)`, which needs `results`,

@@ -268,8 +268,9 @@ const GOLDENS: &[(&str, u64)] = &[
 /// produce, written out by hand. The delta is that pass's ceiling on this shape.
 /// Every program here must complete under `DEFAULT_CAPS`: TM arithmetic is unary, so keep them small.
 ///
-/// These six shapes are the task brief's, VERBATIM. Two of them measure more than their label claims,
-/// and `SUPPLEMENTARY_PROBES` below carries the unbundled replacements — see `PROBE_CAVEATS`.
+/// These six shapes are `2026-07-24-core-source-map-and-step-survey.md`'s, VERBATIM. Two of them
+/// measure more than their label claims, and `SUPPLEMENTARY_PROBES` below carries the unbundled
+/// replacements — see `PROBE_CAVEATS`.
 const PROBES: [(&str, &str, &str); 6] = [
     ("constant folding", "2 * 3 + 4 * 5", "26"),
     ("algebraic identities", "let x = 7; x * 1 + x * 0 + (x + 0)", "let x = 7; x + x"),
@@ -321,7 +322,7 @@ const SUPPLEMENTARY_PROBES: &[(&str, &str, &str, &str)] = &[
          form deliberately does NOT do: it keeps `ap_add1` as a real function, still CALLS it, and \
          still calls `add1` inside it. Deleting `ap` outright (`fn add1(x){ x + 1 } add1(5)`, 6022 \
          steps) would read 90.1% — but that bundles inlining and dead-function elimination on top of \
-         devirtualization, the exact conflation PROBE_CAVEATS criticizes in the brief's own rows.",
+         devirtualization, the exact conflation PROBE_CAVEATS criticizes in PROBES' own rows.",
     ),
     (
         "devirt. of map's callback",

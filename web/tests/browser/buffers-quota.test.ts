@@ -77,12 +77,12 @@ beforeAll(async () => {
 describe('a full store', () => {
   /**
    * **THE SECOND FAILING WRITE IS THE FORK'S OWN `scratch-compiled` REPLY, NOT A SECOND CLICK — A
-   * DEVIATION FROM THE BRIEF'S OWN SNIPPET, AND THE REASON IS WORTH RECORDING.** The brief's illustration
-   * clicks `[data-leaf="lambda-0"] .detach` twice in a row. That does not reach a second write at all:
-   * the first fork detaches the pane, and a detached pane offers no fork (`LambdaPane`'s
-   * `#refreshDetach`: `!this.#detached`), so a literal second click on the same selector finds nothing
-   * and is a silent no-op — the assertions after it would hold vacuously, proving only that nothing
-   * happened twice.
+   * DEVIATION FROM THE SKETCH IN `2026-08-16-plan5d-ii-d-persisted-buffers.md`, AND THE REASON IS
+   * WORTH RECORDING.** That plan's illustration clicks `[data-leaf="lambda-0"] .detach` twice in a
+   * row. That does not reach a second write at all: the first fork detaches the pane, and a detached
+   * pane offers no fork (`LambdaPane`'s `#refreshDetach`: `!this.#detached`), so a literal second
+   * click on the same selector finds nothing and is a silent no-op — the assertions after it would
+   * hold vacuously, proving only that nothing happened twice.
    *
    * A second click that WAS wired to something real would prove the wrong thing anyway. Both other
    * candidates change `#link-status` for an unrelated reason and would make the comparison fail for a

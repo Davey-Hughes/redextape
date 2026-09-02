@@ -20,7 +20,7 @@
  * `tests/browser/pool-isolation.test.ts` asserts a shared worker cannot have. A scratchpad is a
  * DIFFERENT WORKER holding a different single handle, not a second handle in this one.
  *
- * PLAN T5 SAID THIS FILE WAS NOT TO BE EDITED AND T8's BRIEF LIFTS THAT, for the reason T7 recorded
+ * PLAN T5 SAID THIS FILE WAS NOT TO BE EDITED AND T8 LIFTS THAT, for the reason T7 recorded
  * from the other side: nothing up to T7 could put a second session in the registry because the worker
  * had no message that builds a scratch. That message is `lambda-scratch`; see `onLambdaScratch`.
  *

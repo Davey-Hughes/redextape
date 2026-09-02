@@ -91,9 +91,9 @@ pub enum TmRun {
     /// before. So lowering never proceeds for any of the four: the program never ran a single step.
     ///
     /// Distinct from `HitCap`, which reports a run that started and then hit a resource cap mid-flight
-    /// — a program refused here never started. Distinct from `Overflow` too: `run_tm_fitted`'s retry
-    /// loop widens the bank and tries again on `Overflow`, and never on this. A refusal returns
-    /// straight out of the loop, reporting no width — nothing was fitted.
+    /// — a program refused here never started. Distinct from `Overflow` too: the shared `search_width`
+    /// both entry points drive widens the bank and tries again on `Overflow`, and never on this. A
+    /// refusal returns straight out of the search, reporting no width — nothing was fitted.
     ///
     /// **NOT NECESSARILY AT THE FIRST WIDTH, and the fourth cause is what changed that.** The three
     /// pre-checked conditions are properties of the `Program` alone, so they refuse before the width
@@ -103,7 +103,7 @@ pub enum TmRun {
     /// width (`lower_tm::MAX_MUL_INSTRS`'s doc records `Mul` as O(width²) under `Binary`), so a
     /// program can lay out fine at `MIN_FIELD_WIDTH`, overflow its fields, and exceed the ceiling only
     /// at a wider one. Retrying wider still would be pointless in either case — a refused machine only
-    /// grows with width — so the loop returns on the first refusal, at whatever width reached it.
+    /// grows with width — so `search_width` returns on the first refusal, at whatever width reached it.
     TooLarge,
     /// The program could not be lowered to asm (e.g. a higher-order use).
     LowerError(LowerError),
@@ -211,12 +211,21 @@ fn lower_and_size(core: &Core) -> Result<(Program, lower_tm::SlotMap), TmRun> {
     Ok((prog, sm))
 }
 
-/// Lower, then run at the narrowest field width that fits, reporting that width alongside the outcome.
+/// The field-width ladder and the retry rule, in one definition on the library path.
 ///
-/// Attempts `MIN_FIELD_WIDTH`, doubling, up to `MAX_FIELD_WIDTH`; an attempt that halts in the overflow
-/// guard is retried one width wider, and anything else is the answer. Reaching the ceiling and still
-/// overflowing yields `TmRun::Overflow`. An encoding reporting `field_width() == None` is unbounded, so
-/// there is exactly one attempt and the reported width is `None`.
+/// Attempts `MIN_FIELD_WIDTH`, doubling, up to `MAX_FIELD_WIDTH`. `at` runs one attempt at one width
+/// and answers `None` for the state-ceiling refusal (`MAX_MACHINE_STATES`, knowable only once THIS
+/// width's gadgets are built). `overflowed` answers whether an outcome is the overflow guard. Answers
+/// the outcome together with the width that produced it, or `None` when an attempt refused — callers
+/// map that onto whatever `TooLarge` shape their own signature calls for.
+///
+/// **THAT REFUSAL IS NOT A CLAIM ABOUT EVERY WIDTH — only about this one and every wider one.** A
+/// program can lay out and run at a narrow width, overflow its fields there, and exceed the ceiling
+/// only once the search has widened to retry it (`TmRun::TooLarge`'s doc has the mechanism;
+/// `guard_counterexamples.rs`'s `a_program_is_admitted_at_narrow_widths_and_refused_only_once_widened`
+/// is the witness, admitted at widths 4 and 8 and refused at 16). Widening PAST a refusal is what
+/// would be pointless — a refused machine only grows with width — so the search stops at the first
+/// one.
 ///
 /// Only the GUARD triggers a retry, never `HitCap` (nor `TooLarge`) — a nil/dangling dereference spins
 /// to a cap at every width, so retrying on caps would burn the full step budget five times over and
@@ -228,6 +237,28 @@ fn lower_and_size(core: &Core) -> Result<(Program, lower_tm::SlotMap), TmRun> {
 /// program and then halts at its first overflowing store, so it costs less than the successful attempt
 /// that follows it. Without the guard an under-sized run corrupts the bank and frequently runs away to
 /// the full step cap instead, which is what made the pre-guard behaviour expensive as well as wrong.
+///
+/// **THE THREE `widths()` COPIES IN `tests/` AND `examples/` ARE NOT ROUTED THROUGH THIS AND MUST NOT
+/// BE.** They are independent models of this ladder, and two of them carry assertions ABOUT it; making
+/// them walk whatever this function says would stop those assertions being able to fail. See the doc on
+/// each copy.
+fn search_width<T>(mut at: impl FnMut(usize) -> Option<T>, overflowed: impl Fn(&T) -> bool) -> Option<(T, usize)> {
+    let mut width = MIN_FIELD_WIDTH;
+    loop {
+        let got = at(width)?;
+        if overflowed(&got) && width < MAX_FIELD_WIDTH {
+            width = (width * 2).min(MAX_FIELD_WIDTH);
+        } else {
+            return Some((got, width));
+        }
+    }
+}
+
+/// Lower, then run at the narrowest field width that fits, reporting that width alongside the outcome.
+///
+/// The search is `search_width`; see its doc for why only the guard retries. Reaching the ceiling and
+/// still overflowing yields `TmRun::Overflow`. An encoding reporting `field_width() == None` is
+/// unbounded, so there is exactly one attempt and the reported width is `None`.
 pub fn run_tm_fitted(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> (TmRun, Option<usize>) {
     let (prog, sm) = match lower_and_size(core) {
         Ok(p) => p,
@@ -237,22 +268,17 @@ pub fn run_tm_fitted(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> (TmRun, O
     if enc.field_width().is_none() {
         return (attempt(&prog, enc, n_slots, caps).map_or(TmRun::TooLarge, |a| a.0), None);
     }
-    let mut width = MIN_FIELD_WIDTH;
-    loop {
-        let fitted = enc.at_width(width);
-        // Matched on `attempt`'s `Option`, not flattened through `map_or`, so the state-ceiling refusal
-        // (`None` — `MAX_MACHINE_STATES`, only knowable once THIS width's gadgets are built) can be told
-        // apart from every other outcome and report `None` for "the width that was fitted" too, the same
-        // as `lower_and_size`'s pre-checked refusal just above returns for the other three conditions.
-        // `Some(width)` there would claim a width was fitted when nothing was: `TmRun::TooLarge` means
-        // the program never ran a single step, at ANY width, so no width is more "the" answer than
-        // another — reporting the loop's current `width` would just be exposing an implementation detail
-        // of where the search happened to be standing when the refusal surfaced.
-        match attempt(&prog, &*fitted, n_slots, caps) {
-            None => return (TmRun::TooLarge, None),
-            Some((TmRun::Overflow, ..)) if width < MAX_FIELD_WIDTH => width = (width * 2).min(MAX_FIELD_WIDTH),
-            Some((other, ..)) => return (other, Some(width)),
-        }
+    // Matched rather than flattened through `map_or` so the state-ceiling refusal (`None` —
+    // `MAX_MACHINE_STATES`, only knowable once a width's gadgets are built) can be told apart from
+    // every other outcome and report `None` for "the width that was fitted" too, the same as
+    // `lower_and_size`'s pre-checked refusal above returns for the other three conditions. `Some(width)`
+    // there would claim a width was fitted when nothing was: `TmRun::TooLarge` means the program never
+    // ran a single step, at ANY width, so no width is more "the" answer than another — reporting the
+    // search's current width would just be exposing where it happened to be standing when the refusal
+    // surfaced.
+    match search_width(|w| attempt(&prog, &*enc.at_width(w), n_slots, caps), |a| matches!(a.0, TmRun::Overflow)) {
+        None => (TmRun::TooLarge, None),
+        Some((a, width)) => (a.0, Some(width)),
     }
 }
 
@@ -274,7 +300,7 @@ pub struct DescribedRun {
     /// `DescribedRun` always describes a run that STARTED — including `HitCap` and `Overflow`, both
     /// of which have step counts and would have nowhere to put them if the field hung off `Ran`.
     ///
-    /// FOR `Overflow` THIS IS THE LAST ATTEMPT'S COUNT. The width search below doubles and retries,
+    /// FOR `Overflow` THIS IS THE LAST ATTEMPT'S COUNT. `search_width` above doubles and retries,
     /// so a program that overflows at width 8 and fits at 64 simulates four times; the count reported
     /// belongs to the run whose outcome is reported.
     pub steps: u64,
@@ -308,9 +334,8 @@ fn describe_at(
 /// `Err` for a program that never ran (`LowerError` / `TooLarge`): there is no configuration to
 /// describe, so there is no honest header to return.
 ///
-/// Mirrors `run_tm_fitted`'s search — `MIN_FIELD_WIDTH`, doubling, retrying only on the overflow
-/// guard — but has no unbounded-encoding branch: `EncodingKind` names only bounded encodings, since
-/// an unbounded one has no name to write in a file.
+/// Shares `search_width` with `run_tm_fitted`, and has no unbounded-encoding branch: `EncodingKind`
+/// names only bounded encodings, since an unbounded one has no name to write in a file.
 ///
 /// # Errors
 ///
@@ -346,14 +371,9 @@ fn describe_at(
 pub fn run_tm_described(core: &Core, kind: EncodingKind, result: Ty, caps: TmCaps) -> Result<DescribedRun, TmRun> {
     let (prog, sm) = lower_and_size(core)?;
     let n_slots = sm.n_slots();
-    let mut width = MIN_FIELD_WIDTH;
-    loop {
-        let described = describe_at(&prog, n_slots, kind, result.clone(), caps, width).ok_or(TmRun::TooLarge)?;
-        match described.run {
-            TmRun::Overflow if width < MAX_FIELD_WIDTH => width = (width * 2).min(MAX_FIELD_WIDTH),
-            _ => return Ok(described),
-        }
-    }
+    search_width(|w| describe_at(&prog, n_slots, kind, result.clone(), caps, w), |d| matches!(d.run, TmRun::Overflow))
+        .map(|(d, _)| d)
+        .ok_or(TmRun::TooLarge)
 }
 
 /// `run_tm_described` at a width the caller chose, with the fitting search skipped.
@@ -792,5 +812,38 @@ mod run_tm_tests {
         let fitted = run_tm_described(&core, EncodingKind::Unary, crate::ty::Ty::Nat, TM_DEFAULT_CAPS).unwrap();
         assert!(!matches!(fitted.run, TmRun::Overflow), "the search must widen past the overflow");
         assert!(fitted.header.width > MIN_FIELD_WIDTH, "and must have actually widened");
+    }
+
+    /// THE PROPERTY THE ROADMAP FILED, PINNED END TO END THROUGH BOTH PUBLIC ENTRY POINTS RATHER THAN
+    /// THROUGH THE HELPER THEY SHARE. `run_tm_fitted` and `run_tm_described` ran their own copy of the
+    /// `MIN_FIELD_WIDTH`/doubling/`Overflow` search for a year and agreed by inspection; folding them
+    /// onto one helper removes that axis, and this asserts what the fold is FOR. Written through the
+    /// public functions on purpose: a divergence in how each one CALLS the helper is invisible to a
+    /// test of the helper itself.
+    ///
+    /// The corpus is chosen so the search does real work. `1 + 2` fits at `MIN_FIELD_WIDTH` and never
+    /// retries; `40 + 2` and `1 + 2 * 3` must widen; `head(nil)` reaches a cap rather than the overflow
+    /// guard, so it exercises the early return that must NOT retry.
+    #[test]
+    fn the_two_entry_points_fit_the_same_width() {
+        for src in ["1 + 2", "40 + 2", "1 + 2 * 3", "sum(4)", "head(nil)"] {
+            let core = core_of(src);
+            for (name, kind, enc) in [
+                ("unary", EncodingKind::Unary, Box::new(Unary::default()) as Box<dyn Encoding>),
+                ("binary", EncodingKind::Binary, Box::new(Binary::default()) as Box<dyn Encoding>),
+            ] {
+                let caps = TmCaps { steps: 50_000, cells: 50_000 };
+                let (_, fitted) = run_tm_fitted(&core, &*enc, caps);
+                let described = run_tm_described(&core, kind, crate::ty::Ty::Nat, caps);
+                match (fitted, described) {
+                    (Some(w), Ok(d)) => assert_eq!(w, d.header.width, "`{src}` under {name}"),
+                    (None, Err(_)) => {}
+                    (f, d) => panic!(
+                        "`{src}` under {name}: fitted said {f:?}, described said {:?}",
+                        d.map(|d| d.header.width)
+                    ),
+                }
+            }
+        }
     }
 }

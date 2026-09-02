@@ -32,13 +32,13 @@ const DEBOUNCE_MS = 300
  * `noSessionReply`", is gone too**: the next task took the retire out of that arm as well, so neither
  * file passes slots to anything any more. `replies.ts`'s own `no-session` arm records what went with it.
  *
- * `sourceSession` IS NOT IN THE TASK BRIEF'S SIGNATURE, AND IS NEEDED ANYWAY. It is the literal
- * source-session id `main.ts` names once at construction, and is not derivable from anything else this
- * factory already takes. Named `sourceSession` here rather than `SOURCE_SESSION`, matching
- * `createReplies`'s own dependency of the same name and for the same reason: every other dep in this
- * signature is camelCase.
+ * `sourceSession` WAS NOT PART OF THE SIGNATURE THIS FACTORY WAS SPECIFIED WITH, AND IS NEEDED ANYWAY.
+ * It is the literal source-session id `main.ts` names once at construction, and is not derivable from
+ * anything else this factory already takes. Named `sourceSession` here rather than `SOURCE_SESSION`,
+ * matching `createReplies`'s own dependency of the same name and for the same reason: every other dep
+ * in this signature is camelCase.
  *
- * `tmPane` IS IN THE BRIEF'S SIGNATURE AND IS NOT HERE, and no pane of any leg is here now. `schedule`
+ * `tmPane` WAS PART OF THE SPECIFIED SIGNATURE AND IS NOT HERE, and no pane of any leg is here now. `schedule`
  * never read it — the only pane this file ever touched was `setEditor(null)` on the branch where a
  * scratchpad retired, and that branch is gone; the TM leg never had a scratchpad to reflect and nothing
  * in this file's moved body ever mentioned a TM pane. Grepping the moved code for it turns up nothing.

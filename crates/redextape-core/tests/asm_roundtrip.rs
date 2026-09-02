@@ -207,8 +207,9 @@ fn label_order_is_normalized_across_indices_and_kept_within_one() {
     );
 }
 
-/// §3.3, measured rather than assumed under the brief's original name for this test
-/// (`a_label_name_with_a_space_does_not_survive_the_trip`). `validate()` does correctly reject this
+/// §3.3, measured rather than assumed under this test's original name in
+/// `2026-08-24-asm-reader.md` (`a_label_name_with_a_space_does_not_survive_the_trip`).
+/// `validate()` does correctly reject this
 /// name — whitespace is one of `label_name_representable`'s own separators — but that check is about
 /// what a label may be USED as (a jump target, where an operand list splits on whitespace); it is not
 /// what the *label-declaration* line actually enforces. `parse_asm`'s label arm strips a trailing `:`

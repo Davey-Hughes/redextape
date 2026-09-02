@@ -909,7 +909,8 @@ fn the_redex_span_is_in_bytes_over_text_containing_lambdas() {
     }
 }
 
-/// THE DIMENSION THE BRIEF'S OWN TEST CANNOT SEE: that `redex_span` is actually populated, not merely
+/// THE DIMENSION `a_frame_locates_its_own_redex_in_its_own_text` CANNOT SEE — the pairing that test's
+/// own doc names from the other side: that `redex_span` is actually populated, not merely
 /// well-formed when present. A `render` that always leaves the field `None` — the exact regression
 /// `viewmodel.rs`'s former `NO redex FIELD, DELIBERATELY` header warns against reintroducing one field
 /// over — passes `a_frame_locates_its_own_redex_in_its_own_text` above outright (its assertion is

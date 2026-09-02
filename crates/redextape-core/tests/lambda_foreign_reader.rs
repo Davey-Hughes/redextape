@@ -84,18 +84,20 @@
 //!     deliberately non-normalizing term, so an argument-first reader would diverge there too, for an
 //!     unrelated cause. An applicative-order reader of this text form is simply wrong, and nothing in
 //!     the docs warns it.
-//!  8. THE TEXT FORM CARRIES NO RESULT TYPE, AND THE ENCODINGS COLLIDE — noted here because the task
-//!     brief asks for it and because it is stronger than "the file happens not to record a type".
+//!  8. THE TEXT FORM CARRIES NO RESULT TYPE, AND THE ENCODINGS COLLIDE — noted here because
+//!     `2026-07-28-lambda-foreign-reader-and-typed-decode.md` asks for it, and because it is stronger
+//!     than "the file happens not to record a type".
 //!     `encode.rs` documents `true = \t.\f. t` and `nil = \n.\c. n`: the SAME de Bruijn term,
 //!     `Abs(Abs(Var 1))`. And `false = \t.\f. f` and `church 0 = \f.\x. x`: also the same term,
 //!     `Abs(Abs(Var 0))`. So a normal form cannot be decoded without an externally supplied type —
 //!     not as an implementation convenience, but in principle. No READER-FACING permitted doc says
 //!     this anywhere — not `syntax.rs`, not `encode.rs`. It IS recorded, in `lambda/decode.rs`'s
-//!     module doc, the file this task's brief correctly banned (that file describes the very decoding
-//!     strategy a foreign reader has to rederive independently). So the fact is not undocumented
+//!     module doc, the file the out-of-band task instructions correctly banned this reader from
+//!     consulting (that file describes the very decoding strategy a foreign reader has to rederive
+//!     independently). So the fact is not undocumented
 //!     project-wide; the gap is narrower and more actionable than that: no file a foreign reader is
 //!     permitted to consult carries it, so it has to be rediscovered rather than looked up.
-//!     *Resolved:* the type is supplied per corpus row, from the brief.
+//!     *Resolved:* the type is supplied per corpus row, from those out-of-band instructions.
 //!  9. WHAT SHAPE SHOULD A DECODER MATCH? `encode.rs` documents the combinators, not the normal forms
 //!     they produce. That a fully applied, normalized cons cell is `\n.\c. c h t`, and that its two
 //!     payloads are closed and therefore need no shifting out from under those two binders, has to be
@@ -141,12 +143,14 @@
 //! row), so a resolver holding one flat name-to-index map instead of a push/pop binder stack breaks.
 //!
 //! THE RESIDUAL, so a later reader does not take this file as establishing more than it does. Unlike
-//! `tm_foreign_reader.rs`, whose heap layout came from its brief, nothing about the GRAMMAR or the
-//! ENCODINGS here came from the brief — those are `syntax.rs`'s and `encode.rs`'s module and
-//! combinator docs, and the β rule is TAPL's. What did come from the brief is: the corpus itself, the
-//! `FTy` set and the decision to supply a type per row (finding 8), the caps, and the
-//! `parse`/`desugar`/`lower`/`print_lambda` pipeline. Separately, findings 2, 3, 4 and 10 are
-//! resolved by guesses the corpus cannot falsify; this file does not establish them.
+//! `tm_foreign_reader.rs`, whose heap layout came from the out-of-band instructions in
+//! `2026-07-28-tm-header-hardening-and-tooling.md`, nothing about the GRAMMAR or the ENCODINGS here
+//! came from this file's own out-of-band instructions, in
+//! `2026-07-28-lambda-foreign-reader-and-typed-decode.md` — those are `syntax.rs`'s and `encode.rs`'s
+//! module and combinator docs, and the β rule is TAPL's. What did come from that plan is: the corpus
+//! itself, the `FTy` set and the decision to supply a type per row (finding 8), the caps, and the
+//! `parse`/`desugar`/`lower`/`print_lambda` pipeline. Separately, findings 2, 3, 4 and 10 are resolved
+//! by guesses the corpus cannot falsify; this file does not establish them.
 //!
 //! A NARROWER RESIDUAL WITHIN THE β RULE ITSELF, worth stating plainly rather than leaving implicit:
 //! `shift`, `subst` and `beta` below share their originals' names, signatures (`shift(d: i64, cutoff:
@@ -452,7 +456,8 @@ fn step(t: &FTerm) -> Option<FTerm> {
 
 /// Iterative (explicit stack) so measuring the depth cannot itself overflow on a deep term. Seeds the
 /// worklist at depth 1, not 0 — which is the exact, now-identified cause of this reader's measured
-/// corpus maximum of 47 running one over the brief's stated 46 (previously attributed to "a slightly
+/// corpus maximum of 47 running one over the 46 stated in
+/// `2026-07-28-lambda-foreign-reader-and-typed-decode.md` (previously attributed to "a slightly
 /// different origin" for lack of a better explanation). A measured difference in where the two depth
 /// counts start, not a fault: the original `term_depth` was never read, per the discipline this file
 /// depends on.

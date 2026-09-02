@@ -1354,8 +1354,8 @@ fn part_c(rows: &[Row]) {
 
     // THE SAME 2x CRITERION, APPLIED TO THE WINNER RATHER THAN TO THE CONTROL. The table above prices
     // `Σ model`, so its failure list answers "is the accounting complete?" — a different question from
-    // "which rows does the identified counter fail to explain?", which is what the brief asked. A
-    // counter that is 96% of the work on one row and 16% on another cannot price the same on both, and
+    // "which rows does the identified counter fail to explain?" A counter that is 96% of the work
+    // on one row and 16% on another cannot price the same on both, and
     // naming the rows where it does not is the honest form of the dominance claim.
     let win_vals: Vec<f64> = rows.iter().map(|r| (winner.f)(&r.work) as f64).collect();
     let (win_med_rel, _) = unit_prices(&win_vals, &reliable);
@@ -1383,7 +1383,7 @@ fn part_c(rows: &[Row]) {
         "\nTHE SAME 2x TEST, APPLIED TO {} ITSELF rather than to the `Σ model` control. Against the {}-row\n\
          median it fails on rows: {}. Against the 46-row median, additionally: {}.\n\
          Of those, the ones at or above {RELIABLE_MS} ms — where the clock can be trusted — are: {}.\n\
-         The rest are below the timer's resolution, so they are named because the brief asked which rows\n\
+         The rest are below the timer's resolution, so they are named to report which rows\n\
          the counter fails on, not because they weigh against it.",
         winner.name,
         reliable.len(),

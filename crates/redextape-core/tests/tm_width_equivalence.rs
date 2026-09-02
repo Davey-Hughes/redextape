@@ -35,6 +35,10 @@ mod common;
 use common::box_tape_is_well_formed;
 
 /// Every width auto-fit can choose.
+///
+/// **A DELIBERATE INDEPENDENT MODEL OF `tm.rs`'s `search_width`, NOT A DUPLICATE TO BE FOLDED.** This
+/// file asserts things ABOUT the ladder; routing it through the library's own definition would make it
+/// walk whatever that definition says and stop it being able to disagree. Leave the copy.
 fn widths() -> Vec<usize> {
     let mut w = vec![MIN_FIELD_WIDTH];
     while *w.last().unwrap() < MAX_FIELD_WIDTH {

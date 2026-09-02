@@ -27,7 +27,7 @@ fn compile_grammar(name: &str) {
 }
 
 fn main() {
-    // `env!("CARGO_MANIFEST_DIR")` over the relative `../../grammars/...` path the brief sketched:
+    // `env!("CARGO_MANIFEST_DIR")` over a relative `../../grammars/...` path:
     // cargo does run build scripts with the working directory set to the package root, so the
     // relative form would resolve too, but this is correct regardless of how the build is invoked
     // (a workspace-relative `-p`, a vendored path) rather than depending on that one guarantee. It

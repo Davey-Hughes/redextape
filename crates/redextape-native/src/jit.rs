@@ -694,8 +694,8 @@ mod tests {
     #[test]
     fn infinite_recursion_hits_cap_without_stack_overflow() {
         // `$main: call $main; halt` — self-recursion that never returns. Must trip the stack-depth
-        // cap (via rt_enter, before each native call) and NOT overflow the OS stack. The brief's
-        // bare `[Call("f")]` has no return point for the partition's reachability walk; a trailing
+        // cap (via rt_enter, before each native call) and NOT overflow the OS stack. A bare
+        // `[Call("f")]` has no return point for the partition's reachability walk; a trailing
         // `Halt` gives one without changing the (never-taken) behaviour.
         let prog = Program { code: vec![Instr::Call("f".into()), Instr::Halt], labels: vec![("f".into(), 0)] };
         assert!(matches!(

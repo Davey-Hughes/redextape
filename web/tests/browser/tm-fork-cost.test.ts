@@ -46,9 +46,9 @@ import type { TmProgram, TmStatus } from '../../src/types'
  *    program's reading is inflated by a previous program's leftover DOM.
  *
  * **GATED ON `REDEXTAPE_PROBE` EXACTLY THE WAY `buffer-affordability.test.ts` IS — file-level exclusion
- * in `vite.config.ts`, not a check inside this file.** The brief's own sketch reads
- * `process.env.REDEXTAPE_PROBE` at module scope and gates with `describe.runIf`; that idiom does not
- * survive contact with the browser project — `process` is a Node global, and the browser page this
+ * in `vite.config.ts`, not a check inside this file.** `2026-08-17-plan5d-iv-editable-tm.md`'s own
+ * sketch reads `process.env.REDEXTAPE_PROBE` at module scope and gates with `describe.runIf`; that
+ * idiom does not survive contact with the browser project — `process` is a Node global, and the browser page this
  * file runs on does not have one (`ReferenceError: process is not defined`, thrown importing this file
  * the moment that line exists). `buffer-affordability.test.ts` carries no `PROBE` constant and no
  * `runIf` anywhere in it for the same reason: the check has to happen on the Node side, before the file

@@ -124,9 +124,10 @@ async function main(): Promise<EditorView> {
    * THE BUFFER LIST'S BUTTON — design §4.2's `[buffers 3 ▾]`, queried here exactly as `#appearance` and
    * `#restore-layout` are, because `bufferList` takes a button rather than building one (its own doc).
    *
-   * **NO `aria-label`, WHERE THE TASK BRIEF'S MARKUP CARRIED `aria-label="scratch buffers"`.** An
-   * `aria-label` REPLACES an element's contents as its accessible name, and the contents here are the
-   * readout: `bufferList.update` writes `buffers 3 ▾` into them at every moment the count changes,
+   * **NO `aria-label`, WHERE `2026-08-13-plan5d-ii-c-scratch-buffers.md`'s MARKUP CARRIED
+   * `aria-label="scratch buffers"`.** An `aria-label` REPLACES an element's contents as its accessible
+   * name, and the contents here are the readout: `bufferList.update` writes `buffers 3 ▾` into them
+   * at every moment the count changes,
    * precisely so the header states how many buffers exist while the list is closed. A label naming the
    * control and not the count would make that readout inaudible to the one reader who cannot see it —
    * the opposite of what `#restore-layout`'s label does, which EXPANDS a terse visible word rather than
