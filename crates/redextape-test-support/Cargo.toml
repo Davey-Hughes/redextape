@@ -19,3 +19,27 @@ proptest = ["dep:proptest"]
 
 [dependencies]
 proptest = { version = "1", optional = true }
+
+# `ts_derive_scan`'s NULLABILITY rule parses Rust rather than scanning it as text, and this is the
+# parser. It is not optional and not behind the `proptest` feature, for the reason the module doc
+# gives: the text-scanning version of that rule was defeated by ordinary Rust four times across three
+# review rounds — a qualified `std::option::Option`, two `ts(...)` groups on one line, an anchor
+# inside an already-open attribute, and a comment lexer that mistook a char literal for a string.
+# Every one of those is a question about Rust's grammar, which is a closed and finite thing that
+# `syn` already answers. The SIBLING scan in that module stays a text scan on purpose; its whitelist
+# asks whether a line IS one exact string, which needs no grammar at all.
+#
+# WHERE THIS DOES AND DOES NOT REACH, stated per crate because "every consumer" was written here
+# first and was false. `redextape-wasm` — the crate that actually builds to wasm — declares this crate
+# under `[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]`, so nothing here enters its
+# wasm32 graph: `cargo tree -i redextape-test-support --target wasm32-unknown-unknown -p
+# redextape-wasm --edges normal,build,dev` prints `nothing to print`, and `cargo check --target
+# wasm32-unknown-unknown -p redextape-wasm --all-targets` exits 0. `redextape-core`,
+# `redextape-native` and `redextape-grammar-check` declare it under a PLAIN `[dev-dependencies]`, so
+# `syn` and `quote` are in their wasm32 dev graphs — and those graphs were already unbuildable for
+# wasm32 before this line existed, which the note above `proptest` in `redextape-core`'s own manifest
+# records: `cargo check --target wasm32-unknown-unknown -p redextape-core --all-targets` fails on
+# `wait-timeout`, as it did before. What SHIPS is unaffected either way, because `wasm-pack build`
+# compiles no dev-dependencies at all.
+syn = { version = "2", features = ["full", "parsing", "printing", "visit"] }
+quote = "1"

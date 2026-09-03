@@ -1085,6 +1085,8 @@ name = "redextape-test-support"
 version = "0.0.0"
 dependencies = [
  "proptest",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

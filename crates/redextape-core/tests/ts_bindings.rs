@@ -20,7 +20,9 @@ use redextape_core::lambda::{Cut, Owner};
 use redextape_core::span::Span;
 use redextape_core::tm::machine::Move;
 use redextape_core::viewmodel::{LambdaState, RuleView, StateView, TmProgram, TmState};
-use redextape_test_support::ts_derive_scan::{ts_deriving_type_names_in_crate, without_doc_comments};
+use redextape_test_support::ts_derive_scan::{
+    assert_overrides_match_field_nullability, ts_deriving_type_names_in_crate, without_doc_comments,
+};
 use ts_rs::TS;
 
 /// Every type in this crate carrying `#[ts(export)]`, paired with the file it generates.
@@ -121,4 +123,21 @@ fn the_gate_covers_every_exported_type() {
          the derive: {stale_in_gate:?}. Add the new type to `generated()`, or remove the stale entry — \
          or, if the derive was written in some other form, make the two agree."
     );
+}
+
+/// No field override may misstate whether the field can be null.
+///
+/// **NEITHER TEST ABOVE CAN SEE THIS CLASS, WHICH IS WHY IT IS A THIRD TEST RATHER THAN A WIDENING
+/// OF EITHER.** `ts(type = "number")` on an `Option<u64>` generates `number`: no `bigint` for the
+/// gate above to find, and the type still carries the derive, so the coverage gate is satisfied too.
+/// The `| null` that `None` puts on the wire is simply gone.
+///
+/// THE RULE AND ITS REASONING LIVE IN `redextape_test_support::ts_derive_scan` — read
+/// `assert_overrides_match_field_nullability`'s own doc for the anchor, the forward resolution, and
+/// the two things it names as outside its reach rather than closed. One implementation with two
+/// callers is deliberate: a second copy drifts the moment one is widened and the other is not.
+#[test]
+fn no_override_misstates_a_field_s_nullability() {
+    let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert_overrides_match_field_nullability(crate_root, &crate_root.join("tests").join("ts_bindings.rs"));
 }

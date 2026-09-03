@@ -14,16 +14,32 @@
 
 // Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
 // unwrap/expect/panic set: an assertion is a deliberate panic, and a probe that casts a `u64` step
-// count to `f64` to print a ratio is not a defect. This crate has no inline `#[cfg(test)]` module of
-// its own — it is itself a test-only helper library, consumed by other crates' tests, not a holder
-// of tests — so there is no module-level attribute for `cfg_attr` to stand in for here; kept for
-// consistency with the other crates in this workspace, which do have inline test modules.
+// count to `f64` to print a ratio is not a defect. This crate was for a long time a test-only helper
+// library with no inline `#[cfg(test)]` module of its own; `ts_derive_scan` now has one, whose tests
+// drive the override rule from source fixtures rather than from the filesystem — which is what lets
+// the rule be checked here while its WIRING is checked by the two crates' gate binaries that call it.
+//
+// THE ATTRIBUTE BELOW IS STILL INERT, AND AN EARLIER VERSION OF THIS COMMENT CLAIMED OTHERWISE.
+// `ts_derive_scan.rs` carries its own module-level `#![allow(..., clippy::pedantic)]`, which covers
+// the nested test module it now holds, and that module is this crate's only `#[cfg(test)]` block.
+// MEASURED rather than reasoned, which is what the first version of this sentence was not: deleting
+// the line below and running `cargo clippy -p redextape-test-support --all-targets` recompiles the
+// crate and emits zero warnings. It stays for consistency with the other crates in this workspace,
+// which is what it was doing before and what it is still doing.
 #![cfg_attr(test, allow(clippy::pedantic))]
 
 //! `ts_derive_scan` (below) is the second thing this crate holds for the same structural reason as
 //! the first: two crates need one definition and neither can own it. It needs no `proptest` and is
-//! not behind that feature — it is plain `std`, so a consumer that opts out of `proptest` compiles it
-//! at no dependency cost.
+//! not behind that feature, so a consumer that opts out of `proptest` still gets it.
+//!
+//! **IT IS NO LONGER FREE, AND THIS SENTENCE USED TO SAY IT WAS.** It read "it is plain `std`, so a
+//! consumer that opts out of `proptest` compiles it at no dependency cost" — true until the
+//! nullability rule started parsing Rust instead of scanning it, which put `syn` and `quote` in this
+//! crate's unconditional `[dependencies]`. Measured: `cargo tree -p redextape-cli -e normal,dev -i
+//! syn@2.0.119` prints `syn` beneath `redextape-test-support` beneath `redextape-cli`, the one
+//! consumer that declares `default-features = false` precisely to avoid paying for what it does not
+//! use. See `Cargo.toml`'s note above the `syn` entry for why that cost was accepted and what it does
+//! not reach.
 
 pub mod ts_derive_scan;
 
