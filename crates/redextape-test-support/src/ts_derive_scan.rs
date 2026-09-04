@@ -29,6 +29,30 @@ use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 
+/// The attributes a `cfg_attr` would apply, read WITHOUT parsing its predicate.
+///
+/// **`syn::Meta` CANNOT PARSE `cfg_attr(true, …)`, AND A BOOLEAN PREDICATE IS STABLE RUST.** Parsing
+/// the whole argument list as `Punctuated<Meta, Comma>` therefore fails on ordinary source — which in
+/// the gate guard was a SILENT SKIP that walked a real attribute proc macro into a gate file with
+/// every gate green, and on the field side was a PANIC on a correct override. The predicate is not
+/// something this module needs to understand, so it is consumed as opaque token trees up to the first
+/// top-level comma and only the tail is parsed. A comma inside `all(a, b)` sits in a `Group` and is
+/// never top-level, so nesting is handled by construction rather than by counting.
+struct CfgAttrTail(Punctuated<syn::Meta, Token![,]>);
+
+impl Parse for CfgAttrTail {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        while !input.is_empty() && !input.peek(Token![,]) {
+            input.parse::<proc_macro2::TokenTree>()?;
+        }
+        if input.is_empty() {
+            return Ok(Self(Punctuated::new()));
+        }
+        input.parse::<Token![,]>()?;
+        Ok(Self(Punctuated::parse_terminated(input)?))
+    }
+}
+
 /// The ts-rs field keys that say something about whether the field can be null.
 ///
 /// **`optional` IS THE THIRD, AND IT WAS NEITHER CHECKED NOR NAMED UNTIL THE SECOND WHOLE-BRANCH
@@ -48,50 +72,213 @@ const NULLABILITY_KEYS: [&str; 3] = ["type", "as", "optional"];
 
 /// Refuse the caller's gate file if it has started declaring types of its own.
 ///
-/// **BOTH WALKS IN THIS MODULE SKIP THAT ONE FILE ENTIRELY, AND A WHOLE-FILE SKIP IS SAFE ONLY WHILE
-/// THE FILE HOLDS NOTHING EITHER WALK WOULD WANT TO READ.** A gate file declares no `pub struct` or
+/// **ONE WALK IN THIS MODULE SKIPS THAT FILE ENTIRELY, AND A WHOLE-FILE SKIP IS SAFE ONLY WHILE THE
+/// FILE HOLDS NOTHING THAT WALK WOULD WANT TO READ.** It used to be both. The nullability rule stopped
+/// needing the skip the moment it started parsing rather than scanning, and dropping it there deleted
+/// every route past this guard for that walk at once — see
+/// [`assert_overrides_match_field_nullability`]. What is left is [`ts_deriving_type_names_in_crate`],
+/// which is textual by design and genuinely cannot read a gate file's `use ts_rs::TS;` without failing
+/// its own canonical-line check. **So this guard now protects one scan, and the honest question to ask
+/// of it is whether that scan could stop needing it too.** A gate file declares no `pub struct` or
 /// `pub enum`, so it has no derive site and no field for an override to sit on; a type moved INTO it
 /// would be invisible to every check in the binary that scans for it. The exclusion exists because a
 /// gate file legitimately mentions `ts_rs` — the trait import `export_to_string` needs — which is not
 /// a derive site and would otherwise fail the sibling scan on its own correctness.
 ///
-/// This is asserted rather than commented, and it is called from both walks rather than written
-/// twice, for the reason this module's header gives: one implementation, because a second copy drifts
-/// the moment one is widened.
+/// This is asserted rather than commented, for the reason this module's header gives about shared
+/// implementations. It is called from one walk now — the textual one — and the doc above says why.
 fn assert_scanner_file_declares_no_types(path: &Path) {
     let own_src = fs::read_to_string(path).unwrap();
-    // PARSED, NOT MATCHED ON TWO PREFIXES. `pub struct ` / `pub enum ` at the start of a trimmed line
-    // was the whole test, and a whole-file skip is only as safe as the guard on it: the fifth
-    // whole-branch review appended a `pub(crate) struct` carrying the canonical derive and a bad
-    // override to a gate file, ran the binary, and got `4 passed; 0 failed` with a real binding file
-    // generated — every gate silent, through the guard, on exactly the sabotage the exclusion assumes
-    // never happens. A private `struct`, `pub(super)`, a `union`, or a declaration not starting its
-    // line all evaded it the same way. `syn` answers "does this file declare a type" exactly.
-    struct DeclaresType(bool);
-    impl<'ast> syn::visit::Visit<'ast> for DeclaresType {
+
+    // THE QUESTION IS NOT "DOES THIS FILE DECLARE A TYPE" BUT "CAN THIS FILE PRODUCE ONE", AND THE
+    // SECOND IS THE ONLY ONE WORTH ASKING OF A FILE BOTH WALKS SKIP WHOLE. Three rounds of answering
+    // the first each shipped a hole: line prefixes missed `pub(crate)`; the parse that replaced them
+    // missed a type inside `declare_it! { … }`; and adding a text scan for the words missed
+    // `#[path = "../../elsewhere.rs"] mod m;`, which spells nothing and was demonstrated writing a
+    // real binding with all three green. So this refuses every construct that can bring a declaration
+    // in AT MODULE SCOPE — a type, a module, an item-position macro, or an attribute not known to be
+    // inert — rather than trying to recognise the declaration itself.
+    //
+    // **MODULE SCOPE IS THE WHOLE OF IT, AND A ROUND WAS SPENT ON POSITIONS THAT ARE NOT.** A previous
+    // round added checks for macros in statement, expression, `impl`, trait, `extern` and type
+    // position, on a review's report that one had declared a type and written a real binding. **That
+    // report was never independently verified and does not reproduce.** `rustc` does not collect
+    // `#[test]` items nested in a function body — it warns `unnameable_test_items` — so `ts-rs`'s
+    // generated `export_bindings_*` test never runs and no file is written. Measured here: a
+    // canonically-derived type declared inside a `#[test] fn` in the real gate file yields no
+    // `export_bindings_*` and no `bindings/` directory at all. None of those positions can place an
+    // item at module scope, so the layer bought nothing — while costing false reds on `env!`,
+    // `debug_assert_eq!`, `format_args!` and every `std::`-qualified spelling. It is deleted rather
+    // than extended. **A subagent's finding is a claim to check, not a result**, and this file now
+    // carries the cost of having taken one on trust.
+    #[derive(Default)]
+    struct Declares {
+        ty: Option<&'static str>,
+        item_macro: bool,
+        module: bool,
+        foreign_attr: Option<String>,
+    }
+    // Attributes that cannot expand to anything. Anything else — including every attribute proc-macro,
+    // which `syn` reports as an ordinary `Item::Fn`/`Item::Mod`/`Item::Const` carrying an attribute and
+    // which no amount of parsing can distinguish from an inert one — is refused. A whitelist, for the
+    // reason this module's sibling records paying four rounds to learn.
+    // `forbid` was missing beside its three siblings, and `#[must_use]`/`#[track_caller]` on a test
+    // helper are entirely ordinary — each was a red on source a gate file could legitimately grow.
+    // This is a list and a list goes stale; the refusal names the construct, so the next is added
+    // deliberately rather than discovered.
+    const INERT: [&str; 21] = [
+        "allow",
+        "deny",
+        "warn",
+        "expect",
+        "forbid",
+        "cfg",
+        "cfg_attr",
+        "test",
+        "should_panic",
+        "ignore",
+        "doc",
+        "inline",
+        "must_use",
+        "track_caller",
+        "deprecated",
+        "cold",
+        "repr",
+        "non_exhaustive",
+        // The three `#[unsafe(...)]` wraps in edition 2024.
+        "no_mangle",
+        "export_name",
+        "link_section",
+    ];
+    impl Declares {
+        /// **THROUGH `cfg_attr`, BECAUSE ONE OF THEM WALKED A REAL PROC MACRO PAST THIS.**
+        /// `#[cfg_attr(all(), wasm_bindgen::prelude::wasm_bindgen)]` compiles, expands, and was
+        /// measured leaving a gate file at `3 passed; 0 failed` — `visit_attribute` sees only the
+        /// OUTER attribute, `cfg_attr` is inert, and `syn` never surfaces what is nested inside its
+        /// tokens. This is the identical class `ts_keys_under` in this same file records fixing for the
+        /// key scan, left open here: fixing a class in one function and not in its neighbour is how
+        /// this module keeps paying for the same lesson.
+        ///
+        /// **AND THE PATH MUST BE A SINGLE SEGMENT.** Matching only the LAST one let `#[tokio::test]`,
+        /// `#[async_std::test]` and `#[actix_rt::test]` — ordinary attribute proc-macros that expand to
+        /// arbitrary items — answer to `test`. A qualified path is refused whatever its tail says,
+        /// which also refuses `#[rustfmt::skip]`; that is the safe direction, and the message says
+        /// which construct was refused so the reader can add it deliberately rather than by accident.
+        fn check_meta(&mut self, meta: &syn::Meta) {
+            let path = meta.path();
+            let single = path.segments.len() == 1 && path.leading_colon.is_none();
+            let name = path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+            // `#[unsafe(no_mangle)]` is edition 2024's REQUIRED spelling of otherwise-inert built-in
+            // attributes, and `syn` reports it as a list whose path is `unsafe`. Refusing it names a
+            // construct the author did not write. Its contents are attributes with no predicate, so
+            // every one of them is checked.
+            if single && name == "unsafe" {
+                if let syn::Meta::List(list) = meta
+                    && let Ok(inner) = list.parse_args_with(Punctuated::<syn::Meta, Token![,]>::parse_terminated)
+                {
+                    for nested in &inner {
+                        self.check_meta(nested);
+                    }
+                } else {
+                    self.foreign_attr = Some("an unsafe(…) wrapper this scan cannot read".to_string());
+                }
+                return;
+            }
+            if single && name == "cfg_attr" {
+                if let syn::Meta::List(list) = meta {
+                    // NOT `if let Ok(…)`. That was a silent skip, and `#[cfg_attr(true, <proc macro>)]`
+                    // — which compiles — is exactly what it skipped, walking a real attribute proc
+                    // macro past this whitelist with every gate green. Everywhere else this module
+                    // treats an attribute it cannot read as a refusal.
+                    match list.parse_args_with(CfgAttrTail::parse).map(|t| t.0) {
+                        Ok(tail) => {
+                            for nested in &tail {
+                                self.check_meta(nested);
+                            }
+                        }
+                        Err(e) => {
+                            self.foreign_attr = Some(format!("a cfg_attr this scan cannot read ({e})"));
+                        }
+                    }
+                }
+                return;
+            }
+            if !(single && INERT.contains(&name.as_str())) {
+                self.foreign_attr = Some(path.to_token_stream().to_string().replace(' ', ""));
+            }
+        }
+    }
+    impl<'ast> syn::visit::Visit<'ast> for Declares {
         fn visit_item_struct(&mut self, _: &'ast syn::ItemStruct) {
-            self.0 = true;
+            self.ty = Some("struct");
         }
         fn visit_item_enum(&mut self, _: &'ast syn::ItemEnum) {
-            self.0 = true;
+            self.ty = Some("enum");
         }
         fn visit_item_union(&mut self, _: &'ast syn::ItemUnion) {
-            self.0 = true;
+            self.ty = Some("union");
+        }
+        fn visit_item_macro(&mut self, _: &'ast syn::ItemMacro) {
+            self.item_macro = true;
+        }
+        fn visit_item_mod(&mut self, _: &'ast syn::ItemMod) {
+            self.module = true;
+        }
+        fn visit_attribute(&mut self, node: &'ast syn::Attribute) {
+            self.check_meta(&node.meta);
         }
     }
-    let mut found = DeclaresType(false);
-    if let Ok(parsed) = syn::parse_file(&own_src) {
-        syn::visit::Visit::visit_file(&mut found, &parsed);
-    }
+    // FAIL CLOSED. This used to be `if let Ok(parsed) = …`, so a gate file that did not parse left
+    // every flag false and re-blessed the whole-file skip in silence — ten lines from `check_source`,
+    // which panics on the identical condition and explains why a parse failure must never be a skip.
+    let parsed = syn::parse_file(&own_src).unwrap_or_else(|e| {
+        panic!(
+            "{} does not parse as Rust ({e}), so this scan cannot tell what it can produce — and it \
+             is the file the textual walk in this module skips whole. A parse failure here must be \
+             a refusal, never a pass.",
+            path.display()
+        )
+    });
+    let mut found = Declares::default();
+    syn::visit::Visit::visit_file(&mut found, &parsed);
+
+    let refusal = if let Some(kind) = found.ty {
+        Some(format!(
+            "declares a `{kind}` of its own, at some visibility — a `ts_rs::TS` derive or a field \
+             override attached to a type declared HERE is invisible to every gate in this binary"
+        ))
+    } else if found.module {
+        Some(
+            "declares a `mod`, which can bring in a whole file this scan never opens — \
+             `#[path = \"../../elsewhere.rs\"] mod m;` resolves outside the crate root, spells no type \
+             name here, and was measured writing a real binding with every gate green"
+                .to_string(),
+        )
+    } else if found.item_macro {
+        Some(
+            "contains an item-position macro — an invocation OR a `macro_rules!` definition; `syn` \
+             reports both as `Item::Macro` and reads neither's tokens, so what it produces cannot be \
+             known from here"
+                .to_string(),
+        )
+    } else {
+        found.foreign_attr.as_ref().map(|attr| {
+            format!(
+                "carries the item attribute `#[{attr}]`, which is not on this scan's list of \
+                 attributes known to expand to nothing. An attribute proc-macro is reported by `syn` \
+                 as an ordinary item carrying an attribute, so a parse cannot tell it from an inert one"
+            )
+        })
+    };
+
     assert!(
-        !found.0,
-        "{} declares a type of its own now — a `struct`, `enum` or `union`, at ANY visibility — \
-         which makes this module's self-exclusion unsafe: a `ts_rs::TS` derive, or a field \
-         override, attached to a type declared HERE would be invisible to every gate in this \
-         binary, exactly the sabotage the exclusion was written to assume never happens. Move the \
-         type out of this file into an ordinary crate source file, where the walks read it like any \
-         other.",
-        path.display()
+        refusal.is_none(),
+        "{} {}. That makes this module's whole-file self-exclusion unsafe. Move whatever needs it \
+         into an ordinary crate source file, which the textual walk reads like any other — or, if \
+         this really belongs in a gate file, the exclusion needs rethinking rather than one more \
+         construct added to what it tolerates.",
+        path.display(),
+        refusal.unwrap_or_default()
     );
 }
 
@@ -255,9 +442,9 @@ pub fn ts_deriving_type_names_in_crate(crate_root: &Path, scanner_path: &Path) -
                 // source and refuse the silent exclusion the moment that property stops holding, rather
                 // than trusting the comment above to stay true.
                 //
-                // The assertion itself is [`assert_scanner_file_declares_no_types`], shared with
-                // `assert_overrides_match_field_nullability`'s walk, which excludes the same file for
-                // the same reason and shipped without this guard until the whole-branch review said so.
+                // The assertion itself is [`assert_scanner_file_declares_no_types`]. It used to be
+                // shared with `assert_overrides_match_field_nullability`'s walk; that walk excludes
+                // nothing as of this branch, so this exclusion and its guard are now this scan's alone.
                 assert_scanner_file_declares_no_types(&path);
             } else if path.extension().is_some_and(|e| e == "rs") {
                 let src = fs::read_to_string(&path).unwrap();
@@ -405,6 +592,25 @@ pub fn without_doc_comments(ts: &str) -> String {
 /// what type a field has and which attributes sit on it, which is a question only a parser can answer.
 /// Two mechanisms in one module, each matched to its question.
 ///
+/// **THIS WALK SKIPS NOTHING, AND THAT IS WHAT THREE ROUNDS OF GUARDING A SKIP WERE ACTUALLY FOR.**
+/// Both walks in this module used to exclude the caller's gate file whole, because that file quotes
+/// `ts(type = ...)` inside its own assertion messages. **A parser does not care.** Every one of those
+/// occurrences is a string literal or a doc comment and not one is an attribute — which is the
+/// property that matters, stated instead of a count, because the count differs between the two files
+/// and nothing gates either. So this walk reads both gate files like any other source and both gates
+/// stay green, measured before the exclusion was removed rather than after. The exclusion predated the parser and outlived its reason by three review
+/// rounds, each of which found a way past the guard protecting it: a `pub(crate) struct` past two line
+/// prefixes, a `macro_rules!` body past a parse, and `#[path = "../../elsewhere.rs"] mod m;` past a
+/// parse plus a text scan plus an item-macro refusal. **Removing the skip retires that whole class
+/// instead of refusing its members one at a time**, including the members nobody has found yet.
+/// [`assert_scanner_file_declares_no_types`] survives for [`ts_deriving_type_names_in_crate`] alone,
+/// which is textual and genuinely cannot read a gate file's `use ts_rs::TS;` without failing its own
+/// canonical-line check.
+///
+/// A consequence worth stating rather than leaving to be discovered: a type declared IN a gate file
+/// with a bad override is now caught by this rule directly, rather than only refused by the sibling's
+/// guard.
+///
 /// **THE RULE, OVER THE THREE KEYS THAT SAY ANYTHING ABOUT NULL** — see [`NULLABILITY_KEYS`] for why
 /// those three and not the others. A field is an `Option` exactly when its override claims a null,
 /// and any disagreement is a panic: `ts(type = "X")` claims one when `X` has a top-level `null` union
@@ -425,23 +631,21 @@ pub fn without_doc_comments(ts: &str) -> String {
 /// override does to the nullability of the variant's payload has not been measured, and a rule
 /// guessing at it would be exactly the unmeasured mechanism this module's history is made of. Named
 /// here, pinned by a test, and left open.
-pub fn assert_overrides_match_field_nullability(crate_root: &Path, scanner_path: &Path) {
-    fn walk(dir: &Path, self_path: &Path) {
+pub fn assert_overrides_match_field_nullability(crate_root: &Path) {
+    fn walk(dir: &Path) {
         for entry in fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
                 if path.file_name().is_some_and(|n| n == "target") {
                     continue;
                 }
-                walk(&path, self_path);
-            } else if path == self_path {
-                assert_scanner_file_declares_no_types(&path);
+                walk(&path);
             } else if path.extension().is_some_and(|e| e == "rs") {
                 check_source(&path, &fs::read_to_string(&path).unwrap());
             }
         }
     }
-    walk(crate_root, scanner_path);
+    walk(crate_root);
 }
 
 /// Every field in `src`, checked against the overrides on it. Split out from the walk so the rule can
@@ -462,8 +666,15 @@ fn check_source(path: &Path, src: &str) {
     syn::visit::Visit::visit_file(&mut FieldWalk { path }, &file);
 }
 
-/// **THE WALK IS `syn`'s OWN VISITOR, NOT A HAND-WRITTEN DESCENT, AND THAT IS THE FIX FOR A CLASS
-/// RATHER THAN FOR ITS INSTANCES.** Three rounds of "descend into `mod`", then "and into `fn`
+/// **THE WALK IS `syn`'s OWN VISITOR, NOT A HAND-WRITTEN DESCENT, AND THAT IS THE FIX FOR ONE CLASS
+/// AND NOT FOR EVERY ONE.** The over-claim is worth correcting rather than softening: an earlier
+/// version of this paragraph said the visitor makes the two gates in this binary unable to answer
+/// differently about the same type, and that is still FALSE for a type declared through an
+/// item-position macro — `syn` reads the invocation as `Item::Macro` and never enters its tokens,
+/// while the sibling's line-based scan resolves forward to the `pub struct` inside it and finds it.
+/// The gate file is protected from that by [`assert_scanner_file_declares_no_types`]'s third layer;
+/// ANY OTHER file in either crate is not, and the macro boundary below is where that is named. Three rounds of "descend
+/// into `mod`", then "and into `fn`
 /// bodies", then "and into `impl` methods" were each correct and each left the next container out: a
 /// type declared in a nested block, a closure body, a match arm, a `const _: () = { … }` initializer,
 /// or a `union` — all ordinary Rust, and every one of them a silent pass. Each had the same witness:
@@ -514,15 +725,14 @@ fn ts_keys_on(path: &Path, owner: &str, field: &str, attrs: &[syn::Attribute]) -
         if attr.path().is_ident("ts") {
             found.extend(ts_keys_in(path, owner, field, &attr.meta));
         } else if attr.path().is_ident("cfg_attr") {
-            let inner =
-                attr.parse_args_with(Punctuated::<syn::Meta, Token![,]>::parse_terminated).unwrap_or_else(|e| {
-                    panic!(
-                        "{}: `{owner}.{field}` carries a `cfg_attr` whose contents this scan cannot \
+            let inner = attr.parse_args_with(CfgAttrTail::parse).map(|t| t.0).unwrap_or_else(|e| {
+                panic!(
+                    "{}: `{owner}.{field}` carries a `cfg_attr` whose contents this scan cannot \
                          read ({e}). This used to be a silent `continue`, in a module whose stated \
                          rule is that an unreadable attribute is a panic and never a skip.",
-                        path.display()
-                    )
-                });
+                    path.display()
+                )
+            });
             found.extend(ts_keys_under(path, owner, field, inner.iter()));
         }
     }
@@ -557,14 +767,13 @@ fn ts_keys_under<'a>(
                     meta.path().to_token_stream()
                 )
             };
-            let inner =
-                list.parse_args_with(Punctuated::<syn::Meta, Token![,]>::parse_terminated).unwrap_or_else(|e| {
-                    panic!(
-                        "{}: `{owner}.{field}` carries a nested `cfg_attr` this scan cannot read \
+            let inner = list.parse_args_with(CfgAttrTail::parse).map(|t| t.0).unwrap_or_else(|e| {
+                panic!(
+                    "{}: `{owner}.{field}` carries a nested `cfg_attr` this scan cannot read \
                          ({e}). An attribute it cannot read is one it cannot check.",
-                        path.display()
-                    )
-                });
+                    path.display()
+                )
+            });
             found.extend(ts_keys_under(path, owner, field, inner.iter()));
         }
     }
@@ -635,6 +844,20 @@ impl Parse for TsKeys {
 /// match a prefix against. The string-matching version of this question was defeated twice on this
 /// branch, once on the field side and once — by the fix for the first — on the `as` side.
 fn type_is_option(ty: &syn::Type) -> bool {
+    // `(Option<u64>)` is the same type as `Option<u64>`, and `rustfmt` preserves the parens. Without
+    // this the field side was a silent pass and the `as` side — which lives inside a string literal,
+    // where no lint reaches it — was a false red. Same shape as the two `starts_with("Option<")`
+    // defects recorded above.
+    // TO A FIXED POINT, not one layer: `((Option<u64>))` is the same type too, and the single `match`
+    // this replaces let it through silently. The reasoning applies at every depth, so the code should.
+    let mut ty = ty;
+    while let syn::Type::Paren(_) | syn::Type::Group(_) = ty {
+        ty = match ty {
+            syn::Type::Paren(p) => &p.elem,
+            syn::Type::Group(g) => &g.elem,
+            _ => unreachable!(),
+        };
+    }
     let syn::Type::Path(path) = ty else {
         return false;
     };
@@ -656,20 +879,73 @@ fn type_is_option(ty: &syn::Type) -> bool {
 /// **`=>` AND `->` DO NOT CLOSE A GENERIC.** `((x: number) => void) | null` left the depth at -1 by
 /// the time the top-level `|` was reached, so no member was ever split off and a correct override was
 /// reported as a violation.
+/// `ts_type` with any parentheses that enclose the whole of it removed, to a fixed point.
+///
+/// A WHOLE union may be parenthesised, and then nothing splits at depth zero: `(number | null)` and
+/// `(null | number)` both read as non-nullable and panicked the gate on correct TypeScript. Matching
+/// depth is what keeps `(a) | (b)` alone — its first `(` closes before the end, so it encloses
+/// nothing.
+fn strip_enclosing_parens(ts_type: &str) -> &str {
+    let mut out = ts_type.trim();
+    while out.starts_with('(') && out.ends_with(')') {
+        let mut depth = 0i32;
+        let mut encloses = true;
+        for (i, c) in out.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 && i + 1 != out.len() {
+                        encloses = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !encloses {
+            break;
+        }
+        out = out[1..out.len() - 1].trim();
+    }
+    out
+}
+
 fn union_admits_null(ts_type: &str) -> bool {
+    let ts_type = strip_enclosing_parens(ts_type);
     let bytes = ts_type.as_bytes();
     let mut depth = 0i32;
     let mut start = 0;
     let mut members = Vec::new();
     let mut ended_at_arrow = false;
+    // QUOTED SPANS ARE SKIPPED, AND THIS WAS A REGRESSION THE ARROW GUARD INTRODUCED. A TypeScript
+    // string-literal type may contain any character, so `'=>' | null` and `'>' | null` are ordinary
+    // nullable unions — and once a depth-zero `=>` began ENDING the scan rather than merely being
+    // skipped, a quoted arrow terminated it before the `null` member was ever reached. Both returned
+    // true before that change and false after: a false red on correct source, panicking the gate.
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
     for (i, c) in ts_type.char_indices() {
+        if let Some(q) = quote {
+            // Escapes are honoured, because `'it\'s' | null` otherwise closes the span at the
+            // backslashed quote, reopens it at the real one, and swallows the top-level `|` — the
+            // same false-red class the quote handling was added to fix, one level down.
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == q {
+                quote = None;
+            }
+            continue;
+        }
         match c {
+            '\'' | '"' | '`' => quote = Some(c),
             '<' | '(' | '[' | '{' => depth += 1,
-            // A `>` that closes an ARROW is not a closer at all. At depth zero it ends the search
-            // outright: everything after it is the return type, so `(x: number) => void | null` is a
-            // function returning `void | null` rather than a nullable function, and TypeScript only
-            // reads that union as the FIELD's when the whole function type is parenthesised — in
-            // which case this `>` sits at depth > 0 and is merely skipped.
+            // A `>` that closes an ARROW is not a closer. At depth zero it ends the search outright:
+            // everything after it is the return type, so `(x: number) => void | null` is a function
+            // returning `void | null` rather than a nullable function. Parenthesise the function type
+            // and the `=>` sits at depth > 0, where it is merely skipped.
             '>' if i > 0 && bytes[i - 1] == b'=' => {
                 if depth == 0 {
                     ended_at_arrow = true;
@@ -688,7 +964,15 @@ fn union_admits_null(ts_type: &str) -> bool {
     if !ended_at_arrow {
         members.push(&ts_type[start..]);
     }
-    members.iter().any(|m| m.trim() == "null")
+    // A MEMBER MAY ITSELF BE A PARENTHESISED UNION, so this recurses rather than string-comparing.
+    // `number | (null)` failed a bare comparison; `number | (null | undefined)` then failed the trim
+    // that fixed it, because stripping the parens leaves a union and not the word. Recursion
+    // terminates because it only happens when `strip_enclosing_parens` actually removed something.
+    members.iter().any(|m| {
+        let trimmed = m.trim();
+        let inner = strip_enclosing_parens(trimmed);
+        inner == "null" || (inner.len() < trimmed.len() && union_admits_null(inner))
+    })
 }
 
 /// The rule itself, in both directions, over all three keys.
@@ -1400,7 +1684,7 @@ pub struct Handlers {
     /// `pub(crate) struct` carrying the canonical derive and a bad override to a gate file and got
     /// every gate silent with a binding really generated — through a guard matching two prefixes.
     #[test]
-    #[should_panic(expected = "declares a type of its own")]
+    #[should_panic(expected = "declares a `struct`")]
     fn the_guard_refuses_a_type_at_any_visibility() {
         let dir = crate::ScratchDir::new("ts-derive-scan-guard").unwrap();
         let file = dir.join("gate.rs");
@@ -1414,6 +1698,305 @@ pub struct Handlers {
         let file = dir.join("gate.rs");
         std::fs::write(&file, "use ts_rs::TS;\n\n#[test]\nfn a_gate() {}\n").unwrap();
         assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// CRITICAL REGRESSION, sixth review: replacing the line-prefix guard with a parse traded a
+    /// `pub(crate)` hole for a `macro_rules!` one. `syn` reads this as `Item::Macro` and never enters
+    /// its tokens, so the parse alone sees no type — while the check it replaced found the words
+    /// because they are literally there.
+    #[test]
+    #[should_panic(expected = "item-position macro")]
+    fn the_guard_refuses_a_type_declared_through_a_macro_body_in_the_same_file() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-macro").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(
+            &file,
+            concat!(
+                "macro_rules! declare_it { ($($t:tt)*) => { $($t)* }; }\n",
+                "declare_it! {\n    pub struct SneakyViaMacro {\n",
+                "        pub total_steps: Option<u64>,\n    }\n}\n",
+            ),
+        )
+        .unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// What removing the skip bought: a bad override on a type declared IN a gate file is now caught
+    /// by the RULE, not merely refused by the guard. Before, this file was never read by this walk at
+    /// all.
+    #[test]
+    #[should_panic(expected = "total_steps")]
+    fn an_override_in_a_file_that_used_to_be_skipped_is_now_checked() {
+        check(
+            r#"
+use ts_rs::TS;
+
+pub struct InAGateFile {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub total_steps: Option<u64>,
+}
+"#,
+        );
+    }
+
+    /// And the thing the skip existed for stays invisible, because a parser reads it as a string.
+    #[test]
+    fn a_ts_attribute_quoted_inside_an_assertion_message_is_not_an_attribute() {
+        check(
+            r#"
+pub fn a_gate() {
+    assert!(
+        false,
+        "it needs an override — `#[cfg_attr(feature = "ts", ts(type = "number"))]` for a bare field"
+    );
+}
+"#,
+        );
+    }
+
+    /// Edition 2024 requires `#[unsafe(no_mangle)]`; refusing it named a construct nobody wrote.
+    #[test]
+    fn the_guard_reads_through_an_unsafe_attribute_wrapper() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-unsafe-attr").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(&file, "#[unsafe(no_mangle)]\npub extern \"C\" fn helper() {}\n").unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    #[test]
+    #[should_panic(expected = "emit_a_type")]
+    fn the_guard_still_refuses_a_proc_macro_inside_an_unsafe_wrapper() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-unsafe-evil").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(&file, "#[unsafe(emit_a_type)]\npub fn helper() {}\n").unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// **THE LAYER THIS REPLACES WAS DELETED, AND THIS PINS WHY.** A round added checks for macros
+    /// in statement, expression, `impl`, trait, `extern` and type position on a report that one had
+    /// declared a type and written a binding. `rustc` does not collect `#[test]` items nested in a
+    /// function body, so no `export_bindings_*` runs and no file is written; none of those positions
+    /// reaches module scope. A gate file may invoke whatever expression macros it likes.
+    #[test]
+    fn the_guard_accepts_macros_outside_item_position() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-stmt-macros").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(
+            &file,
+            concat!(
+                "#![forbid(unsafe_code)]\n\n#[test]\nfn a_gate() {\n",
+                "    let root = env!(\"CARGO_MANIFEST_DIR\");\n",
+                "    let v = vec![1, 2];\n",
+                "    debug_assert_eq!(v.len(), 2);\n",
+                "    std::assert_eq!(v.len(), 2);\n",
+                "    some_crate::anything! { whatever }\n",
+                "    assert!(!root.is_empty(), \"a struct or enum in prose\");\n}\n",
+            ),
+        )
+        .unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// CRITICAL, ninth review: `syn::Meta` cannot parse the keyword `true`, so parsing a `cfg_attr`'s
+    /// WHOLE argument list failed and an `if let Ok` dropped it — walking a real proc macro past the
+    /// whitelist the round before had just tightened. The predicate is opaque tokens now.
+    #[test]
+    #[should_panic(expected = "wasm_bindgen")]
+    fn the_guard_reads_a_cfg_attr_with_a_boolean_predicate() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-cfg-true").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(&file, "#[cfg_attr(true, wasm_bindgen::prelude::wasm_bindgen)]\npub fn helper() {}\n").unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// A whole union may be parenthesised, and then nothing splits at depth zero.
+    #[test]
+    fn a_union_parenthesised_as_a_whole_is_still_a_union() {
+        check(
+            r#"
+pub struct A {
+    #[cfg_attr(feature = "ts", ts(type = "(number | null)"))]
+    pub a: Option<u64>,
+}
+
+pub struct B {
+    #[cfg_attr(feature = "ts", ts(type = "number | (null | undefined)"))]
+    pub b: Option<u64>,
+}
+"#,
+        );
+    }
+
+    /// One layer of unwrapping let this through; the reasoning applies at every depth.
+    #[test]
+    #[should_panic(expected = "total_steps")]
+    fn a_doubly_parenthesised_option_is_still_an_option() {
+        check(
+            r#"
+pub struct TmStatus {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub total_steps: ((Option<u64>)),
+}
+"#,
+        );
+    }
+
+    /// The false-red direction of the same `cfg_attr` defect: a correct override under a boolean
+    /// predicate used to panic the whole nullability gate, on source that compiles.
+    #[test]
+    fn a_correct_override_under_a_boolean_cfg_predicate_is_read() {
+        check(
+            r#"
+pub struct TmStatus {
+    #[cfg_attr(true, ts(type = "number | null"))]
+    pub total_steps: Option<u64>,
+}
+"#,
+        );
+    }
+
+    /// HIGH, eighth review: a real proc macro walked past the whitelist because `cfg_attr` is on it
+    /// and `syn` never surfaces what is nested inside one. The same class this file already records
+    /// fixing for the key scan.
+    #[test]
+    #[should_panic(expected = "wasm_bindgen")]
+    fn the_guard_descends_into_cfg_attr_when_checking_attributes() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-nested-attr").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(&file, "#[cfg_attr(all(), wasm_bindgen::prelude::wasm_bindgen)]\npub fn helper() {}\n").unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// Matching the LAST path segment let `#[tokio::test]` answer to `test`.
+    #[test]
+    #[should_panic(expected = "tokio::test")]
+    fn the_guard_refuses_a_qualified_attribute_whose_tail_is_inert() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-qualified-attr").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(&file, "#[tokio::test]\nfn a_gate() {}\n").unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// `(Option<u64>)` is the same type, and `rustfmt` keeps the parens: a silent pass on the field
+    /// side, and on the `as` side a false red inside a string literal where no lint reaches.
+    #[test]
+    #[should_panic(expected = "total_steps")]
+    fn a_parenthesised_option_field_is_still_an_option() {
+        check(
+            r#"
+pub struct TmStatus {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub total_steps: (Option<u64>),
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn a_parenthesised_option_in_an_as_override_is_accepted() {
+        check(
+            r#"
+pub struct TmStatus {
+    #[cfg_attr(feature = "ts", ts(as = "(Option<u32>)"))]
+    pub total_steps: Option<u64>,
+}
+"#,
+        );
+    }
+
+    /// `number | (null)` is legal TypeScript and genuinely nullable.
+    #[test]
+    fn a_parenthesised_null_member_is_a_null_member() {
+        check(
+            r#"
+pub struct TmStatus {
+    #[cfg_attr(feature = "ts", ts(type = "number | (null)"))]
+    pub total_steps: Option<u64>,
+}
+"#,
+        );
+    }
+
+    /// HIGH, seventh review: this got a type past ALL THREE layers of the previous guard and wrote a
+    /// real binding with every gate green. A `mod` brings in a whole file — `#[path]` can point it
+    /// outside the crate root, where neither walk ever reads it — and it is not a macro.
+    #[test]
+    #[should_panic(expected = "declares a `mod`")]
+    fn the_guard_refuses_a_module_declaration() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-mod").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(&file, "#[path = \"../../sneaky_probe.rs\"]\nmod sneaky_probe;\n").unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// The same class one step further out: an attribute proc-macro is reported by `syn` as an
+    /// ordinary item carrying an attribute, so no parse can tell it from an inert one. A whitelist of
+    /// attributes known to expand to nothing is the only construction that refuses it.
+    #[test]
+    #[should_panic(expected = "not on this scan's list")]
+    fn the_guard_refuses_an_unknown_item_attribute() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-attr").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(&file, "#[emit_a_type]\nfn helper() {}\n").unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// The attributes the real gate files carry must NOT trip the whitelist.
+    #[test]
+    fn the_guard_accepts_the_attributes_a_real_gate_file_uses() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-inert").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(
+            &file,
+            concat!(
+                "#![allow(clippy::pedantic)]\n#![cfg(feature = \"ts\")]\n\n",
+                "/// A doc comment.\n#[test]\nfn a_gate() {\n",
+                "    assert!(true, \"a struct or enum mentioned in prose\");\n}\n",
+            ),
+        )
+        .unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// The route neither a parse NOR a text scan can see: the macro's body lives elsewhere, so the
+    /// word `struct` is spelled nowhere in this file.
+    #[test]
+    #[should_panic(expected = "item-position macro")]
+    fn the_guard_refuses_an_item_macro_whose_body_lives_elsewhere() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-extern-macro").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(&file, "crate::declare_a_type!();\n").unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// FAIL CLOSED. This used to leave the flag false and re-bless the whole-file skip in silence.
+    #[test]
+    #[should_panic(expected = "does not parse as Rust")]
+    fn the_guard_refuses_a_gate_file_it_cannot_parse() {
+        let dir = crate::ScratchDir::new("ts-derive-scan-guard-unparseable").unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(&file, "pub struct Thing { pub a: u64, }\nfn broken( {\n").unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
+    /// A TypeScript string-literal type may contain any character. Both of these were `true` before
+    /// the arrow guard landed and `false` after — a false red that panicked the gate on correct
+    /// source.
+    #[test]
+    fn a_quoted_arrow_or_angle_bracket_does_not_end_the_union_scan() {
+        check(
+            r#"
+pub struct A {
+    #[cfg_attr(feature = "ts", ts(type = "'=>' | null"))]
+    pub a: Option<u64>,
+}
+
+pub struct B {
+    #[cfg_attr(feature = "ts", ts(type = "'>' | null"))]
+    pub b: Option<u64>,
+}
+"#,
+        );
     }
 
     /// A NAMED BOUNDARY, PINNED RATHER THAN CLAIMED CLOSED. `ts-rs-macros`'s `VariantAttr` carries

@@ -122,6 +122,5 @@ fn the_gate_covers_every_exported_type() {
 /// callers is deliberate: a second copy drifts the moment one is widened and the other is not.
 #[test]
 fn no_override_misstates_a_field_s_nullability() {
-    let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    assert_overrides_match_field_nullability(crate_root, &crate_root.join("tests").join("ts_bindings.rs"));
+    assert_overrides_match_field_nullability(Path::new(env!("CARGO_MANIFEST_DIR")));
 }

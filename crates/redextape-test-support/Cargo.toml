@@ -43,3 +43,6 @@ proptest = { version = "1", optional = true }
 # compiles no dev-dependencies at all.
 syn = { version = "2", features = ["full", "parsing", "printing", "visit"] }
 quote = "1"
+# For reading a `cfg_attr`'s predicate as opaque tokens rather than trying to parse it: `syn::Meta`
+# cannot parse `cfg_attr(true, …)`, and a boolean predicate is stable Rust.
+proc-macro2 = "1"
