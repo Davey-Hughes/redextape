@@ -161,7 +161,7 @@ golden green.
 `print_asm_doc(&AsmDocument) -> Option<String>`. `None` exactly when the document has no machine or
 program, which is exactly when it carried an error — a formatter has nothing to write for a file
 that does not parse, and saying so with `None` is what lets a caller leave the buffer alone rather
-than replace it with something. It is also the shape `LanguageSupport::format` wants in §3.2.
+than replace it with something. It is also the shape `Language::format` wants in §3.2.
 
 A struct rather than a wider tuple, for a reason this slice can already name: the round after this
 one adds navigation, and a struct's next field costs no call site at all where a fifth tuple element
@@ -307,18 +307,36 @@ labels are reachable from authored text; the roadmap's note stays true only of t
 
 ```
 crates/redextape-lsp/
-  Cargo.toml       lsp-server, gen-lsp-types, serde, serde_json, redextape-core
-  src/main.rs      stdio, the initialize handshake, hand off     — thin, uncovered
-  src/lib.rs       Server::handle(&mut self, Request) -> Response — pure, covered
+  Cargo.toml       lsp-server, gen-lsp-types, serde_json, redextape-core
+  src/main.rs      stdio, the initialize handshake, hand off          — thin, uncovered
+  src/lib.rs       Server::handle(&mut self, RequestObject) -> Vec<Outgoing> — pure, covered
   src/document.rs  open documents, one LineIndex per version
   src/position.rs  Span <-> Position under both encodings
-  src/language.rs  Language, LanguageSupport, four impls
+  src/language.rs  Language, a Copy enum with two inherent methods
 ```
 
 **The split is not stylistic.** It is what makes the workspace's 90% line-coverage merge gate
 reachable with a new crate in the tree, and it is what lets the web phase reuse the handler: a pure
-`Request -> Response` needs no stdio, no threads and no channels, so a wasm caller can drive the
-identical code. `lsp-server` appears in `main.rs` and nowhere else.
+`handle` needs no stdio, no threads and no channels, so a wasm caller can drive the identical code.
+`lsp-server` appears in `main.rs` and nowhere else.
+
+**CORRECTED WHILE WRITING PR B'S PLAN — `handle(&mut self, Request) -> Response` cannot express
+what this slice serves.** `textDocument/publishDiagnostics` is a server-to-client *notification*
+with no request behind it, and the messages that produce it — `didOpen`, `didChange` — are
+notifications too, so neither the input nor the output of that signature has a place for the
+traffic this slice exists to serve. The shape that shipped is `handle(&mut self, RequestObject) ->
+Vec<Outgoing>`, where `Outgoing` is a response or a notification and `RequestObject` is
+`gen-lsp-types`' JSON-RPC envelope for both, distinguished by whether an id is present. It is still
+one pure function of the client's message and the server's state — the property this section is
+about — merely able to say what the server actually says.
+
+**A re-export this section should also record: `crates/redextape-core/src/tm.rs` gained four new
+entries because of PR B.** PR A added `TmDocument`, `AsmDocument`, `print_tm_doc` and
+`print_asm_doc` to `tm::syntax` and `tm::asm_syntax` but never added them to `tm.rs`'s re-export
+block, which otherwise carries every other public entry point of both modules. PR A had no consumer
+outside `redextape-core`, so nothing showed the gap; PR B is that consumer, and it closes it by
+adding the four names to the existing blocks rather than reaching through `tm::syntax::` and
+`tm::asm::` for names whose siblings are one path shorter.
 
 ### §3.2 Language dispatch
 
@@ -330,6 +348,18 @@ trait LanguageSupport {
 ```
 
 Four implementations, resolved from the LSP `languageId`.
+
+**CORRECTED WHILE WRITING PR B'S PLAN — the trait above has no implementations, because there is
+nothing for it to abstract over.** What shipped is `Language`, a `Copy` enum of four variants with
+two inherent methods taking `self`: `diagnostics(self, src: &str) -> Vec<Diagnostic>` and
+`format(self, src: &str) -> Option<String>`, each a four-arm `match`. A trait is the shape for an
+OPEN set — one a caller outside the crate can add a member to. This set is closed and this crate
+owns every member of it: the four forms are `plugin/redextape.lua`'s four filetypes, and
+`Language::from_language_id` is the only mapping FROM a `languageId` to one (the variants are `pub`, so a caller can of course name `Language::Tm` directly; what does not exist is a second place where a string is turned into a form). So there is one implementation, not
+four, and a `match` over an enum reaches it where a trait would have needed four types, four `impl`
+blocks, and a `dyn LanguageSupport` behind a reference or a `Box` to carry the result of resolving a
+`languageId` — indirection to choose between four arms already known at compile time. The `&self`
+above becomes `self` for the same reason: a fieldless `Copy` enum is passed by value.
 
 **The `languageId` is already the filetype, and the filetype is already this repository's.**
 `plugin/redextape.lua` registers exactly `redextape`, `redextape_asm`, `redextape_lambda` and
@@ -364,6 +394,15 @@ async one; and `crossbeam-deque`, `-epoch` and `-utils` are already in `Cargo.lo
 argument is this repository's own convention about a hand-maintained second copy of a shape defined
 elsewhere, arriving from outside. It is edition 2024, matching the workspace, and its non-optional
 dependencies are `serde` and `serde_json`, both already present.
+
+**That dependency claim holds, and the reason is worth recording rather than taking on faith.** With
+neither the `url` nor the `fluent-uri` feature enabled, `gen_lsp_types::Uri` is a newtype over
+`String` — a fact that lives one `#[cfg]` deep in the crate's generated `common.rs` — carrying
+`AsRef<str>` and `Display` and nothing else. That is what lets `serde` and `serde_json` be the whole
+of the non-optional dependency list: neither a URL crate nor its own transitive dependencies are
+pulled in. This server keys documents by URI string and never parses one, so it takes the default
+features and gets that newtype. Enabling either feature would buy a URL type for nothing here and
+change `Uri` out from under every signature that names it.
 
 `tower-lsp` was not considered past the version check: last release 2023-08-11.
 
@@ -417,8 +456,10 @@ vim.lsp.enable("redextape")
   idea.
 - **A user's configuration needs no change.** `{ "Davey-Hughes/redextape", lazy = false }` remains
   the whole of it, which is the property the file's own header states as its reason for existing.
-- Format-on-save through `conform.nvim`, for those who route formatting there, is one entry:
-  `redextape = { lsp_format = "fallback" }`. Not required — `vim.lsp.buf.format()` works without it.
+- Format-on-save through `conform.nvim`, for those who route formatting there, is four entries and
+  not one: `formatters_by_ft` is keyed by FILETYPE and this server serves four, so `redextape`,
+  `redextape_asm`, `redextape_lambda` and `redextape_tm` each need `{ lsp_format = "fallback" }` —
+  or conform's `["_"]` catch-all. Not required — `vim.lsp.buf.format()` works without it.
 - `ROOT` is already resolved in that file from the script's own path, so nothing is hardcoded and a
   lazy.nvim clone, a manual clone and a development checkout all work without knowing which they are.
 
@@ -426,10 +467,11 @@ vim.lsp.enable("redextape")
 
 ## §6 Tests
 
-**Handlers are called directly.** `Server::handle` takes a constructed `Request` and returns a
-`Response`; the tests assert on that. No process spawn, no stdio, no sleeping, no timing. This is
-what holds the workspace coverage gate — `cargo llvm-cov nextest --workspace --fail-under-lines 90`,
-measuring ~95% at `ebb1970` — with a new crate present.
+**Handlers are called directly.** `Server::handle` takes a constructed `RequestObject` and returns
+a `Vec<Outgoing>` — §3.1's correction note is why — and the tests assert on that. No process spawn,
+no stdio, no sleeping, no timing. This is what holds the workspace coverage gate —
+`cargo llvm-cov nextest --workspace --fail-under-lines 90`, measuring ~95% at `ebb1970` — with a new
+crate present.
 
 **And exactly one test does spawn the binary.** A test that only calls `Server::handle` never
 exercises `main.rs`, and would pass with the JSON-RPC framing broken. This repository has paid that
@@ -447,6 +489,15 @@ Named tests:
 - **`printer_output_is_unchanged`** — the existing listing golden, run unmodified. PR A must not move
   it.
 - **`positions_differ_by_encoding`** — §4's `λ` test, both numbers, one source.
+
+  **CORRECTED WHILE WRITING PR B'S PLAN — the two names above are this section's, not the tree's.**
+  Reading `crates/redextape-core/tests/` against this list found three of the names below exist
+  verbatim: `a_file_with_an_error_recovers_no_comments`,
+  `an_authored_comment_takes_the_tape_line_over_the_generated_name`, and
+  `printing_twice_after_a_reparse_is_idempotent`, which is what `round_trip_over_documents` above
+  landed as. `printer_output_is_unchanged` landed as `the_fixture_is_what_the_compiler_emits_today`,
+  in `crates/redextape-core/tests/tm_header.rs`. All five belong to PR A and none was rewritten for
+  PR B; PR B's obligation to them is negative — not to move them.
 - **`a_file_with_an_error_recovers_no_comments`** — §2.4's rule, replacing the
   `unanchorable_comment_is_a_diagnostic` this spec first asked for.
 - **`an_authored_comment_takes_the_tape_line_over_the_generated_name`** — §2.4's displacement rule,

@@ -41,7 +41,7 @@ The plan sequence, and the running log of what implementation falsified:
 
 ## Architecture
 
-Seven crates under `crates/`.
+Eight crates under `crates/`.
 
 **`redextape-core`** — the whole language, with **no dependencies** (`cargo tree -p redextape-core
 --edges normal` lists only itself), which is what keeps it WASM-clean:
@@ -78,6 +78,24 @@ holds the tree-sitter differential that checks each editor grammar against the f
 span. **These three went undescribed here while the count above still read "Four"**, which is the
 same defect the section below documents for test counts: a total and an enumeration that drift
 apart, where either alone looks right.
+
+**`redextape-lsp`** is the eighth, and the count above already included it before this paragraph
+did — the same drift named just above, one crate later. It is a stdio language server — diagnostics
+and formatting for all four text forms (`.rxt`, `.rxlambda`, `.tm`, `.asm`), served over the Language
+Server Protocol to Neovim from the same `redextape-core` front ends the CLI and the web UI already
+call. `lsp-server` (the transport) is confined to its `main.rs`; every other file in the crate is a
+pure function of one client message to the messages that go back, which is what holds the crate to
+the workspace's coverage floor and is checked mechanically —
+`git grep -l lsp_server crates/redextape-lsp/src` names exactly that one file. Build it with
+`cargo build --release -p redextape-lsp`; `plugin/redextape.lua` finds the binary there (or on
+`PATH`) and registers it with `vim.lsp.enable` automatically, so a lazy.nvim spec of
+`{ "Davey-Hughes/redextape", lazy = false }` needs no change to pick it up — no binary just means no
+diagnostics or formatting, with a warning naming both remedies, and highlighting is unaffected
+either way. For `conform.nvim` users who route formatting through it rather than
+`vim.lsp.buf.format()` directly, `formatters_by_ft` is keyed by FILETYPE and this server serves four
+of them, so opting in takes four entries rather than one — `redextape`, `redextape_asm`,
+`redextape_lambda` and `redextape_tm`, each `{ lsp_format = "fallback" }`, or conform's `["_"]`
+catch-all. Not required either way.
 
 ### The oracle
 
@@ -163,7 +181,10 @@ as it diverges. Both are reachable only because control now returns from each β
   tree costs 850 MB against `HISTORY_BYTES`' 32 MB ring, and most steps have no tree to draw at any
   budget that is still affordable
   (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2).
-- **LSP** — `crates/redextape-lsp`, deferred to v2.
+- **LSP** — `crates/redextape-lsp` now serves diagnostics and formatting for all four text forms
+  (Architecture, above). Still not built: navigation for any form (go-to-definition, references,
+  hover) and semantic tokens — the four tree-sitter grammars already highlight all four forms in
+  Neovim, so tokens are not needed for that editor and stay deliberately out of this slice.
 
 `crates/redextape-cli` is no longer on this list. All four subcommands work — `redextape fmt` /
 `redextape lint` (Roadmap Plan 6's first half, 2026-08-19), `redextape run` / `emit` (Plan 6's second

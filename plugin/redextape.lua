@@ -210,3 +210,53 @@ vim.api.nvim_create_autocmd("FileType", {
     end
   end,
 })
+
+-- THE LANGUAGE SERVER. Diagnostics for all four forms and formatting for all four, from the same
+-- `redextape-core` the CLI and the web UI use — see crates/redextape-lsp.
+--
+-- `filetypes = FILETYPES` REUSES THE TABLE ABOVE rather than repeating four strings. That removes a
+-- duplication INSIDE this file and nothing more — no gate could have caught the repetition either
+-- way, and saying otherwise here would credit a habit with the work of a check.
+--
+-- THE DUPLICATION THAT SPANS TWO FILES IS THE ONE THAT NEEDED A GATE, and `scripts/check-lua.sh` now
+-- holds it: this table against the four `languageId`s `Language::from_language_id` resolves in
+-- `crates/redextape-lsp/src/language.rs`. Neovim sends the buffer's filetype as the `languageId`, so
+-- a fifth form added here and forgotten there gets a server that attaches, tracks the document,
+-- publishes an empty diagnostic list and answers `null` to every format request — a file that looks
+-- clean because nothing read it. That is the same silent wrong answer the `GRAMMARS`/symbol check
+-- above exists to prevent, one layer up, and it is now checked the same way.
+--
+-- THE BINARY IS RESOLVED, NOT ASSUMED, and a missing one is said out loud once. A development
+-- checkout has it under `target/release`; someone who ran `cargo install --path crates/redextape-lsp`
+-- has it on `PATH`; someone who has done neither gets a warning naming both remedies rather than an
+-- LSP client that fails to start with no explanation. That is the shape the missing-parser
+-- `vim.notify` above already uses.
+local function server_cmd()
+  local built = ROOT .. "/target/release/redextape-lsp"
+  if vim.uv.fs_stat(built) then
+    return built
+  end
+  if vim.fn.executable("redextape-lsp") == 1 then
+    return "redextape-lsp"
+  end
+  return nil
+end
+
+local cmd = server_cmd()
+if cmd then
+  vim.lsp.config("redextape", {
+    cmd = { cmd },
+    filetypes = FILETYPES,
+    root_markers = { "redextape.toml", ".git" },
+  })
+  vim.lsp.enable("redextape")
+else
+  vim.notify(
+    "redextape: no redextape-lsp binary found.\n"
+      .. "Run `cargo build --release -p redextape-lsp` in "
+      .. ROOT
+      .. ", or `cargo install --path crates/redextape-lsp` to put it on PATH.\n"
+      .. "Diagnostics and formatting are off until then; highlighting is unaffected.",
+    vim.log.levels.WARN
+  )
+end

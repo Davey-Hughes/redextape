@@ -14,13 +14,26 @@
 # of those hooks, which is the honest reading of a tree with no Lua gate in it. A syntax error would
 # have shipped green.
 #
-# **THE SECOND CHECK IS THE ONE THAT EARNS THE SCRIPT.** Every editor loads a parser by looking up the
-# C symbol `tree_sitter_<name>`, so the four keys of that file's `GRAMMARS` table have to equal the
-# four symbols `grammars/*/src/parser.c` export. The file's own comment says getting one wrong "loads a
+# **THE CHECKS AFTER THE FIRST ARE THE ONES THAT EARN THE SCRIPT, AND BOTH HAVE THE SAME SHAPE:** a
+# list in `plugin/redextape.lua` that must equal a list somewhere else in the tree, where disagreeing
+# is silent rather than loud.
+#
+# **`GRAMMARS` against the parser symbols.** Every editor loads a parser by looking up the C symbol
+# `tree_sitter_<name>`, so the four keys of that file's `GRAMMARS` table have to equal the four
+# symbols `grammars/*/src/parser.c` export. The file's own comment says getting one wrong "loads a
 # different language rather than failing to find one" — a silent, wrong-colour failure that no test in
 # this repository could otherwise see, because nothing here loads those parsers by name. A `luac -p`
 # would not catch it; a human reading the table would not catch it either, since both spellings look
 # plausible.
+#
+# **`FILETYPES` against the `languageId`s the server serves.** The same failure one layer up. Neovim
+# attaches `redextape-lsp` to every filetype in that table and sends the buffer's filetype as the LSP
+# `languageId`; `Language::from_language_id` in `crates/redextape-lsp/src/language.rs` answers `None`
+# for anything it does not know. So a fifth form added to the plugin and forgotten in the server gets
+# a language server that attaches, tracks the document, publishes an empty diagnostic list and answers
+# `null` to every format request — indistinguishable, from the editor, from a file with nothing wrong
+# with it. Nothing on either side fails: the Lua is valid, the Rust compiles, and every test of both
+# still passes.
 #
 # **THE INTERPRETER IS PROBED RATHER THAN NAMED, AND THE FIRST DRAFT NAMING ONE FAILED IN CI.** It ran
 # `nvim --headless` with `loadfile`, on the reasoning that Neovim is required to use any of this
@@ -53,6 +66,43 @@ done
 [ -n "$LUA_CMD" ] || fail "no Lua-capable interpreter found (tried luac*, luajit, lua*, nvim).
   Install any one of them — on Debian/Ubuntu, 'apt-get install -y lua5.4' is enough."
 
+# The filetypes the plugin attaches the server to, against the `languageId`s the server answers.
+# Both lists are read out of their own file rather than restated here: a third copy in this script
+# would be one more place to forget. Prints the disagreement and returns non-zero; the caller decides
+# what to do with it, which is what lets the self-test drive it over constructed files.
+#
+# An extraction that comes back EMPTY is a failure, not a pass. Renaming either list would otherwise
+# turn this check off silently, which is the failure mode it exists to catch.
+filetypes_agree() {
+  local plugin="$1" lang="$2"
+  local -a attached served
+
+  # awk rather than a `sed` range: `FILETYPES` is written on one line, and `sed -n '/{/,/}/p'` starts
+  # looking for its end on the NEXT line, so it would run on past the table it was given.
+  mapfile -t attached < <(awk '/^local FILETYPES = \{/ { f = 1 } f { print } f && /\}/ { exit }' "$plugin" |
+    grep -o '"[A-Za-z_][A-Za-z0-9_]*"' | tr -d '"' | sort)
+
+  # Only the arms that RESOLVE. `_ => None` is the fallback, not a filetype.
+  mapfile -t served < <(awk '/fn from_language_id/ { f = 1 } f && /^    \}$/ { exit } f { print }' "$lang" |
+    sed -n 's/^ *"\([A-Za-z_][A-Za-z0-9_]*\)" => Some(.*/\1/p' | sort)
+
+  if [ "${#attached[@]}" -eq 0 ]; then
+    echo "found no FILETYPES entries in $plugin — has the table been renamed?"
+    return 1
+  fi
+  if [ "${#served[@]}" -eq 0 ]; then
+    echo "found no resolving languageId arms in $lang — has from_language_id been reshaped?"
+    return 1
+  fi
+  if [ "${attached[*]}" != "${served[*]}" ]; then
+    printf '%s\n' "$plugin's FILETYPES do not match the languageIds $lang serves" \
+      "  attached by the plugin: ${attached[*]}" \
+      "  served by the server:   ${served[*]}"
+    return 1
+  fi
+  return 0
+}
+
 lua_syntax_ok() {
   # Compile without executing, which is what makes this safe to run over a plugin file whose whole
   # purpose is to register autocmds.
@@ -82,7 +132,48 @@ if [ "${1:-}" = "--self-test" ]; then
     fail "self-test: a valid file was rejected"
   fi
 
-  echo "self-test passed: a syntax error is caught and a valid file is not"
+  # The FILETYPES/languageId check, proved the same way: construct a disagreeing pair and confirm it
+  # is rejected. A check the self-test does not exercise is a check nothing holds.
+  cat >"$tmp/language.rs" <<'RS'
+    pub fn from_language_id(id: &str) -> Option<Self> {
+        match id {
+            "redextape" => Some(Language::Redextape),
+            "redextape_tm" => Some(Language::Tm),
+            _ => None,
+        }
+    }
+RS
+
+  printf 'local FILETYPES = { "redextape", "redextape_tm" }\n' >"$tmp/plugin.lua"
+  if ! filetypes_agree "$tmp/plugin.lua" "$tmp/language.rs" >/dev/null; then
+    fail "self-test: an agreeing FILETYPES/languageId pair was rejected"
+  fi
+
+  # A fifth form attached by the plugin and forgotten in the server — the drift this check is for.
+  printf 'local FILETYPES = { "redextape", "redextape_tm", "redextape_bf" }\n' >"$tmp/plugin.lua"
+  if filetypes_agree "$tmp/plugin.lua" "$tmp/language.rs" >/dev/null; then
+    fail "self-test: a filetype the server does not serve was accepted"
+  fi
+
+  # And the other direction, which is just as silent: served, never attached, so never reached.
+  printf 'local FILETYPES = { "redextape" }\n' >"$tmp/plugin.lua"
+  if filetypes_agree "$tmp/plugin.lua" "$tmp/language.rs" >/dev/null; then
+    fail "self-test: a languageId no filetype attaches to was accepted"
+  fi
+
+  # Neither list may go missing quietly: an empty extraction must fail rather than pass vacuously.
+  printf 'local OTHER = { "redextape", "redextape_tm" }\n' >"$tmp/renamed.lua"
+  if filetypes_agree "$tmp/renamed.lua" "$tmp/language.rs" >/dev/null; then
+    fail "self-test: a renamed FILETYPES table passed vacuously"
+  fi
+  printf 'local FILETYPES = { "redextape", "redextape_tm" }\n' >"$tmp/plugin.lua"
+  printf 'fn nothing_of_the_sort() {}\n' >"$tmp/reshaped.rs"
+  if filetypes_agree "$tmp/plugin.lua" "$tmp/reshaped.rs" >/dev/null; then
+    fail "self-test: a reshaped from_language_id passed vacuously"
+  fi
+
+  echo "self-test passed: a syntax error is caught, a valid file is not, and a FILETYPES/languageId \
+disagreement is rejected in both directions while a renamed list fails rather than passing empty"
   exit 0
 fi
 
@@ -119,4 +210,15 @@ if [ "${declared[*]}" != "${exported[*]}" ]; then
   Every editor loads a parser as tree_sitter_<name>, so a mismatch loads the wrong language silently."
 fi
 
-echo "check-lua: $count tracked Lua file(s) parse under $LUA_CMD; ${#declared[@]} GRAMMARS keys match the exported parser symbols."
+# ------------------------------------------------------------------- filetype/languageId agreement
+lang="crates/redextape-lsp/src/language.rs"
+[ -f "$lang" ] || fail "$lang is missing; the FILETYPES check reads it"
+
+if ! disagreement="$(filetypes_agree "$plugin" "$lang")"; then
+  fail "$disagreement
+  Neovim sends the buffer's filetype as the LSP languageId, so a filetype the server does not serve
+  attaches, tracks the document, publishes no diagnostics and answers null to formatting — the same
+  silent wrong answer the GRAMMARS check above exists to prevent, one layer up."
+fi
+
+echo "check-lua: $count tracked Lua file(s) parse under $LUA_CMD; ${#declared[@]} GRAMMARS keys match the exported parser symbols, and $plugin's FILETYPES match the languageIds $lang serves."

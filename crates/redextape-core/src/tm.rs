@@ -21,10 +21,10 @@ pub mod syntax;
 
 pub use asm::{
     AsmHeader, AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, DecodeFailure, Instr, Program, Reg, decode_asm,
-    decode_asm_reason, decode_asm_ty, decode_asm_ty_reason, print_asm, print_asm_mapped, print_asm_with,
+    decode_asm_reason, decode_asm_ty, decode_asm_ty_reason, print_asm, print_asm_doc, print_asm_mapped, print_asm_with,
     print_asm_with_mapped, run_asm,
 };
-pub use asm_syntax::{parse_asm, parse_asm_full};
+pub use asm_syntax::{AsmDocument, parse_asm, parse_asm_full};
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
     AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP,
@@ -41,7 +41,9 @@ pub use sim::{
     Caps as TmCaps, DEFAULT_CAPS as TM_DEFAULT_CAPS, Status as TmStatus, Step, Tape, Trace, Watcher, simulate,
     simulate_counts, simulate_final, simulate_trace, simulate_watched,
 };
-pub use syntax::{parse_tm, parse_tm_full, print_tm, print_tm_mapped, print_tm_with, print_tm_with_mapped};
+pub use syntax::{
+    TmDocument, parse_tm, parse_tm_full, print_tm, print_tm_doc, print_tm_mapped, print_tm_with, print_tm_with_mapped,
+};
 
 use crate::core::Core;
 use crate::ty::Ty;

@@ -1,0 +1,31 @@
+[package]
+name = "redextape-lsp"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+redextape-core = { path = "../redextape-core" }
+# The transport, and nothing else. Its whole dependency list is crossbeam-channel, log, serde,
+# serde_derive and serde_json, and it deliberately ships no LSP types crate: it hands over a method
+# string and a `serde_json::Value` and lets the caller choose the type layer. That is what lets it
+# live in `main.rs` alone — see this crate's `lib.rs` module doc for why that boundary is
+# load-bearing rather than tidy.
+lsp-server = "0.10.0"
+# The message types AND the JSON-RPC envelope types, both generated from Microsoft's official LSP
+# MetaModel. `gen_lsp_types::json_rpc` is why the pure half of this crate can speak the protocol
+# without naming `lsp-server`: without it, the alternative was a hand-written second copy of
+# Request/Response/Notification, which is the drift that made rust-analyzer leave `lsp-types` and
+# is the reason this crate is here rather than that one.
+#
+# DEFAULT FEATURES, DELIBERATELY. With neither `url` nor `fluent-uri` enabled, `Uri` is a newtype
+# over `String` with `AsRef<str>` and `Display`. This server keys documents by URI string and never
+# parses one, so either feature would buy a URL crate for nothing — and would change `Uri` out from
+# under every signature in this crate.
+gen-lsp-types = "0.11.0"
+serde_json = "1"

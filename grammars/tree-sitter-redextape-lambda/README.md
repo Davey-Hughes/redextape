@@ -70,8 +70,9 @@ they answer to different ones — copying either class into the other would brea
 for the same reason. Inside this project, λ text is already coloured without a grammar:
 `web/src/lambda-pane.ts` takes `print_lambda_mapped`'s spans straight through `spans.ts`'s
 `decorationRanges`, so the web λ pane draws over the printer's own classification and has no use for a
-CST. Neovim, Helix, Zed and Emacs cannot call a Rust function, and `redextape-lsp` is deferred to v2.
-A grammar is the only thing that reaches them.
+CST. Neovim, Helix, Zed and Emacs cannot call a Rust function, and `redextape-lsp` — which does now
+serve Neovim — advertises no semantic tokens, deliberately, for the reason the mini-language grammar's
+README gives. For colour, a grammar is still the only thing that reaches them.
 
 Worth stating plainly, because it changes what "installing" means here: **no file in this repository
 has a `.rxlambda` extension**, and nothing writes one. The λ form appears as web-pane text, as

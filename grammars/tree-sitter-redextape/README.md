@@ -8,9 +8,11 @@ A tree-sitter grammar for the redextape mini-language — the `.rxt` source form
 **External editors, and only external editors.** Everywhere this project already highlights source, it
 does so by calling `redextape_core::analysis::classify_source` — `web/` renders CodeMirror decorations
 straight over that function's spans, which is why Plan 5 considered a grammar for its own panes and
-chose not to. Neovim, Helix, Zed and Emacs cannot make that call at all, and `redextape-lsp` (deferred
-to v2) does not yet serve them either. A grammar is the only thing that reaches them. That is the whole
-motivation.
+chose not to. Neovim, Helix, Zed and Emacs cannot make that call at all. `redextape-lsp` now reaches
+Neovim over those same front ends — but with diagnostics and formatting, and it advertises **no
+semantic tokens**, deliberately: these grammars already colour all four forms there, and a server
+answering the same question would compete with them rather than complete them. So colour in an
+external editor is still a grammar or nothing. That is the whole motivation.
 
 ## What it is NOT, and may never become
 
