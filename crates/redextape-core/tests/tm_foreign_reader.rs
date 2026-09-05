@@ -218,10 +218,10 @@ fn foreign_reader_decodes_list_1_2() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/list_1_2.tm");
     let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
 
-    let (m, h, ds) = parse_tm_full(&src);
-    assert!(ds.is_empty(), "unexpected diagnostics parsing the fixture: {ds:?}");
-    let m = m.expect("fixture must parse to a machine");
-    let h = h.expect("fixture must carry a header");
+    let doc = parse_tm_full(&src);
+    assert!(doc.diagnostics.is_empty(), "unexpected diagnostics parsing the fixture: {:?}", doc.diagnostics);
+    let m = doc.machine.expect("fixture must parse to a machine");
+    let h = doc.header.expect("fixture must carry a header");
 
     // Build the initial configuration from the header's literal tapes (FORMAT, per parse_tm_full/
     // TmHeader — not simulation). Tapes not listed start empty (a single blank cell, per Tapes::new).

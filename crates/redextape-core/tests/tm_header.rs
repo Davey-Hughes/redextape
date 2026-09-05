@@ -57,9 +57,9 @@ fn the_headers_recipe_reproduces_its_literal_tapes() {
         for &kind in EncodingKind::ALL {
             let d = described(src, kind);
             let file = print_tm_with(&d.machine, &d.header);
-            let (pm, h, ds) = parse_tm_full(&file);
-            assert!(ds.is_empty(), "{src} under {kind:?}: {ds:?}");
-            let h = h.expect("a header");
+            let doc = parse_tm_full(&file);
+            assert!(doc.diagnostics.is_empty(), "{src} under {kind:?}: {:?}", doc.diagnostics);
+            let h = doc.header.expect("a header");
 
             // Optionality property 2, on the combination with the most moving parts — which is
             // `cons(1, cons(2, nil))` under `Binary`: a 5-tape COMPILED machine (every compiled
@@ -72,7 +72,7 @@ fn the_headers_recipe_reproduces_its_literal_tapes() {
             // Naming the program matters: a review read this comment as describing `sum(5)` (which is
             // `result Nat`) and reported it as a false claim. The claim was true of a different
             // corpus entry; an unnamed "combination" invites exactly that misreading.
-            assert_eq!(pm.as_ref(), Some(&d.machine), "{src} under {kind:?}: machine must round-trip");
+            assert_eq!(doc.machine.as_ref(), Some(&d.machine), "{src} under {kind:?}: machine must round-trip");
             assert_eq!(h, d.header, "{src} under {kind:?}: header must round-trip");
 
             let enc = h.encoding();
@@ -98,9 +98,9 @@ fn the_headers_recipe_reproduces_its_literal_tapes() {
 fn a_tm_file_becomes_a_value_with_nothing_but_the_file() {
     let file = include_str!("fixtures/list_1_2.tm");
 
-    let (m, h, ds) = parse_tm_full(file);
-    assert!(ds.is_empty(), "diagnostics: {ds:?}");
-    let (m, h) = (m.expect("a machine"), h.expect("a header"));
+    let doc = parse_tm_full(file);
+    assert!(doc.diagnostics.is_empty(), "diagnostics: {:?}", doc.diagnostics);
+    let (m, h) = (doc.machine.expect("a machine"), doc.header.expect("a header"));
 
     // 1. Build the initial configuration from the file and simulate. A generic simulator can do this
     //    much with no knowledge of this project.
@@ -120,9 +120,9 @@ fn a_tm_file_becomes_a_value_with_nothing_but_the_file() {
 fn a_binary_tm_file_becomes_a_value_with_nothing_but_the_file() {
     let file = include_str!("fixtures/list_1_2_binary.tm");
 
-    let (m, h, ds) = parse_tm_full(file);
-    assert!(ds.is_empty(), "diagnostics: {ds:?}");
-    let (m, h) = (m.expect("a machine"), h.expect("a header"));
+    let doc = parse_tm_full(file);
+    assert!(doc.diagnostics.is_empty(), "diagnostics: {:?}", doc.diagnostics);
+    let (m, h) = (doc.machine.expect("a machine"), doc.header.expect("a header"));
 
     let (tapes, status) = simulate(&m, &h.init(m.tapes), TM_DEFAULT_CAPS);
     assert_eq!(status, TmStatus::Halted);
@@ -184,8 +184,8 @@ fn sabotaging_the_recipe_is_caught_by_the_consistency_check() {
 #[test]
 fn sabotaging_the_header_is_caught_by_the_end_to_end_decode() {
     let file = include_str!("fixtures/list_1_2.tm");
-    let (m, h, _) = parse_tm_full(file);
-    let (m, h) = (m.expect("a machine"), h.expect("a header"));
+    let doc = parse_tm_full(file);
+    let (m, h) = (doc.machine.expect("a machine"), doc.header.expect("a header"));
     let (tapes, _) = simulate(&m, &h.init(m.tapes), TM_DEFAULT_CAPS);
     let truth = Some(Value::list_of_nats(&[1, 2]));
     assert_eq!(decode_tape_ty(&tapes, &h.result, &*h.encoding()), truth);
@@ -237,10 +237,10 @@ fn emit_then_run_round_trip_matches_the_reference() {
 
             // `run`: read the file (here, the in-memory text) -> parse -> build init from the header
             // -> simulate -> decode.
-            let (m, h, ds) = parse_tm_full(&text);
-            assert!(ds.is_empty(), "{src} under {kind:?}: {ds:?}");
-            let m = m.unwrap_or_else(|| panic!("{src} under {kind:?}: file did not parse to a machine"));
-            let h = h.unwrap_or_else(|| panic!("{src} under {kind:?}: file has no header"));
+            let doc = parse_tm_full(&text);
+            assert!(doc.diagnostics.is_empty(), "{src} under {kind:?}: {:?}", doc.diagnostics);
+            let m = doc.machine.unwrap_or_else(|| panic!("{src} under {kind:?}: file did not parse to a machine"));
+            let h = doc.header.unwrap_or_else(|| panic!("{src} under {kind:?}: file has no header"));
 
             let init = h.init(m.tapes);
             let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);

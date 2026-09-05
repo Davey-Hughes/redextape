@@ -11,6 +11,7 @@
 
 use crate::core::BinOp;
 use crate::tm::asm::{AsmHeader, Instr, OperandKind, Program, Reg};
+use crate::tm::comments::{self, AnchoredComment, AsmAnchor};
 use crate::{Diagnostic, Span};
 
 /// The positional operand kinds of one mnemonic. `RI` is `li rd, #n`; `RL` is `jz r, label`.
@@ -98,6 +99,18 @@ pub(super) fn bin_op_for(mnemonic: &str) -> Option<BinOp> {
     })
 }
 
+/// An `.asm` file as authored: the program it describes, its optional header, and the comments that
+/// belong to neither. `TmDocument`'s shape over asm's line grammar, for the reasons stated there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AsmDocument {
+    /// `None` exactly when `diagnostics` is non-empty, matching what the tuple returned.
+    pub program: Option<Program>,
+    pub header: Option<AsmHeader>,
+    /// Recovered only from lines that parsed, for the reason `TmDocument::comments` states.
+    pub comments: Vec<AnchoredComment<AsmAnchor>>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
 /// Parse the register-assembly text form, returning the header too. Iterative over a flat line
 /// grammar, no recursion, never panics — `parse_tm_full`'s shape and contract.
 ///
@@ -111,11 +124,30 @@ pub(super) fn bin_op_for(mnemonic: &str) -> Option<BinOp> {
 /// costs nothing: the round-trip property this form guarantees is over text the PRINTER produced
 /// (design §3.4, P1), and rejecting a leading zero would buy a stricter grammar no writer needs.
 #[must_use]
-pub fn parse_asm_full(src: &str) -> (Option<Program>, Option<AsmHeader>, Vec<Diagnostic>) {
+pub fn parse_asm_full(src: &str) -> AsmDocument {
     let mut diags: Vec<Diagnostic> = Vec::new();
     let mut code: Vec<Instr> = Vec::new();
     let mut labels: Vec<(String, usize)> = Vec::new();
     let mut header: Option<AsmHeader> = None;
+    let mut comments: Vec<AnchoredComment<AsmAnchor>> = Vec::new();
+    // Own-line comments seen but not yet attached: they belong to the NEXT line that parses, which
+    // has not been read. Drained at each anchor and, if any survive, at end of input.
+    let mut pending: Vec<String> = Vec::new();
+
+    // Attach everything waiting to `anchor`, then the line's own trailing comment. Called only from
+    // a branch that has decided the line parses — a line that errors leaves `pending` intact for the
+    // next line that does, and contributes no trailing comment of its own.
+    let attach = |comments: &mut Vec<AnchoredComment<AsmAnchor>>,
+                  pending: &mut Vec<String>,
+                  anchor: AsmAnchor,
+                  comment: Option<&str>| {
+        for text in pending.drain(..) {
+            comments.push(AnchoredComment { text, anchor, own_line: true });
+        }
+        if let Some(body) = comment {
+            comments.push(AnchoredComment { text: body.to_string(), anchor, own_line: false });
+        }
+    };
 
     let mut offset = 0usize;
     for raw_line in src.split_inclusive('\n') {
@@ -127,8 +159,12 @@ pub fn parse_asm_full(src: &str) -> (Option<Program>, Option<AsmHeader>, Vec<Dia
         // A `;` unconditionally starts a comment in this grammar, so no legal mnemonic or label name
         // can contain one — that is what makes splitting here safe, not any check that runs later. The
         // cost: a hand-written `weird;name:` reads as the label `weird`, silently, with no diagnostic.
-        let text = content.split(';').next().unwrap_or("").trim();
+        let (before, comment) = comments::split_trailing(content);
+        let text = before.trim();
         if text.is_empty() {
+            if let Some(body) = comment {
+                pending.push(body.to_string());
+            }
             continue;
         }
 
@@ -142,6 +178,7 @@ pub fn parse_asm_full(src: &str) -> (Option<Program>, Option<AsmHeader>, Vec<Dia
                 diags.push(Diagnostic::error(span, "expected a label name before `:`"));
             } else {
                 labels.push((name.to_string(), code.len()));
+                attach(&mut comments, &mut pending, AsmAnchor::Label(labels.len() - 1), comment);
             }
             continue;
         }
@@ -162,6 +199,7 @@ pub fn parse_asm_full(src: &str) -> (Option<Program>, Option<AsmHeader>, Vec<Dia
                     let ty_text = rest.trim();
                     if let Some(t) = crate::ty::parse_ty(ty_text) {
                         header = Some(AsmHeader { result: t });
+                        attach(&mut comments, &mut pending, AsmAnchor::Result, comment);
                     } else {
                         diags.push(Diagnostic::error(
                             span,
@@ -174,12 +212,28 @@ pub fn parse_asm_full(src: &str) -> (Option<Program>, Option<AsmHeader>, Vec<Dia
         }
 
         match parse_instr(text) {
-            Ok(instr) => code.push(instr),
+            Ok(instr) => {
+                code.push(instr);
+                attach(&mut comments, &mut pending, AsmAnchor::Instr(code.len() - 1), comment);
+            }
             Err(message) => diags.push(Diagnostic::error(span, message)),
         }
     }
 
-    if diags.is_empty() { (Some(Program { code, labels }), header, diags) } else { (None, None, diags) }
+    for text in pending.drain(..) {
+        comments.push(AnchoredComment { text, anchor: AsmAnchor::Eof, own_line: true });
+    }
+
+    // Unlike `pending` above — where each branch decides for itself whether to drain it — whether
+    // `comments` survives at all is decided in exactly one place: this check. Any diagnostic, from
+    // any line, empties it regardless of which branch produced it or how much had already been
+    // attached; no branch above needs to undo its own `attach` call when a later line goes on to
+    // fail. `a_file_with_an_error_recovers_no_comments` is the test for this.
+    if diags.is_empty() {
+        AsmDocument { program: Some(Program { code, labels }), header, comments, diagnostics: diags }
+    } else {
+        AsmDocument { program: None, header: None, comments: Vec::new(), diagnostics: diags }
+    }
 }
 
 /// Parse the register-assembly text form, dropping any header.
@@ -190,8 +244,8 @@ pub fn parse_asm_full(src: &str) -> (Option<Program>, Option<AsmHeader>, Vec<Dia
 /// removes the failure mode where two parsers drift.
 #[must_use]
 pub fn parse_asm(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
-    let (prog, _, ds) = parse_asm_full(src);
-    (prog, ds)
+    let d = parse_asm_full(src);
+    (d.program, d.diagnostics)
 }
 
 /// One instruction line, already stripped of indentation and comments.
@@ -552,7 +606,7 @@ mod tests {
 
     #[test]
     fn a_headered_file_yields_both_halves() {
-        let (prog, header, ds) = parse_asm_full("result Nat\n\n    halt\n");
+        let AsmDocument { program: prog, header, diagnostics: ds, .. } = parse_asm_full("result Nat\n\n    halt\n");
         assert!(ds.is_empty(), "{ds:?}");
         assert_eq!(header, Some(AsmHeader { result: Ty::Nat }));
         assert_eq!(prog.expect("parses").code, vec![Instr::Halt]);
@@ -561,7 +615,7 @@ mod tests {
     /// Optionality property: a header-less file is NOT an error, it simply has no header.
     #[test]
     fn a_header_less_file_is_not_an_error() {
-        let (prog, header, ds) = parse_asm_full("    halt\n");
+        let AsmDocument { program: prog, header, diagnostics: ds, .. } = parse_asm_full("    halt\n");
         assert!(ds.is_empty(), "{ds:?}");
         assert_eq!(header, None);
         assert_eq!(prog.expect("parses").code, vec![Instr::Halt]);
@@ -577,7 +631,7 @@ mod tests {
 
     #[test]
     fn a_result_that_is_not_a_value_type_is_rejected_where_it_is_written() {
-        let (prog, header, ds) = parse_asm_full("result Fun\n\n    halt\n");
+        let AsmDocument { program: prog, header, diagnostics: ds, .. } = parse_asm_full("result Fun\n\n    halt\n");
         assert!(prog.is_none());
         assert_eq!(header, None);
         assert_eq!(ds.len(), 1, "{ds:?}");
@@ -586,7 +640,7 @@ mod tests {
 
     #[test]
     fn a_duplicate_result_directive_is_an_error() {
-        let (_, _, ds) = parse_asm_full("result Nat\nresult Bool\n\n    halt\n");
+        let ds = parse_asm_full("result Nat\nresult Bool\n\n    halt\n").diagnostics;
         assert_eq!(ds.len(), 1, "{ds:?}");
         assert!(ds[0].message.contains("duplicate"), "{}", ds[0].message);
     }
@@ -595,7 +649,7 @@ mod tests {
     /// written today cannot be broken by a later, stricter reader.
     #[test]
     fn a_directive_after_the_first_instruction_is_rejected() {
-        let (_, _, ds) = parse_asm_full("    halt\nresult Nat\n");
+        let ds = parse_asm_full("    halt\nresult Nat\n").diagnostics;
         assert_eq!(ds.len(), 1, "{ds:?}");
         assert!(ds[0].message.contains("precede"), "{}", ds[0].message);
     }
@@ -603,7 +657,7 @@ mod tests {
     /// A label counts as body, not header — the same rule, checked on the other line kind.
     #[test]
     fn a_directive_after_the_first_label_is_rejected() {
-        let (_, _, ds) = parse_asm_full("f:\nresult Nat\n    halt\n");
+        let ds = parse_asm_full("f:\nresult Nat\n    halt\n").diagnostics;
         assert_eq!(ds.len(), 1, "{ds:?}");
         assert!(ds[0].message.contains("precede"), "{}", ds[0].message);
     }
@@ -613,7 +667,8 @@ mod tests {
     /// property the `strip_prefix("result")` + separator check in `parse_asm_full` exists for.
     #[test]
     fn a_label_named_result_or_resultset_is_not_read_as_a_directive() {
-        let (prog, header, ds) = parse_asm_full("result:\nresultset:\n    halt\n");
+        let AsmDocument { program: prog, header, diagnostics: ds, .. } =
+            parse_asm_full("result:\nresultset:\n    halt\n");
         assert!(ds.is_empty(), "{ds:?}");
         assert_eq!(header, None, "no directive was written, so there is no header");
         let prog = prog.expect("parses");
@@ -628,7 +683,7 @@ mod tests {
     /// because the line starts with the word `result`.
     #[test]
     fn a_label_named_result_with_a_space_before_the_colon_is_a_label() {
-        let (prog, header, ds) = parse_asm_full("result :\n    halt\n");
+        let AsmDocument { program: prog, header, diagnostics: ds, .. } = parse_asm_full("result :\n    halt\n");
         assert!(ds.is_empty(), "{ds:?}");
         assert_eq!(header, None, "no directive was written, so there is no header");
         let prog = prog.expect("parses");
@@ -653,7 +708,7 @@ mod tests {
     /// directive, not a label — the label check only claims lines that end in `:`.
     #[test]
     fn result_nat_with_no_trailing_colon_is_still_a_directive() {
-        let (prog, header, ds) = parse_asm_full("result Nat\n\n    halt\n");
+        let AsmDocument { program: prog, header, diagnostics: ds, .. } = parse_asm_full("result Nat\n\n    halt\n");
         assert!(ds.is_empty(), "{ds:?}");
         assert_eq!(header, Some(AsmHeader { result: Ty::Nat }));
         let prog = prog.expect("parses");

@@ -169,11 +169,11 @@ fn run(args: &[String]) -> Result<(), String> {
 
     let text = std::fs::read_to_string(path).map_err(|e| format!("could not read `{path}`: {e}"))?;
 
-    let (m, h, ds) = parse_tm_full(&text);
-    if !ds.is_empty() {
-        return Err(format!("`{path}` does not parse as a `.tm` file:\n{}", format_diagnostics(&ds)));
+    let doc = parse_tm_full(&text);
+    if !doc.diagnostics.is_empty() {
+        return Err(format!("`{path}` does not parse as a `.tm` file:\n{}", format_diagnostics(&doc.diagnostics)));
     }
-    let m = m.ok_or_else(|| format!("`{path}` did not parse to a machine"))?;
+    let m = doc.machine.ok_or_else(|| format!("`{path}` did not parse to a machine"))?;
     // THIS REFUSAL IS NO LONGER THE TREE'S ONLY ANSWER TO A MISSING HEADER, AND THAT IS DELIBERATE
     // RATHER THAN DRIFT. `redextape-wasm`'s `session::tm_scratch` RUNS a headerless machine, from blank
     // tapes at `MIN_FIELD_WIDTH` — decision 6 of
@@ -193,7 +193,7 @@ fn run(args: &[String]) -> Result<(), String> {
     // the reading a future maintainer would otherwise take from it — that nothing in this tree runs a
     // headerless machine. #32's `lower_tm` "cannot drift" entry is the failure this comment exists to
     // avoid: two places asserting opposite things about one condition, with neither naming the other.
-    let h = h.ok_or_else(|| {
+    let h = doc.header.ok_or_else(|| {
         format!(
             "`{path}` has no header. A `.tm` file without one records δ and the start state but not \
              an initial configuration, so it genuinely cannot be run without the caller supplying \

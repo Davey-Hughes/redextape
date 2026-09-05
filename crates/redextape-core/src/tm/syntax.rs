@@ -44,6 +44,7 @@
 use crate::analysis::{Classified, TokenClass as C, push_span};
 use crate::diagnostic::Severity;
 use crate::tm::build::MAX_TAPES;
+use crate::tm::comments::{self, AnchoredComment, CommentWriter, TmAnchor, TmDirective};
 use crate::tm::header::{HeaderParts, TmHeader, write_header};
 use crate::tm::machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
 use crate::{Diagnostic, Span};
@@ -114,35 +115,55 @@ pub fn print_tm_with(m: &Machine, h: &TmHeader) -> String {
 /// `print_tm`, plus a class per span of the produced text.
 #[must_use]
 pub fn print_tm_mapped(m: &Machine) -> (String, Classified) {
-    print_tm_inner(m, None)
+    print_tm_inner(m, None, &[])
 }
 
 /// `print_tm_with`, plus a class per span of the produced text — header directives included.
 #[must_use]
 pub fn print_tm_with_mapped(m: &Machine, h: &TmHeader) -> (String, Classified) {
-    print_tm_inner(m, Some(h))
+    print_tm_inner(m, Some(h), &[])
 }
 
 /// The one printer. The header's presence is the ONLY difference between the entry points above, which
 /// is what keeps them from drifting. Spans are pushed as each piece is appended, so an offset is exact
 /// by construction and nothing re-scans the output.
-fn print_tm_inner(m: &Machine, header: Option<&TmHeader>) -> (String, Classified) {
+///
+/// `comments` is `&[]` from `print_tm_mapped`/`print_tm_with_mapped`: an empty slice makes every
+/// `CommentWriter` call below write nothing and `has_trailing` answer `false` for every anchor, so
+/// those two entry points stay byte-identical to what they produced before comments existed by
+/// construction, not by care taken here.
+fn print_tm_inner(
+    m: &Machine,
+    header: Option<&TmHeader>,
+    comments: &[AnchoredComment<TmAnchor>],
+) -> (String, Classified) {
     let mut out = String::new();
     let mut spans: Classified = Vec::new();
     let (o, s) = (&mut out, &mut spans);
+    let cw = CommentWriter::new(comments);
+    cw.own_line(o, s, TmAnchor::Tapes, "");
     push_span(o, s, "tapes", C::Keyword);
     o.push(' ');
     push_span(o, s, &m.tapes.to_string(), C::Nat);
+    cw.trailing(o, s, TmAnchor::Tapes);
     o.push('\n');
+    cw.own_line(o, s, TmAnchor::Start, "");
     push_span(o, s, "start", C::Keyword);
     o.push(' ');
     write_state_name(o, s, m, m.start, C::StateName);
+    cw.trailing(o, s, TmAnchor::Start);
     o.push('\n');
     if let Some(h) = header {
-        write_header(o, s, h);
+        write_header(o, s, h, &cw);
     }
     o.push('\n');
-    for st in &m.states {
+    for (idx, st) in m.states.iter().enumerate() {
+        // Definition order assigns the id, matching how `parse_tm_full` assigns it (see the `ids`
+        // map there) — the same "no caller in this tree can construct that input" argument bounds
+        // this cast, since a `Vec<State>` this large cannot exist in memory.
+        #[allow(clippy::cast_possible_truncation)]
+        let id = idx as StateId;
+        cw.own_line(o, s, TmAnchor::State(id), "");
         push_span(o, s, "state", C::Keyword);
         o.push(' ');
         push_span(o, s, &st.name, C::Label);
@@ -150,11 +171,15 @@ fn print_tm_inner(m: &Machine, header: Option<&TmHeader>) -> (String, Classified
         if st.accept {
             o.push(' ');
             push_span(o, s, "accept", C::Keyword);
+            cw.trailing(o, s, TmAnchor::State(id));
             o.push('\n');
             continue;
         }
+        cw.trailing(o, s, TmAnchor::State(id));
         o.push('\n');
-        for r in &st.rules {
+        for (index, r) in st.rules.iter().enumerate() {
+            let anchor = TmAnchor::Rule { state: id, index };
+            cw.own_line(o, s, anchor, "  ");
             o.push_str("  ");
             push_span(o, s, "[", C::Punct);
             write_syms(o, s, &r.read);
@@ -179,9 +204,11 @@ fn print_tm_inner(m: &Machine, header: Option<&TmHeader>) -> (String, Classified
             push_span(o, s, "goto", C::Keyword);
             o.push(' ');
             write_state_name(o, s, m, r.next, C::StateName);
+            cw.trailing(o, s, anchor);
             o.push('\n');
         }
     }
+    cw.own_line(o, s, TmAnchor::Eof, "");
     (out, spans)
 }
 
@@ -229,7 +256,7 @@ fn bracket(s: &str, span: Span) -> Result<(&str, &str), Diagnostic> {
 
 /// Parse a single rule line body (already known to start with `[`). Strips a trailing `;` comment.
 fn parse_rule_line(line: &str, span: Span) -> Result<RawRule, Diagnostic> {
-    let line = line.split(';').next().unwrap_or("").trim();
+    let line = comments::content_before_comment(line);
     let (read_s, rest) = bracket(line, span)?;
     let rest = rest.trim_start().strip_prefix("->").ok_or_else(|| err(span, "expected `->`"))?;
     let rest = rest.trim_start().strip_prefix("write").ok_or_else(|| err(span, "expected `write`"))?;
@@ -279,8 +306,54 @@ fn header_position(key: &str, states: &[RawState]) -> Result<(), String> {
 /// it delegate removes the failure mode where two parsers drift.
 #[must_use]
 pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
-    let (m, _, ds) = parse_tm_full(src);
-    (m, ds)
+    let d = parse_tm_full(src);
+    (d.machine, d.diagnostics)
+}
+
+/// A `.tm` file as authored: the machine it describes, its optional header, and the comments that
+/// belong to neither.
+///
+/// Returned by `parse_tm_full` in place of the 3-tuple it used to return. A struct rather than a
+/// wider tuple because the next field this grows — navigation wants one — costs no call site here
+/// and would cost all of them there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TmDocument {
+    /// `None` exactly when `diagnostics` holds an error, matching what the tuple returned.
+    pub machine: Option<Machine>,
+    /// `None` means the file carried no header, which is not an error.
+    pub header: Option<TmHeader>,
+    /// Recovered only from lines that parsed. A file with an error has no machine, so nothing will
+    /// print it and there is nothing for a partial recovery to be right about.
+    pub comments: Vec<AnchoredComment<TmAnchor>>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Render a document — machine, header and comments — as `.tm` text.
+///
+/// `None` when the document has no machine, which is exactly when it carried an error diagnostic.
+/// A formatter has nothing to write for a file that does not parse, and saying so with `None` is
+/// what lets the caller leave the buffer alone rather than replace it with something.
+#[must_use]
+pub fn print_tm_doc(d: &TmDocument) -> Option<String> {
+    let m = d.machine.as_ref()?;
+    Some(print_tm_inner(m, d.header.as_ref(), &d.comments).0)
+}
+
+/// The anchor for a header directive line. `rest` is everything after the key, which for `tape` is
+/// the index followed by the cells.
+///
+/// Returns `None` when a `tape` line's index does not parse — that line is about to produce a
+/// diagnostic, so the caller attaches nothing and the comment waits for a line that works.
+fn directive_anchor(key: &str, rest: &str) -> Option<TmDirective> {
+    Some(match key {
+        "version" => TmDirective::Version,
+        "encoding" => TmDirective::Encoding,
+        "width" => TmDirective::Width,
+        "slots" => TmDirective::Slots,
+        "result" => TmDirective::Result,
+        "tape" => TmDirective::Tape(rest.split_whitespace().next()?.parse().ok()?),
+        _ => return None,
+    })
 }
 
 /// Parse the TM text form, returning the header too. Iterative (flat grammar, no recursion). Never
@@ -296,28 +369,65 @@ pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
 /// place.
 #[must_use]
 #[allow(clippy::too_many_lines)]
-pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagnostic>) {
+pub fn parse_tm_full(src: &str) -> TmDocument {
     let mut diags: Vec<Diagnostic> = Vec::new();
     let mut tapes: Option<usize> = None;
     let mut start_name: Option<(String, Span)> = None;
     let mut states: Vec<RawState> = Vec::new();
     let mut header = HeaderParts::default();
+    let mut comments: Vec<AnchoredComment<TmAnchor>> = Vec::new();
+    // Own-line comments seen but not yet attached: they belong to the NEXT line that parses, which
+    // has not been read. Drained at each anchor and, if any survive, at end of input.
+    let mut pending: Vec<String> = Vec::new();
+
+    // Attach everything waiting to `anchor`, then the line's own trailing comment. Called only
+    // from a branch that has decided the line parses — a line that errors leaves `pending` intact
+    // for the next line that does, and contributes no trailing comment of its own.
+    let attach =
+        |comments: &mut Vec<AnchoredComment<TmAnchor>>, pending: &mut Vec<String>, anchor: TmAnchor, content: &str| {
+            for text in pending.drain(..) {
+                comments.push(AnchoredComment { text, anchor, own_line: true });
+            }
+            if let (_, Some(body)) = comments::split_trailing(content) {
+                comments.push(AnchoredComment { text: body.to_string(), anchor, own_line: false });
+            }
+        };
 
     let mut offset = 0usize;
     for raw_line in src.split_inclusive('\n') {
         let line_start = offset;
         offset += raw_line.len();
-        let content = raw_line.trim_end_matches('\n');
+        let content = raw_line.trim_end_matches(['\r', '\n']);
         let span = Span { start: line_start, end: line_start + content.len() };
-        // Strip a full-line comment / blank.
         let trimmed = content.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with(';') {
+        if let Some(body) = comments::whole_line(trimmed) {
+            pending.push(body.to_string());
+            continue;
+        }
+        if trimmed.is_empty() {
+            // Blank lines are structure, not content: the printer decides where they go.
             continue;
         }
         if let Some(rest) = trimmed.strip_prefix("tapes ") {
-            match rest.split(';').next().unwrap_or("").trim().parse::<usize>() {
-                Ok(n) if (1..=MAX_TAPES).contains(&n) => tapes = Some(n),
-                _ => diags.push(err(span, format!("expected `tapes <1..={MAX_TAPES}>`"))),
+            // A duplicate `tapes` line is an error, on the same rule `HeaderParts::directive` states
+            // for the four header directives: the file states a thing once, so a SECOND line — even
+            // one that agrees with the first — is refused rather than silently taken as last-wins.
+            // The duplicate's value is ignored and its line contributes no comment attachment, mirroring
+            // `directive`'s `(Some(_), _) => Err(...)` arm, which never overwrites `self.<field>`
+            // either: the first `tapes` line THAT PARSES is the only one that can ever set `tapes` or
+            // attach to `TmAnchor::Tapes` — a malformed first `tapes` line (e.g. `tapes abc`) sets
+            // nothing and reports only its own error, so a well-formed SECOND line is the one that
+            // sets `tapes` and attaches, and no diagnostic here says the document is clean.
+            if tapes.is_some() {
+                diags.push(err(span, "duplicate `tapes` line"));
+            } else {
+                match comments::content_before_comment(rest).parse::<usize>() {
+                    Ok(n) if (1..=MAX_TAPES).contains(&n) => {
+                        tapes = Some(n);
+                        attach(&mut comments, &mut pending, TmAnchor::Tapes, content);
+                    }
+                    _ => diags.push(err(span, format!("expected `tapes <1..={MAX_TAPES}>`"))),
+                }
             }
         } else if let Some((key, rest)) = trimmed
             .split_once(' ')
@@ -327,6 +437,8 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
                 diags.push(err(span, msg));
             } else if let Some(Err(msg)) = header.directive(key, rest, span) {
                 diags.push(err(span, msg));
+            } else if let Some(dir) = directive_anchor(key, rest) {
+                attach(&mut comments, &mut pending, TmAnchor::Directive(dir), content);
             }
         } else if trimmed == "version" {
             // The one directive with no required argument shape to key off: every other directive's
@@ -340,9 +452,16 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
                 diags.push(err(span, msg));
             }
         } else if let Some(rest) = trimmed.strip_prefix("start ") {
-            start_name = Some((rest.split(';').next().unwrap_or("").trim().to_string(), span));
+            // Same rule as `tapes` above, for the same reason: a second `start` line is an error, its
+            // value is ignored (the first line's target is kept), and it attaches no comment.
+            if start_name.is_some() {
+                diags.push(err(span, "duplicate `start` line"));
+            } else {
+                start_name = Some((comments::content_before_comment(rest).to_string(), span));
+                attach(&mut comments, &mut pending, TmAnchor::Start, content);
+            }
         } else if let Some(rest) = trimmed.strip_prefix("state ") {
-            let rest = rest.split(';').next().unwrap_or("").trim();
+            let rest = comments::content_before_comment(rest);
             let Some((name, tail)) = rest.split_once(':') else {
                 diags.push(err(span, "expected `state <name>:`"));
                 continue;
@@ -360,6 +479,9 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
                 diags.push(err(span, format!("duplicate state name `{name}`")));
             }
             states.push(RawState { name, accept, rules: Vec::new() });
+            #[allow(clippy::cast_possible_truncation)] // see the `ids` map below for why this is sound
+            let id = (states.len() - 1) as StateId;
+            attach(&mut comments, &mut pending, TmAnchor::State(id), content);
         } else if trimmed.starts_with('[') {
             let Some(state) = states.last_mut() else {
                 diags.push(err(span, "rule outside any state"));
@@ -374,7 +496,13 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
                 continue;
             }
             match parse_rule_line(trimmed, span) {
-                Ok(r) => state.rules.push(r),
+                Ok(r) => {
+                    state.rules.push(r);
+                    let index = state.rules.len() - 1; // still inside `state`'s borrow
+                    #[allow(clippy::cast_possible_truncation)] // see the `ids` map below for why this is sound
+                    let id = (states.len() - 1) as StateId; // `state` is dead from here
+                    attach(&mut comments, &mut pending, TmAnchor::Rule { state: id, index }, content);
+                }
                 Err(d) => diags.push(d),
             }
         } else {
@@ -382,9 +510,13 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
         }
     }
 
+    for text in pending.drain(..) {
+        comments.push(AnchoredComment { text, anchor: TmAnchor::Eof, own_line: true });
+    }
+
     let Some(tapes) = tapes else {
         diags.push(err(Span { start: 0, end: 0 }, "missing `tapes <n>`"));
-        return (None, None, diags);
+        return TmDocument { machine: None, header: None, comments: Vec::new(), diagnostics: diags };
     };
 
     let (parsed_header, header_errs) = header.finish(tapes);
@@ -437,7 +569,7 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
     };
 
     if diags.iter().any(|d| d.severity == Severity::Error) {
-        return (None, None, diags);
+        return TmDocument { machine: None, header: None, comments: Vec::new(), diagnostics: diags };
     }
 
     let machine = Machine {
@@ -461,7 +593,10 @@ pub fn parse_tm_full(src: &str) -> (Option<Machine>, Option<TmHeader>, Vec<Diagn
             })
             .collect(),
     };
-    (Some(machine), parsed_header, diags)
+    // Comments ride with a machine or not at all. A document with `machine: None` is never printed,
+    // so a partial recovery from a half-parsed file would be a value nothing can be right or wrong
+    // about — and it is the shape in which an anchor could name a line the printer never emits.
+    TmDocument { machine: Some(machine), header: parsed_header, comments, diagnostics: diags }
 }
 
 #[cfg(test)]
@@ -796,9 +931,13 @@ state halt: accept
     fn a_header_directive_after_the_first_state_is_refused() {
         for bad in ["encoding unary", "width 4", "slots 1", "result Nat", "tape 0 #_#", "version 1"] {
             let src = format!("tapes 1\nstart s\n\nstate s: accept\n{bad}\n");
-            let (m, h, ds) = parse_tm_full(&src);
-            assert!(m.is_none() && h.is_none(), "{bad:?} after a state must be refused");
-            assert!(ds.iter().any(|d| d.message.contains("must precede the first `state`")), "{bad:?}: {ds:?}");
+            let doc = parse_tm_full(&src);
+            assert!(doc.machine.is_none() && doc.header.is_none(), "{bad:?} after a state must be refused");
+            assert!(
+                doc.diagnostics.iter().any(|d| d.message.contains("must precede the first `state`")),
+                "{bad:?}: {:?}",
+                doc.diagnostics
+            );
         }
     }
 
@@ -807,9 +946,9 @@ state halt: accept
     #[test]
     fn the_same_directives_before_the_first_state_still_parse() {
         let src = "tapes 1\nstart s\nversion 1\nencoding unary\nwidth 4\nslots 1\nresult Nat\ntape 0 #_#\n\nstate s: accept\n";
-        let (m, h, ds) = parse_tm_full(src);
-        assert!(ds.is_empty(), "{ds:?}");
-        assert!(m.is_some() && h.is_some());
+        let doc = parse_tm_full(src);
+        assert!(doc.diagnostics.is_empty(), "{:?}", doc.diagnostics);
+        assert!(doc.machine.is_some() && doc.header.is_some());
     }
 
     /// PROPERTY 1: today's round-trip, untouched.
@@ -823,10 +962,10 @@ state halt: accept
     #[test]
     fn property_2_headered_round_trip_returns_both_halves() {
         let (m, h) = (increment(), a_header());
-        let (pm, ph, ds) = parse_tm_full(&print_tm_with(&m, &h));
-        assert!(ds.is_empty(), "diagnostics: {ds:?}");
-        assert_eq!(pm, Some(m));
-        assert_eq!(ph, Some(h));
+        let doc = parse_tm_full(&print_tm_with(&m, &h));
+        assert!(doc.diagnostics.is_empty(), "diagnostics: {:?}", doc.diagnostics);
+        assert_eq!(doc.machine, Some(m));
+        assert_eq!(doc.header, Some(h));
     }
 
     /// PROPERTY 3: a headered file still reads as a plain machine. `parse_tm` must SKIP the directives,
@@ -845,10 +984,10 @@ state halt: accept
     #[test]
     fn property_4_a_headerless_file_yields_none_not_a_diagnostic() {
         let m = increment();
-        let (pm, ph, ds) = parse_tm_full(&print_tm(&m));
-        assert_eq!(pm, Some(m));
-        assert_eq!(ph, None);
-        assert!(ds.is_empty(), "a missing header is not an error, got: {ds:?}");
+        let doc = parse_tm_full(&print_tm(&m));
+        assert_eq!(doc.machine, Some(m));
+        assert_eq!(doc.header, None);
+        assert!(doc.diagnostics.is_empty(), "a missing header is not an error, got: {:?}", doc.diagnostics);
     }
 
     /// `tapes N` and `tape I …` are told apart by the MANDATORY SPACE in each keyword, not by dispatch
@@ -867,10 +1006,10 @@ tape 0 #____#
 
 state s: accept
 ";
-        let (m, h, ds) = parse_tm_full(src);
-        assert!(ds.is_empty(), "diagnostics: {ds:?}");
-        assert_eq!(m.expect("a machine").tapes, 1, "`tapes 1` must set the tape COUNT");
-        assert_eq!(h.expect("a header").tapes(), &[(0, vec!['#', '_', '_', '_', '_', '#'])]);
+        let doc = parse_tm_full(src);
+        assert!(doc.diagnostics.is_empty(), "diagnostics: {:?}", doc.diagnostics);
+        assert_eq!(doc.machine.expect("a machine").tapes, 1, "`tapes 1` must set the tape COUNT");
+        assert_eq!(doc.header.expect("a header").tapes(), &[(0, vec!['#', '_', '_', '_', '_', '#'])]);
     }
 
     /// A PARTIAL header is a diagnostic naming what is missing — not a `None`. Silently discarding a
@@ -878,10 +1017,10 @@ state s: accept
     #[test]
     fn a_partial_header_names_the_missing_directives() {
         let src = "tapes 1\nstart s\nencoding unary\nwidth 4\n\nstate s: accept\n";
-        let (m, h, ds) = parse_tm_full(src);
-        assert!(m.is_none(), "an error gate must suppress the machine too");
-        assert!(h.is_none());
-        let joined = ds.iter().map(|d| d.message.clone()).collect::<Vec<_>>().join(" | ");
+        let doc = parse_tm_full(src);
+        assert!(doc.machine.is_none(), "an error gate must suppress the machine too");
+        assert!(doc.header.is_none());
+        let joined = doc.diagnostics.iter().map(|d| d.message.clone()).collect::<Vec<_>>().join(" | ");
         assert!(joined.contains("slots") && joined.contains("result"), "must name both: {joined}");
         assert!(!joined.contains("encoding") && !joined.contains("width"), "must not name present ones: {joined}");
     }
@@ -891,9 +1030,9 @@ state s: accept
     #[test]
     fn tape_lines_without_a_header_are_a_diagnostic_not_silent_data_loss() {
         let src = "tapes 1\nstart s\ntape 0 #____#\n\nstate s: accept\n";
-        let (_, h, ds) = parse_tm_full(src);
-        assert!(h.is_none());
-        assert!(ds.iter().any(|d| d.message.contains("tape")), "{ds:?}");
+        let doc = parse_tm_full(src);
+        assert!(doc.header.is_none());
+        assert!(doc.diagnostics.iter().any(|d| d.message.contains("tape")), "{:?}", doc.diagnostics);
     }
 
     #[test]
@@ -923,13 +1062,17 @@ state s: accept
         ];
         for (header, needle) in cases {
             let src = format!("tapes 1\nstart s\n{header}\n\nstate s: accept\n");
-            let (m, h, ds) = parse_tm_full(&src);
+            let doc = parse_tm_full(&src);
             assert!(
-                ds.iter().any(|d| d.message.contains(needle)),
-                "expected a diagnostic mentioning {needle:?} for:\n{header}\ngot {ds:?}"
+                doc.diagnostics.iter().any(|d| d.message.contains(needle)),
+                "expected a diagnostic mentioning {needle:?} for:\n{header}\ngot {:?}",
+                doc.diagnostics
             );
-            assert!(m.is_none() && h.is_none(), "an error gate must suppress both halves for:\n{header}");
-            for d in &ds {
+            assert!(
+                doc.machine.is_none() && doc.header.is_none(),
+                "an error gate must suppress both halves for:\n{header}"
+            );
+            for d in &doc.diagnostics {
                 assert!(d.span.start <= d.span.end && d.span.end <= src.len(), "bad span for:\n{header}");
             }
             // The out-of-range `tape` diagnostic is about ONE specific line, whose real span was in
@@ -940,7 +1083,11 @@ state s: accept
             // this test exists to catch. The other cases legitimately have no single offending line and
             // keep the loose check above.
             if *needle == "out of range" {
-                let d = ds.iter().find(|d| d.message.contains("out of range")).expect("out of range diagnostic");
+                let d = doc
+                    .diagnostics
+                    .iter()
+                    .find(|d| d.message.contains("out of range"))
+                    .expect("out of range diagnostic");
                 assert!(d.span.start < d.span.end, "expected a non-empty span for:\n{header}\ngot {d:?}");
                 let covered = &src[d.span.start..d.span.end];
                 assert_eq!(
@@ -960,17 +1107,17 @@ state s: accept
     #[test]
     fn an_out_of_range_tape_is_caught_even_when_it_precedes_the_tapes_line() {
         let src = "tape 9 #____#\ntapes 1\nstart s\nencoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n";
-        let (m, h, ds) = parse_tm_full(src);
-        assert!(m.is_none() && h.is_none());
-        assert!(ds.iter().any(|d| d.message.contains("out of range")), "{ds:?}");
+        let doc = parse_tm_full(src);
+        assert!(doc.machine.is_none() && doc.header.is_none());
+        assert!(doc.diagnostics.iter().any(|d| d.message.contains("out of range")), "{:?}", doc.diagnostics);
     }
 
     #[test]
     fn header_directives_are_order_independent() {
         let a = "tapes 1\nstart s\nencoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n";
         let b = "tapes 1\nresult Nat\nslots 1\nstart s\nwidth 4\nencoding unary\n\nstate s: accept\n";
-        let (_, ha, _) = parse_tm_full(a);
-        let (_, hb, _) = parse_tm_full(b);
+        let ha = parse_tm_full(a).header;
+        let hb = parse_tm_full(b).header;
         assert_eq!(ha, hb);
         assert!(ha.is_some());
     }
@@ -1031,21 +1178,29 @@ state s: accept
             format!("tapes 1\nstart s\nencoding unary\nwidth {w}\nslots {s}\nresult Nat\n\nstate s: accept\n")
         };
         // At each ceiling: accepted.
-        assert!(parse_tm_full(&hdr("100000", "64")).1.is_some(), "at both ceilings must parse");
+        assert!(parse_tm_full(&hdr("100000", "64")).header.is_some(), "at both ceilings must parse");
         // One over: refused, each naming its own directive.
-        let (_, h, ds) = parse_tm_full(&hdr("100001", "64"));
-        assert!(h.is_none() && ds.iter().any(|d| d.message.contains("slots")), "{ds:?}");
-        let (_, h, ds) = parse_tm_full(&hdr("100000", "65"));
-        assert!(h.is_none() && ds.iter().any(|d| d.message.contains("width")), "{ds:?}");
+        let doc = parse_tm_full(&hdr("100001", "64"));
+        assert!(
+            doc.header.is_none() && doc.diagnostics.iter().any(|d| d.message.contains("slots")),
+            "{:?}",
+            doc.diagnostics
+        );
+        let doc = parse_tm_full(&hdr("100000", "65"));
+        assert!(
+            doc.header.is_none() && doc.diagnostics.iter().any(|d| d.message.contains("width")),
+            "{:?}",
+            doc.diagnostics
+        );
     }
 
     /// Absent means version 1, so every file written before this directive existed stays valid.
     #[test]
     fn an_absent_version_means_one() {
         let src = "tapes 1\nstart s\nencoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n";
-        let (m, h, ds) = parse_tm_full(src);
-        assert!(m.is_some() && h.is_some(), "{ds:?}");
-        assert!(ds.is_empty(), "an absent version is not a diagnostic: {ds:?}");
+        let doc = parse_tm_full(src);
+        assert!(doc.machine.is_some() && doc.header.is_some(), "{:?}", doc.diagnostics);
+        assert!(doc.diagnostics.is_empty(), "an absent version is not a diagnostic: {:?}", doc.diagnostics);
     }
 
     /// An unknown version is a hard ERROR, not a warning. A future version could change what `width` or
@@ -1056,9 +1211,9 @@ state s: accept
         for bad in ["version 2", "version 0", "version foo", "version"] {
             let src =
                 format!("tapes 1\nstart s\n{bad}\nencoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n");
-            let (m, h, ds) = parse_tm_full(&src);
-            assert!(m.is_none() && h.is_none(), "{bad:?} must be refused");
-            assert!(ds.iter().any(|d| d.message.contains("version")), "{bad:?}: {ds:?}");
+            let doc = parse_tm_full(&src);
+            assert!(doc.machine.is_none() && doc.header.is_none(), "{bad:?} must be refused");
+            assert!(doc.diagnostics.iter().any(|d| d.message.contains("version")), "{bad:?}: {:?}", doc.diagnostics);
         }
     }
 
@@ -1068,9 +1223,9 @@ state s: accept
     #[test]
     fn a_lone_version_without_a_header_is_a_diagnostic() {
         let src = "tapes 1\nstart s\nversion 1\n\nstate s: accept\n";
-        let (_, h, ds) = parse_tm_full(src);
-        assert!(h.is_none());
-        assert!(ds.iter().any(|d| d.message.contains("version")), "{ds:?}");
+        let doc = parse_tm_full(src);
+        assert!(doc.header.is_none());
+        assert!(doc.diagnostics.iter().any(|d| d.message.contains("version")), "{:?}", doc.diagnostics);
     }
 
     /// The printer always emits it, and it leads the block.

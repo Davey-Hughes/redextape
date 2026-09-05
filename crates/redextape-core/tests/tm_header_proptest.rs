@@ -129,7 +129,12 @@ proptest! {
     fn a_generated_header_round_trips_through_the_text_form((m, h) in arb_machine_and_header()) {
         prop_assert!(m.validate().is_empty(), "generated machine must be validate()-clean: {:?}", m.validate());
         let text = print_tm_with(&m, &h);
-        let (pm, ph, ds) = parse_tm_full(&text);
-        prop_assert_eq!((pm, ph, ds), (Some(m), Some(h), Vec::new()), "round-trip over:\n{}", text);
+        let doc = parse_tm_full(&text);
+        prop_assert_eq!(
+            (doc.machine, doc.header, doc.diagnostics),
+            (Some(m), Some(h), Vec::new()),
+            "round-trip over:\n{}",
+            text
+        );
     }
 }

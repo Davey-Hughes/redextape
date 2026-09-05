@@ -274,7 +274,8 @@ fn headered_text_reads_back_to_identical_text() {
         let prog = lower(src);
         let h = AsmHeader { result: Ty::Nat };
         let text = print_asm_with(&prog, &h);
-        let (back, header, ds) = parse_asm_full(&text);
+        let doc = parse_asm_full(&text);
+        let (back, header, ds) = (doc.program, doc.header, doc.diagnostics);
         assert!(ds.is_empty(), "diagnostics for {src}: {ds:?}");
         assert_eq!(header, Some(h.clone()), "the header survives for {src}");
         assert_eq!(print_asm_with(&back.expect("parses"), &h), text, "headered P1 failed for {src}");
@@ -289,7 +290,8 @@ fn every_admissible_result_type_round_trips() {
         [Ty::Nat, Ty::Bool, Ty::Unit, Ty::List(Box::new(Ty::Nat)), Ty::List(Box::new(Ty::List(Box::new(Ty::Bool))))]
     {
         let h = AsmHeader { result: ty.clone() };
-        let (_, header, ds) = parse_asm_full(&print_asm_with(&prog, &h));
+        let doc = parse_asm_full(&print_asm_with(&prog, &h));
+        let (header, ds) = (doc.header, doc.diagnostics);
         assert!(ds.is_empty(), "{ty:?}: {ds:?}");
         assert_eq!(header, Some(h), "{ty:?} did not survive");
     }

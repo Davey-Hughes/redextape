@@ -110,16 +110,16 @@ fn run_artifact_text(
     err: &mut impl std::io::Write,
     color: bool,
 ) -> std::io::Result<Outcome> {
-    let (machine, header, ds) = redextape_core::tm::parse_tm_full(src);
-    if !ds.is_empty() {
-        report::render(err, label, src, &ds, color)?;
+    let doc = redextape_core::tm::parse_tm_full(src);
+    if !doc.diagnostics.is_empty() {
+        report::render(err, label, src, &doc.diagnostics, color)?;
         return Ok(Outcome::ProgramFailed);
     }
-    let Some(machine) = machine else {
+    let Some(machine) = doc.machine else {
         writeln!(err, "error: `{label}` carries no machine")?;
         return Ok(Outcome::ProgramFailed);
     };
-    let Some(header) = header else {
+    let Some(header) = doc.header else {
         writeln!(
             err,
             "error: `{label}` has no header\n  \
@@ -250,7 +250,8 @@ fn run_asm_artifact(
     err: &mut impl std::io::Write,
     color: bool,
 ) -> std::io::Result<Outcome> {
-    let (program, header, ds) = redextape_core::tm::parse_asm_full(src);
+    let doc = redextape_core::tm::parse_asm_full(src);
+    let (program, header, ds) = (doc.program, doc.header, doc.diagnostics);
     if !ds.is_empty() {
         report::render(err, label, src, &ds, color)?;
         return Ok(Outcome::ProgramFailed);

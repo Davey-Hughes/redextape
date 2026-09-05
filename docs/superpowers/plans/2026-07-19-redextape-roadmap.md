@@ -15699,3 +15699,153 @@ all configs green — base, LLVM and browser
 ```
 
 **Four guard routes were sabotaged in the real tree and each fires, the prose case that used to redden them is green, and the check the skip's removal created was sabotaged too.** A `pub(crate) struct` fails on the type check; `declare_it! { pub struct … }` on the item-macro check; `#[path = "../../sneaky_probe.rs"] mod sneaky_probe;` on the module check; `#[emit_a_type] fn helper() {}` on the attribute whitelist. Adding a sentence containing "struct or enum" to an existing `assert!` message leaves all three tests passing. And a `pub(crate) struct` in a gate file carrying `ts(type = "number")` on an `Option<u64>` now fails TWO tests — the sibling's guard and the nullability rule reading that file for the first time. `git status --porcelain` is empty at this head and `find crates -maxdepth 2 \( -iname bindings -o -iname pkg \) -type d` prints nothing — checked by name, because both are gitignored and the sabotage above really does write a binding file, which is how the entry above came to carry a false no-strays claim for several hours.
+
+#### THE `.tm` AND `.asm` TEXT FORMS KEEP THEIR COMMENTS, THE TWO FORMS GET DIFFERENT GUARANTEES BECAUSE THE TM PRINTER FABRICATES LABELS AND TWO OF ITS ANCHORS WERE NAMED FROM A FAMILY OF LINES RATHER THAN ONE, A SECOND `tapes` LINE HAD BEEN SILENTLY OVERWRITING THE FIRST SINCE LONG BEFORE THIS BRANCH AND WAS FOUND BY AN OUT-OF-TREE PROBE AFTER A REVIEW CHALLENGED A DOC COMMENT'S SELF-EVIDENT CLAIM RATHER THAN BY THE PROPERTY, WHICH WAS AND REMAINS STRUCTURALLY BLIND TO THE SHAPE, AND FOUR TIMES A GREEN TEST STRUCTURALLY COULD NOT REACH THE CASE THAT WOULD HAVE FALSIFIED IT WHILE LOOKING COMPREHENSIVE BECAUSE IT NAMED EVERY VARIANT (2026-09-04, branch `redextape-lsp`, `ebb1970..4135ef7`, 28 commits, plus the entry commit)
+
+Design: [`../specs/2026-09-04-redextape-lsp-design.md`](../specs/2026-09-04-redextape-lsp-design.md). Plan: [`2026-09-04-tm-asm-comment-retention.md`](2026-09-04-tm-asm-comment-retention.md).
+
+PR A of a two-PR design, and the half the other half needs first. A formatter cannot be pointed at a hand-written `.tm` or `.asm` file while the parsers throw its comments on the floor, so `parse_tm_full` and `parse_asm_full` now return `TmDocument` and `AsmDocument` — the machine or program, the header, the diagnostics, and a `Vec<AnchoredComment<A>>` — and `print_tm_doc` / `print_asm_doc` write the comments back. **The comments are a SIDE CHANNEL, and `Machine` and `Program` gain no field**: a machine that came out of `lower_tm` has no comments and must print exactly what the listing golden pins, so comments must not reach the compiler's output path at all. Each `AnchoredComment` carries the trimmed body, the printed line it sits against, and whether only whitespace separated it from the previous newline. **An anchor rather than a span, and that is the whole design decision.** `token::Comment` can carry a `Span` because the `.rxt` formatter walks tokens and can order a comment against them; the TM and asm printers walk a `Machine` and a `Program` and never see a token, so a byte offset into the text a comment CAME from cannot say where to write it in the text being produced. Naming the printed line is what survives reformatting.
+
+`print_tm`, `print_tm_with`, `print_asm` and `print_asm_with` are unchanged in behaviour by construction rather than by test: every one of them reaches a single inner printer with `comments` as `&[]`, `CommentWriter::new` buckets an empty slice into two empty maps, `HashMap::get` on an empty map is `None` for every key so `own_line` and `trailing` write nothing, and `HashMap::contains_key` on an empty map is `false` for every key so `has_trailing` answers `false` for every anchor too, which is what keeps `write_header`'s generated `; reg` label in `print_tm_with`'s output rather than suppressing it — `print_tm_inner`'s own doc states both halves of this argument, and this entry now follows that wording. **`.rxt` already retained comments and λ has no comment syntax at all** — nothing under `crates/redextape-core/src/lambda/` contains a `';'` character literal or a `";"` string literal, so no byte of λ source is ever compared against a semicolon, let alone read as opening a comment — so this is two forms and not three.
+
+##### THE TWO FORMS GET DIFFERENT GUARANTEES, AND BOTH MECHANISMS THAT FORCE THE DIFFERENCE ARE ABSENT ON THE ASM SIDE
+
+`.asm` gets the **strict round trip**: `parse_asm_full(print_asm_doc(d))` agrees with `d` on `program`, `header` and `comments` exactly. `.tm` gets only **idempotence**: `print_tm_doc(parse_tm_full(print_tm_doc(parse_tm_full(x))))` equals `print_tm_doc(parse_tm_full(x))`. Formatting a `.tm` file once may change it; formatting it again changes nothing.
+
+**The strict round trip is false on `.tm`, and it is false for exactly the files this slice exists to serve.** `write_header` labels a `tape <i>` line with a comment `tape_name` generates — `; reg`, `; work`, `; stack`, `; heap`, `; box` — whenever that anchor carries no AUTHORED trailing comment, `CommentWriter::has_trailing` being what decides "authored". A hand-written file is not obliged to comment its `tape` lines, so a `tape 0` line with nothing after it parses with no comment on that anchor and prints **with** `; reg`; reparsing that output records an `AnchoredComment` anchored to `Directive(Tape(0))` that was never in the source. `d` and its round trip differ by a comment the printer invented. This is a property of every generated label, not a count of which tape indices happen to trigger it.
+
+**The second mechanism is subtler, and it is what the duplicate-line diagnostic below exists for.** `TmAnchor::Tapes` and `TmAnchor::Start` were each named by `parse_tm_full` from a **family** of lines — every `tapes ...` line, every `start ...` line — rather than from one fixed line, unlike `Directive`, `State` and `Rule`, which are keyed by an identity of their own. `CommentWriter::trailing` joins several trailing comments on one anchor with `" ; "`, and that join is not a fixed point when a body is empty, so a second line in either family made the first print and the second print differ.
+
+**Neither mechanism has a counterpart in asm, and that was verified rather than assumed.** The asm printer fabricates no comment. `AsmAnchor::Label(i)` and `AsmAnchor::Instr(i)` are positional — `labels.len() - 1` and `code.len() - 1` at the moment of the push — so no two lines in one clean parse can share an index. A second `result` directive is already a diagnostic, on either of two branches, and `parse_asm_full`'s single tail check empties `comments` for the whole document whichever fired. And `AsmAnchor::Eof` is never a `trailing` argument at all: the parser only ever drains `pending` into it own-line, matching the printer's own `Eof` call, which has no `trailing` counterpart. So the asm property does not have to weaken to idempotence and does not have to drop to a sub-multiset check on `comments`.
+
+**Why idempotence is the right statement for `.tm` rather than a retreat.** After the first print the generated label is ordinary text sitting on that line. Reparsing records it as an AUTHORED trailing comment on the same anchor — parsing cannot tell a generated label from a hand-typed one, they are the same bytes — and on the second print `has_trailing` takes the displacement branch, writes the recorded text, and never calls `tape_name` again. The generated path and the authored path converge on identical bytes. That convergence is a property of the displacement rule, so the section's two rules hold each other up instead of sitting side by side. And idempotence is what a formatter actually needs: *"running the formatter twice differs from running it once"* is the defect a user meets, while *"a hand-authored file is not a fixed point of the printer"* is what every formatter does the first time it touches a file.
+
+**`CommentWriter` is generic over its anchor type, so the doc states two things a THIRD instantiation must still establish rather than a fact about today's tree**: one line holds at most one trailing comment, AND every anchor variant names at most one line. The second is the one that was false for `TmAnchor`, and it is the one a reader is most likely to assume — but for `AsmAnchor`, which has already shipped, the doc does not stop at naming `parse_asm_full`'s duplicate-`result` diagnostic and its positional anchors as a starting point: it states the argument discharged, the same argument `printing_and_reparsing_all_anchors_recovers_the_document_exactly`'s doc comment writes out in full.
+
+##### A PRODUCTION BUG OLDER THAN THIS BRANCH, FOUND BY AN OUT-OF-TREE PROBE AFTER A REVIEW CHALLENGED A DOC COMMENT'S SELF-EVIDENT CLAIM, IN A CODE PATH THAT HAS NOTHING TO DO WITH COMMENTS
+
+`tapes 1` followed by `tapes 5` silently yielded a five-tape machine. `start q0` followed by `start q1` silently started at `q1`. Both with zero diagnostics, neither diagnosed, neither tested, and both predating this branch by a long way. **The rule they were outside of was already written down**: `HeaderParts::directive` refuses a second `version`, `encoding`, `width`, `slots`, `result` or `tape <i>` directive on the argument that a file states a thing once, so a second line — even one that agrees with the first — is refused rather than silently taken as last-wins. The two leading lines had simply never been brought under it. `parse_tm_full` now reports `duplicate \`tapes\` line` and `duplicate \`start\` line`, with the span pinned to the SECOND line, which is the only observable trace of the keep-the-first choice. The first line **that parses** is the one that wins: a malformed first `tapes` line sets nothing and reports only its own error, so a well-formed second line is then the one that counts.
+
+**The idempotence property did not find this, and structurally could not have.** Its generator emits exactly one `tapes` line and one `start` line per document, at every commit on this branch — `render` in `crates/redextape-core/tests/tm_comments.rs` is the function that builds its input, and it calls `emit` for `tapes` and for `start` exactly once each. No case the property can draw ever contains the duplicate, so it never went red on this defect and remains blind to it today, a fact this entry documents twice more below. What actually found it was an out-of-tree probe, "found by a probe rather than by reasoning" in `dfc150c`'s own words, written after a review challenged `CommentWriter::trailing`'s doc comment — it had stated as self-evident that a parse can never attach two trailing comments to one anchor, and that claim was false for exactly this shape: `TmAnchor::Tapes` and `TmAnchor::Start` are each named from a family of lines rather than one, so a duplicate `tapes` or `start` line attached a second trailing comment to the same anchor, and the `" ; "` join is not a fixed point when a body is empty. The correctness bug underneath — a second `tapes` or `start` line silently overwriting the first — was found on the way to the fix, not by the fix's own test suite.
+
+##### FOUR TIMES A GREEN TEST STRUCTURALLY COULD NOT REACH THE CASE THAT WOULD HAVE FALSIFIED IT, AND EACH TIME IT LOOKED COMPREHENSIVE BECAUSE IT NAMED EVERY VARIANT
+
+This is the most valuable thing on the branch, so it is recorded as four instances and one general form.
+
+1. **The round-trip property appended its generated comments after a fixed skeleton.** So every comment it drew landed on `TmAnchor::Eof`, and the property never met a `tape` line at all. It was strengthened to range densely over every anchor and both `own_line` values **because a review said it was weak**, and it went RED on the first run of the strengthened form — against real, previously-untested printer behaviour rather than a generator artifact. That red is the false round-trip guarantee above.
+
+2. **The same property emits exactly one `tapes` line and one `start` line per document, and still does today.** So no case it can draw contains the duplicate, and strengthening it in the first direction did not reach this: the generator would have had to gain the ability to write a second line in either family before the anchor-family defect could appear to it at all — and nothing on this branch gave it that ability. The property never met this case; the defect above was found by a probe built outside it, not by any strengthening of it.
+
+3. **A `.tm` emission test used a header-less fixture, so `write_header` was never called by the test that appeared to cover printing.** Five of the six `TmDirective` variants — `Version`, `Encoding`, `Width`, `Slots`, `Result` — were parsed by a test and printed by none. The same test also asserted only that each comment's text appeared SOMEWHERE in the whole document, so moving a comment onto a neighbouring anchor left it green; it now compares the entire printed output against a frozen expected string in one `assert_eq!`, which pins placement, indentation and ordering at once, and a second test gives every directive variant a comment against `write_header`'s actual fixed order.
+
+4. **An `.asm` fixture put every whole-line comment above a `result` line or a label line**, each of which drains `pending` before any instruction is reached. So the ordinary case — a whole-line comment directly above an unlabeled instruction — was untested, in a fixture whose entire purpose was to reach every `AsmAnchor` variant. It now carries a second instruction with a comment directly above it and no label or directive between, asserting `AsmAnchor::Instr(1)` so the index cannot be a hardcoded `0`.
+
+**THE GENERAL FORM: coverage is a property of a fixture's SHAPE, not of the list of things it mentions.** All four of these tests named the variants they were supposed to cover. The generator drew from every anchor; the emission test had a comment for each; the asm fixture listed `Result`, `Label`, `Instr` and `Eof` by name. What none of them had was a document whose shape put a comment anywhere but the end, or a second `tapes` line, or a header, or an instruction with nothing above it. **512 passing cases said nothing, twice**: the same property, at the same `ProptestConfig::with_cases(512)`, was green while blind to the duplicate `tapes` line AND green while blind to a printer that stably dropped every comment. The number of documents was never the variable.
+
+##### THE STOPPING RULE IS SHARPER THAN "THE SABOTAGE REDDENED IT", AND THE SHARPER FORM IS WHAT EXPOSED AN ASSERTION THAT COULD NOT FAIL
+
+**A sabotage that reddens an assertion proves less than a sabotage that reddens one assertion while leaving another green.** The first shows a test can fail. The second shows WHICH test carries the weight, and that its neighbours are not carrying it for it. Three on this branch, each applied, measured and reverted:
+
+- **Removing `write_header`'s call reddens the header assertion and nothing else.** The case aborts there, and the machine is built from `tapes`, `start` and the states, which still print.
+- **No-op'ing `CommentWriter::own_line` and `CommentWriter::trailing` reddens the survival assertion while byte-level idempotence stays GREEN.** A printer that stably drops every comment prints the same bytes twice, so idempotence is structurally blind to it.
+- **Dropping the `accept` keyword reddens the machine assertion while idempotence is likewise blind.**
+
+**The middle one is what forced the survival assertion to exist.** The property had excluded `comments` from its comparison entirely, so a printer that stably dropped every comment satisfied all three of its assertions. `is_sub_multiset` closes that — a SUB-MULTISET rather than a subset, because two comments with identical text are two obligations for the printer to preserve, and set containment is satisfied by one copy surviving while the other silently vanishes.
+
+**And the assertion it replaced could not fail at all.** The property compared `parse_tm_full` of the twice-printed text against `parse_tm_full` of the once-printed text — but once byte idempotence holds, those are the same string fed to a pure function, so every field agrees by construction. Nothing then related the printed output to the ORIGINAL parse in any way; a printer that stably dropped the whole header would have satisfied it too. The assertions now relate the reparse back to the parse of the source the generator actually wrote.
+
+##### FOUR SENTENCES IN THE DESIGN DOCUMENT WERE FALSE, AND EACH WAS WRITTEN WHILE CORRECTING THE PREVIOUS ONE
+
+§2.4 of the design is one short section, and it was wrong four times in sequence with every correction introducing the next error:
+
+1. The guarantee was stated as the strict round trip `parse_tm_full(print_tm_doc(d)) == d`. False, for the reason in the first section above.
+2. Correcting that, the replacement said the document round trip *"does hold from the first print onward"*, comparing the once-printed text with the twice-printed one. A tautology, as the section above records.
+3. Correcting THAT, the paragraph read *"the comments do not [survive]"* — which says comments may be lost, the exact opposite of what this whole slice guarantees. The distinction it was missing is the direction: survival holds, equality does not.
+4. And the paragraph explaining the duplicate-line defect said the sequence stabilised *"only from the third print"*, counting the first print that equals its predecessor rather than the number of distinct values. Hand reconstruction gives exactly two, for `Start` as well as for `Tapes` and for any number of empty trailing comments.
+
+A fifth in the same section: **one sabotage was credited with proving three assertions, and it reddens exactly one of them** — the rule of the section above, broken inside the paragraph that states it.
+
+**AND THE SAME FALSE SENTENCE WAS FIXED IN THE SPEC AND LEFT STANDING IN THE PLAN, FROM WHICH AN IMPLEMENTER INHERITED IT INTO SHIPPED CODE.** §2.4's clean-parse clause argued that a document carrying diagnostics reprints to text that parses clean, so its round trip returns an empty `diagnostics` and fails equality — an argument from a comparison the property does not perform. The real reason is different and stronger: every diagnostic under the TM module is `Severity::Error`, so any diagnostic at all leaves `machine: None`, `print_tm_doc` returns `None` through its `?`, and the guard is load-bearing **against a panic** rather than against a failed comparison. That correction was applied to the spec and not to the plan's Task 8, which stated the identical false mechanism; Task 8's implementer inherited it, wrote it into the property's doc comment, and it shipped until a review checked it in one line. **A class fixed in one document and not in its neighbour** — the failure this file already carries a diagnosis of, committed again on the branch that was reading it.
+
+##### WHAT STAYS OPEN
+
+- **λ gains no comment syntax, and that is a property rather than a gap.** Its text form has no comment token at all, so there is nothing to retain and nothing to add here. It is why this slice is two forms and not three.
+- **Comment placement WITHIN a line is not preserved.** The body is trimmed and reprinted as `; body`, so `;x` and `;    x` come back alike and column is not recorded anywhere. **That is what makes the round trip a fixed point rather than a best effort**, and it is a choice rather than a limitation waiting to be fixed.
+- **Blank lines are not preserved.** The printer decides where those go, as it always has. Only comments are recovered.
+- **`redextape fmt` does not yet accept `.tm` or `.asm`** — it handles `.rxt` alone. Teaching it the two forms is now possible without data loss, and is the natural follow-on.
+- **The obligation `CommentWriter`'s doc states for a third anchor type is prose, not a gate.** Nothing mechanical stops a future instantiation whose anchor variants name a family of lines, which is exactly the shape that produced the defect above.
+- **This is PR A of a two-PR design.** The `redextape-lsp` crate is PR B, and it has no plan yet.
+- **CLOSED BEFORE MERGE — `parse_tm_full`'s six hand-rolled copies of "content up to the first `;`" now go through `comments::content_before_comment`.** It is left in this list rather than moved out of it because the finding, the reason it was deferred, and the reason that reversed are one story; what follows is its history. **The bolded lead said the opposite until a review pointed out that a bullet under a WHAT STAYS OPEN heading is read by its first clause**, and burying `CLOSED` forty per cent into a long paragraph leaves a scanning reader with the false half. The original description: `parse_tm_full` re-derived "content up to the first `;`" six times over, independently of `comments::split_trailing`. `parse_cells`, `HeaderParts::directive`, `parse_rule_line` and three sites inside `parse_tm_full` itself each call `.split(';').next()` by hand to strip a trailing comment before reading the content that precedes it, rather than going through the one shared splitter `attach` already uses for the comment side of the same line. `parse_asm_full` does not have this shape today, and **it carried the seventh copy until this branch folded it.** Before the comment-retention task it spelled the same thing character-for-character; that task replaced it with a single `split_trailing` call feeding both halves, because it needed the comment half for the first time and a second independent split would have been the duplication being described here. So the pre-branch tree held seven copies, this branch folded the asm one as a side effect of the feature, and the six named above were folded last. The six TM sites and `split_trailing` agree today because both split on the first `;`, but nothing enforces that agreement; a change to either side (an escaped `;` in a comment body, say) could desynchronize what a line's content is taken to be from what its comment is taken to be, with no test positioned to catch the drift since the six sites predate this branch and comment recovery only reads their output after the fact. **CLOSED before merge, at the repository owner's call, and the measurement is why it was cheap.** The six spellings are provably interchangeable rather than merely agreeing in practice: `str::split` always yields at least one item, so each site's `unwrap_or("")` arm is unreachable, and both forms answer with the prefix before the first `;` or the whole string when there is none. All six now call `comments::content_before_comment`, which is `split_trailing`'s first half trimmed — so a line's content and that same line's comment are derived from one function for both grammars, which is what `parse_asm_full` already did. `git grep "split(';')" crates/redextape-core/src` matches exactly one line afterwards, inside the new function's own doc comment explaining what it replaced. The workspace suite is unchanged at 1403 passed — **and that figure proves less than the sentence here first claimed.** It read "the property that matters for a fold justified on equivalence: not that the tests still pass, but that not one expected value moved". Since the two spellings are extensionally equal on every input, no expected value *could* have moved, so the count has no discriminating power whatever over the equivalence claim it was offered for. What it does rule out is a mechanical slip across six edits — the wrong receiver threaded at one site — which is a real property and a different one. **This file's own entry above documents four cases of a measurement credited with more than it can see, and this is the fifth, written while closing the branch that documents them.**
+
+##### VERIFICATION
+
+Figures measured at `4135ef7`, the branch's last commit before the one that adds this entry, and every one of them re-run there rather than carried from any earlier commit or from any task report.
+
+```
+28                      commits                      git rev-list --count main..4135ef7
+19 files, +3812/-206    whole-branch diff            git diff --shortstat main..4135ef7
+1403 passed, 10 skipped workspace                    cargo nextest run --workspace
+22 passed, 0 skipped    the two new test binaries    cargo nextest run -p redextape-core
+                                                      -E 'binary(tm_comments) + binary(asm_comments)'
+94.91% lines            coverage, floor 90           cargo llvm-cov nextest --workspace
+  (22276 lines, 1133 missed)                          --fail-under-lines 90   [exit 0]
+100.00% lines           the new comments module      the same run's per-file row
+```
+
+```
+$ scripts/check-all.sh
+all configs green — base, LLVM and browser
+[exited with code 0]
+```
+
+**No leg was skipped.** The gate ran in its full form — base, LLVM and browser tiers — rather than under `--no-llvm` or `--no-browser`, so the closing line above is the full one and not a narrowed gate's.
+
+**THE PRINTERS WERE CONFIRMED NOT TO HAVE MOVED BY HAND AS WELL AS BY TEST**, because the whole slice rests on that and a command a person watched is a different kind of evidence from a test that passed. `cargo run -q -p redextape-cli -- run crates/redextape-core/tests/fixtures/list_1_2.tm` prints `[1, 2]` and exits 0 — that fixture carries `; reg` on its `tape 0` line today, so it is the displacement rule's own witness travelling through the changed `parse_tm_full` on its way to being simulated. `cargo run -q -p redextape-cli -- emit crates/redextape-cli/tests/cmd/emit_asm.in/p.rxt --lang tm` exits 0 with nothing on stderr and its first line is `tapes 5`.
+
+`git status --porcelain` is empty at this head, and `find crates -maxdepth 2 \( -iname bindings -o -iname pkg \) -type d` prints nothing — **checked by name rather than inferred from a clean status**, because this file records a sabotage that left a gitignored binding file which a revert did not remove and which `git status` could not see. `git clean -nxd` over `crates`, `docs`, `scripts` and the TM grammar directory lists one entry, a compiled `parser.so` whose mtime is a week older than this branch's work and which `.gitignore` documents as written by an editor running `tree-sitter build`, not by anything here. **That scope covers one of four grammar directories, not all of them**: `tree-sitter-redextape`, `tree-sitter-redextape-asm` and `tree-sitter-redextape-lambda` each hold their own gitignored `parser.so` too, at the same mtime as the TM grammar's — one editor run across the whole `grammars/` tree, not four separate ones — and none of the three were swept by the command actually run here.
+
+**The three sabotages in the stopping-rule section are the branch's own recorded measurements from the rounds that made them, and they were NOT re-run at this head**, because this task was not permitted to modify code. They are named here as history rather than as figures measured at `4135ef7`, which is the distinction the block above exists to keep.
+
+##### AND THE BLOCK ABOVE WENT STALE BEFORE THE BRANCH MERGED, WHICH IS THE SEVENTH INSTANCE OF THIS FILE'S OLDEST FAILURE
+
+Those figures were measured at `4135ef7` and correctly say so. **Four commits then landed after
+them** — the whole-branch review's fix rounds and one more correction found while checking those.
+Every figure above remains true of the commit it names and none of them describes the branch that
+merged. A number anchored to a SHA does not rot; a *sentence* around it does, and the sentence there
+calls `4135ef7` "the branch's last commit before the one that adds this entry", which stopped being
+true the moment a review found something.
+
+Re-measured at `2ebf100`, the branch's real head, with the full gate re-run there rather than
+inferred from the earlier run:
+
+```
+32                      commits                      git rev-list --count main..2ebf100
+20 files, +3941/-207    whole-branch diff            git diff --shortstat main..2ebf100
+1403 passed, 10 skipped workspace                    cargo nextest run --workspace
+```
+
+```
+$ scripts/check-all.sh
+all configs green — base, LLVM and browser
+[exited with code 0]
+```
+
+`git status --porcelain` empty at `2ebf100`. **And then the branch moved again, twice more, so even
+the escape hatch this paragraph reached for went stale.** It read "everything after `2ebf100` on this
+branch is this section and nothing else" — true when written and false within the hour, because a
+review of the six-site fold found two more sentences to correct.
+
+**So the durable statement is a rule and not a number.** Every figure in this entry names the commit
+it was measured at, and none is carried from another. The full gate and the slow tier were re-run at
+every commit that changed code, including the last. What no sentence here will attempt again is a
+count of how many commits follow it: three separate attempts to pin that number went stale, each
+within one review round of being written, and the third was a paragraph explaining why the second
+had.
+
+**What the four post-measurement commits were is the part worth keeping.** Two carried whole-branch
+review fixes: four false or stale claims in prose, `print_asm_doc`'s gratuitous `match`, and TM's
+line trim aligned to asm's `['\r', '\n']` form. One was a check of those fixes that found a *sixth*
+false round-trip claim in `CommentWriter::trailing`'s doc — ten lines below the fifth, in the same
+file, in the same class, which the review that found the fifth and the round that fixed it both
+walked past. And this one. **The entry above documents "the instance fixed, the class missed" as a
+recurring failure of this branch and then reproduced it during its own review.**

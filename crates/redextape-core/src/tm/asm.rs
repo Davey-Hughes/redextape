@@ -5,6 +5,8 @@
 
 use crate::analysis::push_span;
 use crate::core::BinOp;
+use crate::tm::asm_syntax::AsmDocument;
+use crate::tm::comments::{AnchoredComment, AsmAnchor, CommentWriter};
 use crate::ty::Ty;
 use crate::value::Value;
 use std::collections::HashMap;
@@ -261,53 +263,7 @@ pub fn print_asm(prog: &Program) -> String {
 /// so offsets are exact by construction — nothing re-scans the output.
 #[must_use]
 pub fn print_asm_mapped(prog: &Program) -> (String, crate::analysis::Classified) {
-    use crate::analysis::TokenClass as C;
-    let mut out = String::new();
-    let mut spans: crate::analysis::Classified = Vec::new();
-    let emit_label = |out: &mut String, spans: &mut crate::analysis::Classified, name: &str| {
-        push_span(out, spans, name, C::Label);
-        push_span(out, spans, ":", C::Punct);
-        out.push('\n');
-    };
-    // Bucket the labels by the index they precede, once. Rescanning `prog.labels` inside the loop over
-    // `prog.code` made printing O(code x labels), and both grow with program size.
-    //
-    // `prog.labels` ORDER is load-bearing: when several labels sit at one index they print in the order
-    // they appear there, and the goldens pin that. Pushing into per-index buckets in `prog.labels` order
-    // reproduces it exactly. The `code.len() + 1` length covers the one-past-the-end targets handled
-    // below; a label further past the end is dropped by `get_mut`, which is what the old scan did too
-    // (neither loop had an index for it).
-    let mut labels_at: Vec<Vec<&str>> = vec![Vec::new(); prog.code.len() + 1];
-    for (name, at) in &prog.labels {
-        if let Some(bucket) = labels_at.get_mut(*at) {
-            bucket.push(name);
-        }
-    }
-    for (idx, instr) in prog.code.iter().enumerate() {
-        for name in labels_at.get(idx).into_iter().flatten() {
-            emit_label(&mut out, &mut spans, name);
-        }
-        out.push_str("    ");
-        let (mnemonic, operands) = instr_parts(instr);
-        push_span(&mut out, &mut spans, mnemonic, C::Mnemonic);
-        for (i, operand) in operands.iter().enumerate() {
-            // The `\t` before the first operand and the space after each `,` are whitespace and belong
-            // to no span; the `,` itself is punctuation, classified as the TM printer already does.
-            if i == 0 {
-                out.push('\t');
-            } else {
-                push_span(&mut out, &mut spans, ",", C::Punct);
-                out.push(' ');
-            }
-            push_span(&mut out, &mut spans, &operand_str(operand), operand.class());
-        }
-        out.push('\n');
-    }
-    // Any labels pointing one past the end (e.g. a trailing skip target) still print.
-    for name in labels_at.get(prog.code.len()).into_iter().flatten() {
-        emit_label(&mut out, &mut spans, name);
-    }
-    (out, spans)
+    print_asm_with_inner(prog, None, &[])
 }
 
 /// The optional self-describing block an emitted `.asm` file may carry.
@@ -337,27 +293,105 @@ pub fn print_asm_with(prog: &Program, h: &AsmHeader) -> String {
     print_asm_with_mapped(prog, h).0
 }
 
-/// `print_asm_with`, plus a class per span. Offsets are exact by construction: the header's spans are
-/// pushed as it is written, and the listing's are shifted by the header's byte length rather than
-/// recomputed, so the two halves cannot disagree about where the listing starts.
+/// `print_asm_with`, plus a class per span of the produced text — the header directive included.
 #[must_use]
 pub fn print_asm_with_mapped(prog: &Program, h: &AsmHeader) -> (String, crate::analysis::Classified) {
+    print_asm_with_inner(prog, Some(h), &[])
+}
+
+/// The one printer. The header's presence is the ONLY difference between `print_asm_mapped` and
+/// `print_asm_with_mapped`, which is what keeps them from drifting. Spans are pushed as each piece is
+/// appended, so an offset is exact by construction and nothing re-scans the output.
+///
+/// `comments` is `&[]` from `print_asm_mapped`/`print_asm_with_mapped`: an empty slice makes every
+/// `CommentWriter` call below write nothing, so those two entry points stay byte-identical to what
+/// they produced before comments existed by construction, not by care taken here.
+fn print_asm_with_inner(
+    prog: &Program,
+    header: Option<&AsmHeader>,
+    comments: &[AnchoredComment<AsmAnchor>],
+) -> (String, crate::analysis::Classified) {
     use crate::analysis::TokenClass as C;
     let mut out = String::new();
     let mut spans: crate::analysis::Classified = Vec::new();
-    push_span(&mut out, &mut spans, "result", C::Keyword);
-    out.push(' ');
-    push_span(&mut out, &mut spans, &crate::ty::show(&h.result), C::Ident);
-    out.push('\n');
-    out.push('\n');
 
-    let offset = out.len();
-    let (listing, listing_spans) = print_asm_mapped(prog);
-    out.push_str(&listing);
-    spans.extend(
-        listing_spans.into_iter().map(|(s, c)| (crate::span::Span { start: s.start + offset, end: s.end + offset }, c)),
-    );
+    // The same writer the TM printer uses. One rule, one implementation.
+    let cw = CommentWriter::new(comments);
+
+    if let Some(h) = header {
+        cw.own_line(&mut out, &mut spans, AsmAnchor::Result, "");
+        push_span(&mut out, &mut spans, "result", C::Keyword);
+        out.push(' ');
+        push_span(&mut out, &mut spans, &crate::ty::show(&h.result), C::Ident);
+        cw.trailing(&mut out, &mut spans, AsmAnchor::Result);
+        out.push('\n');
+        out.push('\n');
+    }
+
+    // Bucket the labels by the index they precede, once. Rescanning `prog.labels` inside the loop over
+    // `prog.code` made printing O(code x labels), and both grow with program size.
+    //
+    // `prog.labels` ORDER is load-bearing: when several labels sit at one index they print in the order
+    // they appear there, and the goldens pin that. Pushing into per-index buckets in `prog.labels` order
+    // reproduces it exactly. The `code.len() + 1` length covers the one-past-the-end targets handled
+    // below; a label further past the end is dropped by `get_mut`, which is what the old scan did too
+    // (neither loop had an index for it).
+    //
+    // `(usize, &str)` rather than `&str`: the anchor is the label's own index in `prog.labels`, because
+    // several labels may sit at one instruction index and this bucketing is what reproduces their
+    // order. The index has to travel with the name to reach the emit calls below.
+    let mut labels_at: Vec<Vec<(usize, &str)>> = vec![Vec::new(); prog.code.len() + 1];
+    for (li, (name, at)) in prog.labels.iter().enumerate() {
+        if let Some(bucket) = labels_at.get_mut(*at) {
+            bucket.push((li, name.as_str()));
+        }
+    }
+
+    let emit_label = |o: &mut String, s: &mut crate::analysis::Classified, li: usize, name: &str| {
+        cw.own_line(o, s, AsmAnchor::Label(li), "");
+        push_span(o, s, name, C::Label);
+        push_span(o, s, ":", C::Punct);
+        cw.trailing(o, s, AsmAnchor::Label(li));
+        o.push('\n');
+    };
+
+    for (idx, instr) in prog.code.iter().enumerate() {
+        for (li, name) in labels_at.get(idx).into_iter().flatten() {
+            emit_label(&mut out, &mut spans, *li, name);
+        }
+        cw.own_line(&mut out, &mut spans, AsmAnchor::Instr(idx), "    ");
+        out.push_str("    ");
+        let (mnemonic, operands) = instr_parts(instr);
+        push_span(&mut out, &mut spans, mnemonic, C::Mnemonic);
+        for (i, operand) in operands.iter().enumerate() {
+            // The `\t` before the first operand and the space after each `,` are whitespace and belong
+            // to no span; the `,` itself is punctuation, classified as the TM printer already does.
+            if i == 0 {
+                out.push('\t');
+            } else {
+                push_span(&mut out, &mut spans, ",", C::Punct);
+                out.push(' ');
+            }
+            push_span(&mut out, &mut spans, &operand_str(operand), operand.class());
+        }
+        cw.trailing(&mut out, &mut spans, AsmAnchor::Instr(idx));
+        out.push('\n');
+    }
+    // Any labels pointing one past the end (e.g. a trailing skip target) still print.
+    for (li, name) in labels_at.get(prog.code.len()).into_iter().flatten() {
+        emit_label(&mut out, &mut spans, *li, name);
+    }
+    cw.own_line(&mut out, &mut spans, AsmAnchor::Eof, "");
     (out, spans)
+}
+
+/// Render a document — program, header and comments — as `.asm` text.
+///
+/// `None` when the document has no program, for the reason `print_tm_doc` states.
+#[must_use]
+pub fn print_asm_doc(d: &AsmDocument) -> Option<String> {
+    let p = d.program.as_ref()?;
+    Some(print_asm_with_inner(p, d.header.as_ref(), &d.comments).0)
 }
 
 /// Resource caps for `run_asm`, mirroring the reference interpreter's budget/depth guards.

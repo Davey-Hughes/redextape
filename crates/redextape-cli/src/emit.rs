@@ -470,10 +470,10 @@ mod tests {
     fn emitted_tm_carries_a_header_and_re_parses() {
         let (text, err, outcome) = emit_case("tm", "1 + 2", Lang::Tm, Some(EncodingArg::Unary));
         assert!(matches!(outcome, Outcome::Emitted), "stderr: {err}");
-        let (machine, header, ds) = redextape_core::tm::parse_tm_full(&text);
-        assert!(ds.is_empty(), "emitted TM must re-parse cleanly, got: {ds:?}");
-        assert!(machine.is_some(), "emitted TM must carry a machine");
-        assert!(header.is_some(), "emitted TM must carry a header, or `run` cannot use it");
+        let doc = redextape_core::tm::parse_tm_full(&text);
+        assert!(doc.diagnostics.is_empty(), "emitted TM must re-parse cleanly, got: {:?}", doc.diagnostics);
+        assert!(doc.machine.is_some(), "emitted TM must carry a machine");
+        assert!(doc.header.is_some(), "emitted TM must carry a header, or `run` cannot use it");
     }
 
     #[test]
@@ -558,9 +558,9 @@ mod tests {
     fn binary_succeeds_where_unary_overflowed() {
         let (text, err, outcome) = emit_case("overflow-binary", OVERFLOW_SRC, Lang::Tm, Some(EncodingArg::Binary));
         assert!(matches!(outcome, Outcome::Emitted), "stderr: {err}");
-        let (machine, header, ds) = redextape_core::tm::parse_tm_full(&text);
-        assert!(ds.is_empty(), "got: {ds:?}");
-        assert!(machine.is_some() && header.is_some());
+        let doc = redextape_core::tm::parse_tm_full(&text);
+        assert!(doc.diagnostics.is_empty(), "got: {:?}", doc.diagnostics);
+        assert!(doc.machine.is_some() && doc.header.is_some());
     }
 
     /// A capped fitting run is NOT the overflow case. The header records the initial tapes and the
@@ -573,9 +573,13 @@ mod tests {
         assert!(matches!(outcome, Outcome::Emitted), "a capped fitting run still emits; stderr: {err}");
         assert!(err.starts_with("note:"), "the note must not read as an error, got: {err}");
         assert!(err.contains("TM_DEFAULT_CAPS"), "the note must name the cap, got: {err}");
-        let (machine, header, ds) = redextape_core::tm::parse_tm_full(&text);
-        assert!(ds.is_empty(), "the emitted file must still be a valid machine, got: {ds:?}");
-        assert!(machine.is_some() && header.is_some());
+        let doc = redextape_core::tm::parse_tm_full(&text);
+        assert!(
+            doc.diagnostics.is_empty(),
+            "the emitted file must still be a valid machine, got: {:?}",
+            doc.diagnostics
+        );
+        assert!(doc.machine.is_some() && doc.header.is_some());
     }
 
     /// `emit --lang asm`'s new behavior: the common path's `ty` (already computed before `match lang`)
@@ -589,7 +593,8 @@ mod tests {
         assert!(err.is_empty(), "no stderr: {err}");
         assert!(matches!(outcome, Outcome::Emitted));
         assert!(text.contains("result Nat"), "the header names the result type:\n{text}");
-        let (prog, header, ds) = redextape_core::tm::parse_asm_full(&text);
+        let doc = redextape_core::tm::parse_asm_full(&text);
+        let (prog, header, ds) = (doc.program, doc.header, doc.diagnostics);
         assert!(ds.is_empty(), "the emitted file parses: {ds:?}");
         assert_eq!(header.map(|h| h.result), Some(redextape_core::ty::Ty::Nat));
         assert!(!prog.expect("parses").code.is_empty());
@@ -612,7 +617,8 @@ mod tests {
     fn a_program_with_no_expressible_result_type_emits_asm_without_a_header() {
         let (text, err, outcome) = emit_case("asm-var", "[]", Lang::Asm, None);
         assert!(matches!(outcome, Outcome::Emitted), "emitting a listing does not require a result type: {err}");
-        let (_, header, ds) = redextape_core::tm::parse_asm_full(&text);
+        let doc = redextape_core::tm::parse_asm_full(&text);
+        let (header, ds) = (doc.header, doc.diagnostics);
         assert!(ds.is_empty(), "{ds:?}");
         assert_eq!(header, None, "no header, because no value type could be written");
     }

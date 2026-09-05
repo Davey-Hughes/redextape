@@ -8,6 +8,7 @@ pub mod asm;
 pub mod asm_syntax;
 pub mod attribute;
 pub mod build;
+pub mod comments;
 pub mod decode;
 pub mod defunc;
 pub mod encoding;

@@ -220,11 +220,13 @@ impl TmHeader {
 }
 
 use crate::analysis::{Classified, TokenClass, push_span};
+use crate::tm::comments::{CommentWriter, TmAnchor, TmDirective, content_before_comment};
 use crate::ty::show;
 
 /// Append `h`'s directives to `out`, one per line, each ending in a newline, pushing a class per span
 /// onto `spans`. Emitted between `start` and the states by `syntax::print_tm_inner`, which owns the
 /// buffer — so the offsets recorded here are already absolute in the finished file, with no rebasing.
+/// `cw` is that same call's `CommentWriter`, so an authored comment against a header line lands on it.
 ///
 /// The order — `version`, `encoding`, `width`, `slots`, `result`, then `tape` lines ascending — is
 /// FIXED, even though the parser accepts any order. A printer has to choose one, and a fixed choice is
@@ -236,21 +238,26 @@ use crate::ty::show;
 /// this tree writes one — the tape alphabet is `_ # 1 0 @` — and `Machine::validate()` already
 /// reserves `;`. A hand-built machine using `;` as a data symbol is outside the representable subset
 /// the text form is specified for, the same as one whose state name contains a space.
-pub(crate) fn write_header(out: &mut String, spans: &mut Classified, h: &TmHeader) {
-    let directive = |out: &mut String, spans: &mut Classified, key: &str, val: &str, class: TokenClass| {
-        push_span(out, spans, key, TokenClass::Keyword);
-        out.push(' ');
-        push_span(out, spans, val, class);
-        out.push('\n');
-    };
+pub(crate) fn write_header(out: &mut String, spans: &mut Classified, h: &TmHeader, cw: &CommentWriter<'_, TmAnchor>) {
+    let directive =
+        |out: &mut String, spans: &mut Classified, key: &str, val: &str, class: TokenClass, anchor: TmDirective| {
+            cw.own_line(out, spans, TmAnchor::Directive(anchor), "");
+            push_span(out, spans, key, TokenClass::Keyword);
+            out.push(' ');
+            push_span(out, spans, val, class);
+            cw.trailing(out, spans, TmAnchor::Directive(anchor));
+            out.push('\n');
+        };
     // `encoding` and `result` name an encoding and a type; neither has a class of its own, and `Ident`
     // is the vocabulary's word for "a name whose meaning comes from elsewhere in the file".
-    directive(out, spans, "version", &HEADER_VERSION.to_string(), TokenClass::Nat);
-    directive(out, spans, "encoding", h.encoding.name(), TokenClass::Ident);
-    directive(out, spans, "width", &h.width.to_string(), TokenClass::Nat);
-    directive(out, spans, "slots", &h.slots.to_string(), TokenClass::Nat);
-    directive(out, spans, "result", &show(&h.result), TokenClass::Ident);
+    directive(out, spans, "version", &HEADER_VERSION.to_string(), TokenClass::Nat, TmDirective::Version);
+    directive(out, spans, "encoding", h.encoding.name(), TokenClass::Ident, TmDirective::Encoding);
+    directive(out, spans, "width", &h.width.to_string(), TokenClass::Nat, TmDirective::Width);
+    directive(out, spans, "slots", &h.slots.to_string(), TokenClass::Nat, TmDirective::Slots);
+    directive(out, spans, "result", &show(&h.result), TokenClass::Ident, TmDirective::Result);
     for (i, cells) in &h.tapes {
+        let anchor = TmDirective::Tape(*i);
+        cw.own_line(out, spans, TmAnchor::Directive(anchor), "");
         let packed: String = cells.iter().collect();
         push_span(out, spans, "tape", TokenClass::Keyword);
         out.push(' ');
@@ -262,10 +269,20 @@ pub(crate) fn write_header(out: &mut String, spans: &mut Classified, h: &TmHeade
         if !packed.is_empty() {
             push_span(out, spans, &packed, TokenClass::TapeSymbol);
         }
-        if let Some(name) = tape_name(*i) {
+        // AN AUTHORED COMMENT DISPLACES THE GENERATED LABEL RATHER THAN JOINING IT. `;` runs to end
+        // of line, so `; reg  ; mine` reparses as ONE comment whose body is `reg  ; mine`, and the
+        // round trip is lost. The author's line wins: a generated label is a convenience, and
+        // somebody who wrote their own has said what they want the line to say.
+        //
+        // Reachable, not defensive: `tape_name` labels tape 0 `reg` and tape 1 `work`, and
+        // `tests/fixtures/list_1_2.tm` carries `; reg` on its `tape 0` line today.
+        if !cw.has_trailing(TmAnchor::Directive(anchor))
+            && let Some(name) = tape_name(*i)
+        {
             out.push_str("  ");
             push_span(out, spans, &format!("; {name}"), TokenClass::Comment);
         }
+        cw.trailing(out, spans, TmAnchor::Directive(anchor));
         out.push('\n');
     }
 }
@@ -273,7 +290,7 @@ pub(crate) fn write_header(out: &mut String, spans: &mut Classified, h: &TmHeade
 /// Unpack a `tape` line's cell run: strip a trailing `;` comment, trim, and take one `Symbol` per
 /// char. The inverse of `print_header`'s packing (D4).
 pub(crate) fn parse_cells(s: &str) -> Vec<Symbol> {
-    s.split(';').next().unwrap_or("").trim().chars().collect()
+    content_before_comment(s).chars().collect()
 }
 
 /// The header directives seen so far, accumulated across the parse loop so they can arrive in any
@@ -322,7 +339,7 @@ impl HeaderParts {
     /// admitting agreeing duplicates would mean comparing values to decide whether a file is
     /// well-formed, which is a strictly worse rule to state and to test.
     pub(crate) fn directive(&mut self, key: &str, rest: &str, span: Span) -> Option<Result<(), String>> {
-        let val = rest.split(';').next().unwrap_or("").trim();
+        let val = content_before_comment(rest);
         match key {
             // Unlike the four directives below, an unrecognized version is not "incomplete" — it is
             // refused outright, here, at the earliest point it can be: a v2 file parsed under v1 rules
@@ -498,7 +515,7 @@ mod tests {
     /// A one-line wrapper over the one formatter — the spans are simply discarded here.
     fn print_header(h: &TmHeader) -> String {
         let mut out = String::new();
-        write_header(&mut out, &mut Vec::new(), h);
+        write_header(&mut out, &mut Vec::new(), h, &CommentWriter::new(&[]));
         out
     }
 

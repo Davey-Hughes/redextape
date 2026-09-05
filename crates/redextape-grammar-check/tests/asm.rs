@@ -265,7 +265,8 @@ fn every_printed_token_is_captured() {
 #[test]
 fn parse_asm_accepts_every_corpus_entry() {
     for (name, src) in CORPUS {
-        let (prog, _header, diagnostics) = redextape_core::tm::parse_asm_full(src);
+        let doc = redextape_core::tm::parse_asm_full(src);
+        let (prog, diagnostics) = (doc.program, doc.diagnostics);
         assert!(diagnostics.is_empty(), "`{name}` must parse under the real authority cleanly, got: {diagnostics:?}");
         assert!(prog.is_some(), "`{name}` produced no program despite no diagnostics");
     }

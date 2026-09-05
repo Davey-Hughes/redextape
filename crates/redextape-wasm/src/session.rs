@@ -1240,8 +1240,9 @@ pub fn tm_scratch(src: &str) -> Scratched<TmScratch> {
 /// that never runs. With a budget of three the same states are reached in microseconds, by the same
 /// code, from the same text.
 fn tm_scratch_with_caps(src: &str, caps: tm::TmCaps) -> Scratched<TmScratch> {
-    let (machine, header, diagnostics) = tm::parse_tm_full(src);
-    let scratch = machine.map(|m| {
+    let doc = tm::parse_tm_full(src);
+    let header = doc.header;
+    let scratch = doc.machine.map(|m| {
         let (program, cursor) = match &header {
             // The IDENTICAL function `compile` builds its leg with, not a copy of it — which is what
             // makes "a headered scratch matches the `Session` path" a property of one code path rather
@@ -1257,7 +1258,7 @@ fn tm_scratch_with_caps(src: &str, caps: tm::TmCaps) -> Scratched<TmScratch> {
         };
         TmScratch { program, cursor, header }
     });
-    Scratched { diagnostics, scratch }
+    Scratched { diagnostics: doc.diagnostics, scratch }
 }
 
 impl TmScratch {
