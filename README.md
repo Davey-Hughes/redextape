@@ -192,7 +192,11 @@ half, 2026-08-23), and `parse_asm` (2026-08-25) rounding out `emit`'s three text
 round-trip — and a `redextape.toml` for four settings plus `--deny-warnings` close Plan 6's remaining
 two knobs; see that crate's own README for the schema, discovery and precedence. `.rxlambda` is the
 one emitted form `redextape run` still does not take — a bare λ term carries no result type to decode
-against.
+against. `redextape fmt` has since grown the same two forms `run` already read — `.tm` and `.asm`
+alongside `.rxt` (Roadmap `cli-fmt-tm-asm`, 2026-09-05) — chosen by extension, by `--form` where a
+caller needs to override it, or for stdin by asking the parsers themselves rather than a pattern.
+`--width` stays a line budget the `.rxt` printer alone reads; an explicit `--width` on a `.tm` or
+`.asm` input is refused rather than silently ignored.
 
 The CLI and the web visualizer are both usable today. The examples below remain the most direct way to
 drive the raw backends, with no binary or browser involved:

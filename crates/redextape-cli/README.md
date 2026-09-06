@@ -1,6 +1,8 @@
 # `redextape` — the command line front end
 
     redextape fmt foo.rxt            rewrite in place
+    redextape fmt foo.tm             rewrite in place, comments preserved
+    redextape fmt foo.asm            rewrite in place, comments preserved
     redextape fmt --check src/*.rxt  diff what would change; rewrite nothing
     redextape fmt -                  stdin to stdout
     redextape lint foo.rxt           parse, type and lint diagnostics
@@ -27,10 +29,32 @@ script the program failed when it did not. The `2`s a user is most likely to mee
 fine are written out at the end of this file, because each reads as a bug in the flag until you know
 the rule.
 
-`fmt` is exactly `print ∘ parse` — `redextape_core::format_with_width`, which is `format` with the
-line budget passed in rather than read off `printer::MAX_WIDTH`, so the one flag and the one config
-key both land in the same place. A file that does not parse is reported and left untouched. Every other file named on the same command line is still processed, and the worst
-outcome across them is what sets the exit code.
+`fmt` is exactly `print ∘ parse` for all three forms, each through its own parser and printer:
+`.rxt` through `redextape_core::format_with_width`, which is `format` with the line budget passed in
+rather than read off `printer::MAX_WIDTH`; `.tm` through `parse_tm_full` and `print_tm_doc`; `.asm`
+through `parse_asm_full` and `print_asm_doc`. Formatting `.tm` and `.asm` preserves their comments,
+which is the whole reason formatting is offered for those two forms at all — `print_tm`/`print_asm`,
+the plain printers `emit` uses, drop every one. **What survives is each comment's text and the line
+it sits on — not its column, and not the blank lines around it**, which is worth knowing before
+running a command whose headline mode rewrites files in place. A comment body is trimmed and
+reprinted as `; body`, so `;x` and `;    x` come back alike; and the printer decides where blank
+lines go, as it always has. Both are choices rather than limitations waiting to be fixed — they are
+what make the round trip a fixed point rather than a best effort.
+
+**The formatter writes LF, and normalises a CRLF file to it.** That has always been true of `.rxt`
+and is now true of all three forms; the content is untouched, and a CRLF file comes back
+byte-identical to the same file authored with LF. **The consequence worth knowing is about
+`--check` rather than about a rewrite**: a CRLF file can never converge, so `redextape fmt --check`
+reports it as needing a change on every run and a pipeline that gates on that exit code fails
+permanently rather than once. Convert the file, or keep it out of the check. `--width` is a line budget only
+the `.rxt` printer reads; an explicit `--width` on a `.tm` or `.asm` input is refused rather than
+silently ignored, because those two printers lay out from their own content and have no width to
+apply it to. `--form {rxt,tm,asm}` names the form outright, overriding both the file's extension
+and, for standard input, the content sniffing that otherwise identifies it; standard input given no
+`--form` is identified by what parses — `parse_tm_full`, then `parse_asm_full`, falling back to
+`.rxt` when neither accepts it. A file that does not parse is reported and left untouched. Every
+other file named on the same command line is still processed, and the worst outcome across them is
+what sets the exit code.
 
 `lint` reports errors and two warnings: a `let mut` that is never assigned, and a binding that is never
 read. Name a binding `_x` to say you meant it. A warning does not fail the run by default — `lint`

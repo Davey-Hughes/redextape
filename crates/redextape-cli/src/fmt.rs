@@ -6,6 +6,7 @@
 //! aborts on the first broken file is useless, so every input is processed and the exit code reports
 //! the worst outcome seen.
 
+use crate::form::Form;
 use crate::input::{Input, write_atomic};
 use crate::report::render;
 
@@ -33,9 +34,19 @@ pub enum Outcome {
 ///
 /// Any `std::io::Error` from writing to `out` or `err`. A failure to read, write or parse an INPUT is
 /// not an error here — it is reported and folded into the returned `Outcome`.
+// `explicit_width` stays a separate `Option` from `width` so `one` can tell a user's flag from the
+// config default it was already collapsed with (see `main.rs`'s own comment on that), and `form` is
+// the user's `--form` override, resolved once inside `one` rather than here. Eight plain parameters
+// naming eight independent things is the honest shape of that. **An enclosing struct is a taste
+// call and not a correctness one** — an earlier revision of this comment claimed those two fields
+// "cannot fold into an enclosing struct without losing what each one is for", which is false: a
+// struct would carry the same fields under the same names and lose nothing.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     inputs: &[Input],
     check: bool,
+    explicit_width: Option<usize>,
+    form: Option<Form>,
     width: usize,
     out: &mut impl std::io::Write,
     err: &mut impl std::io::Write,
@@ -43,7 +54,7 @@ pub fn run(
 ) -> std::io::Result<Outcome> {
     let mut worst = Outcome::Clean;
     for input in inputs {
-        worst = worst.max(one(input, check, width, out, err, color)?);
+        worst = worst.max(one(input, check, explicit_width, form, width, out, err, color)?);
     }
     Ok(worst)
 }
@@ -58,9 +69,14 @@ pub fn diff(label: &str, before: &str, after: &str) -> String {
     d.unified_diff().header(&format!("{label} (before)"), &format!("{label} (after)")).to_string()
 }
 
+// Same shape, same reason as `run`'s own allow above — `one` is `run`'s per-input body and takes
+// the identical eight things, one input at a time.
+#[allow(clippy::too_many_arguments)]
 fn one(
     input: &Input,
     check: bool,
+    explicit_width: Option<usize>,
+    explicit_form: Option<Form>,
     width: usize,
     out: &mut impl std::io::Write,
     err: &mut impl std::io::Write,
@@ -74,11 +90,49 @@ fn one(
             return Ok(Outcome::Failed);
         }
     };
-    let formatted = match redextape_core::format_with_width(&src, width) {
-        Ok(f) => f,
-        Err(ds) => {
-            render(err, &label, &src, &ds, color)?;
-            return Ok(Outcome::Failed);
+    let form = Form::resolve(input, explicit_form, &src);
+    // `--width` is a line budget for the `.rxt` pretty-printer. The `.tm` and `.asm` printers take
+    // no width at all — they lay out from their own content — so an explicit `--width` on either is
+    // refused rather than silently ignored, the same way `run` refuses `--backend` on them. Keyed on
+    // `explicit_width`, never on the effective `width`: `redextape.toml` carries a `fmt.width`, and
+    // keying this on the collapsed value would refuse every `.tm`/`.asm` format on any machine that
+    // has a config file.
+    if explicit_width.is_some() && form.is_artifact() {
+        let noun = match form {
+            Form::Tm => "a `.tm` file, which the printer lays out from its own content",
+            Form::Asm => "an `.asm` file, which the printer lays out from its own content",
+            Form::Rxt => unreachable!("is_artifact() is false for Rxt"),
+        };
+        writeln!(err, "error: `--width` does not apply to {noun}")?;
+        return Ok(Outcome::Failed);
+    }
+    // The `.tm` and `.asm` printers take no width — they lay out from their own content, which is
+    // exactly why an explicit `--width` is refused above rather than threaded through to them.
+    let formatted = match form {
+        Form::Rxt => match redextape_core::format_with_width(&src, width) {
+            Ok(f) => f,
+            Err(ds) => {
+                render(err, &label, &src, &ds, color)?;
+                return Ok(Outcome::Failed);
+            }
+        },
+        Form::Tm => {
+            let doc = redextape_core::tm::parse_tm_full(&src);
+            if let Some(f) = redextape_core::tm::print_tm_doc(&doc) {
+                f
+            } else {
+                render(err, &label, &src, &doc.diagnostics, color)?;
+                return Ok(Outcome::Failed);
+            }
+        }
+        Form::Asm => {
+            let doc = redextape_core::tm::parse_asm_full(&src);
+            if let Some(f) = redextape_core::tm::print_asm_doc(&doc) {
+                f
+            } else {
+                render(err, &label, &src, &doc.diagnostics, color)?;
+                return Ok(Outcome::Failed);
+            }
         }
     };
     match input {
@@ -162,8 +216,17 @@ mod tests {
         let p = d.join("a.rxt");
         std::fs::write(&p, "let   x=1;\nx+1").unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got =
-            run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&p)],
+            false,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Rewritten), "got {got:?}");
         let after = std::fs::read_to_string(&p).unwrap();
         assert_eq!(after, redextape_core::format("let   x=1;\nx+1").unwrap());
@@ -178,11 +241,21 @@ mod tests {
         let p = d.join("a.rxt");
         std::fs::write(&p, "let   x=1;\nx+1").unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
+        run(&[Input::from_arg(&p)], false, None, None, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false)
+            .unwrap();
         let once = std::fs::read_to_string(&p).unwrap();
         out.clear();
-        let got =
-            run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&p)],
+            false,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Clean), "the second run has nothing to do: {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), once);
         assert!(out.is_empty(), "a clean path input must not print to stdout: {out:?}");
@@ -195,8 +268,17 @@ mod tests {
         let original = "let x = ;";
         std::fs::write(&p, original).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got =
-            run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&p)],
+            false,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Failed), "got {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), original, "THE FILE MUST NOT BE TOUCHED");
         // M2: `!err.is_empty()` also passes for a one-byte stderr; require the message name the file,
@@ -216,6 +298,8 @@ mod tests {
         let got = run(
             &[Input::from_arg(&bad), Input::from_arg(&good)],
             false,
+            None,
+            None,
             redextape_core::printer::MAX_WIDTH,
             &mut out,
             &mut err,
@@ -240,6 +324,8 @@ mod tests {
         let got = run(
             &[Input::from_arg(&good), Input::from_arg(&bad)],
             false,
+            None,
+            None,
             redextape_core::printer::MAX_WIDTH,
             &mut out,
             &mut err,
@@ -285,6 +371,8 @@ mod tests {
         let got = run(
             &[Input::from_arg(&unwritable), Input::from_arg(&good)],
             false,
+            None,
+            None,
             redextape_core::printer::MAX_WIDTH,
             &mut out,
             &mut err,
@@ -324,8 +412,17 @@ mod tests {
         let before = std::fs::metadata(&p).unwrap().ino();
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got =
-            run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&p)],
+            false,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Rewritten), "got {got:?}");
 
         let after = std::fs::metadata(&p).unwrap().ino();
@@ -346,8 +443,17 @@ mod tests {
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&link)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false)
-            .unwrap();
+        let got = run(
+            &[Input::from_arg(&link)],
+            false,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Rewritten), "got {got:?} (stderr: {})", String::from_utf8_lossy(&err));
 
         assert!(
@@ -376,8 +482,17 @@ mod tests {
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&link)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false)
-            .unwrap();
+        let got = run(
+            &[Input::from_arg(&link)],
+            false,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Rewritten), "got {got:?} (stderr: {})", String::from_utf8_lossy(&err));
 
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the link must survive");
@@ -401,8 +516,17 @@ mod tests {
         std::os::unix::fs::symlink(&middle, &link).unwrap();
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&link)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false)
-            .unwrap();
+        let got = run(
+            &[Input::from_arg(&link)],
+            false,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Rewritten), "got {got:?} (stderr: {})", String::from_utf8_lossy(&err));
 
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the outer link must survive");
@@ -423,8 +547,17 @@ mod tests {
         std::os::unix::fs::symlink(&nowhere, &link).unwrap();
 
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got = run(&[Input::from_arg(&link)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false)
-            .unwrap();
+        let got = run(
+            &[Input::from_arg(&link)],
+            false,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Failed), "got {got:?}");
         assert!(String::from_utf8(err).unwrap().contains("link.rxt"), "the failure must name the link the user passed");
         assert!(out.is_empty());
@@ -444,8 +577,17 @@ mod tests {
         let original = "let   x=1;\nx+1";
         std::fs::write(&p, original).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got =
-            run(&[Input::from_arg(&p)], true, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&p)],
+            true,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::WouldChange), "got {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), original, "--check must never write the file");
     }
@@ -457,8 +599,17 @@ mod tests {
         let formatted = redextape_core::format("let   x=1;\nx+1").unwrap();
         std::fs::write(&p, &formatted).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got =
-            run(&[Input::from_arg(&p)], true, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&p)],
+            true,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Clean), "got {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), formatted);
         assert!(out.is_empty());
@@ -475,6 +626,8 @@ mod tests {
         let got = run(
             &[Input::from_arg(&would_change), Input::from_arg(&bad)],
             true,
+            None,
+            None,
             redextape_core::printer::MAX_WIDTH,
             &mut out,
             &mut err,
@@ -491,8 +644,17 @@ mod tests {
         let clean = redextape_core::format("let x = 1;\nx + 1").unwrap();
         std::fs::write(&p, &clean).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got =
-            run(&[Input::from_arg(&p)], true, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&p)],
+            true,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Clean), "got {got:?}");
         assert!(out.is_empty() && err.is_empty(), "a clean --check is silent");
     }
@@ -504,8 +666,17 @@ mod tests {
         let original = "let   x=1;\nx+1";
         std::fs::write(&p, original).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got =
-            run(&[Input::from_arg(&p)], true, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&p)],
+            true,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::WouldChange), "got {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), original, "--check writes NOTHING");
         let text = String::from_utf8(out).unwrap();
@@ -527,7 +698,8 @@ mod tests {
         let p = d.join("a.rxt");
         std::fs::write(&p, "let   x=1;\nx+1").unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        run(&[Input::from_arg(&p)], true, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
+        run(&[Input::from_arg(&p)], true, None, None, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false)
+            .unwrap();
         let text = String::from_utf8(out).unwrap();
         assert!(!text.contains(".redextape-tmp"), "the temporary file is an implementation detail: {text}");
     }
@@ -539,8 +711,17 @@ mod tests {
         let d = tmpdir("missing");
         let p = d.join("nope.rxt");
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let got =
-            run(&[Input::from_arg(&p)], false, redextape_core::printer::MAX_WIDTH, &mut out, &mut err, false).unwrap();
+        let got = run(
+            &[Input::from_arg(&p)],
+            false,
+            None,
+            None,
+            redextape_core::printer::MAX_WIDTH,
+            &mut out,
+            &mut err,
+            false,
+        )
+        .unwrap();
         assert!(matches!(got, Outcome::Failed));
         assert!(String::from_utf8(err).unwrap().contains("nope.rxt"));
     }
@@ -554,5 +735,140 @@ mod tests {
         assert!(Outcome::Rewritten < Outcome::WouldChange);
         assert!(Outcome::WouldChange < Outcome::Failed);
         assert_eq!(Outcome::Clean.max(Outcome::Failed), Outcome::Failed);
+    }
+
+    /// Parses clean. Printing it changes it (one space becomes two before the trailing comment),
+    /// which is what lets a test tell formatting apart from a passthrough. Verbatim from
+    /// `form.rs`'s own `TM_IN`.
+    const TM_IN: &str = "; a machine\ntapes 1\nstart q0\n\nstate q0:\n  [a] -> write [b], move [R], goto q1 ; and a trailing one\nstate q1: accept\n";
+
+    /// `TM_IN`'s printed form, byte-exact. Verbatim from `form.rs`'s own `TM_OUT`.
+    const TM_OUT: &str = "; a machine\ntapes 1\nstart q0\n\nstate q0:\n  [a] -> write [b], move [R], goto q1  ; and a trailing one\nstate q1: accept\n";
+
+    /// Parses clean. Printing it inserts a blank line after `result Nat` and doubles the spaces
+    /// before each trailing comment. Note the literal tab after `li`. Verbatim from `form.rs`'s own
+    /// `ASM_IN`.
+    const ASM_IN: &str = "; a program\nresult Nat\nf: ; the entry\n    li\tr0, #1 ; and a trailing one\n    ret\n";
+
+    /// `ASM_IN`'s printed form, byte-exact. Verbatim from `form.rs`'s own `ASM_OUT`.
+    const ASM_OUT: &str = "; a program\nresult Nat\n\nf:  ; the entry\n    li\tr0, #1  ; and a trailing one\n    ret\n";
+
+    #[test]
+    fn comments_survive_fmt_on_both_forms() {
+        // THE PAYOFF OF PR A, ASSERTED FROM THE COMMAND LINE. Before it, `print ∘ parse` over these
+        // two forms deleted every comment in the file.
+        for (name, input, expected) in [("p.tm", TM_IN, TM_OUT), ("p.asm", ASM_IN, ASM_OUT)] {
+            let dir = redextape_test_support::ScratchDir::new(&format!("fmt-comments-{name}")).unwrap();
+            let p = dir.join(name);
+            std::fs::write(&p, input).unwrap();
+
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let outcome = run(&[Input::from_arg(&p)], false, None, None, 80, &mut out, &mut err, false).unwrap();
+            assert_eq!(outcome, Outcome::Rewritten, "{name}");
+
+            let got = std::fs::read_to_string(&p).unwrap();
+            // Byte-exact against the measured printer output. This is the assertion the INPUT
+            // cannot satisfy: `expected` differs from `input`, so a formatter that wrote the buffer
+            // back unchanged fails here. Substring checks alone would not — both comments appear in
+            // the input verbatim.
+            assert_eq!(got, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn formatting_an_already_formatted_file_is_clean() {
+        // What stops `fmt --check` flapping in CI, and the property a formatter is for.
+        for (name, formatted) in [("p.tm", TM_OUT), ("p.asm", ASM_OUT)] {
+            let dir = redextape_test_support::ScratchDir::new(&format!("fmt-idem-{name}")).unwrap();
+            let p = dir.join(name);
+            std::fs::write(&p, formatted).unwrap();
+
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let outcome = run(&[Input::from_arg(&p)], false, None, None, 80, &mut out, &mut err, false).unwrap();
+            assert_eq!(outcome, Outcome::Clean, "{name} was not already formatted");
+            assert_eq!(std::fs::read_to_string(&p).unwrap(), formatted, "{name}");
+        }
+    }
+
+    #[test]
+    fn an_unparseable_artifact_reports_and_writes_nothing() {
+        for (name, src) in [("p.tm", "tapes\n"), ("p.asm", "li\n")] {
+            let dir = redextape_test_support::ScratchDir::new(&format!("fmt-bad-{name}")).unwrap();
+            let p = dir.join(name);
+            std::fs::write(&p, src).unwrap();
+
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let outcome = run(&[Input::from_arg(&p)], false, None, None, 80, &mut out, &mut err, false).unwrap();
+            assert_eq!(outcome, Outcome::Failed, "{name}");
+            // The same standard `a_file_that_does_not_parse_is_left_exactly_as_it_was` records for
+            // the `.rxt` path: `!err.is_empty()` also passes for a one-byte stderr, so require the
+            // message to NAME the file. Both artifact arms route through the same
+            // `render(err, &label, ...)` the `.rxt` arm does, so the label is in the output.
+            assert!(
+                String::from_utf8(err).unwrap().contains(name),
+                "{name}'s diagnostic must name the file, not merely exist"
+            );
+            // There is no partial format: a file that does not parse is left exactly as it was.
+            assert_eq!(std::fs::read_to_string(&p).unwrap(), src, "{name}");
+        }
+    }
+
+    #[test]
+    fn an_uppercase_extension_formats_as_its_form() {
+        let dir = redextape_test_support::ScratchDir::new("fmt-uppercase").unwrap();
+        let p = dir.join("M.TM");
+        std::fs::write(&p, TM_IN).unwrap();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let outcome = run(&[Input::from_arg(&p)], false, None, None, 80, &mut out, &mut err, false).unwrap();
+        assert_eq!(outcome, Outcome::Rewritten);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), TM_OUT);
+    }
+
+    // The gap list's fifth row: `--check` had coverage on `.rxt` (`check_on_a_dirty_file_prints_a_diff_and_leaves_the_file_alone`
+    // above) but none on either artifact form. Reusing `diff` itself to build the expected text
+    // (rather than hand-copying hunk lines) means this assertion is exactly as strict as the
+    // production diff, and it is sensitive to a passthrough: a formatter that writes `src` back
+    // unchanged makes `formatted == src`, which flips the outcome to `Clean` and empties `out`
+    // before either assertion below runs.
+    #[test]
+    fn check_on_an_artifact_reports_would_change_and_writes_nothing() {
+        for (name, input, expected) in [("p.tm", TM_IN, TM_OUT), ("p.asm", ASM_IN, ASM_OUT)] {
+            let dir = redextape_test_support::ScratchDir::new(&format!("fmt-check-artifact-{name}")).unwrap();
+            let p = dir.join(name);
+            std::fs::write(&p, input).unwrap();
+
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let outcome = run(&[Input::from_arg(&p)], true, None, None, 80, &mut out, &mut err, false).unwrap();
+            assert_eq!(outcome, Outcome::WouldChange, "{name}");
+            assert_eq!(std::fs::read_to_string(&p).unwrap(), input, "{name}: --check must never write the file");
+            let text = String::from_utf8(out).unwrap();
+            assert_eq!(text, diff(&p.display().to_string(), input, expected), "{name}");
+        }
+    }
+
+    #[test]
+    fn an_explicit_width_is_refused_on_an_artifact_and_the_config_default_is_not() {
+        // The flag is meaningless for these two forms: their printers lay out from their own
+        // content. `run` already refuses `--backend` on them rather than ignoring it, and silently
+        // accepting a flag that does nothing is worse in a formatter, where the user is asking for
+        // a specific shape and will believe they got it.
+        let dir = redextape_test_support::ScratchDir::new("fmt-width-artifact").unwrap();
+        let p = dir.join("p.tm");
+        std::fs::write(&p, TM_IN).unwrap();
+
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let outcome = run(&[Input::from_arg(&p)], false, Some(80), None, 80, &mut out, &mut err, false).unwrap();
+        assert_eq!(outcome, Outcome::Failed);
+        let err = String::from_utf8(err).unwrap();
+        assert!(err.contains("`--width` does not apply"), "stderr was: {err}");
+        assert!(err.contains("`.tm`"), "the message must name the form: {err}");
+        // Refused means refused: the file is untouched.
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), TM_IN);
+
+        // With no explicit flag, the same file formats — the config default must stay silent.
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let outcome = run(&[Input::from_arg(&p)], false, None, None, 80, &mut out, &mut err, false).unwrap();
+        assert_eq!(outcome, Outcome::Rewritten);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), TM_OUT);
     }
 }

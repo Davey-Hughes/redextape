@@ -6,6 +6,7 @@
 //! that cannot lower it, a result type with no encoding, or an unreadable file. Collapsing the two
 //! would tell a script the program failed when it did not.
 
+use crate::form::Form;
 use crate::input::Input;
 use crate::report;
 use redextape_core::RunError;
@@ -24,13 +25,6 @@ pub enum Backend {
     /// Lower to a Turing machine, simulate it, and decode the final tapes. Same type-directed limit
     /// as `lambda`: a tape encodes Nat, Bool, Unit and List<T>, and a function-typed result exits 2.
     Tm,
-}
-
-/// Which already-compiled form a path names. A source file is neither.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Artifact {
-    Tm,
-    Asm,
 }
 
 /// What happened, in exactly the three shapes `main` maps to exit codes.
@@ -67,36 +61,46 @@ pub fn run(
     let label = input.label();
     // ASCII-case-insensitive, because `M.TM` is a real artifact and a byte-for-byte `e == "tm"` sent
     // it down the `.rxt` path, where the lexer produced a cascade of errors and exit 1 blamed a
-    // perfectly valid file on the program.
-    let artifact = match input {
-        Input::Path(p) => p.extension().and_then(|e| {
-            let e = e.to_string_lossy().to_ascii_lowercase();
-            match e.as_str() {
-                "tm" => Some(Artifact::Tm),
-                "asm" => Some(Artifact::Asm),
-                _ => None,
-            }
-        }),
-        Input::Stdin => None,
+    // perfectly valid file on the program. The table now lives in `Form::from_extension`, which is
+    // the one copy `fmt` reads too.
+    //
+    // **A `Form`, not an `Option<Form>`, and that is what lets `is_artifact` answer the next
+    // question.** Folding `None` into `Rxt` here — the same fallback `Form::resolve` applies — means
+    // "is this already-compiled output" is asked in the one spelling `fmt` also uses, rather than a
+    // second time as `Option::is_some` on `from_extension`'s result: two independently-written
+    // spellings that agreed only while `from_extension` happened never to return `Rxt`. Both matches
+    // below are then total over `Form` with no `_` arm, so a fourth text form breaks this function
+    // at compile time.
+    //
+    // Stdin carries no extension, so `run` treats it as the source language and does not inspect its
+    // content. That is a deliberate choice rather than an unimplemented one: executing a program
+    // guessed from its content is a different risk from formatting one, and the two commands are
+    // allowed to differ here — which is why this reads `from_extension` with a fallback rather than
+    // `Form::resolve`, whose stdin arm sniffs.
+    let form = match input {
+        Input::Path(p) => Form::from_extension(p).unwrap_or(Form::Rxt),
+        Input::Stdin => Form::Rxt,
     };
-    if let Some(kind) = artifact {
-        if backend != Backend::Reference {
-            let noun = match kind {
-                Artifact::Tm => "a `.tm` file, which is already a machine",
-                Artifact::Asm => "a `.asm` file, which is already a program",
-            };
-            writeln!(err, "error: `--backend` does not apply to {noun}")?;
-            return Ok(Outcome::ToolFailed);
-        }
-        return match kind {
-            Artifact::Tm => run_artifact_text(&src, &label, out, err, color),
-            Artifact::Asm => run_asm_artifact(&src, &label, out, err, color),
+    if form.is_artifact() && backend != Backend::Reference {
+        let noun = match form {
+            Form::Tm => "a `.tm` file, which is already a machine",
+            Form::Asm => "a `.asm` file, which is already a program",
+            // The `is_artifact()` guard immediately above is false for `Rxt`, which is the same
+            // adjacency `fmt.rs`'s `--width` refusal relies on. Named rather than `_` so a fourth
+            // form has to be dispositioned here.
+            Form::Rxt => unreachable!("is_artifact() is false for Rxt"),
         };
+        writeln!(err, "error: `--backend` does not apply to {noun}")?;
+        return Ok(Outcome::ToolFailed);
     }
-    match backend {
-        Backend::Reference => run_reference(&src, &label, out, err, color),
-        Backend::Lambda => run_lambda_backend(&src, &label, out, err, color),
-        Backend::Tm => run_tm_backend(&src, &label, out, err, color),
+    match form {
+        Form::Tm => run_artifact_text(&src, &label, out, err, color),
+        Form::Asm => run_asm_artifact(&src, &label, out, err, color),
+        Form::Rxt => match backend {
+            Backend::Reference => run_reference(&src, &label, out, err, color),
+            Backend::Lambda => run_lambda_backend(&src, &label, out, err, color),
+            Backend::Tm => run_tm_backend(&src, &label, out, err, color),
+        },
     }
 }
 

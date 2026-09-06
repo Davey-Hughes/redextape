@@ -50,3 +50,23 @@ fn check_on_stdin_prints_nothing_and_exits_zero_when_the_input_is_already_clean(
     assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     assert!(out.stdout.is_empty(), "an already-clean --check must print nothing: {:?}", out.stdout);
 }
+
+/// Parses clean. Printing it changes it (one space becomes two before the trailing comment), which
+/// is what lets this test tell formatting apart from a passthrough. Verbatim from `form.rs`'s own
+/// `TM_IN`.
+const TM_IN: &str = "; a machine\ntapes 1\nstart q0\n\nstate q0:\n  [a] -> write [b], move [R], goto q1 ; and a trailing one\nstate q1: accept\n";
+
+/// `TM_IN`'s printed form, byte-exact. Verbatim from `form.rs`'s own `TM_OUT`.
+const TM_OUT: &str = "; a machine\ntapes 1\nstart q0\n\nstate q0:\n  [a] -> write [b], move [R], goto q1  ; and a trailing one\nstate q1: accept\n";
+
+// The gap list's last row: every test above feeds stdin `.rxt` content, so `Form::resolve`'s
+// content-sniffing step (reached only when a path's extension cannot answer, i.e. stdin) had no
+// coverage through the dispatch at all. Stdin carries no extension, so a `.tm` body must be sniffed
+// as `Tm` and printed through `print_tm_doc`, not treated as `.rxt` source and blamed with lexer
+// diagnostics.
+#[test]
+fn stdin_content_sniffed_as_tm_formats_through_the_dispatch() {
+    let out = Command::cargo_bin("redextape").unwrap().args(["fmt", "-"]).write_stdin(TM_IN).output().unwrap();
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), TM_OUT);
+}

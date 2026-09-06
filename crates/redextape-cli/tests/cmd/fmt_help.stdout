@@ -1,13 +1,31 @@
-Format source files in place
+Format `.rxt`, `.tm` and `.asm` files in place
 
 Usage: redextape fmt [OPTIONS] <PATHS>...
 
 Arguments:
-  <PATHS>...  Files to format. `-` reads standard input and writes standard output
+  <PATHS>...
+          Files to format. `-` reads standard input and writes standard output
 
 Options:
-      --check            Print a diff instead of rewriting; exit 1 if anything would change
-      --config <PATH>    Read settings from this file instead of searching for one. Naming a file that does not exist is an error, where finding no file during the search is not
-      --no-config        Ignore any `redextape.toml` and use built-in defaults
-      --width <COLUMNS>  Line budget, overriding `fmt.width` in `redextape.toml`. A BUDGET, not a bound: binary chains, parameter lists and deep indentation can each exceed it, and do so more often the narrower it is
-  -h, --help             Print help
+      --check
+          Print a diff instead of rewriting; exit 1 if anything would change
+
+      --config <PATH>
+          Read settings from this file instead of searching for one. Naming a file that does not exist is an error, where finding no file during the search is not
+
+      --no-config
+          Ignore any `redextape.toml` and use built-in defaults
+
+      --width <COLUMNS>
+          Line budget, overriding `fmt.width` in `redextape.toml`. A BUDGET, not a bound: binary chains, parameter lists and deep indentation can each exceed it, and do so more often the narrower it is
+
+      --form <FORM>
+          Treat every input as this form, overriding both the file extension and, for standard input, the content. Without it a path is identified by its extension and standard input by what parses
+
+          Possible values:
+          - rxt: The source language, `.rxt`. The default when nothing else identifies the input
+          - tm:  A Turing machine listing, `.tm`
+          - asm: A register-assembly listing, `.asm`
+
+  -h, --help
+          Print help (see a summary with '-h')

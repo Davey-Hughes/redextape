@@ -9,6 +9,7 @@ mod cli;
 mod config;
 mod emit;
 mod fmt;
+mod form;
 mod input;
 mod lint;
 mod report;
@@ -48,10 +49,14 @@ fn main() -> ExitCode {
     };
 
     match args.command {
-        cli::Command::Fmt { paths, check, width } => {
+        cli::Command::Fmt { paths, check, width, form } => {
+            // THE `Option` SURVIVES ON PURPOSE. `fmt` refuses an explicit `--width` on a `.tm` or
+            // `.asm` input, and collapsing the flag with the config default here would make every
+            // such format fail on any machine that has a `redextape.toml`.
+            let explicit_width = width;
             let width = width.unwrap_or(cfg.fmt.width);
             let inputs: Vec<Input> = paths.iter().map(|p| Input::from_arg(p)).collect();
-            match fmt::run(&inputs, check, width, &mut out, &mut err, color) {
+            match fmt::run(&inputs, check, explicit_width, form, width, &mut out, &mut err, color) {
                 Ok(fmt::Outcome::Clean | fmt::Outcome::Rewritten) => ExitCode::SUCCESS,
                 Ok(fmt::Outcome::WouldChange) => ExitCode::from(1),
                 Ok(fmt::Outcome::Failed) => ExitCode::from(2),

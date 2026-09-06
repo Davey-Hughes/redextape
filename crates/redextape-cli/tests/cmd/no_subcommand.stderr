@@ -3,7 +3,7 @@ The redextape mini-language toolchain
 Usage: redextape [OPTIONS] <COMMAND>
 
 Commands:
-  fmt   Format source files in place
+  fmt   Format `.rxt`, `.tm` and `.asm` files in place
   lint  Report parse, type and lint diagnostics
   run   Run a program and print its value
   emit  Compile a program to a backend text form

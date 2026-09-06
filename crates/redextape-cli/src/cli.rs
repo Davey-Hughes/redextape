@@ -20,7 +20,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Format source files in place.
+    /// Format `.rxt`, `.tm` and `.asm` files in place.
     Fmt {
         /// Files to format. `-` reads standard input and writes standard output.
         #[arg(required = true)]
@@ -33,6 +33,11 @@ pub enum Command {
         /// narrower it is.
         #[arg(long, value_name = "COLUMNS")]
         width: Option<usize>,
+        /// Treat every input as this form, overriding both the file extension and, for standard
+        /// input, the content. Without it a path is identified by its extension and standard input
+        /// by what parses.
+        #[arg(long, value_name = "FORM")]
+        form: Option<crate::form::Form>,
     },
     /// Report parse, type and lint diagnostics.
     Lint {

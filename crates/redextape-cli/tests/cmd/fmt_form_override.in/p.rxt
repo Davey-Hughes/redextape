@@ -1,0 +1,7 @@
+; a machine
+tapes 1
+start q0
+
+state q0:
+  [a] -> write [b], move [R], goto q1 ; and a trailing one
+state q1: accept
