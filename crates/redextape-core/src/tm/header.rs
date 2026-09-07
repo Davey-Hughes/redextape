@@ -163,7 +163,7 @@ impl TmHeader {
     /// information. Normalizing at construction makes the round-trip exact instead of approximate.
     ///
     /// **PRECONDITION for the round-trip, unenforced here.** This constructor accepts any `width` and
-    /// `slots`, but `parse_tm_full` caps them at `MAX_FIELD_WIDTH` and `MAX_SLOTS` (totality guards on
+    /// `slots`, but `parse_tm_nav` caps them at `MAX_FIELD_WIDTH` and `MAX_SLOTS` (totality guards on
     /// untrusted input). So a header built with `width: 0`, `width > MAX_FIELD_WIDTH` or
     /// `slots > MAX_SLOTS` will PRINT and then fail to parse back — optionality property 2 holds for
     /// headers within those caps, not for every value this constructor admits. `run_tm_described`, the
@@ -204,8 +204,8 @@ impl TmHeader {
     /// a header and a tape count that disagree still yield a runnable configuration.
     ///
     /// **Not total in `n_tapes` itself.** The allocation below is `n_tapes` `Vec`s, so this is bounded
-    /// only because the one caller that parses `n_tapes` from a file (`syntax::parse_tm_full`) caps it
-    /// at `MAX_TAPES` before it ever reaches here — see that cap's doc for why an unbounded `tapes N`
+    /// only because the one caller that parses `n_tapes` from a file (`syntax::parse_tm_nav`, which
+    /// `parse_tm_full` is a one-line wrapper over) caps it at `MAX_TAPES` before it ever reaches here — see that cap's doc for why an unbounded `tapes N`
     /// is a hazard. A caller that hands this an unvalidated `n_tapes` is outside that guarantee.
     #[must_use]
     pub fn init(&self, n_tapes: usize) -> Vec<Vec<Symbol>> {

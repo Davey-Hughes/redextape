@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use crate::language::Language;
 use crate::position::LineIndex;
+use redextape_core::nav::NameIndex;
 
 /// One open document, at one version.
 pub struct Document {
@@ -18,18 +19,35 @@ pub struct Document {
     pub version: i32,
     pub text: String,
     pub index: LineIndex,
+    /// The name index for this version, or `None` for a form this server does not index.
+    ///
+    /// **CACHED FOR THE SAME REASON `index` IS, AND IT WAS NOT UNTIL A REVIEW MEASURED THE
+    /// DIFFERENCE.** Both derive from `text` alone and both are invalidated by exactly one event,
+    /// the `replace` below — so a rebuild-per-request for one and a rebuild-per-version for the
+    /// other was an inconsistency, not a decision. Measured on a real emitted machine (1,906,914
+    /// bytes, 8,610 states): rebuilding is 33.25 ms against `LineIndex::new`'s 0.26 ms, and every
+    /// navigation request paid it. `main.rs` drives one strictly sequential message loop, so each
+    /// of those blocked the `publishDiagnostics` queued behind it — and advertising
+    /// `documentSymbolProvider` newly invites outline plugins to re-request on every change.
+    pub nav: Option<NameIndex>,
 }
 
 impl Document {
     #[must_use]
     pub fn new(language_id: &str, version: i32, text: String) -> Self {
+        let language = Language::from_language_id(language_id);
         let index = LineIndex::new(&text);
-        Document { language: Language::from_language_id(language_id), version, text, index }
+        let nav = language.and_then(|l| l.nav(&text));
+        Document { language, version, text, index, nav }
     }
 
     /// Replace the whole text. Under `FULL` sync this is the only update there is.
+    ///
+    /// Both derived values are rebuilt here and nowhere else, which is what makes "cached per
+    /// version" true rather than aspirational.
     pub fn replace(&mut self, version: i32, text: String) {
         self.index = LineIndex::new(&text);
+        self.nav = self.language.and_then(|l| l.nav(&text));
         self.text = text;
         self.version = version;
     }

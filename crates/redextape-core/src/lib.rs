@@ -22,6 +22,7 @@ pub mod interp;
 pub mod lambda;
 pub mod lexer;
 pub mod lints;
+pub mod nav;
 pub mod parser;
 pub mod prelude;
 pub mod printer;

@@ -43,6 +43,7 @@
 
 use crate::analysis::{Classified, TokenClass as C, push_span};
 use crate::diagnostic::Severity;
+use crate::nav::NameIndex;
 use crate::tm::build::MAX_TAPES;
 use crate::tm::comments::{self, AnchoredComment, CommentWriter, TmAnchor, TmDirective};
 use crate::tm::header::{HeaderParts, TmHeader, write_header};
@@ -223,6 +224,10 @@ struct RawRule {
     moves: Vec<Move>,
     goto: String,
     span: Span,
+    /// Where the goto target begins, relative to the start of the line `parse_rule_line` was
+    /// given — which is the line already trimmed of its indentation. The caller adds the line's
+    /// own start and that indentation back.
+    goto_at: usize,
 }
 
 struct RawState {
@@ -235,6 +240,24 @@ struct RawState {
 /// (`_` is the blank symbol). A multi-char token uses its first char.
 fn parse_sym(tok: &str) -> Option<Symbol> {
     if tok == "*" { None } else { Some(tok.chars().next().unwrap_or(BLANK)) }
+}
+
+/// `s` with surrounding whitespace removed, plus how far into `s` the result begins.
+///
+/// Spans are built by ARITHMETIC over lengths, not by pointer comparison between a slice and its
+/// parent. Both work; only one is checkable by reading it. The subtraction cannot underflow:
+/// `trim_start` only ever removes bytes, so its result is never longer than its input.
+///
+/// **THE PAD IS ONLY MEANINGFUL IF THE CALLER PASSES UN-TRIMMED TEXT, AND THAT HAS ALREADY GONE
+/// WRONG ONCE.** `trimmed_at` has four callers — three in this file (`goto`, `start`, `state`) and
+/// one in `asm_syntax`. The two NAME-KEYWORD sites here, `start` and `state`, originally fed this
+/// `comments::content_before_comment(..)`,
+/// which is `split_trailing(..).0.trim()` — so the pad was structurally zero, and every name span
+/// was correct only when exactly one space followed its keyword. `start  scan` reported a span
+/// beginning on the space. Pass `split_trailing(..).0`, which removes a trailing comment without
+/// touching the leading whitespace this measures.
+pub(super) fn trimmed_at(s: &str) -> (&str, usize) {
+    (s.trim(), s.len() - s.trim_start().len())
 }
 
 fn parse_move(tok: &str) -> Option<Move> {
@@ -265,10 +288,14 @@ fn parse_rule_line(line: &str, span: Span) -> Result<RawRule, Diagnostic> {
     let rest = rest.trim_start().strip_prefix("move").ok_or_else(|| err(span, "expected `move`"))?;
     let (moves_s, rest) = bracket(rest, span)?;
     let rest = rest.trim_start().strip_prefix(',').ok_or_else(|| err(span, "expected `,`"))?;
-    let goto = rest.trim_start().strip_prefix("goto").ok_or_else(|| err(span, "expected `goto`"))?.trim();
+    let after_goto = rest.trim_start().strip_prefix("goto").ok_or_else(|| err(span, "expected `goto`"))?;
+    let (goto, goto_pad) = trimmed_at(after_goto);
     if goto.is_empty() {
         return Err(err(span, "expected a goto target"));
     }
+    // `line` here is the comment-stripped line; every slice above came from it by prefix
+    // stripping, so the goto's offset is the whole line's length minus what is left after it.
+    let goto_at = line.len() - after_goto.len() + goto_pad;
     let read = read_s.split_whitespace().map(parse_sym).collect();
     let write = write_s.split_whitespace().map(parse_sym).collect();
     // Named `moves_s` (not `move_s`) to stay clear of `moves` below — `clippy::similar_names` flagged
@@ -279,7 +306,7 @@ fn parse_rule_line(line: &str, span: Span) -> Result<RawRule, Diagnostic> {
         .map(parse_move)
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| err(span, "bad move (expected L/R/S)"))?;
-    Ok(RawRule { read, write, moves, goto: goto.to_string(), span })
+    Ok(RawRule { read, write, moves, goto: goto.to_string(), span, goto_at })
 }
 
 /// Reject a header directive that appears AFTER the first `state`.
@@ -356,8 +383,24 @@ fn directive_anchor(key: &str, rest: &str) -> Option<TmDirective> {
     })
 }
 
-/// Parse the TM text form, returning the header too. Iterative (flat grammar, no recursion). Never
-/// panics.
+/// Parse the TM text form. Unchanged in signature and behaviour.
+///
+/// `parse_tm_nav`'s document half, exactly as `print_tm` is `print_tm_mapped`'s text half. One
+/// parser, two entry points, and no way for them to disagree.
+///
+/// **REFERENCES ELSEWHERE TO THIS FUNCTION DIAGNOSING OR CAPPING SOMETHING MEAN THE LOOP IN
+/// `parse_tm_nav`.** Several safety arguments across this crate — `header.rs`'s allocation bound,
+/// `comments.rs`'s anchor-names-one-line claim — name this function as the code that performs a
+/// check, and were written when it WAS that code. It is now one line. The checks did not move
+/// out of the crate, only into `parse_tm_nav`, and a reader following such a pointer should
+/// continue there rather than conclude the bound is unenforced.
+#[must_use]
+pub fn parse_tm_full(src: &str) -> TmDocument {
+    parse_tm_nav(src).0
+}
+
+/// Parse the TM text form, returning the header and a navigation index too. Iterative (flat
+/// grammar, no recursion). Never panics.
 ///
 /// A `None` header means the file carried none, which is NOT an error — see `HeaderParts::finish`.
 ///
@@ -369,7 +412,7 @@ fn directive_anchor(key: &str, rest: &str) -> Option<TmDirective> {
 /// place.
 #[must_use]
 #[allow(clippy::too_many_lines)]
-pub fn parse_tm_full(src: &str) -> TmDocument {
+pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
     let mut diags: Vec<Diagnostic> = Vec::new();
     let mut tapes: Option<usize> = None;
     let mut start_name: Option<(String, Span)> = None;
@@ -379,6 +422,7 @@ pub fn parse_tm_full(src: &str) -> TmDocument {
     // Own-line comments seen but not yet attached: they belong to the NEXT line that parses, which
     // has not been read. Drained at each anchor and, if any survive, at end of input.
     let mut pending: Vec<String> = Vec::new();
+    let mut nav = NameIndex::default();
 
     // Attach everything waiting to `anchor`, then the line's own trailing comment. Called only
     // from a branch that has decided the line parses — a line that errors leaves `pending` intact
@@ -400,6 +444,9 @@ pub fn parse_tm_full(src: &str) -> TmDocument {
         let content = raw_line.trim_end_matches(['\r', '\n']);
         let span = Span { start: line_start, end: line_start + content.len() };
         let trimmed = content.trim_start();
+        // How far the line's content sits from the line's own start. Every name span below is
+        // `line_start + indent + <offset within `trimmed`>`.
+        let indent = content.len() - trimmed.len();
         if let Some(body) = comments::whole_line(trimmed) {
             pending.push(body.to_string());
             continue;
@@ -454,6 +501,24 @@ pub fn parse_tm_full(src: &str) -> TmDocument {
         } else if let Some(rest) = trimmed.strip_prefix("start ") {
             // Same rule as `tapes` above, for the same reason: a second `start` line is an error, its
             // value is ignored (the first line's target is kept), and it attaches no comment.
+            // **RECORDED BEFORE THE DUPLICATE CHECK, AND OUTSIDE IT.** A second `start` line is an
+            // error whose VALUE is ignored, but the name on it is still a name the user can put a
+            // cursor on — and a file with two `start` lines is the ordinary mid-edit state of
+            // someone renaming the entry state, who types the new line before deleting the old.
+            // The `state` branch below already records both definitions of a duplicated name for
+            // exactly this reason; these two arms took opposite decisions until this was fixed,
+            // and only one of them said why.
+            //
+            // `split_trailing(..).0`, NOT `content_before_comment`. The latter is
+            // `split_trailing(..).0.trim()`, and that leading trim is exactly the whitespace this
+            // pad has to measure — feeding it a trimmed string makes `pad` structurally zero and
+            // the span correct only for a single space after the keyword. Stripping the comment is
+            // safe here because a comment is removed from the END.
+            let (name, pad) = trimmed_at(comments::split_trailing(rest).0);
+            if !name.is_empty() {
+                let at = line_start + indent + "start ".len() + pad;
+                nav.push_reference(name, Span { start: at, end: at + name.len() });
+            }
             if start_name.is_some() {
                 diags.push(err(span, "duplicate `start` line"));
             } else {
@@ -461,12 +526,15 @@ pub fn parse_tm_full(src: &str) -> TmDocument {
                 attach(&mut comments, &mut pending, TmAnchor::Start, content);
             }
         } else if let Some(rest) = trimmed.strip_prefix("state ") {
-            let rest = comments::content_before_comment(rest);
-            let Some((name, tail)) = rest.split_once(':') else {
+            // `split_trailing(..).0` rather than `content_before_comment`, so that `name_part`
+            // below keeps the leading whitespace its span offset is measured from. `name_part`
+            // and `tail` are both `.trim()`ed at their own use sites, so nothing else changes.
+            let rest = comments::split_trailing(rest).0;
+            let Some((name_part, tail)) = rest.split_once(':') else {
                 diags.push(err(span, "expected `state <name>:`"));
                 continue;
             };
-            let (name, tail) = (name.trim().to_string(), tail.trim());
+            let (name, tail) = (name_part.trim().to_string(), tail.trim());
             if name.is_empty() {
                 diags.push(err(span, "empty state name"));
                 continue;
@@ -477,6 +545,13 @@ pub fn parse_tm_full(src: &str) -> TmDocument {
             }
             if states.iter().any(|s| s.name == name) {
                 diags.push(err(span, format!("duplicate state name `{name}`")));
+            }
+            // Recorded even when this line also produced a `duplicate state name` diagnostic:
+            // the file really does define the name twice, and an outline should show that.
+            {
+                let (_, pad) = trimmed_at(name_part);
+                let at = line_start + indent + "state ".len() + pad;
+                nav.push_definition(&name, Span { start: at, end: at + name.len() });
             }
             states.push(RawState { name, accept, rules: Vec::new() });
             #[allow(clippy::cast_possible_truncation)] // see the `ids` map below for why this is sound
@@ -497,6 +572,8 @@ pub fn parse_tm_full(src: &str) -> TmDocument {
             }
             match parse_rule_line(trimmed, span) {
                 Ok(r) => {
+                    let at = line_start + indent + r.goto_at;
+                    nav.push_reference(&r.goto, Span { start: at, end: at + r.goto.len() });
                     state.rules.push(r);
                     let index = state.rules.len() - 1; // still inside `state`'s borrow
                     #[allow(clippy::cast_possible_truncation)] // see the `ids` map below for why this is sound
@@ -509,6 +586,7 @@ pub fn parse_tm_full(src: &str) -> TmDocument {
             diags.push(err(span, "unrecognized line"));
         }
     }
+    nav.link();
 
     for text in pending.drain(..) {
         comments.push(AnchoredComment { text, anchor: TmAnchor::Eof, own_line: true });
@@ -516,7 +594,7 @@ pub fn parse_tm_full(src: &str) -> TmDocument {
 
     let Some(tapes) = tapes else {
         diags.push(err(Span { start: 0, end: 0 }, "missing `tapes <n>`"));
-        return TmDocument { machine: None, header: None, comments: Vec::new(), diagnostics: diags };
+        return (TmDocument { machine: None, header: None, comments: Vec::new(), diagnostics: diags }, nav);
     };
 
     let (parsed_header, header_errs) = header.finish(tapes);
@@ -569,7 +647,7 @@ pub fn parse_tm_full(src: &str) -> TmDocument {
     };
 
     if diags.iter().any(|d| d.severity == Severity::Error) {
-        return TmDocument { machine: None, header: None, comments: Vec::new(), diagnostics: diags };
+        return (TmDocument { machine: None, header: None, comments: Vec::new(), diagnostics: diags }, nav);
     }
 
     let machine = Machine {
@@ -596,7 +674,7 @@ pub fn parse_tm_full(src: &str) -> TmDocument {
     // Comments ride with a machine or not at all. A document with `machine: None` is never printed,
     // so a partial recovery from a half-parsed file would be a value nothing can be right or wrong
     // about — and it is the shape in which an anchor could name a line the printer never emits.
-    TmDocument { machine: Some(machine), header: parsed_header, comments, diagnostics: diags }
+    (TmDocument { machine: Some(machine), header: parsed_header, comments, diagnostics: diags }, nav)
 }
 
 #[cfg(test)]
@@ -1234,5 +1312,142 @@ state s: accept
         let out = print_tm_with(&increment(), &a_header());
         let block: Vec<&str> = out.lines().skip(2).take(1).collect();
         assert_eq!(block, vec!["version 1"], "got:\n{out}");
+    }
+
+    /// Probed at `64c1164`: parses clean, and `scan` appears at 14, 25 and 66 while `halt`
+    /// appears at 106 and 117. Three occurrences of one name is the point — an assertion that
+    /// only checked the NAME would be satisfied by any of them.
+    const NAV_TM: &str = "tapes 1\nstart scan\nstate scan:\n  [1] -> write [*], move [R], goto scan\n  [*] -> write [1], move [S], goto halt\nstate halt: accept\n";
+
+    #[test]
+    fn tm_navigation_records_definitions_and_references_at_name_spans() {
+        let (doc, nav) = parse_tm_nav(NAV_TM);
+        assert!(doc.machine.is_some(), "the fixture's premise: it parses");
+
+        // Every span is asserted BOTH as text and as an offset. Text alone cannot tell three
+        // `scan`s apart; an offset alone would not catch a span that is off by the length of
+        // the keyword before it.
+        let names: Vec<_> =
+            nav.definitions().map(|o| (o.name.as_str(), o.span.start, &NAV_TM[o.span.start..o.span.end])).collect();
+        assert_eq!(names, vec![("scan", 25, "scan"), ("halt", 117, "halt")]);
+
+        // `start scan` at 14 resolves to the DEFINITION at 25, not to itself and not to the
+        // `goto scan` at 66.
+        let (i, occ) = nav.at(14).expect("a name at 14");
+        assert_eq!(occ.span, Span { start: 14, end: 18 });
+        assert_eq!(nav.get(nav.definition_of(i).expect("resolves")).map(|o| o.span), Some(Span { start: 25, end: 29 }));
+    }
+
+    #[test]
+    fn a_goto_resolves_to_a_state_defined_further_down() {
+        // `goto halt` at 106 precedes `state halt:` at 117. Linking after the scan is what
+        // makes a forward reference resolve; linking during it could not.
+        let (_, nav) = parse_tm_nav(NAV_TM);
+        let (i, occ) = nav.at(106).expect("a name at 106");
+        assert_eq!(&NAV_TM[occ.span.start..occ.span.end], "halt");
+        assert_eq!(nav.definition_of(i).and_then(|d| nav.get(d)).map(|o| o.span), Some(Span { start: 117, end: 121 }));
+    }
+
+    #[test]
+    fn a_line_that_does_not_parse_contributes_no_occurrences() {
+        // Probed: this reports one diagnostic, `bad move (expected L/R/S)`, spanning the WHOLE
+        // rule line 31..70 — and `parse_rule_line` reads `goto` last, so the `halt` at 66 is
+        // never reached. The `state halt:` definition at 77 is on a line that DOES parse and is
+        // recorded. That asymmetry is the per-line rule, stated as a test.
+        let src = "tapes 1\nstart scan\nstate scan:\n  [1] -> write [*], move [X], goto halt\nstate halt: accept\n";
+        let (doc, nav) = parse_tm_nav(src);
+        assert!(doc.machine.is_none(), "the fixture's premise: it does not parse");
+        assert_eq!(nav.at(66), None, "the goto on the failed line contributes nothing");
+        assert_eq!(nav.at(77).map(|(_, o)| o.span), Some(Span { start: 77, end: 81 }), "the state line still counts");
+    }
+
+    #[test]
+    fn an_index_survives_a_document_that_produced_no_machine() {
+        // THE WHOLE REASON THE INDEX IS RETURNED BESIDE THE DOCUMENT RATHER THAN INSIDE IT.
+        // Probed: this reports `unknown goto target `nowhere`` and `machine` is None, while
+        // `comments` would have been emptied. Navigation is not.
+        let src = "tapes 1\nstart scan\nstate scan:\n  [*] -> write [*], move [S], goto nowhere\n";
+        let (doc, nav) = parse_tm_nav(src);
+        assert!(doc.machine.is_none());
+        assert_eq!(nav.definitions().count(), 1, "`state scan:` is still a definition");
+        let (i, _) = nav.at(66).expect("`nowhere` is still a reference");
+        assert_eq!(nav.definition_of(i), None, "and it resolves to nothing");
+    }
+
+    #[test]
+    fn a_duplicate_state_line_records_both_definitions() {
+        // §3.1 of the design claims the index records BOTH definitions of a duplicated name, and
+        // the `.asm` sibling has a test while this one did not — so the claim was the untested
+        // half. A duplicate `state` IS diagnosed here (unlike `.asm`, which accepts it silently),
+        // so `machine` is `None` and this doubles as a per-line-recovery case.
+        let src = "tapes 1\nstart scan\nstate scan: accept\nstate scan: accept\n";
+        let (doc, nav) = parse_tm_nav(src);
+        assert!(doc.machine.is_none(), "the premise: a duplicate state name is an error");
+        let defs: Vec<_> = nav.definitions().map(|o| o.span.start).collect();
+        assert_eq!(defs, vec![25, 44], "both, at their own name spans");
+        for &at in &defs {
+            assert_eq!(src.get(at..at + 4), Some("scan"));
+        }
+    }
+
+    #[test]
+    fn a_duplicate_start_line_records_its_name_too() {
+        // The two duplicate-line arms in `parse_tm_nav` took opposite decisions until this was
+        // fixed: `state` recorded both, `start` recorded neither, because its `nav.push_reference`
+        // sat inside the `else` of the duplicate check. Two `start` lines is the ordinary mid-edit
+        // state of renaming the entry state — the new line typed before the old one is deleted —
+        // and `nav.rs`'s module doc says navigation is worth most exactly then.
+        let src = "tapes 1\nstart a\nstart b\nstate a: accept\nstate b: accept\n";
+        let (doc, nav) = parse_tm_nav(src);
+        assert!(doc.machine.is_none(), "the premise: a duplicate start line is an error");
+        let mut spans = Vec::new();
+        let mut i = 0;
+        while let Some(o) = nav.get(i) {
+            assert_eq!(src.get(o.span.start..o.span.end), Some(o.name.as_str()));
+            spans.push(o.span.start);
+            i += 1;
+        }
+        assert_eq!(spans, vec![14, 22, 30, 46], "start a, start b, state a:, state b:");
+        assert_eq!(src.get(22..23), Some("b"), "the name on the DUPLICATE line");
+    }
+
+    #[test]
+    fn a_trailing_comment_does_not_shift_any_span() {
+        // The sibling invariant to `asm_syntax`'s test of the same name, added when a real
+        // off-by-the-comment-length defect was found there. This form's arithmetic uses a LEADING
+        // pad and was never affected — which is a thing to hold with a test rather than to
+        // conclude from reading, since the two parsers compute their offsets differently.
+        // **SPACING THE PRINTER NEVER EMITS, WHICH IS THE POINT.** Every other fixture in this
+        // file uses one space after each keyword — printer layout — and the population this
+        // feature exists for is hand-written files, where names get aligned. An earlier version
+        // of this fixture used single spaces throughout and passed while `start  scan` reported a
+        // span beginning on the space.
+        let src = "tapes 1 ; t\nstart  scan ; go\n   state   scan: ; here\n  [1] -> write [*], move [R], goto   scan ; loop\nstate halt: accept ; done\n";
+        let (_doc, nav) = parse_tm_nav(src);
+        let mut seen = 0;
+        while let Some(occ) = nav.get(seen) {
+            assert_eq!(
+                src.get(occ.span.start..occ.span.end),
+                Some(occ.name.as_str()),
+                "occurrence {seen} ({:?}) spans {}..{}, which is not its own name",
+                occ.name,
+                occ.span.start,
+                occ.span.end
+            );
+            seen += 1;
+        }
+        assert_eq!(seen, 4, "start, two state definitions, one goto");
+    }
+
+    #[test]
+    fn parse_tm_full_is_exactly_the_documents_half_of_parse_tm_nav() {
+        // **A TAUTOLOGY TODAY, AND SAYING SO IS THE POINT.** `parse_tm_full` is *defined* as
+        // `parse_tm_nav(src).0`, so this expands to `x == x` and no sabotage can redden it. It is kept
+        // as a guard for the day someone de-delegates the wrapper into a second parser — the
+        // failure `parse_tm`'s own doc calls the reason for delegating — at which point it
+        // becomes live. It is NOT evidence that the two agree; the function body is that.
+        for src in [NAV_TM, "tapes 1\nstate q0:\n", "", "tapes\n"] {
+            assert_eq!(parse_tm_full(src), parse_tm_nav(src).0, "disagreement on {src:?}");
+        }
     }
 }

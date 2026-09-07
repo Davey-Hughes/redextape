@@ -9,7 +9,9 @@
 //! and `.asm` are contested extensions — happens once, in that Lua file, before the server hears
 //! about the buffer at all.
 
+use gen_lsp_types::SymbolKind;
 use redextape_core::Diagnostic;
+use redextape_core::nav::NameIndex;
 
 /// One of the four text forms this repository defines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,6 +76,47 @@ impl Language {
             }
             Language::Tm => redextape_core::tm::print_tm_doc(&redextape_core::tm::parse_tm_full(src)),
             Language::Asm => redextape_core::tm::print_asm_doc(&redextape_core::tm::parse_asm_full(src)),
+        }
+    }
+
+    /// The `SymbolKind` a definition in this form is reported as, or `None` for a form this
+    /// server does not index.
+    ///
+    /// **THIS SITS BESIDE `nav` BECAUSE THE TWO ARE ONE LIST OF LANGUAGES WRITTEN TWICE, AND THEY
+    /// LIVED IN DIFFERENT FILES UNTIL A REVIEW POINTED AT WHAT THAT COSTS.** `document_symbol` had
+    /// its own `match` naming `Redextape | Lambda`, unreachable only because `nav` answers `None`
+    /// for them — so PR B teaching `nav` to answer for `.rxt` would have made every function, let
+    /// and parameter report as one kind, with no compile error and no failing test. Keeping both
+    /// arms in one impl means the edit that changes one is looking at the other, and
+    /// `every_form_with_an_index_has_a_symbol_kind` fails if they ever disagree.
+    ///
+    /// `.rxt` will need THREE kinds rather than one — a `fn`, a `let` and a parameter are not the
+    /// same thing — so PR B changes this signature. That is the point: it changes a signature
+    /// rather than silently returning a wrong constant.
+    #[must_use]
+    pub fn symbol_kind(self) -> Option<SymbolKind> {
+        match self {
+            // A TM state is a place the machine can be in; an asm label names a point in a
+            // program. `Class` and `Function` are the nearest of the protocol's fixed set.
+            Language::Tm => Some(SymbolKind::Class),
+            Language::Asm => Some(SymbolKind::Function),
+            Language::Redextape | Language::Lambda => None,
+        }
+    }
+
+    /// The name-span index for this form, or `None` for a form that has none.
+    ///
+    /// **`None` IS NOT AN EMPTY INDEX.** An empty index says "this document contains no names",
+    /// which is a claim about the document; `None` says "this server cannot answer navigation
+    /// for this form", which is a claim about the server. `.rxt` waits on a binder-resolution
+    /// pass — names there are scoped, so an occurrence resolves to a BINDING and not to a name —
+    /// and `.rxlambda` on a term type that carries no source positions at all.
+    #[must_use]
+    pub fn nav(self, src: &str) -> Option<NameIndex> {
+        match self {
+            Language::Tm => Some(redextape_core::tm::parse_tm_nav(src).1),
+            Language::Asm => Some(redextape_core::tm::parse_asm_nav(src).1),
+            Language::Redextape | Language::Lambda => None,
         }
     }
 }
@@ -195,5 +238,27 @@ f: ; the entry
         // assertion is about the file the printer has nothing to print from.
         assert_eq!(Language::Redextape.format("let x = "), None);
         assert!(Language::Redextape.format("1 + true").is_some(), "a type error still formats");
+    }
+
+    #[test]
+    fn only_the_two_artifact_forms_have_a_navigation_index() {
+        // `.rxt` waits on a binder-resolution pass and `.rxlambda` on a term type that carries
+        // no source positions at all. `None` is the answer, not an empty index: an empty index
+        // would tell the server "this file has no names in it", which is a different claim.
+        assert!(Language::Tm.nav("tapes 1\nstart q0\nstate q0: accept\n").is_some());
+        assert!(Language::Asm.nav("f:\n\tret\n").is_some());
+        assert!(Language::Redextape.nav("let x = 1;\nx\n").is_none());
+        assert!(Language::Lambda.nav("λx. x").is_none());
+    }
+
+    #[test]
+    fn every_form_with_an_index_has_a_symbol_kind_and_no_other_form_does() {
+        // The two `match`es are one list of languages written twice. This is what holds them in
+        // step: a form that gains an index without gaining a kind reports nothing in an outline,
+        // and one that gains a kind without an index has a constant nothing can reach.
+        for lang in [Language::Redextape, Language::Lambda, Language::Tm, Language::Asm] {
+            let has_index = lang.nav("").is_some();
+            assert_eq!(has_index, lang.symbol_kind().is_some(), "{lang:?} disagrees between nav and symbol_kind");
+        }
     }
 }

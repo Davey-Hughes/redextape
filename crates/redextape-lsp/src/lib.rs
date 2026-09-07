@@ -21,12 +21,16 @@ pub mod position;
 
 use gen_lsp_types::json_rpc::{Error, Id, RequestObject, ResponseObject};
 use gen_lsp_types::{
+    BaseSymbolInformation, Definition, DefinitionParams, DefinitionProvider, DefinitionRequest, DefinitionResponse,
     DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentFormattingParams, DocumentFormattingProvider, DocumentFormattingRequest, ErrorCodes, InitializeParams,
-    InitializeRequest, InitializeResult, Position, PublishDiagnosticsNotification, PublishDiagnosticsParams, Range,
-    ServerCapabilities, ServerInfo, ShutdownRequest, TextDocumentContentChangeEvent, TextDocumentSync,
+    DocumentFormattingParams, DocumentFormattingProvider, DocumentFormattingRequest, DocumentSymbol,
+    DocumentSymbolParams, DocumentSymbolProvider, DocumentSymbolRequest, DocumentSymbolResponse, ErrorCodes,
+    InitializeParams, InitializeRequest, InitializeResult, Location, Position, PublishDiagnosticsNotification,
+    PublishDiagnosticsParams, Range, ReferenceParams, ReferencesProvider, ReferencesRequest, ServerCapabilities,
+    ServerInfo, ShutdownRequest, SymbolInformation, TextDocumentContentChangeEvent, TextDocumentSync,
     TextDocumentSyncKind, TextEdit,
 };
+use redextape_core::nav::NameIndex;
 
 use crate::document::Documents;
 use crate::position::Encoding;
@@ -51,6 +55,14 @@ pub enum Outgoing {
 /// The language server, and all of its state.
 pub struct Server {
     documents: Documents,
+    /// Whether the client said it understands `DocumentSymbol[]`, from
+    /// `textDocument.documentSymbol.hierarchicalDocumentSymbolSupport`.
+    ///
+    /// **THE PROTOCOL MAKES THIS THE PRECONDITION FOR THE RICHER RESPONSE, NOT A PREFERENCE.**
+    /// `false` until `initialize` says otherwise, which is both the protocol's default and the
+    /// right answer for the window in which nothing has been negotiated — the same rule
+    /// `encoding` follows.
+    hierarchical_symbols: bool,
     /// Settled by `initialize`. `Utf16` until then, which is the protocol's default and the right
     /// answer for the window in which no negotiation has happened.
     encoding: Encoding,
@@ -65,7 +77,7 @@ impl Default for Server {
 impl Server {
     #[must_use]
     pub fn new() -> Self {
-        Server { documents: Documents::default(), encoding: Encoding::Utf16 }
+        Server { documents: Documents::default(), hierarchical_symbols: false, encoding: Encoding::Utf16 }
     }
 
     /// The encoding settled by `initialize`.
@@ -97,6 +109,9 @@ impl Server {
             ("textDocument/didChange", None) => self.did_change(params),
             ("textDocument/didClose", None) => self.did_close(params),
             ("textDocument/formatting", Some(id)) => vec![self.formatting(id, params)],
+            ("textDocument/definition", Some(id)) => vec![self.definition(id, params)],
+            ("textDocument/references", Some(id)) => vec![self.references(id, params)],
+            ("textDocument/documentSymbol", Some(id)) => vec![self.document_symbol(id, params)],
             (_, Some(id)) => vec![Outgoing::Response(ResponseObject::from_error(
                 id,
                 Error {
@@ -119,6 +134,13 @@ impl Server {
         let params: InitializeParams = serde_json::from_value(params).unwrap_or_default();
         let offered = params.capabilities.general.as_ref().and_then(|g| g.position_encodings.as_deref());
         self.encoding = Encoding::negotiate(offered);
+        self.hierarchical_symbols = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|t| t.document_symbol.as_ref())
+            .and_then(|d| d.hierarchical_document_symbol_support)
+            .unwrap_or(false);
 
         let capabilities = ServerCapabilities {
             position_encoding: Some(self.encoding.kind()),
@@ -126,6 +148,9 @@ impl Server {
             // that buys a class of bugs before it buys anything else.
             text_document_sync: Some(TextDocumentSync::Kind(TextDocumentSyncKind::Full)),
             document_formatting_provider: Some(DocumentFormattingProvider::Bool(true)),
+            definition_provider: Some(DefinitionProvider::Bool(true)),
+            references_provider: Some(ReferencesProvider::Bool(true)),
+            document_symbol_provider: Some(DocumentSymbolProvider::Bool(true)),
             // Everything else stays `None`. Diagnostics are PUSHED, via `publishDiagnostics`, which
             // needs no capability entry: it is universally supported, where pull diagnostics are a
             // 3.17 addition this slice does not need.
@@ -196,7 +221,11 @@ impl Server {
     /// says "no edits" is, and an error would surface in the editor as a failed command for the
     /// ordinary case of formatting a file that currently has a syntax error in it.
     fn formatting(&self, id: Id, params: serde_json::Value) -> Outgoing {
-        let edits = serde_json::from_value::<DocumentFormattingParams>(params).ok().and_then(|p| {
+        let params = match serde_json::from_value::<DocumentFormattingParams>(params) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(id, "textDocument/formatting", &e),
+        };
+        let edits = Some(params).and_then(|p| {
             let uri = p.text_document.uri.to_string();
             let doc = self.documents.get(&uri)?;
             let formatted = doc.language?.format(&doc.text)?;
@@ -210,6 +239,170 @@ impl Server {
             }])
         });
         Outgoing::Response(ResponseObject::from_success::<DocumentFormattingRequest>(id, edits))
+    }
+
+    /// Go to the definition of the name under the cursor.
+    ///
+    /// `null` for every case with no answer — an unknown URI, a form with no index, a cursor
+    /// that is not on a name, a reference to a name nothing defines. `null` is what LSP says
+    /// "no definition" is, and an error would surface in the editor as a failed command for the
+    /// ordinary case of a cursor sitting on a keyword.
+    fn definition(&self, id: Id, params: serde_json::Value) -> Outgoing {
+        let params = match serde_json::from_value::<DefinitionParams>(params) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(id, "textDocument/definition", &e),
+        };
+        let found = Some(params).and_then(|p| {
+            let pos = p.text_document_position_params;
+            let (doc, nav, offset) = self.locate(pos.text_document.uri.as_ref(), pos.position)?;
+            let (i, _) = nav.at(offset)?;
+            let target = nav.get(nav.definition_of(i)?)?;
+            Some(DefinitionResponse::Definition(Definition::Location(Location::new(
+                pos.text_document.uri,
+                doc.index.range(&doc.text, target.span, self.encoding),
+            ))))
+        });
+        Outgoing::Response(ResponseObject::from_success::<DefinitionRequest>(id, found))
+    }
+
+    /// Every mention of the name under the cursor, in this document.
+    ///
+    /// **THE DECLARATION IS INCLUDED ONLY WHEN THE CLIENT ASKS FOR IT.** `include_declaration`
+    /// is a parameter, not a preference: answering the same list either way would be ignoring
+    /// it. It comes first when present, which is where an editor's quickfix list wants it.
+    fn references(&self, id: Id, params: serde_json::Value) -> Outgoing {
+        let params = match serde_json::from_value::<ReferenceParams>(params) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(id, "textDocument/references", &e),
+        };
+        let found = Some(params).and_then(|p| {
+            let include = p.context.include_declaration;
+            let pos = p.text_document_position_params;
+            let uri = pos.text_document.uri;
+            let (doc, nav, offset) = self.locate(uri.as_ref(), pos.position)?;
+            let (i, _) = nav.at(offset)?;
+            // **A NAME NOTHING DEFINES STILL HAS OTHER MENTIONS, AND THE INDEX IS HOLDING THEM.**
+            // This used to short-circuit on `definition_of(i)?` and answer `null`, which tells
+            // someone hunting every `jmp nowhere` still to fix that the name under their cursor is
+            // not a name — in exactly the mid-edit state `nav.rs`'s module doc calls the moment
+            // navigation is worth most. `include_declaration` has nothing to include here, so it
+            // is not consulted: with no binding, every occurrence of the name IS a reference,
+            // including the one under the cursor.
+            let spans: Vec<_> = match nav.definition_of(i) {
+                Some(def) => include
+                    .then(|| nav.get(def).map(|o| o.span))
+                    .flatten()
+                    .into_iter()
+                    .chain(nav.references_to(def).map(|o| o.span))
+                    .collect(),
+                None => nav.dangling_like(i).map(|o| o.span).collect(),
+            };
+            Some(
+                spans
+                    .into_iter()
+                    .map(|s| Location::new(uri.clone(), doc.index.range(&doc.text, s, self.encoding)))
+                    .collect::<Vec<_>>(),
+            )
+        });
+        Outgoing::Response(ResponseObject::from_success::<ReferencesRequest>(id, found))
+    }
+
+    /// Every name this document DEFINES, flat and in source order.
+    ///
+    /// **FLAT, NOT NESTED.** Rules could hang under their state, but the demo suite contains a
+    /// machine of **7,353 states carrying 18,499 rules**, and an outline nesting the second under
+    /// the first is not one a human uses. (An earlier version of this sentence said "25,852
+    /// states". That is `map_fold`'s ROW count — the states and the rules added together — so it
+    /// both inflated the state count 3.5x and named the one quantity that is neither of the two
+    /// this decision is about.)
+    ///
+    /// `range` and `selection_range` are both the name's span. The protocol only requires the
+    /// selection range to be contained by the range, and the index stores name spans — a range
+    /// enclosing a whole state's rules would mean the parser recording where each state's block
+    /// ends, which is more than navigation needs.
+    ///
+    /// The `SymbolKind` is chosen HERE because this is the one place that knows the document's
+    /// language; `nav.rs` deliberately holds no grammar and cannot tell a state from a label.
+    fn document_symbol(&self, id: Id, params: serde_json::Value) -> Outgoing {
+        let params = match serde_json::from_value::<DocumentSymbolParams>(params) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(id, "textDocument/documentSymbol", &e),
+        };
+        let found = Some(params).and_then(|p| {
+            let uri = p.text_document.uri;
+            let doc = self.documents.get(uri.as_ref())?;
+            // `symbol_kind` lives beside `nav` in `language.rs`, so the two lists of languages
+            // cannot drift apart unseen; `None` here is the same answer `nav` gives.
+            let kind = doc.language?.symbol_kind()?;
+            let nav = doc.nav.as_ref()?;
+            let symbols = nav.definitions().map(|o| {
+                let selection_range = doc.index.range(&doc.text, o.span, self.encoding);
+                let range = doc.index.range(&doc.text, enclosing_line(&doc.text, o.span), self.encoding);
+                (o.name.clone(), range, selection_range)
+            });
+            Some(if self.hierarchical_symbols {
+                DocumentSymbolResponse::DocumentSymbolList(
+                    symbols
+                        .map(|(name, range, selection_range)| {
+                            // `DocumentSymbol::deprecated` is a #[deprecated] field with no
+                            // default and a positional slot in `::new`, so BOTH construction
+                            // routes trip the lint that `-D warnings` makes fatal.
+                            #[allow(deprecated)]
+                            DocumentSymbol {
+                                name,
+                                detail: None,
+                                kind,
+                                tags: None,
+                                deprecated: None,
+                                range,
+                                selection_range,
+                                children: None,
+                            }
+                        })
+                        .collect(),
+                )
+            } else {
+                // **THE FLAT SHAPE IS NOT A FALLBACK, IT IS WHAT THE PROTOCOL SAYS THIS CLIENT
+                // ASKED FOR.** `DocumentSymbol[]` is conditional on
+                // `hierarchicalDocumentSymbolSupport`; a client without it expects
+                // `SymbolInformation[]`, whose members carry a `location` rather than a `range`.
+                // `DocumentSymbolResponse` is `#[serde(untagged)]`, so sending the wrong arm is
+                // not a protocol error the client can report — it is an empty outline with
+                // nothing logged on either side.
+                DocumentSymbolResponse::SymbolInformationList(
+                    symbols
+                        .map(|(name, range, _)| {
+                            #[allow(deprecated)]
+                            SymbolInformation {
+                                deprecated: None,
+                                location: Location::new(uri.clone(), range),
+                                base_symbol_information: BaseSymbolInformation {
+                                    name,
+                                    kind,
+                                    tags: None,
+                                    container_name: None,
+                                },
+                            }
+                        })
+                        .collect(),
+                )
+            })
+        });
+        Outgoing::Response(ResponseObject::from_success::<DocumentSymbolRequest>(id, found))
+    }
+
+    /// The document, its index and the cursor as a byte offset — the three things every
+    /// navigation handler starts from.
+    ///
+    /// One place, so the three handlers cannot disagree about what "the name under the cursor"
+    /// means. `None` for an untracked URI or a form this server does not index.
+    fn locate(&self, uri: &str, pos: Position) -> Option<(&crate::document::Document, &NameIndex, usize)> {
+        let doc = self.documents.get(uri)?;
+        // The index is CACHED per document version beside `LineIndex` — see `Document::nav`. This
+        // used to rebuild it per request, which is a whole parse, and then return it by value.
+        let nav = doc.nav.as_ref()?;
+        let offset = doc.index.offset(&doc.text, pos, self.encoding);
+        Some((doc, nav, offset))
     }
 
     /// The `publishDiagnostics` notification for one document.
@@ -236,6 +429,42 @@ impl Server {
             PublishDiagnosticsParams { uri: uri.into(), version, diagnostics },
         ))
     }
+}
+
+/// The answer to a request this server could not READ.
+///
+/// **`null` IS THE ANSWER TO A QUESTION WITH NO ANSWER; IT IS NOT THE ANSWER TO A QUESTION THAT DID
+/// NOT PARSE.** All four request handlers used to deserialize with `.ok()`, so a client that sent
+/// `textDocument/references` without the required `context`, or a `position.line` as a string, got
+/// a SUCCESS response of `null` — indistinguishable from "this name has no references", which is a
+/// plausible answer, so the client bug never surfaced to anyone. The `null`-for-no-answer rule
+/// `formatting` established is about cases the SERVER cannot answer, and that argument does not
+/// reach a request it could not read.
+fn invalid_params(id: Id, method: &str, err: &serde_json::Error) -> Outgoing {
+    Outgoing::Response(ResponseObject::from_error(
+        id,
+        Error { code: ErrorCodes::InvalidParams, message: format!("{method}: {err}"), data: None },
+    ))
+}
+
+/// The span of the whole line `span` sits on, terminator excluded.
+///
+/// **`DocumentSymbol::range` IS NOT DECORATION, IT IS WHAT A CLIENT TESTS THE CURSOR AGAINST.** The
+/// protocol defines it as the region used to decide whether the caret is inside the symbol, and
+/// `selectionRange` as the part to reveal — so setting both to the name span made breadcrumbs,
+/// sticky scroll and nvim-navic report no symbol for every position except the few columns of the
+/// name itself. The name span still goes to `selectionRange`, which is what it is for. Containment
+/// holds either way, which is the only requirement the earlier doc comment checked itself against.
+///
+/// A line rather than a whole `state` block: the index stores name spans, and recording where each
+/// block ends is more than navigation needs. A line is the smallest span that makes the cursor test
+/// behave, and is exact for `.asm`, where a label IS its line.
+fn enclosing_line(text: &str, span: redextape_core::Span) -> redextape_core::Span {
+    let start = text.get(..span.start).map_or(span.start, |b| b.rfind('\n').map_or(0, |i| i + 1));
+    let rest = text.get(span.end..).unwrap_or("");
+    let end = rest.find('\n').map_or(text.len(), |i| span.end + i);
+    let end = if text.get(end.saturating_sub(1)..end) == Some("\r") { end - 1 } else { end };
+    redextape_core::Span { start, end }
 }
 
 /// A `redextape-core` diagnostic as the protocol's.
@@ -309,6 +538,93 @@ state q1: accept
         serde_json::from_value(r.result().expect("a success response").clone()).expect("an InitializeResult")
     }
 
+    /// The raw JSON value of one successful response. Untyped, unlike `initialize_result` and
+    /// `format_edits`: the navigation tests below assert on individual fields of a `Location` or
+    /// on `null`, and a single shared shape for both would have to be `Option<Location>` anyway.
+    fn success_value(out: &[Outgoing]) -> serde_json::Value {
+        let [Outgoing::Response(r)] = out else { panic!("expected exactly one response, got {out:?}") };
+        r.result().expect("a success response").clone()
+    }
+
+    /// The error half of `success_value`.
+    fn error_of(out: &[Outgoing]) -> gen_lsp_types::json_rpc::Error {
+        let [Outgoing::Response(r)] = out else { panic!("expected exactly one response, got {out:?}") };
+        r.error().expect("an error response").clone()
+    }
+
+    #[test]
+    fn references_on_a_name_nothing_defines_lists_its_other_mentions() {
+        // Probed: this parses with `program: Some` and ZERO diagnostics — asm never checks jump
+        // targets — and records two dangling references to `nowhere`. This used to answer `null`,
+        // which tells someone hunting every jump still to fix that the name under their cursor is
+        // not a name. `include_declaration` has nothing to include: with no binding, every
+        // occurrence IS a reference, so both are listed either way.
+        let mut server = Server::new();
+        server.handle(notification(
+            "textDocument/didOpen",
+            &json!({"textDocument": {
+                "uri": "file:///d.asm", "languageId": "redextape_asm", "version": 1,
+                "text": "result Nat\nf:\n\tjmp\tnowhere\n\tjz\tr0, nowhere\n\tret\n"
+            }}),
+        ));
+        for include in [false, true] {
+            let out = server.handle(request(
+                3,
+                "textDocument/references",
+                &json!({
+                    "textDocument": {"uri": "file:///d.asm"},
+                    "position": {"line": 2, "character": 5},
+                    "context": {"includeDeclaration": include}
+                }),
+            ));
+            let v = success_value(&out);
+            let lines: Vec<_> =
+                v.as_array().expect("an array").iter().map(|l| l["range"]["start"]["line"].as_u64()).collect();
+            assert_eq!(lines, vec![Some(2), Some(3)], "both jumps, includeDeclaration={include}");
+        }
+    }
+
+    #[test]
+    fn a_request_this_server_cannot_read_is_an_error_not_a_null() {
+        // **`null` IS THE ANSWER TO A QUESTION WITH NO ANSWER, NOT TO ONE THAT DID NOT PARSE.**
+        // All four handlers deserialized with `.ok()`, so a client omitting `context` — a required
+        // field with no serde default — was told the name has no references, which is a plausible
+        // answer and therefore one nobody investigates.
+        let mut server = Server::new();
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+        let cases = [
+            // `references` with no `context` at all.
+            (
+                "textDocument/references",
+                json!({"textDocument": {"uri": "file:///a.tm"}, "position": {"line": 1, "character": 6}}),
+            ),
+            // `definition` with no `position`.
+            ("textDocument/definition", json!({"textDocument": {"uri": "file:///a.tm"}})),
+            // `definition` with a `line` of the wrong type.
+            (
+                "textDocument/definition",
+                json!({"textDocument": {"uri": "file:///a.tm"}, "position": {"line": "1", "character": 6}}),
+            ),
+            // `documentSymbol` with no `textDocument`.
+            ("textDocument/documentSymbol", json!({})),
+            // `formatting`, which established the `null` rule and is corrected with the rest.
+            // NOTE it needs a missing `textDocument`, not a missing `options`: `FormattingOptions`
+            // deserializes from an absent field, so the obvious malformed formatting request is
+            // not malformed at all — checked rather than assumed.
+            ("textDocument/formatting", json!({})),
+        ];
+        for (method, params) in cases {
+            let out = server.handle(request(9, method, &params));
+            assert!(
+                matches!(&out[..], [Outgoing::Response(r)] if r.error().is_some()),
+                "{method} with {params} was not an error: {out:?}"
+            );
+            let e = error_of(&out);
+            assert_eq!(e.code, ErrorCodes::InvalidParams, "{method} with {params}");
+            assert!(e.message.starts_with(method), "the message names the method: {:?}", e.message);
+        }
+    }
+
     #[test]
     fn initialize_advertises_full_sync_and_formatting() {
         let mut server = Server::new();
@@ -322,7 +638,9 @@ state q1: accept
         // question. Asserted so that adding one is a deliberate edit to this line.
         assert_eq!(caps.semantic_tokens_provider, None);
         assert_eq!(caps.hover_provider, None);
-        assert_eq!(caps.definition_provider, None);
+        // Slice 2 serves definition. The two assertions above it stay: they are what keeps a
+        // capability this server does not serve from appearing without a decision.
+        assert_eq!(caps.definition_provider, Some(DefinitionProvider::Bool(true)));
     }
 
     #[test]
@@ -596,5 +914,379 @@ state q1: accept
             assert_eq!(p.diagnostics.len(), expected, "{id} published the wrong count");
             assert!(expected > 0, "{id}'s fixture must actually error or this proves nothing");
         }
+    }
+
+    /// `scan` is defined at 25 and referenced at 14 (`start`) and 66 (`goto`). Three
+    /// occurrences of one name, so a handler that returns "some scan" is distinguishable
+    /// from one that returns the right one.
+    const NAV_TM: &str = "tapes 1\nstart scan\nstate scan:\n  [1] -> write [*], move [R], goto scan\n  [*] -> write [1], move [S], goto halt\nstate halt: accept\n";
+
+    /// `initialize` with `hierarchicalDocumentSymbolSupport`, which is what Neovim and VS Code
+    /// both send. Without it the server answers `documentSymbol` with `SymbolInformation[]`, which
+    /// the protocol says is what a client that does not advertise it asked for.
+    fn init_hierarchical(server: &mut Server) {
+        server.handle(request(
+            1,
+            "initialize",
+            &json!({"capabilities": {"textDocument": {"documentSymbol": {"hierarchicalDocumentSymbolSupport": true}}}}),
+        ));
+    }
+
+    fn open_tm(server: &mut Server, uri: &str, text: &str) {
+        server.handle(notification(
+            "textDocument/didOpen",
+            &json!({"textDocument": {"uri": uri, "languageId": "redextape_tm", "version": 1, "text": text}}),
+        ));
+    }
+
+    #[test]
+    fn definition_on_a_goto_answers_the_state_that_defines_it() {
+        let mut server = Server::new();
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+        // The `goto scan` at byte 66 is on line 3. Under the default (utf-16) encoding with no
+        // multi-byte characters in this fixture, the character column is the byte column.
+        let out = server.handle(request(
+            2,
+            "textDocument/definition",
+            &json!({"textDocument": {"uri": "file:///a.tm"}, "position": {"line": 3, "character": 35}}),
+        ));
+        let v = success_value(&out);
+        // Line 2 is `state scan:`; the name begins at character 6. NOT line 1 (`start scan`),
+        // which is the other place the string `scan` appears before this one.
+        assert_eq!(v["uri"], "file:///a.tm");
+        assert_eq!(v["range"]["start"], json!({"line": 2, "character": 6}));
+        assert_eq!(v["range"]["end"], json!({"line": 2, "character": 10}));
+    }
+
+    #[test]
+    fn definition_off_a_name_is_null_rather_than_an_error() {
+        // A cursor on whitespace, on a keyword, in a file this server does not serve, or in a
+        // file it has never opened. All four are ordinary, and an error would surface in the
+        // editor as a failed command.
+        let mut server = Server::new();
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+        for (uri, line, character) in
+            [("file:///a.tm", 0, 0), ("file:///a.tm", 3, 2), ("file:///nope.tm", 2, 6), ("file:///a.tm", 99, 0)]
+        {
+            let out = server.handle(request(
+                2,
+                "textDocument/definition",
+                &json!({"textDocument": {"uri": uri}, "position": {"line": line, "character": character}}),
+            ));
+            assert_eq!(success_value(&out), serde_json::Value::Null, "{uri} {line}:{character}");
+        }
+    }
+
+    #[test]
+    fn definition_in_a_broken_file_still_answers() {
+        // THE REASON THE INDEX SURVIVES A FAILED PARSE. This file has an unknown goto target,
+        // so `machine` is None and it publishes a diagnostic — and go-to-definition on the
+        // `start scan` reference still lands on `state scan:`.
+        let mut server = Server::new();
+        let broken = "tapes 1\nstart scan\nstate scan:\n  [*] -> write [*], move [S], goto nowhere\n";
+        open_tm(&mut server, "file:///b.tm", broken);
+        let out = server.handle(request(
+            2,
+            "textDocument/definition",
+            &json!({"textDocument": {"uri": "file:///b.tm"}, "position": {"line": 1, "character": 6}}),
+        ));
+        // The WHOLE location, as the sibling test does: a range whose end or uri were wrong would
+        // still satisfy a start-only assertion, and this test's own claim is that navigation is
+        // fully answerable in a file that does not parse.
+        let v = success_value(&out);
+        assert_eq!(v["uri"], "file:///b.tm");
+        assert_eq!(v["range"]["start"], json!({"line": 2, "character": 6}));
+        assert_eq!(v["range"]["end"], json!({"line": 2, "character": 10}));
+    }
+
+    #[test]
+    fn definition_works_with_the_cursor_at_the_end_of_a_name() {
+        // WHERE THE CARET ACTUALLY SITS after typing a name, after `e`/`w` in Vim, and after a
+        // double-click or `End`. `NameIndex::at` answered `null` one past the last byte until it
+        // was taught that adjacency counts, under a test asserting "the end is exclusive" as
+        // though that were the contract. `start scan` occupies characters 6..10 on line 1, so
+        // character 10 is one past the final `n`.
+        let mut server = Server::new();
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+        for character in [6, 9, 10] {
+            let out = server.handle(request(
+                2,
+                "textDocument/definition",
+                &json!({"textDocument": {"uri": "file:///a.tm"}, "position": {"line": 1, "character": character}}),
+            ));
+            assert_eq!(
+                success_value(&out)["range"]["start"],
+                json!({"line": 2, "character": 6}),
+                "cursor at character {character}"
+            );
+        }
+        // **AND A COLUMN PAST THE END OF THE LINE CANNOT BE THE NEGATIVE CASE ON THIS LINE, WHICH
+        // IS WORTH KNOWING RATHER THAN WORKING AROUND.** `LineIndex::offset` clamps such a column
+        // to the line's CONTENT end, and line 1 ends with `scan` — so character 11, or 400, is
+        // the same byte offset as character 10 and resolves to the same name. That is the right
+        // answer (the caret is visually at the end of the name, and there is nothing else on the
+        // line) but it means the negative case needs a line with something AFTER the name.
+        // Line 2 is `state scan:`, so character 11 is past the colon.
+        let out = server.handle(request(
+            2,
+            "textDocument/definition",
+            &json!({"textDocument": {"uri": "file:///a.tm"}, "position": {"line": 2, "character": 11}}),
+        ));
+        assert_eq!(success_value(&out), serde_json::Value::Null, "past the colon is not the name");
+    }
+
+    #[test]
+    fn definition_on_a_form_this_server_does_not_serve_is_null() {
+        // Coverage for `locate`'s `doc.language?` check. An unrecognised `languageId` still
+        // tracks the document — see `unknown_language_id_is_answered` — but `language` is `None`
+        // for it, and nothing here may hand that document to any form's `nav`.
+        //
+        // THE TEXT IS DELIBERATELY VALID `.tm` SYNTAX. A sabotage that drops the check and falls
+        // back to some default `Language` would answer this with a real location rather than
+        // null, and an arbitrary non-TM fixture (Rust source, say) would not tell the two apart:
+        // it parses to an empty index either way, so `null` comes out whether or not the check
+        // ran. Sabotage-verified against `doc.language.unwrap_or(Language::Tm)`, which this
+        // fixture turns red.
+        let mut server = Server::new();
+        server.handle(request(1, "initialize", &json!(InitializeParams::default())));
+        did_open(&mut server, "file:///a.rs", "rust", NAV_TM);
+        let out = server.handle(request(
+            2,
+            "textDocument/definition",
+            &json!({"textDocument": {"uri": "file:///a.rs"}, "position": {"line": 3, "character": 35}}),
+        ));
+        assert_eq!(success_value(&out), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn initialize_advertises_the_three_navigation_providers() {
+        let mut server = Server::new();
+        let out = server.handle(request(1, "initialize", &json!(InitializeParams::default())));
+        let caps = initialize_result(&out).capabilities;
+        assert_eq!(caps.definition_provider, Some(DefinitionProvider::Bool(true)));
+        assert_eq!(caps.references_provider, Some(ReferencesProvider::Bool(true)));
+        assert_eq!(caps.document_symbol_provider, Some(DocumentSymbolProvider::Bool(true)));
+    }
+
+    #[test]
+    fn references_lists_every_mention_and_honours_include_declaration() {
+        // `scan` is referenced twice — `start scan` on line 1 and `goto scan` on line 3 — and
+        // defined once on line 2. The declaration's inclusion is the CLIENT's choice, so the
+        // two calls below must differ; a handler that ignored the flag would pass one of them.
+        let mut server = Server::new();
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+
+        let ask = |server: &mut Server, include: bool| {
+            let out = server.handle(request(
+                3,
+                "textDocument/references",
+                &json!({
+                    "textDocument": {"uri": "file:///a.tm"},
+                    "position": {"line": 2, "character": 6},
+                    "context": {"includeDeclaration": include}
+                }),
+            ));
+            success_value(&out)
+                .as_array()
+                .expect("an array")
+                .iter()
+                .map(|l| (l["range"]["start"]["line"].as_u64(), l["range"]["start"]["character"].as_u64()))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(ask(&mut server, false), vec![(Some(1), Some(6)), (Some(3), Some(35))]);
+        assert_eq!(ask(&mut server, true), vec![(Some(2), Some(6)), (Some(1), Some(6)), (Some(3), Some(35))]);
+    }
+
+    #[test]
+    fn references_from_a_reference_finds_its_siblings_not_just_itself() {
+        // Asking from `goto scan` on line 3 must give the same set as asking from the
+        // definition. A handler that returned only the occurrence under the cursor would pass
+        // a test that asked from the definition and nothing else.
+        let mut server = Server::new();
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+        let out = server.handle(request(
+            3,
+            "textDocument/references",
+            &json!({
+                "textDocument": {"uri": "file:///a.tm"},
+                "position": {"line": 3, "character": 35},
+                "context": {"includeDeclaration": false}
+            }),
+        ));
+        let lines: Vec<_> = success_value(&out)
+            .as_array()
+            .expect("an array")
+            .iter()
+            .map(|l| l["range"]["start"]["line"].as_u64())
+            .collect();
+        assert_eq!(lines, vec![Some(1), Some(3)]);
+    }
+
+    #[test]
+    fn references_from_a_reference_can_include_the_declaration() {
+        // The fourth cell of the (start position × `include_declaration`) square; the other three
+        // are covered above. `include` is read before `locate` and is independent of which
+        // occurrence the lookup began from, so this cell FOLLOWS from the other three — which is
+        // an argument, and an argument is what a test replaces.
+        let mut server = Server::new();
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+        let out = server.handle(request(
+            3,
+            "textDocument/references",
+            &json!({
+                "textDocument": {"uri": "file:///a.tm"},
+                "position": {"line": 3, "character": 35},
+                "context": {"includeDeclaration": true}
+            }),
+        ));
+        let lines: Vec<_> = success_value(&out)
+            .as_array()
+            .expect("an array")
+            .iter()
+            .map(|l| l["range"]["start"]["line"].as_u64())
+            .collect();
+        assert_eq!(lines, vec![Some(2), Some(1), Some(3)], "the declaration first, then both references");
+    }
+
+    #[test]
+    fn references_off_a_name_is_null() {
+        let mut server = Server::new();
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+        let out = server.handle(request(
+            3,
+            "textDocument/references",
+            &json!({
+                "textDocument": {"uri": "file:///a.tm"},
+                "position": {"line": 0, "character": 0},
+                "context": {"includeDeclaration": true}
+            }),
+        ));
+        assert_eq!(success_value(&out), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn document_symbol_lists_the_states_a_tm_file_defines() {
+        let mut server = Server::new();
+        init_hierarchical(&mut server);
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+        let out =
+            server.handle(request(4, "textDocument/documentSymbol", &json!({"textDocument": {"uri": "file:///a.tm"}})));
+        let v = success_value(&out);
+        let syms = v.as_array().expect("an array");
+        let names: Vec<_> = syms.iter().map(|s| s["name"].as_str()).collect();
+        // The DEFINITIONS, in source order. `start scan` is a reference and must not appear.
+        assert_eq!(names, vec![Some("scan"), Some("halt")]);
+        // `range` is the whole `state scan:` LINE and `selectionRange` is the name inside it.
+        // They were both the name span until a review pointed out that `range` is what a client
+        // tests the cursor against — so an outline reported no symbol anywhere except the four
+        // columns of the name.
+        assert_eq!(
+            syms[0]["range"],
+            json!({"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 11}})
+        );
+        assert_eq!(
+            syms[0]["selectionRange"],
+            json!({"start": {"line": 2, "character": 6}, "end": {"line": 2, "character": 10}})
+        );
+        assert!(syms[0]["children"].is_null(), "flat, not nested: 18,499 rules under 7,353 states is not an outline");
+    }
+
+    #[test]
+    fn a_tm_state_and_an_asm_label_get_different_symbol_kinds() {
+        // `nav.rs` is language-agnostic on purpose, so the kind is chosen here — the one place
+        // that knows the document's language. A single hardcoded kind would pass a test that
+        // only looked at one form.
+        let mut server = Server::new();
+        init_hierarchical(&mut server);
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+        server.handle(notification(
+            "textDocument/didOpen",
+            &json!({"textDocument": {
+                "uri": "file:///a.asm", "languageId": "redextape_asm", "version": 1,
+                "text": "result Nat\nf:\n\tret\n"
+            }}),
+        ));
+        let kind = |server: &mut Server, uri: &str| {
+            let out = server.handle(request(4, "textDocument/documentSymbol", &json!({"textDocument": {"uri": uri}})));
+            success_value(&out)[0]["kind"].as_u64()
+        };
+        let tm = kind(&mut server, "file:///a.tm");
+        let asm = kind(&mut server, "file:///a.asm");
+        assert!(tm.is_some() && asm.is_some());
+        assert_ne!(tm, asm, "a state and a label are not the same kind of thing");
+    }
+
+    #[test]
+    fn a_client_without_hierarchical_support_gets_symbol_information() {
+        // **THE SHAPE IS THE CLIENT'S CHOICE, AND `DocumentSymbolResponse` IS `#[serde(untagged)]`
+        // SO A WRONG CHOICE IS SILENT.** A client that does not advertise
+        // `hierarchicalDocumentSymbolSupport` expects `SymbolInformation[]`, whose members carry a
+        // `location` rather than a `range` — sending the other arm gives it objects with no
+        // `location` field, which it cannot report as a protocol error and renders as an empty
+        // outline. This server always sent the hierarchical arm until that was noticed.
+        let mut server = Server::new();
+        server.handle(request(1, "initialize", &json!(InitializeParams::default())));
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+        let out =
+            server.handle(request(4, "textDocument/documentSymbol", &json!({"textDocument": {"uri": "file:///a.tm"}})));
+        let syms = success_value(&out);
+        let first = &syms.as_array().expect("an array")[0];
+        assert_eq!(first["name"], "scan");
+        // The distinguishing field: `location`, carrying the uri, and NO bare `range`.
+        assert_eq!(first["location"]["uri"], "file:///a.tm");
+        assert_eq!(first["location"]["range"]["start"], json!({"line": 2, "character": 0}));
+        assert!(first["range"].is_null(), "a SymbolInformation has no bare `range`: {first}");
+        assert!(first["selectionRange"].is_null(), "nor a selectionRange");
+    }
+
+    #[test]
+    fn the_cached_index_is_rebuilt_when_the_document_changes() {
+        // THE CLASSIC CACHE DEFECT, AND THE REASON THE INDEX WAS NOT CACHED BEFORE IS THAT NOTHING
+        // MADE IT CHEAP TO GET WRONG. `Document::replace` rebuilds `index` and `nav` together and
+        // nowhere else; a stale `nav` would answer navigation against text the buffer no longer
+        // holds, which is worse than the parse-per-request it replaced.
+        let mut server = Server::new();
+        init_hierarchical(&mut server);
+        open_tm(&mut server, "file:///a.tm", NAV_TM);
+        server.handle(notification(
+            "textDocument/didChange",
+            &json!({
+                "textDocument": {"uri": "file:///a.tm", "version": 2},
+                "contentChanges": [{"text": "tapes 1\nstart only\nstate only: accept\n"}]
+            }),
+        ));
+        let out =
+            server.handle(request(4, "textDocument/documentSymbol", &json!({"textDocument": {"uri": "file:///a.tm"}})));
+        let v = success_value(&out);
+        let names: Vec<_> = v.as_array().expect("an array").iter().map(|s| s["name"].as_str()).collect();
+        assert_eq!(names, vec![Some("only")], "the NEW text's definitions, not the opened text's");
+    }
+
+    #[test]
+    fn document_symbol_is_null_for_a_form_this_server_does_not_index() {
+        // A `.rxt` buffer is served diagnostics and formatting and no navigation. Null, not an
+        // empty array: an empty array claims the file defines nothing.
+        let mut server = Server::new();
+        init_hierarchical(&mut server);
+        server.handle(notification(
+            "textDocument/didOpen",
+            &json!({"textDocument": {
+                "uri": "file:///a.rxt", "languageId": "redextape", "version": 1, "text": "fn f() { 1 }\nf()\n"
+            }}),
+        ));
+        let out = server.handle(request(
+            4,
+            "textDocument/documentSymbol",
+            &json!({"textDocument": {"uri": "file:///a.rxt"}}),
+        ));
+        assert_eq!(success_value(&out), serde_json::Value::Null);
+
+        let out = server.handle(request(
+            4,
+            "textDocument/documentSymbol",
+            &json!({"textDocument": {"uri": "file:///gone.tm"}}),
+        ));
+        assert_eq!(success_value(&out), serde_json::Value::Null, "an untracked URI too");
     }
 }

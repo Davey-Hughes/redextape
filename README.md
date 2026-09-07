@@ -81,7 +81,8 @@ apart, where either alone looks right.
 
 **`redextape-lsp`** is the eighth, and the count above already included it before this paragraph
 did — the same drift named just above, one crate later. It is a stdio language server — diagnostics
-and formatting for all four text forms (`.rxt`, `.rxlambda`, `.tm`, `.asm`), served over the Language
+and formatting for all four text forms (`.rxt`, `.rxlambda`, `.tm`, `.asm`), navigation for the two
+artifact forms, served over the Language
 Server Protocol to Neovim from the same `redextape-core` front ends the CLI and the web UI already
 call. `lsp-server` (the transport) is confined to its `main.rs`; every other file in the crate is a
 pure function of one client message to the messages that go back, which is what holds the crate to
@@ -181,10 +182,13 @@ as it diverges. Both are reachable only because control now returns from each β
   tree costs 850 MB against `HISTORY_BYTES`' 32 MB ring, and most steps have no tree to draw at any
   budget that is still affordable
   (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2).
-- **LSP** — `crates/redextape-lsp` now serves diagnostics and formatting for all four text forms
-  (Architecture, above). Still not built: navigation for any form (go-to-definition, references,
-  hover) and semantic tokens — the four tree-sitter grammars already highlight all four forms in
-  Neovim, so tokens are not needed for that editor and stay deliberately out of this slice.
+- **LSP** — `crates/redextape-lsp` now serves diagnostics and formatting for all four text forms,
+  plus **go-to-definition, find-references and document symbols for `.tm` and `.asm`**
+  (Architecture, above). Still not built: navigation for `.rxt`, which needs `analysis` to keep
+  resolved symbols because its names are scoped; navigation for `.rxlambda`, whose de Bruijn terms
+  carry no source positions at all; hover; rename; and semantic tokens — the four tree-sitter
+  grammars already highlight all four forms in Neovim, so tokens are not needed for that editor and
+  stay deliberately out of this slice.
 
 `crates/redextape-cli` is no longer on this list. All four subcommands work — `redextape fmt` /
 `redextape lint` (Roadmap Plan 6's first half, 2026-08-19), `redextape run` / `emit` (Plan 6's second

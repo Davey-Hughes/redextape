@@ -24,7 +24,7 @@ pub use asm::{
     decode_asm_reason, decode_asm_ty, decode_asm_ty_reason, print_asm, print_asm_doc, print_asm_mapped, print_asm_with,
     print_asm_with_mapped, run_asm,
 };
-pub use asm_syntax::{AsmDocument, parse_asm, parse_asm_full};
+pub use asm_syntax::{AsmDocument, parse_asm, parse_asm_full, parse_asm_nav};
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
     AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP,
@@ -42,7 +42,8 @@ pub use sim::{
     simulate_counts, simulate_final, simulate_trace, simulate_watched,
 };
 pub use syntax::{
-    TmDocument, parse_tm, parse_tm_full, print_tm, print_tm_doc, print_tm_mapped, print_tm_with, print_tm_with_mapped,
+    TmDocument, parse_tm, parse_tm_full, parse_tm_nav, print_tm, print_tm_doc, print_tm_mapped, print_tm_with,
+    print_tm_with_mapped,
 };
 
 use crate::core::Core;

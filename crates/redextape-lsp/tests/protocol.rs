@@ -65,6 +65,9 @@ fn server_binary_speaks_the_protocol() {
     assert_eq!(reply["id"], 1);
     assert_eq!(reply["result"]["capabilities"]["positionEncoding"], "utf-8");
     assert_eq!(reply["result"]["capabilities"]["documentFormattingProvider"], true);
+    // The capability an editor dispatches `vim.lsp.buf.definition` off. A handler test sees this
+    // field on an `InitializeResult`; only here is it the JSON a client actually reads.
+    assert_eq!(reply["result"]["capabilities"]["definitionProvider"], true);
 
     send(
         &mut stdin,
@@ -131,6 +134,51 @@ fn server_binary_speaks_the_protocol() {
     let new_text = edits[0]["newText"].as_str().expect("a newText string");
     assert!(new_text.contains("; a machine"), "own-line comment lost:\n{new_text}");
     assert!(new_text.contains("; and a trailing one"), "trailing comment lost:\n{new_text}");
+
+    // NAVIGATION OVER THE WIRE. The handler tests call `Server::handle` directly and cannot see
+    // that a `Location` survives the framing and the write loop, or that a request answered after
+    // three `didOpen` notifications on one connection still reads the document it names — this is
+    // the third document opened here, and the two before it are the ones a server that had lost
+    // track of which URI it was looking at would answer from.
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": "file:///nav.tm", "languageId": "redextape_tm", "version": 1,
+                // NAV_TM from the handler tests: `goto scan` on line 3 is a reference, `state scan:`
+                // on line 2 is its definition, and `start scan` on line 1 is the decoy — a plain
+                // string search for `scan` finds that one first.
+                "text": "tapes 1\nstart scan\nstate scan:\n  [1] -> write [*], move [R], goto scan\n  [*] -> write [1], move [S], goto halt\nstate halt: accept\n"
+            }}
+        }),
+    );
+    let note = recv(&mut stdout);
+    assert_eq!(note["method"], "textDocument/publishDiagnostics");
+    assert_eq!(note["params"]["uri"], "file:///nav.tm");
+    assert_eq!(note["params"]["diagnostics"].as_array().expect("an array").len(), 0, "this fixture parses clean");
+
+    send(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 10, "method": "textDocument/definition",
+            "params": {
+                "textDocument": { "uri": "file:///nav.tm" },
+                // The `s` of the `scan` in `goto scan`.
+                "position": { "line": 3, "character": 35 }
+            }
+        }),
+    );
+    let reply = recv(&mut stdout);
+    assert_eq!(reply["id"], 10);
+    assert!(reply.get("error").is_none(), "definition on a goto must not error: {reply:?}");
+    // A single `Location`, not an array and not a `LocationLink`: the response type is untagged, so
+    // the shape a client sees is decided by serialization rather than by the handler.
+    assert_eq!(reply["result"]["uri"], "file:///nav.tm");
+    assert_eq!(reply["result"]["range"]["start"]["line"], 2);
+    assert_eq!(reply["result"]["range"]["start"]["character"], 6);
+    assert_eq!(reply["result"]["range"]["end"]["line"], 2);
+    assert_eq!(reply["result"]["range"]["end"]["character"], 10);
 
     send(&mut stdin, &serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "shutdown" }));
     let reply = recv(&mut stdout);

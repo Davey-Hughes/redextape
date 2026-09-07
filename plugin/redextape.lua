@@ -211,8 +211,11 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
--- THE LANGUAGE SERVER. Diagnostics for all four forms and formatting for all four, from the same
--- `redextape-core` the CLI and the web UI use — see crates/redextape-lsp.
+-- THE LANGUAGE SERVER. Diagnostics and formatting for all four forms, plus go-to-definition,
+-- find-references and document symbols for `.tm` and `.asm`, from the same `redextape-core` the
+-- CLI and the web UI use — see crates/redextape-lsp. Navigation needs no wiring here: Neovim
+-- dispatches `vim.lsp.buf.definition` and friends off the capabilities the server advertises at
+-- `initialize`.
 --
 -- `filetypes = FILETYPES` REUSES THE TABLE ABOVE rather than repeating four strings. That removes a
 -- duplication INSIDE this file and nothing more — no gate could have caught the repetition either
@@ -256,7 +259,7 @@ else
       .. "Run `cargo build --release -p redextape-lsp` in "
       .. ROOT
       .. ", or `cargo install --path crates/redextape-lsp` to put it on PATH.\n"
-      .. "Diagnostics and formatting are off until then; highlighting is unaffected.",
+      .. "Diagnostics, formatting and navigation are off until then; highlighting is unaffected.",
     vim.log.levels.WARN
   )
 end
