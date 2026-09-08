@@ -15,6 +15,7 @@
 
 pub mod analysis;
 pub mod ast;
+pub mod binder;
 pub mod core;
 pub mod desugar;
 pub mod diagnostic;

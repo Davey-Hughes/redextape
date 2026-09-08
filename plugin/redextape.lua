@@ -212,8 +212,9 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 
 -- THE LANGUAGE SERVER. Diagnostics and formatting for all four forms, plus go-to-definition,
--- find-references and document symbols for `.tm` and `.asm`, from the same `redextape-core` the
--- CLI and the web UI use — see crates/redextape-lsp. Navigation needs no wiring here: Neovim
+-- find-references and document symbols for `.tm`, `.asm` and `.rxt`, from the same
+-- `redextape-core` the CLI and the web UI use — see crates/redextape-lsp. Navigation needs no
+-- wiring here: Neovim
 -- dispatches `vim.lsp.buf.definition` and friends off the capabilities the server advertises at
 -- `initialize`.
 --

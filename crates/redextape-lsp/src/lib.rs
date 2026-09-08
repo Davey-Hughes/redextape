@@ -33,6 +33,7 @@ use gen_lsp_types::{
 use redextape_core::nav::NameIndex;
 
 use crate::document::Documents;
+use crate::language::outline_kind;
 use crate::position::Encoding;
 
 /// One message the server sends because of one message from the client.
@@ -321,8 +322,10 @@ impl Server {
     /// enclosing a whole state's rules would mean the parser recording where each state's block
     /// ends, which is more than navigation needs.
     ///
-    /// The `SymbolKind` is chosen HERE because this is the one place that knows the document's
-    /// language; `nav.rs` deliberately holds no grammar and cannot tell a state from a label.
+    /// The `SymbolKind` comes from `outline_kind(DefKind)`, per occurrence rather than per
+    /// document — a `.rxt` file mixes `fn`s, `let`s and parameters, so one language no longer
+    /// implies one kind. `nav.rs` still holds no grammar; `DefKind` is the parser's answer and
+    /// `outline_kind` is this crate's mapping of it to the protocol.
     fn document_symbol(&self, id: Id, params: serde_json::Value) -> Outgoing {
         let params = match serde_json::from_value::<DocumentSymbolParams>(params) {
             Ok(p) => p,
@@ -331,19 +334,19 @@ impl Server {
         let found = Some(params).and_then(|p| {
             let uri = p.text_document.uri;
             let doc = self.documents.get(uri.as_ref())?;
-            // `symbol_kind` lives beside `nav` in `language.rs`, so the two lists of languages
-            // cannot drift apart unseen; `None` here is the same answer `nav` gives.
-            let kind = doc.language?.symbol_kind()?;
             let nav = doc.nav.as_ref()?;
-            let symbols = nav.definitions().map(|o| {
+            let symbols = nav.definitions().filter_map(|o| {
+                // `None` is a definition an outline does not list — a `.rxt` parameter. Filtering
+                // here rather than in the index keeps the parameter navigable.
+                let kind = outline_kind(o.def_kind()?)?;
                 let selection_range = doc.index.range(&doc.text, o.span, self.encoding);
                 let range = doc.index.range(&doc.text, enclosing_line(&doc.text, o.span), self.encoding);
-                (o.name.clone(), range, selection_range)
+                Some((o.name.clone(), kind, range, selection_range))
             });
             Some(if self.hierarchical_symbols {
                 DocumentSymbolResponse::DocumentSymbolList(
                     symbols
-                        .map(|(name, range, selection_range)| {
+                        .map(|(name, kind, range, selection_range)| {
                             // `DocumentSymbol::deprecated` is a #[deprecated] field with no
                             // default and a positional slot in `::new`, so BOTH construction
                             // routes trip the lint that `-D warnings` makes fatal.
@@ -371,7 +374,7 @@ impl Server {
                 // nothing logged on either side.
                 DocumentSymbolResponse::SymbolInformationList(
                     symbols
-                        .map(|(name, range, _)| {
+                        .map(|(name, kind, range, _)| {
                             #[allow(deprecated)]
                             SymbolInformation {
                                 deprecated: None,
@@ -1194,9 +1197,10 @@ state q1: accept
 
     #[test]
     fn a_tm_state_and_an_asm_label_get_different_symbol_kinds() {
-        // `nav.rs` is language-agnostic on purpose, so the kind is chosen here — the one place
-        // that knows the document's language. A single hardcoded kind would pass a test that
-        // only looked at one form.
+        // The `SymbolKind` comes from `outline_kind(DefKind)` per occurrence, not per document —
+        // a single `.rxt` file already mixes several kinds, so knowing the document's language no
+        // longer determines the kind. A single hardcoded kind would pass a test that only looked
+        // at one form, which is why this test opens two documents.
         let mut server = Server::new();
         init_hierarchical(&mut server);
         open_tm(&mut server, "file:///a.tm", NAV_TM);
@@ -1241,6 +1245,41 @@ state q1: accept
     }
 
     #[test]
+    fn a_client_without_hierarchical_support_gets_the_right_kind_per_symbol() {
+        // The flat `SymbolInformation[]` arm threads a per-occurrence `kind` same as the
+        // hierarchical arm does, but `DocumentSymbolResponse` is `#[serde(untagged)]`, so a wrong
+        // `kind` there is silent to the client rather than a protocol error — nothing short of a
+        // test on this arm's own JSON can catch it. `.tm` only ever defines one kind of thing, so
+        // this opens a `.rxt` buffer instead: it mixes a `let` and a `fn`, which is what lets the
+        // assertion below tell an implementation that reused one kind for every symbol from one
+        // that read the kind per occurrence.
+        let mut server = Server::new();
+        server.handle(request(1, "initialize", &json!(InitializeParams::default())));
+        server.handle(notification(
+            "textDocument/didOpen",
+            &json!({"textDocument": {
+                "uri": "file:///a.rxt", "languageId": "redextape", "version": 1,
+                "text": "let top = 1;\nfn compute(alpha) { alpha }\ncompute(top)\n"
+            }}),
+        ));
+        let out = server.handle(request(
+            5,
+            "textDocument/documentSymbol",
+            &json!({"textDocument": {"uri": "file:///a.rxt"}}),
+        ));
+        let v = success_value(&out);
+        let syms = v.as_array().expect("an array");
+        // The distinguishing field of `SymbolInformation`, confirming this is the flat arm and not
+        // the hierarchical one: `location`, and no bare `range`.
+        assert_eq!(syms[0]["location"]["uri"], "file:///a.rxt");
+        assert!(syms[0]["range"].is_null(), "a SymbolInformation has no bare `range`: {}", syms[0]);
+        let names: Vec<_> = syms.iter().map(|s| s["name"].as_str()).collect();
+        assert_eq!(names, vec![Some("top"), Some("compute")], "`alpha` excluded, both in source order");
+        let kinds: Vec<_> = syms.iter().map(|s| s["kind"].as_u64()).collect();
+        assert_eq!(kinds, vec![Some(13), Some(12)], "Variable then Function, not one kind reused for both");
+    }
+
+    #[test]
     fn the_cached_index_is_rebuilt_when_the_document_changes() {
         // THE CLASSIC CACHE DEFECT, AND THE REASON THE INDEX WAS NOT CACHED BEFORE IS THAT NOTHING
         // MADE IT CHEAP TO GET WRONG. `Document::replace` rebuilds `index` and `nav` together and
@@ -1265,20 +1304,21 @@ state q1: accept
 
     #[test]
     fn document_symbol_is_null_for_a_form_this_server_does_not_index() {
-        // A `.rxt` buffer is served diagnostics and formatting and no navigation. Null, not an
-        // empty array: an empty array claims the file defines nothing.
+        // A `.rxlambda` buffer is served diagnostics and formatting and no navigation — it waits
+        // on a term type that carries no source positions at all. Null, not an empty array: an
+        // empty array claims the file defines nothing.
         let mut server = Server::new();
         init_hierarchical(&mut server);
         server.handle(notification(
             "textDocument/didOpen",
             &json!({"textDocument": {
-                "uri": "file:///a.rxt", "languageId": "redextape", "version": 1, "text": "fn f() { 1 }\nf()\n"
+                "uri": "file:///a.rxlambda", "languageId": "redextape_lambda", "version": 1, "text": "λx. x"
             }}),
         ));
         let out = server.handle(request(
             4,
             "textDocument/documentSymbol",
-            &json!({"textDocument": {"uri": "file:///a.rxt"}}),
+            &json!({"textDocument": {"uri": "file:///a.rxlambda"}}),
         ));
         assert_eq!(success_value(&out), serde_json::Value::Null);
 
@@ -1288,5 +1328,103 @@ state q1: accept
             &json!({"textDocument": {"uri": "file:///gone.tm"}}),
         ));
         assert_eq!(success_value(&out), serde_json::Value::Null, "an untracked URI too");
+    }
+
+    #[test]
+    fn document_symbol_lists_a_rxt_fn_and_its_let_but_not_its_parameters() {
+        // The source this test opens is the one the `.rxt`-is-not-indexed test used to open, back
+        // when answering `null` for it was the correct behaviour.
+        let mut server = Server::new();
+        init_hierarchical(&mut server);
+        server.handle(notification(
+            "textDocument/didOpen",
+            &json!({"textDocument": {
+                "uri": "file:///a.rxt", "languageId": "redextape", "version": 1,
+                "text": "let top = 1;\nfn compute(alpha) { alpha }\ncompute(top)\n"
+            }}),
+        ));
+        let out = server.handle(request(
+            5,
+            "textDocument/documentSymbol",
+            &json!({"textDocument": {"uri": "file:///a.rxt"}}),
+        ));
+        let v = success_value(&out);
+        let syms = v.as_array().expect("an array");
+        let names: Vec<_> = syms.iter().map(|s| s["name"].as_str()).collect();
+        // `alpha` is deliberately absent, and `top` and `compute` are in SOURCE order.
+        assert_eq!(names, vec![Some("top"), Some("compute")]);
+        let kinds: Vec<_> = syms.iter().map(|s| s["kind"].as_u64()).collect();
+        assert_eq!(kinds, vec![Some(13), Some(12)], "Variable then Function");
+    }
+
+    /// Shadowing, so a wrong answer is available: `x` is bound twice. `let x = x + 1;`'s
+    /// right-hand `x` (line 1, character 8) is bound by the FIRST `let`, and line 2's bare `x`
+    /// (character 0) is bound by the SECOND — the same fixture `nav_rxt`'s own doc names, one
+    /// layer down. A name-keyed implementation cannot answer both: `binder` resolves each mention
+    /// against the scope chain as it walks, rather than through `NameIndex::link`'s
+    /// first-definition-wins rule.
+    const NAV_RXT_SHADOWED: &str = "let x = 1;\nlet x = x + 1;\nx\n";
+
+    #[test]
+    fn definition_on_rxt_resolves_a_shadowed_name_to_its_own_binding() {
+        let mut server = Server::new();
+        did_open(&mut server, "file:///a.rxt", "redextape", NAV_RXT_SHADOWED);
+
+        let out = server.handle(request(
+            2,
+            "textDocument/definition",
+            &json!({"textDocument": {"uri": "file:///a.rxt"}, "position": {"line": 1, "character": 8}}),
+        ));
+        let v = success_value(&out);
+        assert_eq!(v["uri"], "file:///a.rxt");
+        assert_eq!(v["range"]["start"], json!({"line": 0, "character": 4}), "the FIRST let, not the second");
+        assert_eq!(v["range"]["end"], json!({"line": 0, "character": 5}));
+
+        let out = server.handle(request(
+            2,
+            "textDocument/definition",
+            &json!({"textDocument": {"uri": "file:///a.rxt"}, "position": {"line": 2, "character": 0}}),
+        ));
+        let v = success_value(&out);
+        assert_eq!(v["range"]["start"], json!({"line": 1, "character": 4}), "the SECOND let, not the first");
+        assert_eq!(v["range"]["end"], json!({"line": 1, "character": 5}));
+    }
+
+    #[test]
+    fn references_on_rxt_only_lists_mentions_of_the_same_binding() {
+        // The same shadowed fixture, from the other direction: a name-keyed `references` would
+        // answer both `x` mentions for either `let`, since both share the string `x`. The
+        // binder-resolved index must keep the two bindings' references apart.
+        let mut server = Server::new();
+        did_open(&mut server, "file:///a.rxt", "redextape", NAV_RXT_SHADOWED);
+
+        let ask = |server: &mut Server, line: u64, character: u64| {
+            let out = server.handle(request(
+                3,
+                "textDocument/references",
+                &json!({
+                    "textDocument": {"uri": "file:///a.rxt"},
+                    "position": {"line": line, "character": character},
+                    "context": {"includeDeclaration": false}
+                }),
+            ));
+            success_value(&out)
+                .as_array()
+                .expect("an array")
+                .iter()
+                .map(|l| (l["range"]["start"]["line"].as_u64(), l["range"]["start"]["character"].as_u64()))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            ask(&mut server, 0, 4),
+            vec![(Some(1), Some(8))],
+            "the FIRST let's only reference is line 2's right-hand x, not line 3's"
+        );
+        assert_eq!(
+            ask(&mut server, 1, 4),
+            vec![(Some(2), Some(0))],
+            "the SECOND let's only reference is line 3's bare x, not line 2's own right-hand x"
+        );
     }
 }

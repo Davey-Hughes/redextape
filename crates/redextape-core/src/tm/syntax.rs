@@ -43,7 +43,7 @@
 
 use crate::analysis::{Classified, TokenClass as C, push_span};
 use crate::diagnostic::Severity;
-use crate::nav::NameIndex;
+use crate::nav::{DefKind, NameIndex};
 use crate::tm::build::MAX_TAPES;
 use crate::tm::comments::{self, AnchoredComment, CommentWriter, TmAnchor, TmDirective};
 use crate::tm::header::{HeaderParts, TmHeader, write_header};
@@ -551,7 +551,7 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
             {
                 let (_, pad) = trimmed_at(name_part);
                 let at = line_start + indent + "state ".len() + pad;
-                nav.push_definition(&name, Span { start: at, end: at + name.len() });
+                nav.push_definition(&name, Span { start: at, end: at + name.len() }, DefKind::State);
             }
             states.push(RawState { name, accept, rules: Vec::new() });
             #[allow(clippy::cast_possible_truncation)] // see the `ids` map below for why this is sound

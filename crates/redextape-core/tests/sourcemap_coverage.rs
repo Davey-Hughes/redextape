@@ -416,7 +416,8 @@ fn letrecgroup_span_is_the_hull_and_can_cover_an_interleaved_non_member() {
 /// cells instead inherit their own element's span — the one case where "nearest enclosing" and "what
 /// produced this node" diverge, pinned separately below by
 /// `list_literal_cons_cells_point_at_their_own_elements`); and a UFCS method call's synthesized callee
-/// `Var` (the method name has no span of its own in this AST) inherits the whole call's span.
+/// `Var` inherits the whole call's span rather than the method name's own `name_span` — feeding it
+/// `name_span` instead would move the sourcemap entry this file pins.
 #[test]
 fn synthesized_leaves_inherit_the_span_of_what_caused_them() {
     // `fn f(n) { n; }`: the OUTER program block is itself tail-less (just one `fn` statement), and so

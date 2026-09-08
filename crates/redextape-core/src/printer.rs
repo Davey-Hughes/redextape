@@ -286,7 +286,7 @@ impl<'a> Printer<'a> {
             Expr::List { items, span } => self.list(items, *span),
             Expr::Lambda { params, body, .. } => {
                 self.out.push('|');
-                self.out.push_str(&params.join(", "));
+                self.out.push_str(&params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
                 self.out.push_str("| ");
                 self.expr_prec(body, 0);
             }
@@ -369,7 +369,7 @@ impl<'a> Printer<'a> {
                     links.push(Link::Call(args, Span::new(start, span.end), connector));
                     cur = callee.as_ref();
                 }
-                Expr::Method { recv, name, args, span } => {
+                Expr::Method { recv, name, args, span, .. } => {
                     let prev_end = recv.span().end;
                     let start = self.open_paren_after(prev_end);
                     let connector = self.contains_comment(Span::new(prev_end, start));
@@ -945,7 +945,7 @@ impl Printer<'_> {
                 self.out.push_str("fn ");
                 self.out.push_str(name);
                 self.out.push('(');
-                self.out.push_str(&params.join(", "));
+                self.out.push_str(&params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
                 self.out.push_str(") ");
                 self.braced(body);
             }

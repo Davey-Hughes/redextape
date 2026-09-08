@@ -144,8 +144,9 @@ fn no_line_exceeds_the_budget_except_the_three_documented_constructs() {
          should be updated rather than deleted"
     );
 
-    // §17, first divergence: parameter lists are `Vec<String>`, printed with `join(", ")` and no
-    // width handling at all, in `Stmt::Fn` and `Expr::Lambda` alike. Measured at 509 and 511 columns.
+    // §17, first divergence: parameter lists are `Vec<Param>`, printed with
+    // `.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")` and no width handling at
+    // all, in `Stmt::Fn` and `Expr::Lambda` alike. Measured at 509 and 511 columns.
     let params = (0..30).map(|i| format!("param_number_{i}")).collect::<Vec<_>>().join(", ");
     for src in [format!("fn wide({params}) {{ 1 }}\n0"), format!("let f = |{params}| 1;\n0")] {
         let out = format(&src).unwrap();

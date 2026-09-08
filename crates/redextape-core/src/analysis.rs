@@ -16,6 +16,11 @@
 //! it false.** The count did not move: what rules a reader out here is that it returns a structure
 //! rather than spans, which is true of all three and was true of the two that already existed. The
 //! sentence named the wrong property — absence rather than shape — and a new parser exposed it.
+//!
+//! **NAME RESOLUTION IS NOT HERE.** The LSP navigation design describes `.rxt`'s binder pass as
+//! teaching this module to keep resolved symbols; it landed in `binder` instead, because this
+//! module classifies tokens and a scoping pass is a different concern with a different consumer.
+//! A reader following that phrasing wants `binder::nav_rxt`.
 
 use crate::core::NodeId;
 use crate::lexer::lex;

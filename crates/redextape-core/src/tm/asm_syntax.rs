@@ -10,7 +10,7 @@
 //! for the TM text form, and for the same reasons.
 
 use crate::core::BinOp;
-use crate::nav::NameIndex;
+use crate::nav::{DefKind, NameIndex};
 use crate::tm::asm::{AsmHeader, Instr, OperandKind, Program, Reg};
 use crate::tm::comments::{self, AnchoredComment, AsmAnchor};
 use crate::{Diagnostic, Span};
@@ -211,7 +211,7 @@ pub fn parse_asm_nav(src: &str) -> (AsmDocument, NameIndex) {
                 // now warns that a trimmed argument makes its second return meaningless.
                 let (name_text, pad) = trimmed_at(name);
                 let at = line_start + indent + pad;
-                nav.push_definition(name_text, Span::new(at, at + name_text.len()));
+                nav.push_definition(name_text, Span::new(at, at + name_text.len()), DefKind::Label);
             }
             continue;
         }

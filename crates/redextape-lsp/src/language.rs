@@ -11,7 +11,7 @@
 
 use gen_lsp_types::SymbolKind;
 use redextape_core::Diagnostic;
-use redextape_core::nav::NameIndex;
+use redextape_core::nav::{DefKind, NameIndex};
 
 /// One of the four text forms this repository defines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,45 +79,45 @@ impl Language {
         }
     }
 
-    /// The `SymbolKind` a definition in this form is reported as, or `None` for a form this
-    /// server does not index.
-    ///
-    /// **THIS SITS BESIDE `nav` BECAUSE THE TWO ARE ONE LIST OF LANGUAGES WRITTEN TWICE, AND THEY
-    /// LIVED IN DIFFERENT FILES UNTIL A REVIEW POINTED AT WHAT THAT COSTS.** `document_symbol` had
-    /// its own `match` naming `Redextape | Lambda`, unreachable only because `nav` answers `None`
-    /// for them — so PR B teaching `nav` to answer for `.rxt` would have made every function, let
-    /// and parameter report as one kind, with no compile error and no failing test. Keeping both
-    /// arms in one impl means the edit that changes one is looking at the other, and
-    /// `every_form_with_an_index_has_a_symbol_kind` fails if they ever disagree.
-    ///
-    /// `.rxt` will need THREE kinds rather than one — a `fn`, a `let` and a parameter are not the
-    /// same thing — so PR B changes this signature. That is the point: it changes a signature
-    /// rather than silently returning a wrong constant.
-    #[must_use]
-    pub fn symbol_kind(self) -> Option<SymbolKind> {
-        match self {
-            // A TM state is a place the machine can be in; an asm label names a point in a
-            // program. `Class` and `Function` are the nearest of the protocol's fixed set.
-            Language::Tm => Some(SymbolKind::Class),
-            Language::Asm => Some(SymbolKind::Function),
-            Language::Redextape | Language::Lambda => None,
-        }
-    }
-
     /// The name-span index for this form, or `None` for a form that has none.
     ///
     /// **`None` IS NOT AN EMPTY INDEX.** An empty index says "this document contains no names",
     /// which is a claim about the document; `None` says "this server cannot answer navigation
-    /// for this form", which is a claim about the server. `.rxt` waits on a binder-resolution
-    /// pass — names there are scoped, so an occurrence resolves to a BINDING and not to a name —
-    /// and `.rxlambda` on a term type that carries no source positions at all.
+    /// for this form", which is a claim about the server. `.rxlambda` waits on a term type that
+    /// carries no source positions at all.
     #[must_use]
     pub fn nav(self, src: &str) -> Option<NameIndex> {
         match self {
             Language::Tm => Some(redextape_core::tm::parse_tm_nav(src).1),
             Language::Asm => Some(redextape_core::tm::parse_asm_nav(src).1),
-            Language::Redextape | Language::Lambda => None,
+            Language::Redextape => Some(redextape_core::binder::nav_rxt(src)),
+            Language::Lambda => None,
         }
+    }
+}
+
+/// The `SymbolKind` a document outline lists this definition as, or `None` for a definition an
+/// outline should not list.
+///
+/// **THIS TAKES NO `Language`, AND THAT IS WHAT REPLACED A TEST.** `Language::symbol_kind`
+/// answered one fixed kind per form, and `every_form_with_an_index_has_a_symbol_kind` existed to
+/// stop `nav` and that match drifting apart — because a form gaining an index without gaining a
+/// kind reports nothing in an outline, with no compile error. `DefKind` moves the answer to the
+/// push site, so the match is exhaustive over kinds and a new one is a compile error here. The
+/// test is gone; the compiler holds what it held.
+///
+/// **`None` MEANS "NOT AN OUTLINE SYMBOL", NOT "NOT INDEXED".** A parameter must be in the index —
+/// go-to-definition on one has to land — but an outline listing every parameter of every function
+/// as a flat sibling of the functions is noise. The name is `outline_kind` rather than
+/// `symbol_kind` because those are two different questions and the old name answered one.
+pub(crate) fn outline_kind(kind: DefKind) -> Option<SymbolKind> {
+    match kind {
+        // A TM state is a place the machine can be in; an asm label names a point in a program.
+        // `Class` and `Function` are the nearest of the protocol's fixed set. Unchanged.
+        DefKind::State => Some(SymbolKind::Class),
+        DefKind::Label | DefKind::Fn => Some(SymbolKind::Function),
+        DefKind::Let => Some(SymbolKind::Variable),
+        DefKind::Param => None,
     }
 }
 
@@ -241,24 +241,25 @@ f: ; the entry
     }
 
     #[test]
-    fn only_the_two_artifact_forms_have_a_navigation_index() {
-        // `.rxt` waits on a binder-resolution pass and `.rxlambda` on a term type that carries
-        // no source positions at all. `None` is the answer, not an empty index: an empty index
-        // would tell the server "this file has no names in it", which is a different claim.
+    fn three_of_the_four_forms_have_a_navigation_index() {
         assert!(Language::Tm.nav("tapes 1\nstart q0\nstate q0: accept\n").is_some());
         assert!(Language::Asm.nav("f:\n\tret\n").is_some());
-        assert!(Language::Redextape.nav("let x = 1;\nx\n").is_none());
+        assert!(Language::Redextape.nav("let x = 1;\nx\n").is_some(), "the binder pass ships here");
+        // `.rxlambda` waits on a term type that carries no source positions at all. `None` is the
+        // answer and not an empty index: an empty index would claim the file has no names in it.
         assert!(Language::Lambda.nav("λx. x").is_none());
     }
 
     #[test]
-    fn every_form_with_an_index_has_a_symbol_kind_and_no_other_form_does() {
-        // The two `match`es are one list of languages written twice. This is what holds them in
-        // step: a form that gains an index without gaining a kind reports nothing in an outline,
-        // and one that gains a kind without an index has a constant nothing can reach.
-        for lang in [Language::Redextape, Language::Lambda, Language::Tm, Language::Asm] {
-            let has_index = lang.nav("").is_some();
-            assert_eq!(has_index, lang.symbol_kind().is_some(), "{lang:?} disagrees between nav and symbol_kind");
-        }
+    fn an_outline_lists_functions_and_bindings_and_not_parameters() {
+        // A parameter must be IN the index — go-to-definition on one has to land — but an outline
+        // listing every parameter of every function as a flat sibling of the functions is noise.
+        // `None` here means "not an outline symbol", which is why this is not called symbol_kind.
+        assert_eq!(outline_kind(DefKind::Fn), Some(SymbolKind::Function));
+        assert_eq!(outline_kind(DefKind::Let), Some(SymbolKind::Variable));
+        assert_eq!(outline_kind(DefKind::Param), None);
+        // Unchanged from the slice that shipped them.
+        assert_eq!(outline_kind(DefKind::State), Some(SymbolKind::Class));
+        assert_eq!(outline_kind(DefKind::Label), Some(SymbolKind::Function));
     }
 }

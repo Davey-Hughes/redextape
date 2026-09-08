@@ -1,7 +1,7 @@
 //! Surface AST -> Core AST. Reduces sugar: UFCS method calls, list literals, and the
 //! block/statement structure. Assumes the program has already parsed and typechecked.
 
-use crate::ast::{self, Block, Expr, Program, Stmt};
+use crate::ast::{self, Block, Expr, Param, Program, Stmt};
 use crate::core::{BinOp, Core, NodeGen, NodeId};
 use crate::span::Span;
 use std::collections::{BTreeMap, BTreeSet};
@@ -117,7 +117,7 @@ fn lower_stmts_at(
         }
         i -= 1;
         acc = match stmt {
-            Stmt::Let { name, mutable, value, span } => {
+            Stmt::Let { name, mutable, value, name_span: _, span } => {
                 let value = Box::new(lower_expr_at(g, value, spans));
                 let id = g.fresh();
                 spans.push((id, *span));
@@ -127,7 +127,7 @@ fn lower_stmts_at(
             // lone one through the same helper (a run of one) keeps this arm correct rather than a
             // second, driftable copy of the lowering.
             Stmt::Fn { .. } => lower_fn_run_at(g, std::slice::from_ref(stmt), acc, spans),
-            Stmt::Assign { target, value, span } => {
+            Stmt::Assign { target, value, target_span: _, span } => {
                 // `g.fresh()` for the `Assign` id is read BEFORE `value` is lowered — a single
                 // constructor call evaluates its arguments left to right — and preserving that order
                 // keeps every `NodeId` identical to what the unmapped lowering minted before this leg
@@ -204,12 +204,16 @@ fn lower_fn_run_at(g: &mut NodeGen, run: &[Stmt], acc: Core, spans: &mut Vec<(No
             // so a self-recursive member needs nothing more. Both minted ids are the member's own
             // `Stmt::Fn` span — this member IS the source construct, not scaffolding.
             [i] => match run.get(*i) {
-                Some(Stmt::Fn { name, params, body, span }) => {
+                Some(Stmt::Fn { name, params, body, span, .. }) => {
                     // `lam_id` is read before `body` is lowered — a single constructor call evaluates
                     // its arguments left to right — preserving the `NodeId`s the unmapped lowering
                     // already minted.
                     let lam_id = g.fresh();
-                    let lam = Core::Lambda(lam_id, params.clone(), Box::new(lower_block_at(g, body, spans)));
+                    let lam = Core::Lambda(
+                        lam_id,
+                        params.iter().map(|p| p.name.clone()).collect(),
+                        Box::new(lower_block_at(g, body, spans)),
+                    );
                     spans.push((lam_id, *span));
                     let id = g.fresh();
                     spans.push((id, *span));
@@ -240,9 +244,13 @@ fn lower_fn_run_at(g: &mut NodeGen, run: &[Stmt], acc: Core, spans: &mut Vec<(No
                 });
                 let mut bindings = Vec::with_capacity(group.len());
                 for i in group {
-                    if let Some(Stmt::Fn { name, params, body, span }) = run.get(*i) {
+                    if let Some(Stmt::Fn { name, params, body, span, .. }) = run.get(*i) {
                         let lam_id = g.fresh();
-                        let lam = Core::Lambda(lam_id, params.clone(), Box::new(lower_block_at(g, body, spans)));
+                        let lam = Core::Lambda(
+                            lam_id,
+                            params.iter().map(|p| p.name.clone()).collect(),
+                            Box::new(lower_block_at(g, body, spans)),
+                        );
                         spans.push((lam_id, *span));
                         bindings.push((name.clone(), lam));
                     }
@@ -364,7 +372,7 @@ fn bind<'a>(chain: &mut Vec<Shadow<'a>>, scope: usize, members: &BTreeSet<&'a st
 /// A list literal's synthetic `cons`/`nil` are deliberately NOT references: `typeck` types a list
 /// literal structurally without consulting either name, so counting them would make this analysis
 /// disagree with the scope the typechecker checked against.
-fn free_member_refs<'a>(members: &BTreeSet<&'a str>, params: &'a [String], body: &'a Block) -> BTreeSet<&'a str> {
+fn free_member_refs<'a>(members: &BTreeSet<&'a str>, params: &'a [Param], body: &'a Block) -> BTreeSet<&'a str> {
     let mut out: BTreeSet<&'a str> = BTreeSet::new();
     if members.is_empty() {
         return out;
@@ -372,7 +380,7 @@ fn free_member_refs<'a>(members: &BTreeSet<&'a str>, params: &'a [String], body:
     let mut chain: Vec<Shadow<'a>> = Vec::new();
     let mut scope = NO_SHADOW;
     for p in params {
-        scope = bind(&mut chain, scope, members, p.as_str());
+        scope = bind(&mut chain, scope, members, p.name.as_str());
     }
     let mut work: Vec<Work<'a>> = vec![Work::B(body, scope)];
     while let Some(item) = work.pop() {
@@ -394,7 +402,7 @@ fn free_member_refs<'a>(members: &BTreeSet<&'a str>, params: &'a [String], body:
                 Expr::Lambda { params, body, .. } => {
                     let mut inner = scope;
                     for p in params {
-                        inner = bind(&mut chain, inner, members, p.as_str());
+                        inner = bind(&mut chain, inner, members, p.name.as_str());
                     }
                     work.push(Work::E(body, inner));
                 }
@@ -438,7 +446,7 @@ fn free_member_refs<'a>(members: &BTreeSet<&'a str>, params: &'a [String], body:
                                 if let Stmt::Fn { params, body, .. } = stmt {
                                     let mut inner = cur;
                                     for p in params {
-                                        inner = bind(&mut chain, inner, members, p.as_str());
+                                        inner = bind(&mut chain, inner, members, p.name.as_str());
                                     }
                                     work.push(Work::B(body, inner));
                                 }
@@ -639,7 +647,7 @@ fn lower_expr_at(g: &mut NodeGen, expr: &Expr, spans: &mut Vec<(NodeId, Span)>) 
             let id = g.fresh();
             spans.push((id, *span));
             let inner = Box::new(lower_expr_at(g, body, spans));
-            Core::Lambda(id, params.clone(), inner)
+            Core::Lambda(id, params.iter().map(|p| p.name.clone()).collect(), inner)
         }
         Expr::Call { callee, args, span } => {
             let f = Box::new(lower_expr_at(g, callee, spans));
@@ -648,9 +656,10 @@ fn lower_expr_at(g: &mut NodeGen, expr: &Expr, spans: &mut Vec<(NodeId, Span)>) 
             spans.push((id, *span));
             Core::Apply(id, f, args)
         }
-        Expr::Method { recv, name, args, span } => {
-            // UFCS: recv.m(args) -> m(recv, args). The callee `Var` is synthesized (the method name
-            // has no span of its own in this AST), so it inherits the whole call's span.
+        Expr::Method { recv, name, args, span, .. } => {
+            // UFCS: recv.m(args) -> m(recv, args). The callee `Var` is synthesized and inherits the
+            // whole call's span, NOT the method name's — `name_span` exists now and navigation uses
+            // it, but feeding it here would move sourcemap entries that `sourcemap_coverage` pins.
             let callee = Box::new(var_at(g, name, *span, spans));
             let mut all = vec![lower_expr_at(g, recv, spans)];
             all.extend(args.iter().map(|a| lower_expr_at(g, a, spans)));

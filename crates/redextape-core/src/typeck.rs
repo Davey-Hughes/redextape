@@ -317,7 +317,7 @@ impl Infer {
             };
             let body_mark = env.mark();
             for (p, pt) in params.iter().zip(param_tys) {
-                env.insert(p.clone(), Scheme::mono(pt.clone()), true);
+                env.insert(p.name.clone(), Scheme::mono(pt.clone()), true);
             }
             let body_ty = self.infer_block(env, body);
             self.unify(ret, &body_ty, *span);
@@ -349,7 +349,7 @@ impl Infer {
             // routing a singleton through the same function keeps this arm correct — rather than
             // a second, driftable copy — if `infer_stmt` is ever called on a `Stmt::Fn` directly.
             Stmt::Fn { .. } => self.infer_fn_run(env, std::slice::from_ref(stmt)),
-            Stmt::Assign { target, value, span } => match env.lookup(target) {
+            Stmt::Assign { target, value, target_span: _, span } => match env.lookup(target) {
                 None => self.error(*span, format!("unbound variable `{target}`")),
                 Some(b) => {
                     if !b.mutable {
@@ -432,7 +432,7 @@ impl Infer {
                 let param_tys: Vec<Ty> = params.iter().map(|_| self.fresh()).collect();
                 let mut env2 = clone_env(env);
                 for (p, pt) in params.iter().zip(&param_tys) {
-                    env2.insert(p.clone(), Scheme::mono(pt.clone()), true);
+                    env2.insert(p.name.clone(), Scheme::mono(pt.clone()), true);
                 }
                 let body_ty = self.infer_expr(&env2, body);
                 Ty::Fun(param_tys, Box::new(body_ty))
@@ -444,7 +444,7 @@ impl Infer {
                 self.unify(&ft, &Ty::Fun(arg_tys, Box::new(ret.clone())), *span);
                 ret
             }
-            Expr::Method { recv, name, args, span } => {
+            Expr::Method { recv, name, args, span, .. } => {
                 // UFCS: `recv.m(args)` types as `m(recv, args)`.
                 let recv_ty = self.infer_expr(env, recv);
                 let fun_ty = if let Some(b) = env.lookup(name) {

@@ -16,23 +16,43 @@ pub struct Block {
     pub span: Span,
 }
 
+/// One parameter of a `fn` or a lambda: its name, and the span of that name in the source.
+///
+/// A pair rather than `Vec<String>` beside `Vec<Span>`, because two parallel vectors carry a
+/// length invariant nothing enforces — the parser writes both and the printer reads one, so a
+/// desync produces wrong spans rather than a failure. Navigation needs the span; nothing else
+/// does, and every other consumer reads `name` exactly as it read the bare `String`.
+///
+/// Holds no `Expr` or `Block`, so it stays outside the iterative `Drop` worklist below.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Param {
+    pub name: String,
+    pub span: Span,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stmt {
     Let {
         name: String,
         mutable: bool,
         value: Expr,
+        /// The span of the NAME, not of the statement. `span` above covers the whole statement.
+        name_span: Span,
         span: Span,
     },
     Fn {
         name: String,
-        params: Vec<String>,
+        params: Vec<Param>,
         body: Block,
+        /// The span of the NAME, not of the statement. `span` above covers the whole statement.
+        name_span: Span,
         span: Span,
     },
     Assign {
         target: String,
         value: Expr,
+        /// The span of the NAME, not of the statement. `span` above covers the whole statement.
+        target_span: Span,
         span: Span,
     },
     While {
@@ -86,7 +106,7 @@ pub enum Expr {
         span: Span,
     },
     Lambda {
-        params: Vec<String>,
+        params: Vec<Param>,
         body: Box<Expr>,
         span: Span,
     },
@@ -99,6 +119,8 @@ pub enum Expr {
         recv: Box<Expr>,
         name: String,
         args: Vec<Expr>,
+        /// The span of the NAME, not of the call. `span` above covers the whole method call.
+        name_span: Span,
         span: Span,
     },
     /// An expression the parser could not read, spanning the source it consumed trying.

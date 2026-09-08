@@ -101,7 +101,7 @@ impl Lints {
             if let Stmt::Fn { params, body, .. } = f {
                 let mark = self.scope.len();
                 for p in params {
-                    self.push_param(p);
+                    self.push_param(p.name.as_str());
                 }
                 self.block(body);
                 self.close(mark);
@@ -146,7 +146,7 @@ impl Lints {
     fn stmt(&mut self, s: &Stmt) {
         match s {
             // The value is inferred in the scope BEFORE the binding exists, so it is walked first.
-            Stmt::Let { name, mutable, value, span } => {
+            Stmt::Let { name, mutable, value, name_span: _, span } => {
                 self.expr(value);
                 self.scope.push(Local {
                     name: name.clone(),
@@ -211,7 +211,7 @@ impl Lints {
             Expr::Lambda { params, body, .. } => {
                 let mark = self.scope.len();
                 for p in params {
-                    self.push_param(p);
+                    self.push_param(p.name.as_str());
                 }
                 self.expr(body);
                 self.close(mark);
@@ -509,6 +509,7 @@ mod tests {
                         name: "x".into(),
                         mutable: false,
                         value: Expr::Nat { value: 1, span: Span::new(8, 9) },
+                        name_span: Span::new(4, 5),
                         span: Span::new(0, 10),
                     },
                     Stmt::Error { span: Span::new(11, 15) },

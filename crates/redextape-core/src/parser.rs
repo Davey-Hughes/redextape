@@ -2,7 +2,7 @@
 //! diagnostics; `parse_full`/`parse` return `Some` only when complete, `parse_recovering` always
 //! returns a tree (since a partial tree would be deleted by `format` = `print ∘ parse`).
 
-use crate::ast::{BinOp, Block, Expr, Program, Stmt};
+use crate::ast::{BinOp, Block, Expr, Param, Program, Stmt};
 use crate::diagnostic::Diagnostic;
 use crate::lexer::lex;
 use crate::span::Span;
@@ -393,7 +393,7 @@ impl Parser<'_> {
         self.expect(TokenKind::Assign, "`=`")?;
         let value = self.parse_expr_recovering();
         let semi = self.expect_or_record(TokenKind::Semi, "`;`");
-        Ok(Stmt::Let { name, mutable, value, span: kw.span.merge(semi) })
+        Ok(Stmt::Let { name, name_span: name_tok.span, mutable, value, span: kw.span.merge(semi) })
     }
 
     fn parse_fn(&mut self) -> PResult<Stmt> {
@@ -405,7 +405,7 @@ impl Parser<'_> {
         self.expect(TokenKind::RParen, "`)`")?;
         let body = self.parse_braced_block()?;
         let span = kw.span.merge(body.span);
-        Ok(Stmt::Fn { name, params, body, span })
+        Ok(Stmt::Fn { name, name_span: name_tok.span, params, body, span })
     }
 
     fn parse_while(&mut self) -> PResult<Stmt> {
@@ -422,14 +422,14 @@ impl Parser<'_> {
         self.expect(TokenKind::Assign, "`=`")?;
         let value = self.parse_expr_recovering();
         let semi = self.expect_or_record(TokenKind::Semi, "`;`");
-        Ok(Stmt::Assign { target, value, span: name_tok.span.merge(semi) })
+        Ok(Stmt::Assign { target, target_span: name_tok.span, value, span: name_tok.span.merge(semi) })
     }
 
-    fn parse_param_list(&mut self, close: TokenKind) -> PResult<Vec<String>> {
+    fn parse_param_list(&mut self, close: TokenKind) -> PResult<Vec<Param>> {
         let mut params = Vec::new();
         while self.peek().kind != close {
             let tok = self.expect(TokenKind::Ident, "a parameter name")?;
-            params.push(self.text(tok.span));
+            params.push(Param { name: self.text(tok.span), span: tok.span });
             if self.peek().kind == TokenKind::Comma {
                 self.bump();
             } else {
@@ -526,7 +526,7 @@ impl Parser<'_> {
                     let args = self.parse_arg_list()?;
                     let close = self.expect(TokenKind::RParen, "`)`")?;
                     let span = e.span().merge(close.span);
-                    e = Expr::Method { recv: Box::new(e), name, args, span };
+                    e = Expr::Method { recv: Box::new(e), name, name_span: name_tok.span, args, span };
                 }
                 _ => break,
             }
@@ -753,7 +753,7 @@ mod tests {
         let src = "fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(3)";
         let prog = program(src);
         assert!(
-            matches!(&prog.block.stmts[0], Stmt::Fn { name, params, .. } if name == "count_down" && params == &["n"])
+            matches!(&prog.block.stmts[0], Stmt::Fn { name, params, .. } if name == "count_down" && params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>() == vec!["n"])
         );
     }
 
@@ -1174,6 +1174,29 @@ mod tests {
     }
 
     #[test]
+    fn parameters_carry_the_span_of_their_own_name() {
+        // Both producers go through `parse_param_list`, but they are reached by different callers,
+        // so both are pinned. Spans are sliced back out of the source rather than compared to
+        // literals: a span that is merely non-empty would satisfy a literal comparison written to
+        // match whatever the code happened to produce.
+        let src = "fn f(alpha, beta) { 1 }\nlet g = |gamma| gamma;\n0";
+        let (program, diags) = parse(src);
+        assert!(diags.is_empty(), "{diags:?}");
+        let stmts = &program.expect("parses").block.stmts;
+
+        let Stmt::Fn { params, .. } = &stmts[0] else { panic!("expected a fn, got {:?}", stmts[0]) };
+        let text: Vec<&str> = params.iter().map(|p| &src[p.span.start..p.span.end]).collect();
+        assert_eq!(text, vec!["alpha", "beta"]);
+        assert_eq!(params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["alpha", "beta"]);
+
+        let Stmt::Let { value: Expr::Lambda { params, .. }, .. } = &stmts[1] else {
+            panic!("expected a let holding a lambda, got {:?}", stmts[1])
+        };
+        assert_eq!(params.len(), 1);
+        assert_eq!(&src[params[0].span.start..params[0].span.end], "gamma");
+    }
+
+    #[test]
     fn format_never_sees_a_recovered_tree() {
         // Asserted at `format`'s own level, not by reasoning about parse_full's callers. This is
         // the property that keeps a recovered tree from being written back over the author's
@@ -1184,5 +1207,33 @@ mod tests {
         // And the converse, so the assertions above are not passing because `format` rejects
         // everything.
         assert!(crate::format("let x = 1; x").is_ok());
+    }
+
+    #[test]
+    fn definitions_and_the_method_callee_carry_the_span_of_their_own_name() {
+        // The statement spans these four sit beside are deliberately WIDER than the name — `Let` and
+        // `Assign` swallow their `;`, `Fn` runs to the body's `}`, and `Method` covers the whole call
+        // — so slicing the name span back out of the source is what separates a real name span from
+        // a copy of the statement span.
+        let src = "let mut counter = 1; fn compute(a) { a } counter = 2; 1.method()";
+        let (program, diags) = parse(src);
+        assert!(diags.is_empty(), "{diags:?}");
+        let block = program.expect("parses").block;
+        let slice = |s: Span| &src[s.start..s.end];
+
+        let Stmt::Let { name_span, span, .. } = &block.stmts[0] else { panic!("{:?}", block.stmts[0]) };
+        assert_eq!(slice(*name_span), "counter");
+        assert_ne!(name_span, span, "the name span must not be the statement span");
+
+        let Stmt::Fn { name_span, .. } = &block.stmts[1] else { panic!("{:?}", block.stmts[1]) };
+        assert_eq!(slice(*name_span), "compute");
+
+        let Stmt::Assign { target_span, .. } = &block.stmts[2] else { panic!("{:?}", block.stmts[2]) };
+        assert_eq!(slice(*target_span), "counter");
+
+        let Some(Expr::Method { name_span, .. }) = block.tail.as_deref() else {
+            panic!("expected a method call tail, got {:?}", block.tail)
+        };
+        assert_eq!(slice(*name_span), "method");
     }
 }
