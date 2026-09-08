@@ -16079,3 +16079,117 @@ green, all three tiers  the full local gate           scripts/check-all.sh
 **WHAT THE SECOND BREAKAGE ACTUALLY TAUGHT IS NARROWER AND WORTH MORE: A COMMENT CAN MOVE A COVERAGE FIGURE.** The line total went from 23,743 to 23,749 across a change that added no code, because `llvm-cov`'s line column counts source lines in the coverage map and a six-line comment is six of them. So "documentation-only" does not imply "figure-preserving" here, and the Markdown-only property is the right tripwire precisely because it fires on a `.rs` doc-comment edit that a `docs/`-only rule would have waved through. The percentage was unmoved at 95.15% and the missed count unmoved at 1,152; had only the percentage been quoted, nothing would have looked different and the denominator would have been silently stale.
 
 **AND `redextape-core` STILL HAS ZERO DEPENDENCIES, WHICH IS WHAT ALLOWED `nav.rs` TO BE A NEW MODULE THERE RATHER THAN A NEW CRATE.** `cargo tree -p redextape-core --edges normal` prints one line, the crate itself. `nav.rs` uses `std::collections::HashMap` and `crate::Span`, and nothing further.
+
+#### `.rxt` GETS PARSE RECOVERY SO A BROKEN FILE ANSWERS A TREE AND EVERY PARSE ERROR RATHER THAN NONE AND ONLY THE FIRST, THE PLAN'S OWN `parse_program` DROPPED THE CHECK THAT ITS LOOP ACTUALLY REACHED END OF INPUT, AND AN EXHAUSTIVE SWEEP FOUND IT DELETING SOURCE FROM 3,724 OF 30,941 SHORT TOKEN SEQUENCES WHILE 1,507 TESTS STAYED GREEN — FOUND BY A REVIEW THAT RAN `format` OVER GENERATED INPUT RATHER THAN READING THE DIFF (2026-09-07, branch `rxt-parse-recovery`, `fe3d34b..1b46a8b`, 17 commits, plus the entry and whole-branch-review-fix commits that follow it)
+
+Design: [`../specs/2026-09-07-rxt-parse-recovery-design.md`](../specs/2026-09-07-rxt-parse-recovery-design.md). Plan: [`2026-09-07-rxt-parse-recovery.md`](2026-09-07-rxt-parse-recovery.md).
+
+**PR B1 of the LSP track's third slice.** The navigation design's own §7 named one remaining PR, ".rxt navigation", and scoped it as span plumbing plus a binder-resolution pass. Working through it found a blocker that design did not see: `.rxt` had no parse recovery at all, while both artifact forms already did, and `nav.rs`'s own module doc states the property navigation is built around — the moment it is worth most is the moment the file is broken, which is what a buffer under active editing is. A `.rxt` index built from the existing `parse` would be empty for exactly the files it exists to serve. This PR clears that blocker without touching `redextape-lsp` at all; B2 is the follow-on that spends it.
+
+`ast::Stmt::Error` and `ast::Expr::Error` now hold the source that did not parse. `parser::parse_recovering` always answers a tree; `parse_full` and `parse` keep answering `None` unless the parse was complete, which is the whole of the contract split and what keeps a lossy tree away from `format` — `format` is `print ∘ parse` and writes straight back over the author's buffer, so a `parse` that ever returned a partial tree would delete the parts of it that did not parse. Recovery itself is per statement: `resync` skips forward to the next `;` or `}` at the brace depth recovery started from, so a `}` closing a block nested inside the failed statement is not mistaken for the end of it; a progress bump guarantees the loop advances even on a token that starts no statement, backed by a hard iteration bound in the same shape `MAX_TOKENS` and `MAX_PARSE_DEPTH` already use; `parse_program` absorbs whatever tokens are left over into a trailing `Stmt::Error` rather than reporting a complete parse while they sit unconsumed; `let` and assignment recover a value that fails to parse into an `Expr::Error`, so the binding under the cursor survives losing only its right-hand side; and an unclosed block keeps the body it already collected — the property §1 of the design says the whole option turns on — instead of discarding the file from the open brace onward, which is the state of every buffer while its author is still inside the function they are writing. `Parser::record` counts every recovery unconditionally and caps what it *records* at `MAX_RECOVERED_DIAGNOSTICS = 100`; recovery does not stop at the cap, because B2's navigation reads the tree and not the diagnostic list, and a file of pure garbage recovering at roughly one construct per token would otherwise push up to `MAX_TOKENS` diagnostics to an editor that re-parses on every keystroke.
+
+##### THE PLAN'S OWN `parse_program` DROPPED THE CHECK THAT MADE THIS SAFE, AND ONLY RUNNING `format` OVER GENERATED INPUT SURFACED IT
+
+Task 3's `parse_program` shipped as `let block = self.parse_block_body(TokenKind::Eof); Program { block }`. The old, fallible version had ended with `self.expect(TokenKind::Eof, ...)?`; when `parse_block_body` became infallible that call was dropped and nothing took its place. `parse_block_body`'s `Tail` arm breaks its loop on the first token that cannot extend the tail expression — not on `close` or on `Eof` — so a program whose tail expression was followed by more tokens left the parser sitting mid-file with `self.recovered` still zero and `record()` never called. `parse_full` therefore answered `Some` for a tree that had lost source, and `format("1 2")` answered `Ok("1\n")` — the trailing `2` deleted outright, with nothing anywhere reporting that it had been. An exhaustive sweep over every token sequence of length ≤ 4 found 3,724 of 30,941 losing source this way, and the whole suite was green at 1,507 tests the entire time the defect was live in the tree.
+
+**What found it was a review that ran `format` over generated input rather than reading the diff.** The code is not visibly wrong — `parse_program` reads as a two-line pass-through over an already-infallible call — and no amount of re-reading it would have surfaced a hole that exists only in the gap between where the loop actually stops and where its one caller assumed it stopped. This is the exact failure the whole design exists to prevent (§1: a lossy tree reaching `format`), reintroduced by the task whose brief opens by naming that as the single point of failure to avoid, and it shipped anyway because the two halves of the guarantee — "the loop stops where the caller expects" and "every exit that does not is covered" — were never restated at the one call site that had no caller of its own to enforce the second half. Fixed in `febe3db`: `parse_program` now checks `self.peek().kind != TokenKind::Eof` after the call and, if so, absorbs everything remaining into a trailing `Stmt::Error` and calls `record()` on the way — the check the old `expect(...)?` used to make, restated as an absorb-and-record because `parse_program` has nothing above it to propagate an `Err` to.
+
+##### THE WHOLE-BRANCH REVIEW FOUND THREE MORE DEFECTS THAT SIX PER-TASK REVIEWS HAD EACH PASSED
+
+Six task reviews passed. Asked specifically to search for siblings of defect classes this branch had already produced, the whole-branch review found three more, two of them exactly that.
+
+**The recovered tree could read backwards.** `parse_program`'s trailing-token absorb — the same
+mechanism the section above this one corrects, there for losing source outright rather than for this —
+pushed its trailing `Stmt::Error` into `block.stmts` while a still-live tail expression sat in
+`block.tail`, and `Block` prints `stmts` before `tail`. So a token that comes AFTER the tail in the
+source printed BEFORE it in the tree: `parse_recovering("1 2")` gave `stmts=[Error@2..3]`,
+`tail=Some(Nat@0..1)`, the `2` ahead of the `1` it follows in the source. A sibling of the Eof-check
+defect: the same absorb mechanism, a second way for it to misrepresent the source it collected.
+
+**One wrong rule, independently written at three separate call sites across three earlier tasks, let
+sibling spans overlap.** `expect_or_record`, `parse_expr_recovering`, and `parse_block_body`'s own
+end-span computation each answered a mismatched or unconsumed token's FULL span rather than a
+zero-width span at its start, so a construct could claim source a following sibling also claimed:
+`"let x = 1 let y = 2; y"` gave `Let(x)` the span `0..13` and `Let(y)` the overlapping span `10..20`.
+A throwaway sweep over 5,000 generated damaged programs (3,506 needing recovery) measured 1,537
+sibling-order violations and 2,566 overlap violations before the fix, and zero of each after.
+
+**The third finding was a test's own comment arguing a policy its assertion contradicted.**
+`lints.rs`'s `an_error_statement_warns_about_nothing` carried a comment saying the warning it asserts
+would be "the parser's failure dressed up as one about the user's code" — while the test demanded
+exactly that answer from the arm beside it. The arm is correct as written; the comment now explains why
+the false positive it worried about cannot reach a real user (`analyze` never hands a program
+containing this node to `check`) instead of arguing against the code it sits next to.
+
+All three fixed in `c32b9e3`. **Per-task review could not see any of them because each task's diff was
+correct in isolation.** The order defect lives in the interaction between the tail-expression exit and
+the trailing-token absorb — two mechanisms from two different tasks, each fine reviewed alone. The
+overlap defect lives in three separately-reviewed span computations agreeing on the same wrong rule,
+which a diff-scoped review has no way to compare against each other. Only a review holding the whole
+branch, and asked to look for siblings on purpose, found either.
+
+##### WHAT STAYS OPEN
+
+- **PR B2 owns the rest of `.rxt` navigation.** Name spans on `Stmt::Let`, `Stmt::Fn` and `Stmt::Assign` — all three carry only the whole statement's span today — and on the two `params: Vec<String>` fields, which carry none; the binder-resolution pass `analysis` still does not keep; `Role::Definition`'s kind discriminant, because `Language::symbol_kind` answers one fixed `SymbolKind` per language and `.rxt` needs to tell a `let` from a `fn`, where `.tm` and `.asm` each only ever produce one kind of definition; `nav_rxt`; and the `Language::nav`/`Language::symbol_kind` arms, both of which still read `Language::Redextape | Language::Lambda => None`.
+- **The binder pass must be ITERATIVE.** `lints.rs`'s module doc records that its own recursive walk over the surface tree is safe only because both its current callers — `analyze` here, and `redextape-wasm`'s `Session::compile_with_caps` — run it after typechecking has added no error-severity diagnostic, and `typeck.rs`'s `MAX_TYPE_DEPTH` bounds any program deep enough to clear that gate to a nesting typeck itself can recurse over. A navigation pass runs BEFORE typechecking, over a tree that may not typecheck — or, now, even parse completely — at all, so it cannot borrow that guarantee, and a recursive walk over adversarial nesting is an uncatchable native stack overflow rather than a diagnostic. `desugar.rs`'s `free_member_refs` already walks the identical scoping shape iteratively, over an explicit worklist, and its own doc comment says why; that is the shape B2 should follow rather than reinvent.
+- **`.rxlambda` still has no recovery and no navigation.** Nothing in this PR touches it. Its terms are de Bruijn-indexed and largely print-only past lowering, which the earlier navigation slice already recorded as its own, separate piece of design work.
+- **The `"parser made no progress"` iteration bound in `parse_block_body` is unreachable by construction, and that is by design rather than an oversight.** Every turn of the loop either advances `self.pos` — the progress bump guarantees this on the recovery path, and an ordinary successful statement always consumes at least one token on the happy path — or it breaks the loop outright, so the bound sitting behind that `if turns > bound` can only fire if some future change breaks one of those two guarantees. It is this crate's established shape for turning an uncatchable failure into a diagnostic instead of a hang — the same shape `MAX_TOKENS` and `MAX_PARSE_DEPTH` already use — and it is a tripwire, not a live guard against anything reachable today: only a sabotage makes it observable, which is exactly what `recovery_makes_progress_on_a_token_it_cannot_start_a_statement_with`'s own sabotage run does, by deleting the progress bump it exists to protect.
+- **`let x 1;` — a name present but the `=` missing — discards the binding exactly as a missing name does, and this is pre-existing, unchanged by anything in this branch.** `parse_let` calls `self.expect(TokenKind::Assign, "\`=\`")?` immediately after reading the name, and `expect`'s `?` propagates on any mismatch, turning the whole statement into a single `Stmt::Error` with the name nowhere left to recover from. This branch's recovery only reaches into the VALUE position — `let x = ;` keeps `x` and gives `value` an `Expr::Error` — because the value is the one sub-position with somewhere to put a placeholder; a missing `=` fails before there is a `Stmt::Let` to hold one. It is exactly the case B2's navigation will feel first, since the name a user just finished typing is the one thing a binder pass most wants to keep live through the keystroke that has not yet typed `=`.
+- **`MAX_RECOVERED_DIAGNOSTICS` does not bound what an editor receives.** It caps only the parser's
+  half. Lexer diagnostics are prepended in `parse_inner` uncapped, so 50,000 `$` characters produce
+  50,000 diagnostics out of `parse_recovering`; adding 300 broken `let` statements behind them (capped
+  to 100 plus a summary) measured 50,101 total. The cap is the correct answer for the half it covers
+  and should stay — its own doc comment already states an editor-storm rationale that this measurement
+  shows it only half achieves.
+- **Recovery can stack duplicate diagnostics on one position.** `"{ { { 1"` yields three identical
+  "expected `}`" diagnostics, all at `7..7`. `"let x = } 1;"` yields three diagnostics at `8..9`, two
+  of them the identical message "expected an expression".
+- **Above `MAX_TOKENS`, `parse_recovering` answers an entirely empty tree, not a partially recovered
+  one.** The oversized-input path returns `Block { stmts: Vec::new(), tail: None, .. }` before the
+  parser ever runs, covering none of the source with an error node. "Always answers a tree" holds only
+  literally there — navigation gets nothing at all on the largest files, the ones a cap like this exists
+  to protect.
+- **The `Expr::Error` echo is invisible to the printer's own width probe.** `width_of` measures an
+  element by printing it into a `Printer` built with an empty source string (`Printer::new("", &[])`);
+  an `Expr::Error` arm reads its text out of `self.src`, so against an empty source it always echoes
+  nothing and `width_of` reports 0 regardless of the error span's real size — measured directly: a
+  500-byte `Expr::Error` span reports a width of 0. The arm's stated justification, that a formatter for
+  broken files would have the mechanism, is only partly true: the mechanism is there, but the layout
+  decision that would decide whether to USE it cannot see the text it would echo.
+
+##### VERIFICATION
+
+Every figure below was measured fresh at `21b84c1`, the branch's last commit that touches anything but
+Markdown — re-anchored from `d950960`, which this entry previously named, after the task closing the
+`parse_recovering`/`analyze` test gap landed touching `lib.rs` and `parser.rs` and made that anchor's
+own invariant false.
+
+```
+22                      commits                       git rev-list --count main..21b84c1
+10 files, +2815/-76     whole-branch diff             git diff --shortstat main..21b84c1
+1519 passed, 10 skipped workspace                     cargo nextest run --workspace
+95.23% lines            coverage, floor 90 [exit 0]   cargo llvm-cov nextest --workspace
+  (24468 lines,                                          --fail-under-lines 90
+   1167 missed)
+itself and nothing else redextape-core's dependencies cargo tree -p redextape-core --edges normal
+green, all three tiers  the full local gate           scripts/check-all.sh
+```
+
+**THE TWO GIT FIGURES NAME A SHA BECAUSE ONLY THEY CAN MOVE — THE RULE THIS FILE KEEPS, NOT THE NUMBER.** Writing this entry is itself a commit, so a count measured "at the branch head" is false the moment it is written down. What ends the regress here is that `main..21b84c1` is a fixed range whose answer does not change, plus one property a reader can check rather than trust: **every commit after `21b84c1` on this branch touches only Markdown** — verify with `git diff --name-only 21b84c1..HEAD | grep -v '\.md$'`, which prints nothing. So the three measured figures above — the workspace suite, the coverage gate, and the full local gate — are invariant under everything that lands after, and only the two git figures move.
+
+**AND THE PROPERTY FIRED.** The original anchor, `1b46a8b`, carried this exact paragraph naming this
+exact property, and `c32b9e3` broke it: `git diff --name-only 1b46a8b..HEAD | grep -v '\.md$'` now
+prints `crates/redextape-core/src/lints.rs` and `crates/redextape-core/src/parser.rs` instead of
+nothing, because the whole-branch-review fix landed real code after the entry that claimed nothing
+would. Re-deriving this block for the correction pass is what surfaced that, mechanically, from one
+command — not from anyone remembering to re-check. **A tripwire that fires is doing its job, not
+failing**: this is the property catching the exact class of event it exists to catch, one entry after
+the sibling entry above (`cli-fmt-tm-asm`) went stale the same way.
+
+**AND IT FIRED A SECOND TIME.** `d950960` broke the identical way: `git diff --name-only
+d950960..21b84c1 | grep -v '\.md$'` printed `crates/redextape-core/src/lib.rs` and
+`crates/redextape-core/src/parser.rs`, real code (a test plus two comments) landing after an entry
+that claimed none would. Both firings are the same tripwire catching the same class of event, not two
+different failures.
+
+**AND `redextape-core` STILL HAS ZERO DEPENDENCIES.** `cargo tree -p redextape-core --edges normal` prints one line, the crate itself — this PR is pure recovery logic over the existing `ast`/`parser`/`typeck`/`lints`/`desugar`/`printer` modules and adds nothing that needs one.

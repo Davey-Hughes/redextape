@@ -368,6 +368,9 @@ impl Infer {
             Stmt::Expr(e) => {
                 self.infer_expr(env, e);
             }
+            // Nothing was parsed, so nothing is inferred and nothing is bound. A binding invented
+            // here would be a name the source does not contain.
+            Stmt::Error { .. } => {}
         }
     }
 
@@ -457,6 +460,10 @@ impl Infer {
                 self.unify(&fun_ty, &Ty::Fun(arg_tys, Box::new(ret.clone())), *span);
                 ret
             }
+            // A fresh variable unifies with anything, so an unparsed expression adds no type error
+            // of its own on top of the parse error already reported. This is the same answer this
+            // function already gives an unbound variable and an over-deep expression.
+            Expr::Error { .. } => self.fresh(),
         }
     }
 
@@ -686,5 +693,60 @@ mod tests {
         assert_eq!(ty("[1, 2, 3]"), Ok(Ty::List(Box::new(Ty::Nat))));
         assert!(ty("head(nil)").is_ok()); // nil-typed head is polymorphic but well-typed
         assert!(ty("1 + true").is_err()); // ill-typed → diagnostics
+    }
+
+    #[test]
+    fn an_error_expression_types_as_a_fresh_variable_and_adds_no_type_error() {
+        use crate::ast::{BinOp, Block, Expr, Program};
+        // `1 + <error>`. A fresh variable unifies with Nat, so the ONLY diagnostic a user sees for
+        // a broken file is the parse error — not a type error stacked on top of it. Sabotage: make
+        // the arm answer `Ty::Bool` and this reddens.
+        let program = Program {
+            block: Block {
+                stmts: Vec::new(),
+                tail: Some(Box::new(Expr::Binary {
+                    op: BinOp::Add,
+                    lhs: Box::new(Expr::Nat { value: 1, span: Span::new(0, 1) }),
+                    rhs: Box::new(Expr::Error { span: Span::new(4, 7) }),
+                    span: Span::new(0, 7),
+                })),
+                span: Span::new(0, 7),
+            },
+        };
+        assert_eq!(typecheck(&program), Vec::new(), "an error node must not cascade");
+    }
+
+    #[test]
+    fn an_error_expression_in_a_bool_position_also_adds_no_type_error() {
+        use crate::ast::{Block, Expr, Program};
+        // The sibling of the test above, in a position the `Nat`-expecting one above cannot probe:
+        // an `if` condition unifies against `Ty::Bool`. An arm that answered a hardcoded `Ty::Nat`
+        // instead of `self.fresh()` would still pass the test above (a fresh `Var` unifies with
+        // `Nat` too, same as it does here), while it would cascade a spurious "expected `Nat`,
+        // found `Bool`" type-mismatch diagnostic on this one. Sabotage: make the arm answer
+        // `Ty::Nat` and this reddens.
+        let then_blk = Block {
+            stmts: Vec::new(),
+            tail: Some(Box::new(Expr::Nat { value: 1, span: Span::new(4, 5) })),
+            span: Span::new(4, 5),
+        };
+        let else_blk = Block {
+            stmts: Vec::new(),
+            tail: Some(Box::new(Expr::Nat { value: 2, span: Span::new(6, 7) })),
+            span: Span::new(6, 7),
+        };
+        let program = Program {
+            block: Block {
+                stmts: Vec::new(),
+                tail: Some(Box::new(Expr::If {
+                    cond: Box::new(Expr::Error { span: Span::new(0, 3) }),
+                    then_blk,
+                    else_blk,
+                    span: Span::new(0, 7),
+                })),
+                span: Span::new(0, 7),
+            },
+        };
+        assert_eq!(typecheck(&program), Vec::new(), "an error node in a Bool-expecting position must not cascade");
     }
 }

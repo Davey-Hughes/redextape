@@ -147,13 +147,31 @@ mod api_tests {
         let src = "(1 + 2";
         let a = analyze(src);
         assert!(a.core.is_none());
-        assert_eq!(a.diagnostics.len(), 1);
-        assert!(a.diagnostics[0].message.contains(')'));
-        // The span points at where `)` was expected (EOF, an empty range at end of source).
-        let span = a.diagnostics[0].span;
-        assert!(span.start <= span.end && span.end <= src.len(), "span out of bounds: {span:?}");
-        assert_eq!(span.start, 6);
-        assert_eq!(span.end, 6);
+        let d = a.diagnostics.iter().find(|d| d.message.contains(')')).expect("the missing `)` must be reported");
+        assert_eq!(d.span, Span::new(6, 6));
+        assert_eq!(
+            a.diagnostics.iter().filter(|d| d.message.contains(')')).count(),
+            1,
+            "duplicate diagnostics for the same missing `)`: {:?}",
+            a.diagnostics
+        );
+    }
+
+    #[test]
+    fn analyze_reports_every_parse_error_not_just_the_first() {
+        // THE SHIPPING VALUE OF THIS PR, asserted on the path a user actually travels:
+        // `analyze` -> `parser::parse` -> `parse_full` -> `parse_inner`, which is also what
+        // `Language::diagnostics` in redextape-lsp calls through. `parser::parse_recovering` has
+        // no caller outside this crate's own tests (its consumer is a follow-on PR), so pinning
+        // the multi-error behaviour there alone would leave the shipping path unverified.
+        //
+        // Every character here lexes cleanly — no lexer diagnostic can satisfy this assertion in
+        // its place, which already happened once on this branch. Three statements each fail to
+        // parse at their empty `;`, and `analyze` must report all three, not just the first.
+        let src = "let a = ; let b = 1; let c = ; let d = 2; let e = ;";
+        let a = analyze(src);
+        assert!(a.core.is_none(), "a file with parse errors must produce no Core");
+        assert_eq!(a.diagnostics.len(), 3, "one diagnostic per broken statement: {:?}", a.diagnostics);
     }
 
     #[test]

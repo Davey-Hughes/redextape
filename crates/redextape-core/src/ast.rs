@@ -18,25 +18,96 @@ pub struct Block {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stmt {
-    Let { name: String, mutable: bool, value: Expr, span: Span },
-    Fn { name: String, params: Vec<String>, body: Block, span: Span },
-    Assign { target: String, value: Expr, span: Span },
-    While { cond: Expr, body: Block, span: Span },
+    Let {
+        name: String,
+        mutable: bool,
+        value: Expr,
+        span: Span,
+    },
+    Fn {
+        name: String,
+        params: Vec<String>,
+        body: Block,
+        span: Span,
+    },
+    Assign {
+        target: String,
+        value: Expr,
+        span: Span,
+    },
+    While {
+        cond: Expr,
+        body: Block,
+        span: Span,
+    },
     Expr(Expr),
+    /// A statement the parser could not read, spanning the source it skipped past.
+    ///
+    /// Produced only by `parser::parse_recovering`. `parse_full` answers `None` for any input that
+    /// produced one, so no consumer reached through `parse`/`parse_full`/`format` can meet it —
+    /// which is why every arm answering it below is written as an answer and not an assertion.
+    Error {
+        span: Span,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr {
-    Nat { value: u64, span: Span },
-    Bool { value: bool, span: Span },
-    Var { name: String, span: Span },
-    List { items: Vec<Expr>, span: Span },
-    Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr>, span: Span },
-    If { cond: Box<Expr>, then_blk: Block, else_blk: Block, span: Span },
-    Block { block: Box<Block>, span: Span },
-    Lambda { params: Vec<String>, body: Box<Expr>, span: Span },
-    Call { callee: Box<Expr>, args: Vec<Expr>, span: Span },
-    Method { recv: Box<Expr>, name: String, args: Vec<Expr>, span: Span },
+    Nat {
+        value: u64,
+        span: Span,
+    },
+    Bool {
+        value: bool,
+        span: Span,
+    },
+    Var {
+        name: String,
+        span: Span,
+    },
+    List {
+        items: Vec<Expr>,
+        span: Span,
+    },
+    Binary {
+        op: BinOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+        span: Span,
+    },
+    If {
+        cond: Box<Expr>,
+        then_blk: Block,
+        else_blk: Block,
+        span: Span,
+    },
+    Block {
+        block: Box<Block>,
+        span: Span,
+    },
+    Lambda {
+        params: Vec<String>,
+        body: Box<Expr>,
+        span: Span,
+    },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+        span: Span,
+    },
+    Method {
+        recv: Box<Expr>,
+        name: String,
+        args: Vec<Expr>,
+        span: Span,
+    },
+    /// An expression the parser could not read, spanning the source it consumed trying.
+    ///
+    /// Its existence is what lets `let x = @@@;` still bind `x`: the `value` field needs something
+    /// to hold. See `Stmt::Error` for why the arms answering it never assert.
+    Error {
+        span: Span,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,7 +202,7 @@ fn take_expr_children(e: &mut Expr, work: &mut Vec<DropItem>) {
             work.extend(std::mem::take(args).into_iter().map(DropItem::E));
         }
         // Childless leaves.
-        Expr::Nat { .. } | Expr::Bool { .. } | Expr::Var { .. } => {}
+        Expr::Nat { .. } | Expr::Bool { .. } | Expr::Var { .. } | Expr::Error { .. } => {}
     }
 }
 
@@ -159,6 +230,8 @@ fn take_stmt_children(s: &mut Stmt, work: &mut Vec<DropItem>) {
         Stmt::Expr(e) => {
             work.push(DropItem::E(std::mem::replace(e, leaf_expr())));
         }
+        // Childless: an error statement holds a span and nothing to unlink.
+        Stmt::Error { .. } => {}
     }
 }
 
@@ -175,7 +248,8 @@ impl Expr {
             | Expr::Block { span, .. }
             | Expr::Lambda { span, .. }
             | Expr::Call { span, .. }
-            | Expr::Method { span, .. } => *span,
+            | Expr::Method { span, .. }
+            | Expr::Error { span, .. } => *span,
         }
     }
 }
@@ -187,9 +261,11 @@ impl Stmt {
     #[must_use]
     pub fn span(&self) -> Span {
         match self {
-            Stmt::Let { span, .. } | Stmt::Fn { span, .. } | Stmt::Assign { span, .. } | Stmt::While { span, .. } => {
-                *span
-            }
+            Stmt::Let { span, .. }
+            | Stmt::Fn { span, .. }
+            | Stmt::Assign { span, .. }
+            | Stmt::While { span, .. }
+            | Stmt::Error { span, .. } => *span,
             Stmt::Expr(e) => e.span(),
         }
     }

@@ -173,6 +173,8 @@ impl Lints {
                 self.block(body);
             }
             Stmt::Expr(e) => self.expr(e),
+            // No binding to push and no children to walk.
+            Stmt::Error { .. } => {}
         }
     }
 
@@ -189,7 +191,7 @@ impl Lints {
 
     fn expr(&mut self, e: &Expr) {
         match e {
-            Expr::Nat { .. } | Expr::Bool { .. } => {}
+            Expr::Nat { .. } | Expr::Bool { .. } | Expr::Error { .. } => {}
             Expr::Var { name, .. } => self.mark_use(name),
             Expr::List { items, .. } => {
                 for i in items {
@@ -237,6 +239,7 @@ impl Lints {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::diagnostic::Severity;
 
     #[test]
@@ -486,5 +489,36 @@ mod tests {
         assert!(ds[0].message.contains("`a`"), "the FIRST-declared binding must be reported first: {ds:?}");
         assert!(ds[1].message.contains("`b`"), "the SECOND-declared binding must be reported second: {ds:?}");
         assert!(ds[0].span.start < ds[1].span.start, "span order must match declaration order: {ds:?}");
+    }
+
+    #[test]
+    fn an_error_statement_warns_about_nothing() {
+        use crate::ast::{Block, Program, Stmt};
+        // `Stmt::Error`'s arm introduces no binding and marks no use -- the only answer available,
+        // since an unparsed statement might have read any binding in scope and there is no way to
+        // know which. That means a binding whose only other reader was this statement DOES get
+        // reported unused, as `x` is below: a real gap, but one that cannot reach a user through
+        // `analyze`. `analyze` gets its tree from `parser::parse` (`parse_full`), which answers
+        // `None` for any input that needed recovery to produce a tree -- exactly the inputs that can
+        // contain a `Stmt::Error` -- so `analyze` never has one to hand to `check`. This test reaches
+        // the arm only by building the tree by hand and calling `check` directly, as below.
+        let program = Program {
+            block: Block {
+                stmts: vec![
+                    Stmt::Let {
+                        name: "x".into(),
+                        mutable: false,
+                        value: Expr::Nat { value: 1, span: Span::new(8, 9) },
+                        span: Span::new(0, 10),
+                    },
+                    Stmt::Error { span: Span::new(11, 15) },
+                ],
+                tail: None,
+                span: Span::new(0, 15),
+            },
+        };
+        let ds = check(&program);
+        assert_eq!(ds.len(), 1, "only the unused-variable warning for `x`: {ds:?}");
+        assert!(ds[0].message.contains("unused variable"), "got {:?}", ds[0].message);
     }
 }

@@ -159,6 +159,9 @@ fn lower_stmts_at(
                 spans.push((seq_id, e.span()));
                 Core::Seq(seq_id, Box::new(first), Box::new(acc))
             }
+            // An error statement contributes no link to the chain: it bound nothing and computed
+            // nothing, so the accumulator passes through unchanged.
+            Stmt::Error { .. } => acc,
         };
     }
     acc
@@ -375,7 +378,7 @@ fn free_member_refs<'a>(members: &BTreeSet<&'a str>, params: &'a [String], body:
     while let Some(item) = work.pop() {
         match item {
             Work::E(expr, scope) => match expr {
-                Expr::Nat { .. } | Expr::Bool { .. } => {}
+                Expr::Nat { .. } | Expr::Bool { .. } | Expr::Error { .. } => {}
                 Expr::Var { name, .. } => note(&mut out, members, &chain, scope, name.as_str()),
                 Expr::List { items, .. } => work.extend(items.iter().map(|e| Work::E(e, scope))),
                 Expr::Binary { lhs, rhs, .. } => {
@@ -453,6 +456,11 @@ fn free_member_refs<'a>(members: &BTreeSet<&'a str>, params: &'a [String], body:
                         }
                         Stmt::Expr(e) => {
                             work.push(Work::E(e, cur));
+                            i += 1;
+                        }
+                        // An error statement references nothing and binds nothing, so it neither
+                        // contributes a dependency nor shadows a member name.
+                        Stmt::Error { .. } => {
                             i += 1;
                         }
                     }
@@ -649,6 +657,17 @@ fn lower_expr_at(g: &mut NodeGen, expr: &Expr, spans: &mut Vec<(NodeId, Span)>) 
             let id = g.fresh();
             spans.push((id, *span));
             Core::Apply(id, callee, all)
+        }
+        // An expression position demands a value, so this is the one desugar arm that must produce
+        // a node. `Core` has no fault variant and adding one would ripple into `interp`,
+        // `lambda/lower`, `tm/lower_asm`, `tm/defunc` and `redextape-native`'s codegen. An unbound
+        // `Core::Var` already faults rather than panics (`interp::eval_inner`'s `Core::Var` arm), and
+        // `$` is unforgeable in user source (`lexer::lex` only starts an identifier on `_` or an
+        // ASCII letter), so this collides with no program a user can write.
+        Expr::Error { span } => {
+            let id = g.fresh();
+            spans.push((id, *span));
+            Core::Var(id, "$error".into())
         }
     }
 }
@@ -1031,5 +1050,24 @@ mod tests {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(ids.len(), sorted.len(), "duplicate NodeIds found");
+    }
+
+    #[test]
+    fn an_error_expression_lowers_to_a_fault_rather_than_a_panic() {
+        use crate::ast::{Block, Expr, Program};
+        use crate::interp;
+        // The arm must produce something EVALUABLE that fails loudly. Both halves matter: a panic
+        // would abort the process, and `Core::Unit` would make an unparsed expression evaluate
+        // successfully to a value.
+        let program = Program {
+            block: Block {
+                stmts: Vec::new(),
+                tail: Some(Box::new(Expr::Error { span: Span::new(0, 3) })),
+                span: Span::new(0, 3),
+            },
+        };
+        let core = desugar(&program);
+        let err = interp::eval(&core).expect_err("an error node must not evaluate to a value");
+        assert!(format!("{err:?}").contains("$error"), "the fault should name the node: {err:?}");
     }
 }

@@ -293,6 +293,14 @@ impl<'a> Printer<'a> {
             Expr::Call { .. } | Expr::Method { .. } => self.postfix_chain(e),
             Expr::Block { block, .. } => self.braced(block),
             Expr::If { cond, then_blk, else_blk, .. } => self.if_chain(cond, then_blk, else_blk),
+            // Echo the source verbatim. Unreachable through `format`, which never sees a recovered
+            // tree — written as a real echo so a formatter for broken files has the mechanism
+            // rather than a crash. `self.src` is `&'a str`, so binding it out first keeps the
+            // borrow off `&mut self`; see `comment_text`'s doc for the same pattern.
+            Expr::Error { span } => {
+                let text = self.src.get(span.start..span.end).unwrap_or("");
+                self.out.push_str(text);
+            }
         }
     }
 
@@ -950,6 +958,10 @@ impl Printer<'_> {
             Stmt::Expr(e) => {
                 self.expr_prec(e, 0);
                 self.out.push(';');
+            }
+            Stmt::Error { span } => {
+                let text = self.src.get(span.start..span.end).unwrap_or("");
+                self.out.push_str(text);
             }
         }
     }
@@ -1973,5 +1985,31 @@ mod tests {
         let out = f(src);
         let count = |s: &str| s.matches("//").count();
         assert_eq!(count(&out), count(src), "no comment dropped:\n{out}");
+    }
+
+    #[test]
+    fn an_error_node_prints_back_the_source_it_could_not_parse() {
+        use crate::ast::{Block, Program, Stmt};
+        use crate::parser::Parsed;
+        // The span indexes `src`, so the printer echoes the bytes rather than inventing text. The
+        // assertion names the exact slice: a printer that emitted a placeholder like `<error>`
+        // would satisfy "output is non-empty" but not this.
+        let src = "let x = 1;\n@@@ nonsense\n";
+        let program = Program {
+            block: Block {
+                stmts: vec![Stmt::Error { span: Span::new(11, 23) }],
+                tail: None,
+                span: Span::new(0, src.len()),
+            },
+        };
+        let parsed = Parsed { program, comments: Vec::new(), src };
+        // The full output, not just a substring: a broken arm that echoed all of `self.src` instead of
+        // `self.src[span]` would still contain "@@@ nonsense" (it is a substring of `src` too), so only
+        // equality against the complete printed program pins the arm to the span it was given. The
+        // expected value is exactly the span slice (`src[11..23]`) plus the one trailing newline `print`
+        // always appends: this program has a single top-level statement and no comments, so nothing
+        // else — no indent (top-level, `level == 0`), no tail, no flushed comment — contributes any
+        // other byte.
+        assert_eq!(print(&parsed), "@@@ nonsense\n");
     }
 }
