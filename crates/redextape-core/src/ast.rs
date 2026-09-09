@@ -63,9 +63,10 @@ pub enum Stmt {
     Expr(Expr),
     /// A statement the parser could not read, spanning the source it skipped past.
     ///
-    /// Produced only by `parser::parse_recovering`. `parse_full` answers `None` for any input that
-    /// produced one, so no consumer reached through `parse`/`parse_full`/`format` can meet it —
-    /// which is why every arm answering it below is written as an answer and not an assertion.
+    /// Produced by `parser::parse_recovering` and `parser::parse_for_nav`, the two entry points
+    /// that answer a partial tree. `parse_full` answers `None` for any input that produced one, so
+    /// no consumer reached through `parse`/`parse_full`/`format` can meet it — which is why every
+    /// arm answering it below is written as an answer and not an assertion.
     Error {
         span: Span,
     },
@@ -293,6 +294,39 @@ impl Stmt {
     }
 }
 
+/// The maximal run of consecutive `Stmt::Fn` containing `i`.
+///
+/// A run is the unit `typeck::infer_fn_run` pre-binds: every name in it is bound before any body
+/// is checked, so a member may forward-reference or mutually recurse with any other member, and
+/// any non-`fn` statement ends it. Five passes need that boundary — `typeck`, `lints`, `binder`
+/// and `desugar` twice — and until this existed they agreed only by inspection.
+///
+/// **SCANS BOTH WAYS, AND THE BACKWARD HALF IS NOT DEAD WEIGHT.** `desugar`'s statement lowering
+/// walks right-to-left and so meets a run's END first; it asks at the run's last statement. The
+/// other four walk left-to-right and ask at the first, where the backward scan stops on its first
+/// test. Answering the same range from any index inside a run is what lets one function serve
+/// both directions.
+///
+/// # Panics
+///
+/// Panics when `stmts[i]` is not a `Stmt::Fn`. That is a caller bug — every call site is already
+/// inside a `matches!(.., Stmt::Fn { .. })` arm — and not a reaction to source text, so it does
+/// not breach the no-panics-on-user-input rule. The alternative, an empty range, would stall
+/// every forward caller's `i = run.end` in an infinite loop.
+#[must_use]
+pub(crate) fn fn_run_at(stmts: &[Stmt], i: usize) -> std::ops::Range<usize> {
+    assert!(matches!(stmts.get(i), Some(Stmt::Fn { .. })), "fn_run_at asked at a statement that is not a `fn`");
+    let mut start = i;
+    while start > 0 && matches!(stmts.get(start - 1), Some(Stmt::Fn { .. })) {
+        start -= 1;
+    }
+    let mut end = i + 1;
+    while matches!(stmts.get(end), Some(Stmt::Fn { .. })) {
+        end += 1;
+    }
+    start..end
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -318,5 +352,49 @@ mod tests {
         assert_eq!(text(&stmts[2]), "x = 2;");
         assert_eq!(text(&stmts[3]), "while x > 0 { x = 0; }");
         assert_eq!(text(&stmts[4]), "x");
+    }
+
+    /// Every index inside one run answers that run, not just its first.
+    ///
+    /// The four forward callers only ever ask at a run's first statement, so a scan that looked
+    /// forward alone would satisfy all of them and still be wrong for `desugar`'s statement
+    /// lowering, which walks right-to-left and meets a run's END first. This is the property that
+    /// separates the two.
+    #[test]
+    fn fn_run_at_answers_the_same_range_from_every_index_in_the_run() {
+        use crate::ast::{Stmt, fn_run_at};
+        use crate::parser::parse_recovering;
+
+        for n in 1..=4usize {
+            let mut src = String::from("let before = 0;");
+            for k in 0..n {
+                src.push_str(&format!(" fn f{k}(a) {{ a }}"));
+            }
+            src.push_str(" let after = 1; after");
+            let (parsed, _diags) = parse_recovering(&src);
+            let stmts = &parsed.program.block.stmts;
+            // Probed on 6e0ad6e: this parses to [Let, Fn * n, Let] with `after` as the tail, so
+            // the run is bracketed by a non-`fn` on both sides rather than by the block's ends.
+            let first = stmts.iter().position(|s| matches!(s, Stmt::Fn { .. })).expect("a run");
+            assert_eq!(first, 1, "n={n}");
+            let expected = first..first + n;
+            for i in expected.clone() {
+                assert_eq!(fn_run_at(stmts, i), expected, "n={n}, asked at {i}");
+            }
+        }
+    }
+
+    /// A non-`fn` statement ends a run, and a `fn` after it starts a fresh one — the rule
+    /// `typeck::infer_fn_run` enforces, asserted on the boundary rather than on a single run.
+    #[test]
+    fn a_non_fn_statement_separates_two_runs() {
+        use crate::ast::fn_run_at;
+        use crate::parser::parse_recovering;
+
+        // Probed on 6e0ad6e: [Fn, Let, Fn] with `0` as the tail.
+        let (parsed, _diags) = parse_recovering("fn a(n) { n } let x = 0; fn b(n) { n } 0");
+        let stmts = &parsed.program.block.stmts;
+        assert_eq!(fn_run_at(stmts, 0), 0..1);
+        assert_eq!(fn_run_at(stmts, 2), 2..3);
     }
 }

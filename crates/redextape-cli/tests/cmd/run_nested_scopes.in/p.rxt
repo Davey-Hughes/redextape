@@ -1,0 +1,21 @@
+fn compute_outer(seed) {
+    let doubled = {
+        let base = seed * 2;
+        let bumped = base + 1;
+        bumped
+    };
+    fn square_it(factor) {
+        factor * factor
+    }
+    fn increment_it(prior) {
+        prior + 1
+    }
+    doubled + square_it(doubled) + increment_it(doubled)
+}
+fn shrink(count) {
+    count - 1
+}
+fn grow(units) {
+    units + 10
+}
+compute_outer(3) + shrink(5) + grow(2)

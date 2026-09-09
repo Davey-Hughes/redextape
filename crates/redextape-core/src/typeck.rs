@@ -1,7 +1,7 @@
 //! Hindley–Milner type inference (Algorithm W) over the surface AST. Immutable `let`/`fn`
 //! bindings are generalized; `let mut` bindings stay monomorphic (value restriction).
 
-use crate::ast::{BinOp, Block, Expr, Program, Stmt};
+use crate::ast::{BinOp, Block, Expr, Program, Stmt, fn_run_at};
 use crate::diagnostic::Diagnostic;
 use crate::prelude::type_env;
 use crate::span::Span;
@@ -245,11 +245,9 @@ impl Infer {
                 // mutually recurse with) any other `fn` in the same run. A non-`fn` statement — a
                 // `let`, an `Assign`, a `while`, a bare `Expr` — ends the run; a `fn` after that
                 // point starts a fresh one and cannot see the earlier run's names.
-                let start = i;
-                while i < block.stmts.len() && matches!(&block.stmts[i], Stmt::Fn { .. }) {
-                    i += 1;
-                }
-                self.infer_fn_run(&mut env, &block.stmts[start..i]);
+                let run = fn_run_at(&block.stmts, i);
+                i = run.end;
+                self.infer_fn_run(&mut env, &block.stmts[run]);
             } else {
                 self.infer_stmt(&mut env, &block.stmts[i]);
                 i += 1;

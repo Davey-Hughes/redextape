@@ -1,7 +1,7 @@
 //! Surface AST -> Core AST. Reduces sugar: UFCS method calls, list literals, and the
 //! block/statement structure. Assumes the program has already parsed and typechecked.
 
-use crate::ast::{self, Block, Expr, Param, Program, Stmt};
+use crate::ast::{self, Block, Expr, Param, Program, Stmt, fn_run_at};
 use crate::core::{BinOp, Core, NodeGen, NodeId};
 use crate::span::Span;
 use std::collections::{BTreeMap, BTreeSet};
@@ -106,13 +106,14 @@ fn lower_stmts_at(
             // `fn`s are lowered a RUN at a time: the maximal block of adjacent `fn` statements is a
             // mutually-recursive scope (the same run `typeck::infer_fn_run` pre-binds), so its
             // members must be grouped and ordered together rather than emitted one by one in source
-            // order. Walking right-to-left we meet a run's END first, so scan back to its start.
-            let mut start = i - 1;
-            while start > 0 && matches!(stmts.get(start - 1), Some(Stmt::Fn { .. })) {
-                start -= 1;
-            }
-            acc = lower_fn_run_at(g, stmts.get(start..i).unwrap_or(&[]), acc, spans);
-            i = start;
+            // order.
+            // Walking right-to-left we meet a run's END first, so this asks at its last statement
+            // and `fn_run_at`'s backward scan finds the rest. The four left-to-right callers ask
+            // at a run's first statement instead; the range is the same either way, which is the
+            // whole reason one function serves both.
+            let run = fn_run_at(stmts, i - 1);
+            i = run.start;
+            acc = lower_fn_run_at(g, &stmts[run], acc, spans);
             continue;
         }
         i -= 1;
@@ -432,11 +433,9 @@ fn free_member_refs<'a>(members: &BTreeSet<&'a str>, params: &'a [Param], body: 
                             i += 1;
                         }
                         Stmt::Fn { .. } => {
-                            let start = i;
-                            while matches!(block.stmts.get(i), Some(Stmt::Fn { .. })) {
-                                i += 1;
-                            }
-                            let nested = block.stmts.get(start..i).unwrap_or(&[]);
+                            let range = fn_run_at(&block.stmts, i);
+                            i = range.end;
+                            let nested = &block.stmts[range];
                             for stmt in nested {
                                 if let Stmt::Fn { name, .. } = stmt {
                                     cur = bind(&mut chain, cur, members, name.as_str());

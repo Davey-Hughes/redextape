@@ -30,7 +30,7 @@
 //! nothing here, which is the right answer for a name with no definition in the source.
 
 use crate::Span;
-use crate::ast::{Block, Expr, Param, Program, Stmt};
+use crate::ast::{Block, Expr, Param, Program, Stmt, fn_run_at};
 use crate::nav::{DefKind, NameIndex};
 
 /// One binding in the shadow chain: `(enclosing scope, the name it binds, the event that defines
@@ -46,7 +46,7 @@ const ROOT: usize = usize::MAX;
 /// One name occurrence, before it has an index. `Ref`'s `def` is an EVENT id, not an occurrence
 /// index: occurrences are numbered only once the events are in source order.
 enum Ev<'a> {
-    Def { name: &'a str, span: Span, kind: DefKind },
+    Def { name: &'a str, span: Span, kind: DefKind, extent: Option<Span> },
     Ref { name: &'a str, span: Span, def: Option<usize> },
 }
 
@@ -63,24 +63,29 @@ struct Binder<'a> {
     events: Vec<Ev<'a>>,
 }
 
-/// Every name written in one `.rxt` document, each reference pointed at the binding it resolves to.
+/// Every name written in one `.rxt` document, each reference pointed at the binding it resolves
+/// to. `None` when the document was never parsed.
 ///
-/// Built from `parse_recovering`, never `parse` or `parse_full`: those answer `None` for exactly
-/// the broken files navigation is worth most on.
+/// Built from `parse_for_nav`, never `parse` or `parse_full`: those answer `None` for exactly the
+/// broken files navigation is worth most on. `parse_for_nav` rather than `parse_recovering`
+/// because the two disagree in one case — above `MAX_TOKENS`, where `parse_recovering` answers an
+/// empty tree and this must not answer an empty index, since an empty index is the claim that the
+/// document contains no names.
 #[must_use]
-pub fn nav_rxt(src: &str) -> NameIndex {
-    let (parsed, _diags) = crate::parser::parse_recovering(src);
+pub fn nav_rxt(src: &str) -> Option<NameIndex> {
+    let (parsed, _diags) = crate::parser::parse_for_nav(src);
+    let parsed = parsed?;
     let mut b = Binder::default();
     b.walk(&parsed.program);
-    b.finish()
+    Some(b.finish())
 }
 
 impl<'a> Binder<'a> {
     /// Introduce `name`, and answer the scope that has it. Emits the definition event here, so a
     /// binding and the occurrence that records it cannot get out of step.
-    fn bind(&mut self, scope: usize, name: &'a str, span: Span, kind: DefKind) -> usize {
+    fn bind(&mut self, scope: usize, name: &'a str, span: Span, kind: DefKind, extent: Option<Span>) -> usize {
         let ev = self.events.len();
-        self.events.push(Ev::Def { name, span, kind });
+        self.events.push(Ev::Def { name, span, kind, extent });
         self.chain.push((scope, name, ev));
         self.chain.len() - 1
     }
@@ -123,7 +128,7 @@ impl<'a> Binder<'a> {
     fn params(&mut self, scope: usize, params: &'a [Param]) -> usize {
         let mut inner = scope;
         for p in params {
-            inner = self.bind(inner, p.name.as_str(), p.span, DefKind::Param);
+            inner = self.bind(inner, p.name.as_str(), p.span, DefKind::Param, None);
         }
         inner
     }
@@ -189,14 +194,12 @@ impl<'a> Binder<'a> {
                     // is bound before ANY body is walked, so a member may forward-reference or
                     // mutually recurse with any other member; a non-`fn` statement ends the run
                     // and a `fn` after it starts a fresh one that the earlier run cannot see.
-                    let start = i;
-                    while matches!(b.stmts.get(i), Some(Stmt::Fn { .. })) {
-                        i += 1;
-                    }
-                    let run = b.stmts.get(start..i).unwrap_or(&[]);
+                    let range = fn_run_at(&b.stmts, i);
+                    i = range.end;
+                    let run = &b.stmts[range];
                     for stmt in run {
-                        if let Stmt::Fn { name, name_span, .. } = stmt {
-                            cur = self.bind(cur, name.as_str(), *name_span, DefKind::Fn);
+                        if let Stmt::Fn { name, name_span, span, .. } = stmt {
+                            cur = self.bind(cur, name.as_str(), *name_span, DefKind::Fn, Some(*span));
                         }
                     }
                     for stmt in run {
@@ -208,9 +211,9 @@ impl<'a> Binder<'a> {
                         }
                     }
                 }
-                Stmt::Let { name, name_span, value, .. } => {
+                Stmt::Let { name, name_span, span, value, .. } => {
                     work.push(Work::E(value, cur));
-                    cur = self.bind(cur, name.as_str(), *name_span, DefKind::Let);
+                    cur = self.bind(cur, name.as_str(), *name_span, DefKind::Let, Some(*span));
                     i += 1;
                 }
                 Stmt::Assign { target, target_span, value, .. } => {
@@ -268,7 +271,7 @@ impl Binder<'_> {
         let mut index = NameIndex::default();
         for &event in &order {
             match &self.events[event] {
-                Ev::Def { name, span, kind } => index.push_definition(name, *span, *kind),
+                Ev::Def { name, span, kind, extent } => index.push_definition(name, *span, *kind, *extent),
                 Ev::Ref { name, span, def } => {
                     index.push_resolved_reference(name, *span, def.map(|d| remap[d]));
                 }
@@ -293,7 +296,7 @@ mod tests {
         // The value of the second `let` is walked BEFORE its own name is bound, so the `x` at 19
         // is the FIRST binding and the tail at 26 is the second. Asserting INDICES: every
         // occurrence here is spelled `x`, so a name-only assertion passes against everything.
-        let n = nav_rxt("let x = 1; let x = x + 1; x");
+        let n = nav_rxt("let x = 1; let x = x + 1; x").expect("within the token cap");
         let rhs = n.at(19).expect("a name at 19").0;
         let tail = n.at(26).expect("a name at 26").0;
         assert_eq!(n.definition_of(rhs), Some(0), "the right-hand x is the FIRST let");
@@ -306,7 +309,7 @@ mod tests {
     fn a_parameter_shadows_an_outer_binding_inside_its_body_and_not_outside_it() {
         // `let x = 1; fn f(x) { x } x`
         //      ^4        ^14 ^16   ^21  ^25
-        let n = nav_rxt("let x = 1; fn f(x) { x } x");
+        let n = nav_rxt("let x = 1; fn f(x) { x } x").expect("within the token cap");
         let body = n.at(21).expect("a name at 21").0;
         let tail = n.at(25).expect("a name at 25").0;
         assert_eq!(n.get(n.definition_of(body).expect("resolved")).map(|o| o.span), Some(Span::new(16, 17)));
@@ -319,7 +322,7 @@ mod tests {
         //      ^4        ^14      ^21  ^26
         // The bare-block form `{ let y = 1; y } y` cannot be used: its trailing `y` parses as a
         // `Stmt::Error`, so there is no occurrence to assert on.
-        let n = nav_rxt("let g = { let y = 1; y }; y");
+        let n = nav_rxt("let g = { let y = 1; y }; y").expect("within the token cap");
         let inner = n.at(21).expect("a name at 21").0;
         let outer = n.at(26).expect("a name at 26").0;
         assert_eq!(n.get(n.definition_of(inner).expect("resolved")).map(|o| o.span), Some(Span::new(14, 15)));
@@ -329,7 +332,7 @@ mod tests {
     #[test]
     fn an_assignment_target_is_a_reference_and_not_a_definition() {
         // `let mut x = 1; x = 2; x` — three occurrences of `x`, ONE definition.
-        let n = nav_rxt("let mut x = 1; x = 2; x");
+        let n = nav_rxt("let mut x = 1; x = 2; x").expect("within the token cap");
         assert_eq!(n.definitions().count(), 1, "an assignment must not define");
         let target = n.at(15).expect("a name at 15").0;
         assert_eq!(n.definition_of(target), Some(0));
@@ -340,7 +343,7 @@ mod tests {
     fn a_method_name_resolves_to_the_binding_it_calls() {
         // `fn m(v) { v } 1.m()` — UFCS: typeck looks `m` up in the environment, so it is a
         //  ^3 ^5     ^10   ^16     reference like any other and navigation must agree.
-        let n = nav_rxt("fn m(v) { v } 1.m()");
+        let n = nav_rxt("fn m(v) { v } 1.m()").expect("within the token cap");
         let call = n.at(16).expect("a name at 16").0;
         assert_eq!(n.definition_of(call), Some(0));
         assert_eq!(n.get(0).map(|o| o.span), Some(Span::new(3, 4)));
@@ -351,7 +354,7 @@ mod tests {
         // The worklist pops `else_blk` before `then_blk`, so without the sort `a` precedes `z`.
         // Names chosen so source order and alphabetical order DISAGREE — against `c, p, q` the
         // two are the same list and this test would pass against a sort by name.
-        let n = nav_rxt("let c = true; if c { let z = 1; z } else { let a = 2; a }");
+        let n = nav_rxt("let c = true; if c { let z = 1; z } else { let a = 2; a }").expect("within the token cap");
         let defs: Vec<_> = n.definitions().map(|o| (o.name.as_str(), o.span)).collect();
         assert_eq!(
             defs,
@@ -364,11 +367,11 @@ mod tests {
     fn a_file_that_does_not_parse_still_indexes_what_it_has() {
         // THE POINT OF THE PARSE-RECOVERY PR THIS ONE SPENDS. Both fixtures were probed: each
         // reports exactly one diagnostic and each keeps the occurrences asserted here.
-        let n = nav_rxt("let x = ; x");
+        let n = nav_rxt("let x = ; x").expect("within the token cap");
         assert_eq!(n.definitions().count(), 1, "the binding survives losing its value");
         assert_eq!(n.definition_of(n.at(10).expect("a name at 10").0), Some(0));
 
-        let n = nav_rxt("fn f(a) { a");
+        let n = nav_rxt("fn f(a) { a").expect("within the token cap");
         assert_eq!(n.definitions().count(), 2, "the fn and its parameter");
         let body = n.at(10).expect("a name at 10").0;
         assert_eq!(n.get(n.definition_of(body).expect("resolved")).map(|o| o.span), Some(Span::new(5, 6)));
@@ -380,7 +383,7 @@ mod tests {
         //     ^3 ^5   ^10 ^12        ^20 ^22   ^27 ^29
         // `infer_block_inner` binds every name in a maximal run of consecutive `fn`s before
         // checking any body, so `b` inside `a` is a forward reference the language allows.
-        let n = nav_rxt("fn a(n) { b(n) } fn b(n) { a(n) } 0");
+        let n = nav_rxt("fn a(n) { b(n) } fn b(n) { a(n) } 0").expect("within the token cap");
         let b_in_a = n.at(10).expect("a name at 10").0;
         let a_in_b = n.at(27).expect("a name at 27").0;
         assert_eq!(n.get(n.definition_of(b_in_a).expect("resolved")).map(|o| o.span), Some(Span::new(20, 21)));
@@ -407,7 +410,7 @@ mod tests {
             diags.iter().any(|d| d.message.contains("unbound variable `b`")),
             "the fixture must be one the language rejects: {diags:?}"
         );
-        let n = nav_rxt(src);
+        let n = nav_rxt(src).expect("within the token cap");
         assert_eq!(n.definition_of(n.at(10).expect("a name at 10").0), None, "b is not bound yet");
         // The later `fn b` is still a definition — it is only unreachable FROM `a`.
         assert!(n.definitions().any(|o| o.span == Span::new(31, 32)), "fn b is still defined");
@@ -425,7 +428,7 @@ mod tests {
             .stack_size(512 * 1024)
             .spawn(|| {
                 let src = format!("let x = 1; {}", vec!["x"; 40_000].join(" + "));
-                let n = nav_rxt(&src);
+                let n = nav_rxt(&src).expect("within the token cap");
                 assert_eq!(n.definitions().count(), 1);
                 let last = n.at(src.len() - 1).expect("a name at the end").0;
                 assert_eq!(n.definition_of(last), Some(0), "every x in the chain is the one binding");
@@ -450,7 +453,7 @@ mod tests {
         // `cond` (the `f` at 37) and `body` (the `x` at 44) are both reachable only if the arm
         // pushes both. The `x` inside `while`'s body is the OUTER `x`: the lambda's branched scope
         // must not have leaked into it.
-        let n = nav_rxt("let x = 1; let f = |x| [x, x]; while f(0) { x }");
+        let n = nav_rxt("let x = 1; let f = |x| [x, x]; while f(0) { x }").expect("within the token cap");
         let outer_x = n.at(4).expect("a name at 4").0;
         let f = n.at(15).expect("a name at 15").0;
         let param_x = n.at(20).expect("a name at 20").0;
@@ -470,10 +473,81 @@ mod tests {
         // `} let z = 1; z` — the stray `}` recovers into a `Stmt::Error` at 0..1 (see
         // `parser::recovery_makes_progress_on_a_token_it_cannot_start_a_statement_with`), and the
         // `let` after it must resolve exactly as if the `Stmt::Error` were not there.
-        let n = nav_rxt("} let z = 1; z");
+        let n = nav_rxt("} let z = 1; z").expect("within the token cap");
         assert_eq!(n.definitions().count(), 1, "the error binds nothing");
         let def = n.at(6).expect("a name at 6").0;
         let reference = n.at(13).expect("a name at 13").0;
         assert_eq!(n.definition_of(reference), Some(def));
+    }
+
+    /// `let a0 = 0; let a1 = a0; … let a<n-1> = a0;` — five tokens per statement plus `Eof`.
+    fn let_chain(n: usize) -> String {
+        let mut s = String::from("let a0 = 0;");
+        for i in 1..n {
+            s.push_str(&format!(" let a{i} = a0;"));
+        }
+        s
+    }
+
+    /// An over-cap file is NOT indexed, which is a different claim from containing no names.
+    ///
+    /// **THE TOKEN COUNTS ARE ASSERTED, NOT ASSUMED.** The fixture is generated, so a lexer change
+    /// that moves the boundary would otherwise leave this quietly comparing two under-cap
+    /// programs and passing for the wrong reason. Measured on 6e0ad6e: 19,999 statements is
+    /// 99,996 tokens and 20,000 is 100,001, against a cap of 100,000.
+    #[test]
+    fn a_program_over_the_token_cap_is_not_indexed_and_one_under_it_is() {
+        let under = let_chain(19_999);
+        let over = let_chain(20_000);
+        assert_eq!(crate::parser::MAX_TOKENS, 100_000);
+        assert_eq!(crate::lexer::lex(&under).0.len(), 99_996);
+        assert_eq!(crate::lexer::lex(&over).0.len(), 100_001);
+
+        let indexed = nav_rxt(&under).expect("99,996 tokens is within the cap");
+        assert_eq!(indexed.definitions().count(), 19_999);
+        assert_eq!(nav_rxt(&over), None);
+    }
+
+    /// Recovery is not refusal, and this is the assertion that separates the two states.
+    ///
+    /// A sabotage mapping `Completeness::Recovered` to `None` leaves the cap test above green and
+    /// reddens only this one, which is what makes the three-state enum earn its third state.
+    #[test]
+    fn a_file_that_did_not_parse_completely_is_still_indexed() {
+        let n = nav_rxt("fn f(a) { a").expect("a recovered file is indexed");
+        // Probed on 6e0ad6e: `f` and its parameter `a`.
+        assert_eq!(n.definitions().count(), 2);
+    }
+
+    /// A `.rxt` definition carries the span of the statement that introduces it, which is the
+    /// span `documentSymbol` needs and the name span cannot supply.
+    ///
+    /// Offsets probed on 6e0ad6e, not counted by eye.
+    #[test]
+    fn a_definition_carries_the_extent_of_its_statement() {
+        let src = "fn f(a) {\n  let x = 1;\n  x\n}\nlet y = 2;\ny";
+        let n = nav_rxt(src).expect("within the token cap");
+        let extents: Vec<_> = n
+            .definitions()
+            .map(|o| (o.name.as_str(), o.def_kind(), (o.span.start, o.span.end), o.extent().map(|e| (e.start, e.end))))
+            .collect();
+        assert_eq!(
+            extents,
+            vec![
+                ("f", Some(DefKind::Fn), (3, 4), Some((0, 28))),
+                ("a", Some(DefKind::Param), (5, 6), None),
+                ("x", Some(DefKind::Let), (16, 17), Some((12, 22))),
+                ("y", Some(DefKind::Let), (33, 34), Some((29, 39))),
+            ]
+        );
+    }
+
+    /// A parameter is navigable and has no extent: its statement is the whole `fn`, which is its
+    /// parent's extent and not its own.
+    #[test]
+    fn a_parameter_has_no_extent() {
+        let n = nav_rxt("fn f(a) { a }").expect("within the token cap");
+        let a = n.definitions().find(|o| o.name == "a").expect("the parameter is indexed");
+        assert_eq!(a.extent(), None);
     }
 }

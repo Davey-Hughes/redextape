@@ -551,7 +551,7 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
             {
                 let (_, pad) = trimmed_at(name_part);
                 let at = line_start + indent + "state ".len() + pad;
-                nav.push_definition(&name, Span { start: at, end: at + name.len() }, DefKind::State);
+                nav.push_definition(&name, Span { start: at, end: at + name.len() }, DefKind::State, None);
             }
             states.push(RawState { name, accept, rules: Vec::new() });
             #[allow(clippy::cast_possible_truncation)] // see the `ids` map below for why this is sound
@@ -1336,6 +1336,20 @@ state s: accept
         let (i, occ) = nav.at(14).expect("a name at 14");
         assert_eq!(occ.span, Span { start: 14, end: 18 });
         assert_eq!(nav.get(nav.definition_of(i).expect("resolves")).map(|o| o.span), Some(Span { start: 25, end: 29 }));
+    }
+
+    /// `parse_tm_nav`'s only call to `push_definition` passes `None` for the extent, and this runs
+    /// THAT call, unlike `nav.rs`'s `an_artifact_form_definition_has_no_extent`, which builds a
+    /// `NameIndex` by hand and would not notice if this call site started passing `Some(..)`.
+    #[test]
+    fn tm_navigation_definitions_carry_no_extent() {
+        let (doc, nav) = parse_tm_nav(NAV_TM);
+        assert!(doc.machine.is_some(), "the fixture's premise: it parses");
+        let defs: Vec<_> = nav.definitions().collect();
+        assert_eq!(defs.len(), 2, "scan and halt, so this cannot pass over an empty index");
+        for def in defs {
+            assert_eq!(def.extent(), None, "{:?} at {:?}", def.name, def.span);
+        }
     }
 
     #[test]

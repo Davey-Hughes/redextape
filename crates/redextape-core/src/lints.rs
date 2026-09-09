@@ -18,7 +18,7 @@
 //! first, and `check` never sees it. `check` is `pub`: a caller that skips that gate and hands it an
 //! unchecked tree loses this guarantee and can recurse without bound.
 
-use crate::ast::{Block, Expr, Program, Stmt};
+use crate::ast::{Block, Expr, Program, Stmt, fn_run_at};
 use crate::diagnostic::Diagnostic;
 use crate::span::Span;
 
@@ -64,11 +64,9 @@ impl Lints {
             if matches!(b.stmts[i], Stmt::Fn { .. }) {
                 // Mirrors `infer_block_inner`: group the maximal run of consecutive `Stmt::Fn`s
                 // and scope it as one unit. See `fn_run`.
-                let start = i;
-                while i < b.stmts.len() && matches!(b.stmts[i], Stmt::Fn { .. }) {
-                    i += 1;
-                }
-                self.fn_run(&b.stmts[start..i]);
+                let run = fn_run_at(&b.stmts, i);
+                i = run.end;
+                self.fn_run(&b.stmts[run]);
             } else {
                 self.stmt(&b.stmts[i]);
                 i += 1;

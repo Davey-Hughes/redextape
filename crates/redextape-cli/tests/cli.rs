@@ -24,7 +24,7 @@
 //! `redextape.toml`, stopping at whichever comes first in a directory: the config file, or a `.git`.
 //! `/tmp` on this machine is a shared tmpfs other processes write to, so a case with no config of its
 //! own has an unbounded walk that can reach `/tmp` and pick up whatever a stray file there holds,
-//! silently changing what the case tests. Measured: 18 of the 20 `.in` directories under
+//! silently changing what the case tests. Measured: 20 of the 22 `.in` directories under
 //! `tests/cmd/` have no `redextape.toml` anywhere in them, and for those the marker is what stops the
 //! walk — delete it and `discover` keeps climbing toward `/tmp`.
 //!

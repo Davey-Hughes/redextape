@@ -17,6 +17,7 @@
 
 pub mod document;
 pub mod language;
+mod outline;
 pub mod position;
 
 use gen_lsp_types::json_rpc::{Error, Id, RequestObject, ResponseObject};
@@ -33,7 +34,7 @@ use gen_lsp_types::{
 use redextape_core::nav::NameIndex;
 
 use crate::document::Documents;
-use crate::language::outline_kind;
+use crate::outline::{OutlineNode, outline};
 use crate::position::Encoding;
 
 /// One message the server sends because of one message from the client.
@@ -308,19 +309,22 @@ impl Server {
         Outgoing::Response(ResponseObject::from_success::<ReferencesRequest>(id, found))
     }
 
-    /// Every name this document DEFINES, flat and in source order.
+    /// Every name this document DEFINES, in source order — nested under the innermost construct
+    /// that contains it where the form records one, flat where it does not.
     ///
-    /// **FLAT, NOT NESTED.** Rules could hang under their state, but the demo suite contains a
-    /// machine of **7,353 states carrying 18,499 rules**, and an outline nesting the second under
-    /// the first is not one a human uses. (An earlier version of this sentence said "25,852
-    /// states". That is `map_fold`'s ROW count — the states and the rules added together — so it
-    /// both inflated the state count 3.5x and named the one quantity that is neither of the two
-    /// this decision is about.)
+    /// **RULES NEVER NEST UNDER THEIR STATE.** A `.tm` document mixes states and rules, but the
+    /// demo suite contains a machine of **7,353 states carrying 18,499 rules**, and an outline
+    /// nesting the second under the first is not one a human uses — so no `.tm` parser records a
+    /// state's extent, and `outline` therefore never nests a rule under one. (An earlier version
+    /// of this sentence said "25,852 states". That is `map_fold`'s ROW count — the states and the
+    /// rules added together — so it both inflated the state count 3.5x and named the one quantity
+    /// that is neither of the two this decision is about.)
     ///
-    /// `range` and `selection_range` are both the name's span. The protocol only requires the
-    /// selection range to be contained by the range, and the index stores name spans — a range
-    /// enclosing a whole state's rules would mean the parser recording where each state's block
-    /// ends, which is more than navigation needs.
+    /// `selection_range` is the name; `range` is the construct's extent when the form records one
+    /// and the enclosing line when it does not. `.tm` and `.asm` record none — no parser knows
+    /// where a state's rules end — so both keep the line-shaped range they shipped with, and
+    /// `.rxt` gets the `fn` or `let` statement itself. `outline` builds the nesting; see that
+    /// module for why containment is the rule.
     ///
     /// The `SymbolKind` comes from `outline_kind(DefKind)`, per occurrence rather than per
     /// document — a `.rxt` file mixes `fn`s, `let`s and parameters, so one language no longer
@@ -335,34 +339,10 @@ impl Server {
             let uri = p.text_document.uri;
             let doc = self.documents.get(uri.as_ref())?;
             let nav = doc.nav.as_ref()?;
-            let symbols = nav.definitions().filter_map(|o| {
-                // `None` is a definition an outline does not list — a `.rxt` parameter. Filtering
-                // here rather than in the index keeps the parameter navigable.
-                let kind = outline_kind(o.def_kind()?)?;
-                let selection_range = doc.index.range(&doc.text, o.span, self.encoding);
-                let range = doc.index.range(&doc.text, enclosing_line(&doc.text, o.span), self.encoding);
-                Some((o.name.clone(), kind, range, selection_range))
-            });
+            let tree = outline(nav, &doc.text);
             Some(if self.hierarchical_symbols {
                 DocumentSymbolResponse::DocumentSymbolList(
-                    symbols
-                        .map(|(name, kind, range, selection_range)| {
-                            // `DocumentSymbol::deprecated` is a #[deprecated] field with no
-                            // default and a positional slot in `::new`, so BOTH construction
-                            // routes trip the lint that `-D warnings` makes fatal.
-                            #[allow(deprecated)]
-                            DocumentSymbol {
-                                name,
-                                detail: None,
-                                kind,
-                                tags: None,
-                                deprecated: None,
-                                range,
-                                selection_range,
-                                children: None,
-                            }
-                        })
-                        .collect(),
+                    tree.iter().map(|n| self.to_document_symbol(doc, n)).collect(),
                 )
             } else {
                 // **THE FLAT SHAPE IS NOT A FALLBACK, IT IS WHAT THE PROTOCOL SAYS THIS CLIENT
@@ -372,18 +352,26 @@ impl Server {
                 // `DocumentSymbolResponse` is `#[serde(untagged)]`, so sending the wrong arm is
                 // not a protocol error the client can report — it is an empty outline with
                 // nothing logged on either side.
+                //
+                // `SymbolInformation` has no `children` field, so this arm lists every node in the
+                // tree, preorder, rather than only the roots — the same ranges the hierarchical arm
+                // reports, just without the nesting `SymbolInformation` has no way to carry.
                 DocumentSymbolResponse::SymbolInformationList(
-                    symbols
-                        .map(|(name, kind, range, _)| {
+                    crate::outline::flatten(&tree)
+                        .into_iter()
+                        .map(|(n, container)| {
                             #[allow(deprecated)]
                             SymbolInformation {
                                 deprecated: None,
-                                location: Location::new(uri.clone(), range),
+                                location: Location::new(
+                                    uri.clone(),
+                                    doc.index.range(&doc.text, n.range, self.encoding),
+                                ),
                                 base_symbol_information: BaseSymbolInformation {
-                                    name,
-                                    kind,
+                                    name: n.name.clone(),
+                                    kind: n.kind,
                                     tags: None,
-                                    container_name: None,
+                                    container_name: container.map(str::to_string),
                                 },
                             }
                         })
@@ -392,6 +380,31 @@ impl Server {
             })
         });
         Outgoing::Response(ResponseObject::from_success::<DocumentSymbolRequest>(id, found))
+    }
+
+    /// One `OutlineNode` and its children as the protocol's `DocumentSymbol`.
+    ///
+    /// Recursive, and bounded by the outline's nesting rather than by the file's: `outline` builds
+    /// the tree iteratively, and a tree deep enough to matter here would need that many nested
+    /// `fn`/`let` constructs, each of which the parser's own `MAX_PARSE_DEPTH` already refused.
+    fn to_document_symbol(&self, doc: &crate::document::Document, node: &OutlineNode) -> DocumentSymbol {
+        // `DocumentSymbol::deprecated` is a #[deprecated] field with no default and a positional
+        // slot in `::new`, so BOTH construction routes trip the lint that `-D warnings` makes fatal.
+        #[allow(deprecated)]
+        DocumentSymbol {
+            name: node.name.clone(),
+            detail: None,
+            kind: node.kind,
+            tags: None,
+            deprecated: None,
+            range: doc.index.range(&doc.text, node.range, self.encoding),
+            selection_range: doc.index.range(&doc.text, node.selection_range, self.encoding),
+            children: if node.children.is_empty() {
+                None
+            } else {
+                Some(node.children.iter().map(|c| self.to_document_symbol(doc, c)).collect())
+            },
+        }
     }
 
     /// The document, its index and the cursor as a byte offset — the three things every
@@ -448,26 +461,6 @@ fn invalid_params(id: Id, method: &str, err: &serde_json::Error) -> Outgoing {
         id,
         Error { code: ErrorCodes::InvalidParams, message: format!("{method}: {err}"), data: None },
     ))
-}
-
-/// The span of the whole line `span` sits on, terminator excluded.
-///
-/// **`DocumentSymbol::range` IS NOT DECORATION, IT IS WHAT A CLIENT TESTS THE CURSOR AGAINST.** The
-/// protocol defines it as the region used to decide whether the caret is inside the symbol, and
-/// `selectionRange` as the part to reveal — so setting both to the name span made breadcrumbs,
-/// sticky scroll and nvim-navic report no symbol for every position except the few columns of the
-/// name itself. The name span still goes to `selectionRange`, which is what it is for. Containment
-/// holds either way, which is the only requirement the earlier doc comment checked itself against.
-///
-/// A line rather than a whole `state` block: the index stores name spans, and recording where each
-/// block ends is more than navigation needs. A line is the smallest span that makes the cursor test
-/// behave, and is exact for `.asm`, where a label IS its line.
-fn enclosing_line(text: &str, span: redextape_core::Span) -> redextape_core::Span {
-    let start = text.get(..span.start).map_or(span.start, |b| b.rfind('\n').map_or(0, |i| i + 1));
-    let rest = text.get(span.end..).unwrap_or("");
-    let end = rest.find('\n').map_or(text.len(), |i| span.end + i);
-    let end = if text.get(end.saturating_sub(1)..end) == Some("\r") { end - 1 } else { end };
-    redextape_core::Span { start, end }
 }
 
 /// A `redextape-core` diagnostic as the protocol's.
@@ -1061,6 +1054,35 @@ state q1: accept
         assert_eq!(success_value(&out), serde_json::Value::Null);
     }
 
+    /// An over-cap `.rxt` document has no outline, and `null` is not `[]`.
+    ///
+    /// **THE TWO ANSWERS MEAN DIFFERENT THINGS AND THE PROTOCOL DISTINGUISHES THEM.** `[]` is
+    /// "this document has no symbols"; `null` is "no outline for this document". A 100,001-token
+    /// file is full of names, and the parser refused it before reading one — so `[]` would be a
+    /// claim about the file that nothing in the server ever checked.
+    ///
+    /// The fixture is generated because the cap is 100,000 tokens; the count is asserted in
+    /// `binder`'s own `a_program_over_the_token_cap_is_not_indexed_and_one_under_it_is`, and this
+    /// test exists to prove the refusal reaches the wire.
+    #[test]
+    fn document_symbol_on_an_over_cap_rxt_file_is_null_rather_than_an_empty_list() {
+        use std::fmt::Write as _;
+
+        let mut src = String::from("let a0 = 0;");
+        for i in 1..20_000 {
+            let _ = write!(src, " let a{i} = a0;");
+        }
+        let mut server = Server::new();
+        server.handle(request(1, "initialize", &json!(InitializeParams::default())));
+        did_open(&mut server, "file:///big.rxt", "redextape", &src);
+        let out = server.handle(request(
+            2,
+            "textDocument/documentSymbol",
+            &json!({"textDocument": {"uri": "file:///big.rxt"}}),
+        ));
+        assert_eq!(success_value(&out), serde_json::Value::Null);
+    }
+
     #[test]
     fn initialize_advertises_the_three_navigation_providers() {
         let mut server = Server::new();
@@ -1280,6 +1302,67 @@ state q1: accept
     }
 
     #[test]
+    fn the_flat_arm_lists_every_node_not_just_the_roots() {
+        // Every fixture the two tests above use is depth 1 — `scan`/`halt`, `top`/`compute` — so a
+        // `flatten` replaced with `nodes.iter().collect()` (roots only, no recursion into
+        // `children`) would leave both of them green. This one nests `x` under `f`, which a
+        // roots-only walk drops from the list entirely.
+        let mut server = Server::new();
+        server.handle(request(1, "initialize", &json!(InitializeParams::default())));
+        did_open(&mut server, "file:///a.rxt", "redextape", "fn f(a) {\n  let x = 1;\n  x\n}\nlet y = 2;\ny");
+        let out = server.handle(request(
+            5,
+            "textDocument/documentSymbol",
+            &json!({"textDocument": {"uri": "file:///a.rxt"}}),
+        ));
+        let v = success_value(&out);
+        let syms = v.as_array().expect("an array");
+        let names: Vec<_> = syms.iter().map(|s| s["name"].as_str()).collect();
+        assert_eq!(names, vec![Some("f"), Some("x"), Some("y")], "preorder: f, then its child x, then y");
+
+        // `f`'s range is its whole extent, not just its header line — probed (0, 28), four lines,
+        // the same fixture and figure `a_hierarchical_client_gets_a_lets_children_under_their_fn`
+        // checks on the hierarchical arm's bare `range` rather than this arm's `location.range`.
+        assert_eq!(syms[0]["location"]["range"]["start"]["line"], 0);
+        assert_eq!(syms[0]["location"]["range"]["end"]["line"], 3);
+    }
+
+    /// A client without `hierarchicalDocumentSymbolSupport` gets every symbol the tree holds, not
+    /// only its roots — the nesting reaches it through `containerName`.
+    ///
+    /// `the_flat_arm_lists_every_node_not_just_the_roots` already pins the node LIST; what is new
+    /// here is the container on each row. Both stay, but not for the reason once written here:
+    /// this test's own assertion — `x`'s container is `Some("f")` — already fails against a
+    /// roots-only `flatten`, since a roots-only walk drops `x` from the list rather than merely
+    /// clearing its container. What the older test alone still covers is `f`'s `location.range`
+    /// being the extent, which this test never asserts.
+    ///
+    /// **THE FLAT SHAPE IS WHAT THIS CLIENT ASKED FOR, NOT A FALLBACK**, and
+    /// `DocumentSymbolResponse` is `#[serde(untagged)]`, so sending the wrong arm is not an error
+    /// the client can report. A pass that emitted only the roots would look like a working outline
+    /// with the body of every function missing.
+    #[test]
+    fn a_client_without_hierarchical_support_gets_every_symbol_with_its_container() {
+        let src = "fn f(a) {\n  let x = 1;\n  x\n}\nlet y = 2;\ny";
+        let mut server = Server::new();
+        server.handle(request(1, "initialize", &json!(InitializeParams::default())));
+        did_open(&mut server, "file:///a.rxt", "redextape", src);
+        let out = server.handle(request(
+            2,
+            "textDocument/documentSymbol",
+            &json!({"textDocument": {"uri": "file:///a.rxt"}}),
+        ));
+        let value = success_value(&out);
+        let names: Vec<_> = value
+            .as_array()
+            .expect("the flat arm is an array")
+            .iter()
+            .map(|s| (s["name"].as_str().expect("a name"), s["containerName"].as_str()))
+            .collect();
+        assert_eq!(names, vec![("f", None), ("x", Some("f")), ("y", None)]);
+    }
+
+    #[test]
     fn the_cached_index_is_rebuilt_when_the_document_changes() {
         // THE CLASSIC CACHE DEFECT, AND THE REASON THE INDEX WAS NOT CACHED BEFORE IS THAT NOTHING
         // MADE IT CHEAP TO GET WRONG. `Document::replace` rebuilds `index` and `nav` together and
@@ -1355,6 +1438,35 @@ state q1: accept
         assert_eq!(names, vec![Some("top"), Some("compute")]);
         let kinds: Vec<_> = syms.iter().map(|s| s["kind"].as_u64()).collect();
         assert_eq!(kinds, vec![Some(13), Some(12)], "Variable then Function");
+    }
+
+    /// A client that asked for `DocumentSymbol[]` gets the nesting, not a flattened list.
+    #[test]
+    fn a_hierarchical_client_gets_a_lets_children_under_their_fn() {
+        let src = "fn f(a) {\n  let x = 1;\n  x\n}\nlet y = 2;\ny";
+        let mut server = Server::new();
+        init_hierarchical(&mut server);
+        did_open(&mut server, "file:///a.rxt", "redextape", src);
+        let out = server.handle(request(
+            2,
+            "textDocument/documentSymbol",
+            &json!({"textDocument": {"uri": "file:///a.rxt"}}),
+        ));
+        let value = success_value(&out);
+        let roots = value.as_array().expect("the hierarchical arm is an array");
+        let names: Vec<_> = roots.iter().map(|s| s["name"].as_str().expect("a name")).collect();
+        assert_eq!(names, vec!["f", "y"], "only the two top-level constructs are roots");
+        let children: Vec<_> = roots[0]["children"]
+            .as_array()
+            .expect("`f` has children")
+            .iter()
+            .map(|s| s["name"].as_str().expect("a name"))
+            .collect();
+        assert_eq!(children, vec!["x"]);
+        // The `fn` folds to its body, not its header: probed extent (0, 28) is four lines.
+        assert_eq!(roots[0]["range"]["start"]["line"], 0);
+        assert_eq!(roots[0]["range"]["end"]["line"], 3);
+        assert_eq!(roots[0]["selectionRange"]["start"]["line"], 0);
     }
 
     /// Shadowing, so a wrong answer is available: `x` is bound twice. `let x = x + 1;`'s

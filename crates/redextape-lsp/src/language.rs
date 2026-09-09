@@ -85,12 +85,16 @@ impl Language {
     /// which is a claim about the document; `None` says "this server cannot answer navigation
     /// for this form", which is a claim about the server. `.rxlambda` waits on a term type that
     /// carries no source positions at all.
+    ///
+    /// `.rxt` answers `None` for a second reason: a document above `MAX_TOKENS` is refused by the
+    /// parser before it runs, so there is no tree to index. `.tm` and `.asm` are line-oriented and
+    /// have no such cap, which makes this asymmetry `.rxt`'s alone.
     #[must_use]
     pub fn nav(self, src: &str) -> Option<NameIndex> {
         match self {
             Language::Tm => Some(redextape_core::tm::parse_tm_nav(src).1),
             Language::Asm => Some(redextape_core::tm::parse_asm_nav(src).1),
-            Language::Redextape => Some(redextape_core::binder::nav_rxt(src)),
+            Language::Redextape => redextape_core::binder::nav_rxt(src),
             Language::Lambda => None,
         }
     }
@@ -107,9 +111,10 @@ impl Language {
 /// test is gone; the compiler holds what it held.
 ///
 /// **`None` MEANS "NOT AN OUTLINE SYMBOL", NOT "NOT INDEXED".** A parameter must be in the index —
-/// go-to-definition on one has to land — but an outline listing every parameter of every function
-/// as a flat sibling of the functions is noise. The name is `outline_kind` rather than
-/// `symbol_kind` because those are two different questions and the old name answered one.
+/// go-to-definition on one has to land — but an outline node per parameter is noise whether flat
+/// or nested under its `fn`: a parameter's navigability is what the index is for, and that is a
+/// different question from what belongs in a document's outline. The name is `outline_kind` rather
+/// than `symbol_kind` because those are two different questions and the old name answered one.
 pub(crate) fn outline_kind(kind: DefKind) -> Option<SymbolKind> {
     match kind {
         // A TM state is a place the machine can be in; an asm label names a point in a program.
@@ -253,8 +258,9 @@ f: ; the entry
     #[test]
     fn an_outline_lists_functions_and_bindings_and_not_parameters() {
         // A parameter must be IN the index — go-to-definition on one has to land — but an outline
-        // listing every parameter of every function as a flat sibling of the functions is noise.
-        // `None` here means "not an outline symbol", which is why this is not called symbol_kind.
+        // node per parameter is noise whether flat or nested under its `fn`: a parameter's
+        // navigability is what the index is for. `None` here means "not an outline symbol", which
+        // is why this is not called symbol_kind.
         assert_eq!(outline_kind(DefKind::Fn), Some(SymbolKind::Function));
         assert_eq!(outline_kind(DefKind::Let), Some(SymbolKind::Variable));
         assert_eq!(outline_kind(DefKind::Param), None);

@@ -19,7 +19,9 @@ pub struct Document {
     pub version: i32,
     pub text: String,
     pub index: LineIndex,
-    /// The name index for this version, or `None` for a form this server does not index.
+    /// The name index for this version, or `None` when this server has none to give — either the
+    /// form carries no index at all, or (`.rxt` only) the document is over `MAX_TOKENS` and the
+    /// parser refused it before running. See `Language::nav`.
     ///
     /// **CACHED FOR THE SAME REASON `index` IS, AND IT WAS NOT UNTIL A REVIEW MEASURED THE
     /// DIFFERENCE.** Both derive from `text` alone and both are invalidated by exactly one event,

@@ -39,11 +39,19 @@ pub struct Parsed<'a> {
 /// **THIS IS NOT A REPLACEMENT FOR `parse_full`, IT IS THE OTHER HALF OF A SPLIT CONTRACT.**
 /// `format` is `print ∘ parse`, so a `parse` that answered a partial tree would have `format` write
 /// that tree back over the author's buffer and delete the part that did not parse. Consumers that
-/// print, lower, or evaluate must keep going through `parse`/`parse_full`; this exists for
-/// navigation, which is worth most on exactly the broken files those must refuse.
+/// print, lower, or evaluate must keep going through `parse`/`parse_full`. Navigation goes through
+/// `parse_for_nav`, not this — the file navigation is worth most on is exactly the broken one.
+/// `parse_recovering` has no caller left outside this crate's own tests: what remains is a
+/// convenient way to get a tree unconditionally, indifferent to completeness, without
+/// `parse_full`'s `Option` to unwrap first.
+///
+/// **IT ANSWERS A TREE EVEN WHEN THE PARSER NEVER RAN.** Above `MAX_TOKENS` the tree is an empty
+/// `Program`, which a consumer counting statements reads as a document with none. `parse_for_nav`
+/// is the entry point that distinguishes the two; anything that would draw a conclusion from an
+/// empty tree wants that one.
 #[must_use]
 pub fn parse_recovering(src: &str) -> (Parsed<'_>, Vec<Diagnostic>) {
-    let (parsed, diags, _complete) = parse_inner(src);
+    let (parsed, diags, _completeness) = parse_inner(src);
     (parsed, diags)
 }
 
@@ -53,13 +61,47 @@ pub fn parse_recovering(src: &str) -> (Parsed<'_>, Vec<Diagnostic>) {
 /// printer walk it with a single forward cursor.
 #[must_use]
 pub fn parse_full(src: &str) -> (Option<Parsed<'_>>, Vec<Diagnostic>) {
-    let (parsed, diags, complete) = parse_inner(src);
-    if complete { (Some(parsed), diags) } else { (None, diags) }
+    let (parsed, diags, completeness) = parse_inner(src);
+    if matches!(completeness, Completeness::Complete) { (Some(parsed), diags) } else { (None, diags) }
 }
 
-/// The one parse. `bool` is whether it was complete — no lexer diagnostic, within `MAX_TOKENS`, and
-/// no recovery.
-fn parse_inner(src: &str) -> (Parsed<'_>, Vec<Diagnostic>, bool) {
+/// Parse `src` for navigation. `Some` whenever the parser ran, recovery included.
+///
+/// `None` only for `Completeness::Refused` — the `MAX_TOKENS` refusal, where nothing was parsed.
+/// That is the one case where an empty index would be a claim about the document rather than
+/// about the cap, and `NameIndex`'s own doc reads an empty index as "this document contains no
+/// names".
+pub(crate) fn parse_for_nav(src: &str) -> (Option<Parsed<'_>>, Vec<Diagnostic>) {
+    let (parsed, diags, completeness) = parse_inner(src);
+    match completeness {
+        Completeness::Refused => (None, diags),
+        Completeness::Complete | Completeness::Recovered => (Some(parsed), diags),
+    }
+}
+
+/// How much of `src` `parse_inner` actually read.
+///
+/// **THE THIRD STATE IS THE POINT.** `Refused` produces a tree that is not the whole document
+/// (the parser never ran at all), while `Recovered` may be whole or partial. A `bool` would
+/// collapse them — so a consumer could not tell a file the parser read and recovered from a file
+/// the parser never started on. Navigation is the consumer that needs the difference: a recovered
+/// tree is exactly what it exists to serve, and an empty one from `Refused` would be read as a
+/// document containing no names.
+enum Completeness {
+    /// Clean lex, within `MAX_TOKENS`, nothing recovered.
+    Complete,
+    /// The lex found an unknown character, the parser recovered from a syntax error, or both. The
+    /// tree is partial only in the recovery case — a lexer diagnostic alone leaves the token
+    /// stream, minus the skipped character, as parseable as ever. Every name that made it into the
+    /// tree is real.
+    Recovered,
+    /// The token cap refused the input before the parser ran. The tree is EMPTY, and that
+    /// emptiness is a fact about the cap rather than about the document.
+    Refused,
+}
+
+/// The one parse. `Completeness` says how much of `src` was read — see that enum.
+fn parse_inner(src: &str) -> (Parsed<'_>, Vec<Diagnostic>, Completeness) {
     let (tokens, comments, lex_diags) = lex(src);
     let clean_lex = lex_diags.is_empty();
     let mut diags = lex_diags;
@@ -70,17 +112,17 @@ fn parse_inner(src: &str) -> (Parsed<'_>, Vec<Diagnostic>, bool) {
             format!("program too large: {} tokens exceeds the maximum of {MAX_TOKENS} (deeply nested or very long programs are rejected to avoid stack overflow)", tokens.len()),
         ));
         let program = Program { block: Block { stmts: Vec::new(), tail: None, span: whole } };
-        return (Parsed { program, comments, src }, diags, false);
+        return (Parsed { program, comments, src }, diags, Completeness::Refused);
     }
     let mut p = Parser { src, tokens, pos: 0, depth: 0, diags: Vec::new(), recovered: 0 };
     let program = p.parse_program();
     p.finish_diagnostics();
-    let complete = clean_lex && p.recovered == 0;
+    let completeness = if clean_lex && p.recovered == 0 { Completeness::Complete } else { Completeness::Recovered };
     diags.extend(p.diags);
     // Two passes produce these — the lexer left to right, then the parser — so their concatenation
     // is not sorted by construction even though each half is.
     diags.sort_by_key(|d| d.span.start);
-    (Parsed { program, comments, src }, diags, complete)
+    (Parsed { program, comments, src }, diags, completeness)
 }
 
 /// Parse `src`, discarding trivia. The entry point for every consumer that wants a tree and nothing
@@ -846,9 +888,10 @@ mod tests {
     fn every_parse_error_is_reported_not_just_the_first() {
         // This pins the recovery machinery at the `parse_recovering` entry point: three broken
         // statements, three diagnostics, and the two good statements around them survive. But
-        // `parse_recovering` has no caller outside this module's own tests — nothing in this crate
-        // or its consumers reaches it yet. The shipping path is `analyze` -> `parser::parse` ->
-        // `parse_full` -> `parse_inner`, which this test never exercises even though it shares
+        // `parse_recovering` has no caller outside this crate's own tests — this module's, and
+        // `ast.rs`'s `fn_run_at` tests, which use it as a convenient way to get a tree without
+        // `parse_full`'s `Option` to unwrap first. The shipping path is `analyze` -> `parser::parse`
+        // -> `parse_full` -> `parse_inner`, which this test never exercises even though it shares
         // `parse_inner` with `parse_recovering`. `analyze_reports_every_parse_error_not_just_the_first`
         // (in this crate's root, alongside `analyze`) asserts the same property on that path, and
         // is the one that covers what actually ships.

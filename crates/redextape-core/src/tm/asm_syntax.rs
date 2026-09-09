@@ -211,7 +211,7 @@ pub fn parse_asm_nav(src: &str) -> (AsmDocument, NameIndex) {
                 // now warns that a trimmed argument makes its second return meaningless.
                 let (name_text, pad) = trimmed_at(name);
                 let at = line_start + indent + pad;
-                nav.push_definition(name_text, Span::new(at, at + name_text.len()), DefKind::Label);
+                nav.push_definition(name_text, Span::new(at, at + name_text.len()), DefKind::Label, None);
             }
             continue;
         }
@@ -853,6 +853,20 @@ mod tests {
         let def = nav.definition_of(i).and_then(|d| nav.get(d)).expect("resolves");
         assert_eq!(&NAV_ASM[def.span.start..def.span.end], "g");
         assert_eq!(def.span.start, NAV_ASM.rfind("g:").expect("fixture"), "the LABEL, not an operand");
+    }
+
+    /// `parse_asm_nav`'s only call to `push_definition` passes `None` for the extent, and this runs
+    /// THAT call, unlike `nav.rs`'s `an_artifact_form_definition_has_no_extent`, which builds a
+    /// `NameIndex` by hand and would not notice if this call site started passing `Some(..)`.
+    #[test]
+    fn asm_navigation_definitions_carry_no_extent() {
+        let (doc, nav) = parse_asm_nav(NAV_ASM);
+        assert!(doc.program.is_some(), "the fixture's premise: it parses");
+        let defs: Vec<_> = nav.definitions().collect();
+        assert_eq!(defs.len(), 2, "f and g, so this cannot pass over an empty index");
+        for def in defs {
+            assert_eq!(def.extent(), None, "{:?} at {:?}", def.name, def.span);
+        }
     }
 
     #[test]

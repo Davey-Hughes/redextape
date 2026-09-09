@@ -13,12 +13,14 @@
 //! carries decides nothing, and the alternative — a neutral vocabulary invented to avoid the
 //! words — would be the protocol's `SymbolKind` in disguise, in a crate that names no protocol.
 //!
-//! **AN INDEX OUTLIVES A FAILED PARSE, AND THAT IS THE DIFFERENCE FROM `comments`.** Comment
-//! recovery is all-or-nothing across a document because comments feed the PRINTER, which has
-//! nothing to print for a file with an error. This feeds NAVIGATION: a jump from a `goto` to its
-//! `state` is correct on its own terms, and nothing else in the file has to be true for it to be
-//! the right answer. The moment navigation is worth most is the moment the file is broken,
-//! because that is what a file under active editing is.
+//! **AN INDEX OUTLIVES A PARSE THAT FAILS PARTWAY, AND THAT IS THE DIFFERENCE FROM `comments`.**
+//! Comment recovery is all-or-nothing across a document because comments feed the PRINTER, which
+//! has nothing to print for a file with an error. This feeds NAVIGATION: a jump from a `goto` to
+//! its `state` is correct on its own terms, and nothing else in the file has to be true for it to
+//! be the right answer. The moment navigation is worth most is the moment the file is broken,
+//! because that is what a file under active editing is. The one case where nothing outlives the
+//! attempt is `.rxt` above `MAX_TOKENS`: the parser never runs at all, so there is no tree to
+//! index — see `binder::nav_rxt`.
 
 use std::collections::HashMap;
 
@@ -66,6 +68,26 @@ pub enum DefKind {
 pub enum Role {
     Definition {
         kind: DefKind,
+        /// The span of the construct this name introduces — a `.rxt` `let` statement or `fn`
+        /// declaration, terminator and body included. `None` for a form whose parser does not
+        /// record one: no `.tm` parser knows where a state's rules end, and no `.asm` parser knows
+        /// where a label's instructions end, which is the same fact `documentSymbol`'s line-shaped
+        /// range is built on. `None` also for a `.rxt` parameter: it is navigable and has no
+        /// extent — its statement is the whole `fn`, which is its parent's extent and not its own.
+        ///
+        /// **SUPPLIED BY THE PARSER, LIKE `kind`.** Nothing here derives an extent, and nothing
+        /// here may: a span enclosing a construct is a grammar's answer, and this module holds no
+        /// grammar.
+        ///
+        /// `redextape-lsp`'s `outline` reads this field with no `DefKind::Param` check of its own
+        /// at the read site; what keeps a `Param` out of the tree is `outline_kind`, called
+        /// earlier in the same loop, which maps `DefKind::Param` to `None` and `continue`s before
+        /// that read is ever reached. Nothing upstream removes `Param` first. Without that check a
+        /// `Param` would not make the pass unsound — it has no extent, so it would take the
+        /// `attach` arm like any other extentless definition — it would just produce a wrong
+        /// outline, with every parameter listed as a child of its own `fn`. A coupling this
+        /// module does not enforce and did not, until now, write down.
+        extent: Option<Span>,
     },
     Reference {
         /// Index into the document's occurrences. `None` when nothing in this document defines
@@ -76,8 +98,8 @@ pub enum Role {
 }
 
 impl NameIndex {
-    pub(crate) fn push_definition(&mut self, name: &str, span: Span, kind: DefKind) {
-        self.occurrences.push(Occurrence { name: name.to_string(), span, role: Role::Definition { kind } });
+    pub(crate) fn push_definition(&mut self, name: &str, span: Span, kind: DefKind, extent: Option<Span>) {
+        self.occurrences.push(Occurrence { name: name.to_string(), span, role: Role::Definition { kind, extent } });
     }
 
     /// Record a mention. The link is filled by `link`, not here: a `goto` may name a state
@@ -203,7 +225,18 @@ impl Occurrence {
     #[must_use]
     pub fn def_kind(&self) -> Option<DefKind> {
         match self.role {
-            Role::Definition { kind } => Some(kind),
+            Role::Definition { kind, .. } => Some(kind),
+            Role::Reference { .. } => None,
+        }
+    }
+
+    /// The span of the construct this definition introduces, or `None` for a reference, for a
+    /// form whose parser records none, and for a `.rxt` parameter: it is navigable and has no
+    /// extent — its statement is the whole `fn`, which is its parent's extent and not its own.
+    #[must_use]
+    pub fn extent(&self) -> Option<Span> {
+        match self.role {
+            Role::Definition { extent, .. } => extent,
             Role::Reference { .. } => None,
         }
     }
@@ -220,9 +253,9 @@ mod tests {
     fn fixture() -> NameIndex {
         let mut n = NameIndex::default();
         n.push_reference("alpha", Span::new(0, 5));
-        n.push_definition("alpha", Span::new(20, 25), DefKind::State);
+        n.push_definition("alpha", Span::new(20, 25), DefKind::State, None);
         n.push_reference("alpha", Span::new(40, 45));
-        n.push_definition("beta", Span::new(60, 64), DefKind::State);
+        n.push_definition("beta", Span::new(60, 64), DefKind::State, None);
         n.push_reference("ghost", Span::new(80, 85));
         n.link();
         n
@@ -290,8 +323,8 @@ mod tests {
         // `definitions()` by name reddens this test and nothing else in the file.
         let mut n = NameIndex::default();
         n.push_reference("zeta", Span::new(0, 4));
-        n.push_definition("zeta", Span::new(10, 14), DefKind::State);
-        n.push_definition("alpha", Span::new(20, 25), DefKind::State);
+        n.push_definition("zeta", Span::new(10, 14), DefKind::State, None);
+        n.push_definition("alpha", Span::new(20, 25), DefKind::State, None);
         n.link();
         let names: Vec<_> = n.definitions().map(|o| o.name.as_str()).collect();
         assert_eq!(names, vec!["zeta", "alpha"], "source order, and the reference is excluded");
@@ -303,8 +336,8 @@ mod tests {
         // [("f", 0), ("f", 0)] — so this is a shape the index really meets, not a hypothetical.
         // BOTH definitions stay listed; only the link is singular.
         let mut n = NameIndex::default();
-        n.push_definition("f", Span::new(0, 1), DefKind::State);
-        n.push_definition("f", Span::new(10, 11), DefKind::State);
+        n.push_definition("f", Span::new(0, 1), DefKind::State, None);
+        n.push_definition("f", Span::new(10, 11), DefKind::State, None);
         n.push_reference("f", Span::new(20, 21));
         n.link();
         assert_eq!(n.definition_of(2), Some(0), "the FIRST definition, not the last");
@@ -314,7 +347,7 @@ mod tests {
     #[test]
     fn dangling_like_groups_by_name_and_only_for_the_unresolved() {
         let mut n = NameIndex::default();
-        n.push_definition("f", Span::new(0, 1), DefKind::State);
+        n.push_definition("f", Span::new(0, 1), DefKind::State, None);
         n.push_reference("f", Span::new(10, 11));
         n.push_reference("ghost", Span::new(20, 25));
         n.push_reference("ghost", Span::new(30, 35));
@@ -341,8 +374,8 @@ mod tests {
         // here. The test that separates them is the shadowed-name one directly below; this one
         // covers that the ordinary case works at all.
         let mut n = NameIndex::default();
-        n.push_definition("a", Span::new(0, 1), DefKind::State);
-        n.push_definition("b", Span::new(10, 11), DefKind::State);
+        n.push_definition("a", Span::new(0, 1), DefKind::State, None);
+        n.push_definition("b", Span::new(10, 11), DefKind::State, None);
         n.push_reference("b", Span::new(20, 21));
         n.link();
         assert_eq!(n.references_to(0).count(), 0, "`a` has no references");
@@ -358,8 +391,8 @@ mod tests {
     #[test]
     fn references_to_does_not_answer_by_name_even_when_a_name_is_shadowed() {
         let mut n = NameIndex::default();
-        n.push_definition("f", Span::new(0, 1), DefKind::State);
-        n.push_definition("f", Span::new(10, 11), DefKind::State);
+        n.push_definition("f", Span::new(0, 1), DefKind::State, None);
+        n.push_definition("f", Span::new(10, 11), DefKind::State, None);
         n.push_reference("f", Span::new(20, 21));
         n.link();
         assert_eq!(
@@ -373,8 +406,8 @@ mod tests {
     #[test]
     fn a_definition_carries_the_kind_its_parser_gave_it_and_a_reference_carries_none() {
         let mut n = NameIndex::default();
-        n.push_definition("q0", Span::new(0, 2), DefKind::State);
-        n.push_definition("f", Span::new(10, 11), DefKind::Fn);
+        n.push_definition("q0", Span::new(0, 2), DefKind::State, None);
+        n.push_definition("f", Span::new(10, 11), DefKind::Fn, None);
         n.push_reference("q0", Span::new(20, 22));
         n.link();
         assert_eq!(n.get(0).and_then(Occurrence::def_kind), Some(DefKind::State));
@@ -390,13 +423,25 @@ mod tests {
         // name, so a `link`-style first-definition-wins rule and the supplied link disagree: this
         // asserts the SECOND, which `link` could not produce.
         let mut n = NameIndex::default();
-        n.push_definition("x", Span::new(0, 1), DefKind::Let);
-        n.push_definition("x", Span::new(10, 11), DefKind::Let);
+        n.push_definition("x", Span::new(0, 1), DefKind::Let, None);
+        n.push_definition("x", Span::new(10, 11), DefKind::Let, None);
         n.push_resolved_reference("x", Span::new(20, 21), Some(1));
         n.push_resolved_reference("ghost", Span::new(30, 35), None);
         assert_eq!(n.definition_of(2), Some(1), "the supplied link, not the first definition");
         assert_eq!(n.definition_of(3), None);
         assert_eq!(n.references_to(1).map(|o| o.span).collect::<Vec<_>>(), vec![Span::new(20, 21)]);
         assert_eq!(n.references_to(0).count(), 0);
+    }
+
+    /// This only pins the ACCESSOR: it builds the `NameIndex` by hand and asserts `extent()`
+    /// returns the `None` it was just given — it does not run `parse_tm_nav` or `parse_asm_nav`,
+    /// so it cannot notice either parser's real call site changing what it passes. That coverage is
+    /// `tm_navigation_definitions_carry_no_extent` and `asm_navigation_definitions_carry_no_extent`, in
+    /// `tm/syntax.rs` and `tm/asm_syntax.rs`.
+    #[test]
+    fn an_artifact_form_definition_has_no_extent() {
+        let mut n = NameIndex::default();
+        n.push_definition("q0", Span::new(0, 2), DefKind::State, None);
+        assert_eq!(n.get(0).and_then(Occurrence::extent), None);
     }
 }

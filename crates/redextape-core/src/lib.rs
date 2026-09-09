@@ -162,9 +162,10 @@ mod api_tests {
     fn analyze_reports_every_parse_error_not_just_the_first() {
         // THE SHIPPING VALUE OF THIS PR, asserted on the path a user actually travels:
         // `analyze` -> `parser::parse` -> `parse_full` -> `parse_inner`, which is also what
-        // `Language::diagnostics` in redextape-lsp calls through. `parser::parse_recovering` has
-        // no caller outside this crate's own tests (its consumer is a follow-on PR), so pinning
-        // the multi-error behaviour there alone would leave the shipping path unverified.
+        // `Language::diagnostics` in redextape-lsp calls through. `parser::parse_recovering` still
+        // has no caller outside this crate's own tests — navigation, once the reason to expect
+        // one, ships through `parse_for_nav` instead — so pinning the multi-error behaviour there
+        // alone would leave the shipping path unverified.
         //
         // Every character here lexes cleanly — no lexer diagnostic can satisfy this assertion in
         // its place, which already happened once on this branch. Three statements each fail to
