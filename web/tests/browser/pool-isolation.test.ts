@@ -54,11 +54,14 @@ const TM_SCRATCH: SessionId = 'tm-scratch'
  */
 function realPool(): { pool: SessionPool; workers: Worker[] } {
   const workers: Worker[] = []
-  const pool = new SessionPool((): PoolPort => {
-    const w = new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' })
-    workers.push(w)
-    return w
-  })
+  const pool = new SessionPool(
+    (): PoolPort => {
+      const w = new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' })
+      workers.push(w)
+      return w
+    },
+    () => {},
+  )
   return { pool, workers }
 }
 

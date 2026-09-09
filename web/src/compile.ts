@@ -117,9 +117,11 @@ export function createCompile(deps: {
     // visible in a caller that could not justify the choice, rather than hidden as a rule inside a
     // collection that has ids for everything else. The `reconcileEditors()` that had to leave no
     // `ScratchEditor` behind, mounted or in custody, for the session the retire killed. And the `draw()`
-    // beside it, which repainted the panes the rebind had just moved: nothing here changes a binding
-    // now, so there is nothing for this path to repaint, and the source's own frames arrive through
-    // `replies.ts` and drive their own.
+    // beside it, which repainted the panes the rebind had just moved. That particular call is gone, but
+    // this path repaints regardless: `client.supersede()` below notifies the pool's `onSupersede`
+    // callback, which is `() => draw()`, so a claimed generation reaches the panes synchronously on
+    // every dispatch — this branch's control withdrawal included. The repaint just no longer comes from
+    // a rebind; the source's own frames still arrive through `replies.ts` and drive their own.
     //
     // THE SOURCE SESSION BY NAME, NOT THROUGH A PANE'S BINDING. Recompiling is what the editor does to
     // the session it is the source of; it is not something a pane slot points at, so this stays

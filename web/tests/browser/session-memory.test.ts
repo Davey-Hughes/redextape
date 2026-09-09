@@ -103,6 +103,7 @@ type Slot = { id: SessionId; legs: { lambda: boolean; tm: boolean } }
 function realPool(): SessionPool {
   return new SessionPool(
     (): PoolPort => new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' }),
+    () => {},
   )
 }
 

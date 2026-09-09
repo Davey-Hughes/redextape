@@ -13,10 +13,13 @@ export type ClientPort = {
 
 export class SessionClient {
   #gen = 0
+  #awaitingRun = false
   #port: ClientPort
+  #onSupersede: () => void
 
-  constructor(port: ClientPort, onReply: (r: RunReply) => void) {
+  constructor(port: ClientPort, onReply: (r: RunReply) => void, onSupersede: () => void = () => {}) {
     this.#port = port
+    this.#onSupersede = onSupersede
     port.addEventListener('message', (e) => {
       // THE SECOND OF TWO GUARDS AGAINST THE SAME HAZARD, and both are needed. The worker abandons
       // superseded work at a chunk boundary so it does not compute results nobody wants; this drops
@@ -25,8 +28,33 @@ export class SessionClient {
       //
       // A GENERATION NOW PRODUCES MANY REPLIES — `compiled`, then frame batches, then `result` — so
       // this fires repeatedly and nothing here may treat any one of them as terminal.
-      if (this.#gen !== 0 && e.data.gen === this.#gen) onReply(e.data)
+      if (this.#gen !== 0 && e.data.gen === this.#gen) {
+        // CLEARED BEFORE `onReply`, NOT AFTER. `replies.ts` drives the repaint off that call, and a
+        // repaint reading the flag while it was still set would paint the withdrawal one frame after
+        // the window it describes had already closed. Idempotent after the first reply of a
+        // generation, which is why it is unconditional rather than guarded.
+        this.#awaitingRun = false
+        onReply(e.data)
+      }
     })
+  }
+
+  /**
+   * Whether a generation has been claimed that no reply has answered yet — which is when the worker's
+   * `onExtend` drops a request addressed to the current generation, because `live.gen` is still the
+   * previous one or there is no session at all.
+   *
+   * A SUPERSET OF THE WORKER'S DROP CONDITION RATHER THAN AN EQUALITY, and the difference is stated
+   * rather than glossed. The worker sets `live.gen` when it STARTS a run and its first reply follows,
+   * so between those two moments the worker would accept an extend this still answers `true` for.
+   * That gap is a message queued behind a run already in flight on a single-threaded worker, so being
+   * conservative there costs nothing — but the two predicates are not the same one.
+   *
+   * A WEDGED WORKER HOLDS THIS TRUE FOREVER, AND THAT IS THE HONEST ANSWER: an extend posted to a
+   * worker that never answers would not be serviced either. Recovery is the header list's retire.
+   */
+  get awaitingRun(): boolean {
+    return this.#awaitingRun
   }
 
   /**
@@ -43,6 +71,9 @@ export class SessionClient {
    */
   supersede(): number {
     this.#gen += 1
+    // SET AND ANNOUNCED IN THAT ORDER, because the callback repaints and must read the new value.
+    this.#awaitingRun = true
+    this.#onSupersede()
     return this.#gen
   }
 
@@ -191,6 +222,7 @@ type Pooled = { readonly client: SessionClient; readonly port: PoolPort }
  */
 export class SessionPool {
   #spawn: () => PoolPort
+  #onSupersede: () => void
   #live = new Map<SessionId, Pooled>()
 
   /**
@@ -222,9 +254,24 @@ export class SessionPool {
    * CONVERSATION and not about the thread, there is still nothing for a `SessionId` here to select,
    * and the extension point never bound. Refusing the parameter without its evidence is the call that
    * held up; the reason given for why it would eventually be needed is the part that did not.
+   *
+   * @param onSupersede Repaint the app. Called by every client this pool makes, from `supersede()`.
+   *
+   * REQUIRED HERE RATHER THAN ON `bind`, AND THAT IS WHAT KEEPS `bind`'s SIGNATURE STILL. This pool
+   * is the only route from `src/` to a `SessionClient`, so one required argument at one place is
+   * enough for no app site to be able to claim a generation without the panes learning — while
+   * `bind` keeps the two parameters its 23 test call sites pass, plus one more site that replaces the
+   * method with a two-parameter interceptor of its own. A third argument there would be dropped silently by
+   * any interceptor that was not updated by hand, which is the shape of the defect this argument
+   * exists to fix.
+   *
+   * IT TAKES NO SESSION, UNLIKE `bind`'s `onReply`. A reply is routed to one session's legs; a
+   * repaint is routed nowhere — it paints every pane — so a `SessionId` here would be a parameter
+   * nothing reads.
    */
-  constructor(spawn: () => PoolPort) {
+  constructor(spawn: () => PoolPort, onSupersede: () => void) {
     this.#spawn = spawn
+    this.#onSupersede = onSupersede
   }
 
   /** How many sessions currently have a worker. */
@@ -258,7 +305,7 @@ export class SessionPool {
   bind(id: SessionId, onReply: (r: RunReply) => void): SessionClient {
     if (this.#live.has(id)) throw new Error(`session already has a worker: ${id}`)
     const port = this.#spawn()
-    const client = new SessionClient(port, onReply)
+    const client = new SessionClient(port, onReply, this.#onSupersede)
     this.#live.set(id, { client, port })
     return client
   }

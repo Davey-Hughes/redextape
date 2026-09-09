@@ -123,8 +123,9 @@ export function createTransport(deps: {
       // At the frontier `▶` means "record one more", which is the same operation as `[continue]`.
       // `canRecordFurther` is `controls.ts`'s call, not re-derived here — see its doc comment.
       const leg = slot.resolve(sessions)
-      if (!leg.hist.forward() && canRecordFurther(leg.done)) {
-        sessions.entryOf(slot.binding.session).client.extend(slot.binding.leg)
+      const entry = sessions.entryOf(slot.binding.session)
+      if (!leg.hist.forward() && canRecordFurther(leg.done, entry.client.awaitingRun)) {
+        entry.client.extend(slot.binding.leg)
       }
       draw()
     },

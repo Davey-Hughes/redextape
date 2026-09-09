@@ -75,11 +75,14 @@ function harness(): {
   const portsById = new Map<SessionId, FakePort>()
   const replies: { session: SessionId; reply: RunReply }[] = []
   const reg = new SessionRegistry()
-  const pool = new SessionPool(() => {
-    const p = fakePort()
-    ports.push(p)
-    return p
-  })
+  const pool = new SessionPool(
+    () => {
+      const p = fakePort()
+      ports.push(p)
+      return p
+    },
+    () => {},
+  )
   const buffers = new ScratchBuffers({
     registry: reg,
     pool,

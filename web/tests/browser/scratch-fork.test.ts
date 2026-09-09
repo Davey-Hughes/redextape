@@ -90,19 +90,22 @@ type Spawned = { worker: Worker; terminated: number }
  */
 function realPool(): { pool: SessionPool; spawned: Spawned[] } {
   const spawned: Spawned[] = []
-  const pool = new SessionPool((): PoolPort => {
-    const worker = new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' })
-    const record: Spawned = { worker, terminated: 0 }
-    spawned.push(record)
-    return {
-      postMessage: (m) => worker.postMessage(m),
-      addEventListener: (_t, h) => worker.addEventListener('message', (e) => h(e as MessageEvent<RunReply>)),
-      terminate: () => {
-        record.terminated += 1
-        worker.terminate()
-      },
-    }
-  })
+  const pool = new SessionPool(
+    (): PoolPort => {
+      const worker = new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' })
+      const record: Spawned = { worker, terminated: 0 }
+      spawned.push(record)
+      return {
+        postMessage: (m) => worker.postMessage(m),
+        addEventListener: (_t, h) => worker.addEventListener('message', (e) => h(e as MessageEvent<RunReply>)),
+        terminate: () => {
+          record.terminated += 1
+          worker.terminate()
+        },
+      }
+    },
+    () => {},
+  )
   return { pool, spawned }
 }
 

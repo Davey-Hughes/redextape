@@ -244,11 +244,14 @@ const noSession = (diagnostics: Diagnostic[]): RunReply => ({ kind: 'no-session'
 function scratchDriver() {
   const reg = new SessionRegistry()
   const ports: (PoolPort & { sent: RunRequest[]; terminated: number })[] = []
-  const pool = new SessionPool(() => {
-    const p = fakePort()
-    ports.push(p)
-    return p
-  })
+  const pool = new SessionPool(
+    () => {
+      const p = fakePort()
+      ports.push(p)
+      return p
+    },
+    () => {},
+  )
   let forkFailed: string | null = null
   // COUNTED RATHER THAN STUBBED OUT, because the text of record and the write of it are two claims:
   // `setText` puts a term in memory and only this callback puts it where a reload can find it, and the

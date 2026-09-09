@@ -279,15 +279,18 @@ async function main(): Promise<EditorView> {
    *
    * For what this doc used to claim and why it changed, see the history note under `pool`.
    */
-  const pool = new SessionPool(() => {
-    const worker = new Worker(new URL('./session-worker.ts', import.meta.url), { type: 'module' })
-    // THE SECOND HALF OF §6's LOAD-FAILURE ROW, and it is not the same failure as `init()`'s. A worker
-    // whose module fails to load does not throw from the constructor — it fires `error` on the handle,
-    // asynchronously, and nothing else in this file would ever hear it. Without this the pane sits on
-    // "running…" forever, which is the same blank-page problem one layer in.
-    worker.addEventListener('error', (e) => showBanner(root, e instanceof ErrorEvent ? (e.error ?? e.message) : e))
-    return worker
-  })
+  const pool = new SessionPool(
+    () => {
+      const worker = new Worker(new URL('./session-worker.ts', import.meta.url), { type: 'module' })
+      // THE SECOND HALF OF §6's LOAD-FAILURE ROW, and it is not the same failure as `init()`'s. A worker
+      // whose module fails to load does not throw from the constructor — it fires `error` on the handle,
+      // asynchronously, and nothing else in this file would ever hear it. Without this the pane sits on
+      // "running…" forever, which is the same blank-page problem one layer in.
+      worker.addEventListener('error', (e) => showBanner(root, e instanceof ErrorEvent ? (e.error ?? e.message) : e))
+      return worker
+    },
+    () => draw(),
+  )
 
   /**
    * THE λ SCRATCH BUFFERS — design §4.3's fork, and the thing that makes a second session reachable.
@@ -1072,8 +1075,15 @@ async function main(): Promise<EditorView> {
    * review round 2, Finding 1.** `refreshBuffers()`'s start-up call (this function's own doc has the
    * full argument for where it sits) can now reach `reportStorageFailure()` reaches `draw()` reaches
    * `linkWiring.drawLink(...)` reaches `detachedPanes()` here — `theLambdaSlot()`/`theTmSlot()` read
-   * `panes.active(...)` — all before `paneHost.applyLayout()` has ever run once. `draw()`'s own body
-   * (`draw.ts`) reads `panes` three more times before it gets that far: `panes.active('lambda')`/
+   * `panes.active(...)` — all before `paneHost.applyLayout()` has ever run once.
+   *
+   * **TWO MORE CALLS REACH `draw()` BEFORE `applyLayout()` DOES, NEITHER THROUGH
+   * `reportStorageFailure()`.** `compile.schedule(SAMPLE)` — this file's own start-up compile — is now
+   * the first `draw()` of the app's life, ahead of the one inside `paneHost.applyLayout()` itself,
+   * reached through `client.supersede()`'s `onSupersede` callback. The restore's warming loop reaches
+   * it the same way, once per warmed session: `scratchpad.warm(session)` spawns a worker, and the spawn
+   * calls `client.supersede()` too. `draw()`'s own body (`draw.ts`) reads `panes` three more times
+   * before it gets that far, regardless of which of the three paths reached it: `panes.active('lambda')`/
    * `panes.active('tm')`, `panes.all()` and `panes.of('lambda')`.
    *
    * **STILL SAFE, AND FOR A REASON THAT HAS NOTHING TO DO WITH ORDERING.** `applyLayout` remains the
@@ -1351,7 +1361,7 @@ async function main(): Promise<EditorView> {
   // **AND ONE CONSEQUENCE THE MOVE DID CHANGE, RATHER THAN MERELY RISK — 5d-ii-d review round 2,
   // Finding 1.** Everything above checks that `linkWiring`/`draw`/`view` are real and that nothing
   // reads a stale write; none of it checks `panes`, because before this move nothing reachable from
-  // here touched it. This call is now the first one anywhere in `main()` that can run `draw()` before
+  // here touched it. This call can run `draw()` before
   // `paneHost.applyLayout()` has ever run — on the quota path, through
   // `reportStorageFailure()` -> `draw()` -> `linkWiring.drawLink(...)` -> `detachedPanes()`, which reads
   // `panes.active(...)`. Safe for the reason `THE LINK STATE` comment above (`linkWiring`'s own
@@ -1433,10 +1443,15 @@ async function main(): Promise<EditorView> {
   // lambda-0/tm-0 panes the default tree names, attaches every host (including `sourceHost`, built
   // above) into `<main>`, persists the tree, and calls `draw()` itself at its own end — so this is
   // still "one call, at the very end of `main()`, after everything else is wired" (`view` included:
-  // `linkWiring`/`draw`/`compile`/`replies` all close over it as a thunk, but `draw()`'s own body reads
-  // `view()` directly, which is why this cannot run any earlier than here). **THE RESTORE'S WARMING
-  // LOOP NOW SITS ABOVE IT AND THE CLAIM SURVIVES INTACT**: that loop spawns workers and reads no pane,
-  // so it is still true that nothing before this line has built one.
+  // `linkWiring`/`draw`/`compile`/`replies` all close over it as a thunk; `draw()`'s own body reads
+  // `view()` directly, and has already done so above this line — once from
+  // `compile.schedule(SAMPLE)`, and once per warmed session from the restore loop — both through
+  // `client.supersede()`). **THE RESTORE'S WARMING LOOP NOW SITS ABOVE IT, AND WHAT SURVIVES IS
+  // NARROWER THAN "READS NO PANE"**: each spawn's `client.supersede()` reaches `draw()` the same way
+  // `compile.schedule(SAMPLE)` does, so the loop reads `panes` now too. `applyLayout` remains the only
+  // thing that ever populates `panes` (`THE LINK STATE` comment above), so those reads run against a
+  // collection that is genuinely empty, and it remains true that nothing before this line has BUILT
+  // one.
   paneHost.applyLayout()
 
   /**

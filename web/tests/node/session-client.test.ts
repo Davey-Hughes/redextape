@@ -70,6 +70,63 @@ describe('SessionClient', () => {
     deliver(reply(0))
     expect(onReply).not.toHaveBeenCalled()
   })
+
+  it('is not awaiting a run before anything is dispatched', () => {
+    const { port } = fakePort()
+    expect(new SessionClient(port, () => {}).awaitingRun).toBe(false)
+  })
+
+  it('awaits a run from the instant a generation is claimed, before anything is posted', () => {
+    const { port, sent } = fakePort()
+    const c = new SessionClient(port, () => {})
+    c.supersede()
+    expect(c.awaitingRun).toBe(true)
+    expect(sent).toEqual([])
+  })
+
+  it('stops awaiting when a reply for the current generation lands', () => {
+    const { port, deliver } = fakePort()
+    const c = new SessionClient(port, () => {})
+    c.request(c.supersede(), 'a', 'unary')
+    deliver(reply(1))
+    expect(c.awaitingRun).toBe(false)
+  })
+
+  // THE DEBOUNCE WINDOW ITSELF: generation 2 is claimed and not yet posted while generation 1's run
+  // is still answering. Its replies must not clear the flag, or the control comes back for the run
+  // that is about to be discarded — which is the whole defect.
+  it('keeps awaiting when a reply for a superseded generation lands', () => {
+    const { port, deliver } = fakePort()
+    const c = new SessionClient(port, () => {})
+    c.request(c.supersede(), 'a', 'unary')
+    c.supersede()
+    deliver(reply(1))
+    expect(c.awaitingRun).toBe(true)
+  })
+
+  // `replies.ts` drives `draw()` off `onReply`, so a repaint that ran while the flag was still set
+  // would paint the withdrawal one frame after the window it describes had already closed.
+  it('clears the flag before onReply runs', () => {
+    const { port, deliver } = fakePort()
+    const seen: boolean[] = []
+    const c = new SessionClient(port, () => seen.push(c.awaitingRun))
+    c.request(c.supersede(), 'a', 'unary')
+    deliver(reply(1))
+    expect(seen).toEqual([false])
+  })
+
+  it('notifies on every supersede, with the flag already set', () => {
+    const { port } = fakePort()
+    const seen: boolean[] = []
+    const c = new SessionClient(
+      port,
+      () => {},
+      () => seen.push(c.awaitingRun),
+    )
+    c.supersede()
+    c.supersede()
+    expect(seen).toEqual([true, true])
+  })
 })
 
 describe('SessionClient streaming', () => {

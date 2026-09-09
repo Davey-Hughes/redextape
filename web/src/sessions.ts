@@ -628,6 +628,9 @@ export class PaneSlot<K extends Leg> {
         newestStep: leg.hist.newestStep,
         evicted: leg.hist.evicted,
         done: leg.done,
+        // PER SESSION, NOT PER LEG — the generation is the client's, and both legs of one session
+        // share it. `reg` and the binding are both already in hand here.
+        awaitingRun: reg.entryOf(b.session).client.awaitingRun,
       }),
     )
     pane.setBindings(reg.pairs(), b)

@@ -39,11 +39,14 @@ function fakePort(): FakePort {
  */
 function harness(): { pool: SessionPool; ports: FakePort[] } {
   const ports: FakePort[] = []
-  const pool = new SessionPool(() => {
-    const p = fakePort()
-    ports.push(p)
-    return p
-  })
+  const pool = new SessionPool(
+    () => {
+      const p = fakePort()
+      ports.push(p)
+      return p
+    },
+    () => {},
+  )
   return { pool, ports }
 }
 
