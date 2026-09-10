@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
+import { SHELL, until } from './harness'
 
 /**
  * **THE SHARED SURFACES FOLLOW FOCUS** — which pane the ONE status line and the ONE source editor
@@ -28,18 +29,6 @@ import { LAYOUT_STORAGE_KEY } from '../../src/layout'
  * leave behind. `\x00` as an escape in the selector's option values is `scripts/check-text-bytes.sh`'s
  * rule.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 /** `link-status.ts`'s `detachedText` for a detached λ pane, verbatim. */
 const LAMBDA_DETACHED = 'λ pane detached — not linked to source'
@@ -120,15 +109,6 @@ const splitSame = (leaf: string, control: string): void => {
   first.click()
 }
 
-/** `pane-picker.test.ts`'s `until`, message and all. */
-async function until(predicate: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
-
 let view: EditorView
 
 beforeAll(async () => {
@@ -137,11 +117,7 @@ beforeAll(async () => {
   // enough. Neither key needs clearing here any more.
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(
-    () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle',
-    'the first compile',
-    60_000,
-  )
+  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
 })
 
 beforeEach(async () => {
@@ -154,7 +130,6 @@ beforeEach(async () => {
       leafIds().length === 3 &&
       lambdaLeaves().length === 1,
     'the default layout on a settled source program',
-    60_000,
   )
 })
 

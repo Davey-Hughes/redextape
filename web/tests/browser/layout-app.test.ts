@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
+import { SHELL } from './harness'
 
 /**
  * THE TREE, DRIVEN THROUGH THE APP — the state `main()` could not reach before this slice.
@@ -21,18 +22,6 @@ import { LAYOUT_STORAGE_KEY } from '../../src/layout'
  * `index.html` this task ships (an empty `<main>`, `#editor`/`#link-status` as bare top-level nodes,
  * `#restore-layout` beside `#appearance`) rather than the fixed four-section one it replaces.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 const $ = <T extends Element>(sel: string) => document.querySelector<T>(sel)
 const panes = () => [...document.querySelectorAll('[data-leaf]')].map((e) => (e as HTMLElement).dataset.leaf)

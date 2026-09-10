@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
 import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout } from '../../src/layout'
+import { SHELL, until } from './harness'
 
 /**
  * **BUFFERS SURVIVING A RELOAD, THROUGH `main()`** — design §4.9, and the only exercise of that path.
@@ -25,18 +26,6 @@ import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout } from '../../src/la
  * reason that cannot be worked around: it needs `localStorage` to hold something DIFFERENT at the moment
  * of the mount, and there is only one mount per file.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 /**
  * **THE STATE A PREVIOUS PAGE LOAD WOULD HAVE LEFT: two buffers, one of them bound.**
@@ -74,14 +63,6 @@ const SEEDED = serializeBuffers({
   ],
   bindings: { 'lambda-0': 'scratch-2', 'tm-0': 'scratch-1' },
 })
-
-async function until(predicate: () => boolean, what: string, timeoutMs = 60_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
 
 // SEEDED BEFORE THE MOUNT, not in a `beforeEach` — `main()` reads both keys exactly once, synchronously,
 // while resolving `let tree` and the restore beside it, so anything written after that read is never

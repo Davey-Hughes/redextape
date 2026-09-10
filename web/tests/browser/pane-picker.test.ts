@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
+import { SHELL, until } from './harness'
 
 /**
  * **THE PICKER, ACTING** — a split creates what it was asked to create, and the closed source pane has a
@@ -22,18 +23,6 @@ import { LAYOUT_STORAGE_KEY } from '../../src/layout'
  * real text, not an `aria-label`), `aria-label` for the glyph-only layout controls, `leg\x00session` for
  * the selector's option values — `\x00` as an escape is `scripts/check-text-bytes.sh`'s rule.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 const leafIds = () => [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => e.dataset.leaf ?? '')
 const lambdaLeaves = () =>
@@ -93,15 +82,6 @@ const pickSplit = (leaf: string, control: string, item: string): void => {
   chosen.click()
 }
 
-/** `pane-kind-switch.test.ts`'s `until`, message and all. */
-async function until(predicate: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
-
 let view: EditorView
 
 beforeAll(async () => {
@@ -110,11 +90,7 @@ beforeAll(async () => {
   // enough. Neither key needs clearing here any more.
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(
-    () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle',
-    'the first compile',
-    60_000,
-  )
+  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
 })
 
 beforeEach(async () => {
@@ -127,7 +103,6 @@ beforeEach(async () => {
       leafIds().length === 3 &&
       lambdaLeaves().length === 1,
     'the default layout on a settled source program',
-    60_000,
   )
 })
 
@@ -231,7 +206,6 @@ describe('a split creates what the picker was asked for', () => {
     await until(
       () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && showing('tm-0').rows === 0,
       'the broken program to empty the TM pane',
-      60_000,
     )
 
     const before = leafIds()
@@ -246,7 +220,6 @@ describe('a split creates what the picker was asked for', () => {
     await until(
       () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && showing(created).rows > 0,
       'the repaired program to reach the created pane',
-      60_000,
     )
     expect(showing(created).tapes).toBe(showing('tm-0').tapes)
     expect(showing(created).tapes).not.toBe('')
@@ -324,7 +297,6 @@ describe('the closed source pane comes back through the picker', () => {
       await until(
         () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle',
         'the edited program to compile',
-        60_000,
       )
       const extraPlace = places().find((p) => p.startsWith(`${extra}@`)) ?? ''
       expect(extraPlace).not.toBe('')

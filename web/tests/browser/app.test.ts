@@ -2,18 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { STORAGE_KEY } from '../../src/appearance'
 import { OVERSCAN, ROW_HEIGHT } from '../../src/tm-pane'
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
+import { SHELL, until } from './harness'
 
 const LAMBDA_DECLINES = 'let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)'
 
@@ -29,14 +18,6 @@ fn add1(x) { x + 1 }
 fold([3, 1, 2].map(add1), 0, add)`
 
 let view: EditorView
-
-async function until(predicate: () => boolean, timeoutMs = 30_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error('timed out waiting for the app')
-    await new Promise((r) => setTimeout(r, 50))
-  }
-}
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 const linkStatusText = () => document.querySelector('#link-status')?.textContent ?? ''
@@ -654,7 +635,7 @@ describe('the app, end to end', () => {
       const src =
         'fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2, 4].map(add1)'
       await settled(view, src)
-      await until(() => stepText('tm').includes('history is full'), 30_000)
+      await until(() => stepText('tm').includes('history is full'), 'the TM history to fill')
 
       const stoppedStep = stepNumber(stepText('tm'))
       expect(stoppedStep).toBeGreaterThan(0)
@@ -668,7 +649,7 @@ describe('the app, end to end', () => {
       // instead of `[continue]`: it must be the live button the fix makes it, not the disabled one it
       // used to render at exactly this frontier.
       expect(click('tm', '▶')?.disabled).toBe(false)
-      await until(() => stepNumber(stepText('tm')) > stoppedStep, 30_000)
+      await until(() => stepNumber(stepText('tm')) > stoppedStep, 'the frontier to advance past the stop')
       expect(stepNumber(stepText('tm'))).toBeGreaterThan(stoppedStep)
     }, 60_000)
 

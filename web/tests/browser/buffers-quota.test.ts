@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY } from '../../src/buffers-store'
+import { SHELL, until } from './harness'
 
 /**
  * **THE QUOTA REPORT — design §4.8, the one place this slice breaks symmetry with the layout writer.**
@@ -26,25 +27,6 @@ import { BUFFERS_STORAGE_KEY } from '../../src/buffers-store'
  * page nobody asserted — and the claim under test is about one writer's policy on a browser that still
  * has storage for everything else, not about a browser with none at all.
  */
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
-
-async function until(predicate: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 10))
-  }
-}
 
 const linkStatus = (): string => document.querySelector('#link-status')?.textContent ?? ''
 const resultsText = (): string => document.querySelector('#results')?.textContent ?? ''
@@ -65,12 +47,15 @@ localStorage.setItem = (key: string, value: string): void => {
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
+  // THE LONGEST SINGLE WAIT IN THE BROWSER TIER, AND IT DELIBERATELY HAS NO OVERRIDE. This `beforeAll`
+  // is the one in the suite that pays for `main()`'s own wasm `init()` with no sibling in the file
+  // having amortised it already, so expect it to be the slowest first compile anywhere in the tier. It
+  // used to carry a local `30_000` for that reason; `harness.ts`'s shared default covers it, and that
+  // was measured rather than assumed — the whole tier passes with that default lowered to 2,000 ms,
+  // this wait included.
   await until(
     () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== '',
     'the first compile',
-    // A wider budget than this file's own default: this is the one test in the suite that pays for
-    // `main()`'s own wasm `init()` without a sibling in the file having paid it already.
-    30_000,
   )
 })
 
@@ -129,7 +114,6 @@ describe('a full store', () => {
     await until(
       () => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null,
       "the scratch's own reply, and its persist",
-      60_000,
     )
 
     // Unchanged, not appended to.
@@ -168,7 +152,6 @@ describe('a full store', () => {
     await until(
       () => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null,
       "the second fork's own reply, and its persist",
-      60_000,
     )
 
     // **WITH THE GUARD: THE REPORT DOES NOT RESTATE, AND THE LINE READS EXACTLY WHAT A SECOND,

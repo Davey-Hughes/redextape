@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { SHELL, until } from './harness'
 
 /**
  * **THE COOL → WARM → BIND ROUND TRIP, AND THE DEFECT IT USED TO END IN** — design §4.5's stated flow
@@ -31,31 +32,12 @@ import { beforeAll, describe, expect, it } from 'vitest'
  * `tests/browser/setup.ts` before this module body runs, so this page starts with no layout and no
  * buffers — the default tree, and a fork that mints `scratch 1`.
  */
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 /** `scratch-edit.test.ts`'s program, for its reason: it truncates at neither budget, so `✎ fork` is
  * offered at the frontier with no scrubbing needed. */
 const SAMPLE = 'let x = 40; x + 2'
 
 let view: EditorView
-
-async function until(predicate: () => boolean, what: string, timeoutMs = 60_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
@@ -179,13 +161,13 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     select.dispatchEvent(new Event('change', { bubbles: true }))
     expect(heading()).toContain('[detached]')
 
-    // BOUNDED BELOW VITEST'S OWN 15s `testTimeout` RATHER THAN AT THIS FILE'S 60s DEFAULT, and the
-    // number is chosen so that THIS wait's message is the one a regression prints. The mount is
-    // synchronous with the `change` event, so anything past a frame or two is the absence rather than a
-    // slow machine — and a bound at or above the harness's own would let Vitest kill the test first,
-    // producing "Test timed out" with no name for what never arrived. Measured: with `pane-host.ts`'s
-    // `mountScratchEditor` reverted, this line is what fails.
-    await until(() => editorHost() !== null, 'the warmed buffer to mount an editor onto its newly bound pane', 10_000)
+    // THE MOUNT IS SYNCHRONOUS WITH THE `change` EVENT, so anything past a frame or two is the absence
+    // rather than a slow machine — which is why this wait is worth naming. The bound itself is
+    // `harness.ts`'s single default, chosen for exactly the reason this comment used to give locally:
+    // a wait bounded at or above Vitest's own lets Vitest kill the test first and print "Test timed
+    // out" with no name for what never arrived. Measured: with `pane-host.ts`'s `mountScratchEditor`
+    // reverted, this line is what fails.
+    await until(() => editorHost() !== null, 'the warmed buffer to mount an editor onto its newly bound pane')
     // ASSERTIONS THE WAIT ABOVE DOES NOT ALREADY IMPLY, which is the whole point of their being here:
     // the wait proves an editor exists, and these two prove it is the RIGHT one and the ONLY one. A
     // second mount is the failure `LambdaPane.receiveEditor` throws on and `setEditor`'s re-seed branch

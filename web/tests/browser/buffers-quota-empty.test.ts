@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY } from '../../src/buffers-store'
+import { SHELL, until } from './harness'
 
 /**
  * **THE NEGATIVE CASE `writeBuffersStorage`'s `hasBuffers` GUARD EXISTS FOR, EXERCISED HERE FOR THE
@@ -24,30 +25,11 @@ import { BUFFERS_STORAGE_KEY } from '../../src/buffers-store'
  * `buffers-quota.test.ts`'s `refuseWrites`, because this file has exactly one scenario and the
  * refusal must already be live for the very first write.
  */
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 const passthroughSetItem = localStorage.setItem.bind(localStorage)
 localStorage.setItem = (key: string, value: string): void => {
   if (key === BUFFERS_STORAGE_KEY) throw new DOMException('quota', 'QuotaExceededError')
   passthroughSetItem(key, value)
-}
-
-async function until(predicate: () => boolean, what: string, timeoutMs = 30_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 10))
-  }
 }
 
 const linkStatus = (): string => document.querySelector('#link-status')?.textContent ?? ''

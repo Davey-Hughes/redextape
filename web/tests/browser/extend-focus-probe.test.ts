@@ -1,31 +1,12 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
+import { SHELL, until } from './harness'
 
 /** The fixture that reaches a `budget` stop on the TM leg — see Task 3's file for the measurement. */
 const BUDGET_SRC =
   'fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2, 4].map(add1)'
 
 let view: EditorView
-
-async function until(predicate: () => boolean, timeoutMs = 30_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error('timed out waiting for the app')
-    await new Promise((r) => setTimeout(r, 50))
-  }
-}
 
 const stepText = () => document.querySelector('[data-leaf="tm-0"] .step')?.textContent ?? ''
 

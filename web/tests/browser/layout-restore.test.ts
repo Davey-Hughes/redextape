@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout, splitLeaf } from '../../src/layout'
+import { SHELL } from './harness'
 
 /**
  * THE RESTORE-FROM-STORAGE PATH, THROUGH `main()` — the branch's only exercise of it.
@@ -24,18 +25,6 @@ import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout, splitLeaf } from '.
  * fastidious, and why clearing the shared key was not enough. What is left here is just the seeding,
  * straight through `localStorage`, which is that per-file shim by the time this line runs.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 /**
  * A once-split tree, built with the app's OWN `splitLeaf` and `serializeLayout` rather than a

@@ -1,19 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-
-// DUPLICATED FROM `app.test.ts` ON PURPOSE, exactly as `link-truncated.test.ts` duplicates it. See the
-// `describe` below for why these cases are not `it`s in that file.
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
+import { SHELL, until } from './harness'
 
 /**
  * `let x = 40; x + 2` — the app's own sample, and the only corpus program whose entire `Owner`
@@ -117,14 +104,6 @@ let view: EditorView
 /** Uncaught errors and rejections seen since the page mounted — see the `SPARSELY_TAGGED` test's use of
  * it. */
 const pageErrors: string[] = []
-
-async function until(predicate: () => boolean, timeoutMs = 30_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error('timed out waiting for the app')
-    await new Promise((r) => setTimeout(r, 50))
-  }
-}
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 const stepText = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''

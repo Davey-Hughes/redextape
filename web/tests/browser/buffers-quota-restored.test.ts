@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY, serializeBuffers } from '../../src/buffers-store'
+import { SHELL } from './harness'
 
 /**
  * **THE REGRESSION TEST FOR THE CRITICAL THIS SLICE'S OWN SELF-REVIEW FOUND AND DID NOT FIX ON FIRST
@@ -38,17 +39,6 @@ import { BUFFERS_STORAGE_KEY, serializeBuffers } from '../../src/buffers-store'
  * seeded with a real payload AND every subsequent write to that key refused from before `main()`'s
  * own module body runs — a combination no other file in this directory needs at once.
  */
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 /**
  * **THE STATE A PREVIOUS PAGE LOAD WOULD HAVE LEFT: one buffer, and nothing bound to it.**

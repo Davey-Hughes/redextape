@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { MAX_WARM_BUFFERS } from '../../src/scratch'
+import { SHELL, until } from './harness'
 
 /**
  * **THE BLANK-BUFFER GESTURE'S OWN CAP REFUSAL, ON THE SURFACE A USER READS IT FROM** — the mirror
@@ -30,27 +31,7 @@ import { MAX_WARM_BUFFERS } from '../../src/scratch'
  * the open menu's own `.buffer-row` count, so a fix that moved one without the other would still fail.
  */
 
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
-
 let view: EditorView
-
-async function until(predicate: () => boolean, what: string, timeoutMs = 60_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
 
 const statusLine = () => document.querySelector('#link-status')?.textContent ?? ''
 const buffersButton = () => document.querySelector<HTMLButtonElement>('#buffers')

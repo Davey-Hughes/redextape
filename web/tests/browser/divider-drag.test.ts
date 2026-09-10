@@ -2,6 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LAYOUT_STORAGE_KEY, parseLayout } from '../../src/layout'
 import { KEY_STEP } from '../../src/layout-view'
+import { SHELL } from './harness'
 
 /**
  * A DIVIDER DRAG, THROUGH `main()` — the test 5d-ii-a said did not exist, and the reason a broken drag
@@ -17,18 +18,6 @@ import { KEY_STEP } from '../../src/layout-view'
  * frame's worth and then stopped dead. Test 1 below is the direct guard: the grabbed node is still in
  * the document after every move.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 /**
  * A genuinely fresh module instance of `main.ts` per mount, by cache-busting query string.

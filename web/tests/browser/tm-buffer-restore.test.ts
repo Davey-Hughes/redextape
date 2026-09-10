@@ -11,6 +11,7 @@ import list_1_2 from '../../../crates/redextape-core/tests/fixtures/list_1_2.tm?
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
 import type { Leg } from '../../src/protocol'
 import type { SessionId } from '../../src/session-client'
+import { SHELL, until } from './harness'
 
 /**
  * **BOTH LEGS SURVIVE A RELOAD, END TO END — 5d-iv Task 11, the composition check.** Task 6 pinned the
@@ -24,18 +25,18 @@ import type { SessionId } from '../../src/session-client'
  * still fit together through `main()`.
  *
  * **A "RELOAD" NEEDS A GENUINELY FRESH MODULE INSTANCE OF `main.ts`, NOT A SECOND `await` ON THE SAME
- * `ready`.** `main.ts`'s `ready` is computed once, at import evaluation (`export const ready = main()`),
- * and `main` itself is not exported — so there is no function to just call again, and a second bare
- * `import('../../src/main')` from the SAME specifier returns the SAME cached module (ES module imports
- * are cached; this is the reason every sibling in this directory gives for why "each browser test file
+ * `ready`.** `main.ts`'s `ready` is computed once, at import evaluation (`export const ready = main()`), and
+ * `main` itself is not exported — so there is no function to just call again, and a second bare
+ * `import('../../src/main')` from the SAME specifier returns the SAME cached module (ES module imports are
+ * cached; this is the reason most browser test files in this directory give for why "each browser test file
  * gets its own page" and mounts exactly once). `remountApp` below gets a REAL second instance anyway, by
- * importing the module under a cache-busting query string (`?remount=N`) — Vite's dev server (which is
- * what serves modules to a Vitest browser test; nothing here is pre-bundled) keys its module graph on
- * the full specifier including the query, so a differently-queried import is a genuinely distinct module
- * realm: fresh top-level `let`s (`main.ts`'s own `leafCounter` among them), a fresh `main()` invocation,
- * and — proven directly below, not assumed — event listeners bound to the fresh DOM the OLD instance's
- * listeners do not fire on. `document.body.innerHTML` is reset to `SHELL` before every mount so the new
- * instance queries fresh elements rather than ones an earlier instance's listeners are still attached to.
+ * importing the module under a cache-busting query string (`?remount=N`) — Vite's dev server (which is what
+ * serves modules to a Vitest browser test; nothing here is pre-bundled) keys its module graph on the full
+ * specifier including the query, so a differently-queried import is a genuinely distinct module realm: fresh
+ * top-level `let`s (`main.ts`'s own `leafCounter` among them), a fresh `main()` invocation, and — proven
+ * directly below, not assumed — event listeners bound to the fresh DOM the OLD instance's listeners do not
+ * fire on. `document.body.innerHTML` is reset to `SHELL` before every mount so the new instance queries
+ * fresh elements rather than ones an earlier instance's listeners are still attached to.
  * `localStorage` is left untouched across a remount — same store, per this file's per-test-file shim
  * (`tests/browser/setup.ts`) — which is the one thing a real reload keeps too.
  *
@@ -45,31 +46,15 @@ import type { SessionId } from '../../src/session-client'
  * behind. `remountApp` does the opposite on purpose — it must NOT clear anything, since reading back
  * exactly what a previous mount wrote is the entire point of it.
  *
- * **DUPLICATING `SHELL` AND THE PANE/BUFFER HELPERS RATHER THAN IMPORTING THEM FROM A SIBLING, THE
- * STANDING IDIOM `tm-blank-buffer.test.ts` STATES AT LENGTH.** Every browser test file gets its own page
- * and nothing here is exported for another file to import; `tmPaneHost`/`lambdaPaneHost` are this file's
- * own, mirroring `tm-scratch-fork.test.ts`'s and `tm-blank-buffer.test.ts`'s.
+ * **DUPLICATING THE PANE/BUFFER HELPERS RATHER THAN IMPORTING THEM FROM A SIBLING IS DELIBERATE FOR
+ * `mountApp`/`remountApp`, THE SAME REASON `tm-blank-buffer.test.ts` GIVES FOR ITS OWN MOUNT.** Each
+ * browser test file gets its own page, so a shared mount would be a shared page two files could not
+ * both own — that argument reaches `mountApp`/`remountApp` and stops there. `tmPaneHost`/`lambdaPaneHost`
+ * and the rest are pure DOM queries, duplicated because nothing here is exported for another file to
+ * import, not because a shared page forbids it; they mirror `tm-scratch-fork.test.ts`'s and
+ * `tm-blank-buffer.test.ts`'s own. `SHELL` and `until` are no longer part of either duplication — both
+ * are imported from `tests/browser/harness.ts`.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
-
-async function until(predicate: () => boolean, what: string, timeoutMs = 60_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
@@ -501,11 +486,7 @@ describe('restoring buffers on both legs', () => {
     // own (the SAME auto-rebind `brings a λ buffer and a TM buffer back on their own legs`, above,
     // already relies on for a forked pane, with no `pickBinding` call of its own after `remountApp`).
     const second = await remountApp()
-    await until(
-      () => second.tmPane().querySelector('.term-editor') !== null,
-      'the restored buffer to mount its editor',
-      10_000,
-    )
+    await until(() => second.tmPane().querySelector('.term-editor') !== null, 'the restored buffer to mount its editor')
     expect(second.editorText(second.tmPane())).toBe(list_1_2)
   })
 })

@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, parseLayout, setLeafKind } from '../../src/layout'
+import { SHELL, until } from './harness'
 
 /**
  * **A PANE CHANGES WHAT IT SHOWS, IN PLACE** — decision 1's headline capability, driven entirely
@@ -31,18 +32,6 @@ import { LAYOUT_STORAGE_KEY, type LayoutNode, parseLayout, setLeafKind } from '.
  * `applyLayout`'s rewrite of it is the only thing keeping it true — a test that inferred a pane's kind
  * from its leaf id would be reading a string `nextLeafId` stopped spelling for exactly this reason.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 const leafIds = () => [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => e.dataset.leaf ?? '')
 const lambdaLeaves = () =>
@@ -115,20 +104,6 @@ const pick = (leaf: string, value: string): void => {
   select.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
-/**
- * `scratch-rebind-editor.test.ts`'s `until`, message and all — a timeout that names what it was waiting
- * for is the difference between a legible red run and a bare "timed out". THREE SECONDS RATHER THAN
- * SIXTY, so this fires inside Vitest's own 5 s test timeout and the failure carries the predicate's
- * name instead of the runner's.
- */
-async function until(predicate: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
-
 let view: EditorView
 
 beforeAll(async () => {
@@ -137,11 +112,7 @@ beforeAll(async () => {
   // enough. Neither key needs clearing here any more.
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(
-    () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle',
-    'the first compile',
-    60_000,
-  )
+  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
 })
 
 beforeEach(async () => {
@@ -154,7 +125,6 @@ beforeEach(async () => {
       leafIds().length === 3 &&
       lambdaLeaves().length === 1,
     'the default layout on a settled source program',
-    60_000,
   )
 })
 
@@ -435,7 +405,6 @@ describe('a pane changes which leg it renders', () => {
       await until(
         () => termOf('tm-0') !== scratchTerm && termOf('tm-0') !== '',
         "the switched pane to repaint on the buffer's own new frames",
-        10_000,
       )
       // Both λ panes resolve the one buffer's λ leg, so the two showing the same term is that repaint
       // having reached this pane rather than only the one holding the editor.
@@ -450,7 +419,6 @@ describe('a pane changes which leg it renders', () => {
       await until(
         () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle',
         'the source recompile to settle',
-        10_000,
       )
       expect(selectOf('tm-0')?.value).toBe(buffer)
       expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('[detached]')

@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { defaultLayout, LAYOUT_STORAGE_KEY, leaves, parseLayout } from '../../src/layout'
+import { SHELL, until } from './harness'
 
 /**
  * TWO λ PANES ON TWO λ SESSIONS, THROUGH THE APP — the claim 5d-i could assert only with hand-built
@@ -20,18 +21,6 @@ import { defaultLayout, LAYOUT_STORAGE_KEY, leaves, parseLayout } from '../../sr
  * find unless something builds the page first, and ES module imports are linked and evaluated before
  * any of a file's own top-level code runs.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 const leafIds = () => [...document.querySelectorAll('[data-leaf]')].map((e) => (e as HTMLElement).dataset.leaf ?? '')
 /**
@@ -194,14 +183,6 @@ const tmClick = (glyph: string) =>
     .find((b) => b.textContent === glyph)
     ?.click()
 const tmStepText = () => document.querySelector('[data-leaf="tm-0"] .step')?.textContent ?? ''
-
-const until = async (p: () => boolean, ms = 5000) => {
-  const start = performance.now()
-  while (!p()) {
-    if (performance.now() - start > ms) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 50))
-  }
-}
 
 // ONE MOUNT FOR THE FILE, the same reason every sibling file gives: ES module imports are cached, so
 // `main()` runs once per page and Vitest gives each test FILE its own page. Neither storage key needs

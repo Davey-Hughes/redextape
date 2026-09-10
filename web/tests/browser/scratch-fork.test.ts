@@ -15,6 +15,7 @@ import { SessionPool } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type { LambdaState, TmState } from '../../src/types'
+import { SHELL, until } from './harness'
 
 /**
  * **THE TWO CLAIMS PLAN T8 MAKES THAT A FAKE PORT CANNOT ANSWER** — design §4.3, over real
@@ -68,14 +69,6 @@ fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(
 fn add(a, b) { a + b }
 fn add1(x) { x + 1 }
 fold([3, 1, 2].map(add1), 0, add)`
-
-async function until(predicate: () => boolean, what: string, timeoutMs = 60_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 10))
-  }
-}
 
 /** One spawned thread: the raw `Worker` a liveness probe needs, and how many times it was killed. */
 type Spawned = { worker: Worker; terminated: number }
@@ -745,18 +738,6 @@ describe('the no-session report for a failed fork', () => {
  */
 describe('the fork control forks a truncated frame, through the app', () => {
   const WHILE4 = 'let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc'
-
-  const SHELL = `
-    <header class="bar"><span class="wordmark">redextape</span>
-      <button type="button" id="appearance"></button>
-      <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-      <button type="button" id="buffers">buffers</button>
-      <label class="encoding">encoding <select id="encoding"></select></label>
-    </header>
-    <main></main>
-    <div id="editor"></div>
-    <div id="link-status" class="link-status"></div>
-    <section id="results" class="pane results"></section>`
 
   let view: EditorView
 

@@ -1,29 +1,8 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-
-// DUPLICATED FROM `app.test.ts` ON PURPOSE. This file exists only because that page cannot host this
-// test — see the file-level comment on the single `it` below for why a fresh mount is the whole point.
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
+import { SHELL, until } from './harness'
 
 let view: EditorView
-
-async function until(predicate: () => boolean, timeoutMs = 30_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error('timed out waiting for the app')
-    await new Promise((r) => setTimeout(r, 50))
-  }
-}
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 const linkStatusText = () => document.querySelector('#link-status')?.textContent ?? ''

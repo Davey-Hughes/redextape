@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
+import { SHELL, until } from './harness'
 
 /**
  * **THE FORK GESTURE FOR THE TM LEG, DRIVEN THROUGH THE APP — 5d-iv Task 9, the headline task.**
@@ -39,8 +40,10 @@ import { describe, expect, it } from 'vitest'
 
 /**
  * `map`/`fold` over three elements — `tests/browser/scratch-fork.test.ts`'s own `BIG`, duplicated
- * rather than imported (this file's own doc states the standing idiom), and needed here for the
- * identical reason that file states: its λ leg is a fast 555 β-steps but its TM leg is enormous
+ * rather than imported. `BIG` is a plain string — like `SHELL` before it moved to
+ * `tests/browser/harness.ts` — so no shared-page argument forbids importing it; it stays duplicated
+ * only because `scratch-fork.test.ts` does not export it. Needed here for the identical reason that
+ * file states: its λ leg is a fast 555 β-steps but its TM leg is enormous
  * (design §3.1: 25,852 states, 266,863 δ-steps), and `session-worker.ts`'s `onRun` records λ to
  * completion before TM recording ever starts. So by the time this program's `compiled` reply lands —
  * enabling the fork control below — the source session is only just beginning several seconds of TM
@@ -53,26 +56,6 @@ fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(
 fn add(a, b) { a + b }
 fn add1(x) { x + 1 }
 fold([3, 1, 2].map(add1), 0, add)`
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
-
-async function until(predicate: () => boolean, what: string, timeoutMs = 60_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 /** `scratch-app.test.ts`'s own `idle` — the source compile's own "finished" flag. */

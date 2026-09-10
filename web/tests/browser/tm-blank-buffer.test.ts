@@ -2,6 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import type { Leg } from '../../src/protocol'
 import type { SessionId } from '../../src/session-client'
+import { SHELL, until } from './harness'
 
 /**
  * **THE SECOND GESTURE — 5d-iv Task 10, design §4.7.** Task 9 wired the fork, which detaches a pane onto
@@ -10,12 +11,13 @@ import type { SessionId } from '../../src/session-client'
  * `tm_emit` produced. `scratch.ts`'s `ScratchBuffers.forkBlank` is the collection-side half, landed in
  * Task 5 with nothing in `src/` calling it — this file is what calls it.
  *
- * **`mountApp` IS THIS FILE'S OWN, NOT `tm-scratch-fork.test.ts`'s, EVEN THOUGH THE SHELL AND THE IDLE
- * POLL ARE IDENTICAL.** That file's helper has no route to the buffers button, the popover, a row count
- * or the binding selector — nothing here needed them before this task existed to test. Duplicating the
- * shell rather than importing it is the standing idiom every sibling in this directory states: each
- * browser test file gets its own page (`main()` runs once per module load), so there is nothing to
- * import FROM — a shared mount would be a shared page two files could not both own.
+ * **`mountApp` IS THIS FILE'S OWN, NOT `tm-scratch-fork.test.ts`'S, EVEN THOUGH THE IDLE POLL IS
+ * IDENTICAL.** That file's helper has no route to the buffers button, the popover, a row count or the
+ * binding selector — nothing here needed them before this task existed to test. Duplicating the MOUNT
+ * rather than importing it is deliberate: each browser test file gets its own page (`main()` runs once
+ * per module load), so a shared mount would be a shared page two files could not both own. That
+ * argument reaches the mount and stops there — `SHELL` and `until` are an inert string and a pure poll
+ * helper, share no page, and now live in `tests/browser/harness.ts`.
  *
  * ONE MOUNT FOR THE FILE, the same reason every sibling gives: ES module imports are cached, so `main()`
  * runs once per page and Vitest gives each test FILE its own page. Each `it` below calls `mountApp`
@@ -32,26 +34,6 @@ import type { SessionId } from '../../src/session-client'
  * not necessarily the one it just minted — its claim is that the control survives a retire and keeps
  * focus, which holds regardless of how many buffers remain after the click.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
-
-async function until(predicate: () => boolean, what: string, timeoutMs = 60_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
@@ -170,7 +152,7 @@ let mounted = false
 /**
  * Load `src` into the app's one source editor, mounting the app itself on the first call in this file
  * (`main()` runs once per page) and reusing the already-mounted page on every later one — the idiom
- * every sibling in this directory states.
+ * most browser test files in this directory state.
  */
 async function mountApp(src: string): Promise<App> {
   if (!mounted) {

@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY, BUFFERS_VERSION, parseBuffers } from '../../src/buffers-store'
 import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout } from '../../src/layout'
+import { SHELL } from './harness'
 
 /**
  * **A CORRUPT `redextape.buffers` DEGRADES TO A FRESH PAGE** — design §4.1's whole argument for
@@ -25,18 +26,6 @@ import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout } from '../../src/la
  * ever see. What is left here is just the seeding, straight through `localStorage`, which is that
  * per-file shim by the time this line runs.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 beforeAll(async () => {
   localStorage.setItem(LAYOUT_STORAGE_KEY, serializeLayout(defaultLayout()))

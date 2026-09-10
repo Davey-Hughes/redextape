@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { MIN_PANE_FRACTION } from '../../src/layout'
+import { SHELL } from './harness'
 
 /**
  * WHAT A PANE LOOKS LIKE AT THE FLOOR — the measurement `MIN_PANE_FRACTION`'s own doc asks for and no
@@ -22,18 +23,6 @@ import { MIN_PANE_FRACTION } from '../../src/layout'
  * vertical (row) divider, `clientY` for the horizontal (column) one — so every pane kind's OWN floor
  * gets measured rather than TM's height being inferred from source's width by analogy.
  */
-
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
 
 let remountSeq = 0
 async function freshMain(): Promise<{ ready: Promise<EditorView> }> {

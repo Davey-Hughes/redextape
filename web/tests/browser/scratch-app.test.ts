@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { SHELL, until } from './harness'
 
 /**
  * **THE FORK, DRIVEN THROUGH THE APP** — design §4.3's detach, plan T8, from the control a user
@@ -25,27 +26,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
  * where the lifetime rule itself is pinned.
  */
 
-const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
-    <button type="button" id="appearance"></button>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
-  </header>
-  <main></main>
-  <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
-
 let view: EditorView
-
-async function until(predicate: () => boolean, what: string, timeoutMs = 60_000): Promise<void> {
-  const started = performance.now()
-  while (!predicate()) {
-    if (performance.now() - started > timeoutMs) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 const term = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
