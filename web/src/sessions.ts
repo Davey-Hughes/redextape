@@ -64,7 +64,7 @@ export type LegFrame = { lambda: LambdaState; tm: TmState }
  * what a renderer parameterised by its frame type needs. Both cannot be had — `History<T>`'s methods
  * make `LegState` invariant in `T`, so the two forms are genuinely different types and not two
  * spellings. This form is chosen because `PaneView<LegFrame[K]>` is on the render path and `AnyLeg`
- * had exactly one consumer; `main.ts`'s `play` carries the other half of this note.
+ * had exactly one consumer; `transport.ts`'s `play` carries the other half of this note.
  */
 export type SessionLegs = { [L in Leg]?: LegState<LegFrame[L]> }
 
@@ -86,7 +86,7 @@ export type SessionLegs = { [L in Leg]?: LegState<LegFrame[L]> }
  * argument this type's other two fields already make — see `replies.ts`'s `setTmProgram`, which pushes
  * all three together. **INDEPENDENT OF `program` BEING NON-NULL, WHICH IS WHY IT IS NOT A SECOND
  * NULLABLE ENVELOPE ON THE ENTRY.** A machine can exist and still have `tmText: null` — over
- * `MAX_FORK_RULES` (`protocol.ts`'s `compiled` reply, `tmText`'s own doc: "null when there is no TM leg
+ * `MAX_FORK_RULES` (`protocol.ts`'s `compiled` reply, `tmText`'s own doc: "null when there is no TM leg  check-attributions: allow
  * or the machine is over the cap") — so this field carries a fact `program`'s own nullability cannot
  * stand in for.
  */
@@ -580,7 +580,7 @@ export class PaneSlot<K extends Leg> {
    * head is a property of a HISTORY, and a pane looking away is not the user un-pressing play. Two
    * slots may now be bound to one leg, so the alternative — stopping the timer on rebind — would let
    * one pane's selector silently stop the other pane's playback. The leg clears its own timer when it
-   * reaches the frontier (`main.ts`'s `play`), so an unwatched run is bounded rather than forever.
+   * reaches the frontier (`transport.ts`'s `play`), so an unwatched run is bounded rather than forever.
    */
   rebind(session: SessionId): void {
     this.#binding = { session, leg: this.#binding.leg }

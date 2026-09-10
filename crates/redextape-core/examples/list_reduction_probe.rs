@@ -57,7 +57,7 @@
 //!      level per process rather than ramping in a loop.
 //!
 //! THE GUARD THIS PROBE CALIBRATED WAS REVERTED, AND EVERY RAMP HERE REACHES ITS FULL RANGE AGAIN.
-//! Between `1652e09` and the revert, `lambda/lower.rs`'s `MAX_SHARED_LOGICAL_NODES` = 10,000 refused a
+//! Between `1652e09` and the revert, `lambda/lower.rs`'s `MAX_SHARED_LOGICAL_NODES` = 10,000 refused a  check-attributions: allow
 //! term whose largest SHARED subterm exceeded it, so `q3`, `family` and `family-reduce` stopped at seven
 //! groups printing `lower error: TooShared { .. }`. **Measurement then falsified the guard.** The
 //! mechanism it was calibrated against is not the one `subst` implements, and a program with no

@@ -173,6 +173,22 @@ jobs:
         run: scripts/check-citations.sh --self-test
       - name: Reject file:line citations in tracked source
         run: scripts/check-citations.sh
+      # THE ATTRIBUTION GATE RIDES HERE FOR THE REASONS ABOVE, and it is the citation gate's successor
+      # rather than its neighbour: that one enforces CITE THE SYMBOL, and this one enforces that the
+      # file named beside the symbol is the file the symbol is IN. Same script as
+      # `.pre-commit-config.yaml` runs, so the local and CI gates cannot drift.
+      # SELF-TEST FIRST, AND EVERY ONE OF ITS ASSERTIONS COMES FROM A BLIND SPOT A DRAFT SHIPPED WITH.
+      # It asserts that a citation naming the defining file passes; that a symbol present only in a
+      # COMMENT is not ownership; that the `sym()` form is matched rather than skipped; that a symbol
+      # present only in a Rust RAW STRING is not ownership; and that a symbol between two Rust
+      # LIFETIME annotations survives stripping. The first draft failed the second, a later one the
+      # third, and the stripper failed the fifth by reading `'a` as a char literal and blanking the
+      # code between two of them. All five run through the same `strip_code` and `symbol_in_code` the
+      # scan uses, so the self-test cannot drift into agreeing with a broken scan.
+      - name: Prove the attribution detector still detects
+        run: scripts/check-attributions.sh --self-test
+      - name: Reject symbol citations that name the wrong file
+        run: scripts/check-attributions.sh
       # THE FIGURE GATE RIDES IN THIS JOB FOR THE REASONS THE TWO COMMENTS ABOVE ALREADY GIVE, and is
       # unscoped for a SHARPER version of the citation gate's reason. A README's figure goes stale
       # because a DIFFERENT file changed: adding one line to

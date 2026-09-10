@@ -32,7 +32,7 @@ export type PaneEntry<K extends Leg> = {
 }
 
 /**
- * THE PANE COLLECTION — what replaces `main.ts`'s `lambdaPane` and `tmPane` consts.
+ * THE PANE COLLECTION — what replaces `main.ts`'s `lambdaPane` and `tmPane` consts.  check-attributions: allow
  *
  * Thirty call sites assumed exactly one pane of each leg. The question every one of them was really
  * asking is "which panes should this reply repaint", and the answer is a pair: the leg the reply is

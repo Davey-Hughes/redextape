@@ -63,7 +63,7 @@ describe('the λ pane, truncated', () => {
     await settled(view, src)
 
     // RESTART TO STEP 0 BEFORE CLICKING. `lambdaLinkState` checks the play head before it checks
-    // truncation (see its doc in `main.ts`: "a play head off step 0 makes truncation irrelevant"), so
+    // truncation (see its doc in `link-wiring.ts`: "a play head off step 0 makes truncation irrelevant"), so
     // clicking after the run — which leaves the λ pane mid-playback — reports `'not-step-0'` and never
     // reaches the branch this test exists for.
     const restart = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] button')].find((b) =>

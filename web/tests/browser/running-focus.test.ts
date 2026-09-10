@@ -222,7 +222,7 @@ describe('the running focus', () => {
     expect(focusReading(), 'a None step must clear the previous step’s mark').toBe('')
   }, 30_000)
 
-  // THE SAME SEQUENCE, THROUGH `⏵` RATHER THAN `▶`. A different code path: `main.ts`'s `play()` is a
+  // THE SAME SEQUENCE, THROUGH `⏵` RATHER THAN `▶`. A different code path: `transport.ts`'s `play()` is a
   // `setInterval` over recorded frames, and every other test in this file drives `draw()` from a
   // synchronous button handler instead. Nothing anywhere else in the suite exercises `⏵` at all.
   //

@@ -199,7 +199,7 @@ export type Pin = { node: number; origin: 'source' | 'lambda' | 'tm' }
  * next compile's `LinkIndex`, and resolving `owner`'s node id against spans from a program that no
  * longer exists is the silently-wrong answer this project refuses everywhere else. `index` can also be
  * non-null and still stale (the first keystroke after a compile shifts every span it holds without
- * clearing it) — `main.ts`'s `linkable` flag is what catches THAT case, and the caller must consult it
+ * clearing it) — `link-wiring.ts`'s `linkable` flag is what catches THAT case, and the caller must consult it
  * before calling in, the same way `linkAtSourceOffset` already does for clicks.
  */
 export function runningFocus(index: LinkIndex | null, owner: Owner): Focus | null {

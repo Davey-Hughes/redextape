@@ -327,7 +327,7 @@ describe('ScratchBuffers.fork', () => {
 
   // A buffer's entry is `detached: true` BY CONSTRUCTION (5d-i §3.3: no `linkIndex`, no `sourceSpan` on
   // either scratch type), which is what makes §4.5's two surfaces one lookup — `PaneSlot.render` reads
-  // this field for the badge and `main.ts`'s `detachedPanes` reads it for the sentence.
+  // this field for the badge and `link-wiring.ts`'s `detachedPanes` reads it for the sentence.
   it('registers a buffer detached, under its minted label, with one leg and no TM leg', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())

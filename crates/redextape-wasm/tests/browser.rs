@@ -172,7 +172,7 @@ fn compile_step_and_read_both_legs() {
     // prints `text`, and the ~9.3-element `Vec<Dir>` behind it had no JS reader while still costing the
     // history ring. UN-SKIPPING IT FOR THE TREE VIEW MUST FAIL HERE FIRST — that is the point of pinning
     // absence rather than deleting the assertion. Restoring the field means restoring `types.ts`'s
-    // `redex` and `protocol.ts`'s `PATH_ENTRY_BYTES` term with it, and this is what says so.
+    // `redex` and `protocol.ts`'s `PATH_ENTRY_BYTES` term with it, and this is what says so.  check-attributions: allow
     assert!(get(&state, "redex").is_undefined(), "the redex path is skipped on the wire; only `redex_span` crosses");
 
     let ast = call(&session, "lambdaAst", &[JsValue::from_f64(1_000_000.0)]);

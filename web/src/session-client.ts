@@ -98,7 +98,7 @@ export class SessionClient {
    * Post the λ scratchpad build for `gen`, or do nothing if a later `supersede` has already replaced
    * it — design §4.3's fork. `src` HERE IS THE SOURCE'S STEP-0 TEXT, NOT THE TEXT A PANE WAS SHOWING —
    * this doc's own wording predates the `step` parameter below, which is what turns that fixed text
-   * into the actual term a pane had on screen (`lambda_scratch_at`'s replay, `scratch.ts`'s `detach`).
+   * into the actual term a pane had on screen (`lambda_scratch_at`'s replay, `transport.ts`'s `detach`).
    * Both arrive from the caller unresolved, for the same reason `detach`'s own doc gives: neither is
    * this class's to go looking for.
    *
@@ -290,7 +290,7 @@ export class SessionPool {
    * THROWS IF `id` IS ALREADY LIVE, rather than returning the client it already has. A
    * `SessionClient` is constructed with exactly one `onReply` (`:18`) and there is no way to honour a
    * second one — returning the existing client would silently land this caller's frames in the
-   * previous caller's legs, which is the same "two places to be wrong" failure `main.ts`'s `LegState`
+   * previous caller's legs, which is the same "two places to be wrong" failure `sessions.ts`'s `LegState`
    * doc refuses one layer up.
    *
    * **THE CALL SITE THIS THROW USED TO NAME AS ITS REASON IS GONE, AND THE THROW IS NOT.** The

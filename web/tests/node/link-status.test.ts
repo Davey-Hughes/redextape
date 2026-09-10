@@ -117,7 +117,7 @@ describe('linkStatus · detachment', () => {
     )
   })
 
-  // ORDERED MOST-GLOBAL FIRST, the rule `main.ts`'s `lambdaLinkState` states for its own three-way
+  // ORDERED MOST-GLOBAL FIRST, the rule `link-wiring.ts`'s `lambdaLinkState` states for its own three-way
   // choice: a pane being outside the correspondence entirely is a bigger fact than anything about
   // what resolved inside it, and every clause after it is about the panes still inside.
   it('reports detachment ahead of the pin narration', () => {

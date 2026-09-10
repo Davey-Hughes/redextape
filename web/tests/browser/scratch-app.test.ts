@@ -81,7 +81,7 @@ const clickLambda = (label: string) => {
  * reparsed at `step: 0` (5d-i's stopgap), because that path never gave the printer's name generator a
  * reason to walk differently. Design §4.1 replaced that seed: the scratch's step 0 is now derived from
  * an INDEPENDENT print-parse-replay-print pipeline (`index.lambdaText` at `LAMBDA_BYTE_BUDGET`, replayed
- * to the step, re-printed — see `main.ts`'s `detach` handler) — a second, unrelated walk that is free to
+ * to the step, re-printed — see `transport.ts`'s `detach` handler) — a second, unrelated walk that is free to
  * assign fresh names in a different order. Measured directly: forking `let x = 40; x + 2` at step 2
  * produces the SAME term with two binder names swapped end to end (`λx0. ... f0 (f0 (... x))) ... λx. f
  * (f x)` against `λx. ... f0 (f0 (... x0))) ... λx0. f (f x0)`) — alpha-equivalent, not byte-identical.
@@ -238,7 +238,7 @@ describe('the fork control, end to end', () => {
 
     expect(heading()).toContain('[detached]')
     // §4.5's OTHER SURFACE, and the pairing is the point: the badge is the glanceable one and the
-    // status line is the authoritative narration. `main.ts`'s `detachedPanes` reads the same
+    // status line is the authoritative narration. `link-wiring.ts`'s `detachedPanes` reads the same
     // `SessionEntry.detached` the badge does, so the two cannot disagree.
     expect(statusLine()).toContain('λ pane detached')
     // The control is gone, because a pane already on the scratchpad has nothing to fork — and the

@@ -13,7 +13,7 @@ import type { Diagnostic } from './types'
 export type ScratchEditorConfig = {
   host: HTMLElement
   initial: string
-  /** `main.ts`'s `DEBOUNCE_MS`, passed in rather than imported — see the class doc. */
+  /** `compile.ts`'s `DEBOUNCE_MS`, passed in rather than imported — see the class doc. */
   debounceMs: number
   onEdit: (src: string) => void
 }

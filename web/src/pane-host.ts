@@ -671,7 +671,7 @@ export function createPaneHost(deps: {
    * disabled control is a silent no-op per the HTML spec, not a thrown error, so without this the
    * symptom is indistinguishable from the bug Step 8 exists to reproduce: `document.activeElement`
    * stays `<body>` even though the call ran. `[hidden]` gets the same treatment for the same reason —
-   * the continue button (`controls.ts`'s `extend`) is hidden rather than disabled when there is nothing
+   * the continue button (`pane-chrome.ts`'s `extend`) is hidden rather than disabled when there is nothing
    * to continue, and a hidden element cannot take focus either.
    *
    * For what this doc used to claim and why it changed, see the history note under `focusPane`.

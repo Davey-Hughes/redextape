@@ -49,6 +49,34 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      # UNSCOPED FOR THE CITATION GATE'S REASON, ARRIVING FROM THE OTHER END. That gate catches a
+      # pointer whose target MOVED DOWN THE FILE; this one catches a symbol that moved to a DIFFERENT
+      # FILE, and the file that goes wrong is even further from the commit: an extraction changes
+      # `main.ts` and `transport.ts`, while the citations that rot are in twenty files neither commit
+      # touched. A `files:`-scoped rule would fire on exactly the commits that do not need it.
+      # MEASURED, AND THE FIRST FIGURE WRITTEN HERE WAS A GUESS THAT WAS WRONG BY 2x IN THE FLATTERING
+      # DIRECTION. It read "3.6-3.9 s" before anything had been timed; the real figure was 7.5 s, and
+      # what the profile then said was not what the sentence had assumed — stripping every cited file
+      # costs ~180 ms, and the other seven seconds were 486 forks, one per SITE, from command
+      # substitutions in the symbol test and the resolver. Both now return through globals and a bash
+      # word test. Scan alone is 2.60-2.65 s over five runs at the 485 sites in 290 tracked files.
+      # **THE COMPARISON FIGURES HERE ARE MEASURED IN THE SAME MINUTE, NOT QUOTED**, which is the
+      # second thing this comment got wrong: it first read "against 574-594 ms for `check-text-bytes`
+      # and ~250 ms for `check-citations` on the same machine" — two figures copied out of the hook
+      # comments above rather than run, and the first is nearly 2x low against this tree. Re-run
+      # together: `check-text-bytes` 1,070 ms, `check-citations` 487 ms, `check-doc-figures` 254 ms,
+      # `check-shared-docs` 190 ms, this hook 2,667 ms. Still the slowest here, by about 2.5x rather
+      # than the order of magnitude the guessed figure implied.
+      # `--self-test` first, then the scan, for the reason `check-text-bytes` states: a gate that only
+      # ever runs against a passing tree cannot tell you it still works. This one's red half is not
+      # hypothetical — it was demonstrated against the unfixed tree that motivated it, where it found
+      # 31 sites, and against a draft of itself where it found 467 and was wrong about 441 of them.
+      - id: check-attributions
+        name: symbol citations name the file the symbol is in
+        entry: bash -c 'scripts/check-attributions.sh --self-test && scripts/check-attributions.sh'
+        language: system
+        always_run: true
+        pass_filenames: false
       # UNSCOPED FOR A SHARPER VERSION OF THE REASON THE TWO HOOKS ABOVE GIVE, and the sharpening is
       # the whole argument. A README figure goes stale because a DIFFERENT file changed: one line
       # added to `grammars/tree-sitter-redextape-lambda/grammar.js` falsifies both that grammar's

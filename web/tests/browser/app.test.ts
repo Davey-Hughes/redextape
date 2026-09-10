@@ -8,7 +8,7 @@ const LAMBDA_DECLINES = 'let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n;
 
 // NOT `[1, 2]`. Its 455 rows would render acceptably unvirtualized, so it cannot demonstrate the one
 // property this table exists for. `map_fold` is 25,852 rows (design §3.1). Module-scoped, not local to
-// `stepping`, because `main.ts`'s `fn` definitions are also this file's example of a source construct
+// `stepping`, because `BIG`'s `fn` definitions are also this file's example of a source construct
 // that owns no machine states at all — `fn map(...)`'s own span never gets an instruction; only the
 // defunctionalized call sites downstream of it do.
 const BIG = `fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }
@@ -481,7 +481,7 @@ describe('the app, end to end', () => {
     // Converted, the lit text is `(λx0. f (f x0))` — the subterm standing at the redex's path in THIS
     // frame's term, parens included. That is an `Abs`, so it is plainly not the redex itself: the path
     // named a redex `App` in the PRE-step term and β replaced it with this, its CONTRACTUM. See
-    // `types.ts`'s `redex_span` doc; the conversion under test is the same either way.
+    // `viewmodel.rs`'s `redex_span` doc; the conversion under test is the same either way.
     // Sliced as UTF-16 without converting, [130, 146] reads `x0. f (f x0)) x)` — a window shifted off
     // the front of the subterm and past its end, lighting a different token set entirely. A root-path
     // span (`[]`, byte 0) or an ASCII-only fixture would score both readings identical and prove
@@ -531,7 +531,7 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = ;')
       expect(paneText('lambda')).toBe('')
       expect(document.querySelectorAll('[data-leaf="tm-0"] .tape').length).toBe(0)
-      // Design §6's error table: "panes read 'not compiled'". `main.ts`'s `resetLegs` used to leave
+      // Design §6's error table: "panes read 'not compiled'". `sessions.ts`'s `resetLegs` used to leave
       // `reason: ''` here, so the control strip's step readout (`controls.ts`'s `controlState`, via
       // `pane-chrome.ts`'s `.step`) was blank too, not merely the term/tape area above it.
       expect(stepText('lambda')).toBe('not compiled')
@@ -556,7 +556,7 @@ describe('the app, end to end', () => {
     // `lambdaLinkState`'S `'declined'` BRANCH, NEVER EXERCISED END TO END BEFORE THIS.
     // `link-status.test.ts` drives `linkStatus` directly with an ALREADY-DECIDED state, and every other
     // link test in this file clicks a construct under a program whose λ leg is available — so the
-    // "ORDERED MOST-GLOBAL FIRST" branch order `main.ts`'s `lambdaLinkState` doc claims (`declined`
+    // "ORDERED MOST-GLOBAL FIRST" branch order `link-wiring.ts`'s `lambdaLinkState` doc claims (`declined`
     // checked before the play head, before the span, before truncation) was verified only by
     // inspection. `LAMBDA_DECLINES` is this file's own λ-declining fixture, reused rather than invented
     // — its λ backend refuses the whole PROGRAM, so whatever source construct is clicked must report
@@ -586,7 +586,7 @@ describe('the app, end to end', () => {
     // MOST LIKELY CAUSE, not chased further because fixing it is out of scope for a doc/test Minor:
     // `lambda/reduce.rs`'s `depth_exceeds` doc says the guard is "effective only when the running
     // thread's stack is large enough (WASM shadow-stack sizing is a Plan 4 follow-up)" — an already-
-    // named, still-open gap. The recursive printer (`lambda/syntax.rs`'s `write_term`) walks to the same
+    // named, still-open gap. The recursive printer (`lambda/syntax.rs`'s `write`) walks to the same
     // `MAX_TERM_DEPTH` (3,000) bound to build this term's `lambdaText`, calibrated with ~2x margin
     // against an 8 MiB NATIVE stack; wasm32's default stack is far smaller, so the identical walk that
     // takes 2ms natively plausibly overflows it, and a Rust panic under wasm is a module-poisoning abort
@@ -608,7 +608,7 @@ describe('the app, end to end', () => {
     })
 
     // THE CHEAP HALF OF THE PATH THREE DOC COMMENTS NAME AS MOST LIKELY TO BE GOTTEN WRONG
-    // (`main.ts`'s `forward`, `controls.ts`'s `canRecordFurther`, `pane-chrome.ts`'s controlStrip) —
+    // (`transport.ts`'s `forward`, `controls.ts`'s `canRecordFurther`, `pane-chrome.ts`'s controlStrip) —
     // and nothing exercised it until now. `▶` at the frontier of an `'ended'` run must not ask the
     // worker for anything: the step readout must not move and the extend button must stay hidden.
     it('does nothing when ▶ is pressed at the frontier of a run that already ended', async () => {
@@ -644,7 +644,7 @@ describe('the app, end to end', () => {
       expect(extend?.textContent).toBe('keep recording')
 
       // ▶ AND [continue] ARE THE SAME `extend` REQUEST WITH DIFFERENT LABELS (`controls.ts`'s
-      // `canForward`, `main.ts`'s `forward`) — reaching `'budget'` a second time just to click the
+      // `canForward`, `transport.ts`'s `forward`) — reaching `'budget'` a second time just to click the
       // other button would double an already-slow test for no more coverage, so this exercises ▶ here
       // instead of `[continue]`: it must be the live button the fix makes it, not the disabled one it
       // used to render at exactly this frontier.
@@ -678,7 +678,7 @@ describe('the app, end to end', () => {
       expect(stepText('lambda')).toContain('step 0')
 
       // The second `x` in `x + 2`, a `Var` reference — any construct works here, since `lambdaLinkState`
-      // checks the play head BEFORE it ever asks whether this particular node has a λ span (`main.ts`'s
+      // checks the play head BEFORE it ever asks whether this particular node has a λ span (`link-wiring.ts`'s
       // ordering comment: "ORDERED MOST-GLOBAL FIRST").
       linkAt(view, 'let x = 40; x + 2'.indexOf('x + 2'))
       // Resolved to a real node, not a click that landed on nothing — the concrete, pane-independent
@@ -872,7 +872,7 @@ describe('the app, end to end', () => {
 
     it('moves the highlight as the machine steps', async () => {
       await settled(view, 'let x = 40; x + 2')
-      // Same frontier fact as above: `▶` is a no-op here (`main.ts`'s `forward`, mirroring the λ
+      // Same frontier fact as above: `▶` is a no-op here (`transport.ts`'s `forward`, mirroring the λ
       // leg's already-tested "does nothing at the frontier of a run that already ended"), so stepping
       // must go backward to move at all.
       const before = document.querySelector('[data-leaf="tm-0"] .state-row.is-current')?.textContent
@@ -898,7 +898,7 @@ describe('the app, end to end', () => {
       // `▶` at this frontier would be `client.extend()` — an async worker round trip — and asserting
       // right after the click loop with no `await` would pass whether or not detach worked, since no
       // redraw happens before the assertion runs. `◀` moves the head and redraws synchronously
-      // (`main.ts`'s `back` calls `leg.hist.back()` then `draw()` with no worker involved), so it is
+      // (`transport.ts`'s `back` calls `leg.hist.back()` then `draw()` with no worker involved), so it is
       // the one that actually exercises whether a detached table still gets re-centred.
       table().scrollTop = 0
       table().dispatchEvent(new Event('scroll'))

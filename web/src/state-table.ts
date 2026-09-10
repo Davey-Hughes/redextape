@@ -22,7 +22,7 @@ export type Row =
  * of 33,699 entries instead: 135 KB, and a row resolves by binary search.
  *
  * BUILT ONCE PER COMPILE, never per step, which is the property `tmProgram` already has and for the
- * same reason (`protocol.ts`'s `compiled` reply: "`tmProgram` IS SENT ONCE, HERE"). Only the highlight
+ * same reason (`protocol.ts`'s `compiled` reply: "`tmProgram` IS SENT ONCE, HERE"). Only the highlight  check-attributions: allow
  * moves.
  */
 export class StateIndex {

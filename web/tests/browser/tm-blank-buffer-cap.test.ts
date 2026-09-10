@@ -7,7 +7,7 @@ import { SHELL, until } from './harness'
  * **THE BLANK-BUFFER GESTURE'S OWN CAP REFUSAL, ON THE SURFACE A USER READS IT FROM** — the mirror
  * `scratch-cap.test.ts`'s own file doc says the fork gesture needed and the blank-buffer gesture did
  * not yet have. That file drives the `catch (e) { if (!(e instanceof BufferCapReached)) throw e; … }`
- * arm in `main.ts`'s fork handler past `MAX_WARM_BUFFERS`; the sibling arm in `main.ts`'s `onNewTm`
+ * arm in `main.ts`'s fork handler past `MAX_WARM_BUFFERS`; the sibling arm in `buffer-list.ts`'s `onNewTm`
  * handler (the fifth argument `bufferList` is constructed with) is reached from `ScratchBuffers.
  * forkBlank` instead of `fork`, and nothing before this file drove it — the four lines inside it
  * (`if (!(e instanceof BufferCapReached)) throw e`, `linkWiring.setForkFailed(e.message)`, `draw()`,
@@ -91,7 +91,7 @@ describe('the buffer cap, from the blank-buffer control that hits it', () => {
       expect(buffersButton()?.textContent).toBe(`buffers ${n} ▾`)
     }
 
-    // STAGE 2 — THE REFUSAL, AND IT IS ON SCREEN. Before `main.ts`'s `onNewTm` catch arm existed to
+    // STAGE 2 — THE REFUSAL, AND IT IS ON SCREEN. Before `buffer-list.ts`'s `onNewTm` catch arm existed to
     // render it, this would have thrown out of a click handler (`ScratchBuffers.forkBlank`'s own
     // `#refuseAtCap`) with nothing on `#link-status` to show for it — the same failure mode
     // `scratch-cap.test.ts`'s file doc records for the fork gesture, reached through the other door.

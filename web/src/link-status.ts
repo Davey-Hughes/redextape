@@ -249,7 +249,7 @@ function detachedText(d: DetachedPanes): string {
  * to speaking, which is exactly §4.5's obligation.
  *
  * DETACHMENT LEADS, ahead of the coincidence that used to lead. Ordered most-global first — the rule
- * `main.ts`'s `lambdaLinkState` states for its own three-way choice — because "this pane is not part
+ * `link-wiring.ts`'s `lambdaLinkState` states for its own three-way choice — because "this pane is not part
  * of the correspondence" scopes every clause after it: those are about the panes still inside.
  *
  * A DETACHED PANE'S OWN CLAUSES ARE SUPPRESSED, NOT MERELY PRECEDED. §4.5's standard is the one that

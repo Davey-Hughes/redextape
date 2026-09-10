@@ -1099,7 +1099,7 @@ export class ScratchBuffers {
    * `LAMBDA_BYTE_BUDGET`, or (rarely, 5d-i §4.1a) the source's own step-0 print was itself cut, so the
    * replay's first parse fails — and `fork` has ALREADY rebound the pane synchronously, before either
    * of those was knowable (`fork`'s own doc). Left alone, that strands the pane forever: no
-   * `scratch-compiled` ever fires, so `main.ts`'s `lambdaPane.setEditor` is never called, `#editor`
+   * `scratch-compiled` ever fires, so nothing in `replies.ts` ever calls `setEditor`, `#editor`
    * stays `null`, and `LambdaPane.setDiagnostics` (`this.#editor?.setDiagnostics(ds)`) is a silent
    * no-op — the pane reads the `'building…'` placeholder `fork` seeded forever, and `#refreshDetach`'s
    * `!this.#detached` gate hides the only control that could recover it, because this session IS the

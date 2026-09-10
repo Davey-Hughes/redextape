@@ -42,7 +42,7 @@ describe('decorationRanges', () => {
     expect(decorationRanges([at(18, 25, 'Ident')], ascii20)).toEqual([{ from: 18, to: 20, className: 'tok-ident' }])
   })
 
-  // `λf. λx. f x` — the exact term and spans `print_lambda_capped` produces (`syntax.rs`'s `write_term`):
+  // `λf. λx. f x` — the exact term and spans `print_lambda_capped` produces (`syntax.rs`'s `write`):
   // "λ" and the binder name are pushed as SEPARATE spans, "." is its own Punct span, and the space after
   // it is unspanned. 13 bytes, 11 UTF-16 code units — `λ` is 2 bytes but 1 code unit, so every span past
   // the first "λ" is shifted in bytes but not in JS-string terms, and a converter that assumed
