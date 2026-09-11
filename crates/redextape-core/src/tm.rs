@@ -17,6 +17,7 @@ pub mod lower_asm;
 pub mod lower_tm;
 pub mod machine;
 pub mod sim;
+pub mod single_tape;
 pub mod syntax;
 
 pub use asm::{
