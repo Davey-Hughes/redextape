@@ -19,6 +19,7 @@ pub mod machine;
 pub mod sim;
 pub mod single_tape;
 pub mod syntax;
+pub mod two_symbol;
 
 pub use asm::{
     AsmHeader, AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, DecodeFailure, Instr, Program, Reg, decode_asm,
