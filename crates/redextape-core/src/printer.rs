@@ -698,7 +698,7 @@ impl<'a> Printer<'a> {
         self.out.push_str(" else ");
         // NOT collapsed into `else if cond { … }`, even though rustfmt would: `else { if c {…} else
         // {…} }` and `else if c {…} else {…}` are the same tree only in a grammar where `else if` is
-        // itself valid syntax. This one's is not — `parser.rs`'s `If` arm always requires a literal `{`
+        // itself valid syntax. This one's is not — the `If` arm in `parser.rs` always requires a literal `{`
         // immediately after `else` (`expect(TokenKind::Else)` then `parse_braced_block()`, no special
         // case for a following `if`) — so the collapsed text is not a reformatting of the input, it is
         // a program this parser rejects. §7's invariant ("output always reparses") binds here just as
@@ -1174,7 +1174,7 @@ mod tests {
 
     #[test]
     fn a_nested_if_in_an_else_stays_fully_braced() {
-        // NOT collapsed to `else if b { … }`: this grammar has no such sugar (`parser.rs`'s `If` arm
+        // NOT collapsed to `else if b { … }`: this grammar has no such sugar (the `If` arm in `parser.rs`
         // requires a literal `{` right after `else`), so the collapsed text would not reparse. Design
         // doc §15 — see `if_chain`'s doc.
         let out = p("if a { 1 } else { if b { 2 } else { 3 } }");

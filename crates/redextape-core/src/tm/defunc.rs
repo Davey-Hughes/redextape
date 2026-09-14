@@ -66,7 +66,7 @@ use crate::tm::lower_asm::LowerError;
 ///
 /// Rather than thread a live counter through every one of those functions, `defunc` measures the
 /// input's nesting depth ONCE, ITERATIVELY (`too_deep_node`, an explicit worklist -- no native
-/// recursion, mirroring `core.rs`'s `Drop` impl and this module's own `max_id`), before any recursive
+/// recursion, mirroring the `Drop` impl in `core.rs` and this module's own `max_id`), before any recursive
 /// pass runs. `analyze`/`free_vars`/`Rewriter::rewrite`/`peel` all recurse only on `core` itself or its
 /// sub-trees, so bounding `core`'s own height bounds them too; `collect_calls`/`visit` walk the
 /// *rewritten* output instead (structurally close to the input, plus a small constant), so they

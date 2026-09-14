@@ -568,7 +568,7 @@ fn list_literal_cons_cells_point_at_their_own_elements() {
 /// orderings. `a_known_node_maps_to_its_exact_state_block` runs on `"3 - 5"`, which has none of the five
 /// order-sensitive sites below, so it does not guard this.
 ///
-/// One fixture exercises all five (see `desugar.rs`'s `Stmt::Assign`/`Stmt::While` arms of
+/// One fixture exercises all five (see, in `desugar.rs`, the `Stmt::Assign`/`Stmt::While` arms of
 /// `lower_stmts_at`, the `[i]` and multi-member arms of `lower_fn_run_at`, and the `Expr::Lambda` arm of
 /// `lower_expr_at`) and pins the exact id each one gets. The values below were read off one known-good
 /// run of this exact fixture (`cargo test -p redextape-core --test sourcemap_coverage`), not computed by

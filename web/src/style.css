@@ -805,7 +805,7 @@ body {
    fixed the palette, and this does not reopen it. Both operands are `light-dark()`, so every rule
    below is theme-aware without a second declaration for `:root[data-theme="dark"]`.
 
-   `Exact` and `Within` are different claims (`types.ts`'s `Owner` doc) and must read that way:
+   `Exact` and `Within` are different claims (`reduce.rs`'s `Owner` doc) and must read that way:
    `Exact` gets the same solid wash-plus-edge treatment as `.linked`; `Within` is deliberately
    WEAKER — a fainter wash, no edge. Task 8's M2 measured how much of a program a `Within` span
    typically covers, against a threshold fixed before any number existed — the verdict (only one of

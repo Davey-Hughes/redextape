@@ -272,11 +272,17 @@ fn a_configured_encoding_applies_to_a_tm_emit() {
     assert_ne!(with_config.stdout, with_defaults.stdout, "binary and unary must not produce the same machine");
 }
 
-/// **`emit.field-width` WAS THE ONE CONFIG KEY WHOSE EFFECT NO TEST COULD FAIL ON.** Measured before
-/// this existed: replacing `emit.rs`'s `opts.field_width.unwrap_or(opts.defaults.field_width)` with
-/// `unwrap_or(0)` — discarding the configured value outright — left the whole workspace passing. The
-/// other three keys each had a takes-effect test; this one had only refusal tests, and a sabotage
-/// that reads the key, validates it and then ignores it passes every refusal test there is.
+/// **`emit.field-width` WAS THE ONE CONFIG KEY WHOSE EFFECT NO TEST COULD FAIL ON.** The other three
+/// keys each had a takes-effect test; this one had only refusal tests, and a sabotage that reads the
+/// key, validates it and then ignores it passes every refusal test there is.
+///
+/// The sabotage is one argument of the `Width::resolve` call in `emit.rs`: written
+/// `Width::resolve(opts.field_width, 0)`, the configured value is discarded outright, so `(None, 0)`
+/// resolves to `Width::AutoFit` and the pin is gone. Re-measured at this tree with exactly that one
+/// argument changed, `cargo nextest run --workspace --no-fail-fast` reports
+/// `1615 tests run: 1613 passed, 2 failed, 12 skipped` — and the two are this test and
+/// `a_config_pinned_overflow_names_the_key_rather_than_a_flag_nobody_typed` in `emit.rs`. Both arrived
+/// in the same commit as the key itself, which is the sense in which nothing could fail on it before.
 ///
 /// **THE HEADER IS WHAT IS ASSERTED, NOT THE EXIT CODE.** `width 8` is the configured value arriving
 /// in the artifact, which is the only thing the key is for. A `--no-config` run of the same program

@@ -1,6 +1,6 @@
 // M2 VERDICT, decided against a threshold the design fixed BEFORE any number existed: if the median
 // `Within` span exceeded 60% of program length on MORE THAN ONE corpus program, `Within` would render
-// as a status line rather than a highlight (see `types.ts`'s `Owner` doc for what `Within` claims).
+// as a status line rather than a highlight (see `reduce.rs`'s `Owner` doc for what `Within` claims).
 // Task 8 measured it with `crates/redextape-core/examples/owner_probe.rs` — full M1/M2 tables in the
 // `PLAN 5c CLOSES` entry of `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`, which carries
 // the whole nine-program table. Only `sum5` crossed it: median 65.0% (every one of its 402 `Within`
@@ -192,7 +192,7 @@ export type Pin = { node: number; origin: 'source' | 'lambda' | 'tm' }
  * A MARKER, NOT A PIN. `owner` moves every β-step; `link` (the pin a click sets, `main.ts`'s own
  * state) only moves on a click. They are different objects and this function knows nothing about
  * `link` at all — `main.ts`'s `draw()` is where the two are compared, for the one coincidence worth
- * its own treatment. See `types.ts`'s `Owner` doc for why `Exact` and `Within` stay two claims rather
+ * its own treatment. See `reduce.rs`'s `Owner` doc for why `Exact` and `Within` stay two claims rather
  * than collapsing to one.
  *
  * NULL AGAINST A STALE `index`, exactly as a click is — `index` is `null` between a keystroke and the

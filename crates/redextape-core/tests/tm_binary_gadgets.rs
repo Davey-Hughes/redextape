@@ -297,7 +297,7 @@ fn add_is_exact_over_the_representable_range() {
     }
 }
 
-/// Subtraction is MONUS: truncated at zero, matching `interp.rs`'s `saturating_sub`. A borrow out of
+/// Subtraction is MONUS: truncated at zero, matching the `saturating_sub` in `interp.rs`. A borrow out of
 /// the top digit must zero the whole field, not wrap to 2^w - 1 — the defect a ripple that simply
 /// dropped the final borrow would have.
 #[test]

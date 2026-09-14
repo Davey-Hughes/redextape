@@ -61,9 +61,10 @@
 //!
 //! PAST 2^64 THE BACKENDS DIVERGE BY DESIGN, and that is pinned rather than left unexercised — see
 //! `past_the_u64_ceiling_the_backends_diverge_by_design` and `SATURATION_DEMOS`. It cannot be an
-//! agreement test: the reference and native SATURATE to `u64::MAX` (`tm/asm.rs`'s
-//! `saturating_add`/`saturating_mul`), while the TM halts in its rule-less overflow guard
-//! (`tm/lower_tm.rs`'s `Builder::overflow`) at every width up to the ceiling. Both are deliberate.
+//! agreement test: the reference and native SATURATE to `u64::MAX` (the
+//! `saturating_add`/`saturating_mul` in `tm/asm.rs`), while the TM halts in the rule-less
+//! overflow-guard state `tm/build.rs`'s `Builder::overflow` allocates, at every width up to the
+//! ceiling. Both are deliberate.
 //!
 //! CAPS NOTE (Task 4/5 review): native's step accounting is coarse (it only ticks loop back-edges and
 //! calls, enough to guarantee termination, not to match `run_asm`'s per-instruction step count). Every
@@ -410,9 +411,9 @@ const BEYOND_FIELD_WIDTH_DEMOS: &[&str] = &[
 /// exercises; before that test existed, nothing did.
 ///
 /// IT CANNOT BE AN AGREEMENT TEST, and this must not be "fixed" into one. The backends diverge here BY
-/// DESIGN: the reference and native SATURATE (`tm/asm.rs`'s `saturating_add`/`saturating_mul`), while
-/// the TM halts in its rule-less overflow guard (`tm/lower_tm.rs`'s `Builder::overflow`) and never
-/// saturates at any width up to the 64-cell ceiling. Both behaviours are deliberate; they are simply
+/// DESIGN: the reference and native SATURATE (the `saturating_add`/`saturating_mul` in `tm/asm.rs`), while
+/// the TM halts in the rule-less overflow-guard state `tm/build.rs`'s `Builder::overflow` allocates, and
+/// never saturates at any width up to the 64-cell ceiling. Both behaviours are deliberate; they are simply
 /// different, and nothing recorded that in an executable form before this test.
 ///
 /// Measured 2026-07-29: each of these gives reference `Nat(u64::MAX)`, native `Nat(u64::MAX)`, binary

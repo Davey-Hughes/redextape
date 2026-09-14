@@ -22,7 +22,7 @@ use std::rc::Rc;
 ///
 /// Do NOT restate that as "bounded by the `Value` the caller already holds, so it needs no guard": a
 /// caller-held `Cons` spine is bounded only by the step budget — millions of cells — which is exactly
-/// the premise that makes `value.rs`'s `Drop`, `PartialEq` and `Debug` all walk it iteratively. The
+/// the premise that makes the `Drop`, `PartialEq` and `Debug` impls in `value.rs` all walk it iteratively. The
 /// binding half of the `min` is the term, and only for terms some producer built.
 ///
 /// `decode_lambda_ty` walks its spine ITERATIVELY, and the contrast is narrower than "it lacks a guard

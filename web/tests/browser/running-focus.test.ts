@@ -44,7 +44,7 @@ const PLUS = SAMPLE.indexOf('+')
  * and `While`'s own root `App` — and this program's desugaring cannot avoid two of them: `let mut n = 1`
  * is a `Let{mutable: true}` node, and `desugar.rs`'s `lower_stmts_at`, in its `Stmt::Assign` arm,
  * unconditionally wraps the assignment in a `Core::Seq` — there is no statement position that skips it.
- * `Assign` itself is STILL never tagged (`lower.rs`'s `Core::Assign` arm returns the rebuilt store
+ * `Assign` itself is STILL never tagged (the `Core::Assign` arm in `lower.rs` returns the rebuilt store
  * untagged), but the `Seq` wrapping it is, and `desugar.rs`'s `lower_stmts_at`, in that same
  * `Stmt::Assign` arm, mints that `Seq`'s span from the `Stmt::Assign` span with two `spans.push` calls
  * that share the one `*span` — one for the `Assign`, one for the `Seq` — so its tag reads on screen as

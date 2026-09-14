@@ -175,16 +175,43 @@ jobs:
         run: scripts/check-citations.sh
       # THE ATTRIBUTION GATE RIDES HERE FOR THE REASONS ABOVE, and it is the citation gate's successor
       # rather than its neighbour: that one enforces CITE THE SYMBOL, and this one enforces that the
-      # file named beside the symbol is the file the symbol is IN. Same script as
+      # file named beside the symbol is the file that DECLARES it. Same script as
       # `.pre-commit-config.yaml` runs, so the local and CI gates cannot drift.
-      # SELF-TEST FIRST, AND EVERY ONE OF ITS ASSERTIONS COMES FROM A BLIND SPOT A DRAFT SHIPPED WITH.
-      # It asserts that a citation naming the defining file passes; that a symbol present only in a
-      # COMMENT is not ownership; that the `sym()` form is matched rather than skipped; that a symbol
-      # present only in a Rust RAW STRING is not ownership; and that a symbol between two Rust
-      # LIFETIME annotations survives stripping. The first draft failed the second, a later one the
-      # third, and the stripper failed the fifth by reading `'a` as a char literal and blanking the
-      # code between two of them. All five run through the same `strip_code` and `symbol_in_code` the
-      # scan uses, so the self-test cannot drift into agreeing with a broken scan.
+      # SELF-TEST FIRST, AND ITS THIRTEEN CHECKS SPLIT FOUR WAYS RATHER THAN THE TWO THIS COMMENT USED
+      # TO CLAIM. The old split read "seven of its ten trace to a blind spot or a hole the declaration
+      # rule left open; the other three are regression guards" — wrong on the count, and wrong in kind
+      # twice over, because it filed the call-at-statement and re-export checks under "hole left open"
+      # when each guards a hole the declaration rule CLOSED, and it had no category at all for the
+      # positive control that is check 1. Enumerated, with the category each check belongs to:
+      #
+      #   ONE POSITIVE CONTROL, which no other check can stand in for: a citation naming the defining
+      #   file PASSES. Every other check asserts a rejection or a specific acceptance; without this one
+      #   a gate that rejected everything would read green.
+      #
+      #   FOUR BLIND SPOTS A DRAFT OF THIS SCANNER SHIPPED GREEN WITH. A symbol present only in a
+      #   COMMENT is not ownership; a symbol present only in a Rust RAW STRING is not ownership; a
+      #   declaration sitting after an ODD RUN OF RUST LIFETIMES survives stripping; and the `sym()`
+      #   form is MATCHED rather than skipped, which is how the seventh of the seven filed sites
+      #   escaped the first scan meant to find all seven.
+      #
+      #   FOUR GUARDING HOLES THE DECLARATION RULE CLOSED — not holes it left open, which is the
+      #   correction. A CALL AT STATEMENT POSITION is not a declaration, which is the filed archetype
+      #   and what the old presence rule could not tell from a declaration. A RE-EXPORT declares
+      #   nothing, which is what catches a barrel. And TWO for the hole that the first version of the
+      #   declaration rule did NOT close: a PATH-QUALIFIED citation is not satisfied by a local `let`
+      #   binding of the bare name, asserted once directly against `symbol_declared_in` and once
+      #   end-to-end through a written-out `` `binder.rs`'s `Builder::overflow` `` citation — the only
+      #   check here that proves `ATTRIBUTION_RE` admits a `::` at all.
+      #
+      #   FOUR PROVING THE RULE DOES NOT REJECT SOMETHING VALID, a different job from guarding a hole.
+      #   A `wasm_bindgen` `js_name` and an object-literal method ARE declarations; a BARE citation IS
+      #   still satisfied by a local `let` binding, which three live sites citing `examples/tm_demo.rs`
+      #   depend on and which is the constraint the qualified-versus-local split had to respect; and a
+      #   cited CSS file falls back to the presence rule, asserted so the absence of a CSS extractor is
+      #   a decision rather than an accident.
+      #
+      # All thirteen reach the tree through the same `strip_code` and `symbol_declared_in` the scan
+      # uses, so the self-test cannot drift into agreeing with a broken scan.
       - name: Prove the attribution detector still detects
         run: scripts/check-attributions.sh --self-test
       - name: Reject symbol citations that name the wrong file

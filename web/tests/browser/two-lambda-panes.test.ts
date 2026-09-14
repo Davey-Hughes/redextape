@@ -301,6 +301,26 @@ describe('two λ panes on two λ sessions', () => {
     sel.value = optionValue('lambda', 'source')
     sel.dispatchEvent(new Event('change', { bubbles: true }))
 
+    // **WAIT FOR BOTH PANES TO SETTLE BEFORE TAKING THE SNAPSHOT BELOW, OR THE SNAPSHOT RACES THEM.** Step 4
+    // snapshots each pane and then waits for the scratch pane to CHANGE. Nothing above waited for either pane's
+    // term: step 1's wait fires when the editor exists and step 2's when the pane count is 2, and the rebind in
+    // step 3 is followed by nothing at all. On a fast machine both panes have settled anyway, so the snapshot is
+    // the finished term and the only later change is the edit. On a slow CI runner the scratch pane was still
+    // empty when snapshotted, so the seed rendering afterwards satisfied the wait before the edit's recompile
+    // did, and the `u v` assertion below received the seed's Church numeral. It failed that way twice on one
+    // commit that had passed a run earlier. Taking the snapshot while the scratch pane is still empty
+    // reproduces the identical failure message on any machine. The scratch pane reads empty straight after the
+    // fork click and holds its full term once settled.
+    //
+    // Each conjunct is the only false one in some state. The texts DIFFERING is the only false one just after
+    // the split, when both panes still show the scratch term. The scratch pane being non-empty is the only
+    // false one in the race above. The split pane being non-empty keeps a mid-rebind empty render from passing,
+    // which would race the source-pane assertion below the same way. Text rather than the fork control the
+    // other rebinds in this file wait for, because what the snapshot needs settled is the TERM.
+    await until(
+      () => textOf(first ?? '') !== '' && textOf(second ?? '') !== '' && textOf(second ?? '') !== textOf(first ?? ''),
+    )
+
     // 4. Edit the scratch so the two sessions genuinely differ — `typeInto`, a REAL CodeMirror
     // transaction through `EditorView.findFromDOM`. Its own doc carries the argument this comment
     // used to spell out here: `.textContent` plus a synthetic `InputEvent` (this test's own former

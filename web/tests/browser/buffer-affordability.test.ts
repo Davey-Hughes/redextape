@@ -186,7 +186,7 @@ async function runWorkers(n: number): Promise<WorkerResult[]> {
             // MINOR, FIX ROUND 2 — `messageerror` WAS UNHANDLED. `error` catches a worker that fails
             // to load or throws synchronously; it does NOT fire for a main-thread deserialization
             // failure on the reply itself. A worker-side clone failure already posts an `outcome`
-            // (`affordability-worker.ts`'s `catch`), but a payload that fails to deserialize on ITS
+            // (the `catch` in `affordability-worker.ts`), but a payload that fails to deserialize on ITS
             // WAY IN — plausible for a ~36 MB `frames` array — fires `messageerror` here instead, and
             // with nothing listening this reproduces the exact 300 s hang Important 4 (fix round 1)
             // closed for the worker side only.

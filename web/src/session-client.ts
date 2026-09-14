@@ -81,7 +81,7 @@ export class SessionClient {
    * Post the run for `gen`, or do nothing if a later `supersede` has already replaced it.
    *
    * TAKING THE GENERATION RATHER THAN CLAIMING ONE is what makes the debounce self-cancelling: two
-   * keystrokes 100 ms apart claim two generations and schedule two timers — but `main.ts`'s `schedule`
+   * keystrokes 100 ms apart claim two generations and schedule two timers — but `compile.ts`'s `schedule`
    * calls `clearTimeout` on the previous timer before arming the new one, so the FIRST timer never
    * fires and this guard is unreachable from that call site today. It stays anyway, as
    * defence-in-depth: it is the post-side half of the same house pattern the receive-side guard in the

@@ -150,7 +150,7 @@ module.exports = grammar({
 
     // Deliberately NOT `optional($.arguments)`: `arguments` is a named node (see `call_expression`
     // and `method_call`), and reusing it here would wrap each element in an extra `arguments` node.
-    // `parser.rs`'s `Expr::List` holds a flat `Vec<Expr>` with no such wrapper, so this inlines the
+    // `ast.rs`'s `Expr::List` holds a flat `Vec<Expr>` with no such wrapper, so this inlines the
     // same comma / trailing-comma pattern `arguments` uses without introducing the wrapper node.
     list: $ => seq(
       '[',

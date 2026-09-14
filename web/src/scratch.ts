@@ -115,7 +115,7 @@ type BufferState = {
  *     because they are not simultaneously exhausted the instant every buffer's is — the source session
  *     is ordinarily mid-recording or idle, not pinned at its own ring cap at the same moment N buffers
  *     are all pinned at theirs. Intercept = page/app baseline (17,825,792 bytes, a FLOOR — see below) +
- *     the main thread's own wasm module (8,454,144 bytes, `main.ts`'s `init()`, invisible to a heap
+ *     the main thread's own wasm module (8,454,144 bytes, the `init()` call in `main.ts`, invisible to a heap
  *     reading the same way every worker's module is) + that source fixed cost. **Derived cap: 11.**
  *   * **(b) everything-at-exhaustion — reference only, NOT what ships.** The stricter reading: the
  *     source session's own λ and TM rings ALSO driven to exhaustion at the same instant every buffer's
@@ -606,7 +606,7 @@ export class ScratchBuffers {
    * cold-buffer hazard unreachable rather than merely handled. `recompile`'s `this.#reg.entryOf(id)`
    * would throw for a cold id, and there is no binding left on a cold buffer to call `recompile`
    * with — see `recompile`'s own doc. It holds as long as a caller hands this method every slot that
-   * MIGHT be bound to `id`: `main.ts`'s `panes.all()` is what the real app passes, the same set
+   * MIGHT be bound to `id`: the `panes.all()` call in `main.ts` is what the real app passes, the same set
    * `retire` is handed for the same reason.
    *
    * **THE REBIND RUNS EVEN WHEN THE BUFFER IS ALREADY COLD, AND THE RETURN VALUE DOES NOT SAY SO.** A
@@ -848,7 +848,7 @@ export class ScratchBuffers {
       tmProgram: null,
     })
     state.warm = true
-    // SUPERSEDE THEN POST, the pattern `main.ts`'s `schedule` uses and for the same reason
+    // SUPERSEDE THEN POST, the pattern `compile.ts`'s `schedule` uses and for the same reason
     // (`SessionClient.supersede`'s doc): a fresh client is at generation 0, which matches nothing,
     // so the claim has to happen before the post or the request would drop its own message.
     //

@@ -88,13 +88,28 @@ describe('a full store', () => {
    * call, reached through `editorHome` — so its arrival is proof the second persist has already been
    * attempted. **`setEditor` IS `lambda-pane.ts`'s `LambdaPane` METHOD, NOT ANYTHING `replies.ts`
    * DEFINES, and this sentence said otherwise until the whole-branch review.** It read
-   * `` `replies.ts`'s `LambdaPane.setEditor` `` — the one possessive in 57 conversions that named a
-   * symbol its file does not own, which sends a reader grepping `replies.ts` for a definition that
-   * has never been there. Task 2 got the identical shape right (*"called at `reduce.rs`'s
-   * `reduce_step_go`"*); this one is the counter-example, and the fix is to name the arm that calls
-   * it and the file that declares it. This citation used to read `replies.ts` lines 325-341, which by
-   * then was comment prose about `linkIndex` nullability and `setEditor`'s single target, not either
-   * call.
+   * `` `replies.ts`'s `LambdaPane.setEditor` ``, which sends a reader grepping `replies.ts` for a  check-attributions: allow
+   * definition that has never been there. Task 2 got the identical shape right (*"called at
+   * `reduce.rs`'s `reduce_step_go`"*); this one is the counter-example, and the fix is to name the arm
+   * that calls it and the file that declares it. This citation used to read `replies.ts` lines 325-341,
+   * which by then was comment prose about `linkIndex` nullability and `setEditor`'s single target, not
+   * either call. That `reduce.rs` citation was itself split across a line wrap here, so no `grep` line
+   * ever held both halves and the gate did not count it at all. It is JOINED now rather than kept as a
+   * documented curiosity: one hand-placed line break was the only thing holding the split — biome never
+   * reflows a comment — so the next prose edit to this paragraph would have moved the gate's site count
+   * with no diff to any citation. The gate's own header records the measurement and keeps narrating the
+   * hole, which is real whether or not this one instance sits in it.
+   *
+   * **IT WAS CALLED "the one possessive in 57 conversions that named a symbol its file does not own"
+   * HERE, AND IT WAS ONE OF TWO.** The second is in `lambda-pane-editor.test.ts`: the same commit that
+   * produced these 57 conversions rewrote `types.ts` lines 83-116 into a possessive citation of
+   * `LambdaState` against `types.ts`, and `types.ts` is a barrel that re-exports that type from a
+   * gitignored generated binding — so it owns the symbol no more than `replies.ts` owns `setEditor`.
+   * The declaration-gate branch repointed it at `viewmodel.rs`. Found with `git log -S` on the
+   * citation, not by re-reading: **"the one X" is a claim about every other member of a set, and
+   * nothing but enumerating the set can check it.** No gate will ever say so either — the line above
+   * carries the escape-hatch marker, because the quoted citation has to stay wrong to illustrate the
+   * mistake — so a superlative written inside an exempted line is as unguarded as prose gets.
    */
   it('reports once, and the report survives further writes', async () => {
     refuseWrites = true

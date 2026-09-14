@@ -182,7 +182,7 @@ fn lowering_tags_each_core_construct_at_its_own_root() {
     // inside it, which is exactly why the range read as confirmation.
     assert_eq!(resolve(let_id), "let x = 40;", "the Let's tag must resolve to the let binding's own source text");
 
-    // 2. Descend by STRUCTURE — not by searching — to the BinOp's own App. `lower.rs`'s `Let` arm
+    // 2. Descend by STRUCTURE — not by searching — to the BinOp's own App. The `Let` arm in `lower.rs`
     // builds `app_owned(abs(name, lower(body)), lower(value), let_id)`, and `lower_expr`'s `BinOp`
     // arm returns its OWN tagged App directly (no extra spine node in between), so the shape is:
     // root = App(Abs("x", <BinOp's own App>), <value>, Some(let_id)).

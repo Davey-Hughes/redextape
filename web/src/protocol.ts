@@ -52,7 +52,7 @@ export const TM_RADIUS = 40
  *
  * IT BOUNDS TWO DIFFERENT THINGS AT TWO DIFFERENT SITES, AND ONLY ONE OF THEM IS MEMORY.
  * `session-worker.ts`'s `allowance` bounds bytes PRODUCED — the worker posts each batch and clears
- * it, so it retains none of them. `main.ts`'s `sessions.add` call constructs the two `History` rings
+ * it, so it retains none of them. The `sessions.add` call in `main.ts` constructs the two `History` rings
  * that bound bytes RETAINED. They happen to be the same constant, which is why the plan's "one session
  * is already 64 MB" is true, but it is `main.ts`'s two rings and not the worker's `allowance` that make
  * it true. The two come apart on `[continue]`: `onExtend` (`session-worker.ts`) raises the allowance

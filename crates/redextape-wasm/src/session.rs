@@ -263,9 +263,13 @@ pub struct TmStatus {
     /// `cargo nextest run -p redextape-wasm --features ts -E 'binary(ts_bindings)'` still reported
     /// `2 tests run: 2 passed` — neither Rust gate moved — but `tsc` reported three `TS2322` errors, one
     /// per call site assigning a literal `null` to the now-narrowed field: `replies.test.ts`'s
-    /// `compiled` fixture, `results.test.ts`'s `TmLeg` fixture in `'shows the TM reason and no width
-    /// when that backend declines'`, and `session-client.test.ts`'s `compiled` fixture, each
-    /// `Type 'null' is not assignable to type 'number'.` Restoring
+    /// `compiled` fixture; the `declined` fixture in `results.test.ts`, under `'shows the TM reason and
+    /// no width when that backend declines'`; and `session-client.test.ts`'s `compiled` fixture, each
+    /// `Type 'null' is not assignable to type 'number'.` **THE MIDDLE ONE READ "the `TmLeg` fixture in
+    /// `results.test.ts`" AND THAT FILE HOLDS FOUR OF THEM** — `tmOk` at module scope, two `capped`
+    /// bindings in adjacent tests, and this `declined` one — so the definite article rested entirely on
+    /// the test title trailing it, and a reader who stopped at the filename had three wrong fixtures to
+    /// choose from. Restoring
     /// `ts(type = "number | null")` and re-running `build:bindings` returns `pnpm run typecheck` to exit
     /// 0. The condition named above holds, on this tree, on this measurement: with the barrel importing
     /// `TmStatus` from `../bindings/`, `tsc` does refuse the dropped `| null`.

@@ -59,20 +59,55 @@ repos:
       # what the profile then said was not what the sentence had assumed — stripping every cited file
       # costs ~180 ms, and the other seven seconds were 486 forks, one per SITE, from command
       # substitutions in the symbol test and the resolver. Both now return through globals and a bash
-      # word test. Scan alone is 2.60-2.65 s over five runs at the 485 sites in 290 tracked files.
+      # word test.
+      # **"THE BRANCH ENDS FASTER THAN IT STARTED" STOOD HERE AND IS FALSE. IT FLATTERED THE CHANGE,
+      # AND THE FIGURE IT RESTED ON WAS ATTRIBUTED TO THE WRONG TREE AND THE WRONG RUN COUNT.** It read
+      # "2,599-2,716 ms over five runs at 471 sites, against 2,738-2,751 ms at the commit just before
+      # the declaration extractor was added". That second range is a real measurement of a real tree —
+      # the plan records it as the BRANCH-POINT baseline, 499 sites, over THREE runs — and the commit it
+      # was credited to here, `e7da0a1`, carries 471. The two ranges were also taken minutes apart under
+      # different load, so the comparison measured the machine as much as the change.
+      #
+      # Re-measured INTERLEAVED across three trees, 10 rounds, one sample of each per round in rotating
+      # order, one untimed warm-up per tree, `bash scripts/check-attributions.sh` with no `--self-test`
+      # and the two older trees in `git worktree` checkouts:
+      #
+      #   55750f8  presence rule,    499 sites   2,679-2,830 ms   mean 2,778
+      #   e7da0a1  presence rule,    471 sites   2,637-2,680 ms   mean 2,662
+      #   HEAD     declaration rule, 471 sites   2,679-2,796 ms   mean 2,765
+      #
+      # So the honest result is INDISTINGUISHABLE FROM THE BRANCH POINT — 13 ms of mean on a ~2,700 ms
+      # base, inside a spread of 150 ms — and about **4% SLOWER** than the same 471-site tree under the
+      # old rule, which is the only pair that isolates the extractor. Both halves have a mechanism. The
+      # sweep deleted 28 sites and took ~116 ms of mean with them; the extractor put ~103 ms back.
+      # A whole extractor for ~4%, invisible against the tree the branch started from, needs no
+      # inflating; claiming it came out ahead cost the figure its credibility.
+      # **AND THE SENTENCE THAT USED TO DERIVE "~4% INSTEAD OF ~50%" FROM THE BLANK-LINE GUARD IS GONE,
+      # BECAUSE IT MADE THE EXACT COMPARISON THE PARAGRAPH ABOVE IT RETIRES.** It pitted the interleaved
+      # mean against a single-run-set guard-removed figure — 4,099-4,118 ms, a five-run pair taken on
+      # another tree — and the roadmap entry marks that figure as not comparable to the interleaved
+      # table in so many words. The guard is now measured on its own terms, both sides the same way:
+      # interleaved on this tree, 10 rounds, one sample of each variant per round in rotating order,
+      # one untimed warm-up each, no `--self-test` — guard present **2,845-2,887 ms, mean 2,865**;
+      # guard line commented out **4,180-4,242 ms, mean 4,217**. Removing it makes the same scan
+      # **47% slower** for an identical verdict. That is a claim about the guard and nothing else; what
+      # the extractor costs against the presence rule is the interleaved table above, and the two
+      # measurements are separate sessions that must not be subtracted from each other.
       # **THE COMPARISON FIGURES HERE ARE MEASURED IN THE SAME MINUTE, NOT QUOTED**, which is the
       # second thing this comment got wrong: it first read "against 574-594 ms for `check-text-bytes`
       # and ~250 ms for `check-citations` on the same machine" — two figures copied out of the hook
       # comments above rather than run, and the first is nearly 2x low against this tree. Re-run
-      # together: `check-text-bytes` 1,070 ms, `check-citations` 487 ms, `check-doc-figures` 254 ms,
-      # `check-shared-docs` 190 ms, this hook 2,667 ms. Still the slowest here, by about 2.5x rather
-      # than the order of magnitude the guessed figure implied.
+      # together, interleaved over five rounds, each hook doing what this file makes it do
+      # (`--self-test` then scan): `check-text-bytes` 1,131-1,165 ms, `check-citations` 507-528 ms,
+      # `check-doc-figures` 260-267 ms, `check-shared-docs` 185-193 ms, this hook 2,803-2,843 ms. Still
+      # the slowest here, by about 2.4x over the next one rather than the order of magnitude the guessed
+      # figure implied.
       # `--self-test` first, then the scan, for the reason `check-text-bytes` states: a gate that only
       # ever runs against a passing tree cannot tell you it still works. This one's red half is not
       # hypothetical — it was demonstrated against the unfixed tree that motivated it, where it found
       # 31 sites, and against a draft of itself where it found 467 and was wrong about 441 of them.
       - id: check-attributions
-        name: symbol citations name the file the symbol is in
+        name: symbol citations name the file that declares the symbol
         entry: bash -c 'scripts/check-attributions.sh --self-test && scripts/check-attributions.sh'
         language: system
         always_run: true

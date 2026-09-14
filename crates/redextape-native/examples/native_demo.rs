@@ -73,7 +73,7 @@ fn main() {
     println!("   like native's registers. Every value below is representable in `Binary`, so this contrast");
     println!("   is \"native vs. unary\", not \"native vs. the TM backend\" — see `Binary::at`/`run_tm_fitted`");
     println!("   in `redextape_core::tm`. The genuinely remaining gap is values `>= 2^64`: this language's");
-    println!("   own `Value::Nat(u64)` saturates there too (`interp.rs`'s `saturating_add`/`_mul`), so no");
+    println!("   own `Value::Nat(u64)` saturates there too (the `saturating_add`/`_mul` in `interp.rs`), so no");
     println!("   program in this demo can express one — the boundary this file can actually show is unary");
     println!("   vs. everything else, not native vs. the TM backend as a whole.\n");
     println!("   {:<64} {:>10}  {}", "program", "result", "oracle");

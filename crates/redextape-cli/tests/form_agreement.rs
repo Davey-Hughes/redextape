@@ -25,8 +25,8 @@
 //! `run_classifies` passes `--backend lambda` and parses the noun in the "`--backend` does not
 //! apply" message `run.rs` prints; `fmt_classifies` passes `--width 40` and parses the noun in the
 //! "`--width` does not apply" message `fmt.rs` prints. Both checks fire from the extension alone,
-//! before either command parses a byte of the file — `run.rs`'s `form.is_artifact()` guard and
-//! `fmt.rs`'s `explicit_width.is_some() && form.is_artifact()` guard both run ahead of any parsing,
+//! before either command parses a byte of the file — the `form.is_artifact()` guard in `run.rs` and the
+//! `explicit_width.is_some() && form.is_artifact()` guard in `fmt.rs` both run ahead of any parsing,
 //! and neither command consults a path's content — so the scratch files below are written empty;
 //! the content is not part of the property under test.
 #![allow(clippy::unwrap_used)]

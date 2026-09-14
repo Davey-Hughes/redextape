@@ -281,7 +281,7 @@ fn lowered_list_term(n: usize) -> LambdaTerm {
 /// The term `lower` WOULD produce for `[0, 1, ..., n-1]`, built directly with the same combinators
 /// `lower_expr`'s `Core::Apply(cons, [elem, acc])` arm and `resolve`'s `"cons"`/`"nil"` cases use
 /// (`encode::cons`, `encode::nil`, `encode::church`, all `pub`) — `cons(0, cons(1, ..., cons(n-1,
-/// nil)))`, built from the right exactly as `desugar.rs`'s `Expr::List` arm does.
+/// nil)))`, built from the right exactly as the `Expr::List` arm in `desugar.rs` does.
 ///
 /// WHY THIS BYPASSES `lower` RATHER THAN GOING THROUGH IT WITH A DIRECTLY-BUILT `Core`: a list literal
 /// of `n` elements desugars to a `Core::Apply` spine of depth `n + 1` regardless of how that `Core` was

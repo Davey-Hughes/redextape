@@ -108,8 +108,8 @@ const EQUIV_CAP: u64 = 10_000;
 /// test code — but *only* if the terms under test carry provenance tags at all. Over untagged terms
 /// every event on both sides is `Owner::None`, the comparison is trivially satisfied, and the strongest
 /// gate in the crate would silently prove nothing about the newest field in the type it compares. The
-/// terms here are LOWERED from source. The generated programs are tagged by `lower.rs`'s `BinOp` and
-/// `If` arms — the two constructs `arb_expr_over` generates — at their own root `App`, so they are
+/// terms here are LOWERED from source. The generated programs are tagged by the `BinOp` and `If` arms
+/// in `lower.rs` — the two constructs `arb_expr_over` generates — at their own root `App`, so they are
 /// tagged in the way real programs are. The curated shapes below go further: the region-path loop shape
 /// is tagged by five other `lower.rs` arms on the store-passing path (`Let { mutable: true }`, `Seq`,
 /// the region `If`, `build_while`'s own root) that no generated program ever reaches. The assertions

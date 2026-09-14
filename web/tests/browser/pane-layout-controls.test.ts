@@ -199,7 +199,7 @@ describe('layoutControls', () => {
  */
 
 // EXACT EQUALITY AGAINST `'source'`, NOT `includes('source')`. The source SESSION is labelled `source`
-// too (`main.ts`'s `sessions.add`), so every pair it contributes reads `λ · source` / `TM · source` —
+// too (the `sessions.add` call in `main.ts`), so every pair it contributes reads `λ · source` / `TM · source` —
 // a substring test for the source PANE would be satisfied by the pane's own binding and could never
 // fail. The one entry that is not a `(leg, session)` pair is the one with no leg in its text.
 const menuLabels = () => [...parent.querySelectorAll<HTMLElement>('.pane-picker button')].map((b) => b.textContent)

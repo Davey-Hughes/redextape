@@ -532,8 +532,8 @@ describe('the app, end to end', () => {
       expect(paneText('lambda')).toBe('')
       expect(document.querySelectorAll('[data-leaf="tm-0"] .tape').length).toBe(0)
       // Design §6's error table: "panes read 'not compiled'". `sessions.ts`'s `resetLegs` used to leave
-      // `reason: ''` here, so the control strip's step readout (`controls.ts`'s `controlState`, via
-      // `pane-chrome.ts`'s `.step`) was blank too, not merely the term/tape area above it.
+      // `reason: ''` here, so the control strip's step readout (`controls.ts`'s `controlState`, written onto
+      // the `.step` span `pane-chrome.ts` builds) was blank too, not merely the term/tape area above it.
       expect(stepText('lambda')).toBe('not compiled')
       expect(stepText('tm')).toBe('not compiled')
     })

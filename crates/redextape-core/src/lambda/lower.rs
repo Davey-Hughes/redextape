@@ -24,7 +24,7 @@ const GROUP: &str = "$group";
 ///
 /// Rather than thread a live counter through all of those, this module measures the input's nesting
 /// depth ONCE, ITERATIVELY (`too_deep_node`, an explicit worklist — no native recursion, mirroring
-/// `core.rs`'s `Drop` impl and `defunc`'s guard of the same shape), before any recursive pass runs:
+/// the `Drop` impl in `core.rs` and `defunc`'s guard of the same shape), before any recursive pass runs:
 /// each of those walks descends only into sub-trees of `core`, so bounding `core`'s own height bounds
 /// them all. THE TWO ANALYSES ARE WHY. `assigns_captured` walks a lambda's whole body before that body
 /// is lowered, so a counter carried by `lower_expr` alone would still abort on a shallow `fn` wrapping

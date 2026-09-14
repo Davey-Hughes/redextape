@@ -114,7 +114,7 @@ describe('lambdaWindow', () => {
 // happens to work anyway — which is exactly how this function's bug survived review. `λ` is 2 bytes
 // and 1 UTF-16 code unit, so prefixing the fixture with one binder glyph makes every following byte
 // offset drift one UTF-16 index ahead of itself. Same shape as `TEXT`/`SPANS` above, every offset
-// shifted 2 bytes to make room for the glyph — see `highlight.test.ts`'s `linkMark` case for the same
+// shifted 2 bytes to make room for the glyph — see the `linkMark` case in `highlight.test.ts` for the same
 // idiom (`'λf. λx. f x'`) applied to a sibling module.
 const LAMBDA_TEXT = `λ${TEXT}`
 const LAMBDA_SPANS: Classified = [

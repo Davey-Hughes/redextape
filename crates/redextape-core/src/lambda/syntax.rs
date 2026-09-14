@@ -222,7 +222,7 @@ pub fn print_lambda(t: &LambdaTerm) -> String {
 ///
 /// THE BUDGET ALONE DOES NOT BOUND RECURSION, WHICH IS WHY A DEPTH COUNTER RIDES ALONGSIDE IT. A
 /// left-nested spine — `write_app_fn` delegating into `write_term` down the function-position chain,
-/// exactly the shape `lower.rs`'s `Core::Apply` builds — writes ZERO bytes while descending: every
+/// exactly the shape the `Core::Apply` arm in `lower.rs` builds — writes ZERO bytes while descending: every
 /// frame calls `write_app_fn`/`write_term` again before it writes anything of its own, so `out.len() >=
 /// budget` cannot fire during that descent no matter how small `byte_budget` is. Native recursion depth
 /// there equals the spine length, and a spine of 100,000 juxtaposed atoms overflows the stack before
@@ -460,7 +460,7 @@ impl Printer<'_> {
                 self.node(f, depth + 1, Role::AppFn);
                 self.path.pop();
                 // Re-checked for the same reason `parens` re-checks before its closing paren, and this
-                // is the LEFT-nested mirror of that case. `lower.rs`'s `Core::Apply` builds
+                // is the LEFT-nested mirror of that case. The `Core::Apply` arm in `lower.rs` builds
                 // `term = app(term, la)` in a loop, so `f(a, b, c)` is `App(App(App(f,a),b),c)`;
                 // without this check every enclosing frame pushes its separator as the stack unwinds,
                 // and the overshoot the doc comment bounds at one binder prefix becomes one space PER
@@ -899,7 +899,7 @@ mod tests {
     }
 
     /// Left-nested application chains are the case `parenthesized`'s re-check does NOT cover, and they
-    /// are the common one: `lower.rs`'s `Core::Apply` builds `term = app(term, la)` per argument, so
+    /// are the common one: the `Core::Apply` arm in `lower.rs` builds `term = app(term, la)` per argument, so
     /// every multi-argument call is left-nested. Without a budget re-check before the separator, each
     /// frame pushes another space as the stack unwinds and overshoot grows with the argument count.
     #[test]

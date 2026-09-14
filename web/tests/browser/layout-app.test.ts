@@ -117,7 +117,7 @@ describe('the layout tree in the app', () => {
   /**
    * **THE OTHER GESTURE THAT ENDS SOMEWHERE — IMPORTANT FINDING, REVIEW OF THE PICKER COMMIT.** `close`
    * (above) and `rebind`'s cross-leg arm (`pane-kind-switch.test.ts`) both end in `focusPane`; the split
-   * handler did not, and `layout-view.ts`'s `root.replaceChildren()` detaches the subtree the clicked
+   * handler did not, and the `root.replaceChildren()` in `layout-view.ts` detaches the subtree the clicked
    * control is in, so the browser blurred it and the user was left on `<body>` — one Tab from the top of
    * the document, having just asked for a pane. Not a regression (the pre-picker split behaved the same),
    * but `splitControl`'s own doc argues that for a CREATION control with no other route to it "building

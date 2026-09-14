@@ -344,7 +344,7 @@ describe('detach is a fork', () => {
  * follows: `PaneSlot.render` is written to be "the SAME resolution the app's `draw()` does rather than
  * a re-implementation of it" (`sessions.ts`'s own doc), and the `describe` above drives
  * `ScratchBuffers` directly over real `session-worker.ts` threads for the identical reason. Nothing
- * here re-implements `noSessionReply`; it is the exact method `main.ts`'s `onScratchReply` calls.
+ * here re-implements `noSessionReply`; it is the exact method `replies.ts`'s `onScratchReply` calls.
  */
 describe('the no-session report for a failed fork', () => {
   it('keeps a phantom buffer and its pane and hands back a diagnostic to show — but answers null for an already-live scratch', {
@@ -366,7 +366,7 @@ describe('the no-session report for a failed fork', () => {
       // registry — so the constant made `legOf` throw on the reply that proves the second buffer works
       // (`bound to a session that is not in the registry: scratch-1`). Routing by the reply's own
       // session is what `ScratchBuffersConfig.onReply` curries the id in for, and it is the same
-      // resolution `main.ts`'s `onScratchReply` performs.
+      // resolution `replies.ts`'s `onScratchReply` performs.
       onReply: (session, r) => {
         seen.push(r)
         if (r.kind === 'lambda-frames') {
@@ -415,7 +415,7 @@ describe('the no-session report for a failed fork', () => {
       if (failReply === undefined || failReply.kind !== 'no-session') throw new Error('expected a no-session reply')
       expect(failReply.diagnostics.length).toBeGreaterThan(0)
 
-      // CALLED EXACTLY AS `main.ts`'s `onScratchReply` CALLS IT — including the session, which that
+      // CALLED EXACTLY AS `replies.ts`'s `onScratchReply` CALLS IT — including the session, which that
       // handler takes as its own first parameter and which this call used to omit. The `home` and
       // `slots` arguments it also used to take went with the retire (5d-ii-c decision 2).
       const failed = pad.noSessionReply(SCRATCH, failReply.diagnostics)
