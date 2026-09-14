@@ -6,16 +6,14 @@
 // `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-use redextape_core::core::Core;
-use redextape_core::desugar::desugar;
-use redextape_core::parser::parse;
 use redextape_core::tm::{
     DescribedRun, EncodingKind, TM_DEFAULT_CAPS, TmRun, TmStatus, decode_tape_ty, parse_tm_full, print_tm_with,
     run_tm_described, simulate,
 };
-use redextape_core::ty::Ty;
-use redextape_core::typeck::result_type;
 use redextape_core::value::Value;
+
+mod common;
+use common::core_and_ty;
 
 /// Programs small enough to print in full and varied enough to reach REG, WORK, HEAP and the stack.
 const CORPUS: &[&str] = &[
@@ -24,17 +22,6 @@ const CORPUS: &[&str] = &[
     "cons(1, cons(2, nil))",
     "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)",
 ];
-
-/// Parse, typecheck and desugar `src`, returning the `Core` and its top-level type together — the
-/// shared prelude every test below needs before it can call `run_tm_described` (which wants `Core`) or
-/// the reference interpreter (which also wants `Core`, but needs no type).
-fn core_and_ty(src: &str) -> (Core, Ty) {
-    let (prog, ds) = parse(src);
-    assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
-    let prog = prog.expect("a program");
-    let ty = result_type(&prog).unwrap_or_else(|e| panic!("type errors for {src}: {e:?}"));
-    (desugar(&prog), ty)
-}
 
 fn described(src: &str, kind: EncodingKind) -> DescribedRun {
     let (core, ty) = core_and_ty(src);

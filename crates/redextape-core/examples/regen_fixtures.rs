@@ -29,8 +29,8 @@ use redextape_core::tm::{DescribedRun, EncodingKind, TM_DEFAULT_CAPS, print_tm_w
 use redextape_core::ty::Ty;
 use redextape_core::typeck::result_type;
 
-/// Parse, typecheck and desugar `src`, returning the `Core` and its top-level type together — mirrors
-/// the identical helper in `tests/tm_header.rs`.
+/// Parse, typecheck and desugar `src`, returning the `Core` and its top-level type together. The
+/// integration tests share one copy in `tests/common/mod.rs`; this example keeps its own.
 fn core_and_ty(src: &str) -> (Core, Ty) {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");

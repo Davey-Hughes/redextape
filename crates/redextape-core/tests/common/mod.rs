@@ -1,4 +1,5 @@
-//! Shared helpers for the integration tests: the TM bank-safety checkers, and `core_of`.
+//! Shared helpers for the integration tests: the TM bank-safety checkers, `core_of`, and the two
+//! program-to-machine builders `core_and_ty` and `build_machine`.
 //!
 //! Integration tests are separate binaries and cannot import one another, so these were originally
 //! duplicated across `tm_bank_invariant.rs`, `tm_exhaustive_bank_safety.rs` and
@@ -22,7 +23,11 @@
 use redextape_core::core::Core;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{AT, BLANK, BOX, Encoding, Machine, REG, SEP, WORK};
+use redextape_core::tm::{
+    AT, BLANK, BOX, Encoding, EncodingKind, Machine, REG, SEP, Symbol, TM_DEFAULT_CAPS, TmRun, WORK, run_tm_described,
+};
+use redextape_core::ty::Ty;
+use redextape_core::typeck::result_type;
 
 /// Parse and desugar a fixture that must be clean, which is how every test here starts.
 ///
@@ -32,6 +37,31 @@ pub fn core_of(src: &str) -> Core {
     let (p, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in {src:?}: {ds:?}");
     desugar(&p.expect("a program with no diagnostics parses"))
+}
+
+/// Parse, typecheck and desugar `src`, returning its `Core` and its top-level type together, for a
+/// fixture that must be clean. Panics on a diagnostic or a type error for the reason `core_of` gives.
+///
+/// **SHARED BECAUSE THE COPIES PASSED THIS MODULE'S OWN THRESHOLD.** `single_tape_oracle.rs`,
+/// `two_symbol_oracle.rs`, `one_way_oracle.rs` and `tm_header.rs` each carried this function verbatim.
+/// `examples/regen_fixtures.rs` still carries its own copy.
+pub fn core_and_ty(src: &str) -> (Core, Ty) {
+    let (prog, ds) = parse(src);
+    assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
+    let prog = prog.expect("a program");
+    let ty = result_type(&prog).unwrap_or_else(|e| panic!("type errors for {src}: {e:?}"));
+    (desugar(&prog), ty)
+}
+
+/// The lowered machine for `src` under `enc`, and the initial tapes it runs on — for a program the TM
+/// backend must run to completion. `two_symbol_oracle.rs` and `one_way_oracle.rs` each carried this function
+/// verbatim; `single_tape_oracle.rs` carried a unary-only variant, which its `ENCODING` constant now replaces.
+pub fn build_machine(src: &str, enc: EncodingKind) -> (Machine, Vec<Vec<Symbol>>) {
+    let (core, ty) = core_and_ty(src);
+    let d = run_tm_described(&core, enc, ty, TM_DEFAULT_CAPS).unwrap_or_else(|r| panic!("{src} did not run: {r:?}"));
+    assert!(matches!(d.run, TmRun::Ran { .. }), "the source machine must complete for {src:?}");
+    let init = d.header.init(d.machine.tapes);
+    (d.machine, init)
 }
 
 /// The width every generic checker measures against. A bounded encoding reports its field width; an

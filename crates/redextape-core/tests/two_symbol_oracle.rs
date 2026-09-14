@@ -15,37 +15,19 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-use redextape_core::core::Core;
-use redextape_core::desugar::desugar;
-use redextape_core::parser::parse;
+use redextape_core::tm::EncodingKind;
 use redextape_core::tm::build::MAX_MACHINE_STATES;
 use redextape_core::tm::machine::{BLANK, Machine, Symbol};
 use redextape_core::tm::sim::{Caps, DEFAULT_CAPS, Status, Tape, simulate_final};
 use redextape_core::tm::single_tape::{interleave, layout_collision, normalize, to_single_tape};
 use redextape_core::tm::two_symbol::{Code, bitify, to_two_symbol, unbitify};
-use redextape_core::tm::{EncodingKind, TM_DEFAULT_CAPS, TmRun, run_tm_described};
-use redextape_core::ty::Ty;
-use redextape_core::typeck::result_type;
 use std::collections::BTreeSet;
+
+mod common;
+use common::build_machine;
 
 /// Padding blocks per side for the single-tape image, matching `single_tape_oracle.rs`'s `PAD`.
 const PAD: usize = 2;
-
-fn core_and_ty(src: &str) -> (Core, Ty) {
-    let (prog, ds) = parse(src);
-    assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
-    let prog = prog.expect("a program");
-    let ty = result_type(&prog).unwrap_or_else(|e| panic!("type errors for {src}: {e:?}"));
-    (desugar(&prog), ty)
-}
-
-fn build_machine(src: &str, enc: EncodingKind) -> (Machine, Vec<Vec<Symbol>>) {
-    let (core, ty) = core_and_ty(src);
-    let d = run_tm_described(&core, enc, ty, TM_DEFAULT_CAPS).unwrap_or_else(|r| panic!("{src} did not run: {r:?}"));
-    assert!(matches!(d.run, TmRun::Ran { .. }), "the source machine must complete for {src:?}");
-    let init = d.header.init(d.machine.tapes);
-    (d.machine, init)
-}
 
 /// The leg itself, over an arbitrary machine and its tapes, so Task 7 can point it at a single-tape
 /// image without a second copy of the assertions.
@@ -190,7 +172,7 @@ fn the_composed_machine_needs_more_symbols_than_its_rules_name() {
 }
 
 /// **ONE TAPE, ONE HEAD, TWO SYMBOLS** — stage 1 composed with stage 2, which is the roadmap's
-/// stated reason to do the alphabet reduction second. Only stage 3's one-way fold is missing.
+/// stated reason to do the alphabet reduction second.
 ///
 /// This asserts the SHAPE, which is cheap. `the_composed_machine_runs` asserts that it computes the
 /// same thing, which is not.

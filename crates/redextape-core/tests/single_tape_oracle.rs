@@ -5,17 +5,14 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-use redextape_core::core::Core;
-use redextape_core::desugar::desugar;
-use redextape_core::parser::parse;
-use redextape_core::tm::machine::{Machine, Symbol};
+use redextape_core::tm::EncodingKind;
 use redextape_core::tm::sim::{Caps, DEFAULT_CAPS, Status, simulate_final};
 use redextape_core::tm::single_tape::{
     OVERFLOW, deinterleave, interleave, layout_collision, normalize, to_single_tape,
 };
-use redextape_core::tm::{EncodingKind, TM_DEFAULT_CAPS, TmRun, run_tm_described};
-use redextape_core::ty::Ty;
-use redextape_core::typeck::result_type;
+
+mod common;
+use common::build_machine;
 
 /// Padding blocks on each side, measured against this corpus rather than guessed: `0` overflows,
 /// `1` suffices for every program below, and `2` is `1` plus one block of margin. Because a head that
@@ -28,24 +25,9 @@ use redextape_core::typeck::result_type;
 /// measured at is not a property of the reduction.
 const PAD: usize = 2;
 
-fn core_and_ty(src: &str) -> (Core, Ty) {
-    let (prog, ds) = parse(src);
-    assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
-    let prog = prog.expect("a program");
-    let ty = result_type(&prog).unwrap_or_else(|e| panic!("type errors for {src}: {e:?}"));
-    (desugar(&prog), ty)
-}
-
-/// The multi-tape machine and the initial tapes it runs on. Unary because the reduction is
-/// indifferent to the encoding and unary is the cheaper of the two to build.
-fn build_machine(src: &str) -> (Machine, Vec<Vec<Symbol>>) {
-    let (core, ty) = core_and_ty(src);
-    let d = run_tm_described(&core, EncodingKind::Unary, ty, TM_DEFAULT_CAPS)
-        .unwrap_or_else(|r| panic!("{src} did not run: {r:?}"));
-    assert!(matches!(d.run, TmRun::Ran { .. }), "the multi-tape run must complete for {src:?}");
-    let init = d.header.init(d.machine.tapes);
-    (d.machine, init)
-}
+/// Every machine here is built under `Unary`: the reduction is indifferent to the encoding, and unary is
+/// the cheaper of the two to build.
+const ENCODING: EncodingKind = EncodingKind::Unary;
 
 fn assert_single_tape_agrees(src: &str) {
     assert_single_tape_agrees_capped(src, DEFAULT_CAPS);
@@ -57,7 +39,7 @@ fn assert_single_tape_agrees(src: &str) {
 /// would loosen every other test in this file that relies on a runaway construction hitting its cap
 /// quickly.
 fn assert_single_tape_agrees_capped(src: &str, caps: Caps) {
-    let (m, inits) = build_machine(src);
+    let (m, inits) = build_machine(src, ENCODING);
     // THE LAYOUT'S OWN SYMBOLS MUST NOT APPEAR IN THE DATA, and `to_single_tape`'s own refusal cannot
     // see the whole question: it reads `Machine::alphabet()`, which collects only the symbols the
     // RULES mention, so a colliding symbol living solely in an initial tape is invisible to it and
@@ -111,7 +93,7 @@ fn the_single_tape_leg_agrees_on_small_programs() {
 /// doc comment is why that ratio alone is not comparable across runs: dividing it by `blocks` (which
 /// counts padding too) is what survives a change to `PAD`.
 fn step_counts(src: &str, caps: Caps) -> (u64, u64, usize) {
-    let (m, inits) = build_machine(src);
+    let (m, inits) = build_machine(src, ENCODING);
     let (_want, _ws, _wstatus, multi) = simulate_final(&m, &inits, caps);
     let single_m = to_single_tape(&m);
     let cells = interleave(&inits, m.tapes, PAD, PAD);
