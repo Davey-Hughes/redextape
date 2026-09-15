@@ -13,48 +13,12 @@ use proptest::prelude::*;
 use redextape_core::tm::EncodingKind;
 use redextape_core::tm::machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
 use redextape_core::tm::one_way::{LEFT_END, OriginSnapshot, to_one_way, unzigzag, zigzag};
-use redextape_core::tm::sim::{Caps, DEFAULT_CAPS, Status, Tape, simulate_final, simulate_watched};
+use redextape_core::tm::sim::{Caps, DEFAULT_CAPS, Status, simulate_final};
 use redextape_core::tm::single_tape::{LEFT, deinterleave, interleave, layout_collision, normalize, to_single_tape};
 use redextape_core::tm::two_symbol::{Code, bitify, to_two_symbol, unbitify};
 
 mod common;
-use common::build_machine;
-
-/// Run `m` and record where each tape's origin ends up in its final snapshot.
-///
-/// **A TAPE GROWS ON ITS LEFT EXACTLY WHEN, AFTER A STEP, IT IS LONGER AND ITS HEAD IS AT INDEX 0.** A
-/// step moves a head at most one cell, so a tape grows by at most one; growth on the right leaves the
-/// head at index 1 or beyond. The count of left growths is the origin's index. `slice(0, usize::MAX)`
-/// is the tape's length, O(tape) per step — affordable for machines that halt in thousands of steps,
-/// which is every machine this file runs through it.
-fn run_with_origins(m: &Machine, inits: &[Vec<Symbol>], caps: Caps) -> (Vec<OriginSnapshot>, StateId, Status, u64) {
-    let mut len: Vec<usize> = (0..m.tapes).map(|i| inits.get(i).map_or(1, |t| t.len().max(1))).collect();
-    let mut grown = vec![0usize; m.tapes];
-    let mut steps = 0u64;
-    let (tapes, state, status) = {
-        let mut watch = |tapes: &[Tape]| {
-            steps += 1;
-            for (i, t) in tapes.iter().enumerate() {
-                let l = t.slice(0, usize::MAX).len();
-                if l > len[i] && t.head_index() == 0 {
-                    grown[i] += l - len[i];
-                }
-                len[i] = l;
-            }
-            true
-        };
-        simulate_watched(m, inits, caps, &mut watch)
-    };
-    let snaps = tapes
-        .iter()
-        .zip(&grown)
-        .map(|(t, &origin)| {
-            let (cells, head) = t.snapshot();
-            OriginSnapshot { cells, head, origin }
-        })
-        .collect();
-    (snaps, state, status, steps)
-}
+use common::{acyclic_machine, build_machine, run_with_origins};
 
 struct Outcome {
     want: Vec<OriginSnapshot>,
@@ -238,46 +202,6 @@ fn two_tapes_crossing_the_origin_in_one_rule_agree() {
     let out = assert_fold_agrees("two tapes crossing together", &m, &[vec!['p'], vec!['q']], DEFAULT_CAPS);
     assert_eq!((out.want[0].origin, out.want[1].origin), (1, 2), "the fixture must take tape 0 to -1 and tape 1 to -2");
     assert!(out.want_accept && out.got_accept);
-}
-
-/// Random machines whose rules only ever target a higher-numbered state, so every run halts within as
-/// many steps as there are states. Moves lean left, since the left half is what this exists to reach.
-fn acyclic_machine() -> impl Strategy<Value = (Machine, Vec<Vec<Symbol>>)> {
-    (1usize..=3, 2usize..=12).prop_flat_map(|(tapes, n)| {
-        let sym = prop::sample::select(vec!['a', 'b', BLANK]);
-        let read = prop::option::of(sym.clone());
-        let write = prop::option::of(sym.clone());
-        let mv = prop::sample::select(vec![Move::L, Move::L, Move::R, Move::S]);
-        let rule = (
-            prop::collection::vec(read, tapes),
-            prop::collection::vec(write, tapes),
-            prop::collection::vec(mv, tapes),
-            any::<prop::sample::Index>(),
-        );
-        let states = prop::collection::vec(prop::collection::vec(rule, 1..=3), n);
-        let inits = prop::collection::vec(prop::collection::vec(sym, 0..4), tapes);
-        (states, inits).prop_map(move |(states, inits)| {
-            let mut built: Vec<State> = states
-                .into_iter()
-                .enumerate()
-                .map(|(i, rules)| State {
-                    name: format!("s{i}"),
-                    accept: false,
-                    rules: rules
-                        .into_iter()
-                        .map(|(read, write, moves, target)| Rule {
-                            read,
-                            write,
-                            moves,
-                            next: (i + 1 + target.index(n - i)) as StateId,
-                        })
-                        .collect(),
-                })
-                .collect();
-            built.push(State { name: "done".into(), accept: true, rules: vec![] });
-            (Machine { states: built, start: 0, tapes }, inits)
-        })
-    })
 }
 
 proptest! {

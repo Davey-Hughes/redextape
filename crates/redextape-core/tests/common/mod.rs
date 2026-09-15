@@ -3,11 +3,14 @@
 //!
 //! Integration tests are separate binaries and cannot import one another, so these were originally
 //! duplicated across `tm_bank_invariant.rs`, `tm_exhaustive_bank_safety.rs` and
-//! `tm_static_delimiter_safety.rs`, with a test pinning the copies identical. Three copies is where
-//! that stops being cheaper than a shared module: `tests/common/mod.rs` is the standard way to share
-//! code between integration tests, and one definition cannot drift from itself.
+//! `tm_static_delimiter_safety.rs`, with a test pinning the copies identical. `tests/common/mod.rs` is
+//! the standard way to share code between integration tests, and one definition cannot drift from itself.
 //!
-//! Two checkers live here, and they establish DIFFERENT kinds of claim about the same property:
+//! Two oracle-leg helpers live here as well: `run_with_origins`, which locates each tape's origin after a
+//! run, and `acyclic_machine`, a generator of small machines that always halt. `one_way_oracle.rs` defined
+//! both; they moved here when `universal_oracle.rs` needed them too, so neither leg keeps a copy.
+//!
+//! Several checkers live here. Two of them establish DIFFERENT kinds of claim about the same property:
 //!
 //!   * `reg_bank_is_well_formed` inspects a tape at a moment in time. Used after every simulator step,
 //!     it verifies the run that happened — and only that run, only as far as it got.
@@ -20,9 +23,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![allow(dead_code)] // each test binary uses a different subset
 
+use proptest::prelude::{Strategy, any, prop};
 use redextape_core::core::Core;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
+use redextape_core::tm::machine::{Move, Rule, State, StateId};
+use redextape_core::tm::one_way::OriginSnapshot;
+use redextape_core::tm::sim::{Caps, Status, Tape, simulate_watched};
 use redextape_core::tm::{
     AT, BLANK, BOX, Encoding, EncodingKind, Machine, REG, SEP, Symbol, TM_DEFAULT_CAPS, TmRun, WORK, run_tm_described,
 };
@@ -42,9 +49,9 @@ pub fn core_of(src: &str) -> Core {
 /// Parse, typecheck and desugar `src`, returning its `Core` and its top-level type together, for a
 /// fixture that must be clean. Panics on a diagnostic or a type error for the reason `core_of` gives.
 ///
-/// **SHARED BECAUSE THE COPIES PASSED THIS MODULE'S OWN THRESHOLD.** `single_tape_oracle.rs`,
-/// `two_symbol_oracle.rs`, `one_way_oracle.rs` and `tm_header.rs` each carried this function verbatim.
-/// `examples/regen_fixtures.rs` still carries its own copy.
+/// **SHARED BECAUSE SEVERAL INTEGRATION TESTS CARRIED IT VERBATIM:** `single_tape_oracle.rs`,
+/// `two_symbol_oracle.rs`, `one_way_oracle.rs` and `tm_header.rs`. `examples/regen_fixtures.rs` still
+/// carries its own copy.
 pub fn core_and_ty(src: &str) -> (Core, Ty) {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
@@ -336,4 +343,80 @@ pub fn stack_is_empty(cells: &[char]) -> Result<(), String> {
             cells.iter().collect::<String>()
         )),
     }
+}
+
+/// Run `m` and record where each tape's origin ends up in its final snapshot.
+///
+/// **A TAPE GROWS ON ITS LEFT EXACTLY WHEN, AFTER A STEP, IT IS LONGER AND ITS HEAD IS AT INDEX 0.** A
+/// step moves a head at most one cell, so a tape grows by at most one; growth on the right leaves the
+/// head at index 1 or beyond. The count of left growths is the origin's index. `slice(0, usize::MAX)`
+/// is the tape's length, O(tape) per step.
+pub fn run_with_origins(m: &Machine, inits: &[Vec<Symbol>], caps: Caps) -> (Vec<OriginSnapshot>, StateId, Status, u64) {
+    let mut len: Vec<usize> = (0..m.tapes).map(|i| inits.get(i).map_or(1, |t| t.len().max(1))).collect();
+    let mut grown = vec![0usize; m.tapes];
+    let mut steps = 0u64;
+    let (tapes, state, status) = {
+        let mut watch = |tapes: &[Tape]| {
+            steps += 1;
+            for (i, t) in tapes.iter().enumerate() {
+                let l = t.slice(0, usize::MAX).len();
+                if l > len[i] && t.head_index() == 0 {
+                    grown[i] += l - len[i];
+                }
+                len[i] = l;
+            }
+            true
+        };
+        simulate_watched(m, inits, caps, &mut watch)
+    };
+    let snaps = tapes
+        .iter()
+        .zip(&grown)
+        .map(|(t, &origin)| {
+            let (cells, head) = t.snapshot();
+            OriginSnapshot { cells, head, origin }
+        })
+        .collect();
+    (snaps, state, status, steps)
+}
+
+/// Random machines of one to three tapes whose rules only ever target a higher-numbered state, so every
+/// run halts within as many steps as there are states. Moves lean left, since the left half is what this
+/// exists to reach.
+pub fn acyclic_machine() -> impl Strategy<Value = (Machine, Vec<Vec<Symbol>>)> {
+    (1usize..=3, 2usize..=12).prop_flat_map(|(tapes, n)| {
+        let sym = prop::sample::select(vec!['a', 'b', BLANK]);
+        let read = prop::option::of(sym.clone());
+        let write = prop::option::of(sym.clone());
+        let mv = prop::sample::select(vec![Move::L, Move::L, Move::R, Move::S]);
+        let rule = (
+            prop::collection::vec(read, tapes),
+            prop::collection::vec(write, tapes),
+            prop::collection::vec(mv, tapes),
+            any::<prop::sample::Index>(),
+        );
+        let states = prop::collection::vec(prop::collection::vec(rule, 1..=3), n);
+        let inits = prop::collection::vec(prop::collection::vec(sym, 0..4), tapes);
+        (states, inits).prop_map(move |(states, inits)| {
+            let mut built: Vec<State> = states
+                .into_iter()
+                .enumerate()
+                .map(|(i, rules)| State {
+                    name: format!("s{i}"),
+                    accept: false,
+                    rules: rules
+                        .into_iter()
+                        .map(|(read, write, moves, target)| Rule {
+                            read,
+                            write,
+                            moves,
+                            next: (i + 1 + target.index(n - i)) as StateId,
+                        })
+                        .collect(),
+                })
+                .collect();
+            built.push(State { name: "done".into(), accept: true, rules: vec![] });
+            (Machine { states: built, start: 0, tapes }, inits)
+        })
+    })
 }

@@ -17028,7 +17028,7 @@ Every task's end state was built in a scratch worktree before it went into the p
 - **Two helper copies stay:** `examples/regen_fixtures.rs`'s `core_and_ty`, and the unit-test helpers inside `one_way.rs`.
 - **The commit messages of `24f5802` and `446b04b` still say `build_machine` had three verbatim copies.** History is not rewritten; the squash merge carries the PR description instead.
 - **Two lines this branch added exceed 120 columns**, both from the plan's own code and left alone by rustfmt: `one_way.rs`'s `proptest!` parameter line and `one_way_oracle.rs`'s cost-table `println!`.
-- **Tier 2 — a universal machine, a two-counter machine — is untouched.**
+- **Tier 2 — a universal machine, a two-counter machine — is untouched.** **ANNOTATED 2026-09-15 (`universal-tm`):** the universal machine is built; the two-counter machine is its own branch.
 
 ##### VERIFICATION
 
@@ -17308,3 +17308,161 @@ tests on parallel threads; the slow tier's combined peak is not measured.
   - The five later rows are the spec's sabotage table and the fix reports.
 - **Line-wrapped citations:** `git grep -n -P "\x60[A-Za-z0-9_./-]+\.(rs|ts|toml|sh|md|yml)\x60's\s*$" <rev> -- crates scripts | wc -l` prints **59** at `78ebea6` and at `632753e`.
 - **486 and 488 sites:** `028005f`'s commit message records `scripts/check-attributions.sh` before and after the rejoin.
+
+#### A UNIVERSAL TURING MACHINE OF 55 STATES AND 178 RULES RUNS LOWERED MACHINES LAID OUT ON ITS TAPES, AND EVERY GUEST TAPE, STATUS AND DECODED VALUE AGREES WITH THE DIRECT RUN. NO BINARY GUEST IN THE CORPUS CAN SHOW WHETHER IT KEEPS RULE ORDER. THE ORACLE DID NOT COMPARE THE GUEST'S FINAL STATE UNTIL THE WHOLE-BRANCH REVIEW, AND `decode_guest`'S PUBLIC DOC PROMISED A CLEAN READ OF TAPES CAUGHT MID-STEP, WHICH A PROBE MEASURED FALSE (2026-09-15, branch `universal-tm`, `78ebea6..efbeea9`, 13 commits, plus this entry)
+
+**This closes half of stage 3's "Tier 2 — a universal machine, a two-counter machine — is untouched."** The
+two-counter machine is its own branch.
+
+- **What it delivers:**
+  - `tm/universal.rs`: `universal_machine()`, one fixed machine of 55 states and 178 rules, generated with
+    `Builder`; `encode_guest`, which lays a guest machine and its initial tapes out on the machine's five tapes;
+    and `decode_guest`, which reads the guest's tapes and status back from the tapes alone.
+  - `tests/universal_oracle.rs`: hand-built guests of one to three tapes, a proptest over generated guests, and
+    compiled corpus programs, each run directly and through the universal machine.
+  - `run_with_origins` and `acyclic_machine` move from `tests/one_way_oracle.rs` to `tests/common/mod.rs`, by
+    decision, so both oracle files share one copy.
+- **Spec and plan:** spec `docs/superpowers/specs/2026-09-14-universal-tm-design.md`, plan
+  `docs/superpowers/plans/2026-09-14-universal-tm.md`.
+
+##### WHAT WAS MEASURED BEFORE DESIGNING
+
+- **The machine could not be a compiled `.rxt` program.** A research probe wrote a Turing machine interpreter in
+  the language and compiled it. A unary incrementer guest ran, but its interpreter lowered to 188,142 states, a
+  256-element list literal alone lowered to 574,410, and 512 elements were refused `TooLarge`. `3 - 5`'s rule
+  table is 1,938 elements. So the machine is generated in Rust instead.
+- **Guests are lowered machines, not fully reduced ones.** `3 - 5` after stages 1+2 was estimated at
+  1.92×10^12 universal-machine steps, 192 times over 10^10.
+- **A whole-table scan per guest step was estimated** at 1.71×10^6 steps for `3 - 5` and 9.72×10^9 for
+  `sum(5)` under unary. Measured over estimated came to 1.12, 1.19, 0.77, 1.03 and 0.75 across the five rows the
+  spec estimated.
+
+##### WHAT BUILDING THE PLAN DECIDED
+
+- **Five tapes, not the spec's three.** The state id has its own tape beside a status cell, and a fifth tape
+  holds the matched rule's writes and moves, one slot per guest tape. Every comparison and copy is then a
+  lockstep walk of two tapes, with no marking and no counting.
+- **No preamble of widths or tape count.** Every field is delimited, so the machine never reads a width.
+- **One cell, `?`, is both the wildcard and "no write".** Codes need only as many bits as the guest has symbols,
+  and the one limit left is `MAX_GUEST_TAPES`, equal to `MAX_TAPES`.
+- **The halt is on the tapes.** Before halting, the machine writes `Y` or `N` into the status cell, so
+  `decode_guest` reports `Accepted` or `Stuck` without a final state.
+- **Tiers follow the dev profile,** which ran 21 to 29 times slower than release on the eight rows timed both
+  ways. The fast tier holds `3 - 5` under both encodings, `if` under binary, and a `2 + 3` pinned at width 4 that
+  overflows. `scripts/check-slow.sh` runs the rest.
+- **Caps keep a machine that never halts from hanging the fast tier.** The fast tier runs under `DEFAULT_CAPS`,
+  5,000,000 steps, twice the largest compiled fast-tier row's 2,432,575. The proptest bounds shrinking at 10 s.
+
+##### WHAT THE PLAN FOUND
+
+- **No binary guest in the corpus can show rule order.** No state of any binary lowered machine has two rules
+  that can both match one key, so a universal machine that ignored table order would run every binary row the
+  same.
+- **Among the compiled fast-tier rows, only the overflow does.** Sabotage S2 reverses the rules of the first
+  state where order can matter. On `3 - 5` under unary that leaves the halt, tapes and value unchanged, and
+  `the_universal_leg_agrees_on_small_programs` stays green; the overflow goes red. The hand-built guests and the
+  proptest show order for their own machines.
+- **The first form of S2 reversed nothing** in any compiled guest: the first state with rules is state 2, with
+  one rule, in every lowered machine.
+
+##### WHAT REVIEW FOUND
+
+- **Before the build:**
+  - Tasks 2 to 4 pointed at Task 1's and Task 3's commands, which an implementer that sees only its own task
+    cannot read. Every task now carries its own.
+  - The sabotage block passed an unquoted variable as several arguments. The Bash tool's shell is zsh, which
+    does not split it, so the block was rewritten as a function called with separate arguments.
+  - The plan copied `run_with_origins` and the acyclic generator. By decision they were moved to
+    `tests/common/mod.rs` instead, and the plan re-verified.
+- **Task 1's review:** `decode_guest` accepted three or four tapes, though its brief refuses fewer than five,
+  and its only test tried two. The fix, `51929c3`, came after Task 4, because Task 2's patch carried both lines
+  as context.
+- **Tasks 2 to 4:** no Critical or Important findings.
+- **The whole-branch review:**
+  - **`decode_guest`'s contract was false for tapes caught mid-step.** Its doc promised `None` for tapes the
+    machine does not leave between guest steps. A probe decoded after every step of a two-tape copy guest's
+    1,551: 135 decoded to `None`, and 5 to `Running` with a configuration the guest never had, one tape written
+    and the other not yet. The doc now guarantees only freshly encoded tapes and tapes a halted machine leaves,
+    and the pattern requires exactly five tapes (`6ce94ab`).
+  - **The oracle compared the guest's status, not its final state.** `Stuck` does not pin the state, so a
+    machine halting stuck in the wrong one with the same tapes passed. The oracle now reads the state id off the
+    state tape and compares it (`efbeea9`).
+  - **Smaller:** a doc in `tests/common/mod.rs` still cited a threshold sentence the move had deleted, and the
+    module's count of its checkers was false (`da04688`). The table tape was indexed `encoded[0]`, not
+    `encoded[TABLE]` (`402da79`).
+  - **Kept by decision:** `match_phase` has no unit test with a guest of two or more tapes, since the oracle's
+    two-, three- and five-tape guests run that loop, and S3 reddens them. `prepend_block` reuses local names from `sweep_left_phase`, in a
+    separate scope, with distinct state names.
+
+##### SABOTAGES
+
+- **The plan's five rows, S1 to S5,** each went red as the plan's table predicted, at the implementer's Task 4
+  run. S3 also turns the size pin red, since it deletes a rule.
+- **Two more ran with the whole-branch fixes:**
+  - flipping a state-id bit where the machine marks a guest stuck turned 3 of the fast tier's 7 tests red at the
+    new final-state assertion, and at no earlier one;
+  - putting `..` back in `decode_guest`'s pattern turned its test red at the six-tape case.
+
+##### COST
+
+Steps and cells are deterministic and re-run at `efbeea9`. Release times are the plan's, one run each on the
+planning build.
+
+| row | guest steps | machine steps | per guest step | table cells | peak cells | release |
+| --- | --- | --- | --- | --- | --- | --- |
+| `3 - 5`, unary | 253 | 1,920,262 | 7,590.0 | 5,099 | 5,607 | 0.024 s |
+| `3 - 5`, binary | 140 | 1,064,104 | 7,600.7 | 6,267 | 6,567 | 0.017 s |
+| `if 2 > 1 { 10 } else { 20 }`, unary | 638 | 8,855,841 | 13,880.6 | 8,780 | 9,945 | 0.104 s |
+| `if 2 > 1 { 10 } else { 20 }`, binary | 215 | 2,432,575 | 11,314.3 | 10,529 | 10,910 | 0.034 s |
+| `cons(1, cons(2, nil))`, unary | 422 | 7,358,907 | 17,438.2 | 14,936 | 15,414 | 0.086 s |
+| `cons(1, cons(2, nil))`, binary | 495 | 12,791,210 | 25,840.8 | 22,593 | 23,216 | 0.171 s |
+| `1 + 2 * 3`, unary | 1,020 | 20,921,278 | 20,511.1 | 15,203 | 16,001 | 0.266 s |
+| `1 + 2 * 3`, binary | 613 | 23,215,225 | 37,871.5 | 34,015 | 34,478 | 0.262 s |
+| `sum(5)`, unary | 50,542 | 7,315,621,686 | 144,743.4 | 150,364 | 153,437 | 83.502 s |
+| `sum(5)`, binary | 18,086 | 3,485,288,884 | 192,706.5 | 199,520 | 204,401 | 40.645 s |
+| `2 + 3` at width 4, unary, overflow | 153 | 985,361 | 6,440.3 | 4,875 | 5,191 | — |
+
+The largest peak, 204,401 cells, is under `TM_DEFAULT_CAPS.cells` of 5,000,000.
+
+##### SENTENCES THIS BRANCH CHANGES
+
+- **Stage 3's entry, *What this did not close*:** "Tier 2 — a universal machine, a two-counter machine — is
+  untouched". Annotated: the universal machine is built; the two-counter machine is not yet merged.
+- **The dated plan** still embeds `decode_guest`'s old pattern and counts six refusals. It is a record, left as
+  written; `51929c3` and `6ce94ab` changed the code after it.
+- **The spec** describes three tapes, a preamble and `accepted: bool`. The plan's decisions replaced all three.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Fully reduced guests** are out of reach: `3 - 5` after stages 1+2 is estimated at 1.92×10^12 steps.
+- **No state-local lookup.** Every guest step scans the whole table; `sum(5)` under unary takes 7,315,621,686
+  machine steps.
+- **Rule order is shown by one compiled fast-tier row,** the overflow, and by no binary guest.
+- **Most compiled rows run only in the slow tier,** and the cost table is printed, never asserted.
+- **No guest has two accept states,** so the accept list past its first entry never runs.
+- **Mid-step decoding is not a defined result,** and no decode of a capped run is tested.
+- **The generator's reach is held for tape counts and cell -1 only.** Overlapping rules, stuck halts and
+  appends or prepends with two tracks pending are not held on the fixed seed, and the proptest draws a new seed each run.
+- **No CLI or web support,** and no `.tm` header for the universal machine.
+
+##### VERIFICATION
+
+**Every count this entry quotes, with what produces it.** Run on 2026-09-15 at `efbeea9`, the branch's last code
+commit, by a script in the session scratchpad, not committed. The load average was 19.58 when it started, so no
+time it took is quoted.
+
+- **Scope:** `git rev-list --count 78ebea6..efbeea9`: **13**. `git diff --stat 78ebea6..efbeea9 -- . ':!*.md'`: `tm.rs` +1, `tm/universal.rs` +932, `tests/common/mod.rs`, `tests/one_way_oracle.rs`, `tests/universal_oracle.rs` +274; 5 files, 1,299 insertions, 85 deletions.
+- `cargo fmt --all --check`: exit 0. `cargo clippy -p redextape-core --all-targets -- -D warnings`: exit 0.
+- `cargo nextest run -p redextape-core`: **1,155 passed, 16 skipped**.
+- `cargo nextest run -p redextape-core --lib tm::universal --no-capture`: **17 passed**, including the pin of **55 states and 178 rules**.
+- `cargo nextest run -p redextape-core --test universal_oracle --no-capture`: **7 passed, 2 skipped**; the cost rows for `3 - 5` under both encodings, `if` under binary and the overflow as the COST table quotes; the copy guest at **1,551** machine steps; `of 256 generated machines: [84, 89, 83] with 1, 2 and 3 tapes; 128 reach cell -1`.
+- `cargo nextest run -p redextape-core --test one_way_oracle --no-capture`: **8 passed, 2 skipped**, `of 256 generated machines: 128 reach cell -1, 41 reach cell -2 or beyond`.
+- `cargo nextest run --release -p redextape-core --test universal_oracle --run-ignored only --no-capture`: **2 passed**; the COST table's other seven rows' steps and cells. `--test one_way_oracle --run-ignored only`: **2 passed**.
+- `scripts/check-attributions.sh`: **checked 481 attribution sites, 6 excused by marker, 0 violations**. `scripts/check-citations.sh`: **461 files scanned, 0 violations**. `scripts/check-doc-figures.sh`: **42 documented figures match the tree**.
+- **Recorded, not re-run:**
+  - the `.rxt` probe figures, the 1.92×10^12 estimate and the estimate table are the spec's;
+  - the release times, the dev-profile ratio of 21 to 29, and the measured-over-estimated ratios are the plan's *Measured cost*;
+  - the rule-order counts and S2's results are the plan's *Findings*;
+  - S1 to S5 are the implementer's Task 4 report;
+  - the mid-step decode counts are the whole-branch review's probe, which was not kept;
+  - the two later sabotages are the fix report, kept outside the tree.
