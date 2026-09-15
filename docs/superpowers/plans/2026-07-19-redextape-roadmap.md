@@ -2415,7 +2415,7 @@ produce. The oracle validates every combination.
   - *Two-counter (Minsky) machine.* Two integers plus increment/decrement/zero-test is Turing-complete;
     "your program, reduced to two numbers" is arresting. **Honest caveat:** the standard 2-stack →
     2-counter route uses Gödel encoding (`2^a · 3^b`), so the counters explode astronomically — realistically
-    demonstrable only on trivial programs, with step counts to match.
+    demonstrable only on trivial programs, with step counts to match. **ANNOTATED 2026-09-15 (`counter-machines`):** measured and built. Two counters run only toy machines, the binary incrementer on three ones for 2,530,013,456 steps; compiled programs run as accelerated three-counter programs from their stage 1 images.
 
   **Tier 3 — property-preserving variants.** A *reversible* TM (Bennett) — every step undoable, costing a
   history tape — connects computation to thermodynamics and the Landauer limit, which no other track here
@@ -17028,7 +17028,7 @@ Every task's end state was built in a scratch worktree before it went into the p
 - **Two helper copies stay:** `examples/regen_fixtures.rs`'s `core_and_ty`, and the unit-test helpers inside `one_way.rs`.
 - **The commit messages of `24f5802` and `446b04b` still say `build_machine` had three verbatim copies.** History is not rewritten; the squash merge carries the PR description instead.
 - **Two lines this branch added exceed 120 columns**, both from the plan's own code and left alone by rustfmt: `one_way.rs`'s `proptest!` parameter line and `one_way_oracle.rs`'s cost-table `println!`.
-- **Tier 2 — a universal machine, a two-counter machine — is untouched.** **ANNOTATED 2026-09-15 (`universal-tm`):** the universal machine is built; the two-counter machine is its own branch.
+- **Tier 2 — a universal machine, a two-counter machine — is untouched.** **ANNOTATED 2026-09-15 (`universal-tm`):** the universal machine is built. **ANNOTATED 2026-09-15 (`counter-machines`):** the two-counter machine is built, as accelerated three-counter programs with a literal two-counter fold on toys.
 
 ##### VERIFICATION
 
@@ -17466,3 +17466,186 @@ time it took is quoted.
   - S1 to S5 are the implementer's Task 4 report;
   - the mid-step decode counts are the whole-branch review's probe, which was not kept;
   - the two later sabotages are the fix report, kept outside the tree.
+
+#### COUNTER MACHINES: THE CORPUS'S STAGE 1 IMAGES RUN AS ACCELERATED THREE-COUNTER PROGRAMS WHOSE LITERAL STEP COUNTS ARE COMPUTED, NOT TAKEN — `3 - 5` STANDS FOR ABOUT 2^1264 — AND AGREE WITH THE SIMULATOR ON STATE, TAPE AND VALUE. A GÖDEL FOLD RUNS TOY MACHINES ON TWO COUNTERS, THE BINARY INCREMENTER ON THREE ONES FOR 2,530,013,456 STEPS. THREE DESIGNS WERE TIMED BEFORE THE FOURTH TOOK `sum(5)` FROM 110.246 s TO 11.861 s. THE WHOLE-BRANCH REVIEW FOUND THE LOWERED LEG COMPARING A PROGRAM ONLY WITH ITSELF, SO A WRONG HALTING STATE ON THREE OR MORE TAPES PASSED EVERY TEST, AND AN ACCELERATED RUN RETURNING A WRONG "EXACT" COUNT FOR A NONZERO SCRATCH COUNTER (2026-09-15, branch `counter-machines`, `78ebea6..b91116b`, 19 commits, plus this entry)
+
+**This builds the two-counter half of stage 3's "Tier 2 — a universal machine, a two-counter machine — is
+untouched",** and measures the Tier 2 sketch's caveat that the two-counter route is "realistically demonstrable
+only on trivial programs".
+
+- **What it delivers,** in `crates/redextape-core/src/counter/`, with no dependency added:
+  - `nat.rs`: a natural number on 64-bit limbs, dividing through a precomputed reciprocal (Möller–Granlund).
+  - `program.rs`: counter programs of `Move`, `Stop` and `Spin` macros, each `Move` with an exact literal
+    expansion of `(b+3)·P + s + Q + 3·⌊Q/b⌋ + 4` steps.
+  - `accel.rs`: a literal run, and an accelerated run that holds each counter as `hi·b^j + lo` with a deferred
+    step tally; and `#[doc(hidden)] pub fn check_literal_agreement`, which tests use to hold one to the other.
+  - `compile.rs`: a Turing machine compiled to a three-counter program. `readback.rs`: its tapes, and a stage 1
+    image's value, read back from the counters.
+  - `godel.rs`: three counters folded into two by Gödel numbering, run literally, on toy machines only.
+  - `tests/counter_oracle.rs`: stage 1 images run as counter machines against the simulator and the reference
+    interpreter, and lowered machines run literally against both the accelerated run and the simulator.
+- **Spec and plan:** spec `docs/superpowers/specs/2026-09-14-counter-machines-design.md`, with amendments,
+  plan `docs/superpowers/plans/2026-09-14-counter-machines.md`.
+
+##### WHAT WAS MEASURED BEFORE DESIGNING
+
+- **The route starts from the stage 1 image.** The lowered machine's 5 tapes are 10 stacks, so 11 counters, and
+  packing them into 3 would need a Gödel number of 10^12.64 bits (506.7 GiB) for `3 - 5`. Stages 1+2 run about
+  5.6 times as many macros as stage 1.
+- **A prototype ran `3 - 5`'s stage 1 image accelerated** with a largest counter of 1,253 bits, and computed
+  10^380.32 literal steps; `if` computed 10^862.94. Every run matched the simulator's tapes, state and empty
+  scratch counter.
+- **Literal and accelerated runs agreed** on the lowered `1 + 1`, 206,024,328 literal steps, at every one of 570
+  macro entries.
+- **Two counters run only toys.** The unary incrementer on four marks folds to 131 instructions and runs 2,974,863
+  steps; the parity eraser on five marks, 220,027,664; the binary incrementer on three ones, 2,530,013,456.
+
+##### THREE DESIGNS WERE TIMED BEFORE THE FOURTH SHIPPED
+
+Accelerated wall time at stage 1, release, under the 8G cap, from the plan:
+
+| design | `let x = 40; x + 2` | `sum(5)` |
+| --- | --- | --- |
+| three macros, `Transfer`, `Add` and `DivMod`, on `num-bigint` | 35.263 s | stopped by a 400,000,000-macro cap after 103.446 s |
+| one `Move` macro per head move, on `num-bigint` | 14.812 s | 146.948 s |
+| one `Move`, on the in-tree `Nat` | 10.362 s | 110.246 s |
+| buffered counters and a deferred tally, `74906c4`, load average 27.8 | 1.171 s | 11.861 s |
+
+- **The merged `Move`** was chosen after the three-macro design stopped `sum(5)` at the cap.
+- **The in-tree bignum** was chosen after `num-bigint`'s profile of `let x` showed `div_rem_cow` at 51.83% and
+  `div_rem` at 3.54% of self time: a hardware division per limb.
+- **Buffering** was chosen because every move still passed over every limb of two counters. The same design at
+  `ee47c1c`, whose code differs only in comments, ran `sum(5)` in 17.994 s at a load average near 77.
+
+##### WHAT BUILDING THE PLAN FOUND
+
+- **A move may be its own exit,** so `Program::check` has no self-loop rule.
+- **Sabotages S1 and S2 leave every agreement test green,** which the spec predicted red: `move_steps` is off the
+  accelerated path, whose tally keeps the same sum in a deferred shape.
+- **S6 is invisible to the `u128` proptest.** Whether the tally proptest sees it depends on what proptest draws.
+- **Literal runs of compiled programs reach only lowered machines,** the lowered `1` and `1 + 1`. No stage 1
+  image is within reach.
+- **The plan's commands were written for zsh,** the Bash tool's shell, after Task 5 Step 7's loop passed each
+  wasm32 row as one argument: under zsh its first row exits 101, where the plan had recorded `exit 0` from bash.
+
+##### WHAT REVIEW FOUND
+
+- **Before the build:** Tasks 2 to 5 pointed at Task 1's commands, and the plan's citations-gate counts were one
+  or two short, because the gate counts staged files. By decision, the duplicated literal-against-accelerated
+  assertions became one test-support function, `check_literal_agreement`.
+- **Task 2's review:** the accelerated `End::Spun` path, and `Program::check`'s refusals of a start past the last
+  macro and of a scratch counter past the last counter, ran in no test. The tests came after Task 5 (`d99d7b3`),
+  because adding them earlier would have changed the counts Tasks 3 to 5 checked.
+- **Tasks 1 and 3 to 5:** no Critical or Important findings.
+- **The whole-branch review:**
+  - **The lowered leg compared a program only with itself.** It held the literal run to the accelerated one and
+    never consulted the simulator, and the lowered `1` and `1 + 1` move only tapes 0 and 1. A sabotage, S11, made
+    the compiler record `state ^ 1` in every `Stop` of a machine with three or more tapes, and every committed
+    test stayed green. The leg now also compares the stop state, the read-back tapes and an empty scratch counter
+    with the simulator (`a38bcfe`), and S11 turns it red.
+  - **`run_accelerated` accepted a nonzero scratch counter** and returned a run that was not its expansion's: one
+    base-2 move from `[3, 5, 1]` gave 31 steps and `[7, 2, 1]`, against the literal expansion's 34 and
+    `[9, 2, 0]`. It now refuses one with `ProgramError::ScratchNotZero` (`adc15fd`).
+  - **No stage 1 test asserted a step count,** though the docs headline one. A new test now checks steps,
+    counters and stop against a tally with no buffering, on the four fast images (`2012d85`). S7 and S8 turn it
+    red. It first went into the fast tier; at about 5.2 s in debug that broke `counter_oracle.rs`'s own rule of
+    under 1 s timed on its own, which the re-review of the fixes pointed out, so `b91116b` moved it to the slow
+    tier.
+  - **Docs made false:** `accel.rs` quoted `sum(5)` at 18.0 s with no commit or load, and said the tally folds
+    only when `hi` is about to change or a total is read, though it also folds when a weight would overflow
+    (`56a168c`); `Spin` was said to loop "because scratch is zero" (`b15a09c`); a doc said "Every toy" of a test
+    that runs four of five (`dfe9921`); `check_literal_agreement` was said not to be part of the crate's API,
+    though `#[doc(hidden)]` only hides it from rustdoc (`56a168c`).
+  - **Kept by decision:** `Nat` derives an unused `Default`; the buffered proptest never uses base 1; `dispatch`
+    can emit a duplicate `Spin` or `Stop`; `FoldError` has no test; `Folded` derives `PartialEq` and `Eq` that nothing
+    compares.
+
+##### SABOTAGES
+
+- **The plan's seven rows, S1 to S7,** each matched its predicted red at the implementer's Task 5 run. S6 matched
+  the second of the two results the plan lists.
+- **Run by the whole-branch review,** in a probe worktree, on the code before its fixes:
+
+| row | red | green |
+| --- | --- | --- |
+| S7: no fold before a refill | the buffered proptest; the slow lowered `1 + 1`; the probe's stage 1 tallies; the probe's base-3 test | the fast oracle tier, the lowered `1`, the compiled toys, the branching proptest, the `Spin` test |
+| S8: no fold before a flush | the buffered proptest, the compiled toys, the slow lowered `1 + 1`, the probe's stage 1 tallies | the fast oracle tier, the lowered `1` |
+| S9a: no weight-overflow fold, where debug arithmetic panics on overflow | panics in the compiled toys, the buffered proptest, the lowered `1` and `1 + 1` | the probe's stage 1 tallies |
+| S9b: no weight-overflow fold, with a wrapping add | the buffered proptest | everything else |
+| S11: the halting state XOR 1 on 3+ tapes | the probe's lowered-against-simulator comparisons | every committed test |
+
+- **Run with the fixes:** S11 turned the lowered leg red at its new state comparison; deleting the scratch check
+  turned `a_nonzero_scratch_counter_is_refused` red; S7 and S8 each turned the new unbuffered-tally test red at
+  its steps assertion.
+
+##### COST
+
+Moves, largest counters and step-count bit lengths are deterministic, re-run at `b91116b`. Wall times are the
+plan's buffered column, at `74906c4`.
+
+| program | moves | largest counter | literal steps, computed | wall, release |
+| --- | --- | --- | --- | --- |
+| `3 - 5` | 256,351 | 1,253 bits | about 2^1264 | 0.004 s |
+| `cons(1, cons(2, nil))` | 396,441 | 1,203 bits | about 2^1214 | 0.007 s |
+| `if 2 > 1 { 10 } else { 20 }` | 1,497,261 | 2,855 bits | about 2^2867 | 0.034 s |
+| `1 + 2 * 3` | 1,603,003 | 1,956 bits | about 2^1969 | 0.030 s |
+| `pair_sum(1, add1(2))` | 6,747,237 | 2,659 bits | about 2^2674 | 0.145 s |
+| `let x = 40; x + 2` | 22,495,905 | 10,356 bits | about 2^10370 | 1.171 s |
+| `sum(5)` | 303,419,137 | 7,504 bits | about 2^7523 | 11.861 s |
+
+- **Literal runs:** the lowered `1` takes 1,472 literal steps and `1 + 1` 206,024,328. The parity eraser on five
+  marks runs 220,027,664 two-counter steps, and the binary incrementer on three ones 2,530,013,456.
+- **Test times at `b91116b`:** the unbuffered-tally test takes 5.236 s alone in debug, at a load average of 4.94,
+  and 0.903 s in the release slow tier. There `sum(5)`'s image takes 14.745 s and the binary incrementer 4.115 s,
+  in a run that started at a load average of 11.17.
+
+##### SENTENCES THIS BRANCH CHANGES
+
+- **Stage 3's entry, *What this did not close*:** "Tier 2 — a universal machine, a two-counter machine — is
+  untouched". Annotated: the two-counter machine is built.
+- **The roadmap's Tier 2 sketch, the two-counter (Minsky) machine bullet:** "realistically demonstrable only on
+  trivial programs". Annotated with what was measured: two counters run only toys; compiled programs run as
+  accelerated three-counter programs.
+- **The dated plan and spec are left as written,** and this entry corrects them:
+  - The plan's Decision 10 says S7 is seen by one test. That is the fast tier: the slow lowered `1 + 1` also sees
+    it, and so does the unbuffered-tally test `2012d85` adds.
+  - The Global Constraint "one public item exists for tests" is literally false: several `pub` items have no
+    caller outside tests. Its intent holds: `check_literal_agreement` is the one item that exists solely as test
+    support.
+  - The plan's counts, 22 fast tests and `1153 passed, 20 skipped`, predate `d99d7b3` and the fixes.
+  - The spec's sentence on when the tally folds has the same gap as the doc `56a168c` corrected.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Two counters never run a compiled program,** and the 11-counter route from lowered machines, a start from
+  stages 1+2, and CLI or web support are not built.
+- **No test executes a move on a third tape.** Literal runs of compiled programs reach only the lowered `1` and
+  `1 + 1`, which move tapes 0 and 1.
+- **Some sabotages stay invisible to some tests:** S1 and S2 to every agreement test, S6 to the `u128` proptest, and
+  a missing weight-overflow fold to everything but the buffered proptest, at every literal-affordable size.
+- **`largest_bits` may lag the true peak by up to 65 bits,** since it is measured only at the start, at flushes
+  and at the end.
+- **The unbuffered tally runs only in the slow tier,** so on the stage 1 images no fast-tier test asserts a step
+  count.
+- **`check_literal_agreement` stays callable,** since `#[doc(hidden)]` only hides it from rustdoc.
+- **The base-1 buffered case, `FoldError`, and `dispatch`'s duplicate `Spin` or `Stop`** are left as they are.
+
+##### VERIFICATION
+
+**Every count this entry quotes, with what produces it.** Run on 2026-09-15 at `b91116b`, the branch's last code
+commit, by a script in the session scratchpad, not committed; the load average was 11.17 when it started.
+
+- **Scope:** `git rev-list --count 78ebea6..b91116b`: **19**. `git diff --stat 78ebea6..b91116b -- . ':!*.md'`: **9 files, 2,191 insertions**, all under `crates/redextape-core/src/counter*`, `src/lib.rs` (+1) and `tests/counter_oracle.rs`. `git diff --name-only 78ebea6..b91116b -- '*Cargo.toml' Cargo.lock`: nothing.
+- `cargo fmt --all --check`: exit 0. `cargo clippy -p redextape-core --all-targets -- -D warnings`: exit 0.
+- `cargo nextest run -p redextape-core`: **1,155 passed, 21 skipped**.
+- `cargo nextest run -p redextape-core --lib --test counter_oracle -E 'test(/^counter::/) | binary_id(redextape-core::counter_oracle)' --no-capture`: **24 passed, 837 skipped**; the COST table's rows for `3 - 5`, `cons`, `if` and `1 + 2 * 3`, and `1 lowered: 1472 literal steps`.
+- The same with `--release` and `--run-ignored only`: **7 passed, 854 skipped**; the unbuffered-tally test at **0.903 s**; the rows for `pair_sum`, `let x` and `sum(5)`; `1 + 1 lowered: 206024328 literal steps`; `parity_eraser n=5: 220027664 two-counter steps`; `binary_increment n=3: 2530013456 two-counter steps`; `sum(5)`'s image at **14.745 s** and the binary incrementer at **4.115 s**.
+- `cargo nextest run -p redextape-core --test counter_oracle --run-ignored only -E 'test(an_unbuffered_tally_matches_the_buffered_run_on_fast_stage_one_images)' --test-threads 1`, in debug, alone: **5.236 s**, at a load average of 4.94.
+- `cargo check --target wasm32-unknown-unknown` on `-p redextape-core --lib`, with `--features serde`, with `--features ts`, on `-p redextape-wasm --lib`, and with `--features ts`: each **exit 0**.
+- `scripts/check-attributions.sh`: **checked 484 attribution sites, 6 excused by marker, 0 violations**. `scripts/check-citations.sh`: **467 files scanned, 0 violations**. `scripts/check-doc-figures.sh`: **42 documented figures match the tree**.
+- **Recorded, not re-run:**
+  - the route, prototype and two-counter toy figures, and the unary incrementer's 131 instructions and 2,974,863 steps, are the spec's;
+  - the design timings, the profile percentages and the decisions are the plan's *Figures, measured while planning* and *Decisions*;
+  - S1 to S7 are the implementer's Task 5 report;
+  - the whole-branch review's probe figures and sabotages come from its report, with its logs kept in the session scratchpad;
+  - the fix-round sabotages are the fix report, kept outside the tree.
