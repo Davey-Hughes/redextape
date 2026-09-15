@@ -16,8 +16,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use redextape_core::tm::EncodingKind;
-use redextape_core::tm::build::MAX_MACHINE_STATES;
 use redextape_core::tm::machine::{BLANK, Machine, Symbol};
+use redextape_core::tm::reduction::refusal;
 use redextape_core::tm::sim::{Caps, DEFAULT_CAPS, Status, Tape, simulate_final};
 use redextape_core::tm::single_tape::{interleave, layout_collision, normalize, to_single_tape};
 use redextape_core::tm::two_symbol::{Code, bitify, to_two_symbol, unbitify};
@@ -188,7 +188,9 @@ fn the_composed_machine_is_one_tape_over_two_symbols() {
         assert_eq!(canonical.validate(), Vec::<String>::new(), "for {src:?}");
         assert_eq!(canonical.tapes, 1, "one tape, for {src:?}");
         assert_eq!(canonical.alphabet().len(), 2, "two symbols, for {src:?}");
-        assert!(canonical.states.len() < MAX_MACHINE_STATES, "over MAX_MACHINE_STATES for {src:?}");
+        // Not `states.len() < MAX_MACHINE_STATES`: past the ceiling `to_two_symbol` refuses, and a refusal
+        // is one state, so that comparison can no longer fail.
+        assert_eq!(refusal(&canonical), None, "refused for {src:?}");
         println!(
             "{src:40} k={} states={} (from {} single-tape, {} original)",
             code.bits(),

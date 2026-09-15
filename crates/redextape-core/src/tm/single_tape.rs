@@ -8,7 +8,9 @@
 //! Reading the identity out of the symbol costs `2k + 2` symbols against an alphabet of 4, which is
 //! the dimension that is not scarce.
 
+use crate::tm::build::MAX_MACHINE_STATES;
 use crate::tm::machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
+use crate::tm::reduction::{ALPHABET_COLLISION, StateTable, TOO_MANY_STATES, TOO_MANY_TAPES, refusal, refused};
 use crate::tm::sim::Tape;
 
 /// The left and right sentinels bounding the block skeleton.
@@ -142,10 +144,11 @@ pub const OVERFLOW: &str = "overflow";
 /// consume a WRITTEN symbol as though it were the tape's own marker, corrupting the tape while the
 /// machine reports an ordinary ACCEPT — a silent wrong answer rather than a visible failure.
 ///
-/// `to_single_tape` checks what IT can see and REFUSES a machine either with too many tapes to encode
-/// (past [`MAX_ENCODABLE_TAPES`]) or whose `Machine::alphabet()` collides with the layout's own
-/// symbols (`layout_collision(m, &[])`), returning a degenerate one-state machine ([`refused`]) that
-/// halts in a named, non-accept state instead of building a construction it cannot represent
+/// `to_single_tape` checks what IT can see and REFUSES a machine with too many tapes to encode (past
+/// [`MAX_ENCODABLE_TAPES`]), whose `Machine::alphabet()` collides with the layout's own symbols
+/// (`layout_collision(m, &[])`), or whose image would hold more than `MAX_MACHINE_STATES` states. Each
+/// refusal is a degenerate one-state machine ([`refused`]) that halts in a named, non-accept state
+/// instead of building a construction it cannot represent
 /// correctly — the same shape `lower_tm.rs`'s `refused` takes for ITS unrepresentable inputs (an
 /// absurd slot count, `Mul` count, or state count).
 ///
@@ -156,11 +159,32 @@ pub const OVERFLOW: &str = "overflow";
 /// wildcard has an empty alphabet and sails straight through, no matter what its caller's initial tapes
 /// contain. A caller wiring `to_single_tape` and `interleave` together must additionally call
 /// [`layout_collision`] with both the machine AND the initial tapes before trusting the pair — this
-/// function's refusal alone is not sufficient. The signature stays `Machine`, not `Option<Machine>`:
-/// the caller already has to distinguish a real accept from [`OVERFLOW`] by state name, and a named
-/// refusal state is that same mechanism, not a new one.
+/// function's `alphabet-collision` refusal alone is not sufficient. The signature stays `Machine`, not
+/// `Option<Machine>`: the caller already has to distinguish a real accept from [`OVERFLOW`] by state name,
+/// and a named refusal state is that same mechanism, not a new one. [`refusal`] names every refusal the
+/// three reductions return, and each of them hands a refusal back unchanged, so a pipeline checks once, at
+/// its end.
 #[must_use]
 pub fn to_single_tape(m: &Machine) -> Machine {
+    to_single_tape_within(m, MAX_MACHINE_STATES).0
+}
+
+/// [`to_single_tape`] under a caller's state ceiling instead of `MAX_MACHINE_STATES`, so a test can trip
+/// the ceiling on a machine small enough to read, together with the number of original states it began
+/// emitting after its table had refused a name.
+///
+/// **A REFUSAL IS RETURNED UNCHANGED, BEFORE ANY OTHER CHECK.** This construction builds its states under
+/// names of its own, so reducing a refusal would erase its name. **THE CEILING IS CHECKED AFTER EACH
+/// ORIGINAL STATE**, and once more in `Names::finish`, which creates states of its own.
+///
+/// **THE CHECK AFTER EACH STATE STOPS THE WORK, AND ONLY THE COUNT SHOWS IT.** Without it the loop would go
+/// on emitting every remaining original state against a full table, and `finish` would refuse all the same,
+/// so the machine returned cannot tell the two apart. The count can: it stays 0, because the loop returns
+/// on the state that trips. `no_original_state_is_started_after_the_ceiling_trips` holds it there.
+pub(crate) fn to_single_tape_within(m: &Machine, ceiling: usize) -> (Machine, usize) {
+    if refusal(m).is_some() {
+        return (m.clone(), 0);
+    }
     // Checked BEFORE anything below calls `reserved_symbols`/`layout_collision`, which mint a
     // `head_here`/`head_away` marker for every tape in `0..m.tapes`: past `MAX_ENCODABLE_TAPES` those
     // markers wrap into each other and into `BLANK`, `LEFT` and `RIGHT` (`head_here`/`head_away`'s own
@@ -168,56 +192,61 @@ pub fn to_single_tape(m: &Machine) -> Machine {
     // this module's tests for a reproduction). Refusing on tape count ALONE, before the alphabet is
     // even consulted, is what keeps this check correct at any `m.tapes` up to `tm::build::MAX_TAPES`.
     if m.tapes > MAX_ENCODABLE_TAPES {
-        return refused("too-many-tapes");
+        return (refused(TOO_MANY_TAPES), 0);
     }
     if layout_collision(m, &[]).is_some() {
-        return refused("alphabet-collision");
+        return (refused(ALPHABET_COLLISION), 0);
     }
-    let mut b = Names::new();
+    let mut b = Names::new(ceiling);
+    let mut started_after_trip = 0;
     for (sid, st) in m.states.iter().enumerate() {
+        if b.table.overflowed() {
+            started_after_trip += 1;
+        }
         b.emit_state(m, StateId::try_from(sid).unwrap_or(0), st);
+        if b.table.overflowed() {
+            return (refused(TOO_MANY_STATES), started_after_trip);
+        }
     }
-    b.finish(m)
+    (b.finish(m), started_after_trip)
 }
 
 /// Generated states per original state — the ratio that decides whether the largest machine the
-/// demo suite builds can be reduced at all.
+/// demo suite builds can be reduced at all. `None` when [`to_single_tape`] returns any refusal, one handed
+/// back from an earlier stage included: a refusal is a one-state machine, and dividing that by the
+/// original's state count would report a failure to build as an excellent ratio — the lesson
+/// `two_symbol.rs`'s `states_per_original` records.
 #[must_use]
-pub fn states_per_original(m: &Machine) -> f64 {
+pub fn states_per_original(m: &Machine) -> Option<f64> {
     let single = to_single_tape(m);
+    if refusal(&single).is_some() {
+        return None;
+    }
     #[expect(clippy::cast_precision_loss, reason = "a ratio of state counts, reported to 2 dp")]
     let ratio = single.states.len() as f64 / m.states.len().max(1) as f64;
-    ratio
+    Some(ratio)
 }
 
 /// The symbols the block skeleton reserves for itself: [`LEFT`], [`RIGHT`], and every tape in
 /// `0..m.tapes`'s two markers (`head_here`/`head_away`). The one place that set is built, so
-/// `to_single_tape`'s own refusal and [`layout_collision`] cannot drift apart on what "reserved"
-/// means: the former is exactly `layout_collision(m, &[]).is_some()`, `inits` empty because
+/// `to_single_tape`'s `alphabet-collision` refusal and [`layout_collision`] cannot drift apart on what
+/// "reserved" means: that refusal is decided by `layout_collision(m, &[])`, `inits` empty because
 /// `to_single_tape` never sees initial tape contents at all.
 fn reserved_symbols(m: &Machine) -> Vec<Symbol> {
     [LEFT, RIGHT].into_iter().chain((0..m.tapes).flat_map(|i| [head_here(i), head_away(i)])).collect()
 }
 
-/// The degenerate one-state machine `to_single_tape` returns for a refusal: a halt in a named,
-/// non-accept state rather than a construction it cannot represent correctly — the same shape
-/// `lower_tm.rs`'s `refused` takes for ITS unrepresentable inputs. `name` says WHY refused, since
-/// `to_single_tape` has more than one reason to (see its own doc).
-fn refused(name: &str) -> Machine {
-    Machine { states: vec![State { name: name.into(), accept: false, rules: vec![] }], start: 0, tapes: 1 }
-}
-
 /// The first symbol in `m`'s alphabet or in `inits` that collides with the layout's own symbols — the
 /// sentinels and every tape's two markers — or `None` when the pair is safe to reduce.
 ///
-/// **THIS SEES WHAT `to_single_tape`'s OWN REFUSAL CANNOT.** `Machine::alphabet` collects symbols only
-/// from rules' `read`/`write`; it never sees `inits`, which `to_single_tape` and `interleave` take as
-/// separate arguments and which this function takes together on purpose. A machine whose only rule is
-/// an unconditional wildcard has an EMPTY alphabet, so `to_single_tape`'s own refusal passes it
-/// regardless of what `inits` holds — and an initial tape containing, say, `head_away(0)` produces
-/// exactly the silent tape corruption the refusal exists to prevent, while the machine still reports an
-/// ordinary ACCEPT. A caller wiring `to_single_tape` and `interleave` together must call this function
-/// on the same `(m, inits)` pair and refuse to proceed when it returns `Some`.
+/// **THIS SEES WHAT `to_single_tape`'s `alphabet-collision` REFUSAL CANNOT.** `Machine::alphabet` collects
+/// symbols only from rules' `read`/`write`; it never sees `inits`, which `to_single_tape` and `interleave`
+/// take as separate arguments and which this function takes together on purpose. A machine whose only rule
+/// is an unconditional wildcard has an EMPTY alphabet, so that refusal passes it regardless of what `inits`
+/// holds — and an initial tape containing, say, `head_away(0)` produces exactly the silent tape corruption
+/// that refusal exists to prevent, while the machine still reports an ordinary ACCEPT. A caller wiring
+/// `to_single_tape` and `interleave` together must call this function on the same `(m, inits)` pair and
+/// refuse to proceed when it returns `Some`.
 #[must_use]
 pub fn layout_collision(m: &Machine, inits: &[Vec<Symbol>]) -> Option<Symbol> {
     let reserved = reserved_symbols(m);
@@ -231,25 +260,19 @@ pub fn layout_collision(m: &Machine, inits: &[Vec<Symbol>]) -> Option<Symbol> {
 /// target is emitted. Names are the text form's identity and must be unique, non-empty and free of
 /// whitespace and `; * : [ ]` (`Machine::validate`), which `.`-separated segments satisfy.
 struct Names {
-    ids: std::collections::HashMap<String, StateId>,
-    states: Vec<State>,
+    table: StateTable,
 }
 
 impl Names {
-    fn new() -> Names {
-        Names { ids: std::collections::HashMap::new(), states: Vec::new() }
+    fn new(ceiling: usize) -> Names {
+        Names { table: StateTable::new(ceiling) }
     }
 
     /// The id for `name`, minting the state on first mention. Every generated state is created here,
-    /// so a target named by a rule always exists by the time `finish` runs.
+    /// so a target named by a rule always exists by the time `finish` runs — unless the ceiling tripped,
+    /// which `to_single_tape_within` and `finish` check before the machine is used.
     fn id(&mut self, name: &str) -> StateId {
-        if let Some(id) = self.ids.get(name) {
-            return *id;
-        }
-        let id = StateId::try_from(self.states.len()).unwrap_or(0);
-        self.ids.insert(name.to_string(), id);
-        self.states.push(State { name: name.to_string(), accept: false, rules: Vec::new() });
-        id
+        self.table.id(name)
     }
 
     /// The state a rule targeting original state `sid` must name.
@@ -267,7 +290,7 @@ impl Names {
 
     fn push_rule(&mut self, at: &str, rule: Rule) {
         let id = self.id(at);
-        if let Some(st) = self.states.get_mut(id as usize) {
+        if let Some(st) = self.table.get_mut(id) {
             st.rules.push(rule);
         }
     }
@@ -281,7 +304,7 @@ impl Names {
         if st.accept {
             let name = format!("q{sid}.halt");
             let id = self.id(&name);
-            if let Some(s) = self.states.get_mut(id as usize) {
+            if let Some(s) = self.table.get_mut(id) {
                 s.accept = true;
                 s.rules.clear();
             }
@@ -459,7 +482,10 @@ impl Names {
     fn finish(mut self, m: &Machine) -> Machine {
         let _ = self.id(OVERFLOW);
         let start = self.id(&Names::entry_name(m, m.start));
-        Machine { states: self.states, start, tapes: 1 }
+        if self.table.overflowed() {
+            return refused(TOO_MANY_STATES);
+        }
+        Machine { states: self.table.into_states(), start, tapes: 1 }
     }
 }
 
@@ -743,9 +769,9 @@ mod tests {
     }
 
     /// The exact failing input from the review: a 1-tape machine that writes `'a'`, which collides with
-    /// `head_away(0)`. Without the refusal in `to_single_tape`, the marker move would clear the marker
-    /// to `'a'`, step onto the just-written `'a'` content cell, and the seek would mistake it for the
-    /// tape's own marker — corrupting the tape while the machine still reports ACCEPT.
+    /// `head_away(0)`. Without `to_single_tape`'s `alphabet-collision` refusal, the marker move would clear
+    /// the marker to `'a'`, step onto the just-written `'a'` content cell, and the seek would mistake it for
+    /// the tape's own marker — corrupting the tape while the machine still reports ACCEPT.
     #[test]
     fn a_data_symbol_colliding_with_a_marker_is_refused_not_silently_corrupted() {
         use crate::tm::sim::{DEFAULT_CAPS, simulate_final};
@@ -768,6 +794,8 @@ mod tests {
         };
         let inits = vec![vec!['1', '1']];
         let single = to_single_tape(&m);
+        assert_eq!(crate::tm::reduction::refusal(&single), Some(ALPHABET_COLLISION));
+        assert_eq!(states_per_original(&m), None, "a refusal must not be reported as a ratio");
         let refusal = &single.states[single.start as usize];
         assert_eq!(refusal.name, "alphabet-collision");
         assert!(!refusal.accept, "the refusal must be a stuck halt, not an accept");
@@ -781,12 +809,12 @@ mod tests {
         assert_eq!(single.states[fin as usize].name, "alphabet-collision");
     }
 
-    /// The hole in `to_single_tape`'s refusal, reproduced live: a 1-tape machine whose only rule is an
-    /// unconditional wildcard (no concrete symbol anywhere in `read`/`write`, so `Machine::alphabet()`
-    /// is empty) paired with an initial tape that contains `head_away(0)`. `to_single_tape`'s own
+    /// The hole in `to_single_tape`'s `alphabet-collision` refusal, reproduced live: a 1-tape machine whose
+    /// only rule is an unconditional wildcard (no concrete symbol anywhere in `read`/`write`, so
+    /// `Machine::alphabet()` is empty) paired with an initial tape that contains `head_away(0)`. That
     /// refusal does NOT fire for this pair — it only ever looks at `m.alphabet()`, which is empty here —
-    /// so it would build the real construction and hand back a machine that silently corrupts this
-    /// exact tape. That asymmetry between the two checks is the whole point of the finding:
+    /// so `to_single_tape` would build the real construction and hand back a machine that silently corrupts
+    /// this exact tape. That asymmetry between the two checks is the whole point of the finding:
     /// `layout_collision` sees the initial tape too, and refuses what `to_single_tape` alone cannot see.
     #[test]
     fn layout_collision_sees_a_symbol_only_the_initial_tape_carries() {
@@ -857,6 +885,7 @@ mod tests {
         assert_eq!(char::from(b'A' + 30_u8), BLANK, "the exact collision MAX_ENCODABLE_TAPES exists to prevent");
 
         let refusal = to_single_tape(&machine_touching_only_tape(31, 30));
+        assert_eq!(crate::tm::reduction::refusal(&refusal), Some(TOO_MANY_TAPES));
         let start = &refusal.states[refusal.start as usize];
         assert_eq!(start.name, "too-many-tapes");
         assert!(!start.accept, "the refusal must be a stuck halt, not an accept");
@@ -914,6 +943,51 @@ mod tests {
         for i in 0..m.tapes {
             let (w_cells, w_head) = want[i].snapshot();
             assert_eq!(normalize(&out[i].0, out[i].1), normalize(&w_cells, w_head), "tape {i}");
+        }
+    }
+
+    /// **EVERY CEILING FROM 0 TO THE IMAGE'S OWN SIZE.** Below the image's state count the construction must
+    /// refuse, wherever the table trips — inside the loop or in `Names::finish` — and at that count it must
+    /// build the image unchanged. Every ceiling is tried and every failing one reported, because one ceiling
+    /// that escapes unrefused is what this looks for, and a test of the boundary alone tries two.
+    #[test]
+    fn every_ceiling_below_the_image_size_refuses_and_the_image_size_builds_it() {
+        let mut wrong = Vec::new();
+        for (fixture, m) in [wildcard_only(), two_candidates(), rewrite_ones(), multi_tape_rule()].iter().enumerate() {
+            let full = to_single_tape(m);
+            assert_eq!(refusal(&full), None, "a toy fixture is not refused");
+            let n = full.states.len();
+            for ceiling in 0..=n {
+                let got = to_single_tape_within(m, ceiling).0;
+                let right = if ceiling < n { refusal(&got) == Some(TOO_MANY_STATES) } else { got == full };
+                if !right {
+                    wrong.push((fixture, ceiling, n));
+                }
+            }
+        }
+        assert_eq!(wrong, Vec::new(), "(fixture, ceiling, image size) neither refused below the size nor built at it");
+    }
+
+    /// **THE CHECK AFTER EACH ORIGINAL STATE, WHICH NO ASSERTION ON THE MACHINE CAN SEE.** At a ceiling of
+    /// one, the first of `two_candidates`'s three original states trips the table. Without the check the loop
+    /// would start the other two against a full table and `Names::finish` would still refuse, so the returned
+    /// machine is the same either way; the count of states started after the trip is not.
+    #[test]
+    fn no_original_state_is_started_after_the_ceiling_trips() {
+        let m = two_candidates();
+        assert_eq!(m.states.len(), 3, "the trip must leave original states still to start");
+        let (single, started_after_trip) = to_single_tape_within(&m, 1);
+        assert_eq!(refusal(&single), Some(TOO_MANY_STATES));
+        assert_eq!(started_after_trip, 0, "an original state was started after the ceiling tripped");
+    }
+
+    /// Reducing a refusal would build a machine of its own that carries none of the refusal's name, so a
+    /// refusal from an earlier stage has to come back exactly as it went in.
+    #[test]
+    fn a_refusal_handed_back_in_comes_back_unchanged() {
+        for name in crate::tm::reduction::REFUSALS {
+            let r = refused(name);
+            assert_eq!(to_single_tape(&r), r, "for {name}");
         }
     }
 
@@ -980,7 +1054,7 @@ mod tests {
     #[test]
     fn the_construction_stays_inside_the_state_budget() {
         for m in [wildcard_only(), two_candidates(), rewrite_ones()] {
-            let ratio = states_per_original(&m);
+            let ratio = states_per_original(&m).expect("a toy fixture is not refused");
             assert!(ratio < CEILING, "{ratio:.2} states per original state exceeds the {CEILING:.1} budget");
         }
     }
@@ -1091,7 +1165,7 @@ mod tests {
             let core = desugar(&prog);
             let d = run_tm_described(&core, EncodingKind::Unary, ty, TM_DEFAULT_CAPS)
                 .unwrap_or_else(|r| panic!("{src} did not run: {r:?}"));
-            let ratio = states_per_original(&d.machine);
+            let ratio = states_per_original(&d.machine).expect("a `SOURCES` machine is not refused");
             assert!(
                 ratio < CEILING,
                 "{src} measured {ratio:.4} states per original state, at or over the {CEILING:.4} \
@@ -1110,16 +1184,7 @@ mod tests {
     /// passed as values), unlike `sum(5)`'s direct first-order recursion — a different SHAPE, not
     /// merely a bigger program, so nothing established here inherits from that test.
     ///
-    /// Hand-copied as one program rather than the whole 46-entry corpus: `real_lowered_machines_cost_far_more_than_the_toy_fixtures`'s
-    /// `SOURCES` above already hand-copies individual `FIRST_ORDER_DEMOS` entries the same way, and
-    /// which entry is the corpus's maximum is section G's job to re-derive, not this module's — this
-    /// test measures the one entry that job has already named.
-    ///
-    /// `run_tm_described_at(..., MAX_FIELD_WIDTH)` reproduces section G's own method (`Binary::default()`
-    /// is `MAX_FIELD_WIDTH`, not an auto-fitted width): confirmed by getting the identical 49,135 states
-    /// back, where `run_tm_described`'s normal auto-fit search — the sequence the test above reuses —
-    /// lands on a narrower width and only 12,295 states for this same program, understating the ratio
-    /// this task's ceiling actually needs (measured 28.29 there against 39.51 here, before Step 1).
+    /// Why it is one hand-copied program, lowered at `MAX_FIELD_WIDTH`: `reduction.rs`'s `worst_shipped_demo`.
     ///
     /// MEASURED (inverting this test's assertion once, via `cargo nextest run -p redextape-core
     /// the_worst_shipped_demo_measured_directly -- --nocapture`), `Binary` at `MAX_FIELD_WIDTH`:
@@ -1131,30 +1196,26 @@ mod tests {
     /// own to close a 1.8x gap; closing it needs shrinking the construction further, raising
     /// `MAX_MACHINE_STATES`, or lowering the worst-shipped-demo floor, none of which this task does —
     /// see this test's own non-assertion below for why that is recorded rather than forced green.
+    ///
+    /// That `cargo nextest run` command no longer selects this test, which is now ignored; re-running it
+    /// needs `--run-ignored only`.
+    ///
+    /// **THESE FIGURES ARE NOW MEASURED WITH THE CEILING LIFTED.** Since the reductions gained a state
+    /// ceiling, `to_single_tape` refuses this machine with `too-many-states` and `states_per_original`
+    /// answers `None` for it, so this test builds the image through `to_single_tape_within` at
+    /// `usize::MAX` — the whole image, as it did before the ceiling existed.
+    ///
+    /// Peak RSS of this test alone, as the test binary's `ru_maxrss`: 1,264,160 KB in 4.3 s in the binary
+    /// `cargo test -p redextape-core --lib --no-run` builds, and 1,262,508 KB in 3.2 s in the one
+    /// `cargo test --release -p redextape-core --lib --no-run` builds, each run with this test's name and `--exact`.
     #[test]
+    #[ignore = "slow tier: builds an unguarded 1,811,054-state stage 1 image, ~1.2 GiB peak; run via scripts/check-slow.sh"]
     fn the_worst_shipped_demo_measured_directly() {
-        use crate::desugar::desugar;
-        use crate::parser::parse;
-        use crate::tm::{EncodingKind, MAX_FIELD_WIDTH, TM_DEFAULT_CAPS, run_tm_described_at};
-        use crate::typeck::result_type;
-
-        // `native_oracle.rs`'s `FIRST_ORDER_DEMOS`, the entry `state_cost_probe`'s section G finds as
-        // the corpus's maximum under `Binary` (49,135 states) — byte-identical to
-        // `guard_counterexamples.rs`'s `WORST_SHIPPED_DEMO`.
-        const WORST_SHIPPED_DEMO: &str = "\
-            fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
-            fn add1(x) { x + 1 }\n\
-            fn ap2(g, a, b) { g(a, b) }\n\
-            head(map([1, 2], add1)) + head(ap2(map, [5, 6], add1))";
-
-        let (prog, ds) = parse(WORST_SHIPPED_DEMO);
-        assert!(ds.is_empty(), "parse errors: {ds:?}");
-        let prog = prog.unwrap_or_else(|| panic!("no program for the worst shipped demo"));
-        let ty = result_type(&prog).unwrap_or_else(|e| panic!("type errors: {e:?}"));
-        let core = desugar(&prog);
-        let d = run_tm_described_at(&core, EncodingKind::Binary, ty, TM_DEFAULT_CAPS, MAX_FIELD_WIDTH)
-            .unwrap_or_else(|r| panic!("the worst shipped demo did not run: {r:?}"));
-        let ratio = states_per_original(&d.machine);
+        // `reduction.rs`'s `worst_shipped_demo` holds the source and lowers it the way section G does.
+        let (machine, _inits) = crate::tm::reduction::worst_shipped_demo();
+        let single = to_single_tape_within(&machine, usize::MAX).0;
+        #[expect(clippy::cast_precision_loss, reason = "a ratio of state counts")]
+        let ratio = single.states.len() as f64 / machine.states.len() as f64;
         // Same shape as `real_lowered_machines_cost_far_more_than_the_toy_fixtures`: this is deliberately
         // not `ratio < CEILING` (see that test's doc for why), since Step 0 found this machine already
         // over budget before Step 1's change and Step 1 alone does not close the gap.

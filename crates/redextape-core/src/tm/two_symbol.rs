@@ -32,7 +32,9 @@
 
 use std::collections::BTreeSet;
 
+use crate::tm::build::MAX_MACHINE_STATES;
 use crate::tm::machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
+use crate::tm::reduction::{CODE_DOES_NOT_COVER_ALPHABET, StateTable, TOO_MANY_STATES, refusal, refused};
 use crate::tm::sim::Tape;
 
 /// The zero bit. **This IS `BLANK`** — see the module doc for why that is forced.
@@ -171,17 +173,16 @@ pub fn unbitify(tape: &Tape, code: &Code) -> Option<(Vec<Symbol>, usize)> {
 }
 
 /// Generated states per original state — the ratio that decides whether a machine can be reduced at
-/// all, and the figure Task 5's gate holds a ceiling on. `None` when `code` does not cover
-/// `m.alphabet()` ([`uncovered_symbol`] is `Some`): `to_two_symbol` refuses in that case and returns a
-/// one-state machine, and dividing that state count by the original would report the refusal as a
-/// favorable ratio instead of a failure to construct at all — the same reason [`bitify`] returns
-/// `Option`.
+/// all, and the figure Task 5's gate holds a ceiling on. `None` when `to_two_symbol` returns any refusal,
+/// one handed back from an earlier stage included. A refusal is a one-state machine, and dividing that state
+/// count by the original would report the refusal as a favorable ratio instead of a failure to construct at
+/// all — the same reason [`bitify`] returns `Option`.
 #[must_use]
 pub fn states_per_original(m: &Machine, code: &Code) -> Option<f64> {
-    if uncovered_symbol(m, code).is_some() {
+    let reduced = to_two_symbol(m, code);
+    if refusal(&reduced).is_some() {
         return None;
     }
-    let reduced = to_two_symbol(m, code);
     #[expect(clippy::cast_precision_loss, reason = "a ratio of state counts, reported to 2 dp")]
     let ratio = reduced.states.len() as f64 / m.states.len().max(1) as f64;
     Some(ratio)
@@ -196,41 +197,57 @@ pub fn states_per_original(m: &Machine, code: &Code) -> Option<f64> {
 /// `m.tapes` — `a_code_built_for_a_different_machine_is_refused` asserts this for a two-tape `m`.
 ///
 /// **REFUSES RATHER THAN BUILDING A CONSTRUCTION IT CANNOT REPRESENT.** `code` must cover every
-/// symbol in `m.alphabet()` — what `Code::new(m, inits)` builds. This refuses exactly when
-/// [`uncovered_symbol`] returns `Some`. A `Code` built from a different machine can leave a symbol
-/// with no pattern; without this check, a write with no pattern would fold into the same case as no
-/// write at all, and the candidate would fire, move, and report an ordinary accept on a tape that
-/// was never written — a silent wrong answer. When `code` does not cover `m.alphabet()`, this returns
-/// a degenerate one-state, non-accept machine ([`refused`]) named to say why, the same shape
-/// `single_tape.rs`'s `refused` takes for its own unrepresentable inputs. Callers pair the two by
-/// construction: build the `Code` once and hand the same one to `to_two_symbol` and `bitify`.
+/// symbol in `m.alphabet()` — what `Code::new(m, inits)` builds. On a machine that is not already a
+/// refusal, this returns the `code-does-not-cover-alphabet` refusal exactly when [`uncovered_symbol`]
+/// returns `Some`. A `Code` built from a different machine can leave a symbol with no pattern; without
+/// this check, a write with no pattern would fold into the same case as no write at all, and the
+/// candidate would fire, move, and report an ordinary accept on a tape that was never written — a
+/// silent wrong answer. When `code` does not cover `m.alphabet()`, this returns a degenerate one-state,
+/// non-accept machine ([`refused`]) named to say why, the shape every reduction's refusals share. It
+/// refuses the same way when the image would exceed `MAX_MACHINE_STATES` states, and hands an earlier
+/// stage's refusal back unchanged: this construction builds its states under names of its own, so
+/// reducing a refusal would erase its name. Callers pair the two by construction: build the `Code` once
+/// and hand the same one to `to_two_symbol` and `bitify`.
 #[must_use]
 pub fn to_two_symbol(m: &Machine, code: &Code) -> Machine {
-    if uncovered_symbol(m, code).is_some() {
-        return refused("code-does-not-cover-alphabet");
-    }
-    let mut b = Names::new(m.tapes);
-    for (sid, st) in m.states.iter().enumerate() {
-        b.emit_state(m, code, StateId::try_from(sid).unwrap_or(0), st);
-    }
-    b.finish(m)
+    to_two_symbol_within(m, code, MAX_MACHINE_STATES).0
 }
 
-/// The degenerate one-state machine `to_two_symbol` returns when `code` does not cover
-/// `m.alphabet()`: a halt in a named, non-accept state rather than a construction it cannot
-/// represent correctly — the same shape `single_tape.rs`'s `refused` takes for its own
-/// unrepresentable inputs. `name` says why.
-fn refused(name: &str) -> Machine {
-    Machine { states: vec![State { name: name.into(), accept: false, rules: vec![] }], start: 0, tapes: 1 }
+/// [`to_two_symbol`] under a caller's state ceiling instead of `MAX_MACHINE_STATES`, so a test can trip
+/// the ceiling on a machine small enough to read, together with the number of original states it began
+/// emitting after its table had refused a name. The ceiling is checked after each original state, and the
+/// count stays 0 because the loop returns on the state that trips;
+/// `no_original_state_is_started_after_the_ceiling_trips` holds it there.
+pub(crate) fn to_two_symbol_within(m: &Machine, code: &Code, ceiling: usize) -> (Machine, usize) {
+    if refusal(m).is_some() {
+        return (m.clone(), 0);
+    }
+    if uncovered_symbol(m, code).is_some() {
+        return (refused(CODE_DOES_NOT_COVER_ALPHABET), 0);
+    }
+    let mut b = Names::new(m.tapes, ceiling);
+    let mut started_after_trip = 0;
+    for (sid, st) in m.states.iter().enumerate() {
+        if b.table.overflowed() {
+            started_after_trip += 1;
+        }
+        b.emit_state(m, code, StateId::try_from(sid).unwrap_or(0), st);
+        if b.table.overflowed() {
+            return (refused(TOO_MANY_STATES), started_after_trip);
+        }
+    }
+    // No check after the loop: every state is created inside `emit_state`, so the check above sees a trip
+    // before the next original state starts, and `Names::finish` creates none.
+    (b.finish(m), started_after_trip)
 }
 
 /// The first symbol in `m.alphabet()` that `code` cannot encode, or `None` when the pairing is safe.
 ///
-/// **THIS IS WHAT `to_two_symbol`'S REFUSAL IS DEFINED AS**: `to_two_symbol` refuses exactly when this
-/// is `Some`, so the two cannot drift apart on what "safe to reduce" means. A caller pairing a `Code`
-/// with a machine it was not built from — the mismatch [`refused`] exists to catch — can call this
-/// first and get the offending symbol back, instead of having to string-match the refused machine's
-/// name to learn why.
+/// **THIS IS WHAT `to_two_symbol`'S `code-does-not-cover-alphabet` REFUSAL IS DEFINED AS**: on a machine
+/// that is not already a refusal, `to_two_symbol` returns that refusal exactly when this is `Some`, so the
+/// two cannot drift apart on what a covering code is. A caller pairing a `Code` with a machine it was not
+/// built from — the mismatch that refusal exists to catch — can call this first and get the offending
+/// symbol back, instead of having to string-match the refused machine's name to learn why.
 #[must_use]
 pub fn uncovered_symbol(m: &Machine, code: &Code) -> Option<Symbol> {
     m.alphabet().into_iter().find(|&s| code.pattern(s).is_none())
@@ -240,26 +257,20 @@ pub fn uncovered_symbol(m: &Machine, code: &Code) -> Option<Symbol> {
 /// target is emitted. Names are the text form's identity and must be unique, non-empty and free of
 /// whitespace and `; * : [ ]` (`Machine::validate`), which `.`-separated segments satisfy.
 struct Names {
-    ids: std::collections::HashMap<String, StateId>,
-    states: Vec<State>,
+    table: StateTable,
     tapes: usize,
 }
 
 impl Names {
-    fn new(tapes: usize) -> Names {
-        Names { ids: std::collections::HashMap::new(), states: Vec::new(), tapes }
+    fn new(tapes: usize, ceiling: usize) -> Names {
+        Names { table: StateTable::new(ceiling), tapes }
     }
 
     /// The id for `name`, minting the state on first mention. Every generated state is created here,
-    /// so a target named by a rule always exists by the time `finish` runs.
+    /// so a target named by a rule always exists by the time `finish` runs — unless the ceiling tripped,
+    /// which `to_two_symbol_within` checks before the machine is used.
     fn id(&mut self, name: &str) -> StateId {
-        if let Some(id) = self.ids.get(name) {
-            return *id;
-        }
-        let id = StateId::try_from(self.states.len()).unwrap_or(0);
-        self.ids.insert(name.to_string(), id);
-        self.states.push(State { name: name.to_string(), accept: false, rules: Vec::new() });
-        id
+        self.table.id(name)
     }
 
     /// The state a rule targeting original state `sid` must name.
@@ -277,7 +288,7 @@ impl Names {
 
     fn push_rule(&mut self, at: &str, rule: Rule) {
         let id = self.id(at);
-        if let Some(st) = self.states.get_mut(id as usize) {
+        if let Some(st) = self.table.get_mut(id) {
             st.rules.push(rule);
         }
     }
@@ -400,7 +411,7 @@ impl Names {
         if st.accept {
             let name = Names::entry_name(sid, true);
             let id = self.id(&name);
-            if let Some(s) = self.states.get_mut(id as usize) {
+            if let Some(s) = self.table.get_mut(id) {
                 s.accept = true;
                 s.rules.clear();
             }
@@ -447,12 +458,12 @@ impl Names {
             let Some(want) = rule.read.get(i).copied().flatten() else { continue };
             // **THIS BRANCH IS UNREACHABLE, PROVABLY.** `emit_candidate` is private with exactly one
             // caller chain: `emit_state` calls it once per candidate of `st`, and `emit_state` is
-            // reached only from `to_two_symbol`'s loop over `m.states`. That loop runs only after
-            // `to_two_symbol`'s own refusal has already returned early whenever `code` does not cover
-            // `m.alphabet()` — the union of every rule's reads and writes, so `want` (a read of one of
-            // `st`'s own rules) is always a member. By the time this line runs, `code.pattern(want)` is
-            // always `Some`. The branch is kept to name that invariant, not because it can fire: if it
-            // ever does, the screen above it has a hole.
+            // reached only from `to_two_symbol_within`'s loop over `m.states`. That loop runs only after
+            // `to_two_symbol_within`'s `code-does-not-cover-alphabet` refusal has already returned early
+            // whenever `code` does not cover `m.alphabet()` — the union of every rule's reads and writes, so
+            // `want` (a read of one of `st`'s own rules) is always a member. By the time this line runs,
+            // `code.pattern(want)` is always `Some`. The branch is kept to name that invariant, not because it
+            // can fire: if it ever does, the screen above it has a hole.
             let Some(pattern) = code.pattern(want) else { return fallthrough.to_string() };
             let prefix = format!("q{sid}.c{c}.t{i}");
             head = self.check_block(&prefix, i, &pattern, &head, fallthrough);
@@ -506,11 +517,10 @@ impl Names {
 
     fn finish(self, m: &Machine) -> Machine {
         let start = self
-            .ids
+            .table
             .get(&Names::entry_name(m.start, m.states.get(m.start as usize).is_some_and(|s| s.accept)))
-            .copied()
             .unwrap_or(0);
-        Machine { states: self.states, start, tapes: m.tapes }
+        Machine { states: self.table.into_states(), start, tapes: m.tapes }
     }
 }
 
@@ -814,6 +824,50 @@ mod tests {
         }
     }
 
+    /// **EVERY CEILING FROM 0 TO THE IMAGE'S OWN SIZE**, as the single-tape reduction checks it: below the
+    /// image's state count the construction must refuse, and at that count it must build the image unchanged.
+    /// Every failing ceiling is reported, not only the first.
+    #[test]
+    fn every_ceiling_below_the_image_size_refuses_and_the_image_size_builds_it() {
+        let alphabet = ['a', 'b', 'c'];
+        let mut wrong = Vec::new();
+        for (fixture, m) in [chain(3), reads('b', &alphabet), writes('c', Move::L, &alphabet)].iter().enumerate() {
+            let code = Code::new(m, &[alphabet.to_vec()]);
+            let full = to_two_symbol(m, &code);
+            assert_eq!(refusal(&full), None, "a toy fixture is not refused");
+            let n = full.states.len();
+            for ceiling in 0..=n {
+                let got = to_two_symbol_within(m, &code, ceiling).0;
+                let right = if ceiling < n { refusal(&got) == Some(TOO_MANY_STATES) } else { got == full };
+                if !right {
+                    wrong.push((fixture, ceiling, n));
+                }
+            }
+        }
+        assert_eq!(wrong, Vec::new(), "(fixture, ceiling, image size) neither refused below the size nor built at it");
+    }
+
+    /// **THE CHECK AFTER EACH ORIGINAL STATE.** At a ceiling of one, the first of `chain(3)`'s four original
+    /// states trips the table, so none of the other three may start.
+    #[test]
+    fn no_original_state_is_started_after_the_ceiling_trips() {
+        let m = chain(3);
+        assert_eq!(m.states.len(), 4, "the trip must leave original states still to start");
+        let (reduced, started_after_trip) = to_two_symbol_within(&m, &Code::new(&m, &[]), 1);
+        assert_eq!(refusal(&reduced), Some(TOO_MANY_STATES));
+        assert_eq!(started_after_trip, 0, "an original state was started after the ceiling tripped");
+    }
+
+    /// Reducing a refusal would build a machine of its own that carries none of the refusal's name, so a
+    /// refusal from an earlier stage has to come back exactly as it went in.
+    #[test]
+    fn a_refusal_handed_back_in_comes_back_unchanged() {
+        for name in crate::tm::reduction::REFUSALS {
+            let r = refused(name);
+            assert_eq!(to_two_symbol(&r, &Code::new(&r, &[])), r, "for {name}");
+        }
+    }
+
     /// **`stride` HAD NEVER EXECUTED BEFORE THIS TEST.** It carried `#[expect(dead_code)]` through
     /// two tasks — which only survives `-D warnings` while nothing calls the item — and the two arms
     /// that reach it, a move with no write, are reached by no other machine in this file. A rule that
@@ -988,7 +1042,7 @@ mod tests {
             for enc in [crate::tm::EncodingKind::Unary, crate::tm::EncodingKind::Binary] {
                 let (m, inits) = demo_machine(src, enc);
                 let code = Code::new(&m, &inits);
-                let ratio = states_per_original(&m, &code).expect("the demo suite's own codes cover their machines");
+                let ratio = states_per_original(&m, &code).expect("a demo machine is not refused");
                 println!("{src:60} {enc:?} k={} ratio={ratio:.6}", code.bits());
                 assert!(
                     ratio < STATE_CEILING,
@@ -1033,7 +1087,7 @@ mod tests {
 
     /// A `Code` built over a DIFFERENT machine's alphabet cannot cover this one's, so `to_two_symbol`
     /// must refuse rather than build a construction where a write with no pattern would silently fold
-    /// into "no write at all". The refusal is the shape `single_tape.rs`'s `refused` uses: one state,
+    /// into "no write at all". The refusal is the shape `reduction.rs`'s `refused` builds: one state,
     /// not an accept, named. `m` has two tapes so this also exercises the refusal's own tape count,
     /// which stays fixed regardless of `m.tapes` — `to_two_symbol`'s doc names this test for it.
     #[test]
@@ -1059,6 +1113,7 @@ mod tests {
             "the fixture must actually exercise the mismatch: `code` must miss a symbol of `m`'s"
         );
         let reduced = to_two_symbol(&m, &code);
+        assert_eq!(crate::tm::reduction::refusal(&reduced), Some(CODE_DOES_NOT_COVER_ALPHABET));
         assert_eq!(reduced.states.len(), 1, "a refusal is the degenerate one-state machine, not a partial build");
         assert!(!reduced.states[0].accept, "a refusal must not be an accept");
         assert_eq!(

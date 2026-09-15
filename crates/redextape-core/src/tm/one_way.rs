@@ -22,9 +22,11 @@
 //! snapshot holding something other than [`LEFT_END`]: that cell materializes as `BLANK`, and this
 //! construction never writes [`LEFT_END`]. [`unzigzag`] returning `Some` on a halted run is that proof.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
-use crate::tm::machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
+use crate::tm::build::MAX_MACHINE_STATES;
+use crate::tm::machine::{BLANK, Machine, Move, Rule, StateId, Symbol};
+use crate::tm::reduction::{LEFT_END_COLLISION, StateTable, TOO_MANY_STATES, refusal, refused};
 use crate::tm::sim::Tape;
 
 /// The marker at physical cell 0 of every folded tape.
@@ -77,8 +79,8 @@ impl OriginSnapshot {
 /// crossing on such a tape would walk off its left end.
 ///
 /// `None` when an initial tape contains [`LEFT_END`] — `Machine::alphabet` cannot see initial contents,
-/// so [`to_one_way`]'s own refusal cannot catch that pairing — or when `inits` holds more tapes than
-/// `tapes`, which `single_tape.rs`'s `interleave` documents dropping silently.
+/// so [`to_one_way`]'s `left-end-collision` refusal cannot catch that pairing — or when `inits` holds more
+/// tapes than `tapes`, which `single_tape.rs`'s `interleave` documents dropping silently.
 #[must_use]
 pub fn zigzag(inits: &[Vec<Symbol>], tapes: usize) -> Option<Vec<Vec<Symbol>>> {
     if inits.len() > tapes || inits.iter().flatten().any(|s| *s == LEFT_END) {
@@ -129,24 +131,25 @@ pub fn unzigzag(tape: &Tape) -> Option<OriginSnapshot> {
     Some(OriginSnapshot { cells, head, origin: negatives })
 }
 
-/// Whether `m`'s rules name [`LEFT_END`] — the predicate [`to_one_way`]'s refusal is defined as. A rule
-/// that wrote the marker could forge the certificate, and one that read it would match the marker as
-/// data. Exported so a caller can check before building, rather than string-matching a refused
-/// machine's name.
+/// Whether `m`'s rules name [`LEFT_END`] — the predicate [`to_one_way`]'s `left-end-collision` refusal is
+/// defined as. A rule that wrote the marker could forge the certificate, and one that read it would match
+/// the marker as data. Exported so a caller can check before building, rather than string-matching a
+/// refused machine's name.
 #[must_use]
 pub fn left_end_collision(m: &Machine) -> bool {
     m.alphabet().contains(&LEFT_END)
 }
 
-/// Generated states per original state. `None` when [`to_one_way`] refuses `m`: a refusal is a
-/// one-state machine, and dividing that by the original's state count would report a failure to build
-/// as an excellent ratio — the lesson `two_symbol.rs`'s `states_per_original` records.
+/// Generated states per original state. `None` when [`to_one_way`] returns any refusal, one handed back from
+/// an earlier stage included: a refusal is a one-state machine, and dividing that by the original's state
+/// count would report a failure to build as an excellent ratio — the lesson
+/// `two_symbol.rs`'s `states_per_original` records.
 #[must_use]
 pub fn states_per_original(m: &Machine) -> Option<f64> {
-    if left_end_collision(m) {
+    let folded = to_one_way(m);
+    if refusal(&folded).is_some() {
         return None;
     }
-    let folded = to_one_way(m);
     #[expect(clippy::cast_precision_loss, reason = "a ratio of state counts, reported to 2 dp")]
     let ratio = folded.states.len() as f64 / m.states.len().max(1) as f64;
     Some(ratio)
@@ -156,32 +159,57 @@ pub fn states_per_original(m: &Machine) -> Option<f64> {
 /// machine this can build.
 ///
 /// **REFUSES RATHER THAN BUILDING SOMETHING IT CANNOT CERTIFY.** When [`left_end_collision`] holds, this
-/// returns a one-state, non-accept machine named `left-end-collision` — the shape `single_tape.rs`'s and
-/// `two_symbol.rs`'s refusals take, including their fixed tape count of one.
+/// returns a one-state, non-accept machine named `left-end-collision` — [`refused`]'s shape, which every
+/// reduction's refusals share, including their fixed tape count of one. It refuses the same way, named
+/// `too-many-states`, when the folded machine would exceed `MAX_MACHINE_STATES` states, and hands an
+/// earlier stage's refusal back unchanged: the fold builds its states under names of its own, so folding
+/// a refusal would erase its name.
 ///
 /// **A PREAMBLE STARTS THE MACHINE**, stepping every head from [`LEFT_END`] onto physical cell 1, because
 /// `Tape::new` starts every head on cell 0 and cell 0 is the marker. It is one state and one step.
 #[must_use]
 pub fn to_one_way(m: &Machine) -> Machine {
-    if left_end_collision(m) {
-        return refused("left-end-collision");
+    to_one_way_within(m, MAX_MACHINE_STATES).0
+}
+
+/// [`to_one_way`] under a caller's state ceiling instead of `MAX_MACHINE_STATES`, so a test can trip the
+/// ceiling on a machine small enough to read, together with the number of worklist items it began emitting
+/// after its table had refused a name. The ceiling is checked once after the preamble and then after each pair
+/// the worklist emits, so the count is always 0; `no_worklist_item_is_started_after_the_ceiling_trips` holds it.
+///
+/// **THE CHECK AFTER THE PREAMBLE IS THE ONLY ONE A CEILING OF 0 REACHES.** `pre` trips the table before the
+/// start pair is named, so `Names::pair` queues nothing and the worklist never runs. At a ceiling of 1 the start
+/// pair is queued just before its own name trips the table, and that check refuses before the worklist starts it.
+pub(crate) fn to_one_way_within(m: &Machine, ceiling: usize) -> (Machine, usize) {
+    if refusal(m).is_some() {
+        return (m.clone(), 0);
     }
-    let mut b = Names::new(m.tapes);
+    if left_end_collision(m) {
+        return (refused(LEFT_END_COLLISION), 0);
+    }
+    let mut b = Names::new(m.tapes, ceiling);
     let mut queue = VecDeque::new();
     let pre = b.id("pre");
     let start = b.pair(m.start, &vec![Side::Right; m.tapes], &mut queue);
     let preamble =
         Rule { read: vec![None; m.tapes], write: vec![None; m.tapes], moves: vec![Move::R; m.tapes], next: start };
     b.push_rule(pre, preamble);
-    while let Some((sid, sides)) = queue.pop_front() {
-        b.emit_pair(m, sid, &sides, &mut queue);
+    if b.table.overflowed() {
+        return (refused(TOO_MANY_STATES), 0);
     }
-    Machine { states: b.states, start: pre, tapes: m.tapes }
-}
-
-/// The degenerate machine [`to_one_way`] returns for a refusal: one named, non-accept state.
-fn refused(name: &str) -> Machine {
-    Machine { states: vec![State { name: name.into(), accept: false, rules: vec![] }], start: 0, tapes: 1 }
+    let mut started_after_trip = 0;
+    while let Some((sid, sides)) = queue.pop_front() {
+        if b.table.overflowed() {
+            started_after_trip += 1;
+        }
+        b.emit_pair(m, sid, &sides, &mut queue);
+        if b.table.overflowed() {
+            return (refused(TOO_MANY_STATES), started_after_trip);
+        }
+    }
+    // No check after the worklist: the check before it refuses a trip in the preamble, and the check after each
+    // pair refuses every trip inside it.
+    (Machine { states: b.table.into_states(), start: pre, tapes: m.tapes }, started_after_trip)
 }
 
 /// Which half of a folded tape a head is on.
@@ -241,29 +269,25 @@ type Queue = VecDeque<(StateId, Vec<Side>)>;
 /// is emitted. Names are the text form's identity and must be unique, non-empty and free of whitespace
 /// and `; * : [ ]` (`Machine::validate`), which `.`-separated segments of letters and digits satisfy.
 struct Names {
-    ids: HashMap<String, StateId>,
-    states: Vec<State>,
+    table: StateTable,
     tapes: usize,
 }
 
 impl Names {
-    fn new(tapes: usize) -> Names {
-        Names { ids: HashMap::new(), states: Vec::new(), tapes }
+    fn new(tapes: usize, ceiling: usize) -> Names {
+        Names { table: StateTable::new(ceiling), tapes }
     }
 
-    /// The id for `name`, minting the state on first mention.
+    /// The id for `name`, minting the state on first mention. Every generated state is created here, so a
+    /// target named by a rule always exists by the time `to_one_way_within` assembles the machine — unless
+    /// the ceiling tripped, which `to_one_way_within` checks after the preamble and after each pair, before
+    /// the machine is used.
     fn id(&mut self, name: &str) -> StateId {
-        if let Some(id) = self.ids.get(name) {
-            return *id;
-        }
-        let id = StateId::try_from(self.states.len()).unwrap_or(0);
-        self.ids.insert(name.to_string(), id);
-        self.states.push(State { name: name.to_string(), accept: false, rules: Vec::new() });
-        id
+        self.table.id(name)
     }
 
     fn push_rule(&mut self, at: StateId, rule: Rule) {
-        if let Some(st) = self.states.get_mut(at as usize) {
+        if let Some(st) = self.table.get_mut(at) {
             st.rules.push(rule);
         }
     }
@@ -288,9 +312,13 @@ impl Names {
     /// The state standing for original state `sid` with its tapes on `sides`, queued for emission the
     /// first time it is named. **The only place a pair's name is spelled**, so a rule targeting a pair
     /// and the pair's own emission cannot disagree about it.
+    ///
+    /// **NOTHING IS QUEUED ONCE THE TABLE HAS TRIPPED.** A name the table refuses is never recorded, so without
+    /// this a refused pair would be queued again every time it is named, including by the item that pops it,
+    /// and the worklist would never end. `a_tripped_table_queues_no_more_pairs` holds it.
     fn pair(&mut self, sid: StateId, sides: &[Side], queue: &mut Queue) -> StateId {
         let name = format!("q{sid}.{}", spell(sides));
-        if !self.ids.contains_key(&name) {
+        if !self.table.overflowed() && self.table.get(&name).is_none() {
             queue.push_back((sid, sides.to_vec()));
         }
         self.id(&name)
@@ -306,7 +334,7 @@ impl Names {
         let here = self.pair(sid, sides, queue);
         let Some(st) = m.states.get(sid as usize) else { return };
         if st.accept {
-            if let Some(s) = self.states.get_mut(here as usize) {
+            if let Some(s) = self.table.get_mut(here) {
                 s.accept = true;
             }
             return;
@@ -388,6 +416,7 @@ impl Names {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tm::machine::State;
     use crate::tm::sim::{DEFAULT_CAPS, Status, simulate_final};
     use crate::tm::single_tape::normalize;
     use proptest::prelude::*;
@@ -548,11 +577,73 @@ mod tests {
         let m = walk(&[(Some(LEFT_END), Move::R)]);
         assert!(left_end_collision(&m));
         let folded = to_one_way(&m);
+        assert_eq!(refusal(&folded), Some(LEFT_END_COLLISION));
         assert_eq!(folded.states.len(), 1, "a refusal is the degenerate one-state machine, not a partial build");
         assert!(!folded.states[0].accept, "a refusal must not be an accept");
         assert_eq!(folded.states[0].name, "left-end-collision");
         assert_eq!(states_per_original(&m), None, "a refusal must not be reported as a ratio");
         assert!(states_per_original(&walk(&[(Some('a'), Move::R)])).is_some(), "and a clean machine has one");
+    }
+
+    /// **EVERY CEILING FROM 0 TO THE FOLD'S OWN SIZE**, as the other two reductions check it: below the folded
+    /// machine's state count the fold must refuse, and at that count it must build the fold unchanged. Every
+    /// failing ceiling is reported, not only the first.
+    #[test]
+    fn every_ceiling_below_the_fold_size_refuses_and_the_fold_size_builds_it() {
+        let x = Some('x');
+        let fixtures =
+            [walk(&[(None, Move::S)]), walk(&[(x, Move::R)]), walk(&[(x, Move::L), (x, Move::L), (None, Move::R)])];
+        let mut wrong = Vec::new();
+        for (fixture, m) in fixtures.iter().enumerate() {
+            let full = to_one_way(m);
+            assert_eq!(refusal(&full), None, "a toy fixture is not refused");
+            let n = full.states.len();
+            for ceiling in 0..=n {
+                let got = to_one_way_within(m, ceiling).0;
+                let right = if ceiling < n { refusal(&got) == Some(TOO_MANY_STATES) } else { got == full };
+                if !right {
+                    wrong.push((fixture, ceiling, n));
+                }
+            }
+        }
+        assert_eq!(wrong, Vec::new(), "(fixture, ceiling, fold size) neither refused below the size nor built at it");
+    }
+
+    /// **THE CHECK AFTER EACH PAIR.** At a ceiling of two the preamble's two states fit and the first worklist
+    /// item trips the table, so no item may start after it.
+    #[test]
+    fn no_worklist_item_is_started_after_the_ceiling_trips() {
+        let x = Some('x');
+        let m = walk(&[(x, Move::L), (x, Move::L), (x, Move::L), (None, Move::R)]);
+        let (folded, started_after_trip) = to_one_way_within(&m, 2);
+        assert_eq!(refusal(&folded), Some(TOO_MANY_STATES));
+        assert_eq!(started_after_trip, 0, "a worklist item was started after the ceiling tripped");
+    }
+
+    /// **A TRIPPED TABLE QUEUES NO MORE PAIRS, WHICH IS WHAT LETS THE WORKLIST END.** Tested on `Names::pair`
+    /// directly, because the check after each pair returns before a refused pair can be popped, so
+    /// `to_one_way_within` does not show it.
+    #[test]
+    fn a_tripped_table_queues_no_more_pairs() {
+        let mut queue = Queue::new();
+        let mut b = Names::new(1, 1);
+        let _ = b.id("pre");
+        let _ = b.pair(0, &[Side::Right], &mut queue);
+        assert!(b.table.overflowed(), "the start pair's name must trip a ceiling of one");
+        assert_eq!(queue.len(), 1, "the pair whose name trips the table is queued");
+        let _ = b.pair(1, &[Side::Right], &mut queue);
+        let _ = b.pair(0, &[Side::Right], &mut queue);
+        assert_eq!(queue.len(), 1, "a pair named after the trip is not queued, even the one the trip refused");
+    }
+
+    /// Folding a refusal would build a machine of its own that carries none of the refusal's name, so a
+    /// refusal from an earlier stage has to come back exactly as it went in.
+    #[test]
+    fn a_refusal_handed_back_in_comes_back_unchanged() {
+        for name in crate::tm::reduction::REFUSALS {
+            let r = refused(name);
+            assert_eq!(to_one_way(&r), r, "for {name}");
+        }
     }
 
     /// Tape 0 crosses into the left half; tape 1 only ever moves right, so no reachable pair may put it on
@@ -623,7 +714,8 @@ mod tests {
     /// **NOT A CEILING EVERY SHIPPED MACHINE MEETS.** The largest shipped demo — `single_tape.rs`'s
     /// `the_worst_shipped_demo_measured_directly` builds it — has four tapes with a `Move::L` rule where
     /// this corpus has two or three, and folded to 7,363,253 states against `MAX_MACHINE_STATES` of
-    /// 1,000,000 when measured on 2026-09-13. That is recorded in the roadmap entry, not gated here.
+    /// 1,000,000 when measured on 2026-09-13, before the reductions had a state ceiling. `to_one_way` now
+    /// refuses it with `too-many-states`; the measurement is recorded in the roadmap entry, not gated here.
     const STATE_CEILING: f64 = 40.0;
 
     /// Also prints, per row, how many `sides` combinations the worklist reached against `2^n` for `n`
@@ -636,7 +728,7 @@ mod tests {
         {
             for enc in [crate::tm::EncodingKind::Unary, crate::tm::EncodingKind::Binary] {
                 let (m, _inits) = demo_machine(src, enc);
-                let ratio = states_per_original(&m).expect("no lowered machine names the marker");
+                let ratio = states_per_original(&m).expect("a demo machine is not refused");
                 let folded = to_one_way(&m);
                 let mut sides = pair_sides(&folded);
                 sides.sort();

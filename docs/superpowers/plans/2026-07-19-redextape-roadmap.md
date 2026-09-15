@@ -16691,7 +16691,7 @@ The one finding that changes what `to_single_tape` returns for any input was fil
 
 ##### WHAT STAYS OPEN
 
-- **The largest shipped demos cannot be reduced**, at 36.858736 against 20.352091. What would close it is collapsing the per-acting-tape passes into one sweep, which needs a **third marker per tape** so a head already moved in this sweep is not moved again. That is a redesign of the apply phase, nothing this slice delivers requires it, and it is filed rather than done.
+- **The largest shipped demos cannot be reduced**, at 36.858736 against 20.352091. What would close it is collapsing the per-acting-tape passes into one sweep, which needs a **third marker per tape** so a head already moved in this sweep is not moved again. That is a redesign of the apply phase, nothing this slice delivers requires it, and it is filed rather than done. **ANNOTATED 2026-09-15 (`reduction-state-guard`):** still true, but `to_single_tape` now refuses the demo with `too-many-states` instead of building its 1,811,054 states.
 - **The two tightest-margin programs are deliberately ungated.** The `while`-loop demo at **20.339483** (+0.062%) and `count_down(4)` at **20.147985** (+1.003%) are both `FIRST_ORDER_DEMOS` members and neither is in `SOURCES`. At 0.062% a seven-state change to an 11,024-state image trips the assertion, which is noise with a pass/fail label rather than signal. The figures are recorded in the spec and in `real_lowered_machines_cost_far_more_than_the_toy_fixtures`'s doc so the tradeoff is visible rather than silent.
 - **The unreachable `fail`/`stuck` states are measured and not pruned.** 1.25%-2.65% of every first-order image and 0.46% of the worst demo, always exactly two per state whose last rule is an all-wildcard catch-all. Pruning takes `sum(5)` from 19.201354 to 18.886633 and the worst demo from 36.858736 to 36.687819 — real, and nowhere near enough alone to close either gap.
 - **`the_worst_shipped_demo_measured_directly` still asserts only `is_finite() && ratio > 0.0`.** A `ratio < CEILING` there would fail permanently by design. It is a measurement wearing a test's shape, and it is the only thing holding the 36.858736 figure against drift.
@@ -17000,7 +17000,7 @@ Across fourteen lowered runs — seven programs under both encodings — **no ta
 | `sum(5)` | unary | 1,182 → 25,673 | 21.719966 | 8 of 2^3 |
 | `sum(5)` | binary | 1,371 → 47,478 | 34.630197 | 8 of 2^3 |
 
-**The worklist saves nothing on this corpus: every combination of sides is reachable.** `STATE_CEILING` is 40.0; the tightest margin is binary `cons(1, cons(2, nil))` at 1,805 states. **The largest shipped demo cannot be folded:** 49,135 states with four tapes carrying a `Move::L` rule fold to 7,363,253 states, ratio 149.857596, against `MAX_MACHINE_STATES` of 1,000,000 — recorded, not gated, as stage 1's 1.81M was.
+**The worklist saves nothing on this corpus: every combination of sides is reachable.** `STATE_CEILING` is 40.0; the tightest margin is binary `cons(1, cons(2, nil))` at 1,805 states. **The largest shipped demo cannot be folded:** 49,135 states with four tapes carrying a `Move::L` rule fold to 7,363,253 states, ratio 149.857596, against `MAX_MACHINE_STATES` of 1,000,000 — recorded, not gated, as stage 1's 1.81M was. **ANNOTATED 2026-09-15 (`reduction-state-guard`):** now gated: all three stages refuse the demo with `too-many-states`, and a slow-tier test holds each.
 
 **Both of the spec's step predictions held.** Folded steps are 2.001x, 1.971x, 2.053x, 2.069x, 2.014x and 2.055x the source's across `1 + 2 * 3`, `let x = 40; x + 2` and `sum(5)` under both encodings, while the longest tape ranges from 26 to 302 cells: about double, and flat in tape length, because no move costs more than three physical steps. Folded then reduced to two symbols, `3 - 5` runs 508 → 2,621 steps, `if 2 > 1 { 10 } else { 20 }` 1,263 → 6,578, `cons(1, cons(2, nil))` 861 → 6,990 and `fn add1(x) … pair_sum(1, add1(2))` 6,791 → 35,606. All three stages on `3 - 5` — one tape, one head, two symbols, one-way — take 508 folded steps, 887,588 through stage 1 and 7,088,578 through all three, over 137,532 states, with no left padding at all, because a folded machine never visits a cell left of its marker. That run is checked a stage at a time, and in that order stage 1 bounds the tape anyway, so it shows the stages compose and is not evidence the fold works.
 
@@ -17020,7 +17020,7 @@ Every task's end state was built in a scratch worktree before it went into the p
 
 ##### WHAT THIS DID NOT CLOSE
 
-- **The largest shipped demo cannot be folded**, at 7,363,253 states, and `to_one_way` has no `MAX_MACHINE_STATES` guard of its own; neither do the two earlier stages.
+- **The largest shipped demo cannot be folded**, at 7,363,253 states, ~~and `to_one_way` has no `MAX_MACHINE_STATES` guard of its own; neither do the two earlier stages~~. **CLOSED 2026-09-15 (`reduction-state-guard`):** all three stages now refuse past `MAX_MACHINE_STATES`.
 - **Leg 6's corpus never goes below cell -1.** Correctness past it rests on the depth-5 test, the two-tape test and the proptest, whose fixed-seed reach is what the generator floor holds.
 - **The cost table prints both step predictions and asserts neither.**
 - **Moves still finish one tape at a time.** Finishing them in parallel would cut steps; nothing here needed it.
@@ -17035,7 +17035,7 @@ Every task's end state was built in a scratch worktree before it went into the p
 **Every count this entry quotes, with what produces it.** Run at `22b55d5`, the branch's last code commit, unless a line says otherwise.
 
 - **The design-time probe, not committed**, run on 2026-09-13 at `22229fb` in a scratch worktree: the four stage 1 images' step counts (257,216, 1,499,580, 397,970, 1,606,768) with `<` at cell 0, and the fourteen lowered runs, with no tape below cell -1, two or three tapes carrying a `Move::L` rule, and five of thirteen excursions ending on an all-blank tape. These are the spec's tables; nothing in the tree re-derives them.
-- **The largest shipped demo, measured by a scratch probe while planning** (2026-09-13), on the scratch worktree's prototype of `to_one_way`: `run_tm_described_at(.., EncodingKind::Binary, .., MAX_FIELD_WIDTH)` on `single_tape.rs`'s `WORST_SHIPPED_DEMO` source, then `to_one_way`: **49,135 → 7,363,253 states, ratio 149.857596, four tapes with a `Move::L` rule**. Nothing in the tree re-derives it.
+- **The largest shipped demo, measured by a scratch probe while planning** (2026-09-13), on the scratch worktree's prototype of `to_one_way`: `run_tm_described_at(.., EncodingKind::Binary, .., MAX_FIELD_WIDTH)` on `single_tape.rs`'s `WORST_SHIPPED_DEMO` source, then `to_one_way`: **49,135 → 7,363,253 states, ratio 149.857596, four tapes with a `Move::L` rule**. Nothing in the tree re-derives it. **ANNOTATED 2026-09-15 (`reduction-state-guard`):** that source now lives in `reduction.rs`'s `worst_shipped_demo`.
 - `cargo nextest run -p redextape-core --lib tm::one_way --no-capture`: **12 passed**; the state-ceiling rows 143 → 1,893 (13.237762), 278 → 5,103 (18.356115), 146 → 2,965 (20.308219), 201 → 6,235 (31.019900), 1,182 → 25,673 (21.719966), 1,371 → 47,478 (34.630197), sides 4 of 2^2, 4 of 2^2, 8 of 2^3 ×4, tightest margin **1,805 states**.
 - `cargo nextest run -p redextape-core --test one_way_oracle --no-capture`: **8 passed, 2 skipped**; leg 6's five excursion lines as quoted; `of 256 generated machines: 128 reach cell -1, 41 reach cell -2 or beyond`; fold then stage 2 at 508 → 2,621, 1,263 → 6,578, 861 → 6,990 and 6,791 → 35,606 steps; `3 - 5: k 4 steps 2158491 pattern(<) ['_', '_', '1', '1']`.
 - `cargo nextest run --release -p redextape-core --test one_way_oracle --run-ignored only --no-capture`: **2 passed**; the cost table's six rows at 2.001x, 1.971x, 2.053x, 2.069x, 2.014x and 2.055x over longest tapes of 46, 26, 261, 37, 188 and 302 cells; `3 - 5: folded 508 steps, stage 1 887588, all three 7088578 (k 4, 137532 states)`.
@@ -17156,3 +17156,155 @@ Rows 1–4 are one parse each, by the size probe. Rows 5–6 keep the fastest of
 - **Readings taken during review, under load, not re-run:** each is the ratio test's own output line, kept in the session's scratch logs. **6.64×** is run 2 of 3 of the unmodified tests at `ead0416`. **18.65×** at `ead0416` and **15.00×** at `9d697df` are the `tape`-line test after `perl -pi` replaced `self.tape_indices.contains(&i)` with `self.tapes.iter().any(|(j, _, _)| *j == i)` in `header.rs`.
 - **Recorded, not re-run:** the 87% `memcmp` share and the isolating ramps are the spec's diagnosis. The 85.5% and 97.0% shares are the roadmap's, read at `296a90c`.
 - **The deleted quote:** `git grep -n "Iterative, no recursion" 78ebea6 -- crates` finds one line, `parse_tm_nav`'s doc quoting it. At `296a90c` it finds none.
+
+#### ALL THREE TIER 1 REDUCTIONS NOW REFUSE PAST `MAX_MACHINE_STATES`, AND A REFUSAL SURVIVES EVERY STAGE AFTER IT. THE PLAN'S CODE WAS BUILT FOUR TIMES BEFORE THE PLAN WAS WRITTEN, AND THE BUILDS FOUND, IN ORDER, THAT THE CHECK INSIDE EACH LOOP WAS HELD BY NO TEST, THAT WITHOUT IT THE FOLD'S WORKLIST WOULD NEVER END, AND THAT TWO DECISIONS TAKEN TOGETHER LET A CEILING OF 0 THROUGH UNREFUSED, A GAP THE LAST BUILD CLOSED. THE WHOLE-BRANCH REVIEW FOUND A PUBLIC DOC STILL PROMISING A STAGE REFUSES "EXACTLY WHEN" ONE CONDITION HOLDS, AND THE BRANCH'S ONE PUBLIC SIGNATURE CHANGE TESTED AT NO TIER (2026-09-15, branch `reduction-state-guard`, `78ebea6..632753e`, 19 commits, plus this entry)
+
+**This closes the guard half of the first bullet of stage 3's *What this did not close*:** "`to_one_way` has no
+`MAX_MACHINE_STATES` guard of its own; neither do the two earlier stages."
+- **What it delivers:**
+  - `tm/reduction.rs`: a shared `StateTable` capped at a ceiling, the five refusal names in `REFUSALS`, one
+    refusal constructor, and a public `refusal()` that checks a refusal's shape as well as its name.
+  - `single_tape.rs`, `two_symbol.rs` and `one_way.rs` each create every state through that table, and each
+    public `to_*` delegates to a crate-private `_within(.., ceiling)`.
+  - Stage 1's public `states_per_original` now returns `Option<f64>`, `None` for a refusal.
+- **Spec and plan:** spec `docs/superpowers/specs/2026-09-14-reduction-state-guard-design.md`, plan
+  `docs/superpowers/plans/2026-09-14-reduction-state-guard.md`.
+
+##### WHAT WAS MEASURED BEFORE DESIGNING
+
+**Every stage goes over the ceiling on the largest shipped demo.** Lowered under `Binary` at
+`MAX_FIELD_WIDTH`, the demo is 49,135 states.
+
+| stage | states without a ceiling |
+| --- | --- |
+| stage 1 | 1,811,054 |
+| stage 2, on the lowered machine | 2,601,972 |
+| the fold | 7,363,253 |
+
+**A refusal did not survive the next stage.** Each of the four refusal machines that existed before this branch,
+fed through each stage, came back as a two-state machine without its name: 12 of 12. So a pipeline that checked
+only its end could not see an earlier stage refuse. Every stage now hands a refusal back unchanged.
+
+##### THE PLAN'S CODE WAS BUILT FOUR TIMES BEFORE IT WAS WRITTEN DOWN
+
+In order, the builds found:
+
+1. **The check inside each loop was held by no test.** The spec's sabotage deleted it only together with the
+   final check. Deleted alone in stage 1, it reddened nothing, because stage 1's `finish` refused anyway. Each
+   `_within` now also returns a count of work started after a trip, and a test in each stage holds that count
+   at 0.
+2. **Without that check, the fold's worklist would never end.** A refused pair's name is never recorded, so the
+   fold would queue it again every time it was named. The fold now queues nothing once the table has tripped.
+   The final checks in stage 2 and the fold, unreachable while the check inside the loop exists, were deleted by
+   decision. Stage 1's stays, because its `finish` creates states.
+3. **Those decisions, taken together, let a ceiling of 0 through.** The fold returned an empty machine that was
+   not a refusal.
+4. **The last build closed that gap.** The fold now also checks before its worklist starts, and each stage's
+   boundary test became a test of every ceiling from 0 to the machine's size. Only ceiling 0 had escaped.
+
+##### WHAT REVIEW FOUND
+
+- **Task reviews:** one Important finding, on Task 3. The composition test's doc said it ran the orders the
+  oracle tests compose the stages in, and it ran two of three. It now also runs the fold then stage 2.
+- **The whole-branch review:**
+  - **A public contract was false.** `to_two_symbol`'s doc said it refuses "exactly when" its code does not cover
+    the alphabet, though it now also refuses past the ceiling and hands earlier refusals back. Each such sentence
+    now names the refusal it means.
+  - **The branch's one public signature change was tested at no tier:** stage 1's `states_per_original`, now
+    `Option<f64>`. Stage 1 now has a `None` test, and each slow test asserts `None` on the demo.
+  - **Smaller gaps:**
+    - `refusal()`'s start-state check had no negative test;
+    - two `expect` messages named one cause of `None`;
+    - a provenance paragraph described code that had moved to `reduction.rs`;
+    - `REFUSALS` was crate-private and `StateTable`'s functions were undocumented;
+    - the spec no longer matched the code in four places.
+  - **A test moved to the slow tier.** `the_worst_shipped_demo_measured_directly`, in `single_tape.rs`, builds the
+    unguarded 1,811,054-state stage 1 image, and had run in the normal tier since #87. Measured alone in a debug
+    build, it peaks at 1,264,108 KiB. By decision it is now `#[ignore]`.
+  - **The attributions gate misses a citation split across a line break.** The fix pass split two of the four
+    citations it added that way, and the gate stayed green at 486 sites, two short. Both are rejoined.
+- **The re-review of those fixes** found a doc recording a nextest command that no longer selects the now-ignored
+  test, and a release figure without the build that produced it. It also found nothing showing that the fold's
+  slow `None` assertion could fail. Both docs now name their commands, and restoring `78ebea6`'s
+  `left_end_collision` pre-check turned that assertion red.
+
+##### SABOTAGES
+
+- **The plan's table has 9 rows,** S2 to S8 with S6 split into S6a, S6b and S6c. There is no S1. The implementer's
+  Task 4 run went red on all nine as the table predicted.
+- **S2 shows why the slow tier exists.** With the fold given `usize::MAX` instead of `MAX_MACHINE_STATES`, the
+  whole normal tier stayed green, and only the fold's slow test failed.
+- **Five more ran after the whole-branch review,** each red where the spec's table predicted:
+  - stage 1's `states_per_original` without its `refusal()` check;
+  - stage 1 without `Names::finish`'s check, red only at `N - 1` on the two fixtures whose `OVERFLOW` state is
+    first created in `finish`;
+  - `refusal()` without its `m.start != 0` check;
+  - stage 2's `states_per_original` with its old `uncovered_symbol` pre-check, red only at its slow test;
+  - the fold's `states_per_original` with its old `left_end_collision` pre-check, red at its slow test, with no
+    other test run under it.
+
+##### MEMORY
+
+Each figure is one test run alone, from a release build, as `scripts/check-slow.sh` builds them.
+
+| test | peak RSS | elapsed |
+| --- | --- | --- |
+| `stage_one_refuses_the_worst_shipped_demo_at_the_real_ceiling` | 746,648 KiB | 2.2 s |
+| `stage_two_refuses_the_worst_shipped_demo_at_the_real_ceiling` | 673,424 KiB | 2.2 s |
+| `the_fold_refuses_the_worst_shipped_demo_at_the_real_ceiling` | 723,108 KiB | 2.3 s |
+| `the_worst_shipped_demo_measured_directly` | 1,262,576 KiB | 2.0 s |
+
+The moved test's peak is 1.69 to 1.87 times each refusal test's. `scripts/check-slow.sh` runs a binary's ignored
+tests on parallel threads; the slow tier's combined peak is not measured.
+
+##### SENTENCES THIS BRANCH CHANGES, STRUCK OR ANNOTATED IN PLACE
+
+- **Stage 1's entry, *What stays open*:** "The largest shipped demos cannot be reduced". Still true, and
+  annotated: `to_single_tape` now refuses the demo with `too-many-states` instead of building it.
+- **Stage 3's entry, *Cost*:** "recorded, not gated, as stage 1's 1.81M was". Annotated: all three stages
+  now refuse the demo, and a slow-tier test holds each.
+- **Stage 3's entry, *What this did not close*, first bullet:** its guard half is struck, closed by this entry.
+- **Stage 3's entry, VERIFICATION:** it names the demo's source as `WORST_SHIPPED_DEMO` in `single_tape.rs`.
+  Annotated: the source now lives in `reduction.rs`'s `worst_shipped_demo`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The attributions gate's line-wrap hole.** A citation split across a line break is still unchecked; 59 such
+  splits predate this branch.
+- **The slow tier's combined peak memory** is not measured.
+- **Stage 1's entry calls `the_worst_shipped_demo_measured_directly` "the only thing holding the 36.858736 figure
+  against drift".** That test now runs only in the slow tier.
+- **The move rests on the test's own measurement, not on a tier rule.** `build.rs`'s
+  `the_builder_stops_at_the_state_ceiling_and_reports_it` builds a ceiling's worth of states in the fast tier.
+- **A hand-written machine with exactly the refusal shape** is indistinguishable from a refusal. Every stage
+  passes it through, and the spec accepts that.
+- **Two task-review Minor findings were left by decision:**
+  - `two_symbol.rs`'s count increment before each state cannot fire in correct code, so a reader could take it
+    for dead logic;
+  - the fold's count test sees a moved check at ceiling 2 only through the queueing that
+    `a_tripped_table_queues_no_more_pairs` pins, and it was not also run at ceiling 3.
+- **The plan document** keeps its planning-time figures and `pub(crate) REFUSALS`. It is a dated record, left as
+  written.
+- **The `.tm` header for reduced machines** builds on `refusal()`, on its own branch.
+
+##### VERIFICATION
+
+**Every count this entry quotes, with what produces it.** Run on 2026-09-15 at `632753e`, whose code is
+`9db7a1f`'s, unless a line says otherwise.
+
+- **Scope:** `git diff --name-only 9db7a1f..632753e | grep -v '\.md$'` prints nothing. `git rev-list --count 78ebea6..632753e`: **19**.
+- `cargo fmt --all --check`: exit 0. `cargo clippy -p redextape-core --all-targets -- -D warnings`: exit 0.
+- `cargo nextest run -p redextape-core`: **1,144 passed, 18 skipped**. `cargo nextest run -p redextape-core --lib tm::single_tape tm::two_symbol tm::one_way tm::reduction`: **69 passed, 778 skipped**. `cargo nextest run -p redextape-core --test two_symbol_oracle`: **6 passed, 1 skipped**.
+- `scripts/check-attributions.sh`: **checked 488 attribution sites, 6 excused by marker, 0 violations**. `scripts/check-citations.sh`: **460 files scanned, 0 violations**. `scripts/check-doc-figures.sh`: **42 documented figures match the tree**.
+- **The four slow tests:** each run alone from the binary that `cargo test --release -p redextape-core --lib --no-run` builds, with the test's full name and `--ignored --exact --nocapture`, under a Python wrapper that prints `resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss` and the wall time. Each passed, at the figures the MEMORY table quotes. The ratios are 1,262,576 / 746,648 = **1.69** and 1,262,576 / 673,424 = **1.87**.
+- **The moved test in debug:** the same wrapper on the binary that `cargo test -p redextape-core --lib --no-run` builds: **1,264,108 KiB**, passed. Its time is not quoted, because other builds were loading the machine.
+- **The regression digests:** the plan's Task 0 probe, recreated from the plan's `state_guard_digest_probe.rs` block in a scratch worktree at `9db7a1f`, run with `cargo run --release --example state_guard_digest_probe -p redextape-core`: **68 rows, identical** to the digests the plan records.
+- **Recorded, not re-run:**
+  - 1,811,054 is from stage 1's entry, and 7,363,253 from stage 3's.
+  - 2,601,972 and **12 of 12** are the spec's planning probes.
+  - The planning findings are the plan's *Spec corrections found while planning*. Its *Left for the controller* names the superseded scratch branches, three of them, before the final one.
+  - The review findings are the branch's review records, kept outside the tree.
+  - The nine sabotage rows are the plan's Task 4 table and the implementer's Task 4 report.
+  - The five later rows are the spec's sabotage table and the fix reports.
+- **Line-wrapped citations:** `git grep -n -P "\x60[A-Za-z0-9_./-]+\.(rs|ts|toml|sh|md|yml)\x60's\s*$" <rev> -- crates scripts | wc -l` prints **59** at `78ebea6` and at `632753e`.
+- **486 and 488 sites:** `028005f`'s commit message records `scripts/check-attributions.sh` before and after the rejoin.

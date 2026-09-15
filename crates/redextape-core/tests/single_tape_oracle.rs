@@ -40,10 +40,10 @@ fn assert_single_tape_agrees(src: &str) {
 /// quickly.
 fn assert_single_tape_agrees_capped(src: &str, caps: Caps) {
     let (m, inits) = build_machine(src, ENCODING);
-    // THE LAYOUT'S OWN SYMBOLS MUST NOT APPEAR IN THE DATA, and `to_single_tape`'s own refusal cannot
-    // see the whole question: it reads `Machine::alphabet()`, which collects only the symbols the
-    // RULES mention, so a colliding symbol living solely in an initial tape is invisible to it and
-    // reproduces the corruption that refusal exists to prevent. `layout_collision` takes both.
+    // THE LAYOUT'S OWN SYMBOLS MUST NOT APPEAR IN THE DATA, and `to_single_tape`'s `alphabet-collision`
+    // refusal cannot see the whole question: it reads `Machine::alphabet()`, which collects only the
+    // symbols the RULES mention, so a colliding symbol living solely in an initial tape is invisible to it
+    // and reproduces the corruption that refusal exists to prevent. `layout_collision` takes both.
     assert_eq!(layout_collision(&m, &inits), None, "a data symbol collides with the layout for {src:?}");
     let (want, _want_state, want_status, want_steps) = simulate_final(&m, &inits, caps);
     assert_eq!(want_status, Status::Halted, "the multi-tape run must halt for {src:?}");

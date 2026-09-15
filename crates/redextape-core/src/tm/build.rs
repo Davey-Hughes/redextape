@@ -72,7 +72,9 @@ pub const MIN_FIELD_WIDTH: usize = 4;
 pub const MAX_FIELD_WIDTH: usize = 64;
 
 /// The most states any one `Machine` may contain. Reaching it makes `Builder` stop allocating and
-/// raise `overflowed`; `lower_tm_all` then refuses the program rather than laying out the rest.
+/// raise `overflowed`; `lower_tm_all` then refuses the program rather than laying out the rest. The three
+/// machine-model reductions enforce the same ceiling through `reduction.rs`'s `StateTable`, and refuse
+/// with `too-many-states`.
 ///
 /// MEASURED, not chosen for roundness. At **727 bytes per state** — RSS delta around `lower_tm`,
 /// against a `size_of::<State>()` of 56 that understates the heap `String` name and `Vec<Rule>` by
@@ -112,8 +114,9 @@ pub const MAX_FIELD_WIDTH: usize = 64;
 /// estimated the cost up front would be symmetric with those three and would refuse before
 /// allocating anything. It would also duplicate per-gadget cost knowledge in a second place, which
 /// goes stale silently the first time a gadget changes — the same failure mode as the prose this
-/// replaces. `Builder::state`/`accept` is the single choke point every state goes through, so a
-/// ceiling here is exact and cannot drift from what the gadgets actually build.
+/// replaces. `Builder::state`/`accept` is the single choke point every state LOWERING builds goes
+/// through, so a ceiling here is exact and cannot drift from what the gadgets actually build. The
+/// reductions count at their own choke point, `StateTable::id`, for the same reason.
 ///
 /// Full measurement tables: `docs/superpowers/specs/2026-08-11-count-bounds-design.md` §3.
 /// `cargo run --release --example state_cost_probe -p redextape-core` re-derives most of them.

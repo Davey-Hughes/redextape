@@ -42,8 +42,9 @@
 //! copy is shaped: that is both what the sync test's extractor looks for and what `grep -rn
 //! FIRST_ORDER_DEMOS` — the audit method that test's own doc names — finds. If `FIRST_ORDER_DEMOS`
 //! grows a new entry, re-copy the array from that file into this one and re-run this probe; its
-//! `WORST SHIPPED DEMO` line is what `tm/build.rs`'s `MAX_MACHINE_STATES` doc and
-//! `guard_counterexamples.rs`'s `WORST_SHIPPED_DEMO` need to match if the maximum moves. G is what
+//! `WORST SHIPPED DEMO` line is what `tm/build.rs`'s `MAX_MACHINE_STATES` doc,
+//! `guard_counterexamples.rs`'s `WORST_SHIPPED_DEMO` and `reduction.rs`'s `worst_shipped_demo` need to
+//! match if the maximum moves. G is what
 //! pins the "never rejects a legitimate program" half of `MAX_MACHINE_STATES`, and
 //! `guard_counterexamples.rs` asserts the relation this section measures.
 //!
