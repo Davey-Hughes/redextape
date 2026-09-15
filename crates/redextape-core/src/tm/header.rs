@@ -313,6 +313,10 @@ pub(crate) struct HeaderParts {
     /// instead of the whole file. The span is parse-time-only: `finish` strips it before handing the
     /// tapes to `TmHeader::new`, which never carries one (see that type's doc).
     tapes: Vec<(usize, Vec<Symbol>, Span)>,
+    /// The index of every entry in `tapes`, so a duplicate `tape` line is found in one lookup.
+    /// Scanning `tapes` for it compared each line's index with every earlier one, which made a header
+    /// of many `tape` lines quadratic to parse.
+    tape_indices: std::collections::HashSet<usize>,
     /// Whether any `tape` line was seen. Tracked separately from `tapes` because a `tape` line that
     /// FAILED to parse still means the file was trying to carry a header, and `finish` must not then
     /// report "no header".
@@ -416,10 +420,9 @@ impl HeaderParts {
                 };
                 Some(match idx.trim().parse::<usize>() {
                     Err(_) => Err(format!("expected `tape <index> <cells>`, found index `{idx}`")),
-                    Ok(i) if self.tapes.iter().any(|(j, _, _)| *j == i) => {
-                        Err(format!("duplicate `tape {i}` directive"))
-                    }
+                    Ok(i) if self.tape_indices.contains(&i) => Err(format!("duplicate `tape {i}` directive")),
                     Ok(i) => {
+                        self.tape_indices.insert(i);
                         self.tapes.push((i, parse_cells(cells), span));
                         Ok(())
                     }

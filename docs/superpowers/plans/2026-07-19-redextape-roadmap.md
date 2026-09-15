@@ -17048,3 +17048,111 @@ Every task's end state was built in a scratch worktree before it went into the p
 - **Lines over 120 characters**, counted by a Python loop over `one_way.rs`, `one_way_oracle.rs` and `two_symbol_oracle.rs`: `one_way.rs`'s `proptest!` parameter line at **122**, present since `65a68e3`; `one_way_oracle.rs`'s cost-table `println!` at **124**, present since `a23379f`; and one line of `two_symbol_oracle.rs` at **122**, present before this branch at `22229fb`.
 - **Scope**: `git diff --name-only 22229fb 22b55d5 | grep -v '\.md$'` lists **8** files: `crates/redextape-core/examples/regen_fixtures.rs`, `src/tm.rs`, `src/tm/one_way.rs`, `tests/common/mod.rs`, `tests/one_way_oracle.rs`, `tests/single_tape_oracle.rs`, `tests/tm_header.rs` and `tests/two_symbol_oracle.rs`, all under `crates/redextape-core/`, none in Core, asm or `encoding`. `git log --oneline 22229fb..22b55d5 | wc -l`: **14**, this entry's range.
 - **The property a reader can still check:** `git diff --name-only 22b55d5..HEAD | grep -v '\.md$'` prints nothing — every commit after the last code commit is Markdown-only, the correction of this entry included.
+
+#### `.tm` PARSING GOES LINEAR: A DUPLICATE-NAME CHECK THAT COMPARED EVERY `state` LINE WITH EVERY EARLIER ONE TOOK A 1,002,222-RULE REDUCED MACHINE 1,230.07 s TO PARSE, AND A `HashSet` TAKES IT TO 1.10 s. IT WAS FOUND BY MEASURING SOMETHING ELSE. THE `tape`-LINE TIMING TEST'S DIAGNOSTIC COUNT COULD PASS WITHOUT ITS LINES REACHING THE CHECK IT TIMES, AND THE WEB APP'S `MAX_FORK_RULES` CAP HAD BEEN PRICED AGAINST THE QUADRATIC PARSER (2026-09-14, branch `tm-parse-linear`, `78ebea6..296a90c`, 15 commits, plus this entry)
+
+**This is not a roadmap item. It was found while planning one:** the `.tm` header for reduced machines (stage 3's
+*What this did not close*, fifth bullet). It lands first because that work edits the same two parser files.
+
+- **What it delivers:** `parse_tm_nav`'s duplicate-state-name check and `HeaderParts::directive`'s duplicate-`tape`
+  check are each one `HashSet` lookup, not a scan.
+- **Nothing observable changes:** every diagnostic keeps its message, span and position, and every navigation
+  definition stays put.
+- **Two slow-tier ratio tests** hold both checks linear.
+- **Spec and plan:** spec `docs/superpowers/specs/2026-09-14-tm-parse-linear-design.md`, plan
+  `docs/superpowers/plans/2026-09-14-tm-parse-linear.md`.
+
+##### THE CAUSE WAS FOUND BY MEASURING HOW BIG A REDUCED MACHINE PRINTS
+
+A scratch probe printed reduced machines with `print_tm` and parsed them back with `parse_tm`, to size the
+reduced-file design. Printing the largest, 73,632,864 bytes, took 164.30 ms. Parsing it back took 1,230.07 s.
+
+| machine | rules | parse, one run at `78ebea6` |
+| --- | --- | --- |
+| `3 - 5`, stages 1+2 | 21,621 | 189.34 ms |
+| `cons(1, cons(2, nil))`, stages 1+2 | 60,422 | 1.22 s |
+| `3 - 5`, all three stages | 160,994 | 10.64 s |
+| `cons(1, cons(2, nil))`, all three stages | 1,002,222 | 1,230.07 s |
+
+The cause was `parse_tm_nav`'s `states.iter().any(|s| s.name == name)`, which compared each `state` line's
+name with every earlier state's.
+- **The spec records the diagnosis:** a `perf` profile with 87% of self time in `memcmp` under that `any`, and
+  ramps that tie the cost to the state count, not to rules per state or symbol count.
+- **One sibling has the same shape:** `header.rs`'s duplicate-`tape` check. Only a crafted file reaches it:
+  128,000 extra `tape` lines parsed in 3.48 s.
+- **Today's files pay too:** the largest shipped demo's lowered file, 49,135 states, parsed in 1.04 s.
+
+##### WHAT CHANGED, IN THE ORDER IT WAS BUILT
+
+1. **Pins first.** Two tests assert the whole diagnostic list, with messages, spans and order, for a duplicate
+   `state` line and a duplicate `tape` line. Both passed on the unfixed parser.
+2. **Two `#[ignore]` ratio tests.** They parse 16,000- and 64,000-line files and require the large parse to take
+   under 10 times the small one. Run against the unfixed parser, the final version of the file reads
+   24.72×–25.18× for `state` lines and 17.88×–18.08× for `tape` lines.
+3. **The state-name `HashSet`:** the state-line test turned green.
+4. **The `tape`-index `HashSet`:** the `tape`-line test turned green.
+
+##### THE REVIEW PASSES FOUND THREE GAPS THE TESTS DID NOT CLOSE, AND A PRODUCT LIMIT PRICED AGAINST THE OLD PARSER
+
+- **Trimming could drift.** The check looked up the trimmed name, and the insert trimmed it again, separately.
+  No fixture padded a name, so dropping either `trim` left every test green. The key is now trimmed once, and a new
+  pin pads two `state` lines differently.
+- **The `tape`-line test could pass without reaching the check it times.** A `tape` line that fails before the
+  duplicate check still yields exactly one diagnostic, so a count of `n` diagnostics did not show the lines
+  reached the check. The test now requires every diagnostic of the large file to say `out of range`.
+- **The timing harness changed.** All three small parses ran before all three large ones, so one burst of load
+  could inflate only one side. The two sizes now alternate over 5 rounds, and each keeps its fastest parse.
+  **Alternating does not make the test load-proof.** With the `tape` scan restored as a sabotage, the test read
+  18.65× at `ead0416` (55.44 ms, then 1.03 s) and 15.00× at `9d697df` (68.58 ms, then 1.03 s). The large parse
+  held; the small one moved.
+- **The bound went from 8 to 10, by decision.** A passing state-line run read 6.64× under load at `ead0416`.
+- **`MAX_FORK_RULES` was priced against the quadratic parser.**
+  - `web/src/protocol.ts` calls the cap "MEASURED (5d-iv T2), NOT CHOSEN".
+  - The roadmap's record of that measurement, the section at lines 8745–8757, puts `tmScratch`'s parse at 85.5%
+    of the cost at 11,802 rules and 97.0% at 94,182, growing super-linearly.
+  - `protocol.ts` and `web/tests/browser/tm-fork-cost.test.ts` now say those readings were taken while the
+    parser still compared each state name with every earlier one. The cap's value is unchanged.
+- **A quote was deleted.** `parse_tm_nav`'s doc quoted a module doc as saying "Iterative, no recursion". No
+  module doc says it, so the quote is gone, and so is the doc's count of "six mutable accumulators".
+
+##### COST
+
+Rows 1–4 are one parse each, by the size probe. Rows 5–6 keep the fastest of 3 parses with `parse_tm_full`.
+
+| file | parse at `78ebea6` | parse at `136b29b` |
+| --- | --- | --- |
+| 21,621 rules | 189.34 ms | 13.50 ms |
+| 60,422 rules | 1.22 s | 42.64 ms |
+| 160,994 rules | 10.64 s | 159.89 ms |
+| 1,002,222 rules | 1,230.07 s | 1.10 s |
+| largest shipped demo, lowered, 49,135 states | 1.04 s | 63.98 ms |
+| 128,000 extra `tape` lines | 3.48 s | 19.64 ms |
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`MAX_FORK_RULES` is not re-measured.** Its value still rests on costs taken with the quadratic parse;
+  re-pricing it is web performance work.
+- **Parse cost per rule still rises on reduced machines:** 0.62 µs at 21,621 rules, 1.10 µs at 1,002,222.
+  46.35 times the rules took 81.5 times as long. The state count grows 46.05 times, whose square is 2,120.7, so
+  this is not a scan over earlier states. It is not investigated.
+- **Under load, the `tape`-line sabotage read 15.00× against a bound of 10.** Unloaded, the unfixed check reads
+  17.88×–18.08×. Both went red; load took the margin.
+- **Every timing was taken on a machine that other work shared.**
+
+##### VERIFICATION
+
+**Every count this entry quotes, with what produces it.** Run on 2026-09-14 at `296a90c`, whose code is
+`136b29b`'s, unless a line says otherwise.
+
+- **Scope:** `git diff --name-only 136b29b..296a90c | grep -v '\.md$'` prints nothing. `git rev-list --count 78ebea6..296a90c`: **15**.
+- `cargo fmt --all --check`: exit 0. `cargo clippy -p redextape-core -p redextape-lsp --all-targets -- -D warnings`: exit 0.
+- `cargo nextest run -p redextape-core`: **1,134 passed, 16 skipped**. `cargo nextest run -p redextape-lsp`: **70 passed, 0 skipped**.
+- **The ratio tests:** `cargo test --release -p redextape-core --test tm_parse_scaling -- --ignored --nocapture --test-threads 1`, 3 runs, all passed: `state` lines **4.57×, 4.56×, 4.29×**, `tape` lines **4.16×, 4.03×, 4.02×**, bound 10. The same command without `--test-threads 1`, which runs both tests at once as `scripts/check-slow.sh` does, 3 runs, all passed: `state` lines **4.24×, 4.27×, 4.27×**, `tape` lines **4.15×, 4.15×, 4.18×**.
+- **The ratio tests against the unfixed parser:** `git show 136b29b:crates/redextape-core/tests/tm_parse_scaling.rs`, written into a scratch worktree at `78ebea6` and removed afterwards, then the `--test-threads 1` command above, 3 runs, each exit 101: `state` lines **24.72×, 24.77×, 25.18×**, `tape` lines **18.08×, 17.88×, 17.95×**.
+- `scripts/check-attributions.sh`: **checked 480 attribution sites, 6 excused by marker, 0 violations**. `scripts/check-citations.sh`: **460 files scanned, 0 violations**. `scripts/check-doc-figures.sh`: **42 documented figures match the tree**.
+- **The size probe, not committed:** `cargo run --release --example reduced_text_size_probe -p redextape-core`, in a scratch worktree checked out at `78ebea6` and again at `136b29b`. For each of `3 - 5` and `cons(1, cons(2, nil))`, it lowers the machine, applies stage 1, stages 1+2 and all three stages, prints each with `print_tm`, parses it once with `parse_tm`, and checks the round trip. Its 8 rows print `round-trips true` at both commits. It gives the rule counts, the four parse times at each commit, and **73,632,864 bytes** printed in **164.30 ms** at `78ebea6`.
+- **The parse-cost probe, not committed:** `cargo run --release --example parse_cost_today_probe -p redextape-core`, at the same two commits. It keeps the fastest of 3 `parse_tm_full` runs. At `78ebea6`: the largest shipped demo lowered, **49,135 states, 11,526,427 bytes, 1.04 s, 0 diagnostics**; **128,000 extra `tape` lines, 3.48 s, 128,000 diagnostics**. At `136b29b`: **63.98 ms** and **19.64 ms**.
+- **Per-rule costs and ratios**, by arithmetic on the `136b29b` column: 13.50 ms / 21,621 = **0.62 µs**; 1.10 s / 1,002,222 = **1.10 µs**; 1,002,222 / 21,621 = **46.35**; 1.10 s / 13.50 ms = **81.5**; 848,860 / 18,433 states = **46.05**, squared **2,120.7**.
+- **Readings taken during review, under load, not re-run:** each is the ratio test's own output line, kept in the session's scratch logs. **6.64×** is run 2 of 3 of the unmodified tests at `ead0416`. **18.65×** at `ead0416` and **15.00×** at `9d697df` are the `tape`-line test after `perl -pi` replaced `self.tape_indices.contains(&i)` with `self.tapes.iter().any(|(j, _, _)| *j == i)` in `header.rs`.
+- **Recorded, not re-run:** the 87% `memcmp` share and the isolating ramps are the spec's diagnosis. The 85.5% and 97.0% shares are the roadmap's, read at `296a90c`.
+- **The deleted quote:** `git grep -n "Iterative, no recursion" 78ebea6 -- crates` finds one line, `parse_tm_nav`'s doc quoting it. At `296a90c` it finds none.

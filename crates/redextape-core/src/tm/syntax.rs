@@ -404,12 +404,10 @@ pub fn parse_tm_full(src: &str) -> TmDocument {
 ///
 /// A `None` header means the file carried none, which is NOT an error — see `HeaderParts::finish`.
 ///
-/// `clippy::too_many_lines`: this is one coherent per-line dispatch loop over a flat grammar (the
-/// module doc says so explicitly — "Iterative, no recursion"), sharing six mutable accumulators
-/// (`diags`, `tapes`, `start_name`, `states`, `header`, `offset`) across every line kind. Splitting it
-/// would mean threading all six through new function boundaries for no gain in clarity — the loop
-/// body's length comes from the number of line kinds the grammar has, not from doing too much in one
-/// place.
+/// `clippy::too_many_lines`: this is one coherent per-line dispatch loop over a flat grammar, and its
+/// mutable state is shared across every line kind. Splitting it would mean threading that state through
+/// new function boundaries for no gain in clarity — the loop body's length comes from the number of line
+/// kinds the grammar has, not from doing too much in one place.
 #[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
@@ -417,6 +415,10 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
     let mut tapes: Option<usize> = None;
     let mut start_name: Option<(String, Span)> = None;
     let mut states: Vec<RawState> = Vec::new();
+    // The name of every `state` line seen so far, as slices of `src`, so a duplicate is found in one
+    // lookup. Scanning `states` for it compared each line's name with every earlier one, which made
+    // parsing quadratic in the number of states.
+    let mut state_names: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut header = HeaderParts::default();
     let mut comments: Vec<AnchoredComment<TmAnchor>> = Vec::new();
     // Own-line comments seen but not yet attached: they belong to the NEXT line that parses, which
@@ -534,7 +536,10 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
                 diags.push(err(span, "expected `state <name>:`"));
                 continue;
             };
-            let (name, tail) = (name_part.trim().to_string(), tail.trim());
+            // Trimmed once, for the name, the duplicate check and the set of names seen, so the check
+            // and the set cannot disagree about padding.
+            let key = name_part.trim();
+            let (name, tail) = (key.to_string(), tail.trim());
             if name.is_empty() {
                 diags.push(err(span, "empty state name"));
                 continue;
@@ -543,7 +548,7 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
             if !accept && !tail.is_empty() {
                 diags.push(err(span, "expected `:` or `: accept` after the state name"));
             }
-            if states.iter().any(|s| s.name == name) {
+            if state_names.contains(key) {
                 diags.push(err(span, format!("duplicate state name `{name}`")));
             }
             // Recorded even when this line also produced a `duplicate state name` diagnostic:
@@ -553,6 +558,8 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
                 let at = line_start + indent + "state ".len() + pad;
                 nav.push_definition(&name, Span { start: at, end: at + name.len() }, DefKind::State, None);
             }
+            // Entered only after the check above, so the line reported is the SECOND to name a state.
+            state_names.insert(key);
             states.push(RawState { name, accept, rules: Vec::new() });
             #[allow(clippy::cast_possible_truncation)] // see the `ids` map below for why this is sound
             let id = (states.len() - 1) as StateId;
@@ -1402,6 +1409,62 @@ state s: accept
         for &at in &defs {
             assert_eq!(src.get(at..at + 4), Some("scan"));
         }
+    }
+
+    /// Everything a duplicated `state` line does to the diagnostics, not just that one mentions
+    /// `duplicate`: every message, every span, and their order. The duplicate line here also carries
+    /// an error the parser reports before it checks the name, and a later line carries one after, so a
+    /// duplicate diagnostic moved earlier or later in the list shows up. The navigation definitions are
+    /// pinned too, since the duplicate line still records its own.
+    #[test]
+    fn a_duplicate_state_line_keeps_every_diagnostic_in_place() {
+        let src = "tapes 1\nstart s\nstate s:\n  [*] -> write [*], move [S], goto s\nstate s: acceptx\n  [*] -> \
+                   write [*], move [S], goto s\nbogus\n";
+        let (doc, nav) = parse_tm_nav(src);
+        let got: Vec<(&str, usize, usize)> =
+            doc.diagnostics.iter().map(|d| (d.message.as_str(), d.span.start, d.span.end)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("expected `:` or `: accept` after the state name", 62, 78),
+                ("duplicate state name `s`", 62, 78),
+                ("unrecognized line", 116, 121),
+            ]
+        );
+        assert!(doc.diagnostics.iter().all(|d| d.severity == Severity::Error));
+        assert!(doc.machine.is_none());
+        let defs: Vec<(usize, usize)> = nav.definitions().map(|o| (o.span.start, o.span.end)).collect();
+        assert_eq!(defs, vec![(22, 23), (68, 69)], "both `state s` lines, at their own name spans");
+    }
+
+    /// A padded name is the same name, so the name checked for a duplicate and the name entered into the
+    /// set of names seen must both be trimmed. Both `state` lines pad `s`, and differently: the first so
+    /// an untrimmed insert would miss, the second so an untrimmed lookup would.
+    #[test]
+    fn a_padded_duplicate_state_name_keeps_every_diagnostic_in_place() {
+        let src = "tapes 1\nstart s\nstate  s : accept\nstate   s: accept\n";
+        let (doc, nav) = parse_tm_nav(src);
+        let got: Vec<(&str, usize, usize)> =
+            doc.diagnostics.iter().map(|d| (d.message.as_str(), d.span.start, d.span.end)).collect();
+        assert_eq!(got, vec![("duplicate state name `s`", 34, 51)]);
+        assert!(doc.diagnostics.iter().all(|d| d.severity == Severity::Error));
+        assert!(doc.machine.is_none());
+        let defs: Vec<(usize, usize)> = nav.definitions().map(|o| (o.span.start, o.span.end)).collect();
+        assert_eq!(defs, vec![(23, 24), (42, 43)], "both `state s` lines, at their own name spans");
+    }
+
+    /// The same for a duplicated `tape` line: the whole diagnostic list, with a later header error so
+    /// the duplicate's position in the list is visible.
+    #[test]
+    fn a_duplicate_tape_line_keeps_every_diagnostic_in_place() {
+        let src = "tapes 1\nstart s\nencoding unary\nwidth 4\nslots 1\nresult Nat\ntape 0 #_#\ntape 0 #_#\nwidth 8\n\n\
+                   state s: accept\n";
+        let doc = parse_tm_full(src);
+        let got: Vec<(&str, usize, usize)> =
+            doc.diagnostics.iter().map(|d| (d.message.as_str(), d.span.start, d.span.end)).collect();
+        assert_eq!(got, vec![("duplicate `tape 0` directive", 69, 79), ("duplicate `width` directive", 80, 87)]);
+        assert!(doc.diagnostics.iter().all(|d| d.severity == Severity::Error));
+        assert!(doc.machine.is_none() && doc.header.is_none());
     }
 
     #[test]

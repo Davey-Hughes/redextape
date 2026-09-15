@@ -20,6 +20,9 @@ import type { TmProgram, TmStatus } from '../../src/types'
  * pre-registered candidate WAS 20,000 rules — REJECTED, high by a factor of 2.5 (roadmap: "PLAN
  * 5d-iv CLOSES", Question 1). `MAX_FORK_RULES` shipped at 50,000; the FIX ROUND below is what measured
  * the candidate, found the rejection, and is what this file now defends rather than merely proposes.
+ * The readings that set `MAX_FORK_RULES` were taken on the branch merged as `ec6900b`, while the parse
+ * inside `tmScratch` still found a duplicate state name by comparing it with every earlier one, as it had
+ * since `50e6126` and no longer does.
  *
  * **FIX ROUND — TWO GAPS THE FIRST CUT LEFT OPEN, BOTH CLOSED HERE:**
  *

@@ -281,6 +281,9 @@ export function tmFrameBytes(f: TmState): number {
  * gesture may take. `list20` is **11,802 rules** and clears it; `list60` is **94,182** and does not.
  * **Those are RULE counts. An earlier draft quoted 16,250 and 127,881 — list20's LINES and list60's
  * δ-table ROWS. A row is a state or a rule: 33,699 states + 94,182 rules is where 127,881 comes from.**
+ * These costs were measured on the branch merged as `ec6900b`, which set this cap, while the parse inside
+ * `tmScratch` still found a duplicate state name by comparing it with every earlier one, as it had since
+ * `50e6126` and no longer does.
  *
  * **RULES RATHER THAN BYTES, BECAUSE THE COUNT IS ANSWERABLE BEFORE ANYTHING IS EMITTED.** `TmProgram`
  * is projected once per compile and both threads hold it, so the refusal costs a reduce rather than a
