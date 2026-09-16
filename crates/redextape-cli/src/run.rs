@@ -107,6 +107,13 @@ pub fn run(
 /// Simulate a `.tm` file. **The header is what makes this possible**: `TmHeader::init` builds the
 /// initial tapes and the header's `result` type is what `decode_tape_ty` decodes against, so a
 /// header-less file cannot be run even though it parses perfectly.
+///
+/// **A REDUCED FILE, `version 2`, RUNS UNDER THE STEPS ITS OWN HEADER RECORDS**, with
+/// `TM_DEFAULT_CAPS`'s cell cap, because a reduced machine takes far more steps than that cap's
+/// step count allows. It must halt in an accept state, since a reduction's run ends in one, and
+/// `decode_reduced` undoes its stages before the value is decoded. A `version 1` file is simulated and
+/// decoded as it always was: `decode_reduced` decodes a header with no reduction exactly as
+/// `decode_tape_ty_reason` does.
 fn run_artifact_text(
     src: &str,
     label: &str,
@@ -133,15 +140,36 @@ fn run_artifact_text(
         )?;
         return Ok(Outcome::ToolFailed);
     };
-    let enc = header.encoding.at(header.width);
     let init = header.init(machine.tapes);
-    let (tapes, status) = redextape_core::tm::simulate(&machine, &init, redextape_core::tm::TM_DEFAULT_CAPS);
+    let defaults = redextape_core::tm::TM_DEFAULT_CAPS;
+    let caps = header
+        .reduction
+        .as_ref()
+        .map_or(defaults, |r| redextape_core::tm::TmCaps { steps: r.steps, cells: defaults.cells });
+    let (tapes, state, status, _steps) = redextape_core::tm::simulate_final(&machine, &init, caps);
     if status == redextape_core::tm::TmStatus::HitCap {
+        match &header.reduction {
+            None => writeln!(
+                err,
+                "error: the machine did not halt within {} steps or {} tape cells (`TM_DEFAULT_CAPS`)",
+                defaults.steps, defaults.cells
+            )?,
+            Some(r) => writeln!(
+                err,
+                "error: the reduced machine did not halt within the {} steps its header records, or {} tape cells",
+                r.steps, defaults.cells
+            )?,
+        }
+        return Ok(Outcome::ProgramFailed);
+    }
+    if header.reduction.is_some()
+        && let Some(halted_in) = machine.states.get(state as usize).filter(|s| !s.accept)
+    {
         writeln!(
             err,
-            "error: the machine did not halt within {} steps or {} tape cells (`TM_DEFAULT_CAPS`)",
-            redextape_core::tm::TM_DEFAULT_CAPS.steps,
-            redextape_core::tm::TM_DEFAULT_CAPS.cells
+            "error: `{label}`'s reduced machine halted in `{}`, which is not an accept state\n  \
+             a reduction's run ends in an accept state, so these tapes hold no value",
+            halted_in.name
         )?;
         return Ok(Outcome::ProgramFailed);
     }
@@ -156,13 +184,7 @@ fn run_artifact_text(
     // the SAME distinction `run_asm_artifact` draws for the identical two causes on the `.asm` form; the
     // two runners used to give it opposite, and each individually wrong, treatments (see that function's
     // doc).
-    report_tm_decode(
-        redextape_core::tm::decode_tape_ty_reason(&tapes, &header.result, &*enc),
-        label,
-        &header.result,
-        out,
-        err,
-    )
+    report_tm_decode(redextape_core::tm::decode_reduced(&tapes, &header), label, &header.result, out, err)
 }
 
 /// `run_artifact_text`'s final `match`, on the two `DecodeFailure` causes — extracted so the MAPPING
@@ -747,6 +769,39 @@ mod tests {
         assert_eq!(out, "");
         assert!(err.contains("its header declares"), "the message must blame the file, got: {err}");
         assert!(matches!(outcome, Outcome::ProgramFailed), "a self-contradicting file is exit 1, not 2");
+    }
+
+    /// A reduced file runs under the steps its own header records, not `TM_DEFAULT_CAPS`. This machine
+    /// reaches its accept state after 10 steps, well inside the default cap, and its header records 5, so
+    /// it is refused at 5 and the message says whose count that was.
+    #[test]
+    fn a_reduced_file_that_does_not_halt_within_its_own_steps_is_the_files_fault() {
+        use std::fmt::Write as _;
+        let mut text = String::from(
+            "tapes 1\nstart w0\nversion 2\nencoding unary\nwidth 4\nslots 0\nresult Nat\nreduced single-tape 5\nsteps 5\n\n",
+        );
+        for i in 0..10 {
+            let next = if i == 9 { "done".to_owned() } else { format!("w{}", i + 1) };
+            writeln!(text, "state w{i}:\n  [*] -> write [*], move [R], goto {next}").unwrap();
+        }
+        text.push_str("state done: accept\n");
+        let (out, err, outcome) = run_case("reduced-hitcap", "m.tm", &text, Backend::Reference);
+        assert_eq!(out, "");
+        assert!(err.contains("did not halt within the 5 steps its header records"), "got: {err}");
+        assert!(matches!(outcome, Outcome::ProgramFailed));
+    }
+
+    /// A reduction's run ends in an accept state, so a halt anywhere else, a stuck state included, has no
+    /// value on its tapes — even when those tapes happen to decode.
+    #[test]
+    fn a_reduced_file_that_halts_outside_an_accept_state_is_the_files_fault() {
+        let text = "tapes 1\nstart stuck\nversion 2\nencoding unary\nwidth 4\nslots 0\nresult Nat\n\
+                    reduced single-tape 5\nsteps 1\n\n\
+                    state stuck:\n";
+        let (out, err, outcome) = run_case("reduced-stuck", "m.tm", text, Backend::Reference);
+        assert_eq!(out, "");
+        assert!(err.contains("halted in `stuck`, which is not an accept state"), "got: {err}");
+        assert!(matches!(outcome, Outcome::ProgramFailed));
     }
 
     #[test]

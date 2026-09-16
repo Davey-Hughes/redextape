@@ -87,6 +87,14 @@
         {
           "type": "SYMBOL",
           "name": "result"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "reduced"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "steps"
         }
       ]
     },
@@ -160,6 +168,123 @@
             "type": "SYMBOL",
             "name": "identifier"
           }
+        }
+      ]
+    },
+    "reduced": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "reduced"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_stage"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_stage"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "_stage": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "fold"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "single_tape"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "two_symbol"
+        }
+      ]
+    },
+    "fold": {
+      "type": "ALIAS",
+      "content": {
+        "type": "TOKEN",
+        "content": {
+          "type": "PATTERN",
+          "value": "fold\\r?"
+        }
+      },
+      "named": true,
+      "value": "stage"
+    },
+    "single_tape": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "TOKEN",
+            "content": {
+              "type": "PATTERN",
+              "value": "single-tape"
+            }
+          },
+          "named": true,
+          "value": "stage"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "number"
+        }
+      ]
+    },
+    "two_symbol": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "TOKEN",
+            "content": {
+              "type": "PATTERN",
+              "value": "two-symbol"
+            }
+          },
+          "named": true,
+          "value": "stage"
+        },
+        {
+          "type": "FIELD",
+          "name": "symbols",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        }
+      ]
+    },
+    "steps": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "steps"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "number"
         }
       ]
     },

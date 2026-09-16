@@ -2,12 +2,30 @@
 
 use proptest::prelude::*;
 use proptest::test_runner::TestRunner;
+use redextape_core::Span;
 use redextape_core::analysis::TokenClass;
 use redextape_grammar_check::TM;
 use redextape_grammar_check::tm::{
-    CORPUS, HEADERED_CORPUS, compare_printed, printed_machine, printed_machine_with_header,
+    CORPUS, HEADERED_CORPUS, REDUCED_CORPUS, compare_printed, printed_machine, printed_machine_with_header,
+    printed_reduced,
 };
 use redextape_test_support::arb_expr_over;
+
+/// One printed file: a name for it, its text and the printer's own classification of that text.
+type Printed = (String, String, Vec<(Span, TokenClass)>);
+
+/// `REDUCED_CORPUS`, printed.
+#[allow(clippy::panic)]
+fn printed_reduced_corpus() -> Vec<Printed> {
+    REDUCED_CORPUS
+        .iter()
+        .map(|(src, stages)| {
+            let (text, want) = printed_reduced(src, stages)
+                .unwrap_or_else(|| panic!("`{src}` through {stages:?} must reduce and print"));
+            (format!("`{src}` through {stages:?}"), text, want)
+        })
+        .collect()
+}
 
 /// Every capture name any query emits must have a class.
 ///
@@ -141,9 +159,15 @@ fn every_corpus_program_parses_without_error_nodes() {
 /// `result`'s operand, a `tape` line's packed run, a comment — are reachable ONLY from a headered
 /// file. A `CORPUS` of header-less machines would leave four patterns with zero coverage while every
 /// other test in this file stayed green.
+///
+/// The printed reduced files join the hand-written corpus here, so a reduced file's own patterns are
+/// reached by text the printer wrote as well as by text typed for this corpus.
 #[test]
 fn every_tm_query_pattern_fires_over_the_corpus() {
-    if let Err(why) = TM.every_query_pattern_fires(CORPUS) {
+    let printed = printed_reduced_corpus();
+    let mut corpus: Vec<(&str, &str)> = CORPUS.to_vec();
+    corpus.extend(printed.iter().map(|(name, text, _)| (name.as_str(), text.as_str())));
+    if let Err(why) = TM.every_query_pattern_fires(&corpus) {
         panic!("{why}");
     }
 }
@@ -156,12 +180,20 @@ fn every_tm_query_pattern_fires_over_the_corpus() {
 /// it exists for the same reason: design §6.3's residue — a whole-line comment, and a trailing comment
 /// on a line the printer never writes one on — has no printer to be compared against, so "the grammar
 /// accepts it" and "the authority accepts it" have to be checked as two separate facts.
+///
+/// The printed reduced files are held to the same check. They come from the printer, but a reduced
+/// header the parser refused would leave the differential below comparing text no reader accepts.
 #[test]
 fn parse_tm_accepts_every_corpus_entry() {
     for (name, src) in CORPUS {
         let (machine, diagnostics) = redextape_core::tm::parse_tm(src);
         assert!(diagnostics.is_empty(), "`{name}` must parse under the real authority cleanly, got: {diagnostics:?}");
         assert!(machine.is_some(), "`{name}` produced no machine despite no diagnostics");
+    }
+    for (name, text, _) in printed_reduced_corpus() {
+        let (machine, diagnostics) = redextape_core::tm::parse_tm(&text);
+        assert!(diagnostics.is_empty(), "{name} must parse under the real authority cleanly, got: {diagnostics:?}");
+        assert!(machine.is_some(), "{name} produced no machine despite no diagnostics");
     }
 }
 
@@ -212,6 +244,28 @@ fn the_tm_grammar_agrees_with_the_headered_printer() {
     }
     assert_eq!(comments, 8, "the headered corpus must reach Comment; Unary yields 1 per entry and Binary 2");
     assert_eq!(idents, 2 * HEADERED_CORPUS.len(), "every headered file carries exactly `encoding` and `result`");
+}
+
+/// The reduced leg: `REDUCED_CORPUS`, printed by the same printer as the headered leg above, for the text only
+/// a reduced header carries.
+///
+/// **ITS OWN TEST RATHER THAN MORE OF THE ONE ABOVE**, because together the two took over a second in a debug
+/// build, timed alone, and this project's fast tier is under one.
+///
+/// The comma floor is what stops an edit to `REDUCED_CORPUS` from quietly leaving every stage list one stage
+/// long, which would leave the one token here that follows a stage name directly uncompared.
+#[test]
+fn the_tm_grammar_agrees_with_the_reduced_printer() {
+    let printed = printed_reduced_corpus();
+    assert!(
+        printed.iter().any(|(_, text, _)| text.lines().any(|l| l.starts_with("reduced ") && l.contains(", "))),
+        "the reduced corpus must print a stage list with a comma in it"
+    );
+    for (name, text, want) in printed {
+        if let Err(why) = compare_printed(&text, &want) {
+            panic!("{name} diverged:\n{why}");
+        }
+    }
 }
 
 /// The header-less leg, generated.

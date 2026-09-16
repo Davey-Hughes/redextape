@@ -203,33 +203,41 @@ state q1: accept  ; done
 /// `Tape`'s trailing/displacement path in `an_authored_comment_takes_the_tape_line_over_the_generated_name`.
 #[test]
 fn printing_a_header_emits_a_comment_on_every_directive_variant() {
+    // Version 2, because `reduced` and `steps` exist only there, and a variant no fixture here could
+    // reach would be a directive whose comments nothing checks.
     const SRC: &str = "\
 tapes 2
 start q0
-version 1 ; the format version
+version 2 ; the format version
 ; how symbols pack
 encoding unary
 width 8 ; cells per tape
 slots 1 ; how many slots
 result Nat ; what comes back
+reduced single-tape 2 ; how it was reduced
+; how long it runs
+steps 40
 tape 1 #________#  ; second tape
 
 state q0: accept
 ";
 
     // `write_header` emits directives in its own fixed order (version, encoding, width, slots,
-    // result, then tape lines ascending) regardless of the order the fixture wrote them in — here
-    // that happens to match the source order too, but the expected string below follows the
-    // printer's order on principle, not the fixture's.
+    // result, reduced, steps, then tape lines ascending) regardless of the order the fixture wrote
+    // them in — here that happens to match the source order too, but the expected string below
+    // follows the printer's order on principle, not the fixture's.
     const EXPECTED: &str = "\
 tapes 2
 start q0
-version 1  ; the format version
+version 2  ; the format version
 ; how symbols pack
 encoding unary
 width 8  ; cells per tape
 slots 1  ; how many slots
 result Nat  ; what comes back
+reduced single-tape 2  ; how it was reduced
+; how long it runs
+steps 40
 tape 1 #________#  ; second tape
 
 state q0: accept
@@ -238,8 +246,8 @@ state q0: accept
     let d = parse_tm_full(SRC);
     assert_eq!(d.diagnostics, vec![], "fixture must parse clean");
 
-    // Precondition: every one of the six `TmDirective` variants is actually anchored by a comment
-    // here, source order preserved by the drain — so the assertion below is exercising all six
+    // Precondition: every one of the eight `TmDirective` variants is actually anchored by a comment
+    // here, source order preserved by the drain — so the assertion below is exercising all eight
     // and not silently exercising fewer.
     let anchors: Vec<(&str, TmAnchor, bool)> =
         d.comments.iter().map(|c| (c.text.as_str(), c.anchor, c.own_line)).collect();
@@ -251,6 +259,8 @@ state q0: accept
             ("cells per tape", TmAnchor::Directive(TmDirective::Width), false),
             ("how many slots", TmAnchor::Directive(TmDirective::Slots), false),
             ("what comes back", TmAnchor::Directive(TmDirective::Result), false),
+            ("how it was reduced", TmAnchor::Directive(TmDirective::Reduced), false),
+            ("how long it runs", TmAnchor::Directive(TmDirective::Steps), true),
             ("second tape", TmAnchor::Directive(TmDirective::Tape(1)), false),
         ]
     );
@@ -439,7 +449,8 @@ fn tape_line_cand() -> impl Strategy<Value = TapeLineCand> {
     })
 }
 
-/// The five single-line header directives that are not `tape` lines, each with its own slot.
+/// The five single-line header directives every header has that are not `tape` lines, each with its
+/// own slot.
 #[derive(Clone, Debug)]
 struct HeaderSlots {
     version: Slot,
@@ -459,10 +470,28 @@ fn header_slots() -> impl Strategy<Value = HeaderSlots> {
     })
 }
 
-/// A candidate header: `TmHeader`'s five directives plus up to `MAX_TAPE_LINES` candidate `tape`
-/// lines, one per index `0..MAX_TAPE_LINES` — rendered only for the indices actually below the
-/// document's `tapes` count, so every index used is in range, and each index has exactly one
-/// candidate, so none collide.
+/// Stage lists a `reduced` line may carry. Fixed rather than generated: what this file varies is where
+/// comments sit, and `tm/syntax.rs`'s tests hold the list grammar on their own.
+const STAGE_LISTS: [&str; 3] = ["fold", "single-tape 3, two-symbol _#1", "fold, single-tape 1, two-symbol _"];
+
+/// A candidate `reduced` and `steps` pair, which makes the header `version 2`, each line with its own slot.
+#[derive(Clone, Debug)]
+struct ReductionCand {
+    stages_idx: usize,
+    steps: u64,
+    reduced: Slot,
+    steps_slot: Slot,
+}
+
+fn reduction_cand() -> impl Strategy<Value = ReductionCand> {
+    (0usize..STAGE_LISTS.len(), 1u64..=1000, slot(), slot())
+        .prop_map(|(stages_idx, steps, reduced, steps_slot)| ReductionCand { stages_idx, steps, reduced, steps_slot })
+}
+
+/// A candidate header: `TmHeader`'s five directives, a reduced header's two more when `reduction` is
+/// `Some`, and up to `MAX_TAPE_LINES` candidate `tape` lines, one per index `0..MAX_TAPE_LINES` —
+/// rendered only for the indices actually below the document's `tapes` count, so every index used is
+/// in range, and each index has exactly one candidate, so none collide.
 #[derive(Clone, Debug)]
 struct HeaderCand {
     width: usize,
@@ -470,6 +499,7 @@ struct HeaderCand {
     encoding_binary: bool,
     result_idx: usize,
     lines: HeaderSlots,
+    reduction: Option<ReductionCand>,
     tape_lines: Vec<TapeLineCand>,
 }
 
@@ -480,24 +510,27 @@ fn header_cand() -> impl Strategy<Value = HeaderCand> {
         proptest::bool::ANY,
         0usize..RESULT_TYS.len(),
         header_slots(),
+        proptest::option::weighted(0.5, reduction_cand()),
         proptest::collection::vec(tape_line_cand(), MAX_TAPE_LINES),
     )
-        .prop_map(|(width, slots, encoding_binary, result_idx, lines, tape_lines)| HeaderCand {
+        .prop_map(|(width, slots, encoding_binary, result_idx, lines, reduction, tape_lines)| HeaderCand {
             width,
             slots,
             encoding_binary,
             result_idx,
             lines,
+            reduction,
             tape_lines,
         })
 }
 
 /// A whole candidate document: every position `print_tm_inner` can anchor a comment to, each with
-/// its own independently-drawn `Slot` — `Tapes`, `Start`, an optional header (reaching all six
+/// its own independently-drawn `Slot` — `Tapes`, `Start`, an optional header (reaching all eight
 /// `TmDirective` variants), up to `MAX_STATES` states each with up to `MAX_RULES` rules, and an EOF
 /// slot. Built so every rendering is diagnostic-free BY CONSTRUCTION — unique state names in
 /// definition order, in-range goto targets, matching rule arity, in-range and non-colliding tape
-/// indices, exactly the five required directives together or not at all — so the `prop_assume!` in
+/// indices, exactly the five required directives together or not at all, and `reduced` and `steps`
+/// together with `version 2` or neither with `version 1` — so the `prop_assume!` in
 /// the property below is a safety net, not the mechanism that keeps cases from being discarded.
 #[derive(Clone, Debug)]
 struct DocSpec {
@@ -542,12 +575,17 @@ fn render(spec: &DocSpec) -> String {
     emit(&mut src, &spec.start_slot, "", &format!("start q{}", spec.start));
 
     if let Some(h) = &spec.header {
-        emit(&mut src, &h.lines.version, "", "version 1");
+        let version = if h.reduction.is_some() { "version 2" } else { "version 1" };
+        emit(&mut src, &h.lines.version, "", version);
         let enc = if h.encoding_binary { "binary" } else { "unary" };
         emit(&mut src, &h.lines.encoding, "", &format!("encoding {enc}"));
         emit(&mut src, &h.lines.width, "", &format!("width {}", h.width));
         emit(&mut src, &h.lines.slots, "", &format!("slots {}", h.slots));
         emit(&mut src, &h.lines.result, "", &format!("result {}", RESULT_TYS[h.result_idx]));
+        if let Some(r) = &h.reduction {
+            emit(&mut src, &r.reduced, "", &format!("reduced {}", STAGE_LISTS[r.stages_idx]));
+            emit(&mut src, &r.steps_slot, "", &format!("steps {}", r.steps));
+        }
         for (idx, cand) in h.tape_lines.iter().enumerate() {
             if cand.include && idx < spec.tapes {
                 emit(&mut src, &cand.slot, "", &format!("tape {idx} {}", cand.cells));
@@ -602,7 +640,7 @@ tapes 2 ; tapes trailing
 ; about start
 start q0 ; start trailing
 ; about version
-version 1 ; version trailing
+version 2 ; version trailing
 ; about encoding
 encoding unary ; encoding trailing
 ; about width
@@ -611,6 +649,10 @@ width 8 ; width trailing
 slots 1 ; slots trailing
 ; about result
 result Nat ; result trailing
+; about reduced
+reduced fold ; reduced trailing
+; about steps
+steps 9 ; steps trailing
 ; about tape 1
 tape 1 #____# ; tape trailing
 
@@ -646,6 +688,10 @@ fn every_anchor_and_own_line_combination_reaches_a_fixed_point() {
             ("slots trailing", TmAnchor::Directive(TmDirective::Slots), false),
             ("about result", TmAnchor::Directive(TmDirective::Result), true),
             ("result trailing", TmAnchor::Directive(TmDirective::Result), false),
+            ("about reduced", TmAnchor::Directive(TmDirective::Reduced), true),
+            ("reduced trailing", TmAnchor::Directive(TmDirective::Reduced), false),
+            ("about steps", TmAnchor::Directive(TmDirective::Steps), true),
+            ("steps trailing", TmAnchor::Directive(TmDirective::Steps), false),
             ("about tape 1", TmAnchor::Directive(TmDirective::Tape(1)), true),
             ("tape trailing", TmAnchor::Directive(TmDirective::Tape(1)), false),
             ("about q0", TmAnchor::State(0), true),
@@ -661,7 +707,7 @@ fn every_anchor_and_own_line_combination_reaches_a_fixed_point() {
     // authored trailing comment on every anchor, including its one `tape` line, so `write_header`'s
     // generated-label path never fires for it — but the FIRST print does NOT equal `ALL_ANCHORS`
     // byte-for-byte: the source writes one space before each trailing `;` and `CommentWriter::trailing`
-    // writes two, so every one of the ten trailing-comment lines above differs by that one space. No
+    // writes two, so every one of the twelve trailing-comment lines above differs by that one space. No
     // assertion here depends on the first print matching the source; see
     // `printing_twice_after_a_reparse_is_idempotent`'s doc comment for why a literal round trip is
     // false in general.)
@@ -769,7 +815,7 @@ proptest! {
     /// because whatever changed is now indistinguishable, to the printer, from something the author
     /// wrote.
     ///
-    /// `doc_spec`/`render` still range over every `TmAnchor` variant — `Tapes`, `Start`, all six
+    /// `doc_spec`/`render` still range over every `TmAnchor` variant — `Tapes`, `Start`, all eight
     /// `TmDirective` variants, `State`, `Rule` and `Eof` — with both `own_line` values independently
     /// possible at each one (`Eof` excepted: the parser only ever drains it as `own_line: true`, so
     /// that is the one combination no document can produce). A typical case touches most of these at

@@ -1,0 +1,141 @@
+================================================================================
+a reduced header through all three stages, in the order the printer emits it
+================================================================================
+
+tapes 1
+start pre
+version 2
+encoding unary
+width 8
+slots 4
+result Nat
+reduced fold, single-tape 5, two-symbol _#1<>ABab|,
+steps 7088578
+tape 0 _1
+
+state pre: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (version
+    (number))
+  (encoding
+    name: (identifier))
+  (width
+    (number))
+  (slots
+    (number))
+  (result
+    type: (identifier))
+  (reduced
+    (fold
+      (stage))
+    (single_tape
+      (stage)
+      (number))
+    (two_symbol
+      (stage)
+      symbols: (identifier)))
+  (steps
+    (number))
+  (tape
+    index: (number)
+    cells: (identifier))
+  (state
+    name: (identifier)))
+
+================================================================================
+the fold alone, at the end of its line
+================================================================================
+
+tapes 1
+start s
+version 2
+encoding unary
+width 4
+slots 1
+result Nat
+reduced fold
+steps 3
+
+state s: accept
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (tapes
+    (number))
+  (start
+    target: (identifier))
+  (version
+    (number))
+  (encoding
+    name: (identifier))
+  (width
+    (number))
+  (slots
+    (number))
+  (result
+    type: (identifier))
+  (reduced
+    (fold
+      (stage)))
+  (steps
+    (number))
+  (state
+    name: (identifier)))
+
+================================================================================
+a stage list the authority refuses: out of order, which this grammar admits
+================================================================================
+
+reduced single-tape 5, fold, two-symbol _#
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (reduced
+    (single_tape
+      (stage)
+      (number))
+    (fold
+      (stage))
+    (two_symbol
+      (stage)
+      symbols: (identifier))))
+
+================================================================================
+a stage list the authority refuses: a repeat, which this grammar admits
+================================================================================
+
+reduced fold, fold
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (reduced
+    (fold
+      (stage))
+    (fold
+      (stage))))
+
+================================================================================
+a stage name ending in a mid-line CR, which the authority refuses
+================================================================================
+
+reduced fold, single-tape 5
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (reduced
+    (fold
+      (stage))
+    (single_tape
+      (stage)
+      (number))))

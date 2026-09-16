@@ -378,6 +378,8 @@ fn directive_anchor(key: &str, rest: &str) -> Option<TmDirective> {
         "width" => TmDirective::Width,
         "slots" => TmDirective::Slots,
         "result" => TmDirective::Result,
+        "reduced" => TmDirective::Reduced,
+        "steps" => TmDirective::Steps,
         "tape" => TmDirective::Tape(rest.split_whitespace().next()?.parse().ok()?),
         _ => return None,
     })
@@ -478,10 +480,9 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
                     _ => diags.push(err(span, format!("expected `tapes <1..={MAX_TAPES}>`"))),
                 }
             }
-        } else if let Some((key, rest)) = trimmed
-            .split_once(' ')
-            .filter(|(k, _)| matches!(*k, "version" | "encoding" | "width" | "slots" | "result" | "tape"))
-        {
+        } else if let Some((key, rest)) = trimmed.split_once(' ').filter(|(k, _)| {
+            matches!(*k, "version" | "encoding" | "width" | "slots" | "result" | "reduced" | "steps" | "tape")
+        }) {
             if let Err(msg) = header_position(key, &states) {
                 diags.push(err(span, msg));
             } else if let Some(Err(msg)) = header.directive(key, rest, span) {
@@ -1288,18 +1289,26 @@ state s: accept
         assert!(doc.diagnostics.is_empty(), "an absent version is not a diagnostic: {:?}", doc.diagnostics);
     }
 
-    /// An unknown version is a hard ERROR, not a warning. A future version could change what `width` or
-    /// `slots` MEAN, so decoding a v2 file under v1 rules would produce a confidently wrong value — the
-    /// exact failure the header exists to prevent.
+    /// An unknown version is a hard ERROR, not a warning. A version can change what the header's fields
+    /// MEAN, so decoding a file under the wrong version's rules would produce a confidently wrong value —
+    /// the exact failure the header exists to prevent.
     #[test]
     fn an_unknown_version_is_an_error_not_a_warning() {
-        for bad in ["version 2", "version 0", "version foo", "version"] {
+        for bad in ["version 3", "version 0", "version foo", "version"] {
             let src =
                 format!("tapes 1\nstart s\n{bad}\nencoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n");
             let doc = parse_tm_full(&src);
             assert!(doc.machine.is_none() && doc.header.is_none(), "{bad:?} must be refused");
             assert!(doc.diagnostics.iter().any(|d| d.message.contains("version")), "{bad:?}: {:?}", doc.diagnostics);
         }
+        let doc = parse_tm_full(
+            "tapes 1\nstart s\nversion 3\nencoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n",
+        );
+        assert!(
+            doc.diagnostics.iter().any(|d| d.message.contains("this build reads versions 1 and 2")),
+            "the refusal names what this build reads: {:?}",
+            doc.diagnostics
+        );
     }
 
     /// `version` is NOT a member of the four-directive header set, so the four optionality properties are
@@ -1319,6 +1328,175 @@ state s: accept
         let out = print_tm_with(&increment(), &a_header());
         let block: Vec<&str> = out.lines().skip(2).take(1).collect();
         assert_eq!(block, vec!["version 1"], "got:\n{out}");
+    }
+
+    use crate::tm::header::{MAX_REDUCED_STEPS, Reduction, Stage};
+    use crate::tm::single_tape::MAX_ENCODABLE_TAPES;
+
+    /// `a_header` as a reduced one.
+    fn a_reduced_header(stages: Vec<Stage>, steps: u64) -> TmHeader {
+        let mut h = a_header();
+        h.reduction = Some(Reduction { stages, steps });
+        h
+    }
+
+    /// A one-state file whose header is `lines` on top of `a_header`'s recipe.
+    fn parse_header_lines(lines: &str) -> TmDocument {
+        parse_tm_full(&format!(
+            "tapes 1\nstart s\n{lines}encoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n"
+        ))
+    }
+
+    /// Property 2 for reduced headers: every stage alone and all three together, `single-tape` at both
+    /// ends of its range, `steps` at both ends of its range, and a `,` among the code's symbols, which
+    /// is why the symbols are the rest of the line rather than one comma-separated item.
+    #[test]
+    fn a_reduced_header_round_trips_through_the_text_form() {
+        let lists = [
+            vec![Stage::Fold],
+            vec![Stage::SingleTape { k: 1 }],
+            vec![Stage::TwoSymbol { symbols: vec!['_'] }],
+            vec![
+                Stage::Fold,
+                Stage::SingleTape { k: MAX_ENCODABLE_TAPES },
+                Stage::TwoSymbol { symbols: vec!['_', ',', '#'] },
+            ],
+        ];
+        for stages in lists {
+            for steps in [1, MAX_REDUCED_STEPS] {
+                let h = a_reduced_header(stages.clone(), steps);
+                let text = print_tm_with(&increment(), &h);
+                let doc = parse_tm_full(&text);
+                assert_eq!((doc.machine, doc.header, doc.diagnostics), (Some(increment()), Some(h), vec![]), "{text}");
+            }
+        }
+    }
+
+    /// Under version 1, explicit or absent, `reduced` and `steps` are errors, each pointing at its line.
+    #[test]
+    fn reduced_and_steps_are_errors_under_version_1() {
+        for version in ["version 1\n", ""] {
+            for line in ["reduced fold", "steps 5"] {
+                let src = format!("{version}{line}\n");
+                let doc = parse_header_lines(&src);
+                let key = line.split(' ').next().unwrap_or_default();
+                let want = format!("`{key}` requires `version 2`; this header is version 1");
+                let d = doc
+                    .diagnostics
+                    .iter()
+                    .find(|d| d.message == want)
+                    .unwrap_or_else(|| panic!("{src:?}: no {want:?} in {:?}", doc.diagnostics));
+                let full = format!("tapes 1\nstart s\n{src}");
+                assert_eq!(&full[d.span.start..d.span.end], line, "{src:?}: the diagnostic points at the line");
+                assert!(doc.header.is_none(), "{src:?}");
+            }
+        }
+    }
+
+    /// Under version 2, each of `reduced` and `steps` is required.
+    #[test]
+    fn version_2_requires_reduced_and_steps() {
+        for (lines, missing) in [("version 2\nsteps 5\n", "reduced"), ("version 2\nreduced fold\n", "steps")] {
+            let doc = parse_header_lines(lines);
+            let want = format!("`version 2` requires a `{missing}` directive");
+            assert!(
+                doc.diagnostics.iter().any(|d| d.message == want),
+                "{lines:?}: no {want:?} in {:?}",
+                doc.diagnostics
+            );
+            assert!(doc.header.is_none(), "{lines:?}");
+        }
+    }
+
+    /// `steps` outside `1..=MAX_REDUCED_STEPS` is refused, and both ends are admitted — a cap tested only
+    /// from outside proves the refusal fires, never that it fires at the right place.
+    #[test]
+    fn steps_is_refused_outside_one_to_its_ceiling_and_admitted_at_both_ends() {
+        for steps in [1, MAX_REDUCED_STEPS] {
+            let doc = parse_header_lines(&format!("version 2\nreduced fold\nsteps {steps}\n"));
+            assert!(doc.diagnostics.is_empty() && doc.header.is_some(), "steps {steps}: {:?}", doc.diagnostics);
+        }
+        for steps in [0, MAX_REDUCED_STEPS + 1] {
+            let doc = parse_header_lines(&format!("version 2\nreduced fold\nsteps {steps}\n"));
+            let want = format!("expected `steps <1..={MAX_REDUCED_STEPS}>`, found `{steps}`");
+            assert!(doc.diagnostics.iter().any(|d| d.message == want), "steps {steps}: {:?}", doc.diagnostics);
+        }
+    }
+
+    /// THE KNOWN TRAP: a key in `parse_tm_nav`'s header filter with no arm in `HeaderParts::directive`
+    /// is skipped with no diagnostic at all. So every new key gets malformed values, and each must be
+    /// refused BY that key's own arm, naming the key.
+    #[test]
+    fn a_malformed_value_for_each_new_key_is_refused_by_that_key() {
+        let over = MAX_ENCODABLE_TAPES + 1;
+        let reduced = [
+            String::new(),
+            "fold,".into(),
+            "fold, fold".into(),
+            "single-tape 5, fold".into(),
+            "single-tape 0".into(),
+            format!("single-tape {over}"),
+            "single-tape x".into(),
+            "single-tape".into(),
+            "two-symbol".into(),
+            "two-symbol a_".into(),
+            "two-symbol _aa".into(),
+            "unfold".into(),
+        ];
+        for val in &reduced {
+            let doc = parse_header_lines(&format!("version 2\nreduced {val}\nsteps 5\n"));
+            assert!(
+                doc.diagnostics.iter().any(|d| d.message.starts_with("expected `reduced`")),
+                "reduced {val:?}: {:?}",
+                doc.diagnostics
+            );
+            assert!(doc.header.is_none(), "reduced {val:?}");
+        }
+        for val in ["", "x", "-1"] {
+            let doc = parse_header_lines(&format!("version 2\nreduced fold\nsteps {val}\n"));
+            assert!(
+                doc.diagnostics.iter().any(|d| d.message.starts_with("expected `steps")),
+                "steps {val:?}: {:?}",
+                doc.diagnostics
+            );
+            assert!(doc.header.is_none(), "steps {val:?}");
+        }
+    }
+
+    #[test]
+    fn a_duplicate_reduced_or_steps_directive_is_an_error() {
+        for (lines, key) in [
+            ("version 2\nreduced fold\nreduced fold\nsteps 5\n", "reduced"),
+            ("version 2\nreduced fold\nsteps 5\nsteps 5\n", "steps"),
+        ] {
+            let doc = parse_header_lines(lines);
+            let want = format!("duplicate `{key}` directive");
+            assert!(doc.diagnostics.iter().any(|d| d.message == want), "{lines:?}: {:?}", doc.diagnostics);
+        }
+    }
+
+    /// A `version` line that does not parse is reported once. It says nothing about which version's rules
+    /// the rest of the header meant, so no version rule adds a diagnostic of its own.
+    #[test]
+    fn a_version_that_does_not_parse_adds_no_version_rule_diagnostic() {
+        let doc = parse_header_lines("version foo\nreduced fold\nsteps 5\n");
+        let messages: Vec<&str> = doc.diagnostics.iter().map(|d| d.message.as_str()).collect();
+        assert_eq!(messages, vec!["expected `version 1` or `version 2`, found `foo`"]);
+    }
+
+    /// A lone `reduced` or `steps`, with none of the four directives, must not read as "no header" — the
+    /// same reasoning as a stray `tape` or `version` line.
+    #[test]
+    fn a_lone_reduced_or_steps_without_a_header_is_a_diagnostic() {
+        for line in ["reduced fold", "steps 5"] {
+            let doc = parse_tm_full(&format!("tapes 1\nstart s\n{line}\n\nstate s: accept\n"));
+            assert!(doc.header.is_none(), "{line:?}");
+            assert!(
+                doc.diagnostics.iter().any(|d| d.message.contains("without a header")),
+                "{line:?}: {:?}",
+                doc.diagnostics
+            );
+        }
     }
 
     /// Probed at `64c1164`: parses clean, and `scan` appears at 14, 25 and 66 while `halt`

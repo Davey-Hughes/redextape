@@ -161,7 +161,14 @@ width, the slot count and the result type — exactly what `TmHeader::init` need
 tapes and what `decode_tape_ty` needs to read the final ones. A header-less `.tm` still parses, and
 `run` still refuses it, with a message saying to re-emit through `redextape emit --lang tm`, which
 always writes a header. A machine that does not halt inside `TM_DEFAULT_CAPS` exits `1` and prints
-nothing: a partial tape that happens to decode is not an answer. A file whose final tapes fail to
+nothing: a partial tape that happens to decode is not an answer.
+
+**A reduced `.tm` file runs from its own header too.** `emit --reduce` writes one as `version 2`, and
+`run` simulates it under the `steps` its header records rather than `TM_DEFAULT_CAPS`'s step count,
+which a reduced machine far exceeds, keeping that cap's cell count. A reduced machine that does not
+halt within those steps, or that halts in a state that is not an accept state, exits `1`. One that
+halts in an accept state has every reduction on its `reduced` line undone, last first, and its tapes
+decode as any other file's do. A file whose final tapes fail to
 decode as the `result` its own header declares is not one failure but two, with opposite fault
 attributions (`DecodeFailure::Mismatch` and `DecodeFailure::BudgetExhausted`). Tapes that contradict
 the header's own declared type — a `Bool` slot holding neither `0` nor `1`, a heap pointer out of
@@ -216,6 +223,20 @@ and can therefore refuse a program auto-fitting would have accepted, at the same
 section below shows — but with a *different message*, because on a pinned run `MAX_FIELD_WIDTH` was
 never attempted and `--encoding binary` is not the remedy. The pinned refusal names the width it
 actually tried and the setting that chose it; the two are written out at the end of this file.
+
+`--reduce STAGES` writes the machine after the reductions it lists — `fold`, `single-tape` and
+`two-symbol`, comma-separated, in that order and each at most once — and is `--lang tm`-only under the
+same rule:
+
+    redextape emit p.rxt --lang tm --reduce fold,single-tape,two-symbol -o p.tm
+
+The reduced machine is run before anything is written: it must halt in an accept state within
+1,000,000,000 steps, and its tapes, with every reduction undone, must decode to the value the fitting
+run computed. Otherwise `emit` exits `2` and writes no file, and it does the same when the fitting run
+itself hit `TM_DEFAULT_CAPS`, since there is then no value to check against. The file it writes is a
+`version 2` `.tm`, whose `tape` lines are the reduced machine's own initial tapes, with a `reduced`
+line recording what undoing each reduction needs and a `steps` line recording how many steps that
+check took. `redextape run` takes it like any other `.tm` file; see `run` above.
 
 | target | what it writes | can `redextape` read it back? |
 |---|---|---|

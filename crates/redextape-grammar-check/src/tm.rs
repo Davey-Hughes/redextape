@@ -20,7 +20,7 @@
 use crate::grammar::{Grammar, compare_classified};
 use redextape_core::Span;
 use redextape_core::analysis::TokenClass;
-use redextape_core::tm::EncodingKind;
+use redextape_core::tm::{EncodingKind, StageKind};
 use tree_sitter_language::LanguageFn;
 
 unsafe extern "C" {
@@ -38,7 +38,8 @@ unsafe extern "C" {
 /// (`every_tm_query_pattern_fires_over_the_corpus`). Four of those patterns — `encoding`'s operand,
 /// `result`'s operand, a `tape` line's packed run, and `@comment` — are reachable ONLY from a headered
 /// file, so a corpus of header-less machines would leave them at zero coverage with every other test
-/// still green. That is the gap `every_query_pattern_fires` was promoted onto `Grammar` to catch.
+/// still green. That is the gap `every_query_pattern_fires` was promoted onto `Grammar` to catch. Two
+/// more — a stage name and a two-symbol code's symbols — are reachable only from a REDUCED file.
 ///
 /// The last two entries are design §6.3's residue: comment positions **no printer can produce**, so
 /// they have no differential authority and rest on this corpus plus `tree-sitter test`.
@@ -66,6 +67,14 @@ pub const CORPUS: &[(&str, &str)] = &[
     (
         "a tape line with no comment, and a nested result type",
         "tapes 10\nstart s\nversion 1\nencoding unary\nwidth 4\nslots 1\nresult List<List<Nat>>\ntape 9 #\n\nstate s: accept\n",
+    ),
+    // A REDUCED HEADER, `version 2` with `reduced` and `steps` after `result`. Its stage list has a comma
+    // straight after `fold`, which is the text a stage name extracted as a keyword would lex as one word,
+    // and its symbols end in a `,`, which the authority reads as a symbol because they run to the end of
+    // the line.
+    (
+        "a reduced header through all three stages",
+        "tapes 1\nstart pre\nversion 2\nencoding unary\nwidth 8\nslots 4\nresult Nat\nreduced fold, single-tape 5, two-symbol _#1<>ABab|,\nsteps 7088578\ntape 0 _1\n\nstate pre: accept\n",
     ),
     // ---- design §6.3's residue: nothing in this project's pipeline emits any of these ----
     ("a whole-line comment", "; what this machine does\ntapes 1\nstart s\n\nstate s: accept\n"),
@@ -186,13 +195,31 @@ pub fn printed_machine(src: &str) -> Option<(String, Vec<(Span, TokenClass)>)> {
 /// stay in §6.3's residue alongside the whole-line comment.
 #[must_use]
 pub fn printed_machine_with_header(src: &str, kind: EncodingKind) -> Option<(String, Vec<(Span, TokenClass)>)> {
+    let d = described(src, kind)?;
+    Some(redextape_core::tm::print_tm_with_mapped(&d.machine, &d.header))
+}
+
+/// `src`'s described run under `kind`, or `None` when it does not parse, type or lower: the one place
+/// the two corpus builders that simulate reach `run_tm_described`.
+fn described(src: &str, kind: EncodingKind) -> Option<redextape_core::tm::DescribedRun> {
     let (program, _diagnostics) = redextape_core::parser::parse(src);
     let program = program?;
     let result = redextape_core::typeck::result_type(&program).ok()?;
     let core = redextape_core::desugar::desugar(&program);
-    let described =
-        redextape_core::tm::run_tm_described(&core, kind, result, redextape_core::tm::TM_DEFAULT_CAPS).ok()?;
-    Some(redextape_core::tm::print_tm_with_mapped(&described.machine, &described.header))
+    redextape_core::tm::run_tm_described(&core, kind, result, redextape_core::tm::TM_DEFAULT_CAPS).ok()
+}
+
+/// Lower a mini-language program, reduce its run through `stages`, and print the reduced file with its
+/// classification, or `None` when the program does not run or its run does not reduce.
+///
+/// **IT SIMULATES MORE THAN `printed_machine_with_header` DOES, UNDER THE SAME BOUNDS.** `reduce` runs the
+/// reduced machine to check it before any text exists, so this is held to the three bounds that
+/// function's doc gives, under `Unary`, and only `REDUCED_CORPUS` reaches it.
+#[must_use]
+pub fn printed_reduced(src: &str, stages: &[StageKind]) -> Option<(String, Vec<(Span, TokenClass)>)> {
+    let d = described(src, EncodingKind::Unary)?;
+    let (machine, header) = redextape_core::tm::reduce(&d, stages).ok()?;
+    Some(redextape_core::tm::print_tm_with_mapped(&machine, &header))
 }
 
 /// The FIXED list of programs the headered corpus is built from, with the encoding each is printed
@@ -207,6 +234,17 @@ pub const HEADERED_CORPUS: &[(&str, EncodingKind)] = &[
     ("3 - 5", EncodingKind::Binary),
     ("if 2 > 1 { 10 } else { 20 }", EncodingKind::Unary),
     ("cons(1, cons(2, nil))", EncodingKind::Binary),
+];
+
+/// The FIXED list of reduced files the headered leg compares too, as a program and its stages: `3 - 5`
+/// through each stage alone, and through the fold then stage 2, whose `reduced` line is the one here with
+/// a comma in it. Fixed for the reason `HEADERED_CORPUS` is. Stage 1 paired with another stage prints many
+/// times larger for this program, so no such pair is here.
+pub const REDUCED_CORPUS: &[(&str, &[StageKind])] = &[
+    ("3 - 5", &[StageKind::Fold]),
+    ("3 - 5", &[StageKind::SingleTape]),
+    ("3 - 5", &[StageKind::TwoSymbol]),
+    ("3 - 5", &[StageKind::Fold, StageKind::TwoSymbol]),
 ];
 
 /// Compare the TM grammar's projected captures against the printer's own classification of the same

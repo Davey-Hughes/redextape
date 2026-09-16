@@ -17024,7 +17024,7 @@ Every task's end state was built in a scratch worktree before it went into the p
 - **Leg 6's corpus never goes below cell -1.** Correctness past it rests on the depth-5 test, the two-tape test and the proptest, whose fixed-seed reach is what the generator floor holds.
 - **The cost table prints both step predictions and asserts neither.**
 - **Moves still finish one tape at a time.** Finishing them in parallel would cut steps; nothing here needed it.
-- **A `.tm` header for folded machines** stays open.
+- **A `.tm` header for folded machines** ~~stays open~~. **CLOSED 2026-09-15 (`reduced-tm-header`):** a `version 2` header records the stages and the reduced machine's step count, and `reduce` writes no file whose reduced run does not decode to the program's value.
 - **Two helper copies stay:** `examples/regen_fixtures.rs`'s `core_and_ty`, and the unit-test helpers inside `one_way.rs`.
 - **The commit messages of `24f5802` and `446b04b` still say `build_machine` had three verbatim copies.** History is not rewritten; the squash merge carries the PR description instead.
 - **Two lines this branch added exceed 120 columns**, both from the plan's own code and left alone by rustfmt: `one_way.rs`'s `proptest!` parameter line and `one_way_oracle.rs`'s cost-table `println!`.
@@ -17649,3 +17649,112 @@ commit, by a script in the session scratchpad, not committed; the load average w
   - S1 to S7 are the implementer's Task 5 report;
   - the whole-branch review's probe figures and sabotages come from its report, with its logs kept in the session scratchpad;
   - the fix-round sabotages are the fix report, kept outside the tree.
+#### A REDUCED `.tm` FILE RUNS AND DECODES FROM THE FILE ALONE: A `version 2` HEADER CARRIES THE STAGE LIST AND THE STEP COUNT, AND `reduce` WRITES NOTHING UNLESS THE REDUCED MACHINE'S OWN TAPES, EVERY STAGE UNDONE, DECODE TO WHAT THE LOWERED RUN'S TAPES DECODE TO — TWO SIMULATIONS, NOT A PROGRAM COMPARED WITH ITSELF. THE VALUE CHECK IS ONLY AS STRONG AS THE RESULT TYPE, AND THE SPEC'S FIRST SABOTAGE ROW STAYED GREEN BECAUSE ITS PROGRAM'S VALUE WAS 0. THE WHOLE-BRANCH REVIEW FOUND NOTHING WRONG WITH THE REDUCTION AND THREE SENTENCES THE FINISHED CODE MADE FALSE, ONE OF THEM THE EXACT SIBLING A FIX ROUND HAD SWEPT PAST TWO COMMITS EARLIER — AND THE FACT-CHECKS OF THIS ENTRY THEN FOUND THREE OF THOSE CORRECTIONS FALSE IN TURN, ALL ALREADY COMMITTED (2026-09-15, branch `reduced-tm-header`, `11f7d66..e537ca5`, 14 commits, plus this entry)
+
+**This closes stage 3's "A `.tm` header for folded machines stays open".** The three Tier 1 reductions could lower a machine but not write one down: a folded or interleaved or bitified machine printed to `.tm` lost the fact that it was reduced, so nothing could undo the stages and read the program's value back. A `version 2` header records the stages and the reduced machine's step count, `reduce` refuses to produce a file it cannot verify, and `run` executes one.
+
+##### WHAT THE FILE CARRIES
+
+`version 2` adds two directives to the header `version 1` already had. `reduced` lists the stages in the order they ran — `fold`, `single-tape <k>` with the tape count before the stage, `two-symbol <symbols>` with the code's symbols in code order — and `steps <n>` records what the reduced machine takes to halt. The `tape` lines are the REDUCED machine's own tapes, so any simulator still runs the file unchanged, while `encoding`, `width`, `slots` and `result` stay the recipe for the tapes once every stage is undone. `REDUCED_HEADER_VERSION` is 2, `MAX_REDUCED_STEPS` is 1,000,000,000, and `HEADER_VERSION` stays 1, meaning a lowered file or an absent `version`.
+
+`Code::from_symbols` is what makes `two-symbol` invertible from the file: a code rebuilt from its symbol order alone. It forced a distinction the code had been able to leave implicit — `Code::new` SORTS its symbols, so the table it builds is a function of the symbol set, while `from_symbols` keeps the order it is handed, because a reduced file's header carries that order and it IS the code.
+
+##### THE CHECK IS TWO SIMULATIONS, AND WHAT BOUNDS IT
+
+`reduce_within` runs the reduced machine, undoes every stage on its final tapes, and decodes; separately it decodes the LOWERED run's tapes; the file exists only if the two values agree. The two sides come from two different simulations, so the check cannot pass by comparing something with itself — the defect the counter-machines branch's whole-branch review had found one PR earlier, looked for here, and did not find.
+
+**What bounds it is the result type, not the machinery.** `decode_tape_ty_reason` is guided by the type's SHAPE, and for `result Unit` the result word is ignored by design, so on a `Unit`-typed program the value comparison stops discriminating and the check falls back to "every stage's inverse accepts the tapes, a result reads off them at all, the machine halts in an accept state, and it takes at least one step" — everything except the value. No program in the reduced corpus is `Unit`-typed, so nothing measured here is wrong, but this is reachable: `typeck.rs` types a tail-less block as `Unit`, so a user can hand `emit --reduce` a program whose reduction is checked that much more weakly.
+
+**The same bound, measured rather than reasoned, is what moved the fast tier's program.** The spec's first sabotage row swaps two symbols of the header's `two-symbol` run, which makes the decoder read every tape through a code mapping one symbol onto another. On `3 - 5`, the program the spec names, all six end-to-end subsets stayed GREEN — the wrong decode still produced 0, which is what `3 - 5` is. On `5 - 3`, whose value is 2, the same row reddens exactly the three subsets containing stage 2. **The fast tier reduces `5 - 3`.**
+
+##### WHAT BUILDING THE PLAN FOUND
+
+Every task's code was built and tested in a scratch worktree before the plan was written, and embedded byte-identically. Four things the build found that the spec had not:
+
+- **Stage 1's skeleton is padded to exactly the cells a run visits — `PAD_MARGIN` is 0.** `pads` runs the machine stage 1 receives and counts each tape's growth on its left. Every reduction in the corpus verified with no margin at all, where the spec's table padded stage 1 by 2 blocks. Program for program the plan's STEP counts come in below the spec's — `3 - 5` through all three at 7,007,238 steps against 7,088,578, `sum(5)` through stage 1 at 298,696,070 against 303,610,850.
+- **The inverses before the fold must rebuild their tapes WITH the head**, through `Tape::from_snapshot`. `unzigzag` refuses a head on physical cell 0, where the spec's `Tape::new(&snapshot.cells)` puts one. **Spec correction.**
+- **`all_three_stages_decode` belongs in the slow tier**, at 2.953 to 3.338 s in debug against a 1 s fast-tier rule. The spec puts all seven subsets in the fast tier; the other six are fast, the longest at 0.664 s. The all-three command-line round trip joins it there for the same reason, though only its release time was measured. **Spec correction.**
+- **The reduced files get a differential of their own** rather than joining the headered one, which took 0.943 to 1.240 s with them inside it. **Spec correction.**
+
+Two instruments were corrected mid-sabotage, and neither had failed loudly. `restore` deleted only a unit test's `proptest-regressions/`, so an integration test's regressions file survived a row and replayed its failing case into the rows after it. And Task 5's `corpus` helper ended in a `grep` for a line `tree-sitter test` prints only when every case passes — so it returned non-zero exactly when a sabotage WORKED, and the `&& fast` after it skipped that row in silence.
+
+##### WHAT REVIEW FOUND
+
+The whole-branch review found nothing wrong with the reduction itself: the two-simulation check, the no-file guarantee, the pad arithmetic and the step-cap boundary all held under inspection. What it found were three claims the branch's own finished code made false, one of which was also wrong in what the CLI printed.
+
+- **The grammar's `/fold\r?/` "admits nothing the authority refuses".** A stage name ending in a MID-line `\r` parses here, where `parse_tm_full` strips a `\r` only from a line's END and answers a diagnostic; and a stage list that repeats a stage parses, where `is_stage_list` demands strictly ascending kinds. The plan's Decision 10 had rejected `/fold[:]?/` for admitting `reduced fold:` and concluded "no existing accept-more divergence changes" — the shipped alternative has the same property with a less typeable character. The module doc's list, which said "THREE ... in total", now names five.
+- **The same comment's MECHANISM was refuted by the shipped artifact.** It said the generator "only extracts a token whose characters are all letters". The generated `ts_lex_keywords` holds `head_move`, which is `/[LRS]/`, and omits the all-letter `version`, `encoding` and `result`, all three of which the same grammar's lexer on main holds — so being all letters neither causes nor prevents extraction.
+- **`Reduction`'s round-trip precondition did not cover the round trip.** It required symbols "that `Code::from_symbols` accepts", and that constructor accepts `;` and whitespace while the round trip does not: a `reduced` line is comment-stripped and trimmed before `parse_stages` sees it, so `two-symbol _;` parses back as the code `_` with NO diagnostic — silently shorter, which is worse than failing to parse. Unreachable from `reduce`. `write_header` already carried a KNOWN LIMIT note for the same hazard on a tape cell; `write_reduced`, the second writer of a packed run, carried none.
+
+**The third is the one that changed what a user sees, and the one that generalises.** Task 4's review had caught `reduce_refusal` appending the state-ceiling sentence to all five refusal names, and the fix gave each its own cause. `ReduceError::Unverified` is the identical defect one variant further along — `reduce_within` raises that ONE variant for four different causes, and the message named only the step ceiling, so a reduction whose measuring run never halted was sent to look at a step count. The fix round swept `Refused` and stopped there. Fixing the class rather than the instance, with the sibling one enum variant away: it survived a task review, a self-review and a fix round before the whole-branch review read the four causes together.
+
+**Then the fact-check of this entry found two of those corrections false, and both were already committed.** 
+
+- **"Out of order is not admitted."** The one example tried was `reduced two-symbol _#, fold`, which does ERROR — but only because `two_symbol`'s `symbols` is one `identifier` that swallows the following comma. `reduced single-tape 5, fold` and `reduced single-tape 5, fold, two-symbol _#` both parse clean, and `is_stage_list` refuses all three. Divergence 4 is now "a stage list need not be strictly ascending", covering the repeat and the reordering together.
+- **"Keyword extraction is not the lever."** That rested on `token(/fold/)` being absent from the generated `ts_lex_keywords`. It is not absent: a regex token is extracted under a generated `aux_sym_*` name, and the probe had grepped for `anon_sym_fold`. Re-read entry by entry, `token('fold')` and `token(/fold/)` are both extracted and both ERROR, and only `token(/fold\r?/)` is out and parses — so extraction tracks the outcome exactly, and keeping the token out of that lexer is what fixes it. What survives from the correction is the narrower claim above: being all letters neither causes nor prevents extraction.
+
+**A whole README section survived the sweep that fixed its neighbours.** "Three accept-more divergences, stated" stayed at three in a file the fix commit was editing — and that same commit wrote the corrected count, five, into a paragraph 73 lines above the heading it left alone. A sweep that visits the passages it already knows about is not a search.
+
+**A third correction went the same way, and ended the cycle by removing the sentence.** The commit that fixed those two said divergence 5 could not be pinned, because its input needs a literal `\r` and `scripts/check-text-bytes.sh` refuses one. That gate ALLOWS CR — its own comment names TAB, LF and CR as the C0 bytes on its list, three lines above the list. A mechanism asserted without running it, for the third time. All three divergences now have corpus cases instead: `test/corpus/` holds 17 where main holds 12 and this branch's Task 5 left 14, so what this grammar admits beyond the authority fails a test rather than staling a sentence. A claim that has been rewritten twice should stop being a sentence.
+
+Two smaller sentences went the same way as the review's three. `write_header`'s KNOWN LIMIT justified itself with "the tape alphabet is `_ # 1 0 @`", which a reduced file's tapes refute — they carry `single_tape.rs`'s `< >` and `A`-`Z`/`a`-`z` and `one_way.rs`'s `|`; the conclusion survives, since none of those is `;`, but the stated reason did not, and `grammar.js` repeated the sentence. And `Code::order`'s doc, itself written to fix a Task 1 review finding, said two codes over one alphabet "are interchangeable only when both came from `Code::new`" — literally false, since two `from_symbols` calls with one order give equal codes. The point was that nothing may ASSUME interchangeability.
+
+##### SABOTAGES
+
+Every task's rows ran and reddened what they aimed at: Task 2 16/16, Task 3 21/21, Task 4 7/7, Task 5 4/4. Four things they measured are worth keeping.
+
+- **The spec's fifth row cannot be run at all.** It calls for "zero padding margin", and the margin measured IS zero. T3-S12 and T3-S13 take its place by taking a block AWAY, one on the left and one on the right.
+- **A skeleton one block short on the RIGHT is invisible to this corpus.** T3-S13 reddens only the unit test with a constructed walk: on `5 - 3` no head ever passes the longest initial tape, so the right pad is 0 and one block fewer is still 0. The left pad is not — T3-S12 reddens the end-to-end subsets with stage 1 too.
+- **The mismatch test's two-tape case could not fail.** It handed the inverse two tapes whose first had no sentinels, so stage 1's inverse refused the pair whether or not it checked for exactly one tape, and T3-S14 ran green. It now hands a tape `interleave` really produces, with a positive control, and the row reddens. A sabotage that does not fire is the finding, in its refined form: the row tested the property it was AIMED at, not the one its sentence claimed.
+- **The row that reddened by panicking, not by deciding.** `s.swap(1, 2)` indexes past the end of a two-symbol code, which one hand-built fixture has, so the first version of the symbol-swap row went red on an index rather than on a value.
+
+The spec's first three rows redden at the PRODUCER rather than at the file: `reduce` verifies by decoding the reduced machine's own tapes, so a header that lies about its stages fails before any file exists. Only the fourth — `steps` one lower — reaches a file, which is written, parses back, and fails when run at the count it records.
+
+##### COST
+
+35 files, 4,074 insertions and 797 deletions against main, excluding Markdown; no `Cargo.toml` or `Cargo.lock` change, so no new dependency. The branch adds 49 `#[test]` functions and removes none, and the workspace suite stands at 1,744 tests at its head.
+
+| what | cost |
+| --- | --- |
+| the six fast subsets | 0.011 s to 0.664 s each, debug |
+| `all_three_stages_decode` | 2.953 to 3.338 s debug, so slow tier |
+| the reduced differential | 0.842 to 0.849 s against a 1 s rule |
+| `emit --reduce` on `cons(1, cons(2, nil))`, all three, release | 0.975 to 1.005 s, 1,020,216 to 1,020,800 KB, writing 73,635,613 bytes |
+| `run` on that file | 1.575 to 1.593 s, 942,348 to 943,764 KB, printing `[1, 2]` |
+
+The reduced files are large because a reduction is: `5 - 3` through all three stages takes 7,271,090 steps and prints 11,571,235 bytes, `1 + 2 * 3` takes 45,085,521 steps, and `fn sum(n) ... sum(5)` through stage 1 alone takes 298,696,070.
+
+##### SENTENCES THIS BRANCH CHANGES
+
+- Stage 3's **"A `.tm` header for folded machines stays open"** is closed, and annotated in place.
+- The plan's **Decision 10** concluded "no existing accept-more divergence changes". Two were added; `grammar.js`'s module doc and the README's "Three accept-more divergences, stated" section both now say five.
+- The SPEC IS NOT AMENDED. Its corrections are Decisions 3, 8, 11 and 13, and its Testing section and step/size table still describe `3 - 5` and a seven-subset fast tier.
+- **Several commit messages on this branch carry sentences later found false**, and history is not rewritten: Task 3's names its fixture `3 - 5` where it is `5 - 3`; `9ec0449`'s says the `\r` "admits nothing `parse_tm_full` refuses" and gives the all-letter rule for keyword extraction; `e112ef9`'s says out-of-order stages are not admitted and that extraction is not the lever; `dc366d2`'s says the control-byte gate refuses a `\r`. The squash merge carries the PR description instead.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The web and wasm tiers changed behaviour without changing code.** `parse_tm_full` now ACCEPTS `version 2`, so the wasm TM scratch pane will build a leg from a reduced file instead of refusing it at the `version` line. It never decodes a value, so nothing reads wrong — but full web support for reduced files is its own slice.
+- **`PAD_MARGIN` 0 is measured over this corpus, not proved from the construction.** The failure mode is safe by construction rather than by luck: a head that leaves the skeleton halts in `OVERFLOW`, which is not an accept state, so a short skeleton is `Unverified` and no file is written. A machine whose heads travel further makes the producer REFUSE, never write a wrong file.
+- **`reduce` verifies the in-memory machine and header, not the printed FILE.** The print → parse → re-run link sits outside the verification, covered by seven round-trip subsets and two command-line ones. That is where the `;`-and-whitespace precondition lives.
+- **`bitify`'s `None` half of `ReduceError::Layout` is unreachable from `reduce`** and has no test, because the code is built from the tapes it encodes.
+- **Whether the grammar's `\r?` is the narrowest workaround was not tried.** Dropping `,` from `identifier` and giving `tape` cells and `two_symbol` symbols their own comma-admitting token is the obvious alternative; nothing here probed it.
+
+##### VERIFICATION
+
+**Every count this entry quotes, with what produces it.** Run on 2026-09-15 at `e537ca5`, the branch's last code commit, under `systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 --`, starting at a load average of 1.38 and finishing at 3.45.
+
+| figure | command | result |
+| --- | --- | --- |
+| workspace | `cargo nextest run --workspace` | 1,744 passed, 33 skipped |
+| the slice, fast | `cargo nextest run -p redextape-core -p redextape-cli -E 'binary_id(redextape-core::reduced_tm_file) \| binary_id(redextape-cli::roundtrip)' --no-capture` | 9 passed, 4 skipped |
+| the slice, slow | the same with `--release --run-ignored only` | 4 passed, 9 skipped |
+| the differential | `cargo nextest run -p redextape-grammar-check` | 61 passed |
+| grammar | `tree-sitter generate` then `tree-sitter test` | exit 0, `src/` byte-identical, 17/17 parses |
+| gates | `check-attributions.sh`, `check-citations.sh`, `check-doc-figures.sh` | 503 sites / 478 files / 43 figures, 0 violations |
+| fmt, clippy | `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
+| size | `git diff --stat 11f7d66..e537ca5 -- . ':!*.md'` | 35 files, 4,074 insertions, 797 deletions |
+| dependencies | `git diff --name-only 11f7d66..e537ca5 -- '*Cargo.toml' Cargo.lock` | empty |
+
+The step, byte and timing figures in COST are the plan's own, measured at the scratch commits it names; the table above re-runs everything that is a property of the shipped tree. The attribution gate reads 503 where the plan's Task 5 step expected 494. Task 5 itself adds none — 502 appeared before its patch was applied, the +8 being Task 4's fix commit citing the stage that raises each refusal; the two review-fix commits then net +1.
+
+**The doc-figures gate moved 42 → 43 by doing its job.** Rewording the README's line-count sentence moved two cross-reference locators off the clauses they were anchored to, and the gate reported them as NOT FOUND rather than silently skipping them — which is what its own header says that rule is for. Re-anchoring both added a row for asm's 165 lines that had never been checked.

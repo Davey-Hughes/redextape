@@ -1,0 +1,1 @@
+error: `--reduce` takes stages from `fold, single-tape, two-symbol`, comma-separated, in that order and each at most once; got `two-symbol,fold`

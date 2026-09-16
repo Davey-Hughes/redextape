@@ -16,7 +16,7 @@ file       := line*
 line       := blank | ';' ...            whole-line comment, after leading whitespace
             | 'tapes' NAT                1..=MAX_TAPES (64)
             | 'start' NAME
-            | DIRECTIVE REST             version | encoding | width | slots | result | tape
+            | DIRECTIVE REST             version | encoding | width | slots | result | reduced | steps | tape
             | 'state' NAME ':' ['accept']
             | RULE
 RULE       := '[' SYM* ']' '->' 'write' '[' SYM* ']' ',' 'move' '[' MOVE* ']' ',' 'goto' NAME
@@ -55,6 +55,31 @@ and the header `Option` is the only difference between the entry points:
 
 Measured on `1 + 2` lowered at `Unary::at(8)`: 3,163 spans header-less, 3,177 headered.
 
+**A reduced header's `fold` needs a token `identifier` cannot swallow.** `identifier` is
+`[^\s;*:\[\]]+` — it admits `,` and stops only at whitespace, so a stage name survives exactly when
+something other than the printer's `,` follows it. `single-tape 5` and `two-symbol _#` are followed by a
+space, so `identifier` covers the name and no more; `fold` is followed straight by `,`, so `identifier`
+covers `fold,` as one token and the rule ERRORs. `fold` is therefore written `/fold\r?/`. Measured, each
+form regenerated and run on `reduced fold, single-tape 5`:
+
+| `fold` token | in generated `ts_lex_keywords` | parse |
+|---|---|---|
+| `token('fold')` | yes, as `anon_sym_fold` | `ERROR` |
+| `token(/fold/)` | yes, as `aux_sym_fold_token1` | `ERROR` |
+| `token(/fold\r?/)` | no | parses |
+
+Extraction tracks the outcome across all three: keeping the token out of that lexer is what fixes it,
+and `/fold\r?/` stays out because it matches a string `identifier` cannot, so `word` does not subsume
+it. A regex token is extracted under a generated `aux_sym_*` name, so `/fold/` reads as absent to a
+grep for `anon_sym_fold`. Being all letters neither causes nor prevents extraction — this grammar's
+keyword lexer holds `head_move`, which is `/[LRS]/`, and omits the all-letter `version`, `encoding`
+and `result`, all three of which this same grammar's keyword lexer on `main` holds. The cost is that
+this grammar admits a stage name
+ending in `\r` MID-line, which `parse_tm_full` refuses: that parser strips a `\r` only from a line's
+end, so `reduced fold\r, single-tape 5` reaches `parse_stages` as the item `fold\r` and is a
+diagnostic. It is one of the five accept-more divergences `grammar.js`'s module doc lists, and like the
+others it is unreachable from printed output.
+
 ## What it is NOT, and may never become
 
 - **Not a second parser.** The roadmap forbids two authoritative grammars; its test for
@@ -84,12 +109,18 @@ unclassified text a query could legitimately miss, and a dropped pattern shows u
 mismatch rather than as a merely uncoloured character. `every_printed_token_is_captured` names that
 property directly.
 
-Two corpora, because the two printers reach different classes:
+Three corpora, because the two printers reach different classes and a reduced header reaches tokens no
+other file carries:
 
 | corpus | printer | how it is built | size |
 |---|---|---|---|
 | generated | `print_tm_mapped` | `parse` → `desugar` → `lower_asm` → `lower_tm` | 32 proptest cases |
 | headered | `print_tm_with_mapped` | `parse` → `result_type` → `desugar` → `run_tm_described` | 5 fixed programs |
+| reduced | `print_tm_with_mapped` | the headered path, then `reduce` | 4 fixed reductions of `3 - 5` |
+
+**The reduced row reuses the headered printer** and is there for the text only a reduced header
+carries: a `reduced` line's stage names, its tape counts, its commas and its symbols. One of the four
+reductions lists two stages, so a comma is compared too.
 
 **32 is a measurement, not a default.** A printed TM machine averages 18,905 bytes and 6,865 spans
 against λ's 912 and 637, so proptest's default 256 would have this leg parsing ~4.8 MB and comparing
@@ -119,9 +150,9 @@ parses under both descriptions, not that any capture agrees with a classificatio
 Closing these properly means a `classify_tm` over *authored* text, which is LSP-shaped work and
 deferred.
 
-### Three accept-more divergences, stated
+### Five accept-more divergences, stated
 
-This grammar accepts input `parse_tm_full` rejects, in three places, all deliberate and all the right
+This grammar accepts input `parse_tm_full` rejects, in five places, all deliberate and all the right
 direction for an editor — where a half-typed buffer is not an error worth underlining:
 
 1. **One construct per line is not enforced.** The authority splits on `\n` and dispatches on the
@@ -132,8 +163,15 @@ direction for an editor — where a half-typed buffer is not an error worth unde
    missing …"* unless all four of `encoding`/`width`/`slots`/`result` are present once any of them is,
    and separately rejects a `tape <i>` whose index falls outside `0..n_tapes`. Both are whole-file
    properties, and a CST is the wrong place to check them.
+4. **A `reduced` line's stages need not be strictly ascending**, which `header.rs`'s `is_stage_list`
+   demands. `reduced fold, fold, fold` and `reduced single-tape 5, fold` both parse here and are
+   diagnostics there. The one arrangement that `ERROR`s here is a `two-symbol` followed by a comma,
+   whose `symbols` is one `identifier` and swallows it — an accident of the token, not a check.
+5. **A stage name may end in a `\r` mid-line**, because `fold` is `/fold\r?/`. The authority strips a
+   `\r` only from a line's end, so `reduced fold\r, single-tape 5` reaches `parse_stages` as the item
+   `fold\r`, matches no stage name, and is a diagnostic.
 
-None of the three is reachable from printed output, so none can reach the differential. The opposite
+None of the five is reachable from printed output, so none can reach the differential. The opposite
 divergence — a rule *rejecting* input the real parser accepts — is what PR 1 of this slice recorded as
 a defect, and nothing here does that.
 
@@ -447,12 +485,17 @@ Three things worth knowing before taking the Zed route:
 
 ## What the grammar covers
 
-`grammar.js` is **147 lines** — close to the mini-language's 171 and nearly twice λ's 78, which is
-what a thirteen-keyword, line-oriented form costs. `queries/highlights.scm` holds **13 patterns** over **11
-capture names**, and `tm::CAPTURE_CLASSES` has **11 rows**, checked total in both directions
-(`the_capture_map_is_total_over_the_queries`, `every_map_row_is_used_by_a_query`) and each one
-exercised at least once over the corpus (`every_tm_query_pattern_fires_over_the_corpus`).
-`src/parser.c` is **42,220 bytes** at ABI 15. `test/corpus/` holds **12** `tree-sitter test` cases.
+`grammar.js` is **195 lines**, against the mini-language's **171**, asm's **165** and λ's **78** — what
+a fifteen-keyword, line-oriented form with three stage names costs, plus the comments recording what
+`fold`'s own token admits. `queries/highlights.scm`
+holds **15 patterns** over **11 capture names**, and `tm::CAPTURE_CLASSES` has **11 rows**, checked
+total in both directions (`the_capture_map_is_total_over_the_queries`,
+`every_map_row_is_used_by_a_query`) and each one exercised at least once over the corpus
+(`every_tm_query_pattern_fires_over_the_corpus`). `src/parser.c` is **74,423 bytes** at ABI 15.
+`test/corpus/` holds **17** `tree-sitter test` cases, the last three pinning divergences 4 and 5 — the
+stage lists and the mid-line `\r` this grammar admits where `parse_tm_full` refuses them — so a change
+in what it accepts there fails a test rather than only staling a sentence. The `\r` case carries a
+literal CR, which `scripts/check-text-bytes.sh` allows: CR, TAB and LF are the C0 bytes on its list.
 
 **Eleven capture names for nine classes**, and both duplicate pairs are deliberate. `@variable`
 (`encoding`'s operand) and `@type` (`result`'s operand) both project to `Ident` — `write_header`'s own
@@ -485,6 +528,7 @@ the choice between `accept` and a rule list is exclusive here too.
 
 **Every field name is load-bearing**, so renaming one means editing `queries/highlights.scm` and
 rerunning the differential: `state` `name:`, `start`/`rule` `target:`, `encoding` `name:`, `result`
-`type:`, `tape` `index:`/`cells:`, and `rule` `read:`/`write:`/`move:`. Unlike the mini-language
+`type:`, `tape` `index:`/`cells:`, `two_symbol` `symbols:`, and `rule` `read:`/`write:`/`move:`.
+Unlike the mini-language
 grammar, which defines several fields no query reads, there are no spare fields here — telling one
 bare-word token apart by position is the whole mechanism.

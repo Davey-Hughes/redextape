@@ -18,7 +18,7 @@
  * divergence — a rule REJECTING input the real parser accepts — is the one PR 1 recorded as a defect,
  * and nothing here does that.
  *
- * There are THREE accept-more divergences in total, and this is the list:
+ * There are FIVE accept-more divergences reachable from a hand-typed buffer, and this is the list:
  *
  *   1. one construct per line is not enforced (above);
  *   2. header directives are not required to precede the first `state`, where `header_position`
@@ -29,9 +29,21 @@
  *      `0..n_tapes`. This grammar has no opinion about either, because both are whole-file
  *      properties and a CST is the wrong place to check them — an editor should not underline a
  *      header the moment you type its first line.
+ *   4. a `reduced` line's stages need not be the STRICTLY ASCENDING list `header.rs`'s
+ *      `is_stage_list` demands. `reduced` here is `_stage (',' _stage)*`, so a repeat and a
+ *      reordering both parse — `reduced fold, fold, fold` gives three `fold` nodes, and `reduced
+ *      single-tape 5, fold` gives them in that order — where the authority answers a diagnostic for
+ *      either. The one arrangement that ERRORs here is a `two-symbol` followed by a comma, because
+ *      its `symbols` is one `identifier` and swallows that comma; that is an accident of the token
+ *      and not a check, and `reduced single-tape 5, fold, two-symbol _#` parses clean.
+ *   5. a stage name may end in a `\r` MID-LINE, because `fold` is `/fold\r?/` (see the rule). The
+ *      authority strips a `\r` only from a line's END, so `reduced fold\r, single-tape 5` reaches
+ *      `parse_stages` with `fold\r` as the item, matches no stage name, and is a diagnostic.
  *
- * Every one of the three is unreachable from printed output, so none of them can reach the
- * differential; they matter only to a hand-typed buffer, where accepting more is the point.
+ * Every one of the five is unreachable from printed output, so none of them can reach the
+ * differential: `write_reduced` writes the stages it is handed and never writes a `\r`, and
+ * `Reduction`'s precondition requires those stages to satisfy `is_stage_list`. They matter only to a
+ * hand-typed buffer, where accepting more is the point.
  *
  * The one place a newline still matters is `comment`, whose pattern stops at the end of its line. A
  * comment pattern matching "any character" INCLUDING the newline would eat the following line,
@@ -96,13 +108,48 @@ module.exports = grammar({
     // give `encoding`'s operand and `result`'s operand DIFFERENT captures (`@variable` and `@type`,
     // both projecting to `Ident`) and `captures_with` does not evaluate query predicates — an
     // `#eq?` on the key would be ignored and would over-capture.
-    _directive: $ => choice($.version, $.encoding, $.width, $.slots, $.result),
+    _directive: $ => choice($.version, $.encoding, $.width, $.slots, $.result, $.reduced, $.steps),
 
     version: $ => seq('version', $.number),
     encoding: $ => seq('encoding', field('name', $.identifier)),
     width: $ => seq('width', $.number),
     slots: $ => seq('slots', $.number),
     result: $ => seq('result', field('type', $.identifier)),
+
+    // A reduced file's stages. `identifier` is `[^\s;*:\[\]]+`, which admits `,` and stops only at
+    // whitespace, so what a stage name is followed by decides whether it survives. `single-tape 5` and
+    // `two-symbol _#` are followed by a SPACE, so `identifier` covers the name and no more. `fold` is
+    // followed straight by the printer's `,`, so `identifier` covers `fold,` — one token, and the seq
+    // fails.
+    //
+    // What fixes it is keeping the token OUT of the generated keyword lexer, and `\r?` is what does
+    // that. MEASURED: each form regenerated, `ts_lex_keywords` read out of `src/parser.c`, and
+    // `reduced fold, single-tape 5` parsed.
+    //
+    //   token('fold')     extracted, as `anon_sym_fold`        ERROR
+    //   token(/fold/)     extracted, as `aux_sym_fold_token1`  ERROR
+    //   token(/fold\r?/)  NOT extracted                        parses
+    //
+    // Extraction tracks the outcome across all three. A regex token is extracted under a generated
+    // `aux_sym_*` name, which is why `/fold/` reads as absent to a grep for `anon_sym_fold` — that
+    // misreading is what an earlier version of this comment was built on. `/fold\r?/` stays out
+    // because it matches a string `identifier` cannot, so `word` does not subsume it.
+    //
+    // BEING ALL LETTERS NEITHER CAUSES NOR PREVENTS EXTRACTION, which this comment also once claimed:
+    // the keyword lexer here holds `head_move`, which is `/[LRS]/`, and omits the all-letter
+    // `version`, `encoding` and `result`, all three of which main's holds.
+    //
+    // The cost is divergence 5 in the module doc: this admits `fold\r` mid-line, which the authority
+    // refuses. A stage name ending in `\r` at a line's END was always read, since `parse_tm_full`
+    // strips that one.
+    reduced: $ => seq('reduced', $._stage, repeat(seq(',', $._stage))),
+    _stage: $ => choice($.fold, $.single_tape, $.two_symbol),
+    fold: $ => alias(token(/fold\r?/), $.stage),
+    single_tape: $ => seq(alias(token(/single-tape/), $.stage), $.number),
+    // The authority takes the code's symbols as the rest of the line, a `,` among them, and one
+    // `identifier` token is exactly that: it stops only at whitespace or a reserved `; * : [ ]`.
+    two_symbol: $ => seq(alias(token(/two-symbol/), $.stage), field('symbols', $.identifier)),
+    steps: $ => seq('steps', $.number),
 
     // `cells` is optional: `TmHeader::new` drops empty tapes, so a written `tape` line always has a
     // run — but `parse_cells` answers `[]` for an empty one, so the form admits it.
@@ -126,8 +173,9 @@ module.exports = grammar({
     move_group: $ => seq('[', repeat($.head_move), ']'),
 
     // `*` is the read-wildcard / write-unchanged marker and is excluded from `identifier`, so it is
-    // spelled out here. Everything else is ONE character: `_` is the blank, and the tape alphabet is
-    // `_ # 1 0 @`.
+    // spelled out here. Everything else is ONE character: `_` is the blank, and the rest is whatever
+    // the machine's alphabet holds — the encodings write `# 1 0 @`, and a REDUCED file adds the
+    // reductions' own markers (`single_tape.rs`'s `< >` and `A`-`Z`/`a`-`z`, `one_way.rs`'s `|`).
     symbol: $ => choice('*', $._symbol_char),
     _symbol_char: _ => token(/[^\s;*:\[\]]/),
 

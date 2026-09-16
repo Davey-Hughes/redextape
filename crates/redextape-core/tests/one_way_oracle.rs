@@ -250,6 +250,11 @@ fn the_fold_composes_with_the_alphabet_reduction_and_stays_right() {
         let folded = to_one_way(&m);
         let cells = zigzag(&inits, m.tapes).expect("no initial tape holds LEFT_END");
         let code = Code::new(&folded, &cells);
+        assert_eq!(
+            Code::from_symbols(code.symbols()).as_ref(),
+            Some(&code),
+            "the symbol order must rebuild the code for {src:?}"
+        );
         let reduced = to_two_symbol(&folded, &code);
         assert_eq!(reduced.validate(), Vec::<String>::new(), "for {src:?}");
         assert_eq!(reduced.alphabet().len(), 2, "two symbols, for {src:?}");

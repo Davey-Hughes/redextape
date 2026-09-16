@@ -106,7 +106,7 @@ fn main() -> ExitCode {
                 }
             }
         }
-        cli::Command::Emit { path, lang, encoding, field_width, out: dest } => {
+        cli::Command::Emit { path, lang, encoding, field_width, reduce, out: dest } => {
             // **THE FLAG IS RANGE-CHECKED HERE, BECAUSE THE CONFIG KEY IT OVERRIDES ALREADY WAS.**
             // `config::validate` refuses `emit.field-width` outside `0 | MIN..=MAX` at exit 2, and
             // the flag that beats it checked nothing: `--field-width 65` wrote a `.tm` carrying
@@ -132,6 +132,7 @@ fn main() -> ExitCode {
             let opts = emit::Options {
                 encoding,
                 field_width,
+                reduce: reduce.as_deref(),
                 defaults: emit::Defaults { encoding: cfg.emit.encoding, field_width: cfg.emit.field_width },
             };
             let input = Input::from_arg(&path);

@@ -44,6 +44,10 @@ pub enum TmDirective {
     Width,
     Slots,
     Result,
+    /// A reduced file's `reduced` line.
+    Reduced,
+    /// A reduced file's `steps` line.
+    Steps,
     /// `tape <i>`, by the tape index the line names.
     Tape(usize),
 }

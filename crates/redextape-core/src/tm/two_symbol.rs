@@ -49,8 +49,13 @@ pub const ONE: Symbol = '1';
 /// decode path that could drift", obtained structurally instead of by discipline.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Code {
-    /// Symbols in code order. `BLANK` is index 0 — forced, not conventional — and the rest follow in
-    /// sorted order so the table is a function of the symbol set alone.
+    /// Symbols in code order. `BLANK` is index 0 — forced, not conventional.
+    ///
+    /// **THE REST'S ORDER DEPENDS ON THE CONSTRUCTOR.** [`Code::new`] sorts them, so the table it builds is
+    /// a function of the symbol set alone. [`Code::from_symbols`] keeps the order it is given, because a
+    /// reduced `.tm` file's header carries that order and it IS the code. So two `Code`s over one alphabet
+    /// agree exactly when their orders do, and only [`Code::new`] makes that a property of the alphabet:
+    /// nothing may ASSUME two codes interchangeable unless both came from it.
     order: Vec<Symbol>,
     bits: usize,
 }
@@ -76,6 +81,28 @@ impl Code {
         let mut order = Vec::with_capacity(set.len() + 1);
         order.push(BLANK);
         order.extend(set);
+        Code::from_order(order)
+    }
+
+    /// The code whose [`Code::symbols`] is `symbols`, which is how a reduced `.tm` file's header carries
+    /// one: the order alone, since the machine `Code::new` would need is gone after the reduction.
+    ///
+    /// `None` unless `BLANK` comes first and no symbol repeats. The rest may come in any order, because
+    /// the order IS the code: a symbol's index is its bit pattern.
+    #[must_use]
+    pub fn from_symbols(symbols: &[Symbol]) -> Option<Code> {
+        if symbols.first() != Some(&BLANK) {
+            return None;
+        }
+        let mut seen = BTreeSet::new();
+        if !symbols.iter().all(|s| seen.insert(*s)) {
+            return None;
+        }
+        Some(Code::from_order(symbols.to_vec()))
+    }
+
+    /// The block width for `order`, computed once for both constructors.
+    fn from_order(order: Vec<Symbol>) -> Code {
         let mut bits = 1usize;
         while (1usize << bits) < order.len() {
             bits += 1;
@@ -546,6 +573,35 @@ mod tests {
             let code = Code::new(&machine_over(syms), &[]);
             assert_eq!(code.pattern(BLANK), Some(vec![ZERO; code.bits()]), "for {syms:?}");
         }
+    }
+
+    #[test]
+    fn from_symbols_rebuilds_the_code_new_built() {
+        for syms in [&[][..], &['a'][..], &['c', 'a', 'b'][..], &['#', '1', '@', '0', 'x'][..]] {
+            let code = Code::new(&machine_over(syms), &[]);
+            assert_eq!(Code::from_symbols(code.symbols()), Some(code.clone()), "for {syms:?}");
+        }
+    }
+
+    /// The order is the code, so `from_symbols` keeps it rather than sorting: `b` before `a` gives `b`
+    /// index 1.
+    #[test]
+    fn from_symbols_keeps_the_order_it_is_given() {
+        let code = Code::from_symbols(&[BLANK, 'b', 'a']).expect("BLANK first and no repeat");
+        assert_eq!(code.pattern('b'), Some(vec![ZERO, ONE]));
+        assert_eq!(code.pattern('a'), Some(vec![ONE, ZERO]));
+    }
+
+    #[test]
+    fn from_symbols_refuses_a_first_symbol_that_is_not_blank() {
+        assert_eq!(Code::from_symbols(&['a', BLANK]), None);
+        assert_eq!(Code::from_symbols(&[]), None, "no symbols at all has no BLANK first either");
+    }
+
+    #[test]
+    fn from_symbols_refuses_a_repeated_symbol() {
+        assert_eq!(Code::from_symbols(&[BLANK, 'a', 'a']), None);
+        assert_eq!(Code::from_symbols(&[BLANK, 'a', BLANK]), None, "BLANK counts as a repeat too");
     }
 
     #[test]

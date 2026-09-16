@@ -26,7 +26,13 @@
   "slots"
   "tape"
   "result"
+  "reduced"
+  "steps"
 ] @keyword
+
+; A reduced file's stage names are keywords to the printer, but tokens of their own here, for the reason
+; the comment on `reduced` in `grammar.js` gives.
+(stage) @keyword
 
 (number) @number
 
@@ -50,6 +56,7 @@
 ; A packed cell run is ONE span (`write_header`), a symbol inside `[..]` is one span EACH
 ; (`write_syms`). Two nodes, same capture, same class.
 (tape cells: (identifier) @character)
+(two_symbol symbols: (identifier) @character)
 (symbol) @character
 
 (head_move) @constant.builtin

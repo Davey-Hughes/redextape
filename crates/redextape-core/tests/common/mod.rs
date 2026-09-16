@@ -29,7 +29,7 @@ use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::tm::machine::{Move, Rule, State, StateId};
 use redextape_core::tm::one_way::OriginSnapshot;
-use redextape_core::tm::sim::{Caps, Status, Tape, simulate_watched};
+use redextape_core::tm::sim::{Caps, Status, simulate_origins};
 use redextape_core::tm::{
     AT, BLANK, BOX, Encoding, EncodingKind, Machine, REG, SEP, Symbol, TM_DEFAULT_CAPS, TmRun, WORK, run_tm_described,
 };
@@ -345,33 +345,18 @@ pub fn stack_is_empty(cells: &[char]) -> Result<(), String> {
     }
 }
 
-/// Run `m` and record where each tape's origin ends up in its final snapshot.
+/// Run `m` and record where each tape's origin ends up in its final snapshot, from the count of left
+/// growths `sim.rs`'s `simulate_origins` keeps.
 ///
-/// **A TAPE GROWS ON ITS LEFT EXACTLY WHEN, AFTER A STEP, IT IS LONGER AND ITS HEAD IS AT INDEX 0.** A
-/// step moves a head at most one cell, so a tape grows by at most one; growth on the right leaves the
-/// head at index 1 or beyond. The count of left growths is the origin's index. `slice(0, usize::MAX)`
-/// is the tape's length, O(tape) per step.
+/// **SOUND AS AN INSTRUMENT FOR THE FOLD, THOUGH THE LIBRARY COUNTS THE ORIGINS.** The fold's side of each
+/// comparison finds its origin from the zig-zag layout, not from growth, so an origin count that went wrong
+/// would disagree with it rather than agree.
 pub fn run_with_origins(m: &Machine, inits: &[Vec<Symbol>], caps: Caps) -> (Vec<OriginSnapshot>, StateId, Status, u64) {
-    let mut len: Vec<usize> = (0..m.tapes).map(|i| inits.get(i).map_or(1, |t| t.len().max(1))).collect();
-    let mut grown = vec![0usize; m.tapes];
-    let mut steps = 0u64;
-    let (tapes, state, status) = {
-        let mut watch = |tapes: &[Tape]| {
-            steps += 1;
-            for (i, t) in tapes.iter().enumerate() {
-                let l = t.slice(0, usize::MAX).len();
-                if l > len[i] && t.head_index() == 0 {
-                    grown[i] += l - len[i];
-                }
-                len[i] = l;
-            }
-            true
-        };
-        simulate_watched(m, inits, caps, &mut watch)
-    };
+    let (tapes, origins, state, status, steps) = simulate_origins(m, inits, caps);
+    assert_eq!(tapes.len(), origins.len(), "one origin per tape");
     let snaps = tapes
         .iter()
-        .zip(&grown)
+        .zip(&origins)
         .map(|(t, &origin)| {
             let (cells, head) = t.snapshot();
             OriginSnapshot { cells, head, origin }

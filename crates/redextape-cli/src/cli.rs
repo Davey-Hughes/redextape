@@ -85,6 +85,13 @@ pub enum Command {
         /// rather than a silent no-op.
         #[arg(long, value_name = "CELLS")]
         field_width: Option<usize>,
+        /// Reduce the machine before writing it, through a comma-separated list of `fold`, `single-tape`
+        /// and `two-symbol`, in that order and each at most once. The reduced machine is run and its value
+        /// checked against the program's before anything is written, and the file it writes still runs
+        /// under `redextape run`. `--lang tm` only: passing it with any other target is an error rather
+        /// than a silent no-op.
+        #[arg(long, value_name = "STAGES")]
+        reduce: Option<String>,
         /// Write here instead of standard output.
         #[arg(short = 'o', long)]
         out: Option<PathBuf>,

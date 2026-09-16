@@ -250,8 +250,9 @@ grammars/tree-sitter-redextape-lambda/README.md|grammars/tree-sitter-redextape-l
 grammars/tree-sitter-redextape-lambda/README.md|.|grammar_count|grammar count (1 of 2: "All N are installed from the same clone")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} are installed from the same clone
 grammars/tree-sitter-redextape-lambda/README.md|.|grammar_count|grammar count (2 of 2: "N grammars, one clone")|\*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars, one clone
 grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-tm|grammar_js_lines|tm grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
-grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape|grammar_js_lines|mini grammar.js lines (CROSS-REF from tm)|close to the mini-language's \*{0,2}([0-9,]+|[A-Za-z]+)
-grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-lambda|grammar_js_lines|lambda grammar.js lines (CROSS-REF from tm)|nearly twice λ's \*{0,2}([0-9,]+|[A-Za-z]+)
+grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape|grammar_js_lines|mini grammar.js lines (CROSS-REF from tm)|against the mini-language's \*{0,2}([0-9,]+|[A-Za-z]+)
+grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-asm|grammar_js_lines|asm grammar.js lines (CROSS-REF from tm)|asm's \*{0,2}([0-9,]+|[A-Za-z]+)
+grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-lambda|grammar_js_lines|lambda grammar.js lines (CROSS-REF from tm)|and λ's \*{0,2}([0-9,]+|[A-Za-z]+)
 grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-tm|query_patterns|tm query patterns|highlights\.scm` holds \*{0,2}([0-9,]+|[A-Za-z]+) patterns
 grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-tm|capture_names|tm capture names (1 of 2: "over N capture names")|over \*{0,2}([0-9,]+|[A-Za-z]+) capture names
 grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-tm|capture_names|tm capture names (2 of 2: "N capture names for M classes")|\*{0,2}([0-9,]+|[A-Za-z]+) capture names for

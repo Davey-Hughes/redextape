@@ -76,6 +76,16 @@ impl Tape {
         (cells, head)
     }
 
+    /// The inverse of [`Tape::snapshot`]: a tape holding `cells` with its head on index `head`. A head past
+    /// the end reads `BLANK`, with `BLANK` cells up to it, as a head that walked there would leave them.
+    #[must_use]
+    pub(crate) fn from_snapshot(cells: &[Symbol], head: usize) -> Tape {
+        let mut left: Vec<Symbol> = cells.iter().take(head).copied().collect();
+        left.resize(head, BLANK);
+        let right = cells.iter().skip(head.saturating_add(1)).rev().copied().collect();
+        Tape { left, head: cells.get(head).copied().unwrap_or(BLANK), right }
+    }
+
     /// The head's index into the tape *as currently materialized* — `left.len()` cells lie to its
     /// left. O(1), unlike `snapshot`, which clones the whole tape before computing the same value; a
     /// per-step caller (`viewmodel::TmState::window`) cannot pay that cost just to learn this index.
@@ -304,6 +314,38 @@ pub fn simulate_watched(
     (tapes, final_state, status)
 }
 
+/// Simulate, also counting how many cells each tape grew on its left: the index its starting cell 0 ends
+/// at in [`Tape::snapshot`]'s coordinates, which a `Tape` does not record.
+///
+/// **A TAPE GROWS ON ITS LEFT EXACTLY WHEN, AFTER A STEP, IT HOLDS MORE CELLS AND ITS HEAD IS AT INDEX 0.**
+/// A step moves a head at most one cell, so a tape grows by at most one; growth on the right leaves the
+/// head at index 1 or beyond.
+#[must_use]
+pub fn simulate_origins(
+    m: &Machine,
+    init: &[Vec<Symbol>],
+    caps: Caps,
+) -> (Vec<Tape>, Vec<usize>, StateId, Status, u64) {
+    let mut cells: Vec<usize> = (0..m.tapes).map(|i| init.get(i).map_or(1, |t| t.len().max(1))).collect();
+    let mut origins = vec![0usize; m.tapes];
+    let (tapes, state, status, steps) = {
+        let mut watch = |tapes: &[Tape]| {
+            for (i, t) in tapes.iter().enumerate() {
+                if let (Some(before), Some(origin)) = (cells.get_mut(i), origins.get_mut(i)) {
+                    let now = t.cells();
+                    if now > *before && t.head_index() == 0 {
+                        *origin += 1;
+                    }
+                    *before = now;
+                }
+            }
+            true
+        };
+        run(m, init, caps, None, None, Some(&mut watch))
+    };
+    (tapes, origins, state, status, steps)
+}
+
 /// Simulate, recording every step (before it is applied) for the scrubbable trace / view models.
 pub fn simulate_trace(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> Trace {
     let mut steps = Vec::new();
@@ -328,6 +370,20 @@ pub fn simulate_counts(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<u6
 mod tests {
     use super::*;
     use crate::tm::machine::State;
+
+    #[test]
+    fn from_snapshot_inverts_snapshot_at_every_head() {
+        let cells = vec!['a', 'b', 'c'];
+        for head in 0..cells.len() {
+            assert_eq!(Tape::from_snapshot(&cells, head).snapshot(), (cells.clone(), head), "head {head}");
+        }
+    }
+
+    /// Past the end, the tape reads what a head that walked there would have left: blanks up to it.
+    #[test]
+    fn from_snapshot_past_the_end_fills_blanks_up_to_the_head() {
+        assert_eq!(Tape::from_snapshot(&['a'], 3).snapshot(), (vec!['a', BLANK, BLANK, BLANK], 3));
+    }
 
     fn increment() -> Machine {
         Machine {

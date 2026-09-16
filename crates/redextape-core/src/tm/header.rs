@@ -24,20 +24,119 @@ use crate::Span;
 use crate::tm::build::{BOX, HEAP, MAX_FIELD_WIDTH, REG, STACK, WORK};
 use crate::tm::encoding::{Binary, Encoding, Unary};
 use crate::tm::lower_tm::MAX_SLOTS;
-use crate::tm::machine::Symbol;
+use crate::tm::machine::{BLANK, Symbol};
+use crate::tm::single_tape::MAX_ENCODABLE_TAPES;
+use crate::tm::two_symbol::Code;
 use crate::ty::Ty;
 use crate::ty::parse_ty;
 
-/// The `.tm` header format version this build writes and accepts.
+/// The `.tm` header format version of a LOWERED machine's file, and what an absent `version` means.
 ///
 /// An ABSENT `version` directive means 1, so every file written before this directive existed stays
-/// valid. An unknown version is a hard parse ERROR rather than a warning: a future version could
-/// change what `width` or `slots` MEAN, and decoding a v2 file under v1 rules would produce a
+/// valid. An unknown version is a hard parse ERROR rather than a warning: a version can change what
+/// the header's fields MEAN, and decoding a file under the wrong version's rules would produce a
 /// confidently wrong value — the exact failure the header exists to prevent.
+/// [`REDUCED_HEADER_VERSION`] is that case.
 ///
 /// NOT a member of the four-directive header set (`encoding`/`width`/`slots`/`result`), so the four
 /// optionality properties are unaffected and a header-less file is still header-less.
 pub const HEADER_VERSION: u32 = 1;
+
+/// The header version of a REDUCED machine's file. Its `tape` lines are the reduced machine's tapes
+/// rather than the layout `encoding`, `width` and `slots` describe, so it is a version of its own, and
+/// it carries `reduced` and `steps` — see [`Reduction`].
+pub const REDUCED_HEADER_VERSION: u32 = 2;
+
+/// The most steps a `steps` directive may record. A reduced file runs under its own `steps` rather than
+/// `TM_DEFAULT_CAPS`, so this bounds how long a file can make a reader simulate.
+pub const MAX_REDUCED_STEPS: u64 = 1_000_000_000;
+
+/// One of the three reductions, without the data undoing it needs. Declared in the one order a reduced
+/// file may list them, so `Ord` is that order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StageKind {
+    /// The fold onto one-way tapes, `to_one_way`.
+    Fold,
+    /// The reduction to one tape, `to_single_tape`.
+    SingleTape,
+    /// The reduction to two symbols, `to_two_symbol`.
+    TwoSymbol,
+}
+
+impl StageKind {
+    /// Every stage, in the order a reduced file lists them.
+    pub const ALL: [StageKind; 3] = [StageKind::Fold, StageKind::SingleTape, StageKind::TwoSymbol];
+
+    /// The stage's name in a `reduced` directive.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            StageKind::Fold => "fold",
+            StageKind::SingleTape => "single-tape",
+            StageKind::TwoSymbol => "two-symbol",
+        }
+    }
+
+    /// The inverse of `name`.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<StageKind> {
+        StageKind::ALL.into_iter().find(|k| k.name() == s)
+    }
+}
+
+/// Whether `kinds` is a stage list a reduced file may carry: at least one stage, in the order of
+/// [`StageKind::ALL`], and none repeated.
+#[must_use]
+pub fn is_stage_list(kinds: &[StageKind]) -> bool {
+    !kinds.is_empty() && kinds.windows(2).all(|w| w[0] < w[1])
+}
+
+/// One reduction a file's machine went through, with what undoing it needs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Stage {
+    /// Nothing: a folded tape reads back with no outside information.
+    Fold,
+    /// The tape count before the stage, `1..=MAX_ENCODABLE_TAPES`, which splitting the one tape back
+    /// into its tapes needs.
+    SingleTape { k: usize },
+    /// The code's symbols in `Code::symbols` order, which `Code::from_symbols` rebuilds the code from.
+    TwoSymbol { symbols: Vec<Symbol> },
+}
+
+impl Stage {
+    /// Which reduction this is.
+    #[must_use]
+    pub fn kind(&self) -> StageKind {
+        match self {
+            Stage::Fold => StageKind::Fold,
+            Stage::SingleTape { .. } => StageKind::SingleTape,
+            Stage::TwoSymbol { .. } => StageKind::TwoSymbol,
+        }
+    }
+}
+
+/// What makes a header a reduced one: the stages its machine went through, in the order they ran, and the
+/// steps the reduced machine takes to halt.
+///
+/// **THE `tape` LINES OF A REDUCED FILE ARE THE REDUCED MACHINE'S OWN TAPES**, so any simulator can still
+/// run it, while `encoding`, `width`, `slots` and `result` stay the recipe for the tapes once every stage
+/// is undone.
+///
+/// **PRECONDITION for the round-trip, unenforced here**, as for `TmHeader::new`: `stages` must satisfy
+/// [`is_stage_list`], each stage's data must be what the parser admits (`k` in `1..=MAX_ENCODABLE_TAPES`,
+/// symbols that `Code::from_symbols` accepts AND that are neither `;` nor whitespace), and `steps` must be
+/// in `1..=MAX_REDUCED_STEPS`. A reduction outside those prints and does not parse back.
+///
+/// `;` and whitespace are named separately because `Code::from_symbols` accepts both and the round trip
+/// does not: a `reduced` line is comment-stripped and trimmed before `parse_stages` sees it, so a `;`
+/// symbol TRUNCATES the code there and a trailing whitespace one is dropped — parsing back to a SHORTER
+/// code with no diagnostic, which is worse than failing to parse. [`reduce`] cannot reach it, since
+/// `Machine::validate` refuses both as concrete symbols; this binds a hand-built header only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reduction {
+    pub stages: Vec<Stage>,
+    pub steps: u64,
+}
 
 /// Declares `EncodingKind` and every list that must know about it, from ONE invocation.
 ///
@@ -146,6 +245,9 @@ pub struct TmHeader {
     /// Literal initial contents by tape INDEX, ascending, with EMPTY TAPES OMITTED. Private because
     /// `new` maintains that normal form and the round-trip depends on it — see `new`.
     tapes: Vec<(usize, Vec<Symbol>)>,
+    /// `Some` for a reduced machine's file, which is `version 2`; `new` leaves it `None`. See
+    /// [`Reduction`] for what the other fields mean then.
+    pub reduction: Option<Reduction>,
 }
 
 impl TmHeader {
@@ -183,7 +285,7 @@ impl TmHeader {
         let mut tapes: Vec<(usize, Vec<Symbol>)> = tapes.into_iter().filter(|(_, c)| !c.is_empty()).collect();
         tapes.sort_by_key(|(i, _)| *i);
         tapes.dedup_by_key(|(i, _)| *i); // duplicates are sorted adjacent, so this keeps the first
-        TmHeader { encoding, width, slots, result, tapes }
+        TmHeader { encoding, width, slots, result, tapes, reduction: None }
     }
 
     /// The literal initial tapes, by index, ascending, empties omitted.
@@ -228,14 +330,16 @@ use crate::ty::show;
 /// buffer — so the offsets recorded here are already absolute in the finished file, with no rebasing.
 /// `cw` is that same call's `CommentWriter`, so an authored comment against a header line lands on it.
 ///
-/// The order — `version`, `encoding`, `width`, `slots`, `result`, then `tape` lines ascending — is
-/// FIXED, even though the parser accepts any order. A printer has to choose one, and a fixed choice is
-/// what makes re-printing a re-parse idempotent. `version` leads: it is not one of the four directives
-/// `TmHeader` carries (there is no field for it — see `HEADER_VERSION`'s doc), but a reader needs to
-/// know which rules govern the rest of the block before it makes sense of them.
+/// The order — `version`, `encoding`, `width`, `slots`, `result`, then a reduced header's `reduced` and
+/// `steps`, then `tape` lines ascending — is FIXED, even though the parser accepts any order. A printer
+/// has to choose one, and a fixed choice is what makes re-printing a re-parse idempotent. `version`
+/// leads: `TmHeader` has no field for it, since it is `REDUCED_HEADER_VERSION` exactly when `reduction`
+/// is `Some`, but a reader needs to know which rules govern the rest of the block before it makes sense
+/// of them.
 ///
-/// KNOWN LIMIT: a tape cell equal to `;` would open a comment and not round-trip. No `Encoding` in
-/// this tree writes one — the tape alphabet is `_ # 1 0 @` — and `Machine::validate()` already
+/// KNOWN LIMIT: a tape cell equal to `;` would open a comment and not round-trip. Nothing in this tree
+/// writes one: the encodings write `_ # 1 0 @`, a REDUCED file's tapes add the reductions' own markers
+/// (`single_tape.rs`'s `< >` and `A`-`Z`/`a`-`z`, `one_way.rs`'s `|`), and `Machine::validate()` already
 /// reserves `;`. A hand-built machine using `;` as a data symbol is outside the representable subset
 /// the text form is specified for, the same as one whose state name contains a space.
 pub(crate) fn write_header(out: &mut String, spans: &mut Classified, h: &TmHeader, cw: &CommentWriter<'_, TmAnchor>) {
@@ -248,13 +352,18 @@ pub(crate) fn write_header(out: &mut String, spans: &mut Classified, h: &TmHeade
             cw.trailing(out, spans, TmAnchor::Directive(anchor));
             out.push('\n');
         };
+    let version = if h.reduction.is_some() { REDUCED_HEADER_VERSION } else { HEADER_VERSION };
     // `encoding` and `result` name an encoding and a type; neither has a class of its own, and `Ident`
     // is the vocabulary's word for "a name whose meaning comes from elsewhere in the file".
-    directive(out, spans, "version", &HEADER_VERSION.to_string(), TokenClass::Nat, TmDirective::Version);
+    directive(out, spans, "version", &version.to_string(), TokenClass::Nat, TmDirective::Version);
     directive(out, spans, "encoding", h.encoding.name(), TokenClass::Ident, TmDirective::Encoding);
     directive(out, spans, "width", &h.width.to_string(), TokenClass::Nat, TmDirective::Width);
     directive(out, spans, "slots", &h.slots.to_string(), TokenClass::Nat, TmDirective::Slots);
     directive(out, spans, "result", &show(&h.result), TokenClass::Ident, TmDirective::Result);
+    if let Some(r) = &h.reduction {
+        write_reduced(out, spans, &r.stages, cw);
+        directive(out, spans, "steps", &r.steps.to_string(), TokenClass::Nat, TmDirective::Steps);
+    }
     for (i, cells) in &h.tapes {
         let anchor = TmDirective::Tape(*i);
         cw.own_line(out, spans, TmAnchor::Directive(anchor), "");
@@ -276,7 +385,11 @@ pub(crate) fn write_header(out: &mut String, spans: &mut Classified, h: &TmHeade
         //
         // Reachable, not defensive: `tape_name` labels tape 0 `reg` and tape 1 `work`, and
         // `tests/fixtures/list_1_2.tm` carries `; reg` on its `tape 0` line today.
-        if !cw.has_trailing(TmAnchor::Directive(anchor))
+        //
+        // A reduced header's tapes are the reduced machine's, which `tape_name` does not name, so they
+        // carry no label at all.
+        if h.reduction.is_none()
+            && !cw.has_trailing(TmAnchor::Directive(anchor))
             && let Some(name) = tape_name(*i)
         {
             out.push_str("  ");
@@ -285,6 +398,44 @@ pub(crate) fn write_header(out: &mut String, spans: &mut Classified, h: &TmHeade
         cw.trailing(out, spans, TmAnchor::Directive(anchor));
         out.push('\n');
     }
+}
+
+/// A reduced header's `reduced` line: the stages comma-separated, each with the data undoing it needs.
+/// A stage name is a `Keyword` like the directive's own, a tape count a `Nat`, and the code's symbols ONE
+/// `TapeSymbol` span, for the reason a `tape` line's cells are one.
+///
+/// KNOWN LIMIT, the same shape as the one `write_header` carries for a tape cell: a code symbol equal to
+/// `;` opens a comment and truncates the code on the way back, and a trailing whitespace one is trimmed
+/// away. Neither round-trips, neither is reachable from [`reduce`] — see [`Reduction`]'s precondition.
+fn write_reduced(out: &mut String, spans: &mut Classified, stages: &[Stage], cw: &CommentWriter<'_, TmAnchor>) {
+    let anchor = TmAnchor::Directive(TmDirective::Reduced);
+    cw.own_line(out, spans, anchor, "");
+    push_span(out, spans, "reduced", TokenClass::Keyword);
+    for (i, stage) in stages.iter().enumerate() {
+        if i > 0 {
+            push_span(out, spans, ",", TokenClass::Punct);
+        }
+        out.push(' ');
+        push_span(out, spans, stage.kind().name(), TokenClass::Keyword);
+        match stage {
+            Stage::Fold => {}
+            Stage::SingleTape { k } => {
+                out.push(' ');
+                push_span(out, spans, &k.to_string(), TokenClass::Nat);
+            }
+            Stage::TwoSymbol { symbols } => {
+                out.push(' ');
+                let run: String = symbols.iter().collect();
+                // `Code::from_symbols` refuses an empty order, so the guard only keeps a hand-built
+                // header from pushing a zero-width span.
+                if !run.is_empty() {
+                    push_span(out, spans, &run, TokenClass::TapeSymbol);
+                }
+            }
+        }
+    }
+    cw.trailing(out, spans, anchor);
+    out.push('\n');
 }
 
 /// Unpack a `tape` line's cell run: strip a trailing `;` comment, trim, and take one `Symbol` per
@@ -302,12 +453,20 @@ pub(crate) struct HeaderParts {
     slots: Option<u32>,
     result: Option<Ty>,
     /// The parsed, VALIDATED version — `Some` only once a `version` directive has been seen naming
-    /// exactly `HEADER_VERSION`. Not surfaced on `TmHeader` (see `HEADER_VERSION`'s doc: version is a
-    /// property of the FORMAT, validated here and re-emitted as a constant, not a property of any one
-    /// machine's header). Its ONLY job is detecting a duplicate directive — `finish` never reads it,
-    /// consulting `saw_version` below instead, because a `version` line that FAILED to validate still
-    /// means the file was trying to carry a header.
+    /// `HEADER_VERSION` or `REDUCED_HEADER_VERSION`. Not surfaced on `TmHeader`, which prints the one
+    /// that `reduction` implies. It detects a duplicate directive, and `finish` reads it for the version
+    /// rules; whether a header was being attempted at all is `saw_version`'s question instead, because a
+    /// `version` line that FAILED to validate still means the file was trying to carry a header.
     version: Option<u32>,
+    /// The stages of the first `reduced` directive that parsed.
+    reduced: Option<Vec<Stage>>,
+    /// The span of the first `reduced` line, whether or not it parsed, so `finish` can both tell that
+    /// one was written and point at it.
+    saw_reduced: Option<Span>,
+    /// The count of the first `steps` directive that parsed.
+    steps: Option<u64>,
+    /// The span of the first `steps` line, whether or not it parsed, for the reason `saw_reduced` gives.
+    saw_steps: Option<Span>,
     /// Each entry carries the `Span` of the `tape` line it came from, so a diagnostic about ONE
     /// specific entry (the out-of-range check in `finish`) can point at the line that caused it
     /// instead of the whole file. The span is parse-time-only: `finish` strips it before handing the
@@ -346,23 +505,54 @@ impl HeaderParts {
         let val = content_before_comment(rest);
         match key {
             // Unlike the four directives below, an unrecognized version is not "incomplete" — it is
-            // refused outright, here, at the earliest point it can be: a v2 file parsed under v1 rules
-            // would not fail to parse, it would parse to a CONFIDENTLY WRONG value, because a future
-            // version could redefine what `width` or `slots` mean. A duplicate is an error for the same
-            // reason as the other four, and on the same rule: the file states a thing once, so two
-            // AGREEING `version 1` lines are refused as well.
+            // refused outright, here, at the earliest point it can be: a file parsed under the wrong
+            // version's rules would not fail to parse, it would parse to a CONFIDENTLY WRONG value,
+            // because a version can redefine what the other directives mean. A duplicate is an error for
+            // the same reason as the other four, and on the same rule: the file states a thing once, so
+            // two AGREEING `version 1` lines are refused as well.
             "version" => {
                 self.saw_version = true;
                 Some(match (self.version, val.parse::<u32>()) {
                     (Some(_), _) => Err("duplicate `version` directive".into()),
-                    (None, Ok(v)) if v == HEADER_VERSION => {
+                    (None, Ok(v)) if v == HEADER_VERSION || v == REDUCED_HEADER_VERSION => {
                         self.version = Some(v);
                         Ok(())
                     }
                     (None, Ok(v)) => Err(format!(
-                        "unsupported header version `{v}` (this build reads version {HEADER_VERSION} only)"
+                        "unsupported header version `{v}` (this build reads versions {HEADER_VERSION} and \
+                         {REDUCED_HEADER_VERSION})"
                     )),
-                    (None, Err(_)) => Err(format!("expected `version {HEADER_VERSION}`, found `{val}`")),
+                    (None, Err(_)) => Err(format!(
+                        "expected `version {HEADER_VERSION}` or `version {REDUCED_HEADER_VERSION}`, found `{val}`"
+                    )),
+                })
+            }
+            // Whether a `reduced` or `steps` line is allowed at all is the version's business, and the
+            // version may come later in the file, so `finish` decides that; these arms parse the value.
+            "reduced" => {
+                self.saw_reduced = self.saw_reduced.or(Some(span));
+                Some(match (&self.reduced, parse_stages(val)) {
+                    (Some(_), _) => Err("duplicate `reduced` directive".into()),
+                    (None, Some(stages)) => {
+                        self.reduced = Some(stages);
+                        Ok(())
+                    }
+                    (None, None) => Err(format!(
+                        "expected `reduced` followed by `fold`, `single-tape <1..={MAX_ENCODABLE_TAPES}>` and \
+                         `two-symbol <symbols>`, comma-separated, in that order and each at most once, with \
+                         the symbols starting at `{BLANK}` and none repeated; found `{val}`"
+                    )),
+                })
+            }
+            "steps" => {
+                self.saw_steps = self.saw_steps.or(Some(span));
+                Some(match (self.steps, val.parse::<u64>()) {
+                    (Some(_), _) => Err("duplicate `steps` directive".into()),
+                    (None, Ok(n)) if (1..=MAX_REDUCED_STEPS).contains(&n) => {
+                        self.steps = Some(n);
+                        Ok(())
+                    }
+                    (None, _) => Err(format!("expected `steps <1..={MAX_REDUCED_STEPS}>`, found `{val}`")),
                 })
             }
             "encoding" => Some(match (self.encoding, EncodingKind::parse(val)) {
@@ -448,10 +638,13 @@ impl HeaderParts {
     /// - **One to three present** -> `(None, [(msg, None)])` naming the missing ones. Not a silent
     ///   `None`, because discarding a half-written header would turn a typo into "this file has no
     ///   header". Spanless: there is no single offending line for an ABSENT directive.
-    /// - **`tape` and/or `version` lines but none of the four** -> an error for the same reason: that
-    ///   data would otherwise vanish without a word. Also spanless, for the same reason. `version` is
-    ///   folded in here rather than getting its own case because a LONE `version` has exactly the same
-    ///   shape as a lone `tape`: a directive with no header for it to belong to.
+    /// - **`tape`, `version`, `reduced` and/or `steps` lines but none of the four** -> an error for the
+    ///   same reason: that data would otherwise vanish without a word. Also spanless, for the same
+    ///   reason. The other three are folded in here rather than getting cases of their own because a
+    ///   LONE one has exactly the same shape as a lone `tape`: a directive with no header for it to
+    ///   belong to.
+    /// - **The version rules** -> `version 2` requires `reduced` and `steps`, and under `version 1`,
+    ///   written or absent, either is an error pointing at its line. See `version_errors`.
     pub(crate) fn finish(self, n_tapes: usize) -> (Option<TmHeader>, Vec<(String, Option<Span>)>) {
         let missing: Vec<&str> = [
             ("encoding", self.encoding.is_none()),
@@ -464,12 +657,12 @@ impl HeaderParts {
         .collect();
 
         if missing.len() == 4 {
-            return if self.saw_tape || self.saw_version {
+            return if self.saw_tape || self.saw_version || self.saw_reduced.is_some() || self.saw_steps.is_some() {
                 (
                     None,
                     vec![(
-                        "`tape`/`version` directives without a header (needs `encoding`, `width`, `slots`, \
-                         `result`)"
+                        "`tape`/`version`/`reduced`/`steps` directives without a header (needs `encoding`, \
+                         `width`, `slots`, `result`)"
                             .into(),
                         None,
                     )],
@@ -480,6 +673,10 @@ impl HeaderParts {
         }
         if !missing.is_empty() {
             return (None, vec![(format!("incomplete header: missing {}", missing.join(", ")), None)]);
+        }
+        let errs = self.version_errors();
+        if !errs.is_empty() {
+            return (None, errs);
         }
 
         // The range check lives HERE, not in `directive`, because directives are order-independent:
@@ -505,8 +702,75 @@ impl HeaderParts {
             return (None, vec![("incomplete header: missing a required directive".into(), None)]);
         };
         let tapes: Vec<(usize, Vec<Symbol>)> = self.tapes.into_iter().map(|(i, cells, _)| (i, cells)).collect();
-        (Some(TmHeader::new(encoding, width, slots, result, tapes)), Vec::new())
+        let mut header = TmHeader::new(encoding, width, slots, result, tapes);
+        header.reduction = self.reduced.zip(self.steps).map(|(stages, steps)| Reduction { stages, steps });
+        (Some(header), Vec::new())
     }
+
+    /// `version 2` exactly when `reduced` and `steps` are both written: under `version 2` a missing one is
+    /// an error, and under `version 1`, written or absent, a written one is an error pointing at its line.
+    ///
+    /// Asked only once the version is known. A `version` line that did not parse has been reported
+    /// already, and it says nothing about which rules the rest of the header meant, so a guess here would
+    /// only add a second diagnostic about the same line.
+    fn version_errors(&self) -> Vec<(String, Option<Span>)> {
+        if self.saw_version && self.version.is_none() {
+            return Vec::new();
+        }
+        if self.version == Some(REDUCED_HEADER_VERSION) {
+            [("reduced", self.saw_reduced), ("steps", self.saw_steps)]
+                .into_iter()
+                .filter(|(_, seen)| seen.is_none())
+                .map(|(key, _)| (format!("`version {REDUCED_HEADER_VERSION}` requires a `{key}` directive"), None))
+                .collect()
+        } else {
+            [("reduced", self.saw_reduced), ("steps", self.saw_steps)]
+                .into_iter()
+                .filter_map(|(key, seen)| {
+                    let msg = format!(
+                        "`{key}` requires `version {REDUCED_HEADER_VERSION}`; this header is version {HEADER_VERSION}"
+                    );
+                    seen.map(|span| (msg, Some(span)))
+                })
+                .collect()
+        }
+    }
+}
+
+/// A `reduced` directive's stages, or `None` unless every stage parses, its data is in range, and the list
+/// is one [`is_stage_list`] admits.
+///
+/// **`two-symbol` IS ALWAYS LAST, SO ITS SYMBOLS ARE THE REST OF THE LINE.** A symbol can be `,`, so
+/// splitting the line on commas first would cut the symbols in two; a symbol cannot be `;`, which is
+/// what lets `content_before_comment` strip a trailing comment before this sees the value.
+fn parse_stages(val: &str) -> Option<Vec<Stage>> {
+    let mut stages = Vec::new();
+    let mut rest = val;
+    loop {
+        if let Some(run) = rest.strip_prefix(StageKind::TwoSymbol.name()).and_then(|r| r.strip_prefix(' ')) {
+            let symbols: Vec<Symbol> = run.chars().collect();
+            Code::from_symbols(&symbols)?;
+            stages.push(Stage::TwoSymbol { symbols });
+            break;
+        }
+        let (item, tail) = match rest.split_once(", ") {
+            Some((item, tail)) => (item, Some(tail)),
+            None => (rest, None),
+        };
+        stages.push(match item.split_once(' ') {
+            None if item == StageKind::Fold.name() => Stage::Fold,
+            Some((name, k)) if name == StageKind::SingleTape.name() => {
+                Stage::SingleTape { k: k.parse().ok().filter(|k| (1..=MAX_ENCODABLE_TAPES).contains(k))? }
+            }
+            _ => return None,
+        });
+        match tail {
+            Some(t) => rest = t,
+            None => break,
+        }
+    }
+    let kinds: Vec<StageKind> = stages.iter().map(Stage::kind).collect();
+    is_stage_list(&kinds).then_some(stages)
 }
 
 #[cfg(test)]
@@ -647,6 +911,85 @@ tape 0 #0000#  ; reg
 tape 1 #0000#  ; work
 ";
         assert_eq!(print_header(&h), expected);
+    }
+
+    /// `a_header`'s recipe with a one-tape reduced machine's tape, through all three stages.
+    fn a_reduced_header() -> TmHeader {
+        let mut h = TmHeader::new(EncodingKind::Unary, 8, 4, Ty::Nat, vec![(REG, vec!['1', '_', '1'])]);
+        h.reduction = Some(Reduction {
+            stages: vec![Stage::Fold, Stage::SingleTape { k: 5 }, Stage::TwoSymbol { symbols: vec!['_', '#', ','] }],
+            steps: 7_088_578,
+        });
+        h
+    }
+
+    /// A reduced header's canonical text: `version 2`, then `reduced` and `steps` after `result`, and no
+    /// generated label on a `tape` line, since the reduced machine's tape 0 is not REG.
+    #[test]
+    fn a_reduced_header_prints_version_2_its_stages_and_steps_and_no_tape_label() {
+        let expected = "\
+version 2
+encoding unary
+width 8
+slots 4
+result Nat
+reduced fold, single-tape 5, two-symbol _#,
+steps 7088578
+tape 0 1_1
+";
+        assert_eq!(print_header(&a_reduced_header()), expected);
+    }
+
+    /// Every token of a reduced header carries a class, in order: a stage name is a `Keyword`, a tape
+    /// count a `Nat`, the separator a `Punct`, and the code's symbols one `TapeSymbol` span.
+    #[test]
+    fn a_reduced_header_classifies_every_token() {
+        use TokenClass::{Ident as Id, Keyword as Kw, Nat as Nt, Punct as Pu, TapeSymbol as Ts};
+        let (mut out, mut spans) = (String::new(), Vec::new());
+        write_header(&mut out, &mut spans, &a_reduced_header(), &CommentWriter::new(&[]));
+        let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&out[s.start..s.end], *c)).collect();
+        assert_eq!(
+            named,
+            vec![
+                ("version", Kw),
+                ("2", Nt),
+                ("encoding", Kw),
+                ("unary", Id),
+                ("width", Kw),
+                ("8", Nt),
+                ("slots", Kw),
+                ("4", Nt),
+                ("result", Kw),
+                ("Nat", Id),
+                ("reduced", Kw),
+                ("fold", Kw),
+                (",", Pu),
+                ("single-tape", Kw),
+                ("5", Nt),
+                (",", Pu),
+                ("two-symbol", Kw),
+                ("_#,", Ts),
+                ("steps", Kw),
+                ("7088578", Nt),
+                ("tape", Kw),
+                ("0", Nt),
+                ("1_1", Ts),
+            ]
+        );
+    }
+
+    #[test]
+    fn stage_names_round_trip_and_only_the_canonical_order_is_a_stage_list() {
+        for k in StageKind::ALL {
+            assert_eq!(StageKind::parse(k.name()), Some(k));
+        }
+        assert_eq!(StageKind::parse("Fold"), None);
+        use StageKind::{Fold, SingleTape, TwoSymbol};
+        assert!(is_stage_list(&[Fold, SingleTape, TwoSymbol]));
+        assert!(is_stage_list(&[SingleTape]));
+        assert!(!is_stage_list(&[]), "empty");
+        assert!(!is_stage_list(&[TwoSymbol, Fold]), "out of order");
+        assert!(!is_stage_list(&[Fold, Fold]), "repeated");
     }
 
     /// D4: cells are PACKED, not space-separated. Rules use space-separated symbol lists because a

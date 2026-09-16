@@ -17,6 +17,7 @@ pub mod lower_asm;
 pub mod lower_tm;
 pub mod machine;
 pub mod one_way;
+pub mod reduced_file;
 pub mod reduction;
 pub mod sim;
 pub mod single_tape;
@@ -38,10 +39,14 @@ pub use build::{
 pub use decode::{decode_tape, decode_tape_reason, decode_tape_ty, decode_tape_ty_reason};
 pub use defunc::{defunc, defunc_mapped};
 pub use encoding::{Binary, Encoding, Unary};
-pub use header::{EncodingKind, HEADER_VERSION, TmHeader};
+pub use header::{
+    EncodingKind, HEADER_VERSION, MAX_REDUCED_STEPS, REDUCED_HEADER_VERSION, Reduction, Stage, StageKind, TmHeader,
+    is_stage_list,
+};
 pub use lower_asm::{LowerError, lower_asm, lower_asm_mapped};
 pub use lower_tm::{lower_tm, lower_tm_guarded, lower_tm_mapped, n_slots_of};
 pub use machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
+pub use reduced_file::{ReduceError, decode_reduced, reduce};
 pub use sim::{
     Caps as TmCaps, DEFAULT_CAPS as TM_DEFAULT_CAPS, Status as TmStatus, Step, Tape, Trace, Watcher, simulate,
     simulate_counts, simulate_final, simulate_trace, simulate_watched,

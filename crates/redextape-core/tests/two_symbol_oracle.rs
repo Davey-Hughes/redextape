@@ -33,6 +33,12 @@ const PAD: usize = 2;
 /// image without a second copy of the assertions.
 fn assert_two_symbol_agrees(label: &str, m: &Machine, inits: &[Vec<Symbol>], caps: Caps) -> (u64, u64) {
     let code = Code::new(m, inits);
+    // What a reduced `.tm` file's header carries is this order alone, so it must rebuild the whole code.
+    assert_eq!(
+        Code::from_symbols(code.symbols()).as_ref(),
+        Some(&code),
+        "the symbol order must rebuild the code for {label}"
+    );
     let (want, _ws, want_status, want_steps) = simulate_final(m, inits, caps);
     assert_eq!(want_status, Status::Halted, "the source run must halt for {label}");
 
