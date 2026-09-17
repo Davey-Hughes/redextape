@@ -8,7 +8,7 @@ import type { History } from './history'
 import type { SplitChoices } from './pane-chrome'
 import type { Leg, RecordEnd } from './protocol'
 import type { SessionClient, SessionId } from './session-client'
-import type { LambdaState, LambdaStatus, TmProgram, TmState, TmStatus } from './types'
+import type { LambdaState, LambdaStatus, TmProgram, TmScratchStatus, TmState, TmStatus, ValueReading } from './types'
 
 /**
  * One leg's live state on this side of the boundary: its history, how recording ended, and what the
@@ -93,6 +93,15 @@ export type SessionLegs = { [L in Leg]?: LegState<LegFrame[L]> }
 export type TmCompiled = { readonly program: TmProgram; readonly tapeNames: string[]; readonly tmText: string | null }
 
 /**
+ * What a TM buffer's panes were last told about the FILE rather than the machine: its status, and its value run's
+ * latest reading, or `null` before the first `tm-value` reply and for a file with no header.
+ */
+export type TmScratchReading = {
+  readonly status: TmScratchStatus
+  readonly value: ValueReading | null
+}
+
+/**
  * One session: what it is called, whether it is inside the source correspondence, the legs it records
  * into, the machine its last compile produced, and the client that talks to its worker.
  *
@@ -145,10 +154,11 @@ export type SessionEntry = {
    * compiled one — which every session is at construction, and which a `LambdaScratch` stays forever.
    *
    * **IT EXISTS BECAUSE A TM PANE CAN BE CREATED AT ANY TIME AND A `compiled` REPLY ARRIVES ONCE.**
-   * `TmPane.setProgram` is called from the reply switch and from nowhere else, so a pane built after
+   * `TmPane.setProgram` was called from the reply switch and from nowhere else, so a pane built after
    * that reply had no route to a program at all: it rendered no tapes, no status line and no δ-rows until
-   * something recompiled. `pane-host.ts`'s creation pass seeds a new pane from this field, which covers
-   * a split, a cross-leg pick and a layout restore alike, because all three create panes there.
+   * something recompiled. `pane-host.ts`'s `seedTmPane` tells a pane from this field when it comes to show
+   * the session without a reply: at creation, which covers a split, a cross-leg pick and a layout restore
+   * alike, and when a pick through its selector, a cool or a retire moves it onto the session.
    *
    * **THE ONE WRITABLE FIELD ON THIS TYPE, AND THE ONE THAT IS NOT KNOWN AT CONSTRUCTION.** `id`,
    * `label`, `detached` and `client` are decided by whoever registers the session; `legs` is a record
@@ -165,6 +175,11 @@ export type SessionEntry = {
    * pane is displaying.
    */
   tmProgram: TmCompiled | null
+  /**
+   * A TM buffer's status and value reading, retained for the reason `tmProgram` above is: a TM pane created after
+   * the reply that told the others is seeded from here. `null` for every session that is not a TM buffer.
+   */
+  tmScratch: TmScratchReading | null
 }
 
 /**

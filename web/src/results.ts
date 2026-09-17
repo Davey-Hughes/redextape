@@ -1,6 +1,6 @@
 import { n } from './format'
 import type { LambdaLeg, TmLeg } from './protocol'
-import type { Diagnostic, RunStatus } from './types'
+import type { Diagnostic, RunStatus, ValueReading } from './types'
 import { decodedText } from './types'
 
 export type Row = { leg: string; label: string; value: string; note?: string }
@@ -97,4 +97,19 @@ export function resultRows(lambda: LambdaLeg, tm: TmLeg): Row[] {
 export function noSessionRows(diagnostics: Diagnostic[]): Row[] {
   const errors = diagnostics.filter((d) => d.severity === 'Error').length
   return [{ leg: '', label: '', value: `not compiled — ${n(errors)} ${errors === 1 ? 'error' : 'errors'}` }]
+}
+
+/**
+ * The line a TM buffer's pane shows for its value run, or `null` for no line: a buffer with no header has no value
+ * run, and one that has not reported yet has nothing to say.
+ *
+ * **THE ENDED TEXT IS `decodedText`'s, THE FORMATTER `#results` USES,** so a value reads the same on both surfaces.
+ * Only a real value takes the `value: ` prefix; every other ending already says what it is.
+ */
+export function valueLine(reading: ValueReading | null): string | null {
+  if (reading === null) return null
+  const { run, value } = reading
+  if (run.run === 'Running') return `value: running · ${n(run.steps)} of ${n(run.cap)} steps`
+  if (typeof value === 'object' && 'Value' in value) return `value: ${value.Value.text}`
+  return decodedText(value)
 }

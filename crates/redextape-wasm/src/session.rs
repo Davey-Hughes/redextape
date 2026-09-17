@@ -409,7 +409,7 @@ pub struct Session {
 /// spell. Widening would put decision 6's invented width and invented tapes one accidental `None`
 /// away from a compiled program. The shared part is factored into `tm_leg_at` instead, which knows
 /// nothing about headers.
-fn build_tm_leg(header: &tm::TmHeader, machine: Machine, caps: tm::TmCaps) -> (TmProgram, TmCursor<Rc<Machine>>) {
+fn build_tm_leg(header: &tm::TmHeader, machine: Rc<Machine>, caps: tm::TmCaps) -> (TmProgram, TmCursor<Rc<Machine>>) {
     let init = header.init(machine.tapes);
     tm_leg_at(machine, header.width, &init, caps)
 }
@@ -419,20 +419,21 @@ fn build_tm_leg(header: &tm::TmHeader, machine: Machine, caps: tm::TmCaps) -> (T
 ///
 /// EXTRACTED SO THERE IS ONE PROJECTION SITE, not two. `build_tm_leg` (above) derives `width`/`init`
 /// from a `TmHeader`; `tm_scratch` derives them from a header or, absent one, from §3.4's defaults.
-/// Both then do the same three things, and the `Rc` sharing between the projection and the cursor is
-/// exactly the detail that would rot if it were written twice.
+/// Both then do the same two things, which would rot if they were written twice.
+///
+/// **THE CALLER MAKES THE `Rc`**, so that `tm_scratch` can hand the same machine to the `TmValueRun` beside
+/// this cursor rather than holding it twice.
 fn tm_leg_at(
-    machine: Machine,
+    machine: Rc<Machine>,
     width: usize,
     init: &[Vec<Symbol>],
     caps: tm::TmCaps,
 ) -> (TmProgram, TmCursor<Rc<Machine>>) {
-    let machine = Rc::new(machine);
     // `TmProgram` is projected ONCE, here, and cached — never per step. The `map` demo is 3,203 states
     // over 344,999 steps; re-projecting per `tmState` is the cost the `TmProgram`/`TmState` split
     // exists to avoid.
     let program = TmProgram::of(&machine, width);
-    let cursor = TmCursor::new(Rc::clone(&machine), init, caps);
+    let cursor = TmCursor::new(machine, init, caps);
     (program, cursor)
 }
 
@@ -491,6 +492,23 @@ fn decoded_value(v: &redextape_core::value::Value) -> Decoded {
         Some(text) => Decoded::Value { text },
         None => Decoded::TooLargeToPrint,
     }
+}
+
+/// `n` with a comma between every three digits: `6100000` reads `6,100,000`.
+///
+/// **FOR THE COUNTS THIS CRATE WRITES INTO A MESSAGE A PANE SHOWS**, beside lines the pane composes itself with
+/// `web/src/format.ts`'s `n`, which groups the same way; a raw `11571215` next to `241,666 steps` reads as a
+/// different kind of number. Written here because nothing in the workspace groups digits.
+fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, d) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(d);
+    }
+    out
 }
 
 /// `decode_lambda_ty`/`decode_tape_ty`'s `Option<Value>` answer, turned into a `Decoded` — the shared
@@ -603,11 +621,11 @@ impl Session {
                 // a run that spent its budget is resumable through `raise_tm_cap`, so flattening it
                 // into a decline would throw away a session the user can still drive.
                 TmRun::Ran { tapes } => {
-                    let (p, c) = build_tm_leg(&d.header, d.machine, caps);
+                    let (p, c) = build_tm_leg(&d.header, Rc::new(d.machine), caps);
                     Ok(((p, c, d.header), Some(tapes)))
                 }
                 TmRun::HitCap => {
-                    let (p, c) = build_tm_leg(&d.header, d.machine, caps);
+                    let (p, c) = build_tm_leg(&d.header, Rc::new(d.machine), caps);
                     Ok(((p, c, d.header), None))
                 }
             },
@@ -1154,7 +1172,7 @@ impl LambdaScratch {
 /// cost this file; this type is that lesson applied before the fact.
 ///
 /// The Rust side pins the field list by an exhaustive destructuring in this module's own tests
-/// (`let TmScratchStatus { available, reason, width, run, header } = sc.tm_status();`), so a sixth
+/// (`let TmScratchStatus { available, reason, width, run, header, reduction } = sc.tm_status();`), so a seventh
 /// field added here fails to compile there with `E0027` rather than merely going unrendered.
 ///
 /// **`width` AND `run` ARE NOT `Option`, WHICH IS THE SAME ARGUMENT IN THE OTHER DIRECTION.** They are
@@ -1188,6 +1206,19 @@ pub struct TmScratchStatus {
     /// field is the only thing that lets a renderer distinguish that from a file that asked for exactly
     /// those values.
     pub header: bool,
+    /// The stages a `version 2` header names and the step count it records, or `None` for a lowered or
+    /// headerless file. The pane says both, because a reduced file's tapes mean nothing read as lowered ones.
+    pub reduction: Option<ReductionStatus>,
+}
+
+/// A reduced file's stages, by `StageKind::name`, and the steps its header records.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ReductionStatus {
+    pub stages: Vec<String>,
+    /// `number`, not `bigint`, for the reason `TmStatus::total_steps` records.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub steps: u64,
 }
 
 /// A Turing machine typed straight into a pane: the projected program, the cursor walking it, and the
@@ -1197,7 +1228,8 @@ pub struct TmScratchStatus {
 /// `self.kind`; decoding is type-directed and TM text carries a `result` type only inside a header,
 /// which may be absent, and there is no compile-time run to have recorded final tapes from. Decision
 /// 2: the method does not exist rather than existing and declining. `tests/browser.rs` pins that at
-/// compile time.
+/// compile time. A headered file's value is read instead by `TmValueRun`, which `tm_scratch` builds beside
+/// the scratch, and only for a file with a header.
 ///
 /// **NO `SourceMap`, WHICH IS WHY T1 HAPPENED.** `tm_state` is the method a TM pane renders from every
 /// frame, and it needed a map. `TmState::window` now takes `Option<&SourceMap>` and this passes `None`,
@@ -1231,9 +1263,40 @@ pub struct TmScratch {
 /// `TM_DEFAULT_CAPS`, THE SAME BUDGET `compile` USES. `compile_with_caps` hands `build_tm_leg` the caps
 /// the described run already spent, so its cursor and its reported outcome agree; a scratch has no
 /// described run to agree with, so it takes the product default the boundary exposes no way to change.
-pub fn tm_scratch(src: &str) -> Scratched<TmScratch> {
+pub fn tm_scratch(src: &str) -> TmScratched {
     tm_scratch_with_caps(src, tm::TM_DEFAULT_CAPS)
 }
+
+/// The largest `.tm` text, in bytes, a TM scratch builds. Longer text is refused before it is parsed.
+///
+/// **MEASURED, NOT CHOSEN, AGAINST THE 250 MS AN INITIATED GESTURE MAY TAKE** — the budget `MAX_FORK_RULES` in
+/// `web/src/protocol.ts` was measured against. A TM buffer's build pays four costs before its first frame: the
+/// text's structured clone to the worker, this parse, the `tm_program` projection, and that projection's clone
+/// back. `web/tests/browser/tm-buffer-cost.test.ts` prices the four together, and one command runs it:
+///
+/// ```text
+/// cd web && pnpm run test:probe:tm-buffer
+/// ```
+///
+/// **THE READINGS ARE ONE RUN OF THAT COMMAND AT THE COMMIT THAT ADDED THE PROBE'S RUN STAMP**
+/// (`web/tests/browser/provided-context.d.ts`), on an AMD Ryzen 9 9950X3D, starting at a load average of 1.32. It ran a
+/// release build with this check switched off (`probe-no-tm-scratch-ceiling`), so files over the ceiling were parsed
+/// too, in the browser test tier's headless Chromium. It priced 65 reduced files from 28,140 to 15,451,499 bytes,
+/// taking each cost's median over seven passes and a file's total as the four medians' sum. The largest file under
+/// budget was 6,053,591 bytes at 223.1 ms, and the smallest over it 6,617,969 bytes at 274.8 ms. This is the first
+/// round hundred thousand at or above the first. The 6,053,591-byte file's seven passes took 215.6 to 231.9 ms in
+/// total, so the ceiling is a band, not a line.
+///
+/// **BYTES,** because bytes are the one size known before parsing, and the parse is one of the costs being bounded.
+/// They do not predict the cost alone. In the same run `head([1, 2])` reduced through `fold, two-symbol` is 5,351,636
+/// bytes and projected in 111.6 ms, while through `single-tape, two-symbol` it is 6,053,591 bytes and projected in
+/// 92.6 ms.
+///
+/// **THE EDITOR IS NOT BOUNDED BY THIS.** The text is already in the pane's editor on the main thread before a
+/// build is posted, so a refusal here cannot spare that cost, and the probe does not price it either. Its `mount`
+/// column waits for two animation frames, and in the same run it read 29.5 to 31.3 ms for every file under 300,000
+/// bytes and 12.9 to 23.6 ms for every file over 7,000,000, falling as the text grew.
+pub const MAX_SCRATCH_TM_BYTES: usize = 6_100_000;
 
 /// `tm_scratch` with the cursor's budget as a parameter rather than a constant.
 ///
@@ -1243,10 +1306,35 @@ pub fn tm_scratch(src: &str) -> Scratched<TmScratch> {
 /// only reachable by actually simulating five million steps. A test that cannot afford that is a test
 /// that never runs. With a budget of three the same states are reached in microseconds, by the same
 /// code, from the same text.
-fn tm_scratch_with_caps(src: &str, caps: tm::TmCaps) -> Scratched<TmScratch> {
+fn tm_scratch_with_caps(src: &str, caps: tm::TmCaps) -> TmScratched {
+    // BEFORE THE PARSE, BECAUSE THE PARSE IS ONE OF THE COSTS THE CEILING BOUNDS. A zero-width span at the origin,
+    // as `lambda_scratch_at`'s refusal uses: the diagnostic is about the whole file, not a place in it.
+    //
+    // OFF UNDER `probe-no-tm-scratch-ceiling`, whose doc in this crate's manifest says why a probe needs longer text
+    // parsed. `cfg!` rather than `#[cfg]` on the check, so the constant is read in every build and no build has to
+    // excuse it as dead code; under the feature the condition is a constant `false`.
+    if !cfg!(feature = "probe-no-tm-scratch-ceiling") && src.len() > MAX_SCRATCH_TM_BYTES {
+        let message = format!(
+            "this file is {} bytes; a TM buffer builds files up to {} bytes — `redextape run` has no such limit",
+            grouped(src.len() as u64),
+            grouped(MAX_SCRATCH_TM_BYTES as u64)
+        );
+        return TmScratched {
+            diagnostics: vec![Diagnostic::error(Span { start: 0, end: 0 }, message)],
+            scratch: None,
+            value: None,
+        };
+    }
     let doc = tm::parse_tm_full(src);
     let header = doc.header;
-    let scratch = doc.machine.map(|m| {
+    let Some(m) = doc.machine else {
+        return TmScratched { diagnostics: doc.diagnostics, scratch: None, value: None };
+    };
+    let m = Rc::new(m);
+    // THE VALUE RUN SHARES THIS `Rc`, SO A MACHINE IS HELD ONCE HOWEVER MANY CURSORS WALK IT. A reduced file can
+    // run to a million rules, and cloning one for a second cursor would double the largest thing a scratch holds.
+    let value = header.clone().map(|h| TmValueRun::new(Rc::clone(&m), h));
+    let scratch = {
         let (program, cursor) = match &header {
             // The IDENTICAL function `compile` builds its leg with, not a copy of it — which is what
             // makes "a headered scratch matches the `Session` path" a property of one code path rather
@@ -1261,8 +1349,8 @@ fn tm_scratch_with_caps(src: &str, caps: tm::TmCaps) -> Scratched<TmScratch> {
             None => tm_leg_at(m, tm::MIN_FIELD_WIDTH, &[], caps),
         };
         TmScratch { program, cursor, header }
-    });
-    Scratched { diagnostics: doc.diagnostics, scratch }
+    };
+    TmScratched { diagnostics: doc.diagnostics, scratch: Some(scratch), value }
 }
 
 impl TmScratch {
@@ -1282,6 +1370,29 @@ impl TmScratch {
             width: self.program.width,
             run,
             header: self.header.is_some(),
+            reduction: self.header.as_ref().and_then(|h| h.reduction.as_ref()).map(|r| ReductionStatus {
+                stages: r.stages.iter().map(|s| s.kind().name().to_owned()).collect(),
+                steps: r.steps,
+            }),
+        }
+    }
+
+    /// What the pane labels each tape: the lowered bank names, or one label for the tape a single-tape stage
+    /// interleaved them onto.
+    ///
+    /// **ONLY THE SINGLE-TAPE STAGE CHANGES WHAT A TAPE IS.** The fold lays each tape out zig-zag and the
+    /// two-symbol stage spells each cell in bits, but tape `i` is still lowered tape `i` after either, so the bank
+    /// names stay true. A headerless file names no stages and keeps them too, as it always has.
+    pub fn tape_names(&self) -> Vec<String> {
+        let interleaved = self.header.as_ref().and_then(|h| h.reduction.as_ref()).and_then(|r| {
+            r.stages.iter().find_map(|s| match s {
+                tm::Stage::SingleTape { k } => Some(*k),
+                tm::Stage::Fold | tm::Stage::TwoSymbol { .. } => None,
+            })
+        });
+        match interleaved {
+            Some(k) => vec![format!("{k} tapes, interleaved")],
+            None => tm::TAPE_NAMES.iter().map(|&n| n.to_owned()).collect(),
         }
     }
 
@@ -1324,6 +1435,115 @@ impl TmScratch {
     /// Extend a capped run's budget. Additive and saturating, like every other cap raise here.
     pub fn raise_tm_cap(&mut self, extra_steps: u64, extra_cells: u64) {
         self.cursor.raise_cap(extra_steps, extra_cells);
+    }
+}
+
+/// `tm_scratch`'s answer: the diagnostics, the scratch, and the run that reads the scratch's value.
+///
+/// **NOT `Scratched<TmScratch>`, WHICH `lambda_scratch` SHARES.** A λ scratch has no value run to carry, so
+/// widening the shared type would put a field on it that is `None` by construction.
+pub struct TmScratched {
+    pub diagnostics: Vec<Diagnostic>,
+    pub scratch: Option<TmScratch>,
+    /// `Some` exactly when `scratch` is and the text carried a header. See `TmValueRun`.
+    pub value: Option<TmValueRun>,
+}
+
+/// How far a `TmValueRun` has got.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ValueRun {
+    /// `Running` while `run` may advance it, `Ended` once it halted, `Capped` once it spent `cap`. Never
+    /// `DepthRefused`, which is λ's alone.
+    pub run: RunStatus,
+    /// `number`, not `bigint`, for the reason `TmStatus::total_steps` records.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub steps: u64,
+    /// The steps this run may take: the header's recorded count for a reduced file, `TM_DEFAULT_CAPS`' otherwise.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub cap: u64,
+}
+
+/// The run that reads a headered scratch's value: a second cursor over the scratch's machine, which renders no
+/// frame and which nothing but `run` advances.
+///
+/// **A TYPE OF ITS OWN, AND DECISION 2 IS WHY.** A method that needs a result type does not exist on a scratch
+/// rather than existing and declining, and a headerless file has no result type. So the value lives on a handle
+/// `tm_scratch` builds only for a file that has one, and `TmScratch` still has no `tm_value`.
+///
+/// **NO RAISE.** A reduced file's recorded step count is its contract, and `raise_tm_cap` belongs to the scratch,
+/// whose cursor this is not.
+pub struct TmValueRun {
+    cursor: TmCursor<Rc<Machine>>,
+    header: tm::TmHeader,
+}
+
+impl TmValueRun {
+    fn new(machine: Rc<Machine>, header: tm::TmHeader) -> TmValueRun {
+        let init = header.init(machine.tapes);
+        let cursor = TmCursor::new(machine, &init, tm::run_caps(&header));
+        TmValueRun { cursor, header }
+    }
+
+    /// Advance up to `budget` steps, then say where the run stands.
+    pub fn run(&mut self, budget: u64) -> ValueRun {
+        for _ in 0..budget {
+            if self.cursor.next().is_none() {
+                break;
+            }
+        }
+        let run = match self.cursor.status() {
+            None => RunStatus::Running,
+            Some(tm::TmStatus::Halted) => RunStatus::Ended,
+            Some(tm::TmStatus::HitCap) => RunStatus::Capped,
+        };
+        ValueRun { run, steps: self.cursor.steps_taken(), cap: tm::run_caps(&self.header).steps }
+    }
+
+    /// The value, once the run has finished: `value_of_run`'s answer, worded for a pane.
+    ///
+    /// **`DecodeFailure::BudgetExhausted` IS A `Fault`, NOT `Undecodable`,** because it is this tool's limit on a
+    /// file that may be perfectly good, the distinction `redextape run` draws with exit 2 against exit 1.
+    pub fn value(&self) -> Decoded {
+        let Some(status) = self.cursor.status() else { return Decoded::Unfinished };
+        match tm::value_of_run(self.cursor.machine(), &self.header, self.cursor.tapes(), self.cursor.state(), status) {
+            Ok(v) => decoded_value(&v),
+            Err(failure) => self.failure_value(failure),
+        }
+    }
+
+    /// How `value` words a finished run that has no value.
+    ///
+    /// **ITS OWN METHOD SO EVERY `RunFailure` CAN BE PINNED, INCLUDING ONE NO TEST HERE RUNS INTO.** Reaching
+    /// `MAX_DECODE_NODES` takes a decode far larger than any test machine, for the reason `redextape run`'s test of
+    /// the same failure gives before calling its `report_tm_decode` with the error directly; this is that seam's twin.
+    fn failure_value(&self, failure: tm::RunFailure) -> Decoded {
+        match failure {
+            tm::RunFailure::HitCap => {
+                let cap = tm::run_caps(&self.header);
+                let message = match &self.header.reduction {
+                    // THE CELLS TOO, AS `redextape run` SAYS: `run_caps` keeps `TM_DEFAULT_CAPS`' cell cap under a
+                    // reduced header, so a run can stop on cells before its recorded steps are spent.
+                    Some(r) => format!(
+                        "did not halt within the {} steps its header records, or {} tape cells",
+                        grouped(r.steps),
+                        grouped(cap.cells)
+                    ),
+                    None => {
+                        format!("did not halt within {} steps or {} tape cells", grouped(cap.steps), grouped(cap.cells))
+                    }
+                };
+                Decoded::Fault { message }
+            }
+            tm::RunFailure::NotAccept(s) => {
+                let name = self.cursor.machine().states.get(s as usize).map_or("?", |st| st.name.as_str());
+                Decoded::Fault { message: format!("halted in `{name}`, which is not an accept state") }
+            }
+            tm::RunFailure::Decode(tm::DecodeFailure::Mismatch) => Decoded::Undecodable,
+            tm::RunFailure::Decode(tm::DecodeFailure::BudgetExhausted) => Decoded::Fault {
+                message: "ran out of decode budget; the value may be fine, and this is the tool's limit".to_owned(),
+            },
+        }
     }
 }
 
@@ -2296,12 +2516,13 @@ state halt: accept
     #[test]
     fn the_tm_scratch_status_has_no_field_for_a_total_it_cannot_know() {
         let sc = tm_scratch(HEADERLESS_TM).scratch.expect("parses");
-        let TmScratchStatus { available, reason, width, run, header } = sc.tm_status();
+        let TmScratchStatus { available, reason, width, run, header, reduction } = sc.tm_status();
         assert!(available);
         assert!(reason.is_empty());
         assert_eq!(width, tm::MIN_FIELD_WIDTH);
         assert_eq!(run, RunStatus::Running);
         assert!(!header);
+        assert_eq!(reduction, None);
     }
 
     /// Text that does not parse to a machine is diagnostics and a `None` scratch — and a MISSING HEADER
@@ -2317,6 +2538,290 @@ state halt: accept
         let garbage = tm_scratch("this is not a machine");
         assert!(!garbage.diagnostics.is_empty());
         assert!(garbage.scratch.is_none());
+    }
+
+    // --- the size ceiling -------------------------------------------------------------------------
+    //
+    // Two tests hold the ceiling and compile only without `probe-no-tm-scratch-ceiling`, which switches it off.
+    // With it, one test holds what it does instead; `scripts/check-all.sh`'s leg for that feature runs it.
+
+    /// `HEADERLESS_TM` padded with one comment line to exactly `bytes` bytes.
+    fn padded_to(bytes: usize) -> String {
+        let text = format!("{HEADERLESS_TM};{}\n", "x".repeat(bytes - HEADERLESS_TM.len() - 2));
+        assert_eq!(text.len(), bytes);
+        text
+    }
+
+    #[cfg(not(feature = "probe-no-tm-scratch-ceiling"))]
+    #[test]
+    fn a_file_at_the_ceiling_builds_and_one_byte_more_is_refused() {
+        let at = tm_scratch(&padded_to(MAX_SCRATCH_TM_BYTES));
+        assert!(at.diagnostics.is_empty(), "{:?}", at.diagnostics);
+        assert!(at.scratch.is_some());
+
+        let over = tm_scratch(&padded_to(MAX_SCRATCH_TM_BYTES + 1));
+        assert!(over.scratch.is_none() && over.value.is_none());
+        let messages: Vec<&str> = over.diagnostics.iter().map(|d| d.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            vec![format!(
+                "this file is {} bytes; a TM buffer builds files up to {} bytes — `redextape run` has no such limit",
+                grouped(MAX_SCRATCH_TM_BYTES as u64 + 1),
+                grouped(MAX_SCRATCH_TM_BYTES as u64)
+            )]
+        );
+    }
+
+    /// Commas every three digits from the right, and none in a number of three digits or fewer.
+    #[test]
+    fn grouped_puts_a_comma_between_every_three_digits() {
+        let cases = [
+            (0, "0"),
+            (7, "7"),
+            (999, "999"),
+            (1_000, "1,000"),
+            (241_666, "241,666"),
+            (6_100_000, "6,100,000"),
+            (11_571_215, "11,571,215"),
+            (u64::MAX, "18,446,744,073,709,551,615"),
+        ];
+        for (n, want) in cases {
+            assert_eq!(grouped(n), want);
+        }
+    }
+
+    /// Text that is both too long and not a machine hears only about its size: the parse never ran.
+    #[cfg(not(feature = "probe-no-tm-scratch-ceiling"))]
+    #[test]
+    fn an_oversized_file_is_refused_before_it_is_parsed() {
+        let text = format!("this is not a machine\n;{}\n", "x".repeat(MAX_SCRATCH_TM_BYTES));
+        let made = tm_scratch(&text);
+        assert_eq!(made.diagnostics.len(), 1, "{:?}", made.diagnostics);
+        assert!(made.diagnostics[0].message.starts_with("this file is "), "{:?}", made.diagnostics);
+    }
+
+    /// With the check switched off, text over the ceiling is parsed like any other: a machine one byte over
+    /// builds, and text that is not a machine hears about its parse, not its size. One comparison, so a failure
+    /// shows both halves.
+    #[cfg(feature = "probe-no-tm-scratch-ceiling")]
+    #[test]
+    fn the_probe_build_parses_text_over_the_ceiling() {
+        let over = tm_scratch(&padded_to(MAX_SCRATCH_TM_BYTES + 1));
+        let garbage = tm_scratch(&format!("this is not a machine\n;{}\n", "x".repeat(MAX_SCRATCH_TM_BYTES)));
+        let sizes = |ds: &[Diagnostic]| ds.iter().filter(|d| d.message.starts_with("this file is ")).count();
+        assert_eq!(
+            (
+                (over.scratch.is_some(), over.diagnostics.len()),
+                (garbage.scratch.is_some(), garbage.diagnostics.is_empty(), sizes(&garbage.diagnostics))
+            ),
+            ((true, 0), (false, false, 0)),
+            "{:?} {:?}",
+            over.diagnostics,
+            garbage.diagnostics
+        );
+    }
+
+    // --- the value run ----------------------------------------------------------------------------
+
+    /// `src` lowered, run, reduced through `stages` and printed: the text `redextape emit --reduce` writes,
+    /// built here through the same core calls so no checked-in file can go stale under this test.
+    fn reduced_text(src: &str, stages: &[tm::StageKind]) -> String {
+        let (program, ds) = parser::parse(src);
+        assert!(ds.is_empty(), "{ds:?}");
+        let program = program.expect("the fixture parses");
+        let ty = typeck::result_type(&program).expect("the fixture types");
+        let kind = EncodingKind::Unary;
+        let enc = kind.at(tm::MIN_FIELD_WIDTH);
+        let (core, _map) = SourceMap::build_from_program(&program, &*enc);
+        let described =
+            tm::run_tm_described(&core, kind, ty, tm::TM_DEFAULT_CAPS).expect("the fixture lowers and runs");
+        let (machine, header) = tm::reduce(&described, stages).expect("the fixture reduces");
+        tm::print_tm_with(&machine, &header)
+    }
+
+    /// The steps a reduced text's header records.
+    fn recorded_steps(text: &str) -> u64 {
+        tm::parse_tm_full(text).header.and_then(|h| h.reduction).expect("a reduced text").steps
+    }
+
+    /// Run `value` out in one call and answer its end.
+    fn run_out(value: &mut TmValueRun) -> (ValueRun, Decoded) {
+        (value.run(u64::MAX), value.value())
+    }
+
+    /// `5 - 3` is 2 and not 0, so a decode that read the reduced tapes as lowered ones cannot pass by
+    /// coincidence — #95's first sabotage row stayed green on a program whose value was 0.
+    #[test]
+    fn every_stage_reads_the_programs_value() {
+        for stage in tm::StageKind::ALL {
+            let text = reduced_text("5 - 3", &[stage]);
+            let mut value = tm_scratch(&text).value.expect("a reduced file has a header");
+            let (end, got) = run_out(&mut value);
+            assert_eq!(end.run, RunStatus::Ended, "{stage:?}");
+            assert_eq!(end.steps, recorded_steps(&text), "{stage:?}: it ran exactly the steps its header records");
+            assert_eq!(got, Decoded::Value { text: "2".into() }, "{stage:?}");
+        }
+    }
+
+    /// Decision 2 at construction: no header, no result type, no value run — and still a scratch.
+    #[test]
+    fn a_headerless_file_builds_a_scratch_and_no_value_run() {
+        let made = tm_scratch(HEADERLESS_TM);
+        assert!(made.scratch.is_some());
+        assert!(made.value.is_none());
+    }
+
+    /// A lowered file's value run agrees with the value `Session` decodes from its compile-time run.
+    #[test]
+    fn a_lowered_files_value_run_agrees_with_the_session() {
+        let src = "let x = 40; x + 2";
+        let s = Session::compile(src, EncodingKind::Unary).session.expect("compiles");
+        let text = s.tm_text().expect("an available TM leg has text");
+        let mut value = tm_scratch(&text).value.expect("an emitted file has a header");
+        let (end, got) = run_out(&mut value);
+        assert_eq!(end.run, RunStatus::Ended);
+        assert_eq!(end.cap, tm::TM_DEFAULT_CAPS.steps, "a lowered file runs under the defaults");
+        assert_eq!(got, s.tm_value().expect("TM available"));
+        assert_eq!(got, Decoded::Value { text: "42".into() });
+    }
+
+    /// The recorded count is exact: at it the run accepts, and one fewer is the file's fault.
+    #[test]
+    fn a_reduced_run_is_held_to_exactly_its_recorded_steps() {
+        let text = reduced_text("5 - 3", &[tm::StageKind::Fold]);
+        let n = recorded_steps(&text);
+        let short = text.replace(&format!("steps {n}\n"), &format!("steps {}\n", n - 1));
+        assert_ne!(short, text, "the fixture must carry a `steps` line to shorten");
+
+        let (end, got) = run_out(&mut tm_scratch(&text).value.expect("header"));
+        assert_eq!((end.run, got), (RunStatus::Ended, Decoded::Value { text: "2".into() }));
+
+        let (end, got) = run_out(&mut tm_scratch(&short).value.expect("header"));
+        assert_eq!(end.run, RunStatus::Capped);
+        assert_eq!(end.cap, n - 1);
+        assert_eq!(
+            got,
+            Decoded::Fault {
+                message: format!(
+                    "did not halt within the {} steps its header records, or 5,000,000 tape cells",
+                    grouped(n - 1)
+                )
+            }
+        );
+    }
+
+    /// The same hand-written stuck machine `redextape run`'s own test refuses.
+    #[test]
+    fn a_reduced_run_that_stops_outside_an_accept_state_is_a_fault() {
+        let text = "tapes 1\nstart stuck\nversion 2\nencoding unary\nwidth 4\nslots 0\nresult Nat\n\
+                    reduced single-tape 5\nsteps 1\n\nstate stuck:\n";
+        let (_end, got) = run_out(&mut tm_scratch(text).value.expect("header"));
+        assert_eq!(got, Decoded::Fault { message: "halted in `stuck`, which is not an accept state".into() });
+    }
+
+    /// A decode that runs out of budget is a `Fault`, the tool's limit, where tapes that do not decode are
+    /// `Undecodable`. Through `failure_value`, whose doc says why no run here reaches the budget.
+    #[test]
+    fn a_decode_out_of_budget_is_a_fault_and_a_mismatch_is_undecodable() {
+        let value = tm_scratch(&reduced_text("5 - 3", &[tm::StageKind::Fold])).value.expect("header");
+        assert_eq!(
+            (
+                value.failure_value(tm::RunFailure::Decode(tm::DecodeFailure::BudgetExhausted)),
+                value.failure_value(tm::RunFailure::Decode(tm::DecodeFailure::Mismatch)),
+            ),
+            (
+                Decoded::Fault {
+                    message: "ran out of decode budget; the value may be fine, and this is the tool's limit".into()
+                },
+                Decoded::Undecodable,
+            )
+        );
+    }
+
+    /// Tapes that do not hold the header's result type are `Undecodable`, the same answer `Session` gives.
+    #[test]
+    fn tapes_that_do_not_hold_the_result_type_are_undecodable() {
+        let text = reduced_text("5 - 3", &[tm::StageKind::Fold]).replace("result Nat\n", "result List<Nat>\n");
+        let (end, got) = run_out(&mut tm_scratch(&text).value.expect("header"));
+        assert_eq!(end.run, RunStatus::Ended);
+        assert_eq!(got, Decoded::Undecodable);
+    }
+
+    #[test]
+    fn a_value_run_is_unfinished_until_it_ends() {
+        let text = reduced_text("5 - 3", &[tm::StageKind::Fold]);
+        let mut value = tm_scratch(&text).value.expect("header");
+        assert_eq!(value.value(), Decoded::Unfinished);
+        assert_eq!(value.run(1).run, RunStatus::Running);
+        assert_eq!(value.value(), Decoded::Unfinished);
+    }
+
+    /// How the worker slices the run does not change where it ends or what it reads.
+    #[test]
+    fn the_value_run_answers_the_same_in_any_chunking() {
+        let text = reduced_text("5 - 3", &[tm::StageKind::SingleTape]);
+        let mut answers = Vec::new();
+        for budget in [1, 7, 1_000, u64::MAX] {
+            let mut value = tm_scratch(&text).value.expect("header");
+            let mut end = value.run(budget);
+            while end.run == RunStatus::Running {
+                end = value.run(budget);
+            }
+            answers.push((budget, end.steps, value.value()));
+        }
+        let want = (recorded_steps(&text), Decoded::Value { text: "2".into() });
+        for (budget, steps, got) in answers {
+            assert_eq!((steps, got), want.clone(), "in chunks of {budget}");
+        }
+    }
+
+    /// The value run is a second cursor: running it out moves nothing the pane is watching.
+    #[test]
+    fn running_the_value_run_out_leaves_the_scratch_at_step_zero() {
+        let text = reduced_text("5 - 3", &[tm::StageKind::Fold]);
+        let made = tm_scratch(&text);
+        let (sc, mut value) = (made.scratch.expect("parses"), made.value.expect("header"));
+        let before = sc.tm_state(3);
+        let (end, _) = run_out(&mut value);
+        assert_eq!(end.run, RunStatus::Ended);
+        assert_eq!(sc.tm_state(3), before);
+        assert_eq!(sc.tm_state(3).step, 0);
+    }
+
+    #[test]
+    fn a_reduced_scratch_reports_its_stages_and_recorded_steps() {
+        let stages = [tm::StageKind::Fold, tm::StageKind::TwoSymbol];
+        let text = reduced_text("5 - 3", &stages);
+        let sc = tm_scratch(&text).scratch.expect("parses");
+        assert_eq!(
+            sc.tm_status().reduction,
+            Some(ReductionStatus { stages: vec!["fold".into(), "two-symbol".into()], steps: recorded_steps(&text) })
+        );
+        let lowered =
+            Session::compile("5 - 3", EncodingKind::Unary).session.expect("compiles").tm_text().expect("text");
+        assert_eq!(tm_scratch(&lowered).scratch.expect("parses").tm_status().reduction, None);
+    }
+
+    /// Only a single-tape stage changes what a tape is; the bank names stay true through the fold and the bits.
+    #[test]
+    fn only_a_single_tape_stage_relabels_the_tapes() {
+        let banks: Vec<String> = tm::TAPE_NAMES.iter().map(|&n| n.to_owned()).collect();
+        let names =
+            |stages: &[tm::StageKind]| tm_scratch(&reduced_text("5 - 3", stages)).scratch.expect("parses").tape_names();
+        assert_eq!(names(&[tm::StageKind::Fold, tm::StageKind::TwoSymbol]), banks);
+        assert_eq!(names(&[tm::StageKind::SingleTape]), vec!["5 tapes, interleaved".to_owned()]);
+        assert_eq!(names(&[tm::StageKind::Fold, tm::StageKind::SingleTape]), vec!["5 tapes, interleaved".to_owned()]);
+        // A STAGE AFTER THE SINGLE-TAPE ONE, so a label read off the last stage alone cannot pass: `5 - 3` through both
+        // is 1,516,707 bytes, under `MAX_SCRATCH_TM_BYTES`.
+        assert_eq!(
+            names(&[tm::StageKind::SingleTape, tm::StageKind::TwoSymbol]),
+            vec!["5 tapes, interleaved".to_owned()]
+        );
+        assert_eq!(
+            tm_scratch(HEADERLESS_TM).scratch.expect("parses").tape_names(),
+            banks,
+            "a headerless file names no stages"
+        );
     }
 
     /// `tapeSlice` speaks the same coordinates `tmState` reports, and names an absent tape rather than

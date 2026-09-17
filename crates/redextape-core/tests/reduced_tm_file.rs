@@ -52,6 +52,22 @@ fn round_trip(src: &str, stages: &[StageKind]) {
 /// reads 0 anyway, and `3 - 5` hid a header whose code had two of its symbols swapped.
 const FIVE_MINUS_THREE: &str = "5 - 3";
 
+/// The web app's browser tier pastes this file into a TM buffer, so it must be the file `reduce` writes today: a stale
+/// copy would pin the web app to a format nothing produces any more.
+#[test]
+fn the_web_fixture_is_the_file_reduce_writes_today() {
+    let (core, ty) = core_and_ty(FIVE_MINUS_THREE);
+    let d = run_tm_described(&core, EncodingKind::Unary, ty, TM_DEFAULT_CAPS).unwrap();
+    let (m, h) = reduce(&d, &[SingleTape]).unwrap();
+    let written = print_tm_with(&m, &h);
+    // `assert!` rather than `assert_eq!`, for `round_trip`'s reason: a failure would print a hundred thousand bytes.
+    assert!(
+        include_str!("fixtures/five_minus_three_single_tape.tm") == written,
+        "regenerate it: `redextape emit five-minus-three.rxt --lang tm --reduce single-tape -o \
+         crates/redextape-core/tests/fixtures/five_minus_three_single_tape.tm`, from a file holding `5 - 3`"
+    );
+}
+
 #[test]
 fn the_fold_alone_decodes() {
     round_trip(FIVE_MINUS_THREE, &[Fold]);

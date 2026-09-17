@@ -398,11 +398,23 @@ body {
   font-style: italic;
 }
 
-.tm-status {
+.tm-status,
+.tm-value {
   font-family: var(--font-mono);
   font-size: var(--step--1);
   color: var(--fg-dim);
   margin-bottom: var(--space-2);
+}
+
+/* AN EMPTY VALUE LINE TAKES NO SPACE AND STAYS IN THE ACCESSIBILITY TREE. `TmPane` empties the line rather than
+   hiding it (its `#value` doc has why: a live region is announced from that tree), so `display: none` is not an
+   option here.
+
+   NOT LOAD-BEARING IN TODAY'S LAYOUT, MEASURED. `.tm-pane` is a block box, so an empty line's margin collapses into
+   `.tm-status`'s: in Chromium the status-to-tapes gap measured 8 px with this rule, 8 px without it, and 8 px with the
+   line at `display: none`. `tm-pane-editor.test.ts` holds the gap itself, not the rule. */
+.tm-value:empty {
+  margin-bottom: 0;
 }
 
 /* Tape rows scroll horizontally INSIDE the pane. A wide tape must never make the page scroll. */

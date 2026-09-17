@@ -1,5 +1,4 @@
 import type { EditorView } from '@codemirror/view'
-import { tapeNames } from '../../pkg/redextape_wasm.js'
 import { showWorkerError } from './banner'
 import type { EditablePane } from './editor-custody'
 import { setDecline, setLink } from './highlight'
@@ -309,12 +308,12 @@ export function createReplies(deps: {
    * `view`, none of which a detached session has any claim on (§3.3: no `linkIndex`, no `sourceSpan`,
    * no `ty`).
    *
-   * SIX ARMS AND NO `default`, WHERE THIS DOC USED TO SAY FOUR — 5d-iv Task 9 is the task that closes
-   * the gap the paragraph below used to record as open. `session-worker.ts` answers a `lambda-scratch`
-   * request with exactly `scratch-compiled`, `lambda-frames`, `no-session` or `worker-error`, and a
-   * `tm-scratch` request with `tm-scratch-compiled`, `tm-frames`, `no-session` or `worker-error` — the
-   * same four-shape answer per leg (`onTmScratch`, `session-worker.ts`'s TM counterpart to
-   * `onLambdaScratch`), and `compiled`/`result` still need a `SourceMap`/`ty` no buffer has, on either
+   * SEVEN ARMS AND NO `default`. `session-worker.ts` answers a `lambda-scratch` request with exactly
+   * `scratch-compiled`, `lambda-frames`, `no-session` or `worker-error`, and a `tm-scratch` request with
+   * `tm-scratch-compiled`, `tm-frames`, `tm-value`, `no-session` or `worker-error` (`onTmScratch`,
+   * `session-worker.ts`'s TM counterpart to `onLambdaScratch`). `tm-value` is the TM leg's one extra
+   * shape: a headered TM buffer's value run reports through it, where a compiled session's value
+   * arrives in `result`. `compiled`/`result` still need a `SourceMap`/`ty` no buffer has, on either
    * leg. `no-session` and `worker-error` are genuinely shared, one arm apiece for both legs — a buffer's
    * failure to build or its worker's death read the same whichever leg minted it. `lambda-frames` and
    * `tm-frames` are not shareable in the same way (`hist.push` closes over a different `LegState`), so
@@ -425,13 +424,15 @@ export function createReplies(deps: {
         // which is false for a scratch that was never offered a fork control in the first place.
         // `setScratchStatus` rides the SAME pass as `then` (Minor fix, fix round on Task 9) rather than
         // a second loop over `panes.ofSession('tm', session)` below — `storeAndSetProgram`'s own doc
-        // has the argument. `tapeNames()` IS A FIXED, PROGRAM-INDEPENDENT WASM EXPORT, not a wire field
-        // this reply carries either (`protocol.ts`'s `tm-scratch-compiled` doc: "no text echo" is the
-        // general shape — nothing this reply's own build did not already need is repeated on it) —
-        // `session-worker.ts`'s `onRun` calls the identical export to answer the SAME question for the
-        // `compiled` reply, and it answers identically for every machine.
-        const compiled: TmCompiled = { program: reply.tmProgram, tapeNames: tapeNames() as string[], tmText: null }
-        storeAndSetProgram(session, compiled, (pane) => pane.setScratchStatus(reply.tm))
+        // has the argument. `tapeNames` RIDES THIS REPLY, PER SCRATCH, where it used to be the fixed
+        // `tapeNames()` export `onRun` still posts: a reduced file's single-tape stage leaves one tape that
+        // the lowered bank names would mislabel, and only the scratch knows its own stage list.
+        const compiled: TmCompiled = { program: reply.tmProgram, tapeNames: reply.tapeNames, tmText: null }
+        sessions.entryOf(session).tmScratch = { status: reply.tm, value: null }
+        storeAndSetProgram(session, compiled, (pane) => {
+          pane.setScratchStatus(reply.tm)
+          pane.setScratchValue(null)
+        })
         // THE EDITOR IS SEEDED FROM THE BUFFER'S OWN TEXT OF RECORD, NOT FROM THIS REPLY — there is
         // none to seed from (`tm-scratch-compiled` carries no `text`, unlike `scratch-compiled`).
         // `ScratchBuffers.editorSeed`'s own doc names the gap this closes: "the λ half of the repair
@@ -457,6 +458,17 @@ export function createReplies(deps: {
         draw()
         return
       }
+      case 'tm-value': {
+        // RETAINED ON THE ENTRY, AS `tm-scratch-compiled` RETAINS THE STATUS, for a TM pane created after this reply.
+        // A reading with no status before it cannot happen: the worker posts this only after `tm-scratch-compiled`
+        // for the same generation, and a stale generation never reaches this switch (`SessionClient`'s filter).
+        const entry = sessions.entryOf(session)
+        if (entry.tmScratch !== null)
+          entry.tmScratch = { ...entry.tmScratch, value: { run: reply.run, value: reply.value } }
+        for (const p of panes.ofSession('tm', session))
+          (p.pane as TmPane).setScratchValue(entry.tmScratch?.value ?? null)
+        return
+      }
       case 'lambda-frames': {
         // UNGUARDED FOR THE REASON THE `scratch-compiled` ARM ABOVE STATES: `legOf` throws for a session
         // the registry no longer holds, and a cooled buffer's worker cannot deliver a reply at all
@@ -478,6 +490,15 @@ export function createReplies(deps: {
         return
       }
       case 'no-session': {
+        // A VALUE RUN THAT WAS STILL GOING IS GONE. The worker drops a scratch, and the value run beside it, before
+        // it parses the next text, so nothing will report on that run again, and a reading left at `Running` would
+        // go on saying otherwise for as long as the text does not build. A finished reading still describes the
+        // last text that built, like the frames this arm leaves on screen, so it stays.
+        const retained = sessions.entryOf(session).tmScratch
+        if (retained?.value?.run.run === 'Running') {
+          sessions.entryOf(session).tmScratch = { ...retained, value: null }
+          for (const p of panes.ofSession('tm', session)) (p.pane as TmPane).setScratchValue(null)
+        }
         // WHICH OF TWO REASONS THIS FIRES IS `ScratchBuffers.noSessionReply`'s QUESTION, NOT THIS
         // FILE'S — see that method's doc for the discriminator (has this session's λ leg ever recorded
         // a frame) and why the two demand different surfaces. Everything below is what THIS reply still
@@ -581,6 +602,16 @@ export function createReplies(deps: {
         // for `onReply`'s reason — stale frames must not survive under a message saying it broke.
         results.dataset.state = 'idle'
         resetLegs(sessions.entryOf(session).legs, null, null, 'the scratchpad failed')
+        // THE RETAINED READING GOES, AND SO DOES WHAT EVERY TM PANE ON THE BUFFER WAS TOLD OF IT — not only the pane
+        // holding the editor, which `setEditor(null)` below reaches. A split pane showing the same buffer would
+        // otherwise go on reading `running` over a thread that will never answer again. Whole-branch review of the
+        // reduced-files slice.
+        sessions.entryOf(session).tmScratch = null
+        for (const p of panes.ofSession('tm', session)) {
+          const pane = p.pane as TmPane
+          pane.setScratchStatus(null)
+          pane.setScratchValue(null)
+        }
         // `setEditor(null)` TOO — Important finding, whole-branch review before merge, second instance
         // of the same root as the binding-selector one `LambdaPane.setDetached`'s doc now covers. This
         // thread is dead and nothing here retires the scratchpad (only `ScratchBuffers.retire` does

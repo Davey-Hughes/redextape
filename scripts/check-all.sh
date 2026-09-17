@@ -156,6 +156,11 @@ LEGS=(
   "base|clippy|-p redextape-wasm --features ts --all-targets"
   "base|test|-p redextape-wasm --features ts"
   "base|wasm|-p redextape-wasm --lib --features ts"
+  # `probe-no-tm-scratch-ceiling` switches `MAX_SCRATCH_TM_BYTES`' check off for one browser probe, and its doc in
+  # `crates/redextape-wasm/Cargo.toml` says why. It changes which tests `crates/redextape-wasm/src/session.rs` compiles,
+  # so it is a config like `ts`, and a config no leg builds is one whose tests never run.
+  "base|clippy|-p redextape-wasm --features probe-no-tm-scratch-ceiling --all-targets"
+  "base|test|-p redextape-wasm --features probe-no-tm-scratch-ceiling"
   "base|build|-p redextape-native --no-default-features"
   "base|clippy|-p redextape-native --no-default-features --all-targets"
   "base|test|-p redextape-native --no-default-features"

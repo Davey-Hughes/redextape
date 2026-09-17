@@ -79,6 +79,10 @@ type TmScratchHandle = {
   free(): void
 }
 
+type TmValueRunHandle = {
+  free(): void
+}
+
 const PROGRAMS: readonly { name: string; src: string }[] = [
   { name: 'sample', src: 'let x = 40; x + 2' },
   { name: 'list2', src: '[1, 2]' },
@@ -133,12 +137,16 @@ describe('TM fork cost', () => {
       })
 
       const t1 = performance.now()
-      const { scratch } = tmScratch(text) as { scratch: TmScratchHandle | null }
+      const { scratch, value } = tmScratch(text) as {
+        scratch: TmScratchHandle | null
+        value: TmValueRunHandle | null
+      }
       const parseMs = performance.now() - t1
       if (scratch === null) {
         throw new Error(`BLOCKED: ${name}'s emitted .tm text failed to round-trip through tmScratch`)
       }
       scratch.free()
+      value?.free()
 
       // CodeMirror mount cost — see the FIX ROUND doc above. A real `ScratchEditor`, the same class the
       // TM leg's editor is now (T7's rename), mounted with this program's emitted text as its

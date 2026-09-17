@@ -3,7 +3,9 @@
 //!
 //! [`reduce`] applies the stages a caller names to a [`DescribedRun`], checks the result by running it,
 //! and returns the reduced machine with its `version 2` header. [`decode_reduced`] undoes a header's
-//! stages on a run's final tapes and decodes the value. The header's text form belongs to `header.rs`.
+//! stages on a run's final tapes and decodes the value. [`run_caps`] and [`value_of_run`] are what a
+//! reader of a headered file runs it under and reads its value with. The header's text form belongs to
+//! `header.rs`.
 
 use crate::tm::DescribedRun;
 use crate::tm::TmRun;
@@ -11,10 +13,10 @@ use crate::tm::asm::DecodeFailure;
 use crate::tm::build::MAX_MACHINE_STATES;
 use crate::tm::decode::decode_tape_ty_reason;
 use crate::tm::header::{MAX_REDUCED_STEPS, Reduction, Stage, StageKind, TmHeader, is_stage_list};
-use crate::tm::machine::{Machine, Symbol};
+use crate::tm::machine::{Machine, StateId, Symbol};
 use crate::tm::one_way::{to_one_way_within, unzigzag, zigzag};
 use crate::tm::reduction::refusal;
-use crate::tm::sim::{Caps, DEFAULT_CAPS, Tape, simulate_final, simulate_origins};
+use crate::tm::sim::{Caps, DEFAULT_CAPS, Status, Tape, simulate_final, simulate_origins};
 use crate::tm::single_tape::{deinterleave, interleave, layout_collision, to_single_tape_within};
 use crate::tm::two_symbol::{Code, bitify, to_two_symbol_within, unbitify};
 use crate::value::Value;
@@ -163,6 +165,61 @@ pub fn decode_reduced(tapes: &[Tape], h: &TmHeader) -> Result<Value, DecodeFailu
         undone = Some(undo(stage, current).ok_or(DecodeFailure::Mismatch)?);
     }
     decode_tape_ty_reason(undone.as_deref().unwrap_or(tapes), &h.result, &*h.encoding())
+}
+
+/// The caps a headered file runs under: the step count a reduced header records, or `DEFAULT_CAPS`' steps
+/// for a lowered one, and `DEFAULT_CAPS`' cells either way.
+///
+/// **A REDUCED FILE CANNOT RUN UNDER THE DEFAULT STEP CAP.** A reduction multiplies a machine's steps, and
+/// `reduce` records the count its own verifying run took, up to `MAX_REDUCED_STEPS`, so that the file alone
+/// says how long it runs.
+#[must_use]
+pub fn run_caps(h: &TmHeader) -> Caps {
+    match &h.reduction {
+        Some(r) => Caps { steps: r.steps, cells: DEFAULT_CAPS.cells },
+        None => DEFAULT_CAPS,
+    }
+}
+
+/// Why a finished run under a header holds no value. [`value_of_run`] is the one producer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunFailure {
+    /// The run stopped at a cap rather than halting. A caller says whose count it was from the header's
+    /// `reduction`.
+    HitCap,
+    /// A reduced run halted in this state, which is not an accept state. A reduction's run ends in an accept
+    /// state, so these tapes hold no value even when they decode. Never produced under a lowered header.
+    /// The state always exists in the machine, because [`value_of_run`] produces this only when `states.get` finds
+    /// it, so a caller may index the machine's states by it, as `redextape run` does.
+    NotAccept(StateId),
+    /// [`decode_reduced`] refused the tapes, for either of `DecodeFailure`'s causes.
+    Decode(DecodeFailure),
+}
+
+/// The value a finished run's tapes hold under `h`: a capped run first, then a reduced run halting outside an
+/// accept state, then [`decode_reduced`].
+///
+/// **THE ONE DECISION `redextape run` AND THE WEB APP'S TM BUFFERS BOTH READ A VALUE WITH.** Neither restates
+/// these checks; each words the failures for its own surface.
+///
+/// # Errors
+///
+/// [`RunFailure`]: `HitCap` for a capped run, `NotAccept` for a reduced run whose final state exists and is not
+/// an accept state, and `Decode` when [`decode_reduced`] refuses.
+pub fn value_of_run(
+    m: &Machine,
+    h: &TmHeader,
+    tapes: &[Tape],
+    state: StateId,
+    status: Status,
+) -> Result<Value, RunFailure> {
+    if status == Status::HitCap {
+        return Err(RunFailure::HitCap);
+    }
+    if h.reduction.is_some() && m.states.get(state as usize).is_some_and(|s| !s.accept) {
+        return Err(RunFailure::NotAccept(state));
+    }
+    decode_reduced(tapes, h).map_err(RunFailure::Decode)
 }
 
 /// One stage's inverse over a run's tapes, or `None` when they are not tapes that stage produces.
@@ -345,6 +402,78 @@ mod tests {
         let want = decode_tape_ty_reason(tapes, &d.header.result, &*d.header.encoding());
         assert_eq!(want, Ok(Value::Nat(1)), "the fixture decodes");
         assert_eq!(decode_reduced(tapes, &d.header), want);
+    }
+
+    #[test]
+    fn a_reduced_header_runs_under_its_own_step_count() {
+        let caps = |h: &TmHeader| (run_caps(h).steps, run_caps(h).cells);
+        let mut h = TmHeader::new(EncodingKind::Unary, 4, 1, Ty::Nat, vec![]);
+        assert_eq!(caps(&h), (DEFAULT_CAPS.steps, DEFAULT_CAPS.cells), "a lowered header runs under the defaults");
+        h.reduction = Some(Reduction { stages: vec![Stage::Fold], steps: 7 });
+        assert_eq!(caps(&h), (7, DEFAULT_CAPS.cells));
+    }
+
+    /// A lowered run, finished in its accept state, with tapes holding `Nat(1)`: every `value_of_run` test
+    /// below starts here, so the one thing each changes is the one check it is about.
+    fn finished() -> DescribedRun {
+        run_of(walk(&[Move::R], accept()), bank(true))
+    }
+
+    /// `finished`'s header and tapes re-expressed as a two-symbol reduction's, which also decode to `Nat(1)`.
+    fn bits_of(d: &DescribedRun) -> (TmHeader, Vec<Tape>) {
+        let code = Code::from_symbols(&['_', '#', '1']).unwrap();
+        let mut h = d.header.clone();
+        h.reduction = Some(Reduction { stages: vec![Stage::TwoSymbol { symbols: code.symbols().to_vec() }], steps: 1 });
+        let tapes = bitify(&d.header.init(d.machine.tapes), &code).unwrap().iter().map(|b| Tape::new(b)).collect();
+        (h, tapes)
+    }
+
+    const DONE: StateId = 1;
+    const WALKING: StateId = 0;
+
+    #[test]
+    fn a_finished_run_under_either_header_is_its_value() {
+        let d = finished();
+        let TmRun::Ran { tapes } = &d.run else { panic!("run_of always runs") };
+        assert_eq!(value_of_run(&d.machine, &d.header, tapes, DONE, Status::Halted), Ok(Value::Nat(1)));
+        let (h, bits) = bits_of(&d);
+        assert_eq!(value_of_run(&d.machine, &h, &bits, DONE, Status::Halted), Ok(Value::Nat(1)));
+    }
+
+    /// The tapes decode; only the status says the run never finished.
+    #[test]
+    fn a_capped_run_has_no_value_even_when_its_tapes_decode() {
+        let d = finished();
+        let TmRun::Ran { tapes } = &d.run else { panic!("run_of always runs") };
+        assert_eq!(value_of_run(&d.machine, &d.header, tapes, DONE, Status::HitCap), Err(RunFailure::HitCap));
+    }
+
+    /// The bits decode; only the final state says a reduced run went wrong.
+    #[test]
+    fn a_reduced_run_that_stops_outside_an_accept_state_has_no_value() {
+        let d = finished();
+        let (h, bits) = bits_of(&d);
+        assert_eq!(value_of_run(&d.machine, &h, &bits, WALKING, Status::Halted), Err(RunFailure::NotAccept(WALKING)));
+    }
+
+    /// The accept check is `reduce`'s promise about a reduced run. A lowered file reads exactly as it did before
+    /// reductions existed, whatever state it halts in.
+    #[test]
+    fn a_lowered_run_is_not_held_to_an_accept_state() {
+        let d = finished();
+        let TmRun::Ran { tapes } = &d.run else { panic!("run_of always runs") };
+        assert_eq!(value_of_run(&d.machine, &d.header, tapes, WALKING, Status::Halted), Ok(Value::Nat(1)));
+    }
+
+    #[test]
+    fn tapes_the_header_does_not_describe_are_a_decode_failure() {
+        let d = finished();
+        let TmRun::Ran { tapes } = &d.run else { panic!("run_of always runs") };
+        let (h, _bits) = bits_of(&d);
+        assert_eq!(
+            value_of_run(&d.machine, &h, tapes, DONE, Status::Halted),
+            Err(RunFailure::Decode(DecodeFailure::Mismatch))
+        );
     }
 
     /// Each inverse, handed tapes its stage never produces, is a mismatch rather than a guess.

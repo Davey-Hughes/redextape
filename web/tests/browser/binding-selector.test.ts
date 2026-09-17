@@ -53,7 +53,7 @@ function lambdaSession(id: SessionId, label: string, text: string, detached: boo
   const hist = new History<LambdaState>(1_000_000)
   hist.push({ text, spans: [], cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
   const leg: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, timer: null }
-  return { id, label, detached, client: fakeClient(), legs: { lambda: leg }, tmProgram: null }
+  return { id, label, detached, client: fakeClient(), legs: { lambda: leg }, tmProgram: null, tmScratch: null }
 }
 
 /**
@@ -80,6 +80,7 @@ function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
     // source session and its first `compiled` reply. The panes here are built directly rather than by
     // `pane-host.ts`, so nothing in this file reads it.
     tmProgram: null,
+    tmScratch: null,
   }
 }
 

@@ -46,7 +46,7 @@ pub use header::{
 pub use lower_asm::{LowerError, lower_asm, lower_asm_mapped};
 pub use lower_tm::{lower_tm, lower_tm_guarded, lower_tm_mapped, n_slots_of};
 pub use machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
-pub use reduced_file::{ReduceError, decode_reduced, reduce};
+pub use reduced_file::{ReduceError, RunFailure, decode_reduced, reduce, run_caps, value_of_run};
 pub use sim::{
     Caps as TmCaps, DEFAULT_CAPS as TM_DEFAULT_CAPS, Status as TmStatus, Step, Tape, Trace, Watcher, simulate,
     simulate_counts, simulate_final, simulate_trace, simulate_watched,

@@ -24,12 +24,12 @@ use std::path::Path;
 use redextape_test_support::ts_derive_scan::{
     assert_overrides_match_field_nullability, ts_deriving_type_names_in_crate, without_doc_comments,
 };
-use redextape_wasm::{Decoded, LambdaStatus, RunStatus, TmScratchStatus, TmStatus};
+use redextape_wasm::{Decoded, LambdaStatus, ReductionStatus, RunStatus, TmScratchStatus, TmStatus, ValueRun};
 use ts_rs::TS;
 
 /// Every type in this crate carrying `#[ts(export)]`, paired with the file it generates.
 ///
-/// **FIVE, AND `redextape-core`'s TWELVE ARE NOT AMONG THEM.** Each crate's gate covers its own
+/// **SEVEN, AND `redextape-core`'s TWELVE ARE NOT AMONG THEM.** Each crate's gate covers its own
 /// derive sites, because `ts_deriving_type_names_in_crate` scans one crate root and a type declared
 /// in the other one is invisible to it from here. That is the correct division: a core type added
 /// without an entry in core's `generated()` fails core's gate, not this one.
@@ -37,9 +37,11 @@ fn generated() -> Vec<(&'static str, String)> {
     vec![
         ("Decoded", Decoded::export_to_string().unwrap()),
         ("LambdaStatus", LambdaStatus::export_to_string().unwrap()),
+        ("ReductionStatus", ReductionStatus::export_to_string().unwrap()),
         ("RunStatus", RunStatus::export_to_string().unwrap()),
         ("TmScratchStatus", TmScratchStatus::export_to_string().unwrap()),
         ("TmStatus", TmStatus::export_to_string().unwrap()),
+        ("ValueRun", ValueRun::export_to_string().unwrap()),
     ]
 }
 

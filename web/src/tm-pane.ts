@@ -13,11 +13,12 @@ import {
   type SplitChoices,
 } from './pane-chrome'
 import type { Leg } from './protocol'
+import { valueLine } from './results'
 import { ScratchEditor } from './scratch-editor'
 import type { Binding, PaneOption } from './sessions'
 import { centredScrollTop, Follow, focusedRows, highlight, linkedRows, ROW_HEIGHT, StateIndex } from './state-table'
 import { tapeRows } from './tape'
-import type { TmProgram, TmScratchStatus, TmState } from './types'
+import type { TmProgram, TmScratchStatus, TmState, ValueReading } from './types'
 import { visibleWindow } from './virtual-list'
 
 export { ROW_HEIGHT } from './state-table'
@@ -26,10 +27,12 @@ export { ROW_HEIGHT } from './state-table'
 export const OVERSCAN = 4
 
 /**
- * The TM pane: five tape rows, a status line, and the δ function as a virtualized table.
+ * The TM pane: a row per tape, a status line, a value line for a headered TM buffer, and the δ function as a
+ * virtualized table.
  *
- * FIVE ROWS, NOT ONE. §6.1's mockup shows a single tape; the lowering emits `TAPES = 5` and showing
- * them together is the point — you cannot watch STACK move while REG is read otherwise.
+ * EVERY TAPE, NOT ONE. §6.1's mockup shows a single tape; the lowering emits `TAPES = 5` and showing
+ * them together is the point — you cannot watch STACK move while REG is read otherwise. A file reduced
+ * through the single-tape stage has one tape, and so one row, labelled as the tapes it interleaves.
  *
  * THE TABLE IS VIRTUALIZED BECAUSE `list60` IS 127,881 ROWS (design §3.1). The `[1, 2]` fixture's 455
  * rows, which sized this feature until it was measured, is 0.4% of that.
@@ -102,8 +105,38 @@ export class TmPane implements EditablePane {
    * "fabricated state" class of defect `LambdaPane.setDetached`'s own doc records finding, pointed the
    * other way: there the bug was an editor outliving the fact that made it appear, here it would be a
    * sentence outliving the editor it describes.
+   *
+   * **THOSE TWO CLEARS REACH ONLY THE PANE HOLDING THE EDITOR, AND A BUFFER'S STATUS REACHES EVERY PANE ON IT —
+   * Important finding, whole-branch review of the reduced-files slice.** `replies.ts` fans the status out to every
+   * TM pane on the session and `pane-host.ts` seeds a new one from the entry, so a split pane that never held the
+   * editor kept `reduced: single-tape · 241,666 steps` and `value: 2` after being rebound to source, and kept a
+   * running count after its buffer was cooled. More clears follow the session instead of the editor: `pane-host.ts`
+   * reseeds the pane from the session it moves onto, through its selector (the same-leg `rebind` arm) or by a
+   * buffer's cool or retire (`reseedingSlots`), `setDetached(false)` clears on any route back to source, and
+   * `replies.ts`'s `worker-error` arm tells every pane on the buffer.
    */
   #scratch: TmScratchStatus | null = null
+  /**
+   * The value run's latest reading, or `null` before its first report and for a file with no header.
+   *
+   * **SHOWN ONLY WHILE `#scratch` IS SET.** Every caller that sets a status sets a reading with it (`replies.ts`'s
+   * `tm-scratch-compiled` arm, `pane-host.ts`'s seeding), so a reading can never outlive the status it was reported
+   * under onto the screen. The clears that follow the session (`#scratch`'s doc) clear both, because each of them
+   * stands for a session change, after which a seed or a reply sets both again.
+   */
+  #reading: ValueReading | null = null
+  /**
+   * The value line. **`role="status"` FROM CONSTRUCTION**, because it updates while nobody is looking at it, which
+   * is the one kind of text the accessibility list's item 6 (`#link-status`) found announcing nothing.
+   *
+   * **EMPTY RATHER THAN `hidden` WHEN IT HAS NOTHING TO SAY, AND `aria-busy="true"` WHILE ITS RUN IS `Running`** — the
+   * project owner's decision on the whole-branch review of the reduced-files slice. A live region is announced from
+   * the accessibility tree, and `hidden` takes the element out of it, so a line that is unhidden in the same write
+   * that fills it can be missed. While the run is going the line changes after every `VALUE_CHUNK`, and a region that
+   * announced each count would talk over everything else; `aria-busy` holds the announcements until the run ends,
+   * and removing it announces the settled value once. `style.css` keeps the empty line from taking vertical space.
+   */
+  #value: HTMLElement
 
   /**
    * The fork control, or `null` on a pane whose events carry no `detachMachine` handler — design
@@ -116,9 +149,10 @@ export class TmPane implements EditablePane {
    * The last `setForkAvailable` call's two facts, kept so `#refreshDetach` can re-evaluate them on
    * every frame rather than only at the moment they arrived — Critical fix, fix round on Task 9.
    *
-   * **WITHOUT THIS PAIR, THE CONTROL COULD OUTLIVE THE FORK IT JUST PERFORMED.** `setForkAvailable`
-   * has exactly one call site, `replies.ts`'s `setTmProgram`, which fans out over
-   * `panes.ofSession('tm', session)` for the SOURCE session. `scratchpad.fork` rebinds this pane's
+   * **WITHOUT THIS PAIR, THE CONTROL COULD OUTLIVE THE FORK IT JUST PERFORMED.** `replies.ts`'s
+   * `setTmProgram` calls `setForkAvailable` over `panes.ofSession('tm', session)` for the SOURCE session,
+   * and `pane-host.ts`'s `seedTmPane` calls it when a pane is created or moved by a pick, a cool or a
+   * retire, which a fork is not. `scratchpad.fork` rebinds this pane's
    * slot to the new scratch SYNCHRONOUSLY, so the pane leaves that set on the very click that forked
    * it — nothing calls `setForkAvailable` again to say the new session has nothing to fork. Storing
    * the two facts here is what lets a LATER call that has nothing to do with forking — `setDetached`,
@@ -168,6 +202,9 @@ export class TmPane implements EditablePane {
     this.#select = paneSelect(title, on.rebind)
     this.#status = document.createElement('div')
     this.#status.className = 'tm-status'
+    this.#value = document.createElement('div')
+    this.#value.className = 'tm-value'
+    this.#value.setAttribute('role', 'status')
     // THE HOST IS IN THE DOM FROM CONSTRUCTION AND CARRIES NO CLASS UNTIL AN EDITOR IS MOUNTED — same
     // rule as `LambdaPane`'s own `#editorHost`, and that field's doc carries the argument.
     this.#editorHost = document.createElement('div')
@@ -280,6 +317,7 @@ export class TmPane implements EditablePane {
     this.#body.append(
       this.#editorHost,
       this.#status,
+      this.#value,
       this.#tapes,
       this.#toggle,
       this.#reattach,
@@ -412,6 +450,15 @@ export class TmPane implements EditablePane {
     this.#detached = detached
     this.#badge.update(detached)
     if (!detached && this.#editor !== null) this.setEditor(null)
+    // A PANE ON SOURCE DESCRIBES NO BUFFER, so nothing a buffer told it may stay on screen, whichever route moved it
+    // there. Every route that moves a pane onto source reseeds it before this runs (`pane-host.ts`'s `seedTmPane` doc
+    // lists them), so this clear, kept by the project owner's decision, is a second line behind that seed rather than
+    // what tells a moved pane. GUARDED, because `PaneSlot.render` calls this on every frame: once both are `null` it
+    // compares two fields and writes nothing.
+    if (!detached && (this.#scratch !== null || this.#reading !== null)) {
+      this.setScratchStatus(null)
+      this.setScratchValue(null)
+    }
     // THE FORK CONTROL IS THE OTHER THING THAT MOVES WHEN `#detached` DOES — Critical fix, fix round
     // on Task 9. `LambdaPane.setDetached`'s own call to `#refreshDetach` is the model: this is what
     // makes the control withdraw the instant THIS method's own input changes, on the very frame the
@@ -448,6 +495,7 @@ export class TmPane implements EditablePane {
       // this call and the next frame must not see a sentence about a machine this pane no longer shows.
       this.#scratch = null
       this.#drawStatus()
+      this.#drawValue()
       return
     }
     const onEdit = this.#onEdit
@@ -484,6 +532,7 @@ export class TmPane implements EditablePane {
     // must stop announcing that editor's scratch's header the instant it does.
     this.#scratch = null
     this.#drawStatus()
+    this.#drawValue()
     return editor
   }
 
@@ -537,13 +586,36 @@ export class TmPane implements EditablePane {
    * unconditionally on both of its branches, which meant whichever of the two ran next after a
    * `tm-scratch-compiled` reply erased this call's text before a single tape row was drawn — `header:
    * false` is the one thing the design says this pane must surface loudly, and as committed it survived
-   * zero frames. `#drawStatus` is the one place that composes both halves, the same idiom
+   * zero frames. `#drawStatus` is the one place that composes the line's parts, the same idiom
    * `LambdaPane.#refreshClaim`/`#refreshDetach` already use: setters write private fields, one private
    * refresher owns the DOM write.
+   *
+   * **`null` SAYS THE PANE SHOWS NO BUFFER'S FILE** — a rebind onto a session with no reading, or a buffer whose
+   * worker died. It is `setScratchValue(null)`'s twin, and `#scratch`'s doc lists the callers.
    */
-  setScratchStatus(s: TmScratchStatus): void {
+  setScratchStatus(s: TmScratchStatus | null): void {
     this.#scratch = s
     this.#drawStatus()
+  }
+
+  /**
+   * Show the value run's latest reading, or an empty line for `null` — `setScratchStatus`'s shape: store, then let the
+   * one writer of the line compose it.
+   */
+  setScratchValue(reading: ValueReading | null): void {
+    this.#reading = reading
+    this.#drawValue()
+  }
+
+  /**
+   * The one writer of `#value`, its text and its `aria-busy` alike. No scratch, no text: an attached pane shows no
+   * value run. See `#value`'s doc for why the line is emptied rather than hidden.
+   */
+  #drawValue(): void {
+    const line = this.#scratch === null ? null : valueLine(this.#reading)
+    this.#value.textContent = line ?? ''
+    if (line !== null && this.#reading?.run.run === 'Running') this.#value.setAttribute('aria-busy', 'true')
+    else this.#value.removeAttribute('aria-busy')
   }
 
   /**
@@ -660,8 +732,8 @@ export class TmPane implements EditablePane {
   }
 
   /**
-   * The one writer of `#status.textContent` — Critical fix, review of Task 8. Composes two independent
-   * halves that used to be written by three different call sites racing over the same element:
+   * The one writer of `#status.textContent` — Critical fix, review of Task 8. Composes three independent
+   * parts; the first two used to be written by three different call sites racing over the same element:
    *
    *   * THE PER-FRAME HALF — `` `${name} · width ${n(width)}` `` — empty whenever there is no frame or
    *     no program to name a state in, exactly the condition `render`'s own frame-null branch used to
@@ -670,6 +742,8 @@ export class TmPane implements EditablePane {
    *     doc has the argument for why this is worth a sentence: a headerless machine runs from blank
    *     tapes at `MIN_FIELD_WIDTH` rather than the input the user pasted, and nothing else in the app
    *     can say so.
+   *   * THE REDUCED SENTENCE, `` `reduced: ${stages} · ${n(steps)} steps` ``, when `#scratch.reduction` is set: a
+   *     file reduced through one or more stages, whose recorded step count is the run's whole budget.
    *
    * **EMITTED ON THE FRAME-NULL BRANCH TOO**, which is the moment right after a `tm-scratch-compiled`
    * reply — before `resetLegs` has produced a first frame to render — when the sentence matters most.
@@ -688,7 +762,9 @@ export class TmPane implements EditablePane {
         : `${program.states[frame.state]?.name ?? `state ${frame.state}`} · width ${n(program.width)}`
     const scratch = this.#scratch
     const headerless = scratch !== null && !scratch.header ? `no header — blank tapes at width ${n(scratch.width)}` : ''
-    this.#status.textContent = [perFrame, headerless].filter((s) => s !== '').join(' · ')
+    const reduction = scratch?.reduction ?? null
+    const reduced = reduction === null ? '' : `reduced: ${reduction.stages.join(', ')} · ${n(reduction.steps)} steps`
+    this.#status.textContent = [perFrame, headerless, reduced].filter((s) => s !== '').join(' · ')
   }
 
   /**

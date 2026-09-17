@@ -15,8 +15,9 @@ import { renderLayout, syncSizes } from './layout-view'
 import type { PaneChoice, PaneEvents } from './pane-chrome'
 import type { LeafId, PaneCollection, PaneKind } from './panes'
 import { type Leg, ruleCount } from './protocol'
+import type { Detachable } from './scratch'
 import type { SessionId } from './session-client'
-import { type Binding, PaneSlot, type TmCompiled } from './sessions'
+import { type Binding, PaneSlot, type TmCompiled, type TmScratchReading } from './sessions'
 import { TmPane } from './tm-pane'
 
 /**
@@ -50,7 +51,7 @@ import { TmPane } from './tm-pane'
  * lives is a second answer to what the current tree is. This module reads it on every use and writes it
  * through the setter, so `main.ts` remains the one owner even though nothing else there mutates it.
  *
- * THREE MEMBERS, WHICH IS WHAT `main.ts` ACTUALLY CALLS — and the shorter list is a decision rather
+ * ITS MEMBERS ARE WHAT `main.ts` ACTUALLY CALLS — and the shorter list is a decision rather
  * than an oversight. No caller outside this module reaches `hostFor` or `paneEvents`, because both are
  * used only from inside `applyLayout`.
  *
@@ -78,6 +79,11 @@ export type PaneHost = {
   seedHost(id: LeafId, host: HTMLElement): void
   /** Record the session a leaf should start on — see the implementation for who asks and when. */
   seedBinding(leaf: LeafId, session: SessionId): void
+  /**
+   * Every pane's slot, for `ScratchBuffers.cool` and `retire` to move off a buffer, whose `rebind` reseeds a TM pane
+   * as a pick through its selector does — see the implementation.
+   */
+  reseedingSlots(): Detachable[]
 }
 
 /**
@@ -163,6 +169,11 @@ export function createPaneHost(deps: {
    */
   tmProgramOf(session: SessionId): TmCompiled | null
   /**
+   * A TM buffer's retained status and value reading, or `null` for any other session — `tmProgramOf`'s twin, asked
+   * in the same creation pass for the same reason: the replies that carried both have already been and gone.
+   */
+  tmScratchOf(session: SessionId): TmScratchReading | null
+  /**
    * The text and collapse flag a λ pane newly bound to `session` should mount its editor from, or
    * `null` when `session` is not a warm scratch buffer — `mountScratchEditor` below is the one caller.
    *
@@ -196,6 +207,7 @@ export function createPaneHost(deps: {
     writeLayoutStorage,
     draw,
     tmProgramOf,
+    tmScratchOf,
     scratchSeedOf,
   } = deps
 
@@ -258,6 +270,36 @@ export function createPaneHost(deps: {
     if (seed === null) return
     custody.claim(session, leaf)
     pane.setEditor(seed.text, seed.collapsed)
+  }
+
+  /**
+   * Tell a TM pane everything `session` holds for it — the machine, whether it may be forked, and a buffer's status
+   * and value reading — and that it holds nothing where it does not.
+   *
+   * **A PANE COMES TO SHOW A SESSION IN TWO WAYS AFTER THE REPLIES HAVE GONE, AND EACH CALLER IS ONE OF THEM:** it
+   * is created (`applyLayout`'s creation pass, whose comment has the history), or it is moved, through its own
+   * selector (the same-leg `rebind` arm) or by a buffer's cool or retire (`reseedingSlots`). A move is what needs the
+   * `null`s — Important finding, whole-branch review of the reduced-files slice: a split pane rebound from a reduced
+   * buffer to source kept the buffer's sentence, its `value: 2`, and its δ table, because nothing told a pane that
+   * did not hold the editor that the session had changed.
+   *
+   * `setForkAvailable(null, 0)` FOR NO MACHINE, as `replies.ts`'s `setTmProgram` pushes for a compile that produced
+   * none, so a pane rebound onto a session with no machine cannot keep a fork control armed with the text of the
+   * session it left.
+   *
+   * **A BUFFER'S FORK FACTS ARE PUSHED TOO, `tmText: null` BESIDE ITS RULE COUNT**, although `replies.ts` declines to
+   * push them because they would read as "over the cap". Here they are never read as anything. Every buffer's session
+   * is detached, `TmPane.#refreshDetach` shows no control on a detached pane, and every route back to an attached
+   * session reseeds the pane. Skipping them would need to tell a buffer from a source machine over the cap, which
+   * also has `tmText: null`, and that is a question this module does not ask of a session.
+   */
+  const seedTmPane = (pane: TmPane, session: SessionId): void => {
+    const compiled = tmProgramOf(session)
+    pane.setProgram(compiled?.program ?? null, compiled?.tapeNames ?? [])
+    pane.setForkAvailable(compiled?.tmText ?? null, compiled === null ? 0 : ruleCount(compiled.program))
+    const reading = tmScratchOf(session)
+    pane.setScratchStatus(reading?.status ?? null)
+    pane.setScratchValue(reading?.value ?? null)
   }
 
   /**
@@ -614,6 +656,10 @@ export function createPaneHost(deps: {
             const held = moved.takeEditor()
             if (held !== null) custody.hold(leaving, held)
           }
+          // **A TM PANE IS RESEEDED FROM THE SESSION IT MOVES ONTO, WHETHER OR NOT IT HELD THE EDITOR** —
+          // `seedTmPane`'s doc has the finding. BEFORE `base.rebind`, for the reason the handover above is: the
+          // `draw()` inside it then renders the new session's frame against the new session's machine.
+          if (entry?.kind === 'tm') seedTmPane(entry.pane as unknown as TmPane, choice.session)
           base.rebind(choice)
           // **AND THE ARRIVING SIDE GETS AN EDITOR IF ITS BUFFER HAS NONE — the flow design §4.5 names
           // ("warm from the header list, then bind a pane through the selector"), which until this line
@@ -845,7 +891,7 @@ export function createPaneHost(deps: {
         const slot = new PaneSlot('tm', session)
         const pane = new TmPane(host, paneEvents(l.id, slot))
         // **A NEW TM PANE IS SEEDED FROM ITS SESSION, BECAUSE THE REPLY THAT WOULD HAVE TOLD IT HAS
-        // ALREADY BEEN AND GONE.** `TmPane.setProgram` is called from `replies.ts` and from nowhere
+        // ALREADY BEEN AND GONE.** `TmPane.setProgram` was called from `replies.ts` and from nowhere
         // else, so a pane created after its session's last `compiled` reply rendered no tapes, no status
         // line and no δ-rows until something recompiled — the whole machine missing from a pane the user
         // just asked for. Pre-existing rather than this slice's doing, and repaired here rather than at
@@ -863,13 +909,15 @@ export function createPaneHost(deps: {
         //
         // A LAYOUT RESTORED FROM `localStorage` COMES THROUGH THIS LOOP TOO AND IS NOT ONE OF THOSE
         // ROUTES, WHICH IS WORTH SAYING BECAUSE IT LOOKS LIKE ONE. It runs at page load, before anything
-        // has compiled, so the session holds nothing and the seed is a no-op — the case the `null` guard
-        // below exists for, rather than a case it repairs.
+        // has compiled, so the session holds nothing and the seed tells a fresh pane the `null`s it already
+        // holds, rather than repairing anything.
         //
-        // A SESSION WITH NOTHING COMPILED SEEDS NOTHING RATHER THAN PUSHING `null`. `setProgram(null, [])`
-        // is what a session that HAD a machine and lost it tells its panes; a pane one statement old is
-        // already in that state (`#program`, `#index` and `#frame` all start `null`), so the call would
-        // be a redraw of an empty table dressed as a repair.
+        // **A SESSION WITH NOTHING COMPILED NOW PUSHES `null`, WHERE THIS PASS USED TO SEED NOTHING.** A pane one
+        // statement old is already in that state, so here the pushes redraw an empty table and change nothing. They
+        // are made anyway because `seedTmPane` is also the same-leg `rebind` arm's seed and `reseedingSlots`'
+        // seed for a buffer's cool or retire, where the pane is NOT fresh and a skipped `null` left the
+        // previous session's machine and reduced sentence on screen; one function for every route is what
+        // keeps them from disagreeing about what a pane is told.
         //
         // **`setForkAvailable` RIDES THE SAME SEED, AND ITS ABSENCE WAS ITS OWN GAP — Important fix,
         // fix round on Task 9.** `TmCompiled.tmText`'s own doc names the reason this field rides beside
@@ -888,11 +936,7 @@ export function createPaneHost(deps: {
         // `TmPane.setDetached` reaches `#refreshDetach` before the browser ever renders a frame. Calling
         // this any earlier — before `#refreshDetach` existed to correct it — would have handed exactly
         // that split-onto-a-scratch pane the same live-and-throwing control Critical 1 fixed.
-        const compiled = tmProgramOf(session)
-        if (compiled !== null) {
-          pane.setProgram(compiled.program, compiled.tapeNames)
-          pane.setForkAvailable(compiled.tmText, ruleCount(compiled.program))
-        }
+        seedTmPane(pane, session)
         panes.add({ id: l.id, kind: 'tm', slot, pane, host })
       }
     }
@@ -960,6 +1004,37 @@ export function createPaneHost(deps: {
      */
     seedBinding(leaf: LeafId, session: SessionId): void {
       pendingBinding.set(leaf, session)
+    },
+    /**
+     * Every pane's slot as a `Detachable` whose `rebind` tells a TM pane what the session it moves onto holds, before
+     * the slot moves — the same seed, in the same order, as the selector's same-leg `rebind` arm.
+     *
+     * **A BARE `PaneSlot.rebind` MOVES A PANE AND TELLS IT NOTHING** — Important finding, review of the fix that made
+     * the selector reseed. `ScratchBuffers.cool` and `retire` moved every pane off a buffer with one, so a pane that had
+     * visited a reduced buffer through its selector came back to source still drawing the buffer's machine, with a
+     * status naming one of its states. A split rebound onto the buffer read `1,866 rules — too large to open in an
+     * editor`, and the pane that had held the editor offered no fork at all until the next source compile.
+     *
+     * **HERE, BESIDE `seedTmPane`, RATHER THAN IN `main.ts`'S COOL AND RETIRE HANDLERS**, so the module that decides
+     * what a moved TM pane is told decides it for every route that moves one. `ScratchBuffers` already takes each move
+     * as a `Detachable`, so it needs no hook of its own, and `main.ts` hands this to both calls where it handed the
+     * bare slots.
+     *
+     * **`ScratchBuffers.fork` STILL TAKES A BARE SLOT, DELIBERATELY.** Its rebind moves a pane onto a buffer that has
+     * built nothing yet, and that build's `tm-scratch-compiled` reply tells the pane its machine, status and value. A
+     * seed would blank the table until that reply lands. The fork facts the pane keeps are never read on a buffer,
+     * because every buffer's session is detached, and every route back replaces them.
+     */
+    reseedingSlots(): Detachable[] {
+      return panes.all().map((p) => ({
+        get binding() {
+          return p.slot.binding
+        },
+        rebind(session: SessionId): void {
+          if (p.kind === 'tm') seedTmPane(p.pane as unknown as TmPane, session)
+          p.slot.rebind(session)
+        },
+      }))
     },
   }
 }

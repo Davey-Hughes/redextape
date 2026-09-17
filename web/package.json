@@ -17,6 +17,7 @@
     "test:browser": "vitest run --project browser",
     "test:probe": "REDEXTAPE_PROBE=1 vitest run --project browser tests/browser/buffer-affordability.test.ts",
     "test:probe:tm": "REDEXTAPE_PROBE=1 vitest run --project browser tests/browser/tm-fork-cost.test.ts",
+    "test:probe:tm-buffer": "export REDEXTAPE_PROBE_TM_BUFFER_RUN=\"$(date +%s)-$$\" && bash ../scripts/emit-probe-reduced-files.sh && wasm-pack build ../crates/redextape-wasm --release --target web --out-dir ../../target/probe-tm-buffer-wasm -- --features probe-no-tm-scratch-ceiling && printf %s \"$REDEXTAPE_PROBE_TM_BUFFER_RUN\" > ../target/probe-tm-buffer-wasm/run.txt && REDEXTAPE_PROBE=1 vitest run --project browser --reporter=verbose tests/browser/tm-buffer-cost.test.ts",
     "test:probe:floor": "REDEXTAPE_PROBE=1 vitest run --project browser tests/browser/pane-floor.test.ts",
     "test:coverage": "vitest run --coverage"
   },

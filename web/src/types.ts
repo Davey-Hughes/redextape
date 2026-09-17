@@ -29,12 +29,14 @@ import type { Decoded } from '../bindings/Decoded'
 import type { Owner } from '../bindings/Owner'
 import type { Span } from '../bindings/Span'
 import type { TokenClass } from '../bindings/TokenClass'
+import type { ValueRun } from '../bindings/ValueRun'
 
 export type { Cut } from '../bindings/Cut'
 export type { Diagnostic } from '../bindings/Diagnostic'
 export type { LambdaState } from '../bindings/LambdaState'
 export type { LambdaStatus } from '../bindings/LambdaStatus'
 export type { Move } from '../bindings/Move'
+export type { ReductionStatus } from '../bindings/ReductionStatus'
 export type { RuleView } from '../bindings/RuleView'
 export type { RunStatus } from '../bindings/RunStatus'
 export type { Severity } from '../bindings/Severity'
@@ -43,7 +45,7 @@ export type { TmProgram } from '../bindings/TmProgram'
 export type { TmScratchStatus } from '../bindings/TmScratchStatus'
 export type { TmState } from '../bindings/TmState'
 export type { TmStatus } from '../bindings/TmStatus'
-export type { Decoded, Owner, Span, TokenClass }
+export type { Decoded, Owner, Span, TokenClass, ValueRun }
 
 /**
  * Every `TokenClass` variant, in the Rust enum's declaration order.
@@ -102,6 +104,13 @@ type _NoneMissing = Assert<Missing>
 type _NoneExtra = Assert<Extra>
 
 export type Classified = [Span, TokenClass][]
+
+/**
+ * A TM buffer's value run as its latest `tm-value` reply left it: how far the run has got, and its value once it has
+ * ended. The retained reading on a session entry, the pane's own copy of it, and the line composed from it all take
+ * this one shape.
+ */
+export type ValueReading = { readonly run: ValueRun; readonly value: Decoded }
 
 /** The `NodeId` under either claim, or `null`. A consumer that renders the two claims differently must match on the variant instead of calling this. */
 export function ownerNode(o: Owner): number | null {

@@ -114,6 +114,10 @@ pub fn run(
 /// `decode_reduced` undoes its stages before the value is decoded. A `version 1` file is simulated and
 /// decoded as it always was: `decode_reduced` decodes a header with no reduction exactly as
 /// `decode_tape_ty_reason` does.
+///
+/// **THOSE CHECKS ARE `run_caps` AND `value_of_run`, NOT CODE IN THIS FUNCTION.** The web app's TM buffers
+/// read a value through the same two, so the CLI and the browser cannot disagree about one; what stays
+/// here is only the wording of each `RunFailure` for a terminal.
 fn run_artifact_text(
     src: &str,
     label: &str,
@@ -142,37 +146,36 @@ fn run_artifact_text(
     };
     let init = header.init(machine.tapes);
     let defaults = redextape_core::tm::TM_DEFAULT_CAPS;
-    let caps = header
-        .reduction
-        .as_ref()
-        .map_or(defaults, |r| redextape_core::tm::TmCaps { steps: r.steps, cells: defaults.cells });
+    let caps = redextape_core::tm::run_caps(&header);
     let (tapes, state, status, _steps) = redextape_core::tm::simulate_final(&machine, &init, caps);
-    if status == redextape_core::tm::TmStatus::HitCap {
-        match &header.reduction {
-            None => writeln!(
-                err,
-                "error: the machine did not halt within {} steps or {} tape cells (`TM_DEFAULT_CAPS`)",
-                defaults.steps, defaults.cells
-            )?,
-            Some(r) => writeln!(
-                err,
-                "error: the reduced machine did not halt within the {} steps its header records, or {} tape cells",
-                r.steps, defaults.cells
-            )?,
+    let decoded = match redextape_core::tm::value_of_run(&machine, &header, &tapes, state, status) {
+        Err(redextape_core::tm::RunFailure::HitCap) => {
+            match &header.reduction {
+                None => writeln!(
+                    err,
+                    "error: the machine did not halt within {} steps or {} tape cells (`TM_DEFAULT_CAPS`)",
+                    defaults.steps, defaults.cells
+                )?,
+                Some(r) => writeln!(
+                    err,
+                    "error: the reduced machine did not halt within the {} steps its header records, or {} tape cells",
+                    r.steps, defaults.cells
+                )?,
+            }
+            return Ok(Outcome::ProgramFailed);
         }
-        return Ok(Outcome::ProgramFailed);
-    }
-    if header.reduction.is_some()
-        && let Some(halted_in) = machine.states.get(state as usize).filter(|s| !s.accept)
-    {
-        writeln!(
-            err,
-            "error: `{label}`'s reduced machine halted in `{}`, which is not an accept state\n  \
-             a reduction's run ends in an accept state, so these tapes hold no value",
-            halted_in.name
-        )?;
-        return Ok(Outcome::ProgramFailed);
-    }
+        Err(redextape_core::tm::RunFailure::NotAccept(halted_in)) => {
+            writeln!(
+                err,
+                "error: `{label}`'s reduced machine halted in `{}`, which is not an accept state\n  \
+                 a reduction's run ends in an accept state, so these tapes hold no value",
+                machine.states[halted_in as usize].name
+            )?;
+            return Ok(Outcome::ProgramFailed);
+        }
+        Err(redextape_core::tm::RunFailure::Decode(failure)) => Err(failure),
+        Ok(v) => Ok(v),
+    };
     // **TWO CAUSES REACH THIS DECODE, WITH OPPOSITE FAULT ATTRIBUTIONS — SEE `DecodeFailure`.** An
     // earlier revision of this comment argued every failure here was the file's fault, on the strength
     // of `HeaderParts::directive` (D5) already refusing a `result` that is not a value type — true, but
@@ -184,7 +187,7 @@ fn run_artifact_text(
     // the SAME distinction `run_asm_artifact` draws for the identical two causes on the `.asm` form; the
     // two runners used to give it opposite, and each individually wrong, treatments (see that function's
     // doc).
-    report_tm_decode(redextape_core::tm::decode_reduced(&tapes, &header), label, &header.result, out, err)
+    report_tm_decode(decoded, label, &header.result, out, err)
 }
 
 /// `run_artifact_text`'s final `match`, on the two `DecodeFailure` causes — extracted so the MAPPING

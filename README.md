@@ -271,7 +271,7 @@ figures above read 841/716/48 until 2026-08-24, having drifted by 315 tests and 
 from the breakdown entirely. Recount rather than trust them.
 
 **Two tiers sit outside that count**, because neither runs under `cargo nextest`. The wasm boundary
-has **26** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
+has **27** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
 `rust-browser` job. `web/` has **246** of its own across two Vitest projects — 187 in Node for the
 pure modules, 59 in real Chromium for the worker and the app end to end — run by CI's `web` job
 under the coverage gate. Recount with `pnpm test`.

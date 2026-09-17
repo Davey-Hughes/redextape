@@ -378,6 +378,7 @@ async function main(): Promise<EditorView> {
     // scratch types cannot send (§4.1), so the scratchpad's own entry states the same `null` and keeps
     // it. See `SessionEntry.tmProgram` for what reads this and when.
     tmProgram: null,
+    tmScratch: null,
   })
   /**
    * TRANSPORT, BEFORE EITHER PANE — its `events(...)` is what each pane is constructed with, so it has
@@ -696,6 +697,7 @@ async function main(): Promise<EditorView> {
     // need. `entryOf` throws for a session nothing registered, which is the policy `legOf` already sets
     // for the same class of wiring bug.
     tmProgramOf: (session: SessionId) => sessions.entryOf(session).tmProgram,
+    tmScratchOf: (session: SessionId) => sessions.entryOf(session).tmScratch,
     // THE SECOND SESSION QUESTION `pane-host.ts` ASKS, ANSWERED HERE FOR THE SAME REASON AS THE FIRST —
     // this file is where `ScratchBuffers` is, and that module takes a function from a `SessionId` to one
     // value rather than the class itself. `editorSeed` answers `null` for everything that is not a warm
@@ -798,7 +800,8 @@ async function main(): Promise<EditorView> {
    * A THUNK BUILT PER OPEN, NOT A VALUE: `bufferList` calls this on `beforetoggle` (its own doc), so
    * the `ofSession` scan runs once per gesture rather than on every frame that repaints the header.
    *
-   * `panes.all().map(...)` HANDS OVER EVERY SLOT ON THE PAGE, NOT THE λ ONES. `retire` rebinds only the
+   * `paneHost.reseedingSlots()` HANDS OVER EVERY SLOT ON THE PAGE, NOT THE λ ONES, and each one tells its TM pane what
+   * the session it moves onto holds (that member's doc has the finding). `retire` rebinds only the
    * slots whose binding names the buffer it is ending (`scratch.ts`'s own rule, and
    * `tests/node/scratch.test.ts` pins it against a TM slot that must not be dragged home), so filtering
    * here would be this file restating a rule the callee enforces — and getting it wrong would be
@@ -863,10 +866,7 @@ async function main(): Promise<EditorView> {
          * way the cold case above used to. `TmState` (`types.ts`) carries no printable `text` field the
          * way `LambdaState` does — a configuration is tape windows and a state index, not a term to
          * print — so there is no equivalent string to join for a TM row today; it reads `null` (`no term
-         * yet` in the row) rather than inventing one. That is honest rather than a placeholder: nothing
-         * in `replies.ts`'s `onScratchReply` routes a TM buffer's `tm-scratch-compiled` or its
-         * `tm-frames` anywhere yet (that file's own doc), so a TM buffer's `tm` leg never records a frame
-         * for this to read even once one exists to ask.
+         * yet` in the row) rather than inventing one.
          *
          * For what this doc used to claim and why it changed, see the history note under `buffers` —
          * the row builder's `term`.
@@ -879,11 +879,7 @@ async function main(): Promise<EditorView> {
         warm: b.warm,
       })),
     (id) => {
-      scratchpad.retire(
-        id,
-        SOURCE_SESSION,
-        panes.all().map((p) => p.slot),
-      )
+      scratchpad.retire(id, SOURCE_SESSION, paneHost.reseedingSlots())
       /**
        * **A RETIRE ANSWERS THE CAP REFUSAL, SO THE REFUSAL STOPS BEING TRUE HERE — found by driving the
        * app, not by a test.** The message reads — quoting `#refuseAtCap`'s message template rather than
@@ -931,14 +927,10 @@ async function main(): Promise<EditorView> {
           // **THE SLOTS ARGUMENT IS WHAT MAKES THE INVARIANT TRUE, AND THIS IS ITS ONLY REAL CALL
           // SITE.** `cool` rebinds every pane on the buffer it sleeps, so "a cold buffer has no panes
           // bound to it" is a property of what this line passes, not of `ScratchBuffers`. Hand it the
-          // same set the retire handler twenty lines above hands `retire` — every slot on the page —
+          // same set the retire handler above hands `retire` — every slot on the page —
           // because a partial set strands exactly the panes it omits: `entryOf` throws for a session the
           // registry no longer holds, and `draw()` resolves through it on the next frame.
-          scratchpad.cool(
-            id,
-            SOURCE_SESSION,
-            panes.all().map((p) => p.slot),
-          )
+          scratchpad.cool(id, SOURCE_SESSION, paneHost.reseedingSlots())
         }
       } catch (e) {
         if (!(e instanceof BufferCapReached)) throw e

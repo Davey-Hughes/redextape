@@ -142,7 +142,7 @@ describe('the TM pane editor region', () => {
 
     // 1. Immediately after a headerless scratch's `tm-scratch-compiled` reply, before any frame exists —
     // `render(null, …)` is what a real page draws in this gap, and the sentence must survive it.
-    pane.setScratchStatus({ available: true, reason: '', width: 4, run: 'Running', header: false })
+    pane.setScratchStatus({ available: true, reason: '', width: 4, run: 'Running', header: false, reduction: null })
     pane.render(null, CONTROLS)
     expect(host.textContent).toMatch(/no header/i)
     expect(host.textContent).toMatch(/blank tapes/i)
@@ -157,17 +157,97 @@ describe('the TM pane editor region', () => {
     expect(host.textContent).toContain(`width ${PROGRAM.width}`)
 
     // 3. A later reply that fixes the header must clear the sentence, and the per-frame line survives.
-    pane.setScratchStatus({ available: true, reason: '', width: 64, run: 'Running', header: true })
+    pane.setScratchStatus({ available: true, reason: '', width: 64, run: 'Running', header: true, reduction: null })
     pane.render(FRAME, CONTROLS)
     expect(host.textContent).not.toMatch(/no header/i)
     expect(host.textContent).toContain(PROGRAM.states[0]?.name)
 
     // 4. A pane that gives its editor up must stop narrating a scratch it no longer shows — the same
     // fabricated-state defect `LambdaPane.setDetached`'s own doc records, pointed the other way.
-    pane.setScratchStatus({ available: true, reason: '', width: 4, run: 'Running', header: false })
+    pane.setScratchStatus({ available: true, reason: '', width: 4, run: 'Running', header: false, reduction: null })
     pane.setEditor(null)
     pane.render(FRAME, CONTROLS)
     expect(host.textContent).not.toMatch(/no header/i)
+  })
+
+  /**
+   * A reduced file's stages and recorded steps are said in the status line, and the value run's reading is a line of
+   * its own, busy while the run goes and announced once it settles. Both go with the editor, for `#scratch`'s reason.
+   *
+   * **THE LINE IS EMPTY, NOT HIDDEN, WHEN IT HAS NOTHING TO SAY**, so it stays in the accessibility tree
+   * (`TmPane`'s `#value` doc). The next test holds it to taking no space.
+   */
+  it('says a reduced file is reduced, reads its value, and forgets both with the editor', () => {
+    const { pane, host } = mountPane()
+    pane.setEditor('tapes 1\n')
+    pane.setScratchStatus({
+      available: true,
+      reason: '',
+      width: 8,
+      run: 'Running',
+      header: true,
+      reduction: { stages: ['fold', 'single-tape'], steps: 910_258 },
+    })
+    pane.render(null, CONTROLS)
+    expect(host.querySelector('.tm-status')?.textContent).toContain('reduced: fold, single-tape · 910,258 steps')
+
+    const line = () => host.querySelector<HTMLElement>('.tm-value')
+    expect(line()?.getAttribute('role')).toBe('status')
+    expect(line()?.hidden).toBe(false)
+    expect(line()?.textContent).toBe('')
+    expect(line()?.hasAttribute('aria-busy')).toBe(false)
+
+    pane.setScratchValue({ run: { run: 'Running', steps: 500_000, cap: 910_258 }, value: 'Unfinished' })
+    expect(line()?.textContent).toBe('value: running · 500,000 of 910,258 steps')
+    expect(line()?.getAttribute('aria-busy')).toBe('true')
+
+    pane.setScratchValue({ run: { run: 'Ended', steps: 910_258, cap: 910_258 }, value: { Value: { text: '2' } } })
+    pane.render(FRAME, CONTROLS)
+    expect(line()?.textContent).toBe('value: 2')
+    expect(line()?.hasAttribute('aria-busy')).toBe(false)
+
+    // A RUNNING READING GOES WITH THE EDITOR TOO, AND TAKES ITS `aria-busy` WITH IT, or a screen reader would hold
+    // announcements for a run this pane no longer shows.
+    pane.setScratchStatus({
+      available: true,
+      reason: '',
+      width: 8,
+      run: 'Running',
+      header: true,
+      reduction: { stages: ['fold', 'single-tape'], steps: 910_258 },
+    })
+    pane.setScratchValue({ run: { run: 'Running', steps: 500_000, cap: 910_258 }, value: 'Unfinished' })
+    expect(line()?.getAttribute('aria-busy')).toBe('true')
+    pane.setEditor(null)
+    expect(line()?.hidden).toBe(false)
+    expect(line()?.textContent).toBe('')
+    expect(line()?.hasAttribute('aria-busy')).toBe(false)
+    expect(host.querySelector('.tm-status')?.textContent).not.toContain('reduced')
+  })
+
+  /**
+   * **AN EMPTY VALUE LINE LEAVES THE PANE LAID OUT AS IF IT WERE NOT THERE.** The reference is the same line with
+   * `display: none`, which is what the line may not use (`TmPane`'s `#value` doc) and is exactly "no space".
+   * `style.css` is loaded for this tier by `tests/browser/setup.ts`, so the margins measured are the app's.
+   */
+  it('takes no vertical space with an empty value line', () => {
+    const { pane, host } = mountPane()
+    pane.setProgram(PROGRAM, ['TAPE'])
+    pane.setScratchStatus({ available: true, reason: '', width: 8, run: 'Running', header: true, reduction: null })
+    pane.render(FRAME, CONTROLS)
+    const at = (selector: string) => host.querySelector<HTMLElement>(selector)?.getBoundingClientRect()
+    const gap = () => (at('.tapes')?.top ?? Number.NaN) - (at('.tm-status')?.bottom ?? Number.NaN)
+    const line = host.querySelector<HTMLElement>('.tm-value')
+    if (line === null) throw new Error('no value line')
+
+    const empty = gap()
+    line.style.display = 'none'
+    const absent = gap()
+    line.style.display = ''
+    expect(empty).toBe(absent)
+
+    pane.setScratchValue({ run: { run: 'Ended', steps: 1, cap: 1 }, value: { Value: { text: '2' } } })
+    expect(gap()).toBeGreaterThan(absent)
   })
 
   /**

@@ -17733,7 +17733,7 @@ The reduced files are large because a reduction is: `5 - 3` through all three st
 
 ##### WHAT THIS DID NOT CLOSE
 
-- **The web and wasm tiers changed behaviour without changing code.** `parse_tm_full` now ACCEPTS `version 2`, so the wasm TM scratch pane will build a leg from a reduced file instead of refusing it at the `version` line. It never decodes a value, so nothing reads wrong — but full web support for reduced files is its own slice.
+- **The web and wasm tiers changed behaviour without changing code.** `parse_tm_full` now ACCEPTS `version 2`, so the wasm TM scratch pane will build a leg from a reduced file instead of refusing it at the `version` line. It never decodes a value, so nothing reads wrong — but full web support for reduced files ~~is its own slice~~. **CLOSED 2026-09-17 (`web-reduced-files`):** a TM buffer reads a headered file's value as `redextape run` does, names its reduction and labels a single-tape file's tapes, and refuses text over 6,100,000 bytes before parsing it.
 - **`PAD_MARGIN` 0 is measured over this corpus, not proved from the construction.** The failure mode is safe by construction rather than by luck: a head that leaves the skeleton halts in `OVERFLOW`, which is not an accept state, so a short skeleton is `Unverified` and no file is written. A machine whose heads travel further makes the producer REFUSE, never write a wrong file.
 - **`reduce` verifies the in-memory machine and header, not the printed FILE.** The print → parse → re-run link sits outside the verification, covered by seven round-trip subsets and two command-line ones. That is where the `;`-and-whitespace precondition lives.
 - **`bitify`'s `None` half of `ReduceError::Layout` is unreachable from `reduce`** and has no test, because the code is built from the tapes it encodes.
@@ -17758,3 +17758,116 @@ The reduced files are large because a reduction is: `5 - 3` through all three st
 The step, byte and timing figures in COST are the plan's own, measured at the scratch commits it names; the table above re-runs everything that is a property of the shipped tree. The attribution gate reads 503 where the plan's Task 5 step expected 494. Task 5 itself adds none — 502 appeared before its patch was applied, the +8 being Task 4's fix commit citing the stage that raises each refusal; the two review-fix commits then net +1.
 
 **The doc-figures gate moved 42 → 43 by doing its job.** Rewording the README's line-count sentence moved two cross-reference locators off the clauses they were anchored to, and the gate reported them as NOT FOUND rather than silently skipping them — which is what its own header says that rule is for. Re-anchoring both added a row for asm's 165 lines that had never been checked.
+#### TM BUFFERS RUN REDUCED FILES: A HEADERED `.tm` FILE IN A TM BUFFER SAYS IT IS REDUCED, LABELS ITS TAPES, AND READS ITS VALUE AS `redextape run` DOES, FROM A SECOND RUN THAT RECORDS NO FRAMES AND YIELDS EVERY 500,000 STEPS, AND A BUFFER REFUSES TEXT OVER 6,100,000 BYTES BEFORE PARSING IT. THE FIRST DEFECT REVIEW FOUND WAS A RE-ENTRY FLAG THE SPEC ITSELF CALLED FOR, AND THE WHOLE-BRANCH REVIEW FOUND A SPLIT PANE READING `value: 2` BESIDE THE SOURCE PROGRAM AFTER EVERY TASK REVIEW HAD PASSED — WHOSE FIRST FIX THEN BROKE THE FORK CONTROL ON COOL AND RETIRE. FIXING THE MINOR FINDINGS BEFORE MERGE SHOWED THE PROBE'S MOUNT COLUMN TIMES ANIMATION FRAMES, NOT THE EDITOR (2026-09-17, branch `web-reduced-files`, `bbc35ba..90b6d71`, 26 commits including this entry's first version, plus this revision)
+
+**This closes `reduced-tm-header`'s "full web support for reduced files is its own slice".** Since that branch a TM buffer built a leg from a reduced file, but it ran the leg at `TM_DEFAULT_CAPS`' 5,000,000 steps, labelled a one-tape file's tape `REG`, and decoded no value at all.
+
+##### WHAT A TM BUFFER DOES NOW
+
+- **The value is decided once, in core.** `run_caps` and `value_of_run`, beside `decode_reduced` in `tm/reduced_file.rs`, hold what `run_artifact_text` did inline: the header's recorded step count as the cap, an accept state for a reduced run, then the decode. The CLI calls them, and no CLI message, exit code or snapshot changed.
+- **The value run is a handle of its own.** `tmScratch` answers `{ diagnostics, scratch, value }`, and `value` is a `TmValueRun` exactly when the text parsed and has a header. It walks a second cursor over the scratch's own `Rc<Machine>` under `run_caps`, records nothing, and maps `value_of_run` onto the existing `Decoded`. The spec's first version put `tmValue` on `TmScratch`, the shape the 5d-i design's decision 2 rejects; the spec was amended before any code, and both decision-2 pins in `tests/browser.rs` pass unedited.
+- **The worker runs it after the first recording**, `VALUE_CHUNK` (500,000) steps at a time, posting `tm-value` after each chunk and yielding between. Every chunk opens with the generation check, so an edit supersedes a run within one chunk.
+- **The pane says so.** The status line gains `reduced: single-tape · 241,666 steps`, a file with a single-tape stage labels its one tape `k tapes, interleaved`, `5 tapes, interleaved` for the fixture, and a line under the status reads `value: running · N of M steps`, then `value: 2` or the decode's fault. The line has `role="status"` and `aria-busy="true"` while its run is going, and it is present but empty when there is nothing to say.
+- **A TM buffer refuses text over `MAX_SCRATCH_TM_BYTES`, 6,100,000 bytes, before parsing it**, headered or not, with one diagnostic: "this file is N bytes; a TM buffer builds files up to 6,100,000 bytes — `redextape run` has no such limit".
+
+##### WHAT WAS MEASURED
+
+**Both constants are measured by a probe this branch commits.** `cd web && pnpm run test:probe:tm-buffer` picks a run stamp, emits reduced files under `target/`, builds the wasm crate with the `probe-no-tm-scratch-ceiling` feature into `target/probe-tm-buffer-wasm/`, and prices each file's build: the clone to the worker, the parse, the `tmProgram` projection and the clone back, against the 250 ms `MAX_FORK_RULES` was measured against. It refuses a corpus or a build that does not carry its own run's stamp. The constants' docs carry one run at the commit that added `web/tests/browser/provided-context.d.ts`, starting at a load average of 1.32:
+
+| what | reading |
+| --- | --- |
+| largest file under 250 ms | 6,053,591 bytes, 223.1 ms; its seven passes 215.6 to 231.9 ms |
+| smallest file over it | 6,617,969 bytes, 274.8 ms |
+| the value run's step rate | 63.9 to 72.4 million steps a second, over twelve files |
+| one 500,000-step chunk | 7.6 ms median, 7.8 ms max; the next doubling 15.2 ms |
+
+- **The ceiling is a band, not a line.** Three runs have timed the 6,053,591-byte file: 209.7 ms in the throwaway probe the plan was written from, 240.3 ms in the committed probe's first run, which started at a load average of 2.54, and 223.1 ms in this one. Each put that file under 250 ms and the 6,617,969-byte file over it, so `MAX_SCRATCH_TM_BYTES` stayed at 6,100,000.
+- **Bytes are the unit because they are known before the parse, not because they predict the cost.** In the same run `head([1, 2])` through `fold, two-symbol` is 5,351,636 bytes and projected in 111.6 ms, and through `single-tape, two-symbol` 6,053,591 bytes and 92.6 ms.
+- **The probe's `mount` column does not price the editor.** It waits for two animation frames, and in the cited run it read 29.5 to 31.3 ms for every file under 300,000 bytes and 12.9 to 23.6 ms for every file over 7,000,000; across the 65 files its correlation with size is -0.91. The first run timed the mount once per file and read 18.0 ms at 15,451,499 bytes, which looked like the editor's cost for the largest file. So no committed instrument measures the editor's cost of holding a large paste, which the spec asked the plan to measure as a main-thread long task.
+- **The first value waits on the first recording**, which the spec asked the plan to measure and the plan did not. Pasted into a TM buffer seven times on a release build, the fixture's reduced status appeared 309.8 to 314.7 ms after the paste, most of that `EDITOR_DEBOUNCE_MS`' 300 ms, and `value: 2` appeared 776.2 to 876.8 ms after the status, 824.3 ms at the median. The worker starts the value run only once the first recording ends, and the run itself is 241,666 steps, under 4 ms at the probe's slowest rate. The order is deliberate: frames are what the pane draws first.
+
+##### WHAT BUILDING THE PLAN FOUND
+
+Every task's end state was built and committed on a scratch branch before the plan was written, and each task's patch is embedded in the plan verbatim, less Task 6's fixture, which Task 6 regenerates and checks by hash.
+
+- **The status is retained and seeded, not only the value.** A split of a TM pane showing a reduced file must show the reduced sentence, which lives in the status — and the status had never been retained, so a split of a headerless buffer's pane had never shown its headerless sentence either.
+- **The supersession test supersedes one spinner with another.** The fixture's run is shorter than one chunk, so a stale loop finishes the new run itself and the right value arrives by accident: with the fixture as the second build, the generation sabotage stayed green. A first spinner recording 50,000,000 steps passed on a dev build and timed out on a release build, where it finished before the first poll; the spinners record 1,000,000,000 and 999,999,999.
+- **A crates-only commit skips the web typecheck.** Task 2's new `TmScratchStatus` field breaks three web test literals that a commit touching only `crates/` never typechecks, so Task 2 fixes them in the same commit.
+- **CI's web coverage run does not fit under an 8 GiB cap.** `pnpm run test:coverage` peaked at 8.5 GiB, and under 8 GiB a pipe into `grep` hid the kill as a gate that printed nothing.
+
+##### WHAT REVIEW FOUND
+
+- **The first defect was the spec's.** Its worker section gave the value loop a re-entry flag, "as `recording.tm` does for `recordTm`". Task 4's review found nothing reset it for a new build: a value run suspended at a yield held it, and a new build whose first recording finished without yielding was turned away and never got a value. Reproduced in Chrome by pasting a one-step headered machine over a running spinner. Davey chose to remove the flag; the generation check each chunk opens with is what supersedes a run. `HALTS_AT_ONCE` pins it, and putting the flag back reddens that test.
+- **The whole-branch review found a false value on screen after every task review had passed.** A TM pane without the editor kept a buffer's sentence and value after leaving the buffer: a split rebound to the source program read `value: 2` beside the source machine, and a split whose buffer was cooled kept `running`. The value line inherited an older gap — a same-leg rebind reseeded nothing on a TM pane, which the plan had filed as older than this slice — and turned it into a wrong value. Davey chose to reseed a TM pane's program, status and value from its new session on every same-leg rebind, and to have a pane moved onto the source program also clear whatever a buffer told it.
+- **That fix broke the fork control on cool and retire, and the re-review caught it in Chrome.** Cool and retire rebound with a bare `slot.rebind(home)`, so they never reseeded: after a selector visit to a buffer and a cool, both panes kept the buffer's machine, and, new with the fix, the split's fork control read "disabled: 1,866 rules — too large". `PaneHost.reseedingSlots()` now wraps the slots `main.ts` hands cool and retire.
+- **The committed probe could not price the side of the ceiling it was for.** `tmScratch` refuses a file over the ceiling before parsing it, so a probe on the product package could time only files under it. Davey chose a probe-only cargo feature over a parameter at the product boundary; the probe's script builds it into `target/`, never `pkg/`.
+- **Docs citing the probe's commit would have dangled after the squash.** The constants' docs named a branch SHA; they now name the commit that added a file, which is a branch commit before the merge and the squash commit after it.
+
+##### WHAT FIXING THE MINOR FINDINGS FOUND
+
+CI passed on the PR at its first head, `46f2b9a`, and Davey chose to fix the whole-branch review's minor findings before merging. A review of those fixes then found two of their own sentences wrong.
+
+- **The probe feature's test ran in no gate.** `scripts/check-all.sh` now gives `-p redextape-wasm --features probe-no-tm-scratch-ceiling` a clippy leg and a test leg; removing the `cfg!` switch reddens exactly `the_probe_build_parses_text_over_the_ceiling` there.
+- **A decode that runs out of budget had no test.** `TmValueRun::value`'s failure arms moved into `failure_value`, which a test calls with `DecodeFailure::BudgetExhausted` directly, as `redextape run`'s test calls `report_tm_decode`; mapping it to `Undecodable` reddens exactly that test. No test decodes a file far enough to reach `MAX_DECODE_NODES`.
+- **The probe counted UTF-16 code units, timed the mount once, and priced whatever it found under `target/`.** It now counts UTF-8 bytes, which is what `src.len()` counts, takes the mount's median of seven, and stops `BLOCKED` unless the corpus and the build both carry the run stamp its script hands it through the browser project's `provide`. Both refusals were run: no stamp, and a stale stamp under a live one. A stamp file named `run` made `import.meta.glob` throw `Expected pattern to be a non-empty string`; named `run.txt`, it resolves.
+- **Taking the mount's median is what showed the column is frame timing** (above). The fix commit's doc said "over this corpus the mount does not grow with the text"; review measured the correlation, and the doc now gives the readings and says the probe does not price the editor.
+- **Rewriting the plan to drop hashes the squash does not keep added a false sentence:** "on a throwaway scratch branch, one commit per task". That branch held seven commits for six tasks.
+- Smaller: `main.ts`'s "twenty lines above" was 51 lines; a `vite.config.ts` comment named `PROBE_EXCLUDE`'s doc, which does not exist, where `PROBE_FILES`' does; and a `check-all.sh` comment said the feature compiles the size check out, where `cfg!` switches it off.
+
+##### SABOTAGES
+
+Tasks 1 to 6 planned thirty rows, and each reddened what it aimed at. Three results are worth keeping, and so are the two rows from the fix rounds that stayed green.
+
+- **T1-S2, the accept check applied to lowered runs, reddens only core's `a_lowered_run_is_not_held_to_an_accept_state`.** The CLI and wasm suites stay green.
+- **T6-S1, the value loop without its generation check, reddens for a reason the spec did not predict.** With the flag gone, the stale loop steps the NEW build's run in 500,000-step chunks, and the new build's first recording yields between them, so its own loop never starts within the test's 10 s wait. The row first failed to apply at all: removing the flag dedented the guard line, and `sab.py` refuses anything but exactly one occurrence.
+- **The spec's S8 could not be written.** "`TmValueRun` steps the scratch's own cursor" is not an edit this design can express, because the value run owns its cursor by type; `running_the_value_run_out_leaves_the_scratch_at_step_zero` still pins the property, and T2-S3 took the row.
+- **Disabling `setDetached(false)`'s clear stayed green, 33 tests passing,** once every app route onto source reseeded, so no app test could show the clear does anything. A pane-level test was added, and the same sabotage reddens it.
+- **Deleting the `.tm-value:empty` CSS rule stays green**, because the rule is not load-bearing in today's block layout. The layout test holds the gap itself, which is the property, and the CSS comment says so.
+
+##### COST
+
+38 files, 5,123 insertions and 173 deletions against main, excluding Markdown; 2,781 of the insertions are the checked-in fixture, `5 - 3` reduced through `single-tape`. The one `Cargo.toml` change adds the probe's feature, so no new dependency. The branch adds 24 Rust tests and removes none, and the workspace suite goes from 1,744 to 1,766: the other two are the probe feature's test, which runs only in its own `check-all.sh` leg, and one wasm browser test.
+
+##### SENTENCES THIS BRANCH CHANGES
+
+- `reduced-tm-header`'s **"full web support for reduced files is its own slice"** is closed, and annotated in place.
+- **The spec is amended before any code,** for the value run's handle, and once more to name `bbc35ba`'s code where it named a spec commit. It still gives the value loop a re-entry flag, a chunk of "about 10 ms", S8 as written, and a ceiling test over corpus files; the plan's *Decisions and spec corrections found while planning* and this entry record where the code departs.
+- **The plan's Task 4 patch still carries the flag,** because review found it after the plan was written. **The plan named the scratch branches' commits by hash;** those branches are local and deleted after the merge, so it now names them by task.
+- **Some commit messages on this branch carry sentences later found false**, and history is not rewritten: `a4ca49e`'s says the mount does not grow with the text over this corpus; `0b9fa74`'s says the tests' section comment said no gate builds the feature, where it said `--all-features` turns it on, and that the feature gets "the same pair of rows" as `ts`, which has three on this crate; and `d4b5668`'s says Vite's glob throws on an extension-less path, from one path. The squash merge carries the PR description instead.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Every TM buffer build failure still reads "fork failed —", and the TM editor's gutter still shows no diagnostic**, so the size refusal reaches a user worded as a failed fork. `noSessionReply` asks whether the buffer's λ leg recorded a frame, which a TM buffer's never does. Older than this slice.
+- **`Session::tm_value` still answers `Undecodable` for both of `DecodeFailure`'s causes**, where a buffer's value run now tells them apart.
+- **No committed instrument measures the editor's cost of holding a large paste**, and no test decodes a file far enough to reach `MAX_DECODE_NODES`, in the web or the CLI.
+- **`tm-fork-cost.test.ts`, an older probe, still prints `bytes=` from a string's `length`**, which counts UTF-16 code units.
+- **Producing a reduced file in the browser**, and the accessibility pass beyond this line's `role="status"` and `aria-busy`.
+
+##### VERIFICATION
+
+**Every count this entry quotes, with what produces it.** Run on 2026-09-17. The gates ran at `cc6df32`, and `90b6d71` changes only comments and Markdown after it.
+
+| figure | command | result |
+| --- | --- | --- |
+| workspace, all three configs | `scripts/check-all.sh`, at `cc6df32` | exit 0, "all configs green — base, LLVM and browser"; base 1,766 passed, 33 skipped; the probe feature's leg 84 passed |
+| slow tier | `scripts/check-slow.sh`, at `cc6df32` | exit 0, 33 passed, 0 failed |
+| Rust coverage floor | `cargo llvm-cov nextest --workspace --fail-under-lines 90`, at `cc6df32` | exit 0, 1,766 passed; lines 95.69% |
+| web, as CI runs it | `pnpm run build:wasm`, `pnpm exec biome ci --error-on-warnings`, `pnpm run typecheck`, `pnpm run test:coverage`, `pnpm run build:app`, at `cc6df32` | each exit 0; 76 files, 735 tests |
+| comments only | `git diff cc6df32 90b6d71 -- . ':!*.md'`, filtered to changed lines that are not comments | none |
+| hygiene gates | `scripts/check-text-bytes.sh`, `check-citations.sh`, `check-attributions.sh`, `check-doc-figures.sh`, `check-shared-docs.sh`, `check-lua.sh`, each with `--self-test` and then alone, at `90b6d71` | each exit 0; 484 files, 510 attribution sites, 43 figures, 12 shared regions, 0 violations |
+| size | `git diff --shortstat bbc35ba..90b6d71 -- . ':!*.md'` | 38 files, 5,123 insertions, 173 deletions |
+| the fixture's share | `git diff --stat bbc35ba..90b6d71 -- crates/redextape-core/tests/fixtures/` | 2,781 insertions |
+| dependencies | `git diff --name-only bbc35ba..90b6d71 -- '*Cargo.toml' Cargo.lock web/package.json web/pnpm-lock.yaml` | `crates/redextape-wasm/Cargo.toml`, the probe's feature, and `web/package.json`, the probe's script |
+| tests added | `git diff bbc35ba..90b6d71 -- '*.rs' \| grep -c -E '^\+\s*#\[(test\|wasm_bindgen_test)\]'`, and `^-` for removed | 24 added, 0 removed |
+| the probe | `cd web && pnpm run test:probe:tm-buffer`, at `d4b5668`, in a `systemd-run --user` unit with `MemoryMax=16G` | exit 0; 65 files priced; the bracket, rate and chunk rows above; load average 1.32 at the start and 1.45 at the end |
+| the mount column | Pearson's r over that run's 65 `SIZE` rows, bytes against `mount`, with Python's `statistics.correlation` | -0.91; 25 files under 300,000 bytes at 29.5 to 31.3 ms, 6 over 7,000,000 at 12.9 to 23.6 ms |
+| the refusals | the probe run by path with `REDEXTAPE_PROBE=1` and no stamp, then with `run.txt` stamps `old-run` under `REDEXTAPE_PROBE_TM_BUFFER_RUN=new-run` | both exit 1, `BLOCKED` before pricing anything |
+| the two new sabotages | the `cfg!` switch removed, then `BudgetExhausted` mapped to `Undecodable`, each under `cargo nextest run --no-fail-fast -p redextape-wasm`, the first with the feature | 83 run and 1 failed; 85 run and 1 failed; each the one named test |
+| the first value | a throwaway browser test pasting the fixture seven times over a one-step headered machine, timing both lines with a `MutationObserver`, under `pnpm exec vitest run --reporter=verbose` after `pnpm run build:wasm`, at `cc6df32` | status 309.8 to 314.7 ms; value 776.2 to 876.8 ms after it, median 824.3 ms; load average 4.02 at the start and 3.62 at the end |
+
+The workspace's 1,744 before this branch is the plan's baseline, on `bbc35ba` with the spec committed on top.
+
+- **Recorded, not re-run:**
+  - 240.3 ms, 2.54 and 18.0 ms are the constants' docs as they stood at `fae4996`, from the committed probe's first run;
+  - 209.7 ms and the planning findings are the plan's *Figures, measured while planning* and *Findings*;
+  - the review findings, Davey's decisions and the other sabotage rows are the branch's review records and task reports, kept outside the tree.

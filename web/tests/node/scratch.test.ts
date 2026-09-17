@@ -149,7 +149,15 @@ function sourceEntry(text = 'from source'): SessionEntry {
   hist.push(lambdaFrame(text), 1)
   const lambda: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, timer: null }
   // NO MACHINE — nothing here sends a `compiled` reply, which is the only thing that retains one.
-  return { id: SOURCE, label: 'source', detached: false, client: fakeClient(), legs: { lambda }, tmProgram: null }
+  return {
+    id: SOURCE,
+    label: 'source',
+    detached: false,
+    client: fakeClient(),
+    legs: { lambda },
+    tmProgram: null,
+    tmScratch: null,
+  }
 }
 
 describe('ScratchBuffers.fork', () => {

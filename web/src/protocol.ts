@@ -9,6 +9,7 @@ import type {
   TmScratchStatus,
   TmState,
   TmStatus,
+  ValueRun,
 } from './types'
 
 /**
@@ -236,6 +237,24 @@ export const FRAME_OVERHEAD_BYTES = 64
 export const EXTEND_STEPS = 100_000
 export const EXTEND_CELLS = 100_000
 
+/**
+ * Steps a TM buffer's value run takes between yields, so an edit waits at most one chunk to supersede it.
+ *
+ * **MEASURED, NOT CHOSEN.** `web/tests/browser/tm-buffer-cost.test.ts` measures the step rate this is set from, and
+ * one command runs that probe:
+ *
+ *     cd web && pnpm run test:probe:tm-buffer
+ *
+ * **THE READINGS ARE ONE RUN OF THAT COMMAND AT THE COMMIT THAT ADDED THE PROBE'S RUN STAMP**
+ * (`web/tests/browser/provided-context.d.ts`), on an AMD Ryzen 9 9950X3D, starting at a load average of 1.32, in the
+ * probe's release build in the browser test tier's headless Chromium. That build skips `MAX_SCRATCH_TM_BYTES`' size
+ * check, which runs once before a parse and never inside a chunk. Twelve reduced files whose recorded runs took
+ * 1,242,325 to 185,898,088 steps ran out in chunks of this size at 63.9 to 72.4 million steps a second. On
+ * `let x = 40; x + 2` reduced through `single-tape`, fifteen chunks of 500,000 steps took 7.6 ms at the median and
+ * 7.8 ms at most. One more doubling measured 15.2 ms at the median, past the 10 ms the design allows a chunk.
+ */
+export const VALUE_CHUNK = 500_000
+
 export type Leg = 'lambda' | 'tm'
 
 /**
@@ -349,9 +368,11 @@ export type RunRequest =
    * machine, and the scratch starts from its header's initial configuration. A `step` here would be a
    * field with no reader on either side.
    *
-   * **NO `encoding`, FOR `lambda-scratch`'s OWN REASON.** An encoding says how a VALUE is decoded,
-   * decoding is type-directed, and a `TmScratch` has no `ty` — `tmValue`, `sourceSpan` and `linkIndex`
-   * are absent from the type rather than declining.
+   * **NO `encoding`, AND NOT FOR `lambda-scratch`'s REASON ANY MORE.** A headered TM buffer's value IS
+   * decoded, by the `TmValueRun` `tmScratch` builds beside the scratch, but under the encoding its own
+   * header names, so a request field would be a second answer to a question the text already settles.
+   * The scratch itself still has no `ty`: `tmValue`, `sourceSpan` and `linkIndex` are absent from it
+   * rather than declining.
    *
    * **THIS IS THE VARIANT `lambda-scratch`'s DOC NOW POINTS AT.** §4.1's `TmScratch` exists at the
    * boundary (plan T3, `tmScratch(src)` is exported and typed); this is the request that finally gives
@@ -435,7 +456,16 @@ export type RunReply =
    * the main thread has never seen it. Here the main thread SENT the text, so echoing it would return
    * up to `MAX_FORK_RULES` rules of string to the sender that already holds it.
    */
-  | { kind: 'tm-scratch-compiled'; gen: number; tm: TmScratchStatus; tmProgram: TmProgram }
+  | { kind: 'tm-scratch-compiled'; gen: number; tm: TmScratchStatus; tmProgram: TmProgram; tapeNames: string[] }
+  /**
+   * How far a TM buffer's value run has got, and its value once it has finished — posted after every chunk.
+   *
+   * **ONLY FOR A FILE WITH A HEADER.** `tmScratch` builds a value run for no other, because decoding needs the
+   * header's `result` type, and a buffer with no header never hears this reply.
+   *
+   * `value` IS `Unfinished` WHILE `run.run` IS `Running`, so a consumer can render either field alone.
+   */
+  | { kind: 'tm-value'; gen: number; run: ValueRun; value: Decoded }
   /**
    * A session exists. Sent BEFORE any recording, so the panes can mount and show their declines
    * while the legs are still being stepped.

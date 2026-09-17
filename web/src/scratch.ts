@@ -606,8 +606,9 @@ export class ScratchBuffers {
    * cold-buffer hazard unreachable rather than merely handled. `recompile`'s `this.#reg.entryOf(id)`
    * would throw for a cold id, and there is no binding left on a cold buffer to call `recompile`
    * with — see `recompile`'s own doc. It holds as long as a caller hands this method every slot that
-   * MIGHT be bound to `id`: the `panes.all()` call in `main.ts` is what the real app passes, the same set
-   * `retire` is handed for the same reason.
+   * MIGHT be bound to `id`: the `paneHost.reseedingSlots()` call in `main.ts` is what the real app passes — still
+   * every pane's slot, since `reseedingSlots` wraps `panes.all()` — the same set `retire` is handed for the same
+   * reason.
    *
    * **THE REBIND RUNS EVEN WHEN THE BUFFER IS ALREADY COLD, AND THE RETURN VALUE DOES NOT SAY SO.** A
    * second `cool` on an already-cold buffer still walks `slots` and still rebinds anything it finds
@@ -838,14 +839,12 @@ export class ScratchBuffers {
       // never gets a machine at all — its worker answers `scratch-compiled`, which carries no
       // `TmProgram` (5d-i §3.3: no TM leg, no `SourceMap`), and no TM pane can ever bind to it either,
       // so nothing will ever write here. A TM buffer's worker DOES answer `tm-scratch-compiled`, which
-      // DOES carry a `TmProgram` — but nothing writes it here YET. `replies.ts`'s `onScratchReply` doc
-      // (rewritten in this same commit) says so directly: `tm-scratch-compiled` and `tm-frames` are not
-      // cases in that switch, so a TM buffer's own compile simply vanishes today, with no pane, no
-      // status line and no `#link-status` any the wiser. This field turns real for a TM buffer once a
-      // later task gives that switch the two arms it is missing — not before. What is shared between
-      // the two legs today is that neither has one at the moment this entry is created, and for a λ
-      // buffer that is permanent.
+      // DOES carry a `TmProgram`, and `replies.ts`'s `onScratchReply` stores it here, with the file's
+      // status and value reading in `tmScratch`, once that reply arrives. What is shared between the
+      // two legs is that neither has either at the moment this entry is created, and for a λ buffer
+      // that is permanent.
       tmProgram: null,
+      tmScratch: null,
     })
     state.warm = true
     // SUPERSEDE THEN POST, the pattern `compile.ts`'s `schedule` uses and for the same reason
@@ -1125,15 +1124,13 @@ export class ScratchBuffers {
    * `legs.lambda` UNCONDITIONALLY, which is a λ buffer's own leg but never a TM buffer's — `#spawn`
    * gives a `'tm'` buffer's entry a `tm` leg and no `lambda` leg at all, so `leg !== undefined` is
    * `false` for one on every call, and this method takes the phantom branch every time regardless of
-   * which of the two reasons actually produced the reply. **THAT DOES NOT YET DISAGREE WITH ANYTHING
-   * OBSERVABLE, WHICH IS WHY IT IS RECORDED RATHER THAN FIXED HERE.** `replies.ts`'s `onScratchReply`
-   * doc names the reason: nothing routes a TM buffer's `tm-scratch-compiled` or its `tm-frames`
-   * anywhere yet, so a TM buffer's OWN `tm` leg never records a frame either — asking the right leg
-   * would still answer `undefined` today. The day that changes — the day `onScratchReply` grows the two
-   * arms that doc calls left open — this discriminator starts answering wrong for a TM buffer's
-   * `recompile`, now that `recompile` reaches one at all (5d-iv T5 review round, Important 1): it will
-   * report an ordinary mid-edit parse failure as a failed fork, on a buffer whose build already
-   * succeeded.
+   * which of the two reasons actually produced the reply. **THAT NOW DISAGREES WITH WHAT A USER SEES,
+   * AND IS RECORDED HERE RATHER THAN FIXED.** This paragraph used to say it could not, because nothing
+   * routed a TM buffer's `tm-scratch-compiled` or its `tm-frames`. `replies.ts`'s `onScratchReply` routes
+   * both, so a TM buffer's own `tm` leg records frames, and this discriminator answers wrong for a TM
+   * buffer's `recompile` (5d-iv T5 review round, Important 1), as this paragraph predicted. Measured in
+   * Chrome: an unparseable edit to a TM buffer whose build had succeeded put `fork failed — unrecognized
+   * line · …` on `#link-status`.
    *
    * RETURNS THE DIAGNOSTICS ON THE PHANTOM PATH, so the caller has the reason to put on the surface
    * built for it — a routing decision rather than a report on something that has already happened.

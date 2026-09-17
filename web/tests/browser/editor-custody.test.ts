@@ -61,7 +61,15 @@ function lambdaSession(id: SessionId): SessionEntry {
     done: null,
     timer: null,
   }
-  return { id, label: id, detached: true, client: fakeClient(), legs: { lambda: leg }, tmProgram: null }
+  return {
+    id,
+    label: id,
+    detached: true,
+    client: fakeClient(),
+    legs: { lambda: leg },
+    tmProgram: null,
+    tmScratch: null,
+  }
 }
 
 let panes: PaneCollection

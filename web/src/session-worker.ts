@@ -46,6 +46,7 @@ import {
   RECORD_CHUNK,
   TM_RADIUS,
   tmFrameBytes,
+  VALUE_CHUNK,
 } from './protocol'
 import type {
   Decoded,
@@ -58,6 +59,7 @@ import type {
   TmScratchStatus,
   TmState,
   TmStatus,
+  ValueRun,
 } from './types'
 
 /**
@@ -127,9 +129,21 @@ type LambdaScratchHandle = {
 type TmScratchHandle = {
   tmStatus(): TmScratchStatus
   tmProgram(): TmProgram
+  tapeNames(): string[]
   stepTm(): boolean
   tmState(radius: number): TmState
   raiseTmCap(extraSteps: number, extraCells: number): void
+  free(): void
+}
+
+/**
+ * The wasm-bindgen `TmValueRun`, described structurally for the reason `Session` above is: the run that reads a
+ * headered TM buffer's value, beside the scratch rather than on it, for decision 2's reason (`session.rs`'s
+ * `TmValueRun` doc).
+ */
+type TmValueRunHandle = {
+  run(budget: number): ValueRun
+  value(): Decoded
   free(): void
 }
 
@@ -153,7 +167,7 @@ type ForkedAtResult = { diagnostics: Diagnostic[]; scratch: LambdaScratchHandle 
  * NO `text` FIELD, UNLIKE `ForkedAtResult`. `tmScratch` never echoes the source: the main thread SENT
  * `src` and already holds it — see `tm-scratch-compiled`'s doc in `protocol.ts`.
  */
-type TmScratchResult = { diagnostics: Diagnostic[]; scratch: TmScratchHandle | null }
+type TmScratchResult = { diagnostics: Diagnostic[]; scratch: TmScratchHandle | null; value: TmValueRunHandle | null }
 
 /**
  * Exactly what this worker uses of its global scope.
@@ -201,7 +215,7 @@ let latest = 0
 type Live =
   | { gen: number; kind: 'session'; session: Session }
   | { gen: number; kind: 'lambda-scratch'; session: LambdaScratchHandle }
-  | { gen: number; kind: 'tm-scratch'; session: TmScratchHandle }
+  | { gen: number; kind: 'tm-scratch'; session: TmScratchHandle; value: TmValueRunHandle | null }
 
 let live: Live | null = null
 
@@ -247,6 +261,13 @@ function dropLive(): void {
     held?.session.free()
   } catch {
     /* See the comment above: a session that cannot be freed is already unusable. */
+  }
+  // THE VALUE RUN IS A SECOND HANDLE, FREED UNDER THE SAME RULE AND IN ITS OWN `try`, so a scratch that cannot be
+  // freed does not leak the run beside it.
+  try {
+    if (held?.kind === 'tm-scratch') held.value?.free()
+  } catch {
+    /* As above. */
   }
 }
 
@@ -642,9 +663,11 @@ async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch'
  * **THE SAME PROLOGUE AS `onRun`/`onLambdaScratch`, AND THAT IS THE INVARIANT RATHER THAN A COPY** —
  * see `onLambdaScratch`'s own doc for the argument; it applies here unchanged.
  *
- * NO `linkIndex`, NO `tapeNames`, NO `result` AFTER IT, for `onLambdaScratch`'s reasons: all three read
- * something a scratch type does not have. It DOES post a `tmProgram`, which is where the two differ —
- * a `TmScratch` has a machine and a `LambdaScratch` has none.
+ * NO `linkIndex` AND NO `result` AFTER IT, for `onLambdaScratch`'s reasons: both read something a scratch type
+ * does not have. It DOES post a `tmProgram`, which is where the two differ — a `TmScratch` has a machine and a
+ * `LambdaScratch` has none — and its own `tapeNames`, per scratch rather than the fixed export `onRun` posts,
+ * because a reduced file's single-tape stage changes what its one tape is. A file with a header then hears
+ * `tm-value` after every chunk of `runValueLoop`, in place of the `result` a compiled session gets.
  *
  * IT DOES NOT `await recordLambda`. A `TmScratch` has one leg; calling it to be told so at its own
  * `kind` guard would be a line asserting the absence rather than respecting it. IT DOES `await
@@ -675,7 +698,7 @@ async function onTmScratch(req: Extract<RunRequest, { kind: 'tm-scratch' }>): Pr
   recording.lambda = false
   recording.tm = false
 
-  const { diagnostics, scratch } = tmScratch(req.src) as TmScratchResult
+  const { diagnostics, scratch, value } = tmScratch(req.src) as TmScratchResult
   if (scratch === null) {
     ctx.postMessage({ kind: 'no-session', gen: req.gen, diagnostics })
     return
@@ -685,17 +708,48 @@ async function onTmScratch(req: Extract<RunRequest, { kind: 'tm-scratch' }>): Pr
   // reasoning `onRun` and `onLambdaScratch` give for the handle each discards on the same race.
   if (latest !== req.gen) {
     scratch.free()
+    value?.free()
     return
   }
-  live = { gen: req.gen, kind: 'tm-scratch', session: scratch }
+  live = { gen: req.gen, kind: 'tm-scratch', session: scratch, value }
 
   ctx.postMessage({
     kind: 'tm-scratch-compiled',
     gen: req.gen,
     tm: scratch.tmStatus(),
     tmProgram: scratch.tmProgram(),
+    tapeNames: scratch.tapeNames(),
   })
   await recordTm(req.gen, true)
+  await runValueLoop(req.gen)
+}
+
+/**
+ * Run a TM buffer's value run out in `VALUE_CHUNK` steps at a time, posting where it stands after each chunk.
+ *
+ * **AFTER THE FIRST RECORDING, NOT BESIDE IT.** Frames are what the pane draws first, so the first recording runs
+ * before this loop starts. A `[continue]` that arrives while this loop is going is dispatched at its next yield: the
+ * message listener starts `onExtend`, whose `recordTm` then takes turns with this loop, one `RECORD_CHUNK` of frames
+ * against one `VALUE_CHUNK` of steps, each run whole between yields. The two step different cursors — `recordTm`
+ * the scratch's own through `stepTm`, this loop the `TmValueRun` beside it — so taking turns delays each by the
+ * other's chunk and changes neither's result.
+ *
+ * **EVERY CHUNK STARTS WITH `recordTm`'s LOOP GUARD**, reading `live` rather than a captured handle, so an edit
+ * that replaced the scratch, or freed it, ends this loop at its next chunk rather than stepping a freed run.
+ *
+ * **NO RE-ENTRY FLAG, BECAUSE A BUILD IS A GENERATION.** `onTmScratch` is the only caller and starts one loop per
+ * build, and every build claims a new generation (`SessionClient.supersede` on the main thread, `latest = req.gen`
+ * here), so one loop per build is one loop per run. A loop left over from an earlier build meets the guard above
+ * at its next chunk and returns without stepping or posting.
+ */
+async function runValueLoop(gen: number): Promise<void> {
+  for (;;) {
+    if (live?.gen !== gen || live.kind !== 'tm-scratch' || live.value === null) return
+    const run = live.value.run(VALUE_CHUNK)
+    ctx.postMessage({ kind: 'tm-value', gen, run, value: live.value.value() })
+    if (run.run !== 'Running') return
+    await yieldToEventLoop()
+  }
 }
 
 async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<void> {
@@ -754,8 +808,9 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
   if (live?.gen !== req.gen) return
   // A SCRATCHPAD GETS NO `result`, AND THAT IS NOT AN OMISSION. `lambdaLeg` reads `lambdaValue` and
   // `tmLeg` reads `tmValue`; §3.3 puts both off the scratch types because decoding is type-directed
-  // and there is no `ty` to decode against. The frames this call just recorded, and their `RecordEnd`,
-  // are the whole answer — see `scratch-compiled`'s doc in `protocol.ts`.
+  // and a scratch has no `ty` to decode against. The frames this call just recorded, and their
+  // `RecordEnd`, are its whole answer; a headered TM buffer's value arrives separately, as the
+  // `tm-value` replies `runValueLoop` posts, which `[continue]` neither starts nor extends.
   if (live.kind !== 'session') return
   ctx.postMessage({ kind: 'result', gen: req.gen, lambda: lambdaLeg(live.session), tm: tmLeg(live.session) })
 }

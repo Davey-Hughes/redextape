@@ -93,7 +93,15 @@ function entry(
   // NO MACHINE ON ANY OF THEM. `SessionEntry.tmProgram` is retained from a `compiled` reply, and this
   // file drives the binding model rather than the reply switch — `tests/node/replies.test.ts` is where
   // the retention itself is asserted.
-  return { id, label: opts.label ?? id, detached: opts.detached ?? false, client: fakeClient(), legs, tmProgram: null }
+  return {
+    id,
+    label: opts.label ?? id,
+    detached: opts.detached ?? false,
+    client: fakeClient(),
+    legs,
+    tmProgram: null,
+    tmScratch: null,
+  }
 }
 
 /** A `PaneView` that records every call instead of touching a DOM. */

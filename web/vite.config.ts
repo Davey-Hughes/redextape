@@ -27,7 +27,7 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /**
  * The probes' own files, excluded from the browser project's default set unless `REDEXTAPE_PROBE` is
- * set — `pnpm test:probe` and `pnpm test:probe:tm` are what set it.
+ * set — the `pnpm test:probe*` scripts are what set it.
  *
  * **IT IS A MEASUREMENT WHOSE CONSOLE OUTPUT IS THE DELIVERABLE (each file's own header says so), AND A
  * DELIVERABLE NOBODY READS ON EVERY PUSH IS PURE COST.** Design §4.6's probe runs eleven real wasm
@@ -39,7 +39,9 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
  * probe is far cheaper (ten compiles, no workers — the fix round's own confirming points widened the
  * corpus from six programs to ten, and each one now mounts a real CodeMirror editor to time, not merely
  * compiles it) but joins the same list for the same structural reason below, not because it shares that
- * weight.
+ * weight. `tm-buffer-cost.test.ts` joins it for the reason and for its weight: it parses every reduced file its
+ * script emits seven times, files of up to 16,000,000 bytes, from a directory and a wasm build under `target/` that
+ * only its script creates.
  *
  * **AN ENV FLAG RATHER THAN A BARE `exclude`, BECAUSE A FILE OUTSIDE `include` CANNOT BE NAMED BACK IN.**
  * Vitest's positional filters select WITHIN the resolved include set, so `vitest run <path>` on an
@@ -63,6 +65,7 @@ const PROBE_FILES = [
   'tests/browser/buffer-affordability.test.ts',
   'tests/browser/tm-fork-cost.test.ts',
   'tests/browser/pane-floor.test.ts',
+  'tests/browser/tm-buffer-cost.test.ts',
 ]
 const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : []
 
@@ -296,8 +299,8 @@ export default defineConfig({
         test: {
           name: 'browser',
           include: ['tests/browser/**/*.test.ts'],
-          // THE PROBE IS NOT IN THE DEFAULT SET — see `PROBE_EXCLUDE` above for the whole argument.
-          // `pnpm test:probe` sets `REDEXTAPE_PROBE` and this list is then empty.
+          // THE PROBE IS NOT IN THE DEFAULT SET — see `PROBE_FILES` above for the whole argument.
+          // Each `pnpm test:probe*` script sets `REDEXTAPE_PROBE`, and this list is then empty.
           //
           // `...configDefaults.exclude` FIRST, BECAUSE A BARE `exclude: PROBE_EXCLUDE` REPLACES
           // VITEST'S DEFAULT LIST RATHER THAN ADDING TO IT — `**/node_modules/**` and `**/.git/**` would
@@ -305,6 +308,10 @@ export default defineConfig({
           // `tests/browser/`, so nothing under `node_modules` or `.git` could match it anyway; the
           // moment that glob widens, the omission bites without a test to catch it.
           exclude: [...configDefaults.exclude, ...PROBE_EXCLUDE],
+          // `tm-buffer-cost.test.ts`'s run stamp, which `pnpm run test:probe:tm-buffer` sets and every other run
+          // leaves empty. A browser test cannot read `process.env` (`PROBE_FILES`' doc says why), so the probe
+          // learns its own run's stamp here, and refuses a corpus or a build under `target/` stamped by another.
+          provide: { probeTmBufferRun: process.env.REDEXTAPE_PROBE_TM_BUFFER_RUN ?? '' },
           // Vitest serves its own tester HTML, so this project's `index.html` — and therefore its
           // `<link>` to `style.css` — never reaches the page. See `tests/browser/setup.ts`: without it
           // the state table's `max-height: 40vh` never applies and the browser tier measures a

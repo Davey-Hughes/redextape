@@ -10,7 +10,7 @@ import type { ClientPort, PoolPort, SessionId } from '../../src/session-client'
 import { SessionClient, SessionPool } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
-import type { Diagnostic, LambdaState, TmProgram, TmState } from '../../src/types'
+import type { Diagnostic, LambdaState, TmProgram, TmScratchStatus, TmState } from '../../src/types'
 
 /**
  * **WHAT A SESSION KEEPS FROM ITS OWN `compiled` REPLY** — the retention a TM pane created later is
@@ -80,6 +80,7 @@ function sourceEntry(): SessionEntry {
     client: fakeClient(),
     legs: { lambda: leg<LambdaState>(), tm: leg<TmState>() },
     tmProgram: null,
+    tmScratch: null,
   }
 }
 
@@ -479,5 +480,95 @@ describe('onScratchReply records a buffer’s text from its own scratch-compiled
     })
 
     expect(persists()).toBe(0)
+  })
+})
+
+describe('a TM buffer retains what its panes were last told', () => {
+  const STATUS: TmScratchStatus = {
+    available: true,
+    reason: '',
+    width: 8,
+    run: 'Running',
+    header: true,
+    reduction: { stages: ['single-tape'], steps: 241_666 },
+  }
+
+  const built = (tapeNames: string[]): RunReply => ({
+    kind: 'tm-scratch-compiled',
+    gen: 1,
+    tm: STATUS,
+    tmProgram: PROGRAM,
+    tapeNames,
+  })
+
+  /**
+   * THE NAMES COME FROM THE REPLY, NOT FROM THE FIXED EXPORT. A label no bank list contains is the only value that
+   * tells the two apart, since the fixed export answers the bank names for every machine.
+   */
+  it('holds the status and the tape names its own reply carried, with no pane to tell', () => {
+    const { buffers, reg, replies } = scratchDriver()
+    const id = buffers.forkBlank('tm')
+    replies.onScratchReply(id, built(['5 tapes, interleaved']))
+    expect(reg.entryOf(id).tmProgram?.tapeNames).toEqual(['5 tapes, interleaved'])
+    expect(reg.entryOf(id).tmScratch).toEqual({ status: STATUS, value: null })
+  })
+
+  it('holds the latest value reading beside that status', () => {
+    const { buffers, reg, replies } = scratchDriver()
+    const id = buffers.forkBlank('tm')
+    replies.onScratchReply(id, built(['REG']))
+    const running = { run: 'Running', steps: 200_000, cap: 241_666 } as const
+    replies.onScratchReply(id, { kind: 'tm-value', gen: 1, run: running, value: 'Unfinished' })
+    const ended = { run: 'Ended', steps: 241_666, cap: 241_666 } as const
+    replies.onScratchReply(id, { kind: 'tm-value', gen: 1, run: ended, value: { Value: { text: '2' } } })
+    expect(reg.entryOf(id).tmScratch).toEqual({
+      status: STATUS,
+      value: { run: ended, value: { Value: { text: '2' } } },
+    })
+  })
+
+  it('a new build forgets the previous value', () => {
+    const { buffers, reg, replies } = scratchDriver()
+    const id = buffers.forkBlank('tm')
+    replies.onScratchReply(id, built(['REG']))
+    replies.onScratchReply(id, {
+      kind: 'tm-value',
+      gen: 1,
+      run: { run: 'Ended', steps: 1, cap: 1 },
+      value: { Value: { text: '2' } },
+    })
+    replies.onScratchReply(id, built(['REG']))
+    expect(reg.entryOf(id).tmScratch?.value).toBeNull()
+  })
+
+  it('forgets a reading that was still running when the next text does not build', () => {
+    const { buffers, reg, replies } = scratchDriver()
+    const id = buffers.forkBlank('tm')
+    replies.onScratchReply(id, built(['REG']))
+    replies.onScratchReply(id, {
+      kind: 'tm-value',
+      gen: 1,
+      run: { run: 'Running', steps: 200_000, cap: 241_666 },
+      value: 'Unfinished',
+    })
+    replies.onScratchReply(id, { kind: 'no-session', gen: 1, diagnostics: [] })
+    expect(reg.entryOf(id).tmScratch).toEqual({ status: STATUS, value: null })
+  })
+
+  it('keeps a finished reading when the next text does not build', () => {
+    const { buffers, reg, replies } = scratchDriver()
+    const id = buffers.forkBlank('tm')
+    replies.onScratchReply(id, built(['REG']))
+    replies.onScratchReply(id, {
+      kind: 'tm-value',
+      gen: 1,
+      run: { run: 'Ended', steps: 241_666, cap: 241_666 },
+      value: { Value: { text: '2' } },
+    })
+    replies.onScratchReply(id, { kind: 'no-session', gen: 1, diagnostics: [] })
+    expect(reg.entryOf(id).tmScratch?.value).toEqual({
+      run: { run: 'Ended', steps: 241_666, cap: 241_666 },
+      value: { Value: { text: '2' } },
+    })
   })
 })

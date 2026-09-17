@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LambdaLeg, TmLeg } from '../../src/protocol'
-import { noSessionRows, resultRows } from '../../src/results'
+import { noSessionRows, resultRows, valueLine } from '../../src/results'
 import type { Diagnostic, LambdaState } from '../../src/types'
 
 const okState: LambdaState = {
@@ -177,5 +177,29 @@ describe('noSessionRows', () => {
   // would report a number the user cannot reconcile with the markers in the gutter.
   it('counts only error-severity diagnostics', () => {
     expect(noSessionRows([err('a'), warn('b'), warn('c')])[0]?.value).toBe('not compiled — 1 error')
+  })
+})
+
+describe('valueLine', () => {
+  const ended = { run: 'Ended', steps: 241_666, cap: 241_666 } as const
+
+  it('has no line before the first reading', () => {
+    expect(valueLine(null)).toBeNull()
+  })
+
+  it('counts a running run against its cap', () => {
+    expect(valueLine({ run: { run: 'Running', steps: 500_000, cap: 7_007_238 }, value: 'Unfinished' })).toBe(
+      'value: running · 500,000 of 7,007,238 steps',
+    )
+  })
+
+  it("prefixes a value, and says every other ending in `decodedText`'s words", () => {
+    expect(valueLine({ run: ended, value: { Value: { text: '[1, 2]' } } })).toBe('value: [1, 2]')
+    expect(valueLine({ run: ended, value: 'Undecodable' })).toBe('no encoding for this type')
+    expect(valueLine({ run: ended, value: 'TooLargeToPrint' })).toBe('value too large to print')
+    const fault = 'did not halt within the 507 steps its header records, or 5,000,000 tape cells'
+    expect(valueLine({ run: { run: 'Capped', steps: 507, cap: 507 }, value: { Fault: { message: fault } } })).toBe(
+      `fault: ${fault}`,
+    )
   })
 })

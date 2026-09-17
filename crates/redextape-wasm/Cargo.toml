@@ -33,15 +33,26 @@ ts-rs = { version = "10", optional = true }
 
 [features]
 # Forwards to core's so `ts` is ONE switch: without it, a run that enabled the feature only here would
-# compile derives for this crate's five wire types and silently leave core's out of that run.
+# compile derives for this crate's seven wire types and silently leave core's out of that run.
 #
-# IT IS NOT LOAD-BEARING FOR IMPORTS TODAY, AND SAYING SO IS THE POINT. Across all five types declared
-# here, every field's type is `bool`, `String`, `usize`, `u64`, the wasm-local `RunStatus`, or `NodeId` —
-# each of those bare or under one `Option` — and `NodeId` is a transparent alias for `u32`, so it inlines
-# as a TypeScript `number` and generates no import at all. The first field here that names a core STRUCT or ENUM is what would make this line
+# IT IS NOT LOAD-BEARING FOR IMPORTS TODAY, AND SAYING SO IS THE POINT. Across all seven types declared
+# here, every field's type is `bool`, `String`, `Vec<String>`, `usize`, `u64`, the wasm-local `RunStatus` or
+# `ReductionStatus`, or `NodeId` — each of those bare or under one `Option` — and `NodeId` is a transparent
+# alias for `u32`, so it inlines as a TypeScript `number` and generates no import at all. The first field here that names a core STRUCT or ENUM is what would make this line
 # load-bearing for imports; until then it keeps the feature switch coherent. An earlier draft of this
 # comment asserted the dangling-import hazard as the reason, and a review found no instance of it.
 ts = ["dep:ts-rs", "redextape-core/ts"]
+# SWITCHES OFF THE SIZE CHECK IN `tm_scratch_with_caps` (`src/session.rs`), SO A TM SCRATCH PARSES TEXT OF ANY
+# LENGTH. It exists for one caller: `web`'s `test:probe:tm-buffer` script, which builds this crate with it into
+# `target/probe-tm-buffer-wasm/` for `web/tests/browser/tm-buffer-cost.test.ts`, and never into `pkg/`.
+# `MAX_SCRATCH_TM_BYTES` is set from what a build costs on BOTH sides of it, and a build that refuses every longer
+# file before parsing it can only price one side.
+#
+# A FEATURE RATHER THAN A PARAMETER, because no product caller chooses the ceiling, as none chooses the caps
+# `tm_scratch_with_caps` takes. The ceiling's two tests in `session.rs` compile only without it; with it, one test
+# there holds what it does instead, and `scripts/check-all.sh` gives it a clippy and test leg of its own so that
+# test runs. No wasm build a gate or the app loads enables it.
+probe-no-tm-scratch-ceiling = []
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.76"

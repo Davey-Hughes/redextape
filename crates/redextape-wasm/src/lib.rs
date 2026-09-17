@@ -15,9 +15,9 @@
 
 mod session;
 
-/// The five wire types this crate declares, re-exported for `tests/ts_bindings.rs`.
+/// The seven wire types this crate declares, re-exported for `tests/ts_bindings.rs`.
 ///
-/// **FEATURE-GATED, AND NARROWED TO FIVE NAMES, BECAUSE IT EXISTS FOR A GATE.** `mod session` is
+/// **FEATURE-GATED, AND NARROWED TO SEVEN NAMES, BECAUSE IT EXISTS FOR A GATE.** `mod session` is
 /// private and stays private: `Session`, `Compiled`, `TmScratch` and the rest are this crate's
 /// internals, reached from JavaScript through `#[wasm_bindgen]` rather than from Rust. But the two
 /// fidelity gates are integration tests, and an integration test links against this crate the way any
@@ -27,7 +27,7 @@ mod session;
 /// canonical-line check. Under default features — which is every browser build — this line does not
 /// exist.
 #[cfg(feature = "ts")]
-pub use session::{Decoded, LambdaStatus, RunStatus, TmScratchStatus, TmStatus};
+pub use session::{Decoded, LambdaStatus, ReductionStatus, RunStatus, TmScratchStatus, TmStatus, ValueRun};
 
 use redextape_core::tm::EncodingKind;
 use serde::Serialize;
@@ -161,7 +161,38 @@ pub fn lambda_scratch_at(src: &str, step: u32, byte_budget: usize) -> Result<JsV
 #[wasm_bindgen]
 pub struct TmScratch(session::TmScratch);
 
-/// `tmScratch(src)` -> `{ diagnostics: Diagnostic[], scratch: TmScratch | null }`.
+/// The run that reads a headered TM scratch's value. See `session::TmValueRun` for why it is a handle of its
+/// own rather than a method on `TmScratch`.
+#[wasm_bindgen]
+pub struct TmValueRun(session::TmValueRun);
+
+#[wasm_bindgen]
+impl TmValueRun {
+    /// Advance up to `budget` steps. `u32` and widened, for the reason `Session::raiseLambdaCap` records.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the `ValueRun`; not expected for this crate's own types.
+    #[wasm_bindgen]
+    pub fn run(&mut self, budget: u32) -> Result<JsValue, JsValue> {
+        to_value(&self.0.run(u64::from(budget)))
+    }
+
+    /// `Unfinished` until `run` reports an end.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the `Decoded`; not expected for this crate's own types.
+    #[wasm_bindgen]
+    pub fn value(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.value())
+    }
+}
+
+/// `tmScratch(src)` -> `{ diagnostics: Diagnostic[], scratch: TmScratch | null, value: TmValueRun | null }`.
+///
+/// **`value` IS NULL WHENEVER `scratch` IS, AND ALSO FOR A SCRATCH WHOSE TEXT HAS NO HEADER** — decision 2's
+/// absence at construction rather than a method that declines. See `session::TmValueRun`.
 ///
 /// Assembled by hand for the reason `compile` and `lambdaScratch` give: a handle and plain data cross
 /// two different ways.
@@ -187,6 +218,11 @@ pub fn tm_scratch(src: &str) -> Result<JsValue, JsValue> {
         None => JsValue::NULL,
     };
     js_sys::Reflect::set(&out, &JsValue::from_str("scratch"), &handle)?;
+    let value = match made.value {
+        Some(v) => JsValue::from(TmValueRun(v)),
+        None => JsValue::NULL,
+    };
+    js_sys::Reflect::set(&out, &JsValue::from_str("value"), &value)?;
     Ok(out.into())
 }
 
@@ -677,10 +713,11 @@ impl LambdaScratch {
     }
 }
 
-/// **FIVE METHODS, AND TWO ABSENCES AND ONE RESHAPE.** §3.3's audit puts `tmProgram`, `stepTm`,
-/// `tapeSlice` and `raiseTmCap` on this type unchanged, and `tmState` too — but only because T1 made
-/// `TmState::window` take `Option<&SourceMap>`; before that, the method a TM pane renders from every
-/// frame could not have existed here at all.
+/// **FIVE METHODS, AND TWO ABSENCES AND ONE RESHAPE, FROM §3.3's AUDIT; AND ONE METHOD SINCE.** The audit puts
+/// `tmProgram`, `stepTm`, `tapeSlice` and `raiseTmCap` on this type unchanged, and `tmState` too — but only because
+/// T1 made `TmState::window` take `Option<&SourceMap>`; before that, the method a TM pane renders from every
+/// frame could not have existed here at all. `tapeNames` came with reduced files: the fixed export's names are
+/// wrong for a file reduced to one tape, and only the scratch knows its own stage list.
 ///
 /// `tmValue` is absent (it reads `ty` + `final_tapes` + `kind`), and so are `sourceSpan` and
 /// `linkIndex`. `tmStatus` is present with a DIFFERENT RETURN SHAPE — see `session::TmScratchStatus`.
@@ -744,5 +781,16 @@ impl TmScratch {
     #[wasm_bindgen(js_name = raiseTmCap)]
     pub fn raise_tm_cap(&mut self, extra_steps: u32, extra_cells: u32) {
         self.0.raise_tm_cap(u64::from(extra_steps), u64::from(extra_cells));
+    }
+
+    /// What to label each tape — per scratch, unlike the fixed `tapeNames()` export, because a reduced file's
+    /// single-tape stage changes what its one tape is.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the names; not expected for this crate's own types.
+    #[wasm_bindgen(js_name = tapeNames)]
+    pub fn tape_names(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.tape_names())
     }
 }

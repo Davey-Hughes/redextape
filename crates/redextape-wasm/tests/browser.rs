@@ -1206,6 +1206,38 @@ fn a_headerless_tm_scratch_runs_and_says_its_configuration_was_invented() {
     }
 }
 
+/// A headered file's `tmScratch` answer carries a value run beside the scratch, and a headerless one carries `null`
+/// there: decision 2's absence at construction, which leaves `tmValue` off the scratch and pinned below. What only
+/// this tier can see is the wire: every count a value run and a reduced status report crosses as a JS number, and the
+/// scratch's own tape names cross per file.
+#[wasm_bindgen_test]
+fn a_headered_tm_scratch_carries_a_value_run_that_reports_in_numbers() {
+    let headerless =
+        redextape_wasm::tm_scratch("tapes 1\nstart s\n\nstate s: accept\n").expect("tmScratch must not throw");
+    assert!(!get(&headerless, "scratch").is_null());
+    assert!(get(&headerless, "value").is_null(), "no header, no result type, no value run");
+
+    let stuck = "tapes 1\nstart stuck\nversion 2\nencoding unary\nwidth 4\nslots 0\nresult Nat\nreduced single-tape 5\nsteps 1\n\nstate stuck:\n";
+    let out = redextape_wasm::tm_scratch(stuck).expect("tmScratch must not throw");
+    let (scratch, value) = (get(&out, "scratch"), get(&out, "value"));
+    assert!(!value.is_null(), "a headered file has a value run");
+
+    let run = call(&value, "run", &[JsValue::from_f64(1_000.0)]);
+    assert_eq!(get(&run, "run").as_string().as_deref(), Some("Ended"));
+    assert_eq!(num(&run, "steps"), 0.0);
+    assert_eq!(num(&run, "cap"), 1.0, "the header's recorded count, as a number");
+    let decoded = call(&value, "value", &[]);
+    let message = get(&get(&decoded, "Fault"), "message").as_string().expect("a fault message");
+    assert!(message.contains("`stuck`"), "{message}");
+
+    let reduction = get(&call(&scratch, "tmStatus", &[]), "reduction");
+    assert_eq!(num(&reduction, "steps"), 1.0);
+    let stages: Array = get(&reduction, "stages").unchecked_into();
+    assert_eq!(stages.get(0).as_string().as_deref(), Some("single-tape"));
+    let names: Array = call(&scratch, "tapeNames", &[]).unchecked_into();
+    assert_eq!(names.get(0).as_string().as_deref(), Some("5 tapes, interleaved"));
+}
+
 /// TM text that does not parse to a machine crosses as diagnostics beside a NULL handle, the same
 /// shape `lambdaScratch` uses. A missing header is deliberately NOT one of these cases.
 #[wasm_bindgen_test]
