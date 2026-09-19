@@ -1665,6 +1665,12 @@ scheduled that adds, removes or relabels a control; no pane kind or renderer exp
 standing list going a full slice without gaining an entry. Whoever takes the pass should check those
 three rather than re-deriving this decision.
 
+**2026-09-17: Plan 7 is the tuning this entry was waiting for, and the trigger stands.** Plan 7's design
+([`2026-09-17-frontend-overhaul-design.md`](../specs/2026-09-17-frontend-overhaul-design.md) §9) makes
+the pass its seventh and last part, taken when the three conditions above hold. Its first six parts build
+every new or renamed control to one set of rules, so the list stops growing, and close the items whose
+controls they replace outright; §9's table assigns each open item to a part.
+
 #### 5d SPLITS IN TWO, AND ITS SESSION MODEL IS DECIDED AHEAD OF ITS SLICE — 5c RESEQUENCED IN FRONT OF IT (2026-08-10, brainstorm, no code)
 
 Recorded here rather than left in a brainstorm transcript, for the reason this Plan's log has now given
@@ -1985,12 +1991,27 @@ yields `Token { kind, span }` — and is what `lint` output actually wants. Also
 for λ/TM/asm if Plan 4's `analysis.rs` has not already covered them by then; that half was the one piece of
 the highlighting work no plan claimed, and a CLI dump is its natural consumer.
 
+### Plan 7 — Frontend overhaul: presets, skins, four styled views, editor intelligence
+
+- **Design:** [`2026-09-17-frontend-overhaul-design.md`](../specs/2026-09-17-frontend-overhaul-design.md)
+  — an umbrella; each part below gets its own spec, plan and PRs.
+- **Parts, in order:** 1 foundations (style × palette tokens, panels) · 2 workspace shell (presets,
+  switches, step controls, vocabulary) · 3 editor intelligence (LSP in the browser, tree-sitter colouring,
+  vim) · 4 views (λ, TM, source) · 5 asm (a core stepper, then a third leg and view) · 6 reach (examples,
+  share links, base16 import) · 7 the deferred accessibility pass.
+- **Depends on:** Plan 5 (the panes, sessions and layout it reworks) and `redextape-lsp` (#78–#83).
+- **Testable outcome:** every control passes one class-level browser test (accessible name, not a bare
+  glyph, keyboard reach); every built-in palette meets WCAG AA; the asm stepper agrees with `run_asm` on
+  the corpus; a first-version share link keeps opening.
+
 ## Deferred beyond v1 (tracked, not planned here)
 
 - **v1.5:** reference-clock synchronized stepping (§6.3) — the deferred hard part (order mismatch,
   §13.1).
 - **v2:** graphical renderers (TM flow/state diagram, Tromp diagrams), linter rule sets,
   `redextape-lsp`, visible assembly pane, single-tape TM view, signed integers (§11).
+  **2026-09-17:** the TM state diagram and the assembly pane move into Plan 7 (parts 4 and 5);
+  `redextape-lsp` shipped in #78–#83, and Plan 7's part 3 brings it to the browser.
 - **Research track:** bidirectional editing feasibility — report + prototype, not a feature (§7.3).
 
 ### Extension tracks (raised 2026-07-22, expanded 2026-07-23 — placement recorded, not yet planned)
@@ -17871,3 +17892,82 @@ The workspace's 1,744 before this branch is the plan's baseline, on `bbc35ba` wi
   - 240.3 ms, 2.54 and 18.0 ms are the constants' docs as they stood at `fae4996`, from the committed probe's first run;
   - 209.7 ms and the planning findings are the plan's *Figures, measured while planning* and *Findings*;
   - the review findings, Davey's decisions and the other sabotage rows are the branch's review records and task reports, kept outside the tree.
+
+#### PLAN 7 IS DESIGNED: A FRONTEND OVERHAUL IN SEVEN PARTS, WITH THE DEFERRED ACCESSIBILITY PASS AS THE LAST — AND THREE CLAIMS MADE WHILE DESIGNING IT WERE WRONG BEFORE THE SPEC WAS WRITTEN (2026-09-17, branch `frontend-overhaul-design`, `7d1ee20..a81d84b`, 1 commit, plus this entry)
+
+**Design only; no code.** [`2026-09-17-frontend-overhaul-design.md`](../specs/2026-09-17-frontend-overhaul-design.md)
+is an umbrella for making the web app usable, and the new Plan 7 section above points at it. It was
+brainstormed with Davey against mockups in a browser, and against a read-only inventory of every
+interactive control in `web/`. Its §2 records thirteen decisions and what each declined; its §3 splits the
+work into seven parts, each to get its own spec, plan and PRs; its §6 names what each part must settle
+before it can be planned. Nothing here is built.
+
+##### WHAT IT DECIDES, IN ONE PARAGRAPH
+
+Three workspace presets (Explorer, Debugger, Stage) over three independent switches; three styles
+(Paper, Terminal, Instrument) crossed with palettes stored as data, six built in, plus base16 import; a
+λ view laid out and foldable with a map of the whole term; a TM view whose rule table and state diagram
+are independently collapsible panels; an asm view that steps, which needs a stepping interpreter in the
+core and a third leg; the LSP running in the browser, with hover as new server work; web-tree-sitter
+colouring all four text forms, highlight-only; a vim keymap; examples; share links carrying program,
+workspace and step positions; and one user-facing vocabulary — *view* and *copy* — with five rules every
+control follows.
+
+##### THE ACCESSIBILITY PASS
+
+The 2026-08-18 decision moved the pass's trigger to "the web UI is close to done". This design reads
+Plan 7 as the tuning that decision was waiting for, and does not take the pass early: part 7 is the pass,
+run when that entry's three conditions hold. A dated note under that entry now says so. Parts 1–6 build
+every new or renamed control to the design's rules, so the list stops growing, and close the items whose
+controls they replace; the design's §9 assigns each of the thirteen open items to a part.
+
+##### THREE CLAIMS WERE WRONG, AND ALL THREE WERE CAUGHT BEFORE THEY REACHED THE SPEC
+
+**The LSP was first reported as serving hover and semantic tokens.** The evidence was a grep for
+`*_provider` names in `crates/redextape-lsp/src/lib.rs`. Two of the hits sat in a test that asserts
+those two capabilities are *absent*, a test whose own comment calls adding one "a deliberate edit to this
+line". The claim was corrected in conversation before any decision rested on it. With the right facts,
+Davey kept hover (as new server work) and chose tree-sitter for colouring. **A grep hit on a capability's
+name is not a capability; the `ServerCapabilities` literal is.**
+
+**The controls inventory said the `shows` selector does not exist on a fresh page.** The code's own doc
+says the opposite — the source session alone contributes two pairs, "so a fresh page now shows this
+control" — and the running app showed it. The inventory was written by a read-only agent, which read the
+sentence the doc *quotes in order to reverse it*. A doc that corrects itself by quoting its old claim
+leaves that claim greppable. The claim was relayed to Davey as fact, then corrected before the spec was
+written, after re-reading the code. The spec's §1 describes the selector as it really is: two options
+that both read `source`, told apart only by their optgroups.
+
+**Three figures in a mockup were not measurements.** The view mockups gave `fact(3)` a 1,300-character
+λ term, 178 δ-rules and 41 asm instructions. Measured, they are 540 characters, 1,199 states with 2,816
+rules, and 21 instructions. 178 is the universal machine's rule count, from its own entry's heading,
+attached to the wrong machine. The mockups were illustrations; the spec quotes only the measured figures.
+The 1,199-state figure changed a design question, too: the state diagram has to show a neighbourhood of the
+current state, not the whole machine.
+
+##### WHAT THIS DID NOT CLOSE
+
+Everything in the design's §6 — each part's questions to settle before planning, including which
+grammar ABI `web-tree-sitter` loads, how Stage's tabs sit in the persisted layout, whether `redextape-lsp`
+compiles for `wasm32-unknown-unknown`, and whether *Instrument*'s fonts ship as files. No part is
+planned yet; part 1 is next.
+
+##### VERIFICATION
+
+Every count this entry quotes, with what produces it:
+
+| Value | What | Command |
+|---|---|---|
+| 1 commit | the branch before this entry | `git log --oneline 7d1ee20..a81d84b \| wc -l` |
+| thirteen, seven | decisions and parts | the rows of the design's §2 and §3 tables |
+| 540 | characters in `fact(3)`'s initial λ term | `redextape --no-config emit fact.rxt --lang lambda \| tr -d '\n' \| wc -m` |
+| 1,199 and 2,816 | states and rules in `fact(3)`'s machine | `emit fact.rxt --lang tm`, then `grep -c '^state '` and `grep -cE '^\s+\['` |
+| 21 | instructions in `fact(3)`'s asm | `emit fact.rxt --lang asm`, then `grep -cE '^\s+[a-z]'` |
+| 178 | the universal machine's rules | that machine's entry heading in this file |
+| thirteen open, of sixteen filed | the deferred-accessibility list | the list's items in the Plan 5 section; 8 is struck, 11 and 12 are marked fixed |
+
+`fact.rxt` is four lines: `fn fact(n) {`, `    if n == 0 { 1 } else { n * fact(n - 1) }`, `}`, `fact(3)`.
+The binary is `target/release/redextape` rebuilt from this branch, whose code is `7d1ee20`'s. The first
+measurements came from a binary built on 2026-09-16, before `7d1ee20`, which touched `redextape-core`;
+every figure above, and every example value in the design's §6, was re-run on the rebuilt binary and none
+changed.
