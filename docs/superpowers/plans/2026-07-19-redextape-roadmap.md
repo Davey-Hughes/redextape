@@ -17840,7 +17840,7 @@ CI passed on the PR at its first head, `46f2b9a`, and Davey chose to fix the who
 Tasks 1 to 6 planned thirty rows, and each reddened what it aimed at. Three results are worth keeping, and so are the two rows from the fix rounds that stayed green.
 
 - **T1-S2, the accept check applied to lowered runs, reddens only core's `a_lowered_run_is_not_held_to_an_accept_state`.** The CLI and wasm suites stay green.
-- **T6-S1, the value loop without its generation check, reddens for a reason the spec did not predict.** With the flag gone, the stale loop steps the NEW build's run in 500,000-step chunks, and the new build's first recording yields between them, so its own loop never starts within the test's 10 s wait. The row first failed to apply at all: removing the flag dedented the guard line, and `sab.py` refuses anything but exactly one occurrence.
+- **T6-S1, the value loop without its generation check, reddens for a reason the spec did not predict.** With the flag gone, the stale loop steps the NEW build's run in 500,000-step chunks, and the new build's first recording yields between them, so its own loop never starts within the test's 10 s wait. The row first failed to apply at all: removing the flag dedented the guard line, and `sab.py` refuses anything but exactly one occurrence. **CORRECTED 2026-09-19 (`tm-buffer-supersede-slow-runner`):** that is a race between the stale loop's delay and the wait's bound. Re-run unconstrained, the new build's loop started 9.2 to 9.3 s after the paste, inside the wait, and the test stayed green without the check; it now asserts the new build's first count instead.
 - **The spec's S8 could not be written.** "`TmValueRun` steps the scratch's own cursor" is not an edit this design can express, because the value run owns its cursor by type; `running_the_value_run_out_leaves_the_scratch_at_step_zero` still pins the property, and T2-S3 took the row.
 - **Disabling `setDetached(false)`'s clear stayed green, 33 tests passing,** once every app route onto source reseeded, so no app test could show the clear does anything. A pane-level test was added, and the same sabotage reddens it.
 - **Deleting the `.tm-value:empty` CSS rule stays green**, because the rule is not load-bearing in today's block layout. The layout test holds the gap itself, which is the property, and the CSS comment says so.
@@ -18108,3 +18108,65 @@ No Rust changed, so the Rust tiers were not re-run locally; CI runs them.
 | 87, 798, and the four coverage figures | test files, tests, coverage | `pnpm run test:coverage` from `web/` |
 | 148 | files Biome checked | `pnpm exec biome ci .` from `web/` |
 | three | fix rounds on Task 8's comments | the task's review records, kept outside the tree |
+
+#### THE TM BUFFER'S SPINNER TESTS WAIT ON ONE RECORDING PER SCOPE, AND THE SUPERSESSION TEST'S EVIDENCE IS THE NEW BUILD'S FIRST COUNT. ON THE SLOWER CI RUNNER VITEST'S 15-SECOND CAP FIRED BEFORE ANY WAIT COULD NAME ITSELF, AND PROVING THE FIX FOUND THE TEST GREEN WITH THE GENERATION CHECK REMOVED (2026-09-19, branch `tm-buffer-supersede-slow-runner`, `13db3b7..2cb599f`, 2 commits, plus this entry)
+
+**A test fix.** `tm-reduced-buffer.test.ts`'s "lets an edit supersede a value run that is still going", added by `web-reduced-files`, failed CI runs 434 and 435 on #98 with an unchanged tree.
+
+##### WHAT FAILED
+
+- **Vitest's cap, not a wait.** Both runs' `web` job ran on runner `450440e2`, and both logs report the test at 15,258 and 15,350 ms with `Test timed out in 15000ms.`, which names nothing. Run 436, on `4360ddec`, passed it in 6,055 ms.
+- **Its body waited on three whole first recordings.** `runValueLoop` starts only once a build's first recording has ended, and the body waited on a spinner, a second spinner and the fixture in turn. `until`'s 10,000 ms bound names what never arrived only while the rest of the body leaves it room. `harness.ts` stated that per-wait distinction, and said no wait in the tier exceeded 2,000 ms; an unconstrained run of the whole tier with every wait logged put the slowest at 2,227 ms, this test's second spinner.
+- **Reproduced under a CPU quota.** At `CPUQuota=70%` main's version failed three runs of three the same way, at 16,303 to 16,462 ms.
+
+##### WHAT CHANGED
+
+- **The spinner starts in `beforeEach` and the fixture returns in `afterEach`**, in a nested block around the three spinner tests, each hook under Vitest's 30,000 ms hook timeout. No body waits on more than one recording, and the other two spinner tests, which each paid for a spinner and the fixture, move with it. The fixture's `aria-busy` check moves into `afterEach`, so all three are held to it. At the same 70% quota the branch passed three runs of three; Vitest's reported durations, 15,963 to 16,137 ms, include the hooks.
+- **`harness.ts`'s 2,000 ms sentence is replaced** by the measurement and what it led to.
+
+##### WHAT PROVING IT FOUND
+
+- **The test was green without the generation check.** With `runValueLoop`'s guard reduced to `live?.kind !== 'tm-scratch' || live.value === null`, main's version passed both runs unconstrained, and the first commit's all three. Without the check the stale loop takes one `VALUE_CHUNK` of the new build's run at every yield of that build's first recording, so the new build's own report comes late but inside the wait: 9.2 to 9.3 s after the paste, in five instrumented runs. `web-reduced-files`' T6-S1 row saw it redden on that wait, and is corrected in place.
+- **The test now holds the new build's first count to one `VALUE_CHUNK`.** A `MutationObserver` on the value line records every count the pane writes, and without the check the first read 799,500,000 in every run that reached it. A poll would not do: with the check in place, a poll's first sighting of a spinner read as high as 98,500,000. With the check removed the test now fails on that assertion unconstrained, and at a 75% quota on the wait, by name: `timed out after 10000ms waiting for the second spinner to report`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **A slow enough runner still fails these tests, now by name.** At a 50% quota, in one run, the spinner waits took 8,404 to 9,100 ms against `until`'s 10,000.
+- **`extend-during-recompile.test.ts` and `extend-focus-probe.test.ts` each have a test that waits twice for over 1,000 ms in one body**: 1,291 and 1,198 ms, and 1,079 and 1,203 ms, unconstrained. On `450440e2` those two took 5,291 to 5,494 ms. Not changed.
+- **Nothing pins the `web` job to a runner**, and the tier as a whole was not run under a quota.
+
+##### VERIFICATION
+
+Run on 2026-09-19. The browser runs are from `web/`, under `systemd-run --user --scope -p MemoryMax=16G -p MemorySwapMax=0` plus the `CPUQuota` named, with `/usr/sbin` on `PATH` for Chrome, against a release `pnpm run build:wasm`. "Instrumented" means `until` patched locally to `console.log` its elapsed time on success, never committed. The sabotage is the guard above, reverted after each run.
+
+```
+pnpm exec biome ci --error-on-warnings (web/)  → exit 0, 148 files (1 info: biome.json's deprecation notice)
+pnpm run typecheck (web/)                      → exit 0
+pnpm run test:coverage (web/)                  → exit 0, 87 files / 798 tests; 96.46 / 91.17 / 98.92 / 98.62
+pnpm run build:app (web/)                      → exit 0
+pnpm exec vitest run --project node tests/node/browser-timeout-invariants.test.ts (web/) → 14 passed
+```
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 2 | commits in the range | `git log --oneline 13db3b7..2cb599f \| wc -l` |
+| 434, 435, 436 | the runs | `actions_run_read` `list_runs` on `davey/redextape`; their API ids are 1724, 1725 and 1726, matched by `html_url` |
+| `450440e2`, `4360ddec` | the runners | line 1 of each run's `web` job log, jobs 8555, 8565 and 8575 from `list_run_jobs`, read with `download_job_log` |
+| 15,258, 15,350, 6,055 | the test's durations in 434, 435 and 436 | the same logs, the test's line under `tm-reduced-buffer.test.ts` |
+| 5,291 to 5,494 | the two `extend-*` tests in 434 and 435 | the same logs |
+| 2,000 | the sentence replaced | `git show 13db3b7:web/tests/browser/harness.ts \| grep -n '2,000'` |
+| 2,227 | the slowest wait in the tier | `pnpm exec vitest run --project browser --reporter=verbose`, instrumented, unconstrained, the logged waits grouped by test |
+| 1,291, 1,198, 1,079, 1,203 | the `extend-*` tests' waits | the same run |
+| 16,303 to 16,462, three of three | main's version failing at 70% | `pnpm exec vitest run --project browser --reporter=verbose tests/browser/tm-reduced-buffer.test.ts` at `CPUQuota=70%`, with `13db3b7`'s two test files checked out, three runs |
+| 15,963 to 16,137, three of three | the branch passing at 70% | the same at `2cb599f`, three runs |
+| both, all three | green sabotage runs of main's version and of the first commit's | the same file, unconstrained, sabotaged: main's version twice, instrumented; the first commit's once clean and twice instrumented |
+| 9.2 to 9.3 s, five | the second spinner's wait without the check | the four instrumented runs in the row above, and one instrumented run of the final file |
+| 799,500,000 | the new build's first count without the check | the final file, sabotaged, unconstrained: the assertion's message, twice clean and once instrumented |
+| 98,500,000 | a poll's highest first sighting with the check | the first commit's file with the line logged after each spinner's wait, unconstrained, once |
+| 75% | the named-wait failure | the final file, instrumented, sabotaged, at `CPUQuota=75%`, once |
+| 8,404 to 9,100 | the spinner waits at 50% | the first commit's file, instrumented, at `CPUQuota=50%`, once |
+| 15,000, 30,000 | Vitest's test and hook timeouts in browser mode | `resolved.testTimeout ??= resolved.browser.enabled ? 15e3 : 5e3` and the `hookTimeout` line after it, `3e4`, in vitest 4.1.10's `dist/chunks/coverage.*.js` |
+| 10,000 | `until`'s bound | the default in its signature in `harness.ts` |
+| 148; 87, 798 and the four coverage figures; 14 | Biome's files, the web suite, the gate's tests | the block above, at `2cb599f` |

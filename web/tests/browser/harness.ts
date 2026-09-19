@@ -56,11 +56,13 @@ const sourceOf = (predicate: () => boolean): string => {
  * project's own config, which sets neither — so a wait bounded at or above the harness's own lets Vitest
  * kill the test first and report `Test timed out in 15000ms.` with no name for what never arrived. Twelve
  * files shipped a default above the bound and eleven call sites shipped `60_000`, none of which could
- * ever fire. 10,000 clears both bounds and is five times the slowest wait measured anywhere in this
- * tier. **That property is per WAIT, not per test.** Vitest's bound covers a test as a whole, so one
- * wait can reach this ceiling and still print its own name while two in the same test cannot. No wait
- * in this tier exceeds 2,000 ms, so the margin is ample today and the distinction is worth stating
- * rather than discovering.
+ * ever fire. 10,000 clears both bounds. **That property is per WAIT, not per test.** Vitest's bound
+ * covers a test as a whole, so one wait can reach this ceiling and still print its own name while two
+ * in the same test cannot. This paragraph once added that no wait in this tier exceeded 2,000 ms. On
+ * 2026-09-19 an unconstrained run of the whole tier, with every wait's time logged, put the slowest at
+ * 2,227 ms: a spinner's first recording in `tm-reduced-buffer.test.ts`, whose supersession test waited
+ * on three recordings in one body, and on the slower of the two CI runners Vitest's cap fired in that
+ * test with no name, twice. That file now gives each such wait a hook or a body of its own.
  *
  * **DO NOT PASS `timeoutMs` FROM A CALL SITE.** `tests/node/browser-timeout-invariants.test.ts` fails if
  * any call site under `tests/browser/` passes a numeric timeout. A wait that genuinely needs longer is a
