@@ -1,4 +1,16 @@
-/* Design tokens. A foundation for Plan 5's panes, not a visual identity — §7 of the design spec. */
+@import "./fonts.css";
+
+/* Design tokens (Plan 7 part 1).
+
+   THE PALETTE IS DATA. `palettes.ts` holds every colour; the app writes the chosen palette onto
+   `<html>` as inline custom properties, which win over this block. What this block keeps is
+   the FALLBACK — Instrument's palette, the first-visit default — so a page that has not run `main.ts`
+   yet, or never will (the startup-failure banner), still has every token. `palettes.test.ts` holds this
+   copy equal to `palettes.ts`, and `scripts/check-colours.sh` allows colour literals between the two
+   markers below and, outside this file, only in `palettes.ts`.
+
+   THE STYLE IS THIS FILE. The non-colour tokens here are Instrument's; the `[data-style]` blocks below
+   override them for Paper and Terminal. A style never sets a colour and a palette never sets a font. */
 :root {
   /* Not just a UA-drawn-widget hint anymore — the encoding `<select>` and each pane's binding
      selector (`.pane-binding` below) are the widgets `prefers-color-scheme` cannot reach inside, and
@@ -9,8 +21,11 @@
      and every `light-dark()` value follows without a second copy of the palette. */
   color-scheme: light dark;
 
-  --font-ui: ui-sans-serif, system-ui, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  --font-ui: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Hack", ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  --radius: 2px;
+  --label-transform: uppercase;
+  --label-tracking: 0.04em;
 
   --step--2: 0.75rem;
   --step--1: 0.8125rem;
@@ -20,31 +35,52 @@
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 1rem;
-  --radius: 6px;
 
-  --bg: light-dark(#fbfbfa, #17161a);
-  --bg-raised: light-dark(#ffffff, #1e1d22);
-  --fg: light-dark(#1c1b1a, #eceaf0);
-  --fg-dim: light-dark(#6b6864, #9a9599);
-  --rule: light-dark(#e2dfda, #322f38);
-  --accent: light-dark(#9a3412, #f0956a);
+  /* palette:fallback:begin */
+  --bg: light-dark(#e9edf2, #101820);
+  --bg-raised: light-dark(#ffffff, #16202a);
+  --bg-chrome: light-dark(#f4f7fa, #122029);
+  --rule: light-dark(#c8d3de, #273947);
+  --fg: light-dark(#152430, #dbe6ef);
+  --fg-dim: light-dark(#4a5f72, #8ea3b5);
+  --accent: light-dark(#0f766e, #2dd4bf);
+  --on-accent: light-dark(#ffffff, #06201d);
+  --focus-ring: light-dark(#152430, #dbe6ef);
+  --error: light-dark(#b42318, #f97066);
+  --warn: light-dark(#8a5a00, #fdb022);
+  --tok-neutral: light-dark(#4a5f72, #8ea3b5);
+  --tok-keyword: light-dark(#0b5fb3, #5fa8f5);
+  --tok-ident: light-dark(#152430, #dbe6ef);
+  --tok-nat: light-dark(#9a3412, #f0956a);
+  --tok-bool: light-dark(#9a3412, #f0956a);
+  --tok-operator: light-dark(#6d28d9, #c4a8f5);
+  --tok-punct: light-dark(#4f6477, #8ea3b5);
+  /* palette:fallback:end */
 
   /* The construct a click linked (`.linked` below). A SEPARATE HUE FROM `--accent`, not a tint of it —
      `.decline` already washes a span in `--accent` for a backend refusal, and `.cm-activeLine` washes
      the current line in it too, so a link in the same hue would read as one of those instead of a
-     third, distinct kind of mark. Reuses `--tok-nat`/`--tok-bool`'s blue rather than adding a new
-     literal pair, mixed the same way `.decline` mixes `--accent` — toward `transparent` so it sits as a
-     wash over whatever the token colours already painted underneath. */
+     third, distinct kind of mark. Derived from `--tok-nat` rather than a palette entry of its own, so a
+     palette author sets hues and the marks built from them follow. */
   --link-bg: color-mix(in oklab, var(--tok-nat) 20%, transparent);
   --link-edge: var(--tok-nat);
+}
 
-  --tok-neutral: light-dark(#6b6864, #9a9599);
-  --tok-keyword: light-dark(#9a3412, #f0956a);
-  --tok-ident: light-dark(#1c1b1a, #eceaf0);
-  --tok-nat: light-dark(#1d4ed8, #86b6ff);
-  --tok-bool: light-dark(#1d4ed8, #86b6ff);
-  --tok-operator: light-dark(#7c2d92, #d6a2f0);
-  --tok-punct: light-dark(#8a8681, #6f6a74);
+/* Paper and Terminal, as overrides of the Instrument shape above. The app sets `data-style` on
+   `<html>`; `index.html` ships `data-style="instrument"` so the default is explicit. */
+:root[data-style="paper"] {
+  --font-ui: ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  --radius: 5px;
+  --label-transform: none;
+  --label-tracking: 0.08em;
+}
+:root[data-style="terminal"] {
+  --font-ui: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  --radius: 3px;
+  --label-transform: none;
+  --label-tracking: 0.02em;
 }
 
 /* The explicit choices. `system` needs no rule at all — it is the absence of `data-theme`, which
@@ -61,6 +97,15 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* ONE FOCUS RING FOR THE WHOLE APP (Plan 7 part 1, spec §10; accessibility item 5). Every palette gives
+   `--focus-ring` 3:1 against every surface (`palettes.test.ts`). CodeMirror's base theme suppresses it on
+   the editable `.cm-content` (`outline: none`), and an editor rule below puts it back. It is a neutral
+   near-text colour in every palette, so it is never mistaken for a state mark. */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 /* `display: flex; flex-direction: column; min-height: 100vh` — FOUND WHILE VERIFYING T12'S CSS
@@ -111,6 +156,7 @@ body {
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--rule);
+  background: var(--bg-chrome);
 }
 
 .wordmark {
@@ -118,7 +164,8 @@ body {
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-.encoding {
+.encoding,
+.skin {
   color: var(--fg-dim);
   display: flex;
   align-items: center;
@@ -156,7 +203,8 @@ body {
    `.buffer-retire` here — one declaration, not a second copy to drift out of step with it. */
 .layout-control,
 .buffer-retire,
-.buffer-temperature {
+.buffer-temperature,
+.panel-actions button {
   font: inherit;
   font-family: var(--font-mono);
   padding: 0.1em 0.45em;
@@ -270,6 +318,30 @@ body {
   caret-color: var(--fg);
 }
 
+/* CodeMirror sets `monospace` on its scroller in its own base theme, so without this the editors ignore
+   the style's code face — Hack under Instrument — while every other piece of code on the page uses it. */
+.cm-editor .cm-scroller {
+  font-family: var(--font-mono);
+}
+
+/* A FOCUSED EDITOR SHOWS THE APP'S RING, NOT CODEMIRROR'S. CodeMirror's base theme draws a 1px dotted
+   near-black outline on the focused frame, which disappears on a dark palette and doubles the ring on a
+   light one; that outline is removed here — the class is doubled to outrank the base theme's two-class
+   selector wherever its sheet lands in the cascade.
+
+   THE APP'S RING GOES ON THE EDITABLE `.cm-content`, AND IT HAS TO BE RESTATED HERE, NOT INHERITED FROM
+   THE GLOBAL RULE: the same base theme sets `outline: none` on `.cm-content` unconditionally, at two
+   classes' specificity, which beats the one-class global `:focus-visible` rule whatever the cascade order
+   (pre-flight: the first draft set only the offset here and drew no ring at all). The ring is pulled
+   INSIDE the content's box, because `.cm-scroller` clips anything drawn outside it. */
+.cm-editor.cm-editor.cm-focused {
+  outline: none;
+}
+.cm-editor .cm-content:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 /* §6.1's original arrangement — source and λ side by side, the TM across the bottom — used to live
    here as a two-column grid with `.pane.wide` spanning the TM/results row. Both are artefacts of the
    fixed four-section layout the layout tree (T12, 5d-ii-a) replaced: the tree supplies its own nested
@@ -279,8 +351,8 @@ body {
    of how it is laid out, so it stays here rather than moving. */
 .pane h2 {
   font-size: var(--step--1);
-  text-transform: lowercase;
-  letter-spacing: 0.08em;
+  text-transform: var(--label-transform);
+  letter-spacing: var(--label-tracking);
   color: var(--fg-dim);
   margin: 0 0 var(--space-2);
 }
@@ -288,17 +360,18 @@ body {
 /* `[detached]` — design §4.5's second surface, on the pane's own title.
 
    NOT COLOUR-ONLY, AND THAT IS THE RULE'S WHOLE CONSTRAINT rather than a preference. §4.5 rejected a
-   whole-pane visual treatment because hue is already the sole discriminator for FIVE states
+   whole-pane visual treatment because hue was then the sole discriminator for FIVE states
    (accessibility item 7 and its two aggravations) and this slice's §6 forbids adding a sixth. So the
    carriers here are the bracketed TEXT itself (`pane-chrome.ts` writes the brackets, and they survive
    this rule never reaching the page at all), a BORDER, and a MONOSPACE face against the title's UI
-   font. `color` below is `--fg`, one step up from the `--fg-dim` the heading inherits — a contrast
-   nudge on top of three non-colour signals, not one of them.
+   font — except under Terminal, whose UI font is monospace too. `color` below is `--fg`, one step up
+   from the `--fg-dim` the heading inherits — a contrast nudge on top of the non-colour signals, not one
+   of them.
 
    `tests/browser/detached-badge.test.ts` asserts the border computes to a non-zero width, so reducing
    this to `color:` alone fails a test rather than quietly shipping the thing §4.5 ruled out.
 
-   `letter-spacing: normal` UNDOES `.pane h2`'s 0.08em, which is tracking for a lowercase label and
+   `letter-spacing: normal` UNDOES `.pane h2`'s `--label-tracking`, which is tracking for a label and
    pushes the closing bracket a visible gap away from the word inside it. */
 .detached-badge {
   margin-inline-start: var(--space-2);
@@ -314,10 +387,10 @@ body {
 /* The binding selector — which session this pane's slot is showing (design §2 decision 1, plan T7).
 
    NOTHING HERE CARRIES STATE IN COLOUR, which §6 requires of every control this slice adds and §4.5
-   argues at length: hue is already the sole discriminator for five states (accessibility item 7 and
-   its two aggravations), and the badge rule above went to three non-colour carriers rather than add a
-   sixth. This control needs none, because it has no state to carry — which session is in force is the
-   `<select>`'s own value, which is text a screen reader reads out and a stylesheet cannot suppress.
+   argues at length: hue was then the sole discriminator for five states (accessibility item 7 and its
+   two aggravations), and the badge rule above went to non-colour carriers rather than add a sixth. This
+   control needs none, because it has no state to carry — which session is in force is the `<select>`'s
+   own value, which is text a screen reader reads out and a stylesheet cannot suppress.
 
    THE SAME TREATMENT AS `.controls button` AND `#appearance`, deliberately: one control in a pane, not
    a new style. The caption is `.pane h2`'s dimmed voice so the row reads as one line of chrome under
@@ -365,32 +438,6 @@ body {
   overflow: auto;
   border-bottom: 1px solid var(--rule);
   margin-bottom: 0.5rem;
-}
-
-/* Collapsed is ABSENT, not faded: no colour carries this state (design §6.2), and the control's
-   accessible name says which way it is. */
-.term-editor.is-collapsed {
-  display: none;
-}
-
-/* 5d-iv Task 8: the TM pane's collapse is a class on `.tm-pane` itself (design §4.1's "a class on the
-   pane, not a second rendering mode"), not on the editor host the way `.term-editor.is-collapsed` above
-   is for the λ pane — so the same `.term-editor` declarations above are reused here (not duplicated)
-   and hidden through an ancestor selector instead of a modifier class on the host.
-
-   TWO SELECTORS FOR ONE BEHAVIOUR, CONSIDERED AND KEPT APART — Minor finding, review of Task 8. §4.1's
-   own words are quoted above for a reason: "a class on the pane, not a second rendering mode" contrasts
-   a CSS-class toggle against a renderer branch (mount/unmount, or two DOM subtrees) — it does not say
-   which ELEMENT the class has to land on. Converging on the λ idiom would mean writing `is-collapsed`
-   onto `TmPane`'s own `#editorHost` instead of `.tm-pane`, and that is the one thing this pane's own
-   design note (`tm-pane.ts`'s `#body` doc) and the plan's own Task 8 test both already rule out: the
-   test asserts `.tm-pane` itself carries `.collapsed`, because §4.1 is read literally there as "the
-   pane," not "the editor host" — `TmPane`'s collapse is a fact about the WHOLE machine-source region,
-   not about one child of it. A single-class selector cannot select an ancestor's class; once the class
-   lives one level up, the descendant combinator here is the only CSS that reaches the editor from it.
-   The two idioms differ because the two panes' designs differ, not by drift. */
-.tm-pane.collapsed .term-editor {
-  display: none;
 }
 
 .truncated {
@@ -688,22 +735,65 @@ body {
   padding: var(--space-3);
   border: 1px solid currentColor;
   border-radius: var(--radius);
+  color: var(--error);
   font-family: var(--font-mono);
   font-size: var(--step--1);
 }
 
-.table-toggle {
-  font-size: var(--step--1);
+/* A named, collapsible region (`panel.ts`). The header is chrome, on the chrome surface; the body is
+   whatever the view put in it. */
+.panel {
   margin-block-start: var(--space-2);
 }
-
-/* ADDED AND REMOVED, NEVER DISABLED (`pane-chrome.ts`'s comment for the continue button) — present
-   only while `Follow` is detached, via `hidden` rather than `disabled`, so it sits beside `.table-toggle`
-   with the same treatment. */
-.table-reattach {
-  font-size: var(--step--1);
-  margin-block-start: var(--space-2);
-  margin-inline-start: var(--space-2);
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  background: var(--bg-chrome);
+  border-block: 1px solid var(--rule);
+}
+.panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--step--2);
+  text-transform: var(--label-transform);
+  letter-spacing: var(--label-tracking);
+  cursor: pointer;
+}
+/* Every icon is text-sized and sits on the text's baseline (`icons.ts`). BEFORE the more specific
+   `.panel-toggle .icon` rules below, because Biome's `noDescendingSpecificity` rejects a less specific
+   selector that follows a more specific one (pre-flight: the first draft had this rule last). */
+.icon {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+}
+.panel-toggle .icon {
+  transition: transform 120ms ease-out;
+}
+.panel[data-open="true"] > .panel-header .panel-toggle .icon {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-toggle .icon {
+    transition: none;
+  }
+}
+/* The actions take the toggle's size here, on the container: the shared control rule above gives every
+   `.panel-actions button` `font: inherit`, which outranks a size set on a button's own class. */
+.panel-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-inline-start: auto;
+  font-size: var(--step--2);
 }
 
 /* `.pane` is `overflow: auto` and NOT a flex column (its own rule above), so the table cannot size itself
@@ -711,8 +801,6 @@ body {
 .state-table {
   overflow-y: auto;
   max-height: 40vh;
-  margin-block-start: var(--space-2);
-  border-top: 1px solid var(--rule);
   font-family: var(--font-mono);
   font-size: var(--step--2);
 }
@@ -738,6 +826,16 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   padding-inline: 0.5rem;
+  /* THE ROW MARKS SHARE ONE `box-shadow`, composed from a variable per state, so a row that is both the
+     current state and in the running focus shows both cues rather than whichever rule came last (Plan 7
+     part 1, spec §11). The transparent left border is the linked row's channel, reserved on every row so
+     marking one does not shift its text. */
+  --row-bar: 0 0 transparent;
+  --row-edge: 0 0 transparent;
+  box-shadow:
+    inset var(--row-bar),
+    inset var(--row-edge);
+  border-inline-start: 3px solid transparent;
 }
 
 .state-row.is-state {
@@ -761,6 +859,8 @@ body {
    after it, are the ones that win. */
 .state-row.is-linked {
   background: var(--link-bg);
+  border-inline-start-style: dashed;
+  border-inline-start-color: var(--link-edge);
 }
 
 /* The RUNNING FOCUS on the delta table: the state header `state-table.ts`'s `focusedRows` marks for
@@ -773,11 +873,10 @@ body {
    at once, and equal specificity means source order decides which background shows. `.is-current`/
    `.is-firing` — the run's literal position — must still win, so they stay declared after this.
 
-   COLOUR-ONLY, same wash-and-edge shape as `.linked`/`.is-focus-exact`/`.is-focus-coincident` — a
-   FOURTH instance of the shape already on the deferred-a11y list from Task 9, not a new one. */
+   ITS CUE IS THE BOTTOM EDGE, composed through `--row-edge` so it survives beside the current row's bar. */
 .state-row.is-focus {
   background: color-mix(in oklab, var(--tok-operator) 22%, var(--bg));
-  box-shadow: inset 0 -2px 0 var(--tok-operator);
+  --row-edge: 0 -2px 0 var(--tok-operator);
 }
 
 .state-row {
@@ -791,6 +890,7 @@ body {
    theme-aware without a second declaration. */
 .state-row.is-current {
   background: color-mix(in oklab, var(--accent) 14%, var(--bg));
+  --row-bar: 3px 0 0 var(--accent);
 }
 
 .state-row.is-firing {
@@ -800,10 +900,16 @@ body {
 }
 
 /* The construct a click linked, echoed in the source pane. Distinct from `.decline`, which is a
-   backend refusal, and from the token colours, which say what a thing IS rather than what is selected. */
+   backend refusal, and from the token colours, which say what a thing IS rather than what is selected.
+
+   A BOX, NOT AN UNDERLINE (Plan 7 part 1, spec §11): the underline now means only "where the machine
+   is", so "what you pinned" takes a different shape rather than a different hue. `clone` gives each
+   line of a wrapped span its own full box. */
 .cm-editor .linked {
   background: var(--link-bg);
-  box-shadow: inset 0 -2px 0 var(--link-edge);
+  box-shadow: inset 0 0 0 1px var(--link-edge);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 /* The RUNNING FOCUS: which source construct the CURRENT β-step belongs to — a SECOND LAYER, painted
@@ -817,41 +923,39 @@ body {
    fixed the palette, and this does not reopen it. Both operands are `light-dark()`, so every rule
    below is theme-aware without a second declaration for `:root[data-theme="dark"]`.
 
-   `Exact` and `Within` are different claims (`reduce.rs`'s `Owner` doc) and must read that way:
-   `Exact` gets the same solid wash-plus-edge treatment as `.linked`; `Within` is deliberately
-   WEAKER — a fainter wash, no edge. Task 8's M2 measured how much of a program a `Within` span
+   `Exact` and `Within` are different claims (`reduce.rs`'s `Owner` doc) and must read that way, by SHAPE
+   as well as strength (Plan 7 part 1, spec §11): `Exact` is a solid underline, `Within` a dotted one and a
+   fainter wash. Task 8's M2 measured how much of a program a `Within` span
    typically covers, against a threshold fixed before any number existed — the verdict (only one of
    nine corpus programs crossed it) is recorded at the top of `link.ts`, which is why `Within` still
    earns a highlight here rather than a status line. */
 .cm-editor .is-focus-exact {
   background: color-mix(in oklab, var(--tok-operator) 22%, transparent);
-  box-shadow: inset 0 -2px 0 var(--tok-operator);
+  text-decoration: underline solid var(--tok-operator) 2px;
+  text-underline-offset: 0.2em;
 }
 .cm-editor .is-focus-within {
   background: color-mix(in oklab, var(--tok-operator) 10%, transparent);
+  text-decoration: underline dotted var(--tok-operator) 2px;
+  text-underline-offset: 0.2em;
 }
 
 /* The one coincidence the app exists to show: the pin (`.linked`) and the running focus naming the
    SAME construct. Not two independently-coloured highlights stacked on one span — its own blended
-   hue, focus purple mixed with the pin's blue, so this reads as ONE distinct signal ("the run just
-   reached what you pinned") rather than two washes competing for the same pixels.
+   hue, the focus's `--tok-operator` mixed with the pin's `--tok-nat`, so this reads as ONE distinct
+   signal ("the run just reached what you pinned") rather than two washes competing for the same pixels.
 
-   CORRECTED 2026-08-10, PR 5c's eyeball gate — the OUTCOME above holds; the MECHANISM sentence did
-   not. They ARE two highlights stacked on one span: CodeMirror renders two same-range mark
-   decorations from two independent `StateField`s as two NESTED elements rather than one element
-   carrying both classes, and the running focus is the OUTER of the two —
-   `<span class="is-focus-coincident"><span class="linked">…</span></span>`, dumped from the rendered
-   line in real Chromium and pinned by `running-focus.test.ts`. So `--focus-coincident-hue` below is
-   NOT what a reader sees on the underline: `.linked`'s own opaque `--link-edge` occupies the same
-   2 px band on the inner element and paints over it. What the blend does reach is the BACKGROUND,
-   which composites under `.linked`'s 20% wash — and that composite is what was judged by eye, in
-   both themes: distinctly more saturated than `.linked` alone and readable as one band, not as a
-   muddy overlap. What the two never do is stack THREE ways — `main.ts` substitutes `'coincident'`
-   for the claim, so `.is-focus-exact`/`.is-focus-within` are absent here. */
+   TWO NESTED ELEMENTS, TWO CUES — pinned by `running-focus.test.ts`: CodeMirror renders the two same-range
+   marks as `<span class="is-focus-coincident"><span class="linked">…</span></span>`. Since Plan 7 part 1
+   the inner `.linked` draws a BOX and the outer draws a DOUBLE underline, which `text-decoration`
+   propagates to the text inside, so a reader sees both — "you pinned this" and "the machine is here" —
+   neither of them only a colour. The blended hue still reaches the background, under `.linked`'s wash. */
 .cm-editor .is-focus-coincident {
   --focus-coincident-hue: color-mix(in oklab, var(--tok-operator) 55%, var(--tok-nat) 45%);
   background: color-mix(in oklab, var(--focus-coincident-hue) 34%, transparent);
-  box-shadow: inset 0 -2px 0 var(--focus-coincident-hue);
+  text-decoration: underline double var(--focus-coincident-hue);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.2em;
 }
 
 .link-status {
@@ -865,7 +969,9 @@ body {
    the class is added alongside `.tok-*`, so the text keeps its syntax colour and gains a ground. */
 .term .is-linked {
   background: var(--link-bg);
-  box-shadow: inset 0 -2px 0 var(--link-edge);
+  box-shadow: inset 0 0 0 1px var(--link-edge);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 /* The redex THIS FRAME'S OWN STEP CONTRACTED, in the λ pane's FRAME view (not the link window above,
@@ -941,11 +1047,8 @@ main {
   cursor: row-resize;
 }
 
-/* THE ONLY FOCUS-VISIBLE RULE IN THE STYLESHEET, and it is here rather than as part of the deferred
-   accessibility pass because a divider that takes focus with no ring is a control a keyboard user
-   cannot locate — item 5 of that list is about rings nobody specified, and this would be a ring
-   nobody could have. */
+/* The divider keeps its ring INSIDE its own box: it is a 4px line between two panes, and a ring drawn
+   outside it would sit on top of both. The colour and width are the global rule's. */
 .layout-divider:focus-visible {
-  outline: 2px solid var(--fg);
   outline-offset: -2px;
 }

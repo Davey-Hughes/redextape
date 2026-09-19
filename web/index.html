@@ -1,21 +1,39 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-style="instrument">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- The two files a first Instrument paint needs (`fonts.css`). `/node_modules/…` is the form Vite
+         rewrites to the hashed asset in the build — a bare package path is left as written and 404s — and
+         there it resolves to the same hashed file `fonts.css` produces, so the built site fetches each once.
+         IN DEV THE TWO DO NOT MATCH, measured: the dev server serves `fonts.css`'s faces from pnpm's real
+         paths (`/node_modules/.pnpm/…`), so these two are fetched a second time and Chrome warns that they
+         went unused. That costs a local download and two console lines in dev only; it is not a reason to
+         change these paths, which are what the build needs. -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/node_modules/hack-font/build/web/fonts/hack-regular.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2" />
     <title>redextape</title>
     <link rel="stylesheet" href="/src/style.css" />
     <script>
-      // Applies the stored appearance BEFORE first paint. `main.ts` does this too (`appearance.ts`'s
-      // `applyAppearance`, called from the module script), but a module script always runs after the
-      // page has already painted once — waiting for it would show the wrong theme for one frame on
-      // every load, then snap to the right one. This inline copy is deliberately tiny and duplicated
-      // rather than imported, since importing a module here would reintroduce exactly the delay it
-      // exists to avoid. `try/catch` because `localStorage` throws in some privacy modes, and a thrown
-      // error here must not block the rest of the page from loading.
+      // Applies the stored appearance, style and palette BEFORE first paint. `main.ts` does this too
+      // (`appearance.ts`'s `applyAppearance`, `skin.ts`'s `applySkin`), but a module script always runs
+      // after the page has already painted once — waiting for it would show the wrong theme for one frame
+      // on every load, then snap to the right one. This inline copy is deliberately tiny and duplicated
+      // rather than imported, since importing a module here would reintroduce exactly the delay it exists
+      // to avoid; `prepaint.test.ts` holds its keys, style ids and pattern to `skin.ts`/`palettes.ts`.
+      // `try/catch` because `localStorage` throws in some privacy modes, and a thrown error here must not
+      // block the rest of the page from loading. The cached palette is applied only if every declaration
+      // in it sets a custom property to a `light-dark(#hex, #hex)` pair (`palettes.ts`'s
+      // `PALETTE_CSS_PATTERN`), so nothing else in storage can reach the `style` attribute.
       try {
         var v = localStorage.getItem('redextape.appearance')
         if (v === 'light' || v === 'dark') document.documentElement.setAttribute('data-theme', v)
+      } catch {}
+      try {
+        var s = localStorage.getItem('redextape.style')
+        if (s === 'paper' || s === 'terminal' || s === 'instrument') document.documentElement.setAttribute('data-style', s)
+        var c = localStorage.getItem('redextape.palette.css')
+        if (c && /^(--[a-z0-9-]+: light-dark\(#[0-9a-f]{6}, #[0-9a-f]{6}\); ?)+$/.test(c)) document.documentElement.setAttribute('style', c)
       } catch {}
     </script>
   </head>
@@ -23,6 +41,14 @@
     <header class="bar">
       <span class="wordmark">redextape</span>
       <button type="button" id="appearance"></button>
+      <label class="skin">
+        style
+        <select id="style"></select>
+      </label>
+      <label class="skin">
+        palette
+        <select id="palette"></select>
+      </label>
       <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
       <button type="button" id="buffers">buffers</button>
       <label class="encoding">

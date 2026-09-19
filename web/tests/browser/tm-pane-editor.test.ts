@@ -7,8 +7,8 @@ import type { TmProgram, TmState } from '../../src/types'
 /**
  * Design §4.2/§4.1's split body, ported to the TM leg (5d-iv, Task 8): the editor mounted (or not)
  * above the tape rows and δ-table, which stay on the unchanged code path — see `TmPane`'s own doc on
- * `#body` for why the collapse is a class on THAT wrapper rather than on `#editorHost` the way
- * `LambdaPane`'s is.
+ * `#body` for why the collapse hides `#editorHost` itself through the text panel, the same mechanism
+ * `LambdaPane` uses, rather than a class on an ancestor.
  *
  * PANES ARE CONSTRUCTED DIRECTLY, matching `lambda-pane-editor.test.ts`'s own idiom: this is chrome and
  * body wiring built in the constructor and moved by `setEditor` directly, with nothing on the path to
@@ -110,15 +110,15 @@ describe('the TM pane editor region', () => {
    * real program first is what makes `rowsBefore > 0`, so the equality afterwards is actually pinning
    * "collapsing does not disturb the table renderer's own path."
    */
-  it('collapses by class and leaves the table renderer alone', () => {
+  it('collapses the text panel and leaves the table renderer alone', () => {
     const { pane, host } = mountPane()
     pane.setEditor('tapes 1\n')
     pane.setProgram(PROGRAM, ['TAPE'])
     pane.render(FRAME, CONTROLS)
     const rowsBefore = host.querySelectorAll('.state-row').length
     expect(rowsBefore).toBeGreaterThan(0)
-    host.querySelector<HTMLButtonElement>('button.collapse')?.click()
-    expect(host.querySelector('.tm-pane')?.classList.contains('collapsed')).toBe(true)
+    host.querySelector<HTMLButtonElement>('[data-panel="text"] .panel-toggle')?.click()
+    expect(host.querySelector<HTMLElement>('.term-editor')?.hidden).toBe(true)
     expect(host.querySelectorAll('.state-row').length).toBe(rowsBefore)
   })
 

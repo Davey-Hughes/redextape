@@ -159,6 +159,14 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      # UNSCOPED FOR THE SIBLINGS' REASON: a colour literal can arrive in any web source, and the file that
+      # carries it is not necessarily one this commit names. Self-test first, then the scan.
+      - id: check-colours
+        name: no colour literals outside the palette
+        entry: bash -c 'scripts/check-colours.sh --self-test && scripts/check-colours.sh'
+        language: system
+        always_run: true
+        pass_filenames: false
       - id: check-lua
         name: lua parses and parser names agree
         entry: bash -c 'scripts/check-lua.sh --self-test && scripts/check-lua.sh'

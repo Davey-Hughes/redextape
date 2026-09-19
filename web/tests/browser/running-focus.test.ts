@@ -348,8 +348,7 @@ describe('the running focus', () => {
     // from the diff whether CodeMirror gives two same-range mark decorations from two independent
     // `StateField`s ONE element carrying both classes or TWO nested elements, and the visual outcome
     // differs. One element means the cascade picks a single winner per property; two nested elements
-    // mean the inner background composites over the outer's, and the inner `box-shadow: inset 0 -2px 0`
-    // paints over the outer's in the same 2 px band.
+    // mean each keeps its own, and the inner background composites over the outer's.
     //
     // MEASURED IN REAL CHROMIUM by dumping the rendered line: it is TWO NESTED ELEMENTS, and the
     // running focus is the OUTER one —
@@ -358,10 +357,10 @@ describe('the running focus', () => {
     //     <span class="tok-ident">x</span> <span class="tok-operator">+</span> <span class="tok-nat">2</span>
     //   </span></span>
     //
-    // `linkMark` is declared BEFORE `focusMark` in `main.ts`'s extension list and lands INSIDE, so the
-    // pin's own opaque `--link-edge` underline is the one that survives on top. What that looks like on
-    // screen is recorded in the roadmap's `PLAN 5c CLOSES` entry, which is where the eyeball gate's
-    // verdict lives — this assertion pins only the structure it depends on.
+    // `linkMark` is declared BEFORE `focusMark` in `main.ts`'s extension list and lands INSIDE. Since
+    // Plan 7 part 1 the two draw different shapes — the inner pin a box, the outer running focus a double
+    // underline that `text-decoration` carries through to the text inside — so both show at once rather
+    // than one painting over the other. This assertion pins only the nesting that depends on.
     const pin = document.querySelector('.cm-editor .linked')
     expect(pin?.textContent).toBe('x + 2')
     expect(pin?.classList.contains('is-focus-coincident'), 'nested, not merged into one element').toBe(false)

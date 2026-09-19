@@ -92,7 +92,7 @@
 #      five patterns"* is a claim about where `_atom` and `_term` appear in the grammar, not a
 #      total, and is not derivable either. None are gated.
 #   5. THE WORKSPACE'S TEST COUNT, AND ANYTHING ELSE THAT NEEDS A BUILD. `cargo nextest list
-#      --workspace` costs 218 s warm; this whole script costs ~150 ms. Gating that figure would make
+#      --workspace` costs 218 s warm; this whole script costs well under a second. Gating that figure would make
 #      every commit in this repository unusable, and putting it in CI alone would break the one
 #      invariant both sibling gates rest on — the same script in both places, so local and CI cannot
 #      drift. **The root README states it as a DATED OBSERVATION instead**, which is the same move
@@ -155,7 +155,7 @@ derive() {
     # REPO-LEVEL KEYS. These ignore `$dir` (passed as `.`) and describe the workspace rather than a
     # grammar. All three are structural greps — the reason they are gateable at all is that none
     # compiles anything. The workspace's TEST COUNT is deliberately absent: `cargo nextest list
-    # --workspace` costs 218 s warm against this whole script's ~150 ms, so the root README states
+    # --workspace` costs 218 s warm against this whole script's fraction of a second, so the root README states
     # that figure as a dated observation instead. A gate that cannot be cheap should not exist.
     workspace_crates)   n=$(find crates -mindepth 1 -maxdepth 1 -type d | wc -l) ;;
     grammar_count)      n=$(find grammars -mindepth 2 -maxdepth 2 -name tree-sitter.json | wc -l) ;;

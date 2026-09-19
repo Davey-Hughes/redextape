@@ -1,4 +1,6 @@
 import type { ControlState } from './controls'
+import { icon } from './icons'
+import { createPanel } from './panel'
 import type { Leg } from './protocol'
 import type { SessionId } from './session-client'
 import type { Binding, PaneOption } from './sessions'
@@ -73,9 +75,9 @@ export type PaneEvents = {
    * A genuine edit landed in a detached pane's own scratch buffer — design §4.3's second edit
    * gesture, and `detach`'s counterpart: that one forks a new scratch from a source-derived view,
    * this one recompiles the scratch that already exists. `ScratchEditor`'s debounced `onEdit` is the
-   * only caller, wired through `LambdaPane.setEditor`, so it fires on a keystroke that survived the
-   * debounce — never on the seed that mounted the editor (`ScratchEditor#setText`'s `#seeding` guard
-   * is what keeps a seed from reaching here at all).
+   * only caller, so it fires on a keystroke that survived the debounce — never on the seed that
+   * mounted the editor (`ScratchEditor#setText`'s `#seeding` guard is what keeps a seed from reaching
+   * here at all).
    *
    * OPTIONAL, FOR THE SAME REASON `detach` IS: an editor exists only on a pane whose slot owns a
    * scratch (§4.2), and this file declares the shape without deciding when a pane gets it — that is
@@ -83,8 +85,7 @@ export type PaneEvents = {
    */
   editScratch?: (src: string) => void
   /**
-   * This pane asks to hold its scratch session's editor — wave 3 (5d-ii-a)'s editor-moves rule, and
-   * `claimEditorButton`'s only caller.
+   * This pane asks to hold its scratch session's editor — wave 3 (5d-ii-a)'s editor-moves rule.
    *
    * OPTIONAL, FOR `detach`'s REASON: it exists only on a pane whose slot may be bound to a scratch,
    * which today means the λ leg. IT CARRIES NOTHING, same as `close` below — the pane knows it was
@@ -101,23 +102,24 @@ export type PaneEvents = {
   /**
    * This pane's editor was collapsed or expanded.
    *
-   * OPTIONAL, LIKE `detach` AND `showEditor` BESIDE IT, for the same "a caller with no handler gets a
-   * pane that never offers the affordance" test those two apply — a pane built with no `collapse`
-   * handler builds no `collapseButton` at all.
+   * OPTIONAL, BUT NOT THE WAY `detach` AND `showEditor` ARE: `textPanel` is the editor host's own
+   * container and both constructors build it unconditionally, so a pane built with no `collapse`
+   * handler still shows the panel and toggles it — only the report of the gesture goes missing, an
+   * `on.collapse?.(collapsed)` call with nothing on the other end.
    *
    * **NOT WITHHELD ON A TM PANE, WHICH REVERSES WHAT THIS PARAGRAPH USED TO SAY.** It read "because a
    * TM pane has no editor to collapse and a handler it can never fire is a parameter pretending to be a
    * capability" — true before Task 8 (5d-iv), false after: `TmPane` also `implements EditablePane` and
-   * its constructor builds a `collapseButton` on its own control strip exactly like `LambdaPane`'s, and
-   * calls `on.collapse?.(collapsed)` from it. `transport.ts`'s `events` provides this handler on both
-   * legs now — see its own doc for the review finding that caught the gap: left λ-only, every `TmPane`
-   * was built with `on.collapse === undefined`, so a TM collapse toggled the class but never reached
-   * `scratchpad.setCollapsed`, and the buffer came back expanded on reload.
+   * its constructor builds a `textPanel` that wraps `#editorHost` in the pane body exactly like
+   * `LambdaPane`'s, and calls `on.collapse?.(collapsed)` from it. `transport.ts`'s `events` provides
+   * this handler on both legs now — see its own doc for the review finding that caught the gap: left
+   * λ-only, every `TmPane` was built with `on.collapse === undefined`, so a TM collapse hid the host but
+   * never reached `scratchpad.setCollapsed`, and the buffer came back expanded on reload.
    *
-   * IT REPORTS THE GESTURE AND DOES NOT PERFORM IT. `collapseButton`'s own callback still toggles
-   * the collapse class on the pane's own editor region — the presentation is unchanged and stays local —
-   * and this is the app being told, so it can record the state against the BUFFER (5d-ii-d §4.7) rather
-   * than against the pane the editor happens to be mounted in today.
+   * IT REPORTS THE GESTURE AND DOES NOT PERFORM IT. The host is already hidden or shown by the time this
+   * runs — `createPanel`'s own click handler (`panel.ts`) applies the new `hidden`/`aria-expanded` state
+   * before calling `onToggle`. This is the app being told, so it can record the state against the
+   * BUFFER (5d-ii-d §4.7) rather than against the pane the editor happens to be mounted in today.
    */
   collapse?: (collapsed: boolean) => void
   /**
@@ -184,15 +186,15 @@ function button(label: string, title: string, onClick: () => void): HTMLButtonEl
  * The `[detached]` badge on a pane's own `<h2>`, shared by both panes — design §4.5's second surface.
  *
  * REAL TEXT, NOT A COLOUR AND NOT AN ICON, and that is the decision rather than a default. §4.5
- * rejected a whole-pane visual treatment because hue is already the sole discriminator for five states
+ * rejected a whole-pane visual treatment because hue was then the sole discriminator for five states
  * (the accessibility list's item 7 and its two aggravations) and this slice's own §6 forbids adding a
  * sixth. Text is also the interim mitigation for the a11y hole §4.5 records: `#link-status` is a plain
  * `<div>` that announces nothing, so the status line's sentence is unreachable to a screen reader,
  * while this sits in the heading of the pane the user is actually on.
  *
- * THE BRACKETS ARE PART OF THE SIGNAL. `.pane h2` is `text-transform: lowercase` with wide tracking, so
- * an unbracketed word would read as a second half of the pane's name ("lambda detached") rather than as
- * a status attached to it. They also survive every stylesheet failure, which a border does not.
+ * THE BRACKETS ARE PART OF THE SIGNAL. An unbracketed word would read as a second half of the pane's
+ * name ("lambda detached") rather than as a status attached to it. They also survive every stylesheet
+ * failure, which a border does not.
  *
  * ADDED AND REMOVED, NEVER HIDDEN — the idiom this file already states for the continue button, taken
  * one step further for a reason specific to this element. `hidden` leaves the text in `textContent` and
@@ -302,11 +304,10 @@ export function detachedBadge(title: HTMLElement): { update(detached: boolean): 
  * for the selector. Nothing here carries state in colour (§6): the button is present or it is not,
  * and what it says is words.
  *
- * **`title` IS A PARAMETER NOW, DEFAULTED TO THE λ WORDING — 5d-iv Task 9, the same widening
- * `collapseButton`'s `noun` parameter already made for this file.** The λ pane forks a TERM into a λ
- * scratchpad; `TmPane` forks a MACHINE into a TM one, and hard-coding the old sentence would have been
- * wrong on the second caller. Every existing call site (this file's own tests, `LambdaPane`'s) keeps
- * reading exactly the old string; `TmPane` is the one caller that passes something else.
+ * **`title` IS A PARAMETER NOW, DEFAULTED TO THE λ WORDING — 5d-iv Task 9.** The λ pane forks a TERM
+ * into a λ scratchpad; `TmPane` forks a MACHINE into a TM one, and hard-coding the old sentence would
+ * have been wrong on the second caller. Every existing call site (this file's own tests, `LambdaPane`'s)
+ * keeps reading exactly the old string; `TmPane` is the one caller that passes something else.
  *
  * **`setReason` IS THE ONE DEVIATION FROM THIS FILE'S "ADDED AND REMOVED, NEVER DISABLED" IDIOM, AND IT
  * IS DELIBERATE — 5d-iv Task 9, design §4.3.** Every other control here treats "cannot work" as a
@@ -370,116 +371,46 @@ export function detachButton(
 }
 
 /**
- * The editor-collapse control on a detached λ pane — design §4.2.
+ * The **text** panel: a copy's editable text — a λ term or a machine — as a collapsible region (Plan 7
+ * part 1, spec §8). It replaces the `⌃/⌄` collapse button both views put in their control strips, and
+ * gives what was one control with two nouns ("term editor", "machine source") one name.
  *
- * IT TOGGLES A CLASS AND NOTHING ELSE. The frame renderer below never learns it has more room, so
- * there is no second body state for `#redraw` and `renderLink` to disagree about — one code path, and
- * the collapse is presentation.
+ * THE STATE IS `aria-expanded`, NOT A RELABEL — accessibility items 2 and 15 — and hiding is the panel
+ * setting `hidden` on the body, which is the view's own editor host. The views keep no collapse class.
  *
- * ADDED AND REMOVED, NEVER DISABLED — this file's stated idiom. It is absent on an attached pane
- * because there is no editor to collapse, which is the same "a control that provably cannot work
- * should not be offered" standard `detachButton` and `paneSelect` both apply.
+ * SHOWN ONLY WHILE AN EDITOR IS MOUNTED, the "a control that provably cannot work should not be offered"
+ * standard `detachButton` and `paneSelect` apply: `update(false)` hides the whole panel.
  *
- * THE LABEL NAMES THE CURRENT STATE, WHICH IS PR #20's `aria-label` TREATMENT and the mitigation the
- * accessibility list's item 2 asks for on the δ-table toggle. Nothing here carries state in colour:
- * the glyph changes and the accessible name changes with it.
+ * **THE STATE IS PERSISTED PER BUFFER, NOT PER PANE**, because the editor MOVES: a collapse remembered
+ * against a pane would describe whichever buffer landed there next. `scratch.ts`'s `setCollapsed` records
+ * the gesture `onToggle` reports, and `update`'s `initial` is how the record reaches this closure: it is
+ * read only on the unavailable → available transition, and every mount the app makes passes the
+ * buffer's own recorded flag.
  *
- * **THE "CURRENT STATE" SURVIVES A REMOVAL, WHICH MEANS IT RESETS ON ONE — found and fixed after a
- * reviewer walked the exact cycle this note now pins.** Mount an editor, click collapse (label ->
- * "show the term editor", host gains `.is-collapsed`), `setEditor(null)` to unmount, `setEditor(text)`
- * to remount: the fresh mount came back expanded (`LambdaPane.setEditor` set `#editorHost.className =
- * 'term-editor'` UNCONDITIONALLY back then, with no `.is-collapsed`, and called `update(true)` here with
- * no second argument — **BOTH HALVES ARE CONDITIONAL NOW, see the paragraph below on what changed and
- * why**), but the button that used to only detach `el` from `parent` on `update(false)` left the
- * closure's `collapsed` flag untouched, so it came back still reading "show the term editor" over an
- * editor that was already showing. The label named the PREVIOUS pane's state, not the one on screen —
- * exactly what the paragraph above forbids.
- * **THE STATE IS PERSISTED NOW, PER BUFFER, AND THE PARAGRAPH THAT USED TO BE HERE IS WHY IT TOOK
- * THREE SLICES.** It read: *"a persisted collapse preference would outlive every session it described
- * — a scratch is retired and replaced, not resumed, so there is no session for a remembered collapse
- * to describe."* 5d-ii-c made buffers resumable and falsified the premise without answering the
- * question; 5d-ii-d §4.7 answers it. **PER BUFFER AND NOT PER PANE**, because the editor MOVES: a
- * collapse remembered against a leaf would describe whichever buffer landed there next, which is the
- * same class of error the reviewer caught on this control once already, when a remounted editor came
- * back reading "show the term editor" over an editor that was already showing. The flag rides with the
- * term, and the reset below still fires on an unmount — a buffer that comes back collapsed is told so
- * by its own record, not by a flag that survived in a closure.
- *
- * **`update`'S SECOND PARAMETER IS HOW THAT RECORD REACHES THIS CLOSURE.** `initial` is read only on
- * the `false -> true` transition — the same transition the no-op guard below already isolates — and is
- * what lets `collapsed` START where the buffer's own record says, instead of always at `false` the way
- * every earlier mount did. `LambdaPane.setEditor`'s mount branch is the one caller that ever passes
- * anything but the default: `scratchpad.collapsedOf(session)`, read at the same call that decides the
- * host's own `.is-collapsed` class, so the closure's flag and the host's class are set from the same
- * value and cannot arrive disagreeing with each other — the exact disagreement this whole doc is about.
- *
- * **`noun` NAMES WHAT IS BEING SHOWN OR HIDDEN, AND DEFAULTS TO `LambdaPane`'S OWN WORDING — 5d-iv
- * Task 8.** The label used to read the literal words "the term editor" unconditionally, which is λ
- * vocabulary on a control `TmPane` now shares. Generalising the string in place would have changed an
- * existing, user-visible accessible name on the λ pane for a slice that has no reason to touch it; a
- * defaulted parameter instead leaves every existing call site (this file's own test, `LambdaPane`'s)
- * reading exactly "show/hide the term editor", while `TmPane` passes `'machine source'` and reads
- * "show/hide the machine source". Nothing here carries state in colour (§6): the words are the state.
- *
- * THE RESET LIVES INSIDE `update`, NOT A SEPARATE METHOD, because `available` going false already IS
- * the unmount signal — and the existing no-op guard above (`available === on`) already fires exactly
- * once per real transition. Piggybacking on that guard is what keeps this safe on the per-frame path
- * every control here is written for: the reset cannot fire twice for one unmount, and cannot fire at all
- * while the control sits hidden across repeated calls with the same `available`. A second exported
- * method would have needed that same guard rebuilt beside this one instead of reusing it.
- *
- * **TWO CALLERS HIDE IT, NOT ONE — a narrower claim used to stand here and named only the first
- * (5d-ii-d T9 fix round 1).** It read "this control's only caller ever hides it for that one reason
- * (`LambdaPane.setEditor`'s `text === null` branch)". `LambdaPane.takeEditor` calls `update(false)` too,
- * for the same unmount reason on the OTHER half of the editor-moves rule — a pane giving its editor up
- * to custody rather than destroying it. Pre-existing and harmless on its own (both callers hide the
- * control for the same fact, so the guard above answers either the same way), but the custody move is
- * now load-bearing for what this control shows on arrival (`receiveEditor`'s own doc, 5d-ii-d T9 fix
- * round 1), which is exactly what a reader relying on "only caller" would have missed.
+ * **AN UNMOUNT RESETS TO OPEN.** A reviewer once caught the predecessor coming back from an unmount and
+ * remount still reading the PREVIOUS buffer's state over an editor that was showing; a hidden control
+ * has no state left to survive with, so the next mount starts from its own record. The reset lives in
+ * `update`, behind its no-op guard: a repeated same-state call is a no-op.
  */
-export function collapseButton(
-  parent: HTMLElement,
+export function textPanel(
+  body: HTMLElement,
   onToggle: (collapsed: boolean) => void,
-  noun = 'term editor',
-): { update(available: boolean, initial?: boolean): void } {
-  const el = document.createElement('button')
-  el.type = 'button'
-  el.className = 'collapse'
-  let collapsed = false
-  const relabel = () => {
-    el.textContent = collapsed ? '⌄' : '⌃'
-    el.setAttribute('aria-label', collapsed ? `show the ${noun}` : `hide the ${noun}`)
-    el.title = collapsed ? `show the ${noun}` : `hide the ${noun}`
-  }
-  relabel()
-  el.addEventListener('click', () => {
-    collapsed = !collapsed
-    relabel()
-    onToggle(collapsed)
-  })
-  // The same no-op guard every control in this file states, for the same reason: this runs on every
-  // recorded frame during playback.
+): { readonly el: HTMLElement; update(available: boolean, initial?: boolean): void } {
+  const panel = createPanel({ name: 'text', label: 'text', body, onToggle: (open) => onToggle(!open) })
+  panel.el.hidden = true
   let on = false
   return {
+    el: panel.el,
     update(available: boolean, initial = false) {
       if (available === on) return
       on = available
       if (available) {
-        // THE INCOMING BUFFER'S OWN RECORD, NOT ALWAYS `false` — see this function's doc, "`update`'S
-        // SECOND PARAMETER". `relabel` runs unconditionally so a caller that mounts already-collapsed
-        // reads "show the term editor" from the first frame, not from the first click.
-        collapsed = initial
-        relabel()
-        parent.append(el)
+        panel.setOpen(!initial)
+        panel.el.hidden = false
         return
       }
-      el.remove()
-      // See "THE 'CURRENT STATE' SURVIVES A REMOVAL" above: a removed control has no state left to
-      // survive with, so the next mount must not inherit this one's click history.
-      if (collapsed) {
-        collapsed = false
-        relabel()
-      }
+      panel.el.hidden = true
+      panel.setOpen(true)
     },
   }
 }
@@ -489,14 +420,12 @@ export function collapseButton(
  * else — wave 3 (5d-ii-a)'s editor-moves rule, and the control that makes moving it a user gesture
  * rather than only a reply-driven side effect.
  *
- * A SEPARATE BUTTON FROM `collapseButton`, NOT A THIRD STATE BOLTED ONTO IT, though the two glyphs
- * (`⌄`) match while both could apply. `collapseButton` toggles the LOCAL host's visibility and is
- * offered only while THIS pane already holds the mounted editor (`LambdaPane.setEditor`'s mount branch
- * is its only caller that shows it); this button is offered only while the pane's session is detached,
- * this pane does NOT hold the editor, AND an editor for that session exists somewhere (`LambdaPane`'s
- * `#refreshClaim`, all three). The first two conditions are mutually exclusive with `collapseButton`'s —
- * holding the editor is exactly what disqualifies this one — so a pane never offers both controls at
- * once, and there is no selector ambiguity between them.
+ * A SEPARATE CONTROL FROM `textPanel`, WITH ITS OWN ICON. The two used to share the `⌄` glyph — the
+ * inventory that opened Plan 7 found them told apart only by tooltip — and now `icons.ts` names each
+ * meaning separately. They are also mutually exclusive by construction: the text panel is shown only
+ * while THIS pane holds the mounted editor, and this button is offered only while the pane's session is
+ * detached, this pane does NOT hold the editor, AND an editor for that session exists somewhere
+ * (`LambdaPane`'s `#refreshClaim`, all three).
  *
  * **THE THIRD CONDITION IS DEFERRED-A11Y ITEM 11 AND WAS ABSENT UNTIL 5d-ii-c's LAST COMMITS**, which
  * is why this paragraph used to name two. Without it the gate read "detached, and not showing it" and
@@ -504,22 +433,18 @@ export function collapseButton(
  * detached pane's session had built at least once. `LambdaPane.#editorAvailable` carries the missing
  * fact and `editor-custody.ts`'s `hasEditor` computes it; both docs have the argument.
  *
- * `aria-label` DELIBERATELY DOES NOT REUSE `collapseButton`'s "show the term editor" — IMPORTANT
- * finding, whole-branch review before merge: the two controls are mutually exclusive by construction
- * (above), so no SELECTOR is ever ambiguous, but a screen-reader user hears one spoken name for two
- * semantically different actions — "uncollapse THIS pane's own editor" versus "pull the editor here
- * FROM ANOTHER pane" — which is exactly the ambiguity `aria-label`'s whole job is to prevent, selector
- * clashes or not. This button's name states what it does: bring the editor here.
+ * THE `aria-label` NAMES THE ACTION — bring the editor here — which is a different action on a different
+ * pane from the text panel's disclosure, and a screen-reader user must hear two names for the two.
  *
  * ADDED AND REMOVED, NEVER DISABLED, this file's stated idiom. IT CARRIES NO LOCAL STATE, unlike
- * `collapseButton`: a click here is always the same request ("bring the editor to this pane"), so there
+ * `textPanel`: a click here is always the same request ("bring the editor to this pane"), so there
  * is no toggle to relabel and no "current state survives a removal" hazard to guard against.
  */
 export function claimEditorButton(parent: HTMLElement, onClaim: () => void): { update(available: boolean): void } {
   const el = document.createElement('button')
   el.type = 'button'
   el.className = 'claim-editor'
-  el.textContent = '⌄'
+  el.append(icon('move-editor-here'))
   el.setAttribute('aria-label', 'bring the term editor to this pane')
   // THE `title` NAMES BOTH PLACES THE EDITOR CAN BE, WHERE IT USED TO NAME ONE. It read "— it is
   // currently mounted on another pane", which is false in the case this control matters most for: the

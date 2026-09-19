@@ -17971,3 +17971,140 @@ The binary is `target/release/redextape` rebuilt from this branch, whose code is
 measurements came from a binary built on 2026-09-16, before `7d1ee20`, which touched `redextape-core`;
 every figure above, and every example value in the design's §6, was re-run on the rebuilt binary and none
 changed.
+
+#### PLAN 7 PART 1, THE FOUNDATIONS: PALETTES ARE DATA, THREE STYLES DRAW FROM THEM, TWO VIEWS' ONE-OFF TOGGLES BECOME PANELS, AND EVERY MARKED STATE HAS A SHAPE. A BUILD OF THE PLAN BEFORE ANY IMPLEMENTER SAW IT FOUND SIX OF ITS DEFECTS, AND THE WHOLE-BRANCH REVIEW FOUND THE ONE THAT MATTERED MOST: EVERY INTER SUBSET DOWNLOADED, BEHIND A TEST THAT COULD NOT SEE IT (2026-09-18, branch `plan7-part1-foundations`, `dc0642c..1d57d83`, 35 commits, plus this entry in three commits)
+
+**Part 1 of Plan 7** ([design](../specs/2026-09-17-plan7-part1-foundations-design.md),
+[plan](2026-09-17-plan7-part1-foundations.md)). It was stacked on PR #97, the Plan 7 design, and was rebased
+onto #97's squash commit `dc0642c` when #97 merged; its range starts there. The rebase changed no commit's
+tree, so every figure below, measured before it, holds for the rebased commits.
+
+##### WHAT PART 1 BUILT
+
+- **Palettes as data.** `web/src/palettes.ts` holds three palettes (Paper, Terminal, Instrument), each with
+  a light and a dark variant, over 18 colour tokens; `palettes.test.ts` holds every variant to WCAG
+  contrast floors. `style.css` keeps Instrument's palette once, between two marker comments, as the
+  first-paint fallback, and a test holds that copy equal to the data.
+- **Three styles.** `[data-style]` blocks set fonts, radius, label case and tracking only; Instrument, the default,
+  draws in self-hosted Inter and Hack. A `style` and a `palette` select in the header choose them, and the
+  inline pre-paint script applies a stored choice and a cached palette before first paint, accepting the
+  cache only if every declaration sets a custom property to a `light-dark(#hex, #hex)` pair.
+- **A colour gate.** `scripts/check-colours.sh` fails on a colour literal in any tracked `.css` or `.ts`
+  file under `web/src/`, outside comments, except the palette file and that one marked block, in pre-commit
+  and CI. Its header states its blind spots.
+- **One disclosure mechanism.** `panel.ts` builds a named region whose state is `aria-expanded`;
+  `icons.ts` draws controls as inline SVG keyed by meaning. The TM view's `hide δ` / `show δ` became a
+  **rules** panel, and the λ and TM views' two `⌃/⌄` editor collapses became one **text** panel — the
+  per-buffer persisted collapse behaves as before on every path, which the task review traced one by one.
+- **One focus ring**, in the palette's `--focus-ring`, on every control and on a code editor's content,
+  replacing CodeMirror's own dotted outline.
+- **A shape for every marked state.** Rows mark position with a left bar and edges, composed through CSS
+  variables so a row that is current and in the running focus shows both; a pinned span is boxed; the
+  running focus is a solid, dotted or double underline. A pinned construct the machine is working on reads
+  as a box around a double underline — checked by eye in all six variants.
+
+##### THE PLAN WAS BUILT BEFORE IT WAS HANDED OUT, AND THAT BUILD FOUND SIX DEFECTS
+
+Every task's code was applied, in order, in a throwaway worktree before the first implementer was
+dispatched. It found six defects: an import order Biome rejects; a CSS rule order that passes plain
+`biome ci` but fails the `--error-on-warnings` the pre-commit hook uses; a new private field named `#rules`
+that collided with `TmPane`'s existing `#rules`, the machine's rule count; two comments and three more
+comment sites describing removed controls as current; and a focus ring that drew nothing on CodeMirror's
+content, because CodeMirror's base theme sets `outline: none` on `.cm-content` unconditionally at a
+specificity the global rule cannot beat. The plan was corrected before execution; the implementers never
+met any of the six.
+
+Before that, the spec's own font choice fell to a measurement: IBM Plex Mono, named in the brainstorm's
+mockups, has none of λ, δ, β or → in its web files, so every λ would have fallen back to another face and
+broken the λ and TM views' column grid. Hack replaced it.
+
+##### WHAT THE REVIEWS FOUND THAT THE BUILD COULD NOT
+
+- **Every Inter subset downloaded, and the test could not see it.** fontsource's per-subset sheets carry no
+  `unicode-range`, so three faces with identical descriptors formed one composite font and the browser
+  fetched Greek and Latin-ext on every Instrument load; the test named for the Greek subset passed with the
+  Greek face removed. Inter now comes from its per-weight sheets, which carry ranges, and the test demands
+  that every Inter face fetched for λ covers λ and not `A` — the `A` check is what failed on the old
+  imports, whose range-less faces cover everything. A production build of the default page now
+  fetches four font files, each once: Inter Latin 400 and 600, and Hack regular and bold.
+- **Comments that were, or became, false.** Label case (Task 2 made `.pane h2` a style token), the pin's
+  hue (a palette choice now, not blue), a field the final fix round deleted, and `icons.ts`'s claim that no
+  shipped font covers the control glyphs, false when written — Hack, shipped a task earlier, covers ▸, ◀
+  and ⌄. Task 8's comment sweep alone took three fix rounds, and corrections kept introducing new false
+  claims — the first round's list of the places a collapse is seeded missed the two custody moves. What
+  ended it was deleting the claims the last re-review named rather than restating them.
+- **The README's per-hook timings**, stale before this branch and left adjacent to a figure the colour
+  gate's arrival changed, re-measured. The hook count itself was changed in the same commit that added the
+  hook, because the doc-figures gate requires it; the controller re-measured two ratios no gate holds
+  (against the unscoped hooks' cost and against the figure gate's own) and recorded each beside the figure
+  it replaced.
+- **Smaller defects, fixed:** a dead font-size rule; `TmPane` mirroring the rules panel's state in a field a
+  restore through `setOpen` would have left stale; the colour gate exempting a marked block in any CSS
+  file; and the Hack licence shipping as `.md`, which the image's nginx serves as a download.
+
+##### DEVIATIONS FROM THE SPEC, AND WHY
+
+- Inter comes from its per-weight sheets, which declare seven subsets where spec §5 named three (adding
+  Cyrillic, Cyrillic-ext, Greek-ext and Vietnamese), so the build ships 28 Inter files where it shipped 12.
+  Their ranges are why only the subsets a page's text needs are fetched.
+- `--accent` (spec §12: 3:1) and `--error` (the plan: 3:1) are held to 4.5:1 against `--bg` and
+  `--bg-raised`, still 3:1 against `--bg-chrome`, because `.banner` and the results' `.row .leg` set text
+  in them.
+- The two font preloads are unconditional, so Paper and Terminal fetch those two files once per browser;
+  the spec said they fetch nothing. In dev the preloads also miss (the dev server serves the faces from
+  pnpm's real paths), which `index.html` says.
+
+##### THE ACCESSIBILITY LIST
+
+Items 2 (the δ toggle relabelling itself), 5 (no focus-visible styling) and 15 (the second collapse
+control) are closed. Items 4 and 7 have their visual half: every state they name has a shape as well as a
+colour. Their other half, a non-visual equivalent, is where the umbrella design's §9 puts it — part 4 for
+item 4, part 2 for item 7 — and the rest of the list stays where that section put it.
+
+##### WHAT THIS DID NOT CLOSE
+
+- Panel state is not persisted per view; that needs part 2's workspace state.
+- `--on-accent` and `--warn` are defined and contrast-tested but have no consumer yet.
+- Hack lacks several control glyphs that are still drawn as characters — among them the play button's ⏵,
+  the fork button's ✎, the appearance button's ☀ and ☾, and a split button's ⤓ — so those fall back to an
+  OS symbol face under Instrument until part 2 draws them as icons.
+- The header wraps its button labels at an 800px window, and its buttons use the browser's default dark
+  button styling; part 2 replaces the header.
+- A development server fetches the two preloaded fonts twice.
+
+##### VERIFICATION
+
+Run at `1d57d83`:
+
+```
+pnpm exec biome ci . (web/)          → 148 files, no errors (1 info: biome.json's own deprecation notice)
+pnpm run typecheck (web/)            → clean
+pnpm run test:coverage (web/)        → 87 files / 798 tests passed; statements 96.46, branches 91.17,
+                                       functions 98.92, lines 98.62 (floors 95 / 89 / 97 / 97)
+pre-commit run --all-files           → all 11 hooks Passed
+git diff --stat dc0642c...HEAD -- crates Cargo.toml Cargo.lock → empty
+docker build + run (plan Task 11 Step 4) → preloads /assets/hack-regular-Dv5unGLz.woff2 and
+                                       /assets/inter-latin-400-normal-C38fXH4l.woff2; font/woff2 with
+                                       Cache-Control public, immutable; both licences 200 text/plain
+```
+
+By eye, on the dev server: all six style and appearance variants, with a pinned construct in coincidence
+with the running focus, a λ copy's text panel closed and reopened, and an 800px window. After the Inter
+fix, a production build (`pnpm run build:app`, then `vite preview`, on a fresh origin) fetched four font
+files for the default page — Inter Latin 400 and 600, Hack regular and bold — each once, with no preload
+warning.
+No Rust changed, so the Rust tiers were not re-run locally; CI runs them.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 35 | commits in the range | `git log --oneline dc0642c..1d57d83 \| wc -l` |
+| 18, 3 | colour tokens, palettes | `node --input-type=module -e "const m = await import('./src/palettes.ts'); console.log(m.COLOUR_TOKENS.length, m.PALETTE_IDS.length)"` from `web/` |
+| 4.66 | the lowest text contrast held to 4.5:1 (Instrument light, `--accent` on `--bg`) | the minimum of `contrastRatio` over every variant's `fg`, `fg-dim`, `accent`, `error` and `tok-*` against `bg` and `bg-raised`, computed with `web/src/contrast.ts` imported into `node` |
+| six | defects the pre-flight build of the plan found | the pre-flight report, kept outside the tree with the branch's other task records |
+| 28, 12 | Inter files the build ships now, and at the Task 5 commit | `ls web/dist/assets \| grep -c '^inter-'` after `pnpm run build:app`; `git show 085fd0d:web/src/fonts.css \| grep -c '@import'` (6 subset-weight sheets, each a `.woff2` and a `.woff`) |
+| 11 | pre-commit hooks | `grep -c '^      - id: ' .pre-commit-config.yaml` |
+| 87, 798, and the four coverage figures | test files, tests, coverage | `pnpm run test:coverage` from `web/` |
+| 148 | files Biome checked | `pnpm exec biome ci .` from `web/` |
+| three | fix rounds on Task 8's comments | the task's review records, kept outside the tree |

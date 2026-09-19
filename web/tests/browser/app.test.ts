@@ -946,7 +946,9 @@ describe('the app, end to end', () => {
     // fails whenever the guard is removed instead of whenever the timing happens to line up.
     it('ignores a scroll that arrives while the table is hidden', async () => {
       await settled(view, BIG)
-      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
+      const toggle = document.querySelector(
+        '[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle',
+      ) as HTMLButtonElement
       const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
       expect(reattach.hidden).toBe(true)
 
@@ -959,14 +961,16 @@ describe('the app, end to end', () => {
     })
 
     // THE CONTROL GOES AWAY WITH THE THING IT CONTROLS. `#reattach.hidden` is maintained inside
-    // `#drawTable`, which the toggle calls only when REOPENING — so hiding a detached table left a
+    // `#drawTable`, which the toggle called only when REOPENING — so hiding a detached table left a
     // live "follow" button with nothing under it, offering to reposition something not on screen.
     // That is the idiom's own rule broken (`pane-chrome.ts`: a control is present only when it does
-    // something), and the `|| !this.#open` term added for it could never fire, because the one place
-    // that reads it does not run on the way down.
+    // something), and the closed-table term written for it could never fire, because `#drawTable`,
+    // where it is evaluated, did not run on the way down.
     it('takes the reattach control away with the table it belongs to', async () => {
       await settled(view, BIG)
-      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
+      const toggle = document.querySelector(
+        '[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle',
+      ) as HTMLButtonElement
       const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
 
       table().scrollTop = 0
@@ -990,7 +994,9 @@ describe('the app, end to end', () => {
     // zero-viewport movement rather than a clamped one.
     it('still detaches on a user scroll after the table has been hidden and shown', async () => {
       await settled(view, BIG)
-      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
+      const toggle = document.querySelector(
+        '[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle',
+      ) as HTMLButtonElement
       const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
       expect(reattach.hidden).toBe(true)
 
@@ -1005,7 +1011,7 @@ describe('the app, end to end', () => {
     })
 
     // THE SCROLL RANGE MUST SURVIVE A COMPILE THAT HAPPENS WHILE THE TABLE IS CLOSED, and this is a
-    // plain user sequence: hide δ, edit the program, show δ.
+    // plain user sequence: close the rules panel, edit the program, reopen it.
     //
     // `#drawTable` writes `scrollTop` BEFORE it writes the spacer height, and a `scrollTop` write
     // CLAMPS to the current scroll height. So a spacer left at the previous program's size silently
@@ -1016,7 +1022,9 @@ describe('the app, end to end', () => {
     // scroll event fires at all: parked at row 0, still nominally following, no reattach offered.
     it('keeps the scroll range honest across a compile with the table hidden', async () => {
       await settled(view, 'let x = 40; x + 2')
-      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
+      const toggle = document.querySelector(
+        '[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle',
+      ) as HTMLButtonElement
       const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
 
       toggle.click()
@@ -1034,9 +1042,12 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = 40; x + 2')
       for (let i = 0; i < 4; i += 1) click('tm', '◀')
       const step = stepText('tm')
-      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
+      const toggle = document.querySelector(
+        '[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle',
+      ) as HTMLButtonElement
       toggle.click()
       expect(table().hidden).toBe(true)
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
       toggle.click()
       expect(stepText('tm')).toBe(step)
     })
@@ -1059,7 +1070,9 @@ describe('the app, end to end', () => {
       click('tm', '◀')
       const current = document.querySelector('[data-leaf="tm-0"] .state-row.is-current')?.textContent
       expect(current).toBeDefined()
-      const toggle = document.querySelector('[data-leaf="tm-0"] .table-toggle') as HTMLButtonElement
+      const toggle = document.querySelector(
+        '[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle',
+      ) as HTMLButtonElement
       toggle.click()
       toggle.click()
       expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-current')?.textContent).toBe(current)

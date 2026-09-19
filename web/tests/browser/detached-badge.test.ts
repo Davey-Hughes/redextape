@@ -115,7 +115,7 @@ describe('the [detached] badge', () => {
 
   /**
    * THE STYLESHEET'S CARRIER IS GEOMETRY, NOT HUE, AND THAT IS ASSERTED RATHER THAN COMMENTED. §4.5
-   * rejected a colour treatment because hue is already the sole discriminator for five states
+   * rejected a colour treatment because hue was then the sole discriminator for five states
    * (accessibility item 7), so the badge rule must survive a reader who cannot tell its colour from
    * the title's. A border is that carrier; a rule reduced to `color:` alone fails here.
    *

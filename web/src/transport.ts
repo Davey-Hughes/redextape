@@ -313,7 +313,8 @@ export function createTransport(deps: {
         }
       : {}),
     // THE EDIT PATH — design §4.3's second gesture, `ScratchEditor`'s debounced `onEdit` wired
-    // through both panes' own `setEditor` (`pane-chrome.ts`'s `editScratch` doc). `recompile` REBUILDS
+    // through both panes' own `setEditor` and `receiveEditor` (`receiveEditor` reassigns it when
+    // custody moves an editor). `recompile` REBUILDS
     // THE BUFFER THIS PANE IS SHOWING rather than forking a second one, which is the whole of
     // what this handler decides. It used to say "the singleton is `scratch.ts`'s to keep, not
     // this handler's to re-derive", and there was no id to pass because there was one scratch;
@@ -348,8 +349,8 @@ export function createTransport(deps: {
     // finding, review of Task 8.** It used to read "LAMBDA-ONLY, LIKE `detach` AND `editScratch` BESIDE
     // IT: `PaneEvents.collapse`'s own doc states the rule ('a handler it can never fire is a parameter
     // pretending to be a capability'), and `TmPane` never builds a `collapseButton` to fire it" — both
-    // halves false as of Task 8: `TmPane`'s constructor builds a `collapseButton` on its own control
-    // strip and calls `on.collapse?.(collapsed)` from it, exactly like `LambdaPane`'s. Left inside the
+    // halves false as of Task 8: `TmPane`'s constructor builds a `textPanel` that wraps `#editorHost`
+    // in the pane body and calls `on.collapse?.(collapsed)` from it, exactly like `LambdaPane`'s. Left inside the
     // λ-only spread, every `TmPane` was constructed with `on.collapse === undefined`, so a TM collapse
     // toggled the class but never reached `scratchpad.setCollapsed` or `redextape.buffers` — collapse a
     // TM scratch, reload, it comes back expanded, the exact screen-disagrees-with-storage defect the
@@ -373,9 +374,10 @@ export function createTransport(deps: {
     // editor actually mounted on the pane agrees with it. Neither handler needed to change; the
     // stale binding they used to inherit is what stopped being possible.
     collapse: (collapsed: boolean) => {
-      // NO `draw()`. The class toggle already happened in the pane — `collapseButton`'s own
-      // callback performs it before this ever runs — and nothing else on screen depends on this
-      // flag. `onBuffersPersist()` is the entire consequence: Task 5's writer, called here for the
+      // NO `draw()`. The host is already hidden or shown by the time this runs — `createPanel`'s own
+      // click handler (`panel.ts`) applies that state before calling `onToggle` — and nothing else on
+      // screen depends on this flag.
+      // `onBuffersPersist()` is the entire consequence: Task 5's writer, called here for the
       // same reason `rebind` above calls it after a `slot.rebind`.
       scratchpad.setCollapsed(slot.binding.session, collapsed)
       onBuffersPersist()

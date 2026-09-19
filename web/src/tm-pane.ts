@@ -3,7 +3,6 @@ import type { EditablePane } from './editor-custody'
 import { EDITOR_DEBOUNCE_MS } from './editor-debounce'
 import { n } from './format'
 import {
-  collapseButton,
   controlStrip,
   detachButton,
   detachedBadge,
@@ -11,7 +10,9 @@ import {
   type PaneEvents,
   paneSelect,
   type SplitChoices,
+  textPanel,
 } from './pane-chrome'
+import { createPanel, type Panel } from './panel'
 import type { Leg } from './protocol'
 import { valueLine } from './results'
 import { ScratchEditor } from './scratch-editor'
@@ -59,11 +60,11 @@ export class TmPane implements EditablePane {
   #editorHost: HTMLElement
   /**
    * The mounted `ScratchEditor`, or `null` on an attached pane. Same contract as `LambdaPane`'s own
-   * `#editor` — never `null` merely because the editor is collapsed away, since collapsing here toggles
-   * `.collapsed` on `#body` (below), not on this field or on `#editorHost`'s own class.
+   * `#editor` — never `null` merely because the editor is collapsed away, since collapsing here sets
+   * `hidden` on `#editorHost` through the text panel (below), not on this field.
    */
   #editor: ScratchEditor | null = null
-  #collapse: ReturnType<typeof collapseButton>
+  #collapse: ReturnType<typeof textPanel>
   /**
    * `on.editScratch`, captured once at construction — `setEditor` reads it per mount rather than
    * closing over `on` directly. Same idiom as `LambdaPane.#onEdit`; that field's doc carries the
@@ -71,17 +72,17 @@ export class TmPane implements EditablePane {
    */
   #onEdit: ((src: string) => void) | undefined
   /**
-   * The pane's own body — everything below the heading row, wrapped in one element so the collapse
-   * control has a single node to carry its state on.
+   * The pane's own body — everything below the heading row, wrapped in one element for `host.replaceChildren`
+   * below.
    *
-   * **THE COLLAPSE IS A CLASS ON THIS ELEMENT, NOT ON `#editorHost` — design §4.1's "a class on the
-   * pane, not a second rendering mode", read literally rather than merely as the idiom `LambdaPane`
-   * already uses.** `LambdaPane` toggles `.is-collapsed` on its own `#editorHost`; putting the flag on
-   * `#body` instead means the tape rows and δ-table are never inside the thing the toggle names, so a
-   * reader of `#drawTable` never has to ask whether a collapse could have touched what it measures — it
-   * could not, because the collapse names an ancestor of the WHOLE body, not a sibling of the table.
-   * `.tm-pane.collapsed .term-editor { display: none }` (`style.css`) is what actually hides the mounted
-   * editor; `#editorHost` itself never carries `is-collapsed`.
+   * **THE COLLAPSE IS NO LONGER A FACT ABOUT THIS ELEMENT, WHICH REVERSES WHAT THIS DOC USED TO SAY —
+   * Plan 7 part 1 Task 8.** It used to carry a `.collapsed` class of its own, read by an ancestor
+   * selector in `style.css` so the tape rows and δ-table stayed outside the thing the toggle named. The
+   * text panel (`textPanel`, constructor below) wraps `#editorHost` directly and hides it with `hidden`
+   * instead — the same mechanism `LambdaPane` uses — so `#body` carries no class for this at all, and
+   * `#drawTable`'s own independence from a collapse now follows from `#editorHost` being a child of the
+   * text panel section, itself a sibling `#drawTable` never touches, rather than from which element the
+   * class landed on.
    */
   #body: HTMLElement
   #layout: ReturnType<typeof layoutControls>
@@ -172,7 +173,13 @@ export class TmPane implements EditablePane {
   #tableHost: HTMLElement
   #spacer: HTMLElement
   #rows: HTMLElement
-  #toggle: HTMLButtonElement
+  /**
+   * The rule table as a panel (Plan 7 part 1, spec §8): the body is `#tableHost`, the header action is
+   * `#reattach`. The panel hides and shows `#tableHost` and holds whether the table is open (`isOpen`);
+   * this class keeps no copy, so a `setOpen` cannot leave one stale. Its `onToggle` redraws. Not `#rules`,
+   * which is the machine's rule count.
+   */
+  #rulesPanel: Panel
   #reattach: HTMLButtonElement
   #index: StateIndex | null = null
   #follow = new Follow()
@@ -184,7 +191,6 @@ export class TmPane implements EditablePane {
    * drives a scroll the way `setLink` can.
    */
   #focused: Set<number> = new Set()
-  #open = true
   /**
    * A one-shot scroll target `#drawTable` honours in preference to `Follow`'s own target, for exactly
    * the next draw — see `setLink`'s doc and design §5.1. `null` when there is nothing pending.
@@ -226,35 +232,10 @@ export class TmPane implements EditablePane {
         'fork this machine into a TM scratchpad — the source session keeps running',
       )
     }
-    // `#body`'s DOC HAS THE ARGUMENT FOR WHY THIS TOGGLES `.collapsed` ON `#body` RATHER THAN ON
-    // `#editorHost`. `machine source` is the noun the accessible name is built from — `LambdaPane`'s own
-    // collapse control reads "term editor" and keeps doing so, per `collapseButton`'s own doc.
-    this.#collapse = collapseButton(
-      this.#strip.el,
-      (collapsed) => {
-        this.#body.classList.toggle('collapsed', collapsed)
-        on.collapse?.(collapsed)
-      },
-      'machine source',
-    )
-
-    this.#toggle = document.createElement('button')
-    this.#toggle.type = 'button'
-    this.#toggle.className = 'table-toggle'
-    this.#toggle.textContent = 'hide δ'
-    this.#toggle.addEventListener('click', () => {
-      this.#open = !this.#open
-      this.#toggle.textContent = this.#open ? 'hide δ' : 'show δ'
-      this.#tableHost.hidden = !this.#open
-      // REDRAW IN BOTH DIRECTIONS, and the closing one is not symmetry for its own sake. `#drawTable`
-      // is where `#reattach.hidden` is maintained, so skipping it on the way down left a live "follow"
-      // button over a table that is not on screen — the idiom's own rule broken, and the `|| !this.#open`
-      // term written for it could never fire because the only place that reads it did not run.
-      // Reopening matters for a different reason: a hidden box has `clientHeight` 0, so any step taken
-      // while the table was closed computed its scroll target against a zero-height viewport and left
-      // the head parked off centre until some later step happened to recentre it.
-      this.#drawTable()
-    })
+    // THE TEXT PANEL — the same control `LambdaPane` builds, with the same name ("text") where the two
+    // used to say "term editor" and "machine source". It wraps `#editorHost` and hides it itself; this
+    // callback only reports the gesture, for the buffer's record.
+    this.#collapse = textPanel(this.#editorHost, (collapsed) => on.collapse?.(collapsed))
 
     // ADDED AND REMOVED, NEVER DISABLED — same idiom `pane-chrome.ts` states for the continue button.
     // A reattach only does something while the table is detached, so it exists only then; `#drawTable`
@@ -262,7 +243,7 @@ export class TmPane implements EditablePane {
     this.#reattach = document.createElement('button')
     this.#reattach.type = 'button'
     this.#reattach.className = 'table-reattach'
-    this.#reattach.textContent = 'follow'
+    this.#reattach.textContent = 'follow current rule'
     this.#reattach.hidden = true
     this.#reattach.addEventListener('click', () => {
       this.#follow.attach()
@@ -285,9 +266,9 @@ export class TmPane implements EditablePane {
       // delivers that write's event at the NEXT rendering update rather than synchronously — so
       // hiding the table in between lands the echo on a `display: none` box, where `scrollTop` reads
       // back 0, which is further from the expected position than any tolerance. Reproduced 5/5 in
-      // Chromium: step, hide δ, show δ, and the table is detached with the current row gone from the
-      // DOM. A hidden box cannot be scrolled by a person, so there is nothing here to honour.
-      if (!this.#open) return
+      // Chromium: step, close the rules panel, reopen it, and the table is detached with the current row
+      // gone from the DOM. A hidden box cannot be scrolled by a person, so there is nothing here to honour.
+      if (!this.#rulesPanel.isOpen()) return
       this.#follow.onScroll(this.#tableHost.scrollTop)
       this.#drawTable()
     })
@@ -308,22 +289,32 @@ export class TmPane implements EditablePane {
       on.linkState?.(row.kind === 'state' ? row.id : row.stateId)
     })
 
-    // `#body` CARRIES EVERYTHING BELOW THE HEADING, WITH `#editorHost` FIRST — design §4.1's "editor
+    // THE RULE TABLE IS A PANEL. `panel.ts` hides `#tableHost` itself and carries the state in
+    // `aria-expanded` rather than relabelling — accessibility item 2. `follow current rule` rides in the
+    // panel's header, beside the thing it acts on.
+    //
+    // REDRAW IN BOTH DIRECTIONS, and the closing one is not symmetry for its own sake. `#drawTable` is
+    // where `#reattach.hidden` is maintained, so skipping it on the way down left a live "follow" button
+    // over a table that is not on screen — the idiom's own rule broken, and the closed-table term written
+    // for it could never fire because `#drawTable`, where it is evaluated, did not run. Reopening matters
+    // for a different reason: a hidden box has `clientHeight` 0, so any step taken while the table was
+    // closed computed its scroll target against a zero-height viewport and left the head parked off
+    // centre until some later step happened to recentre it.
+    this.#rulesPanel = createPanel({
+      name: 'rules',
+      label: 'rules',
+      body: this.#tableHost,
+      onToggle: () => this.#drawTable(),
+    })
+    this.#rulesPanel.actions.append(this.#reattach)
+
+    // `#body` CARRIES EVERYTHING BELOW THE HEADING, WITH THE TEXT PANEL FIRST — design §4.1's "editor
     // region above, today's tape rows and δ-table below". An attached pane (no editor mounted) is
-    // unchanged: `#editorHost` carries no class and contributes no box to the flow, so this reordering
-    // is invisible until `setEditor` gives it something to show.
+    // unchanged: the panel starts `hidden` and contributes no box to the flow, so this reordering is
+    // invisible until `setEditor` gives it something to show.
     this.#body = document.createElement('div')
     this.#body.className = 'tm-pane'
-    this.#body.append(
-      this.#editorHost,
-      this.#status,
-      this.#value,
-      this.#tapes,
-      this.#toggle,
-      this.#reattach,
-      this.#tableHost,
-      this.#strip.el,
-    )
+    this.#body.append(this.#collapse.el, this.#status, this.#value, this.#tapes, this.#rulesPanel.el, this.#strip.el)
     host.replaceChildren(title, this.#body)
   }
 
@@ -370,7 +361,7 @@ export class TmPane implements EditablePane {
    */
   setLink(states: number[], scrollTo: boolean): void {
     this.#linked = this.#index === null ? new Set() : linkedRows(this.#index, states)
-    if (scrollTo && this.#index !== null && this.#open) {
+    if (scrollTo && this.#index !== null && this.#rulesPanel.isOpen()) {
       const first = [...this.#linked].sort((a, b) => a - b)[0]
       if (first !== undefined) {
         // Shared with `Follow.targetScrollTop` via `centredScrollTop` — see that function's doc.
@@ -423,7 +414,7 @@ export class TmPane implements EditablePane {
    * **THIS FILE NOW HAS TWO UNRELATED MEANINGS OF "DETACHED", AND THE SPEC DID NOT NOTICE.**
    * `Follow`'s detach — `#reattach`, `#follow.following`, `state-table.ts`'s own vocabulary — means
    * THE USER SCROLLED THE δ-TABLE AWAY FROM THE CURRENT ROW, a scroll-position fact about one widget
-   * inside this pane, undone by the `follow` button sitting a few lines above the table. §4.5's
+   * inside this pane, undone by the `follow current rule` button sitting a few lines above the table. §4.5's
    * detached means THIS PANE IS BOUND TO A SCRATCH SESSION and is outside the correspondence
    * entirely, undone by rebinding it — through the pane's own selector, or by the retire that ends the
    * buffer (§4.3). ("undone only by a recompile from source" is what this read while a source keystroke
@@ -431,10 +422,11 @@ export class TmPane implements EditablePane {
    * detached.) They can be true independently and in any combination.
    *
    * The badge's text is left as `[detached]` because §4.5 fixes that wording and the two are not
-   * confusable ON SCREEN — the badge sits in the `<h2>` and reads "turing machine [detached]", while
-   * the follow state is a button captioned `follow` beside the table. In CODE they are one word apart,
-   * so the private field is `#badge` rather than anything containing "detach", and this note exists so
-   * the next reader of `#drawTable`'s `#reattach.hidden` line does not go looking for a connection.
+   * confusable ON SCREEN — the badge sits in the `<h2>`, after the pane's name, while the follow state
+   * is a button captioned `follow current rule` in the rules panel's header. In CODE they are one word
+   * apart, so the private field is `#badge` rather than anything containing "detach", and this note
+   * exists so the next reader of `#drawTable`'s `#reattach.hidden` line does not go looking for a
+   * connection.
    *
    * **AN EDITOR CANNOT OUTLIVE `#detached` HERE EITHER — Important finding, review of Task 8.**
    * `LambdaPane.setDetached`'s own doc records the same line ported below and the defect that made it
@@ -473,10 +465,12 @@ export class TmPane implements EditablePane {
    * that method's doc carries the full argument (mounted-and-unmounted, the re-seed no-op inside
    * `ScratchEditor.setText`, `collapsed` seeding the mount and only the mount) and is not repeated here.
    *
-   * **WHAT DIFFERS FROM `LambdaPane` IS WHERE THE COLLAPSE FLAG LANDS, NOT WHETHER IT DOES.**
-   * `LambdaPane` writes `collapsed` into `#editorHost`'s own class (`'term-editor is-collapsed'`); this
-   * pane writes it onto `#body` instead (`#body`'s own doc has the argument), so `#editorHost` here only
-   * ever carries the bare `'term-editor'` class or none at all.
+   * **THE COLLAPSE FLAG LANDS THE SAME WAY `LambdaPane`'S DOES NOW, WHICH REVERSES WHAT THIS PARAGRAPH
+   * USED TO SAY.** It read that the two panes differed in WHERE the flag landed — this one on a
+   * `.collapsed` class on `#body`, `LambdaPane`'s on `#editorHost`'s own class — while agreeing on
+   * WHETHER it did. Plan 7 part 1 Task 8 ended that difference: both panes hand `collapsed` to the text
+   * panel (`textPanel`, constructor above), which hides `#editorHost` itself with `hidden`, so
+   * `#editorHost` here only ever carries the bare `'term-editor'` class or none at all.
    *
    * **NO `#refreshClaim` CALL, UNLIKE `LambdaPane.setEditor`.** `PaneEvents.showEditor`'s own doc states
    * the "bring the term editor to this pane" control exists only on a pane whose slot may be bound to a
@@ -488,7 +482,6 @@ export class TmPane implements EditablePane {
       this.#editor?.destroy()
       this.#editor = null
       this.#editorHost.className = ''
-      this.#body.classList.remove('collapsed')
       this.#collapse.update(false)
       // THE SCRATCH STATUS GOES WITH THE EDITOR — see `#scratch`'s own doc. Cleared here rather than
       // left for whatever `render` happens next, because a caller reading `host.textContent` between
@@ -501,7 +494,6 @@ export class TmPane implements EditablePane {
     const onEdit = this.#onEdit
     if (this.#editor === null) {
       this.#editorHost.className = 'term-editor'
-      this.#body.classList.toggle('collapsed', collapsed)
       this.#editor = new ScratchEditor({
         host: this.#editorHost,
         initial: text,
@@ -526,7 +518,6 @@ export class TmPane implements EditablePane {
     this.#editor = null
     editor.dom.remove()
     this.#editorHost.className = ''
-    this.#body.classList.remove('collapsed')
     this.#collapse.update(false)
     // SAME REASON AS `setEditor(null)`'s OWN CLEAR, ABOVE — this pane is giving the editor up, so it
     // must stop announcing that editor's scratch's header the instant it does.
@@ -545,7 +536,6 @@ export class TmPane implements EditablePane {
   receiveEditor(editor: ScratchEditor, collapsed = false): void {
     if (this.#editor !== null) throw new Error('a TM pane was handed a second editor while still holding one')
     this.#editorHost.className = 'term-editor'
-    this.#body.classList.toggle('collapsed', collapsed)
     this.#editorHost.append(editor.dom)
     // THE EDITS FOLLOW THE VIEW — same fix and same reason as `LambdaPane.receiveEditor`'s own `onEdit`
     // reassignment; that method's doc carries the argument in full.
@@ -777,7 +767,7 @@ export class TmPane implements EditablePane {
     // all (reattaching means nothing against an empty table) and while the table is closed, where the
     // button would offer to reposition something nobody can see — the same idiom the control itself
     // follows, which exists so a control is present only when it does something.
-    this.#reattach.hidden = this.#index === null || this.#follow.following || !this.#open
+    this.#reattach.hidden = this.#index === null || this.#follow.following || !this.#rulesPanel.isOpen()
 
     if (this.#index === null) {
       this.#rows.replaceChildren()
@@ -802,7 +792,7 @@ export class TmPane implements EditablePane {
     // landing within the tolerance of the stale value is absorbed as an echo and does not detach.
     // The rows drawn here would be wrong too — a zero viewport spans nine rows starting at 0 — and are
     // all discarded on reopen, so this returns before the work as well as before the harm.
-    if (!this.#open) return
+    if (!this.#rulesPanel.isOpen()) return
 
     // `.state-table`'s `max-height: 40vh` is the ONLY thing bounding this box, and `clientHeight`
     // reports what it actually laid out rather than what the stylesheet asked for. If the rule never

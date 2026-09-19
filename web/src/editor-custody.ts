@@ -7,19 +7,14 @@ import type { SessionRegistry } from './sessions'
  * What custody needs a pane to be able to do — **a shape rather than a class, so both panes satisfy it
  * without either importing the other.**
  *
- * `LambdaPane` implements these four now; `TmPane` gains them in Task 8. Nothing else here depends on
- * which one arrived.
- * A union of the two classes would make this module import both, and a change to either's constructor
- * would reach a file that only ever calls four methods.
+ * `LambdaPane` and `TmPane` both implement these four. A union of the two classes would make this module
+ * import both, and a change to either's constructor would reach a file that only ever calls four methods.
  *
  * `receiveEditor` TAKES THE SAME `collapsed` SECOND PARAMETER `setEditor` DOES, AND `holdsEditor` IS A
  * FOURTH MEMBER BESIDE THE THREE `hold`/`homeFor`'s OWN DOCS NAME. Both are load-bearing on the two
  * call sites below (`reconcileEditors`'s two `receiveEditor` calls thread `collapsedOf(session)` through
- * so a collapsed buffer remounts collapsed — `pane-chrome.ts`'s `collapseButton` doc: the flag "rides
- * with the buffer and follows it as custody moves the editor between panes" — and `hasEditor` below
- * answers "is a pane already showing one" without unmounting it to find out, which `holdsEditor` alone
- * can do). Dropping either to match a leaner shape would not widen this module for the TM leg; it would
- * narrow what it already does for the λ one.
+ * so a collapsed buffer remounts collapsed, and `hasEditor` below answers "is a pane already showing
+ * one" without unmounting it to find out, which `holdsEditor` alone can do).
  */
 export type EditablePane = {
   setEditor(text: string | null, collapsed?: boolean): void
@@ -91,14 +86,14 @@ export type EditorCustody = {
  * has run.
  *
  * **`collapsedOf` IS A PLAIN FUNCTION, NOT A `ScratchBuffers` DEPENDENCY — 5d-ii-d T9 fix round 1.**
- * `reconcileEditors` below hands every editor it (re)mounts to `LambdaPane.receiveEditor`'s second
- * parameter, which needs the buffer's own collapsed flag the same way `replies.ts`'s `scratch-compiled`
- * arm already reads it for `setEditor`'s — the design's own words are that the flag "rides with the
- * buffer and follows it as custody moves the editor between panes" (`pane-chrome.ts`'s `collapseButton`
- * doc), and until this fix nothing here fed the mount site the sweep and custody passes use at all. A
- * `ScratchBuffers` reader would answer the same question but would also hand this module the whole
- * class — forking, cooling, retiring, every buffer's text — where this file's own module doc argues that
- * `panes` and `sessions` are "the ONLY dependencies" for a reason: every read here is a question this
+ * `reconcileEditors` below hands every editor it (re)mounts to `receiveEditor`'s second parameter,
+ * which needs the buffer's own collapsed flag the same way `replies.ts`'s `scratch-compiled` arm
+ * already reads it for `setEditor`'s — the design's own words are that the flag "rides with the buffer
+ * and follows it as custody moves the editor between panes", and until this fix nothing here fed the
+ * mount site the sweep and custody passes use at all. A `ScratchBuffers` reader would answer the same
+ * question but would also hand this module the whole class — forking, cooling, retiring, every
+ * buffer's text — where this file's own module doc argues that `panes` and `sessions` are "the ONLY
+ * dependencies" for a reason: every read here is a question this
  * module's callers already need answered elsewhere, and widening the dependency to serve one field is
  * the same mistake `pane-host.ts`'s `tmProgramOf` doc argues against for the identical reason, one level
  * up. `main.ts` supplies `(session) => scratchpad.collapsedOf(session)`.
@@ -244,8 +239,8 @@ export function createEditorCustody(deps: {
    * Make every `ScratchEditor` in the app — mounted on a pane, or waiting in custody — agree with where
    * this file says it belongs. The other half of the editor-moves rule, for the one way ownership can
    * change with nothing arriving on the wire to drive it: the
-   * "bring the term editor to this pane" control (`claimEditorButton`). **Not to be confused with
-   * `collapseButton`'s "show the term editor"**, which is a different action on a different pane — it
+   * "bring the term editor to this pane" control (`claimEditorButton`). **Not to be confused with the
+   * text panel's own disclosure (`textPanel`)**, which is a different action on a different pane — it
    * un-collapses an editor this pane ALREADY owns, and moves nothing.
    * `replies.ts`'s `scratch-compiled` case is the other way ownership takes
    * effect, and it needs no such sweep — `editorOwner` already names the right pane by the time a reply

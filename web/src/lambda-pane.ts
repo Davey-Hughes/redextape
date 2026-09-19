@@ -4,7 +4,6 @@ import { EDITOR_DEBOUNCE_MS } from './editor-debounce'
 import type { LambdaWindow } from './lambda-window'
 import {
   claimEditorButton,
-  collapseButton,
   controlStrip,
   detachButton,
   detachedBadge,
@@ -12,6 +11,7 @@ import {
   type PaneEvents,
   paneSelect,
   type SplitChoices,
+  textPanel,
 } from './pane-chrome'
 import type { Leg } from './protocol'
 import { ScratchEditor } from './scratch-editor'
@@ -68,14 +68,14 @@ export class LambdaPane implements EditablePane {
   #editorHost: HTMLElement
   /**
    * The mounted `ScratchEditor`, or `null` on an attached pane. NEVER `null` merely because the editor
-   * is collapsed away — `collapseButton`'s callback (constructor, below) toggles `.is-collapsed` on
-   * `#editorHost`, not on this field, so a collapsed editor is a live CodeMirror instance sitting
-   * behind a `display: none` parent, with its debounce still running exactly as it was before the
-   * click. `setDetached` is what makes "attached" and "`#editor === null`" the same fact — see its own
-   * doc for the review finding that made that true rather than merely intended.
+   * is collapsed away — the text panel (`textPanel`, constructor below) hides `#editorHost` itself with
+   * `hidden`; this field is untouched, so a collapsed editor is a live CodeMirror instance sitting
+   * behind a hidden parent, with its debounce still running exactly as it was before the click.
+   * `setDetached` is what makes "attached" and "`#editor === null`" the same fact — see its own doc for
+   * the review finding that made that true rather than merely intended.
    */
   #editor: ScratchEditor | null = null
-  #collapse: ReturnType<typeof collapseButton>
+  #collapse: ReturnType<typeof textPanel>
   /**
    * The "bring the term editor to this pane" control, or `null` on a pane whose events carry no `showEditor` handler
    * — the same "built only when the handler exists" idiom `#detach` states above, and for the same
@@ -183,18 +183,15 @@ export class LambdaPane implements EditablePane {
     // an editor" has one answer in the DOM as well as in the field.
     this.#editorHost = document.createElement('div')
     this.#onEdit = on.editScratch
-    this.#collapse = collapseButton(this.#strip.el, (collapsed) => {
-      this.#editorHost.classList.toggle('is-collapsed', collapsed)
-      // REPORTS THE GESTURE ONLY — the class toggle above is the whole of what this control performs;
-      // see `PaneEvents.collapse`'s own doc for why the app needs telling on top of that (5d-ii-d §4.7:
-      // the state is recorded against the buffer, not the pane).
-      on.collapse?.(collapsed)
-    })
+    // THE TEXT PANEL WRAPS THE EDITOR HOST and hides it itself; this callback only REPORTS the gesture —
+    // see `PaneEvents.collapse`'s own doc for why the app needs telling (the state is recorded against
+    // the buffer, not the pane).
+    this.#collapse = textPanel(this.#editorHost, (collapsed) => on.collapse?.(collapsed))
     const showEditor = on.showEditor
     if (showEditor !== undefined) {
       this.#claim = claimEditorButton(this.#strip.el, showEditor)
     }
-    host.replaceChildren(title, this.#editorHost, this.#text, this.#strip.el)
+    host.replaceChildren(title, this.#collapse.el, this.#text, this.#strip.el)
 
     // λ TEXT -> SOURCE, the third direction. Delegated from the `<pre>` rather than bound per token,
     // because tokens are recreated on every draw. `data-at` carries the token's byte offset in the
@@ -248,22 +245,24 @@ export class LambdaPane implements EditablePane {
    * handler of its own to add one to (the binding selector) and briefly at a fourth that has one but
    * had not called it (`worker-error`, fixed alongside this) — see `setDetached`'s own doc.
    *
-   * **`collapsed` SEEDS THE MOUNT, AND ONLY THE MOUNT — 5d-ii-d T9, design §4.7.** Defaults to `false`
-   * for every caller but one: `replies.ts`'s `scratch-compiled` arm passes `scratchpad.collapsedOf(session)`,
-   * which is `false` for a fresh fork (nobody has collapsed a buffer that has never had an editor) and
-   * whatever a restored buffer's own record says otherwise. The RE-SEED branch below
-   * (`this.#editor.setText(text)`) ignores it, because a live editor's collapse state is the user's own
-   * click, not something a later reply gets to overwrite.
+   * **`collapsed` SEEDS THE MOUNT, AND ONLY THE MOUNT — 5d-ii-d T9, design §4.7.** Every mount the app
+   * makes passes the buffer's own recorded flag, which is `false` for a fresh fork (nobody has collapsed
+   * a buffer that has never had an editor). The RE-SEED branch below (`this.#editor.setText(text)`)
+   * ignores it, because a live editor's collapse state is the user's own click, not something a later
+   * reply gets to overwrite.
    *
    * **`#editorHost.className` HAS FOUR WRITERS IN THIS FILE, NOT ONE — a claim this paragraph used to
    * make and which was false the day it was written (Important finding, 5d-ii-d T9 fix round 1).** It
    * read "the class assignment stays in ONE place — this is the only line that ever writes
    * `#editorHost.className`". Two of the four CLEAR it (this method's own `text === null` branch, and
    * `takeEditor`), because an unmounted host carries no class at all. The other two are MOUNT sites, and
-   * both need the same seed: this line, and `receiveEditor`'s — the one custody's sweep and custody
-   * passes use to remount an editor on a different pane, which a reader trusting the old sentence would
-   * have concluded needed no seeding of its own. It did, and did not have one; see `receiveEditor`'s own
-   * doc for the finding and the fix.
+   * both write the unconditional `'term-editor'` now — this line, and `receiveEditor`'s.
+   *
+   * **THE SEED NO LONGER LIVES IN THE CLASS, WHICH REVERSES WHAT THIS PARAGRAPH USED TO SAY — Plan 7
+   * part 1 Task 8.** It read `collapsed ? 'term-editor is-collapsed' : 'term-editor'` here and in
+   * `receiveEditor`; the text panel replaced that with `hidden`, so `collapsed` reaches only
+   * `this.#collapse.update(true, collapsed)`, in this method and in `receiveEditor` — see that method's
+   * own doc for the finding that once left ITS seed out.
    */
   setEditor(text: string | null, collapsed = false): void {
     if (text === null) {
@@ -276,7 +275,7 @@ export class LambdaPane implements EditablePane {
     }
     const onEdit = this.#onEdit
     if (this.#editor === null) {
-      this.#editorHost.className = collapsed ? 'term-editor is-collapsed' : 'term-editor'
+      this.#editorHost.className = 'term-editor'
       this.#editor = new ScratchEditor({
         host: this.#editorHost,
         initial: text,
@@ -366,11 +365,10 @@ export class LambdaPane implements EditablePane {
    * exactly the same reason.
    *
    * **`collapsed` SEEDS THIS MOUNT TOO, AND UNTIL THIS FIX IT DID NOT — Important finding, review of
-   * 5d-ii-d T9.** `setEditor`'s doc states the design in full: the flag "rides with the buffer and
-   * follows it as custody moves the editor between panes". This is the OTHER mount — the one custody's
-   * own sweep and custody passes use (`editor-custody.ts`'s `reconcileEditors`), not the one a fresh
-   * build takes — and it was seeded nowhere: the host's class was written unconditionally and
-   * `#collapse.update(true)` ran with `initial` defaulting to `false`, so a collapsed buffer claimed
+   * 5d-ii-d T9.** This is the OTHER mount — the one custody's own sweep and custody passes use
+   * (`editor-custody.ts`'s `reconcileEditors`), not the one a fresh build takes — and it was seeded
+   * nowhere: the host's class was written unconditionally and `#collapse.update(true)` ran with
+   * `initial` defaulting to `false`, so a collapsed buffer claimed
    * onto another pane, or re-claimed out of custody after its holder closed, remounted EXPANDED. Nothing
    * in either sweep pass calls `on.collapse`, so `redextape.buffers` went on reading the buffer as
    * collapsed while the screen showed otherwise, and the next reload silently collapsed what the user had
@@ -380,7 +378,7 @@ export class LambdaPane implements EditablePane {
    */
   receiveEditor(editor: ScratchEditor, collapsed = false): void {
     if (this.#editor !== null) throw new Error('a λ pane was handed a second editor while still holding one')
-    this.#editorHost.className = collapsed ? 'term-editor is-collapsed' : 'term-editor'
+    this.#editorHost.className = 'term-editor'
     this.#editorHost.append(editor.dom)
     // **THE EDITS FOLLOW THE VIEW, AND THIS LINE IS WHY — found by driving the app, not by the suite.**
     // A `ScratchEditor` is built by the pane that FORKS (`setEditor`'s mount branch), closing over THAT
@@ -509,7 +507,7 @@ export class LambdaPane implements EditablePane {
    * GUARDED ON `#editor !== null` RATHER THAN CALLING `setEditor(null)` UNCONDITIONALLY, for the
    * no-op-cost reason every control in this file and `pane-chrome.ts` states: an ATTACHED pane is the
    * common case and is repainted every recorded frame during playback, so an unguarded call would pay
-   * `setEditor`'s own work — a destroy check, a class assignment, a collapse-button update — sixty
+   * `setEditor`'s own work — a destroy check, a class assignment, a text-panel update — sixty
    * times a second for a pane that has never been forked at all.
    *
    * WHAT THIS DOES NOT COVER: a scratch whose WORKER DIES without the pane ever leaving it. Its

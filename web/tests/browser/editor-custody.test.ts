@@ -492,14 +492,11 @@ describe('receiveEditor: where a moved editor sends its edits', () => {
 
 /**
  * **THE COLLAPSE FLAG MUST FOLLOW THE EDITOR ACROSS A CUSTODY MOVE — Important finding, review of
- * 5d-ii-d T9.** `pane-chrome.ts`'s `collapseButton` doc states the design outright: the flag "rides with
- * the buffer and follows it as custody moves the editor between panes". Only `LambdaPane.setEditor`'s
- * mount was ever seeded with it (`replies.ts`'s `scratch-compiled` arm passes `scratchpad.collapsedOf(session)`);
- * the custody-move path — `receiveEditor`, called from `reconcileEditors`' own sweep — mounted expanded
- * unconditionally.
+ * 5d-ii-d T9.** The custody-move path — `receiveEditor`, called from `reconcileEditors`' own sweep —
+ * mounted expanded unconditionally.
  *
  * **THE REACHABLE SEQUENCE, DRIVEN AT THE SEAM `reconcileEditors` OWNS RATHER THAN THROUGH `main()`:**
- * collapse the editor on one pane (the user's own click on `.collapse`, which is what
+ * collapse the editor on one pane (the user's own click on the text panel's toggle, which is what
  * `transport.ts`'s `collapse` handler reports to `ScratchBuffers.setCollapsed` in the app — `collapsedFlags`
  * stands in for that record, per its own doc above), then claim it onto a second pane bound to the same
  * buffer (`custody.claim` + `custody.reconcile()`, exactly `pane-host.ts`'s `showEditor` wrapper followed
@@ -514,13 +511,13 @@ describe('reconcileEditors: the collapse flag follows a custody move', () => {
     const claimer = addPane('pane-2', S, () => undefined)
 
     holder.pane.setEditor('\\x. x')
-    // THE USER'S OWN GESTURE — clicking `.collapse` on the holder toggles the host's class locally AND
+    // THE USER'S OWN GESTURE — clicking the text panel's toggle on the holder hides the host locally AND
     // reports the buffer-level flag through `on.collapse`, exactly as `LambdaPane`'s constructor wires it
-    // (`collapseButton`'s callback in `lambda-pane.ts`).
-    const holderCollapse = holder.host.querySelector<HTMLButtonElement>('button.collapse')
-    holderCollapse?.click()
+    // (`textPanel`'s callback in `lambda-pane.ts`).
+    const holderToggle = holder.host.querySelector<HTMLButtonElement>('[data-panel="text"] .panel-toggle')
+    holderToggle?.click()
     expect(collapsedFlags.get(S)).toBe(true)
-    expect(holder.host.querySelector('.term-editor')?.classList.contains('is-collapsed')).toBe(true)
+    expect(holder.host.querySelector<HTMLElement>('.term-editor')?.hidden).toBe(true)
 
     // THE CLAIM — `pane-host.ts`'s `showEditor` wrapper records the claim; `applyLayout`'s own
     // `custody.reconcile()` is what actually performs the move via the sweep in `reconcileEditors`.
@@ -529,12 +526,13 @@ describe('reconcileEditors: the collapse flag follows a custody move', () => {
 
     const mounted = claimer.host.querySelector('.term-editor')
     expect(mounted).not.toBeNull()
-    // THE FIX: without it, this reads `false` — the class `receiveEditor` used to write unconditionally.
-    expect(mounted?.classList.contains('is-collapsed')).toBe(true)
-    // CHECK BOTH DIRECTIONS — `collapseButton`'s own doc names the exact fault a mismatch here would be:
-    // the label naming a state the host contradicts. `update`'s `initial` argument is what keeps the
-    // button's closure flag and the host's class agreeing.
-    const claimerCollapse = claimer.host.querySelector<HTMLButtonElement>('button.collapse')
-    expect(claimerCollapse?.getAttribute('aria-label')).toBe('show the term editor')
+    // THE FIX: without it, this reads `false` — `receiveEditor` once called `#collapse.update(true)` with
+    // no seed, so a claimed editor mounted expanded regardless of the buffer's own record.
+    expect((mounted as HTMLElement | null)?.hidden).toBe(true)
+    // CHECK BOTH DIRECTIONS — the toggle's `aria-expanded` as well as the host's `hidden`. `panel.ts`'s
+    // `apply()` writes both from the same `open` flag, and `update`'s `initial` argument is what starts
+    // that flag at the buffer's own recorded state.
+    const claimerToggle = claimer.host.querySelector<HTMLButtonElement>('[data-panel="text"] .panel-toggle')
+    expect(claimerToggle?.getAttribute('aria-expanded')).toBe('false')
   })
 })

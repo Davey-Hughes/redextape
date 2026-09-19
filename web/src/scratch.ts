@@ -49,7 +49,7 @@ export type BufferInfo = {
  * WHAT THIS PARAGRAPH USED TO SAY.** `PersistedBuffer` carries the field (design §4.1), so `snapshot`
  * reads it and `restore` writes it exactly as before; what changed is that something now writes it
  * BETWEEN those two moments — `transport.ts`'s `collapse` handler, reached from `pane-chrome.ts`'s
- * `collapseButton` — and something reads it back to seed a remount — `replies.ts`'s `scratch-compiled`
+ * `textPanel` — and something reads it back to seed a remount — `replies.ts`'s `scratch-compiled`
  * arm, through `LambdaPane.setEditor`'s second parameter. `fork` still seeds it `false`: a freshly
  * forked buffer has never been collapsed by anyone.
  *
@@ -699,8 +699,7 @@ export class ScratchBuffers {
   }
 
   /**
-   * Remember whether buffer `id`'s editor is collapsed — design §4.7, and the answer to the question
-   * `pane-chrome.ts`'s `collapseButton` doc has carried since 5d-i: PER BUFFER, because the editor
+   * Remember whether buffer `id`'s editor is collapsed — design §4.7: PER BUFFER, because the editor
    * MOVES between panes under `editor-custody.ts`, and a flag remembered against a leaf would describe
    * whichever buffer landed there next.
    *
@@ -717,11 +716,10 @@ export class ScratchBuffers {
   /**
    * Whether buffer `id`'s editor was collapsed. `false` for an id that is not a buffer.
    *
-   * **`false` RATHER THAN `undefined`, FOR `replies.ts`'s `scratch-compiled` ARM.** That call site hands
-   * this straight to `LambdaPane.setEditor`'s second parameter, which itself defaults to `false` for
-   * every OTHER caller — an `undefined` here would agree with that default by coincidence rather than
-   * by the type saying so, and a caller that ever stopped relying on the default would be handed a value
-   * this method never actually observed a buffer holding.
+   * **`false` RATHER THAN `undefined`.** Every caller hands this straight to a `collapsed` parameter that
+   * itself defaults to `false` (`setEditor`'s, `receiveEditor`'s) — an `undefined` here would agree with
+   * that default by coincidence rather than by the type saying so, and a caller that ever stopped relying
+   * on the default would be handed a value this method never actually observed a buffer holding.
    */
   collapsedOf(id: SessionId): boolean {
     return this.#buffers.get(id)?.collapsed ?? false

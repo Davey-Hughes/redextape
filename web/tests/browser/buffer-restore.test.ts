@@ -283,7 +283,7 @@ describe('buffers restored from storage', () => {
    * round trip end to end rather than merely that the field parses: `ScratchBuffers.restore` puts it on
    * the `BufferState`, `warm`'s build (through `main.ts`'s restore loop) reaches `replies.ts`'s
    * `scratch-compiled` arm, and `LambdaPane.setEditor`'s second parameter — `scratchpad.collapsedOf(session)`,
-   * read at that same call — is what seeds the MOUNT with it. `.is-collapsed` on the host is read here
+   * read at that same call — is what seeds the MOUNT with it. `hidden` on the host is read here
    * rather than toggled by this test first, which is what makes this a restore assertion and not a
    * click assertion.
    *
@@ -293,14 +293,14 @@ describe('buffers restored from storage', () => {
    */
   it('the restored bound buffer comes back with its editor collapsed', async () => {
     await until(() => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null, 'an editor to mount')
-    expect(document.querySelector('[data-leaf="lambda-0"] .term-editor')?.classList.contains('is-collapsed')).toBe(true)
+    expect(document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')?.hidden).toBe(true)
   })
 
   /**
    * **THE WRITE-BACK, THROUGH THE GESTURE A USER ACTUALLY MAKES.** `transport.ts`'s `collapse` handler
    * is the one path that can flip `scratch-2`'s stored `collapsed` back to `false` — a click on the
-   * control the test above just found reading `.is-collapsed` (so `collapseButton`'s own label reads
-   * "show the term editor"), which is what makes this click an EXPAND.
+   * control the test above just found reading hidden (so the text panel's toggle reads
+   * `aria-expanded="false"`), which is what makes this click an EXPAND.
    *
    * **THE `expect` USED TO RESTATE THE `until` PREDICATE, WHICH IS THE SAME DEAD SHAPE finding 3a NAMES
    * TWO TESTS UP — found by sweeping this branch's own files for it rather than by review.** It read
@@ -312,14 +312,12 @@ describe('buffers restored from storage', () => {
    * whole content of "the write-back through the gesture a user actually makes".
    */
   it('expanding it writes the new state back', async () => {
-    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .collapse')?.click()
+    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] [data-panel="text"] .panel-toggle')?.click()
 
     await until(() => stored()?.buffers[1]?.collapsed === false, 'the store to record the expand')
 
     expect(stored()?.buffers[1]?.id).toBe('scratch-2')
-    expect(document.querySelector('[data-leaf="lambda-0"] .term-editor')?.classList.contains('is-collapsed')).toBe(
-      false,
-    )
+    expect(document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')?.hidden).toBe(false)
   })
 
   /**

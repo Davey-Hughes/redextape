@@ -33,6 +33,18 @@ import { createReplies } from './replies'
 import { BufferCapReached, ScratchBuffers } from './scratch'
 import { type SessionId, SessionPool } from './session-client'
 import { SessionRegistry } from './sessions'
+import {
+  applySkin,
+  PALETTE_CHOICE_LABELS,
+  PALETTE_CHOICES,
+  PALETTE_CSS_KEY,
+  PALETTE_KEY,
+  readPaletteChoice,
+  readStyle,
+  STYLE_IDS,
+  STYLE_KEY,
+  STYLE_LABELS,
+} from './skin'
 import type { TmPane } from './tm-pane'
 import { createTransport } from './transport'
 import type { Classified, Diagnostic, LambdaState, TmState } from './types'
@@ -120,6 +132,8 @@ async function main(): Promise<EditorView> {
   const picker = document.querySelector<HTMLSelectElement>('#encoding')
   const appearanceButton = document.querySelector<HTMLButtonElement>('#appearance')
   const restoreLayoutButton = document.querySelector<HTMLButtonElement>('#restore-layout')
+  const styleSelect = document.querySelector<HTMLSelectElement>('#style')
+  const paletteSelect = document.querySelector<HTMLSelectElement>('#palette')
   /**
    * THE BUFFER LIST'S BUTTON — design §4.2's `[buffers 3 ▾]`, queried here exactly as `#appearance` and
    * `#restore-layout` are, because `bufferList` takes a button rather than building one (its own doc).
@@ -143,6 +157,8 @@ async function main(): Promise<EditorView> {
     !picker ||
     !appearanceButton ||
     !restoreLayoutButton ||
+    !styleSelect ||
+    !paletteSelect ||
     !buffersButton ||
     !root
   ) {
@@ -186,6 +202,45 @@ async function main(): Promise<EditorView> {
     applyAppearance(document.documentElement, appearance)
     writeAppearanceStorage(appearance)
     relabelAppearance()
+  })
+
+  // THE STYLE AND PALETTE (Plan 7 part 1, spec §6), wired before `init()` for the appearance toggle's
+  // reason: they touch nothing but storage and `<html>`, so they stay live on the startup-failure path.
+  // Storage is guarded for the same reason too.
+  const readSkinStorage = (key: string): string | null => {
+    try {
+      return localStorage.getItem(key)
+    } catch {
+      return null
+    }
+  }
+  const writeSkinStorage = (key: string, value: string): void => {
+    try {
+      localStorage.setItem(key, value)
+    } catch {
+      // The choice still holds for this page load; it just will not survive a reload.
+    }
+  }
+  for (const id of STYLE_IDS) styleSelect.append(new Option(STYLE_LABELS[id], id))
+  for (const id of PALETTE_CHOICES) paletteSelect.append(new Option(PALETTE_CHOICE_LABELS[id], id))
+  let style = readStyle(readSkinStorage(STYLE_KEY))
+  let paletteChoice = readPaletteChoice(readSkinStorage(PALETTE_KEY))
+  styleSelect.value = style
+  paletteSelect.value = paletteChoice
+  // Every apply refreshes the pre-paint cache, so the next load's first frame is this one.
+  const applyChosenSkin = (): void => {
+    writeSkinStorage(PALETTE_CSS_KEY, applySkin(document.documentElement, style, paletteChoice))
+  }
+  applyChosenSkin()
+  styleSelect.addEventListener('change', () => {
+    style = readStyle(styleSelect.value)
+    writeSkinStorage(STYLE_KEY, style)
+    applyChosenSkin()
+  })
+  paletteSelect.addEventListener('change', () => {
+    paletteChoice = readPaletteChoice(paletteSelect.value)
+    writeSkinStorage(PALETTE_KEY, paletteChoice)
+    applyChosenSkin()
   })
 
   // THE ONE PLACE THE APP CAN FAIL TO START. `init()` fetches the wasm; a worker constructed against

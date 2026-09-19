@@ -75,34 +75,27 @@ describe('LambdaPane editor region', () => {
     expect(el.querySelector('.term-editor')).toBeNull()
   })
 
-  it('relabels the collapse control on remount, not just on the next click', () => {
-    // The reviewer's repro for the stale-label defect: mount, collapse, unmount, remount. A remounted
-    // editor starts expanded (design §4.2, "THE STATE IS NOT PERSISTED"), so the control that names its
-    // state has to say so too — pinned here rather than only in `pane-chrome-collapse.test.ts` because
-    // the bug was never in `collapseButton` alone; it was in `setEditor` reusing one across a cycle
-    // `collapseButton`'s own `update(false)` didn't know was a full unmount.
+  it('reopens the text panel on remount, not just on the next click', () => {
+    // The reviewer's repro for the stale-state defect, carried over from the collapse button this panel
+    // replaced: mount, collapse, unmount, remount. A remounted editor starts where its buffer's record
+    // says (open, here), so the control that names its state has to say so too.
     const el = host()
     const pane = new LambdaPane(el, events())
     pane.setEditor('\\x. x')
 
-    const collapse = el.querySelector<HTMLButtonElement>('button.collapse')
-    if (collapse === null) throw new Error('the collapse control was not added')
-    collapse.click()
-    // Collapsed: the host is hidden and the label offers to reverse that.
-    expect(el.querySelector('.term-editor')?.classList.contains('is-collapsed')).toBe(true)
-    expect(collapse.getAttribute('aria-label')).toBe('show the term editor')
+    const toggle = el.querySelector<HTMLButtonElement>('[data-panel="text"] .panel-toggle')
+    if (toggle === null) throw new Error('the text panel was not added')
+    toggle.click()
+    expect(el.querySelector<HTMLElement>('.term-editor')?.hidden).toBe(true)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
 
     pane.setEditor(null)
     pane.setEditor('\\y. y')
 
-    // Remounted fresh: `setEditor` gives the host a bare `term-editor` class with no `.is-collapsed`,
-    // so the editor is visible on screen. The re-added button must agree with that, not with the label
-    // left over from the pane this replaced.
-    const editorHost = el.querySelector('.term-editor')
+    const editorHost = el.querySelector<HTMLElement>('.term-editor')
     expect(editorHost).not.toBeNull()
-    expect(editorHost?.classList.contains('is-collapsed')).toBe(false)
-    const remounted = el.querySelector<HTMLButtonElement>('button.collapse')
-    expect(remounted?.getAttribute('aria-label')).toBe('hide the term editor')
+    expect(editorHost?.hidden).toBe(false)
+    expect(el.querySelector('[data-panel="text"] .panel-toggle')?.getAttribute('aria-expanded')).toBe('true')
   })
 
   it('offers no fork while a link window is showing', () => {

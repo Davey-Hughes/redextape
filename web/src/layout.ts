@@ -74,13 +74,13 @@ export type LayoutNode =
  * genuinely fires here (unlike the width case above), because `.state-table`'s `max-height: 40vh` is
  * relative to the BROWSER'S viewport, not to this pane. A divider drag does not resize the browser
  * window, so shrinking TM's allocated share of the split does nothing to that cap — the δ-table (open
- * by default, `TmPane`'s `#open` starts `true`) stays whatever size the WINDOW allows regardless of
- * how little SPACE the pane itself was just given. This is a shape mismatch between two different
- * boxes a CSS unit was written against, not a wrong constant — no fraction near 0.1 closes it, since
- * the content driving the overflow does not shrink as the fraction does. Per design §9 this module
- * does not become the place a pixel fix would live even if one were made; this is flagged as a design
- * question (does `.state-table`'s cap want to track the PANE rather than the viewport?) rather than
- * acted on here.
+ * by default, since `createPanel`'s `open` option defaults to `true`) stays whatever size the WINDOW
+ * allows regardless of how little SPACE the pane itself was just given. This is a shape mismatch
+ * between two different boxes a CSS unit was written against, not a wrong constant — no fraction near
+ * 0.1 closes it, since the content driving the overflow does not shrink as the fraction does. Per
+ * design §9 this module does not become the place a pixel fix would live even if one were made; this
+ * is flagged as a design question (does `.state-table`'s cap want to track the PANE rather than the
+ * viewport?) rather than acted on here.
  */
 export const MIN_PANE_FRACTION = 0.1
 

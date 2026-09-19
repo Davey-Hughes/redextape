@@ -26,6 +26,8 @@
 export const SHELL = `
   <header class="bar"><span class="wordmark">redextape</span>
     <button type="button" id="appearance"></button>
+    <label class="skin">style <select id="style"></select></label>
+    <label class="skin">palette <select id="palette"></select></label>
     <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
     <button type="button" id="buffers">buffers</button>
     <label class="encoding">encoding <select id="encoding"></select></label>

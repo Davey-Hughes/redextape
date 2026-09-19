@@ -255,6 +255,13 @@ jobs:
         run: scripts/check-shared-docs.sh --self-test
       - name: Reject shared doc regions that no longer match their source
         run: scripts/check-shared-docs.sh
+      # THE COLOUR GATE RIDES IN THIS JOB FOR THE REASONS ABOVE: repo hygiene needing a checkout and
+      # nothing else, already required, and no change to `gate`'s `needs:` list. Same script as the
+      # pre-commit hook. Self-test first, because a scan of a clean tree proves nothing on its own.
+      - name: Prove the colour detector still detects
+        run: scripts/check-colours.sh --self-test
+      - name: Reject colour literals outside the palette
+        run: scripts/check-colours.sh
       # THE RUNNER IMAGE HAS NO LUA AND NO NEOVIM, AND THE FIRST VERSION OF THIS GATE ASSUMED IT DID.
       # `catthehacker/ubuntu:act-latest` carries node, git and curl; `scripts/check-lua.sh` originally
       # ran `nvim --headless`, which is present on any machine that can actually use the plugin and

@@ -260,13 +260,15 @@ own) — 8 are skipped, so 1,148 run — and `--features llvm` takes `redextape-
 last measured.
 
 **These are dated observations rather than current facts, and the tense is deliberate.** Recovering
-them costs `cargo nextest list --workspace`, measured at **218 s warm** — roughly **1,450x** the
-figure gate's own ~150 ms, and roughly **47x** the ~4.7 s the five unscoped pre-commit hooks cost
-together — so no gate holds them and none can. **THAT COMPARISON READ "150x" AND "the ~1.5 s the
-three unscoped hooks" UNTIL `check-attributions` LANDED**, and it was already wrong before that:
-there were four unscoped hooks, not three, and re-measuring all of them in one minute gives 1,127 +
-494 + 253 + 181 + 2,603 ms. A ratio between two figures goes stale when EITHER moves, which is twice
-the exposure of the figures it compares. The
+them costs `cargo nextest list --workspace`, measured at **218 s warm** — roughly **800x** the
+figure gate's own ~270 ms (its self-test and scan), and roughly **38x** the ~5.7 s the six unscoped
+pre-commit hooks cost together — so no gate holds them and none can. **THAT COMPARISON READ "150x"
+AND "the ~1.5 s the three unscoped hooks" UNTIL `check-attributions` LANDED**, and it was already
+wrong before that: there were four unscoped hooks, not three, and re-measuring all of them in one
+minute gives 1,127 + 494 + 253 + 181 + 2,603 ms. It then read **47x** against "the ~4.7 s the five
+unscoped hooks" until `check-colours` made six, beside the **1,450x** against "~150 ms" it had carried
+since the figure gate landed; both were re-measured then, and the figure gate had grown too. A ratio between two figures goes stale
+when EITHER moves, which is twice the exposure of the figures it compares. The
 figures above read 841/716/48 until 2026-08-24, having drifted by 315 tests and lost three crates
 from the breakdown entirely. Recount rather than trust them.
 
@@ -288,20 +290,23 @@ nextest is missing rather than falling back, so the gate behaves the same everyw
 `scripts/setup-dev.sh` installs it. Because nextest does not run doctests, the script pairs every
 config with an explicit `cargo test --doc` at the same feature flags.
 
-There are **ten** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
+There are **eleven** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
 heavier; a `web/` change runs `biome ci` and `tsc --noEmit`; a Lua or `parser.c` change runs
 `check-lua`, which parses the tracked Lua and asserts `plugin/redextape.lua`'s parser names still
 equal the `tree_sitter_*` symbols the committed parsers export — a mismatch there loads the wrong
 language in an editor rather than failing, so nothing else in this tree could see it. The other
-five — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures` and
-`check-shared-docs` — are unscoped and run on every commit whatever is staged, because all five catch
-things that arrive in a path nobody thought to list; the first three walk `git ls-files`, the fourth
-reads four READMEs, and the fifth holds every marked region in a document to the single copy under
-`grammars/shared/`. `check-attributions` is the newest and the slowest, at ~2.6 s against the next
-slowest's ~1.1 s, because it strips comments and string literals out of every cited file rather than
+six — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
+`check-shared-docs` and `check-colours` — are unscoped and run on every commit whatever is staged,
+because all six catch things that arrive in a path nobody thought to list; the first three walk
+`git ls-files`, the fourth reads four READMEs, the fifth holds every marked region in a document to
+the single copy under `grammars/shared/`, and the sixth scans tracked `.css` and `.ts` files under
+`web/src/` for colour literals outside the palette, skipping `palettes.ts` itself and the marked
+fallback block in `style.css`. `check-colours` is the newest of the six and `check-attributions` the
+slowest, at ~3.2 s against the next slowest's ~1.25 s (each hook's `--self-test` and scan, measured
+2026-09-18), because it strips comments and string literals out of every cited file rather than
 matching patterns line by line — the price of being able to tell a file that OWNS a symbol from one
-that merely talks about it. All **ten** are fast enough for every commit, at ~4.7 s for
-the unscoped five together. Run `scripts/check-all.sh` before merging.
+that merely talks about it. All **eleven** are fast enough for every commit, at ~5.7 s for the
+unscoped six together. Run `scripts/check-all.sh` before merging.
 
 `scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps marked
 `#[ignore = "slow tier: ..."]` — nine of them today — which `cargo test` skips by default and CI

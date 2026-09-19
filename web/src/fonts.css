@@ -1,0 +1,33 @@
+/* The two faces Instrument draws with, self-hosted (Plan 7 part 1, spec §5). Both are declared always,
+   and a browser fetches a face only when something renders in it — apart from the two files `index.html`
+   preloads (last paragraph).
+
+   INTER comes as fontsource's per-weight sheets, at the two weights the style sheet uses. Each declares
+   one face per subset, with that subset's `unicode-range`, so a browser fetches only the subsets the
+   page's text needs. HACK comes from its own package, regular and bold only — the `-subset` files it
+   also ships are Latin-only and would drop λ. Hack has no 600; a `font-weight: 600` rule resolves to its
+   700, which is the browser's nearest-weight rule, not an accident.
+
+   Bare package paths are resolved and bundled by Vite into `/assets/` with hashed names, which
+   `deploy/nginx.conf` already serves as immutable. The two preload links in `index.html` name the same
+   files, and Vite rewrites them to the same hashes. Those preloads are unconditional: every page load
+   requests the two files whatever the style, Paper and Terminal included, and as immutable assets they
+   are downloaded once per browser rather than once per load. */
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/600.css";
+
+@font-face {
+  font-family: "Hack";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("hack-font/build/web/fonts/hack-regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Hack";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("hack-font/build/web/fonts/hack-bold.woff2") format("woff2");
+}
