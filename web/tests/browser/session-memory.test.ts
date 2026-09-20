@@ -37,6 +37,20 @@ import type { LambdaState, TmState } from '../../src/types'
  * can see it, and the warm-up round is discarded rather than kept.
  */
 
+/**
+ * The most collections `round` will spend waiting for the heap to stop falling before it reads `base`,
+ * and the fall below which it treats the heap as settled. A pass freeing under 256 KB is noise rather
+ * than a release; eight is four times what the two-collect version this replaces ever spent, and bounds
+ * a browser whose readings never settle.
+ *
+ * ON A DEVELOPER MACHINE THE CAP IS NEVER APPROACHED — every round of a local run reports `collects: 2`,
+ * the floor, because the second collection already frees nothing. The loop exists for the runner where
+ * it did not: each round prints its own count, so a CI run that needed more says so in the log rather
+ * than hiding it in a ratio.
+ */
+const SETTLE_PASSES = 8
+const SETTLED_BYTES = 256 * 1024
+
 /** See `frame-cost.test.ts`'s type of the same name for why this is local and not in `types.ts`. */
 type MemoryPerformance = Performance & { memory?: { usedJSHeapSize: number } }
 
@@ -202,7 +216,7 @@ const THREE_SESSIONS: Slot[] = [
 ]
 
 /** One round's readings. `resident` is the absolute heap with the round's sessions alive. */
-type Reading = { resident: number; base: number; delta: number; ms: number; kept: number }
+type Reading = { resident: number; base: number; delta: number; ms: number; kept: number; collects: number }
 
 /**
  * What a round's rings ended up holding, as plain numbers.
@@ -271,12 +285,35 @@ describe('session memory', () => {
       // delta came back as -75,368,894. A negative delta is the signature, and it is the same class
       // of error as reading an uncollected heap: the number is real, it just is not a size.
       await new Promise((r) => setTimeout(r, 100))
-      // COLLECTED TWICE. One full collection is enough for `frame-cost.test.ts`'s ~11 MB of young
-      // objects; these rounds put tens of thousands of frames into old space, and a second pass is
-      // cheap insurance against a reading taken one cycle early.
+      // COLLECTED UNTIL THE HEAP STOPS FALLING, WHERE THIS USED TO COLLECT EXACTLY TWICE. One full
+      // collection is enough for `frame-cost.test.ts`'s ~11 MB of young objects; these rounds put tens
+      // of thousands of frames into old space, and two passes were chosen as "cheap insurance against a
+      // reading taken one cycle early". On a loaded runner two is not always enough, and the residue
+      // lands in `base`, which is the one reading nothing downstream can correct.
+      //
+      // **MEASURED, IN CI RUN 441 ON `450440e2`.** Both arms' baselines rose by the same ~22.9 MB
+      // against the run before it on the same runner: arm A's `resident` rose with its `base` (the
+      // residue survived both readings) while arm B's did not (it was collected between them), which is
+      // uncollected garbage by its own signature rather than anything the app allocated. It dropped the
+      // resident ratio from 1.5494 to 1.3281.
+      //
+      // IT STILL COLLECTS AT LEAST TWICE, which is the insurance the two-collect version bought and
+      // which a bare "stop when it stops falling" loop would have thrown away: a first pass that frees
+      // nothing would end it after one. Past that it stops on a pass that freed no more than
+      // `SETTLED_BYTES`, capped at `SETTLE_PASSES` so a browser whose readings never settle costs a
+      // bounded number of passes rather than hanging. Reaching the cap is not a failure — `base` is
+      // then simply the best floor available, and the assertions below no longer depend on it. The
+      // count is reported in each round's console line so a run that needed more than two says so.
       collect()
-      collect()
-      const base = heapNow()
+      let collects = 1
+      let base = heapNow()
+      while (collects < SETTLE_PASSES) {
+        const previous = base
+        collect()
+        collects++
+        base = heapNow()
+        if (previous - base <= SETTLED_BYTES) break
+      }
       const t0 = performance.now()
       const loaded = await load(slots)
       const ms = performance.now() - t0
@@ -287,7 +324,7 @@ describe('session memory', () => {
       // with its `expect(frames.length)` loop — a use of the retained objects at a point the
       // optimizer cannot prove is dead before the two heap reads above.
       const kept = loaded.rings.reduce((n, r) => n + (r.lambda?.length ?? 0) + (r.tm?.length ?? 0), 0)
-      return { reading: { resident, base, delta: resident - base, ms, kept }, shape: shapeOf(loaded) }
+      return { reading: { resident, base, delta: resident - base, ms, kept, collects }, shape: shapeOf(loaded) }
     }
 
     // ONE DISCARDED WARM-UP PAIR, for `frame-cost.test.ts`'s reason: the first pair pays one-time
@@ -355,9 +392,24 @@ describe('session memory', () => {
     // arm A did not, which the construction above says is impossible and would therefore be a bug in
     // the probe rather than a finding about memory. Neither bound is the threshold; see this file's
     // header for why the threshold is not asserted at all.
-    const residentRatio = residentThree / residentOne
-    expect(residentRatio).toBeGreaterThan(1.5)
-    expect(residentRatio).toBeLessThan(2.5)
+    //
+    // **ON THE DELTA RATIO, WHERE THIS USED TO BOUND THE RESIDENT ONE — and the resident one could not
+    // carry a bound, by this file's own model.** `(base + 2C)/(base + C)` falls towards 1 as `base`
+    // grows, which the paragraph above says in as many words, so a bound on it is a bound on the page
+    // baseline rather than on the app. The baselines this probe actually meets differ by a factor of
+    // five: ~17 MB on a developer machine against ~62 MB on CI runner `450440e2`, which put main's own
+    // reading at 1.5505 against a bound of 1.5 — clearing it by three hundredths. Run 441 then read
+    // 1.3281 and failed the build on a branch that had not touched this file, which is exactly the
+    // "browser update moved a heap reading two percent" retirement this file's header forbids.
+    //
+    // THE DELTA IS THE SAME SANITY CHECK ON THE QUANTITY THE PROBE IS ABOUT. `2C/C` has no `base` in it
+    // and is what the console block above already calls the stricter reading. Across the three CI runs
+    // that produced the figures above, `deltaOne` read 75,438,868, 75,438,868 and 75,439,880 bytes —
+    // constant to within a kilobyte while the resident readings moved by 23 MB. A ratio near 1 still
+    // means arm B retained nothing extra, which is the failure both bounds exist to catch.
+    const deltaRatio = deltaThree / deltaOne
+    expect(deltaRatio).toBeGreaterThan(1.5)
+    expect(deltaRatio).toBeLessThan(2.5)
 
     // The rounds must actually have recorded, and the TM ring must actually have FILLED — an evicting
     // ring is the only proof that `HISTORY_BYTES` was reached rather than merely allocated, and a

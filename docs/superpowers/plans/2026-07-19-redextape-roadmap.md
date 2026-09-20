@@ -18170,3 +18170,64 @@ pnpm exec vitest run --project node tests/node/browser-timeout-invariants.test.t
 | 15,000, 30,000 | Vitest's test and hook timeouts in browser mode | `resolved.testTimeout ??= resolved.browser.enabled ? 15e3 : 5e3` and the `hookTimeout` line after it, `3e4`, in vitest 4.1.10's `dist/chunks/coverage.*.js` |
 | 10,000 | `until`'s bound | the default in its signature in `harness.ts` |
 | 148; 87, 798 and the four coverage figures; 14 | Biome's files, the web suite, the gate's tests | the block above, at `2cb599f` |
+
+#### THE MEMORY PROBE'S SANITY BOUNDS MOVE OFF THE RESIDENT RATIO, WHICH THE FILE'S OWN MODEL SAYS IS A FUNCTION OF THE PAGE BASELINE AND NOT OF THE APP — MAIN CLEARED THE BOUND BY THREE HUNDREDTHS ON THE RUNNER, AND A BRANCH THAT NEVER TOUCHED THE FILE IS WHAT MADE IT FAIL (2026-09-20, branch `session-memory-baseline`, `ff7fbd1..d532a2f`, 1 commit, plus this entry)
+
+**A test fix, found by the part 2a PR.** `session-memory.test.ts`'s first test failed CI run 441 on #100 with `expected 1.328089834554238 to be greater than 1.5`, on a branch whose 35 commits do not touch the file.
+
+##### WHAT FAILED
+
+- **The bound was on a quantity the file models as baseline-dependent.** Its own comment writes the resident ratio as `(base + 2C)/(base + C)` and says it "falls towards 1 as `base` grows" and "is not a constant of the app". The assertion `residentThree / residentOne > 1.5` is therefore a bound on `base`.
+- **The baselines differ by a factor of five.** About 17 MB on a developer machine, about 62 MB on CI runner `450440e2`. Local reads 1.8141; main on that runner reads 1.5505, three hundredths above the bound.
+- **And the runner's own baseline moves.** Three runs on `450440e2`, same runner throughout: main at 1.5505, #100 at 1.5494, then #100 again at 1.3281. Between the last two, `residentThree` changed by 1,332 bytes while `residentOne` rose 22.9 MB.
+- **That 22.9 MB was uncollected garbage, by its signature.** Both arms' `base` rose by it. Arm A's `resident` rose with its `base`, so the residue survived both readings; arm B's did not, so it was collected between them. `deltaOne` stayed constant to within a kilobyte across all three runs while `deltaThree` fell by the same 22.9 MB.
+- **This is the retirement the file's header forbids** in as many words: "a probe that failed the build the first time a browser update moved a heap reading two percent would be retired within a week".
+
+##### WHAT CHANGED
+
+- **The sanity bounds move to the delta ratio**, which has no `base` in it and which the file's console block already calls the stricter of its two readings. `deltaOne` read 75,438,868, 75,438,868 and 75,439,880 bytes across the three CI runs — constant to within a kilobyte while the resident readings moved by 23 MB.
+- **The pre-registered threshold is untouched.** It was never asserted, it is still reported, and it is still the resident figure against 2x. Only the loose bounds that exist to catch a broken measurement moved.
+- **`round` settles the heap before reading `base`**, collecting until a pass frees no more than 256 KB, keeping the two-collect floor the previous version guaranteed and capped at eight collections. Each round reports its own count.
+
+##### WHAT PROVING IT FOUND
+
+- **The first settling loop threw away the old guarantee.** Written as "collect while it keeps falling", a first pass that freed nothing ended it after ONE collection, where the version it replaced always did two. It keeps the floor now.
+- **The reported count was misleading before it was read.** Counting loop turns rather than collections printed `passes: 1` for a round that had collected twice, because the `break` precedes the increment. It counts collections.
+- **The settling loop is unexercised on this machine.** Every round of every local run reports `collects: 2`, the floor. Its value is entirely on the runner, which is why each round prints its own count rather than the mean hiding it.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Nothing measures the runner's baseline over time.** Three readings say it moved 23 MB once; whether that is ordinary or was one bad run is not established, and nothing watches it.
+- **The delta ratio moved too, and less is known about why.** It read 1.9996, 1.9996 and 1.6964 across the three runs. The new bound clears the lowest of those by 0.2, where the old one failed, but the 1.6964 is unexplained beyond "arm B's base was polluted and its resident was not".
+- **`frame-cost.test.ts` shares this harness and was not examined.** It retains ~11 MB per round where this file retains 75 to 151 MB, so the same baseline pressure is proportionally smaller, but that is an argument rather than a measurement.
+- **The wasm-side reading is still out of this harness's reach**, as the file's header already records; the third test measures it separately.
+
+##### VERIFICATION
+
+Run on 2026-09-20 at `d532a2f`, from `web/`, against the branch's own checkout. "Ballast" is 70 MB of `Uint8Array` retained for the whole test, which is the baseline CI actually carries; "one slot" slices `load`'s `slots` to its first element so three sessions retain what one does. Both are sabotages, reverted after each run.
+
+```
+pnpm exec vitest run --project browser tests/browser/session-memory.test.ts  → 3 passed
+  clean                    → resident 1.8138330696142917, delta 1.9998281366046353, collects 2 every round
+  with ballast             → resident 1.4539240343543200, delta 1.9994150371611000 — the OLD bound fails,
+                             the new one passes within 0.0002 of the clean reading
+  with one slot            → delta 0.9999867055348272, "expected 0.9999867055348272 to be greater than 1.5"
+pnpm exec tsc --noEmit -p tsconfig.json                                      → exit 0
+pnpm exec biome ci --error-on-warnings tests/browser/session-memory.test.ts  → exit 0
+```
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 1 | commits in the range | `git log --oneline ff7fbd1..d532a2f \| wc -l` |
+| 1.5505, 1.5494, 1.3281 | the resident ratio on runner `450440e2` for main, then #100 twice | the `mean resident:` line in the `web` job logs of runs 439, 440 and 441, jobs 8613, 8623 and 8637 |
+| `450440e2` | the runner all three ran on | line 1 of each of those job logs |
+| 137,279,760 and 160,152,183; 212,695,154 and 212,696,486 | `residentOne` and `residentThree` in runs 440 and 441 | the same lines |
+| 75,438,868, 75,438,868, 75,439,880 | `deltaOne` in runs 439, 440 and 441 | the `mean delta:` line in the same logs |
+| 1.9996, 1.9996, 1.6964 | the delta ratio in those runs | the same lines |
+| 22.9 MB | the baseline movement between runs 440 and 441 | the difference of the `residentOne` figures above |
+| 1.8141, 1.8138 | the local resident ratio before and after the change | two local runs of the command above |
+| ~17 MB, ~62 MB | the local and CI page baselines | `residentOne − deltaOne` from the local run and from run 439 |
+| 70 | ballast megabytes | the sabotage's own loop bound |
+| 256 KB, 8, 2 | `SETTLED_BYTES`, `SETTLE_PASSES`, and the collections every local round used | the constants in the file, and the `collects` field in each round's console line |
