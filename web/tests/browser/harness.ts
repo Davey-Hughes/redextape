@@ -26,7 +26,7 @@
 export const SHELL = `
   <header class="bar">
     <span class="wordmark">redextape</span>
-    <button type="button" id="workspace" aria-haspopup="menu" aria-controls="workspace-menu" aria-expanded="false">Explorer</button>
+    <button type="button" id="workspace" aria-haspopup="menu" aria-controls="workspace-menu" aria-expanded="false">Explorer <span aria-hidden="true">▾</span></button>
     <div id="workspace-menu" class="header-menu" popover>
       <button type="button" id="reset-preset">reset preset — restores the default views</button>
     </div>
@@ -48,7 +48,11 @@ export const SHELL = `
   </header>
   <div id="notice" class="notice" hidden></div>
   <div id="live" class="visually-hidden" role="status"></div>
-  <main></main>
+  <main>
+    <div id="views"></div>
+    <aside id="inspector" class="inspector" hidden></aside>
+  </main>
+  <div id="step-bar" class="step-bar" hidden></div>
   <div id="editor"></div>
   <footer class="strip">
     <section id="results" class="results"></section>

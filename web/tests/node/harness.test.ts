@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { SHELL, until } from '../browser/harness'
 
@@ -17,6 +19,9 @@ describe('SHELL', () => {
       '#live',
       '#results',
       '#link-status',
+      '#step-bar',
+      '#views',
+      '#inspector',
       '#appearance-choice',
       '#workspace-menu',
       '#new-view-menu',
@@ -27,7 +32,45 @@ describe('SHELL', () => {
       // own text — so deleting the element this list is about would leave it green.
       expect(SHELL).toContain(`id="${sel.slice(1)}"`)
     }
-    expect(SHELL).toContain('<main></main>')
+    // `<main>` HOLDS TWO CHILDREN SINCE PART 2b: the layout tree's own root and the inspector column
+    // beside it (spec §9). `renderLayout` opens with `root.replaceChildren()`, so the tree needed a root
+    // of its own the moment anything else lived in `<main>`.
+    expect(SHELL).toContain('<div id="views"></div>')
+  })
+})
+
+/**
+ * THE GATE THAT HOLDS THE REAL PAGE AND THE TEST SHELL TOGETHER.
+ *
+ * **THE ID LIST ABOVE IS NOT ONE, AND THAT WAS MEASURED RATHER THAN NOTICED.** It reads `SHELL` and never
+ * opens `index.html`, so the two could diverge completely: part 2b's own whole-branch review deleted
+ * `#views`, `#inspector` and `#step-bar` from `index.html` — reverting the real page to its part 2a shape —
+ * and **all 533 node tests passed**, while the browser tier mounts `SHELL` and could not see it either.
+ * `main()` would have thrown `the page is missing a mount point` on the real site, behind a green CI.
+ *
+ * **STRUCTURE, NOT SUBSTRINGS.** `main.ts` now also resolves `footer.strip` by CLASS, and `#inspector` has
+ * to sit INSIDE `<main>` beside `#views` or the inspector column has nothing to be a column of — neither
+ * fact is visible to a list of `id="…"` fragments. Comparing the whole body is the only form that holds
+ * what the app actually depends on, and it costs one assertion.
+ *
+ * The module script is the one deliberate difference: `SHELL` is injected into a page that imports
+ * `main.ts` itself, so it must not carry a second copy.
+ */
+describe('SHELL against index.html', () => {
+  const html = readFileSync(fileURLToPath(new URL('../../index.html', import.meta.url)), 'utf8')
+
+  /** Markup with every run of whitespace between tags collapsed, so indentation is not a difference. */
+  const shape = (markup: string): string =>
+    markup
+      .replace(/<script type="module"[^>]*><\/script>/g, '')
+      .replace(/>\s+</g, '><')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+  it('is the same markup the real page ships, from <header> to the end of the strip', () => {
+    const body = /<body>([\s\S]*?)<\/body>/.exec(html)?.[1]
+    expect(body, 'index.html has no <body> to compare against').toBeDefined()
+    expect(shape(SHELL)).toBe(shape(body as string))
   })
 })
 

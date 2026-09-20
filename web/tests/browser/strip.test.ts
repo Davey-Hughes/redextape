@@ -23,6 +23,11 @@ beforeAll(async () => {
   await until(() => state() === 'idle' && resultsText().startsWith('λ 42'), 'the first compile')
 })
 
+// **`show` TAKES A THUNK PAIR SINCE PART 2b** (`readout.ts`'s `Lines`): the strip and the inspector draw
+// different shapes from the same frame, and handing over both eagerly would pay for the unused one on
+// every playback frame. These cases are about the strip, so `rows` is never called.
+const strip = (segments: readonly string[]) => ({ segments: () => segments, rows: () => [] })
+
 describe('the strip', () => {
   it("reads the program's value and counts in one line, without the normal form", () => {
     const [lambda, tm, ...rest] = segments()
@@ -114,7 +119,7 @@ describe('createReadout', () => {
     // unchanged-key guard starts at, so this call took the early return and wrote no attribute at all.
     // `style.css` dims a running compile through `[data-state="running"][data-describes="program"]`, so
     // the strip stayed undimmed through the one compile with nothing else on it.
-    createReadout(host).show(null, [])
+    createReadout(host).show(null, strip([]))
     expect(host.dataset.describes, 'the first call wrote no data-describes').toBe('copy')
   })
 
@@ -122,10 +127,10 @@ describe('createReadout', () => {
     const { createReadout } = await import('../../src/readout')
     const host = document.createElement('div')
     const readout = createReadout(host)
-    readout.show(null, ['λ copy 1 · 3 reductions'])
+    readout.show(null, strip(['λ copy 1 · 3 reductions']))
     expect(host.dataset.describes).toBe('copy')
     // The error arm returned before writing the attribute too, so `'copy'` survived into a program error.
-    readout.show({ kind: 'error', error: 'the worker stopped' } as never, [])
+    readout.show({ kind: 'error', error: 'the worker stopped' } as never, strip([]))
     expect(host.dataset.describes, 'a program error still read as a copy').toBe('program')
   })
 
@@ -139,7 +144,7 @@ describe('createReadout', () => {
     const { createReadout } = await import('../../src/readout')
     const host = document.createElement('div')
     const long = `λ ${'9'.repeat(200)} · 1 reduction`
-    createReadout(host).show(null, [long, 'TM 42 · 3 transitions · width 8'])
+    createReadout(host).show(null, strip([long, 'TM 42 · 3 transitions · width 8']))
     const segs = [...host.querySelectorAll<HTMLElement>('.segment')]
     expect(segs.map((s) => s.title)).toEqual([long, 'TM 42 · 3 transitions · width 8'])
     expect(segs.map((s) => s.textContent)).toEqual([long, 'TM 42 · 3 transitions · width 8'])

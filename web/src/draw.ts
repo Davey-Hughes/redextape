@@ -4,7 +4,17 @@ import type { LambdaPane } from './lambda-pane'
 import { isCoincident, type Link, runningFocus, sourceNodeOwner } from './link'
 import type { LinkWiring } from './link-wiring'
 import type { LeafId, PaneCollection } from './panes'
-import { lambdaCopySegments, type ProgramResult, programSegments, tmCopySegments } from './readout'
+import {
+  copyRows,
+  type Lines,
+  lambdaCopyParts,
+  lambdaCopySegments,
+  type ProgramResult,
+  programRows,
+  programSegments,
+  tmCopyParts,
+  tmCopySegments,
+} from './readout'
 import type { SessionId } from './session-client'
 import type { SessionRegistry } from './sessions'
 import type { TmPane } from './tm-pane'
@@ -61,9 +71,18 @@ export function createDraw(deps: {
   focused: () => LeafId
   /** The program's session id, `main.ts`'s `SOURCE_SESSION`, passed in rather than re-spelled here. */
   sourceSession: SessionId
-  readout: { show(program: ProgramResult | null, segments: readonly string[]): void }
+  readout: { show(program: ProgramResult | null, lines: Lines): void }
   /** The program's last result, as `replies.ts` stored it. */
   program: () => ProgramResult | null
+  /**
+   * Whether a view draws its own step controls — spec §8's `steps` switch. A thunk, for `leaves`' reason:
+   * the switch moves under a `draw()` that did not cause it.
+   */
+  stepsInView: () => boolean
+  /** Whether the views are drawn as a stage — spec §5. A thunk, for `leaves`' reason. */
+  stage: () => boolean
+  /** The one bottom bar, brought up to date once per frame after every pane has been painted (spec §8). */
+  stepBar: { update(): void }
   nameOf: (session: SessionId) => string | null
 }): () => void {
   const {
@@ -79,6 +98,9 @@ export function createDraw(deps: {
     readout,
     program,
     nameOf,
+    stepsInView,
+    stage,
+    stepBar,
   } = deps
   return () => {
     // "THE" λ AND TM PANES, RESOLVED THROUGH THE COLLECTION RATHER THAN CLOSED OVER — AND EITHER MAY
@@ -147,6 +169,11 @@ export function createDraw(deps: {
     // slot's render pass requires. Safe here because `p.slot.binding.leg === 'tm'` is exactly the
     // condition under which `pane-host.ts` ever constructs a `PaneEntry` with a `TmPane` in `.pane`.
     for (const p of panes.all()) {
+      // **A VIEW THAT IS NOT ON THE PAGE IS NOT PAINTED** (spec §5). In Stage every host but one is in
+      // `pane-host.ts`'s map and out of the document, and a `render` into a detached subtree is work whose
+      // only observer is the next `innerHTML` read. Selecting a tab re-attaches the host and ends in a
+      // `draw()`, so nothing comes back stale.
+      if (!p.host.isConnected) continue
       const leg = p.slot.resolve(sessions)
       if (p.slot.binding.leg === 'tm') (p.pane as TmPane).setFocus(tmFocusLink?.states ?? [])
       p.slot.render(sessions, p.pane, leg)
@@ -163,11 +190,20 @@ export function createDraw(deps: {
       // pane's own pair, which the menu puts first and labels `(same)`; it is read here rather than
       // remembered by the pane for `PaneCollection`'s reason for reading bindings through the slot on
       // every call — a copy is a second place to be wrong.
-      p.pane.setLayoutControls(leaves() > 1, p.kind !== 'source', {
+      // `p.kind !== 'source' && !stage()` IS THE SPLIT REFUSAL, AND IT HAS TWO HALVES NOW. One editor,
+      // nothing to duplicate into (`splitLeaf`'s own doc); and in Stage a split can never apply, because
+      // the stage draws ONE view over a tab strip and a split of it would be invisible — umbrella §4
+      // rule 4's "removed where it can never apply in that view". `+ view` is what adds a view there
+      // (spec §5), and it is in the app header rather than in this menu.
+      p.pane.setLayoutControls(leaves() > 1, p.kind !== 'source' && !stage(), {
         options: pairs,
         sourceAvailable: canCreateSource,
         current: p.slot.binding,
       })
+      // WHICH STEP CONTROLS THIS VIEW DRAWS — driven from here for `setLayoutControls`' reason one line
+      // up: it is a fact about the workspace rather than about the frame just rendered, so this per-frame
+      // pass is the only hook a caller with no render loop of its own has.
+      p.pane.setStepsShown(stepsInView())
     }
 
     // RESOLVED ONCE, HERE, AND SHARED BY BOTH CONSUMERS BELOW. `draw()` runs on every recorded frame
@@ -194,6 +230,8 @@ export function createDraw(deps: {
     // would be a method that could only ever be ignored. The loop above is the render pass for BOTH
     // legs; this one is already the place where "λ panes, and only λ panes" is said.
     for (const p of panes.of('lambda')) {
+      // THE SAME SKIP THE MAIN LOOP TAKES, for the same reason (spec §5).
+      if (!p.host.isConnected) continue
       const pane = p.pane as LambdaPane
       pane.renderLink(lambdaWin)
       pane.setEditorAvailable(hasEditor(p.slot.binding.session))
@@ -240,7 +278,10 @@ export function createDraw(deps: {
     // (`panes.get('source')` is `undefined`) and shows the program, as does any view bound to it.
     const entry = panes.get(focused())
     if (entry === undefined || entry.slot.binding.session === sourceSession) {
-      readout.show(program(), programSegments(program()))
+      readout.show(program(), {
+        segments: () => programSegments(program()),
+        rows: () => programRows(program()),
+      })
     } else {
       const session = entry.slot.binding.session
       // **NOT THE SESSION ID — IT IS THE ONE PLACE THE VOCABULARY SWEEP CANNOT SEE.** `nameOf` answers
@@ -249,14 +290,21 @@ export function createDraw(deps: {
       // literal finds.
       const name = nameOf(session) ?? 'a copy'
       const leg = entry.slot.resolve(sessions)
-      const segments =
-        entry.slot.binding.leg === 'lambda'
-          ? lambdaCopySegments(name, { newestStep: leg.hist.newestStep, done: leg.done, status: leg.status })
-          : tmCopySegments(name, sessions.entryOf(session).tmScratch, {
-              newestStep: leg.hist.newestStep,
-              status: leg.status,
-            })
-      readout.show(null, segments)
+      // **THE LEG FACTS ARE HOISTED OUT OF THE OLD TERNARY**, because both thunks below read them and a
+      // value built inside one branch is a value the other cannot see.
+      const lambdaLeg = { newestStep: leg.hist.newestStep, done: leg.done, status: leg.status }
+      const tmLeg = { newestStep: leg.hist.newestStep, status: leg.status }
+      const reading = sessions.entryOf(session).tmScratch
+      const isLambda = entry.slot.binding.leg === 'lambda'
+      readout.show(null, {
+        segments: () => (isLambda ? lambdaCopySegments(name, lambdaLeg) : tmCopySegments(name, reading, tmLeg)),
+        rows: () => copyRows(isLambda ? lambdaCopyParts(name, lambdaLeg) : tmCopyParts(name, reading, tmLeg)),
+      })
     }
+
+    // THE BAR (spec §8), AFTER THE READOUT AND AFTER EVERY PANE. It resolves its own target through the
+    // thunks `main.ts` gave it, so this call is only "a frame has been painted, say what is true now" —
+    // the same division `readout.show` above takes, and the reason `draw.ts` still needs no layout tree.
+    stepBar.update()
   }
 }

@@ -1,5 +1,5 @@
 import type { Dir, LayoutNode } from './layout'
-import { MIN_PANE_FRACTION } from './layout'
+import { leaves, MIN_PANE_FRACTION } from './layout'
 import type { LeafId } from './panes'
 
 /**
@@ -347,4 +347,103 @@ function divider(
   el.addEventListener('blur', commitKeys)
 
   return el
+}
+
+/**
+ * THE SAME TREE, DRAWN AS TABS — Plan 7 part 2 spec §5, the `views` switch at `stage`.
+ *
+ * **STAGE IS A RENDERER, NOT A NODE.** The tree is untouched: the tabs are `leaves(tree)` in depth-first
+ * order and the mounted host is the focused leaf's. Every other host stays in the caller's map, off the
+ * page, exactly as a host between two commits already is (`renderLayout`'s own note) — which is what makes
+ * flipping back to tiles give the arrangement the user left, for free rather than by remembering it.
+ *
+ * **NO `ResizeHandlers`, BECAUSE A STAGE HAS NO DIVIDERS.** The tree still has splits and sizes and they
+ * are still what `tiles` draws; nothing here writes to them.
+ *
+ * **A TAB HAS NO CLOSE CONTROL** (§5): the view's own header still carries `✕`, and a second closer would
+ * be a second glyph meaning "close" in the same place (umbrella §4 rule 2).
+ *
+ * **MANUAL ACTIVATION.** Arrow keys move the focus with a roving `tabindex`; `Enter` or `Space` selects.
+ * Automatic activation — selecting on arrow — would remount a CodeMirror-bearing subtree per keypress for
+ * a user who is only looking for the tab they want.
+ *
+ * **IT RESCUES THE FOCUSED TAB ACROSS ITS OWN REBUILD**, for `renderLayout`'s divider reason and by the
+ * same mechanism: an element has no identity across `replaceChildren`, so `data-leaf` is the durable name.
+ */
+export function renderStage(
+  root: HTMLElement,
+  tree: LayoutNode,
+  hosts: Map<LeafId, HTMLElement>,
+  opts: { readonly focused: LeafId; title(id: LeafId): string; select(id: LeafId): void },
+): void {
+  const held = root.contains(document.activeElement) ? document.activeElement : null
+  const heldLeaf = held instanceof HTMLElement && held.getAttribute('role') === 'tab' ? held.dataset.leaf : undefined
+
+  const all = leaves(tree)
+  const shown = all.some((l) => l.id === opts.focused) ? opts.focused : (all[0]?.id ?? opts.focused)
+  const host = hosts.get(shown)
+  if (host === undefined) throw new Error(`stage names a leaf with no host: ${shown}`)
+  // THE HOST NEEDS AN ID BECAUSE A TAB NAMES IT, and `panel.ts` mints one the same way for the same
+  // reason: `aria-controls` is an IDREF, and a host built by `pane-host.ts` carries only `data-leaf`.
+  if (host.id === '') host.id = `view-host-${shown}`
+
+  const strip = document.createElement('div')
+  strip.className = 'stage-tabs'
+  strip.setAttribute('role', 'tablist')
+
+  const tabs = all.map((l) => {
+    const t = document.createElement('button')
+    t.type = 'button'
+    t.className = 'stage-tab'
+    t.dataset.leaf = l.id
+    t.setAttribute('role', 'tab')
+    t.textContent = opts.title(l.id)
+    const selected = l.id === shown
+    t.setAttribute('aria-selected', String(selected))
+    if (selected) t.setAttribute('aria-controls', host.id)
+    t.tabIndex = selected ? 0 : -1
+    t.addEventListener('click', () => opts.select(l.id))
+    return t
+  })
+
+  /**
+   * Move the focus to tab `i`, wrapping — and move the TAB STOP with it.
+   *
+   * **A ROVING `tabindex` HAS TO ROVE, WHICH THIS DID NOT.** The tabs were built with `tabIndex = selected
+   * ? 0 : -1` and nothing updated it, so arrowing to a tab left the strip's single tab stop on the tab that
+   * was still SELECTED. `Tab` out and `Shift+Tab` back then returned to a different tab than the one the
+   * user had arrowed to — exactly the condition the pattern exists to prevent. Selection is manual here
+   * (§5), so the tab stop follows the FOCUS and not the selection; they part company the moment a user
+   * arrows without pressing Enter, which is the whole point of manual activation.
+   */
+  const focusAt = (i: number): void => {
+    const next = tabs[(i + tabs.length) % tabs.length]
+    if (next === undefined) return
+    for (const t of tabs) t.tabIndex = t === next ? 0 : -1
+    next.focus()
+  }
+  tabs.forEach((t, i) => {
+    t.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') focusAt(i + 1)
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') focusAt(i - 1)
+      else if (e.key === 'Home') focusAt(0)
+      else if (e.key === 'End') focusAt(tabs.length - 1)
+      else if (e.key === 'Enter' || e.key === ' ') opts.select(t.dataset.leaf ?? shown)
+      else return
+      e.preventDefault()
+    })
+  })
+
+  strip.replaceChildren(...tabs)
+
+  host.style.flex = '1 1 0'
+  host.style.minWidth = '0'
+  host.style.minHeight = '0'
+
+  const box = document.createElement('div')
+  box.className = 'stage'
+  box.append(strip, host)
+  root.replaceChildren(box)
+
+  if (heldLeaf !== undefined) tabs.find((t) => t.dataset.leaf === heldLeaf)?.focus()
 }

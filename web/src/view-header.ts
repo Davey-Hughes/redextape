@@ -1,3 +1,4 @@
+import { handOff, nearest } from './focus-handoff'
 import { type IconName, icon } from './icons'
 import type { Dir } from './layout'
 import type { PaneChoice, SplitChoices } from './pane-chrome'
@@ -54,6 +55,14 @@ export type ViewHeader = {
   setBindings(options: readonly PaneOption[], current: Binding<Leg>): void
   /** Whether the view shows a copy, which is not linked to the program. */
   setDetached(detached: boolean): void
+  /**
+   * Whether the step slot is in the header at all — spec §8's `steps` switch.
+   *
+   * **THE SLOT LEAVES THE DOM, IT IS NOT HIDDEN** (`PaneView.setStepsShown`'s own doc), and taking it out
+   * from under a keyboard user is spec §11's fourth rule — which is why this is the setter and not a
+   * class on the header.
+   */
+  setStepsShown(shown: boolean): void
 }
 
 /**
@@ -111,6 +120,7 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
   let current: Binding<Leg> | null = null
   let rendered = ''
   let detached = false
+  let stepsShown = true
 
   // BUILT ON OPEN, NOT PER FRAME — `viewMenu`'s rule, which `pane-chrome.ts` stated for the same
   // per-frame reason: `draw()` repaints every view on every recorded frame during playback, and a menu that
@@ -198,6 +208,21 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
       if (next === detached) return
       detached = next
       paint()
+    },
+    setStepsShown(shown: boolean): void {
+      if (shown === stepsShown) return
+      stepsShown = shown
+      if (shown) {
+        // BEFORE THE ACTIONS, so the header keeps spec §7's order: title · status · step controls · ⋯ · ✕.
+        el.insertBefore(steps, actions)
+        return
+      }
+      // A CONTROL REMOVED BY A STATE CHANGE MUST NOT TAKE THE FOCUS WITH IT — spec §11's fourth rule, the
+      // same rule the continue button already follows, applied to a whole SLOT rather than one button
+      // (`focus-handoff.ts`). Reached by a user standing on `▶` who flips the `steps` switch in the
+      // header's own menu: without this, focus falls to `<body>`.
+      handOff(steps, nearest(el, steps))
+      steps.remove()
     },
   }
 }
@@ -433,7 +458,18 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     // is open and a frame changes what applies — a copy created elsewhere, a recording ending.
     const same = wanted.length === main.children.length && wanted.every((b, i) => main.children[i] === b)
     if (!same) {
-      for (const child of [...main.children]) if (!wanted.includes(child as HTMLButtonElement)) child.remove()
+      const going = [...main.children].filter((child) => !wanted.includes(child as HTMLButtonElement))
+      // A CONTROL REMOVED BY A STATE CHANGE MUST NOT TAKE THE FOCUS WITH IT — spec §11's fourth rule, at
+      // the instance the spec names by hand: the split items when Stage is chosen. It is reachable with
+      // the menu OPEN, which is the only way a user can be standing on one of these when the state
+      // changes. `main` is "the same menu"; the candidates are filtered against `going` because `nearest`
+      // walks the menu as it stands BEFORE the removal, so a departing sibling is still connected and
+      // would otherwise be handed the focus a moment before it leaves too.
+      if (going.length > 0) {
+        const candidates = nearest(main, going[0] as Element).filter((el) => !going.includes(el))
+        handOff(going, candidates)
+      }
+      for (const child of going) child.remove()
       for (const [i, b] of wanted.entries()) {
         const at = main.children[i]
         if (at === b) continue

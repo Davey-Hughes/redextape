@@ -32,11 +32,15 @@ describe('a restored workspace', () => {
    * which is the restore and the fan-out in one assertion: `main.ts`'s `setSpeed` draws so every step
    * control repaints, and `step-controls.ts` reads the workspace's speed on every update.
    */
+  // **SCOPED TO `.view-steps`, WHERE IT USED TO SWEEP THE PAGE.** Part 2b's step bar is a second
+  // `stepControls` instance (`step-bar.ts`), so a page-wide `.controls select.speed` now finds three —
+  // and this case's own name says "every view that steps", which is the two. The bar's copy is asserted
+  // on its own line below rather than dropped: one global speed means the bar shows it too (spec §8).
   it('shows the restored speed in every view that steps', () => {
-    expect([...document.querySelectorAll<HTMLSelectElement>('.controls select.speed')].map((el) => el.value)).toEqual([
-      '250',
-      '250',
-    ])
+    expect(
+      [...document.querySelectorAll<HTMLSelectElement>('.view-steps .controls select.speed')].map((el) => el.value),
+    ).toEqual(['250', '250'])
+    expect(document.querySelector<HTMLSelectElement>('#step-bar select.speed')?.value).toBe('250')
   })
 
   it('changes the speed in every view at once', () => {
@@ -45,6 +49,9 @@ describe('a restored workspace', () => {
     first.value = '1000'
     first.dispatchEvent(new Event('change'))
     expect(document.querySelector<HTMLSelectElement>('[data-leaf="tm-0"] select.speed')?.value).toBe('1000')
+    // THE BAR IS A STEP CONTROL ON THE PAGE TOO, so "every step control reflects a change at once"
+    // (spec §8) includes it — even while the `steps` switch has it hidden.
+    expect(document.querySelector<HTMLSelectElement>('#step-bar select.speed')?.value).toBe('1000')
     expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.speed).toBe(1000)
     // BACK TO WHAT WAS RESTORED — every test in this file reads one page, and the next one asserts the
     // stored speed is still the seeded 250.

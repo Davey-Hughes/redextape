@@ -241,6 +241,47 @@ body {
   gap: var(--space-2);
 }
 
+/* A SECTION OF THE WORKSPACE MENU — the preset choice, and one per switch (spec §4, §6). The group is a
+   `role="group"` with an `aria-label`, so a reader hears which choice a row of values belongs to, and the
+   label is DRAWN FROM THAT SAME ATTRIBUTE rather than from a second element holding a second copy of the
+   word — one string, so the visible label and the spoken one cannot drift.
+
+   `.header-menu > button` IS A DIRECT-CHILD SELECTOR, so nothing in here inherits it; these items need
+   their own rules, which is the cost of grouping and is cheaper than flattening three choices into one
+   undifferentiated list. */
+.menu-group {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  padding: 0.15em 0.6em;
+}
+.menu-group::before {
+  content: attr(aria-label);
+  flex: 0 0 7rem;
+  font-size: var(--step--2);
+  color: var(--fg-dim);
+  text-transform: var(--label-transform);
+  letter-spacing: var(--label-tracking);
+}
+.menu-group button {
+  font: inherit;
+  padding: 0.05em 0.45em;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+/* The value in force, on the title menu's own idiom — a border, never colour alone (umbrella §4 rule 5,
+   the accessibility list's item 7). */
+.menu-group button[aria-current="true"] {
+  border-color: var(--fg-dim);
+}
+/* The workspace menu is wider than the others, because a switch row is a label and two values. */
+#workspace-menu {
+  min-width: 20rem;
+}
+
 /* Same treatment as `.controls button` — chrome, not a new visual language.
 
    `.buffer-delete` SHARES THIS RULE RATHER THAN RESTATING IT, AND THAT IS A CORRECTION. It was its own
@@ -646,6 +687,39 @@ button.view-title[aria-expanded="true"] {
 /* In a view's header the strip is on the title's line, so it loses `.controls`' own top margin. AFTER
    `.controls` rather than beside `.view-steps`, for Biome's `noDescendingSpecificity`. */
 .view-steps .controls {
+  margin-top: 0;
+}
+
+/* THE ONE STEP BAR (spec §8): the `steps` switch at `bar`. It sits below the views and above the readout,
+   on the raised surface the strip uses, because the two together are the workspace's bottom edge.
+   NOTHING HERE IS A NEW COLOUR. */
+.step-bar {
+  display: flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border-top: 1px solid var(--rule);
+  background: var(--bg-raised);
+}
+.step-bar[hidden] {
+  display: none;
+}
+.step-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+/* The view it drives, in the title-selector's own spelling (`step-bar.ts`). */
+.step-bar-title {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--fg-dim);
+}
+.step-bar-title[hidden] {
+  display: none;
+}
+/* In the bar the controls are on the title's line, so they lose `.controls`' own top margin — the same
+   override `.view-steps .controls` makes just above, and AFTER `.controls` for `noDescendingSpecificity`. */
+.step-bar .controls {
   margin-top: 0;
 }
 
@@ -1174,8 +1248,19 @@ button.view-title[aria-expanded="true"] {
 main {
   display: flex;
   flex: 1 1 auto;
+  flex-direction: row;
+  align-items: stretch;
+  min-height: 0;
+}
+/* THE LAYOUT TREE'S OWN ROOT (spec §9). `main` is a ROW now — the views on the left, the inspector on the
+   right — and the column-ness, the `align-items: stretch` and the `min-height: 0` a divider drag depends
+   on moved down here, onto the element `renderLayout` owns and empties. */
+#views {
+  display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: stretch;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -1200,6 +1285,43 @@ main {
 /* The divider keeps its ring INSIDE its own box: it is a 4px line between two panes, and a ring drawn
    outside it would sit on top of both. The colour and width are the global rule's. */
 .layout-divider:focus-visible {
+  outline-offset: -2px;
+}
+
+/* THE STAGE (spec §5): a tab strip over one view. The strip is chrome, on the chrome surface, exactly as
+   `.panel-header` is — a stage tab and a panel disclosure are the same kind of thing at two scales.
+   NOTHING HERE IS A NEW COLOUR. */
+.stage {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.stage-tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  background: var(--bg-chrome);
+  border-block-end: 1px solid var(--rule);
+}
+.stage-tab {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-block-end: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+/* THE SELECTED TAB CARRIES A SHAPE, NOT ONLY A COLOUR (umbrella §4 rule 5, the accessibility list's
+   item 7): a 2px edge along its bottom, which is what a tab is. */
+.stage-tab[aria-selected="true"] {
+  color: var(--fg);
+  border-block-end-color: var(--accent);
+}
+.stage-tab:focus-visible {
   outline-offset: -2px;
 }
 
@@ -1236,4 +1358,77 @@ main {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/* THE INSPECTOR (spec §9): a fixed-width right-hand column, collapsible to its header, scrolling its own
+   rows. `panel.ts` builds the header; this decides the column. NOTHING HERE IS A NEW COLOUR. */
+.inspector {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 18rem;
+  min-height: 0;
+  border-inline-start: 1px solid var(--rule);
+  background: var(--bg-raised);
+}
+.inspector[hidden] {
+  display: none;
+}
+.inspector > .panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-block-start: 0;
+}
+/* THE ROWS SCROLL AND THE COLUMN DOES NOT. `.panel` sets no bounds of its own (its own note), so a long
+   normal form has to be given one here or it makes the whole page scroll. */
+.inspector-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+}
+/* **`#results` CARRIES `class="results"` WHEREVER IT IS MOVED TO, AND `.results` IS A WRAPPING FLEX ROW.**
+   The `readout` switch relocates the element rather than building a second one (`main.ts`'s `applySwitches`,
+   spec §9) — which is right, because `#results[data-state]` must have exactly one writer — but the strip's
+   own layout came with it, so the inspector's rows became flex items and packed side by side. Measured
+   before this rule: three rows sharing y=227. Spec §9 is "Every row on its own line". */
+.inspector .results {
+  display: block;
+}
+.inspector-body .row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0 var(--space-2);
+  padding-block: var(--space-1);
+}
+/* **NO `text-transform` HERE, AND THAT IS NOT AN OVERSIGHT.** These labels carry `λ`, and
+   `--label-transform` is `uppercase` in the Instrument style — which renders `λ normal form` as
+   `Λ NORMAL FORM`. `Λ` is a different letter, and `λ` is the vocabulary the umbrella's §4 table fixes.
+   `.view-title` already sets `text-transform: none` for the same reason; this is that rule's sibling, found
+   by looking at a screenshot rather than at `textContent`, which every test reads and which was correct. */
+.inspector-body .row-label {
+  font-size: var(--step--2);
+  color: var(--fg-dim);
+  letter-spacing: var(--label-tracking);
+}
+/* **THE NORMAL FORM WRAPS HERE WHERE THE STRIP CUTS IT** — the strip is one line and ellipsises a segment
+   that overruns; the inspector's whole reason for existing is that it does not. AT THE END OF THE FILE, because
+   it narrows `.results .segment`, `.panel` AND `.link-status`, and those three are 700 lines apart —
+   `noDescendingSpecificity` is satisfied only by sitting after the last of them. */
+.inspector-body .row-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* The mark on a cut normal form (`readout.ts`'s `InspectorRow.note`). Dim and small, like a label, because
+   it is about the value rather than part of it — but it must be legible, not decorative. */
+.inspector-body .row-note {
+  font-size: var(--step--2);
+  color: var(--fg-dim);
+}
+.inspector-body .link-status {
+  margin-inline-start: 0;
+  padding: var(--space-1) 0 0;
 }

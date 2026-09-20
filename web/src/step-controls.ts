@@ -1,4 +1,5 @@
 import type { ControlState } from './controls'
+import { handOff } from './focus-handoff'
 import { n } from './format'
 import { icon } from './icons'
 import type { PaneEvents } from './pane-chrome'
@@ -96,17 +97,18 @@ export function stepControls(
       step.textContent = c.stepText
       if (c.continueLabel === null) {
         // A CONTROL THAT GOES AWAY UNDER THE KEYBOARD MUST NOT TAKE THE FOCUS WITH IT (umbrella rule 5,
-        // spec §11). The nearest control that still works takes it: forward, then play, back, restart.
+        // spec §11). `focus-handoff.ts` is that rule, and this is one of its four call sites; the
+        // CANDIDATE ORDER stays this control's own, which is why it is spelled out here rather than
+        // computed. The nearest control that still works takes it: forward, then play, back, restart.
         //
         // **AND WHEN NONE OF THEM IS LIVE, THE SPEED SELECT IS** — a leg that is not available disables
         // all four at once (`controls.ts`'s unavailable branch returns every `can*` false AND no
         // continue label), which is exactly the state a copy's worker throwing produces while the user
         // is on that view's continue button. The select is never disabled: the workspace's speed is a
-        // setting, not a property of this leg.
-        if (document.activeElement === extend) {
-          const next = [forward, play, back, restart].find((b) => !b.disabled)
-          ;(next ?? speed).focus()
-        }
+        // setting, not a property of this leg. **IN DOM ORDER THE SELECT COMES FIRST OF THE FIVE**, so
+        // `focus-handoff.ts`'s own `nearest` would hand it the focus in every case — which is the whole
+        // reason this list is written down instead.
+        handOff(extend, [forward, play, back, restart, speed])
         extend.hidden = true
       } else {
         extend.hidden = false

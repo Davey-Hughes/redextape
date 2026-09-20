@@ -458,6 +458,11 @@ export class TmPane implements EditablePane {
     this.#refreshDetach()
   }
 
+  /** Spec §8's `steps` switch, per `PaneView.setStepsShown` — the view's header owns the slot. */
+  setStepsShown(shown: boolean): void {
+    this.#header.setStepsShown(shown)
+  }
+
   /**
    * Mount an editor over this pane's body seeded with `text`, or unmount it with `null` — design
    * §4.2's upper region, ported to this leg. Same contract and same guards as `LambdaPane.setEditor`;

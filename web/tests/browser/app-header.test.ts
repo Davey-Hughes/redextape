@@ -16,7 +16,11 @@ beforeAll(async () => {
 
 describe('the app header', () => {
   it('names the workspace after its preset', () => {
-    expect(document.querySelector('#workspace')?.textContent).toBe('Explorer')
+    const button = document.querySelector<HTMLButtonElement>('#workspace') as HTMLButtonElement
+    expect(button.textContent?.trim()).toBe('Explorer ▾')
+    // THE POSITIVE HALF: the glyph is in the label and out of the name (spec §6). A bare `▾` reaching
+    // the accessible name reads as "down-pointing triangle", which is what `copies ▾` already avoids.
+    expect(computeAccessibleName(button)).toBe('Explorer')
   })
 
   it('adds a view beside the focused one, focuses it, and says so', async () => {
@@ -47,10 +51,11 @@ describe('the app header', () => {
     // measures neither: the button's name is the preset its switches make, and the stored focus is what
     // the workspace normalises to when the tree is replaced.
     //
-    // **THE SWITCH HALF CANNOT FAIL YET, AND IT IS HERE FOR WHEN IT CAN.** 2a holds the switches at
-    // Explorer's values and ships no control that moves them, so `switches: PRESETS[preset]` restores
-    // what they already were; 2b adds the three switches and this assertion starts discriminating.
-    expect(document.querySelector('#workspace')?.textContent).toBe('Explorer')
+    // **THE SWITCH HALF DISCRIMINATES NOW.** 2a held the switches at Explorer's values and shipped no
+    // control that moved them, so `switches: PRESETS[preset]` restored what they already were; 2b's
+    // workspace menu moves them, `workspace-switches.test.ts` drives that, and a *reset preset* that
+    // dropped the assignment would leave this button reading whatever the last pick made it.
+    expect(document.querySelector('#workspace')?.textContent?.trim()).toBe('Explorer ▾')
     expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.focused).toBe('lambda-0')
   })
 

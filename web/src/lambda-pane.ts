@@ -509,6 +509,11 @@ export class LambdaPane implements EditablePane {
     this.#refreshClaim()
   }
 
+  /** Spec §8's `steps` switch, per `PaneView.setStepsShown` — the view's header owns the slot. */
+  setStepsShown(shown: boolean): void {
+    this.#header.setStepsShown(shown)
+  }
+
   /**
    * Offer "move the editor here" exactly when this pane's session has one to show and this pane is not
    * already showing it — wave 3 (5d-ii-a)'s editor-moves rule.

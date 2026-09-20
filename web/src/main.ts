@@ -3,7 +3,7 @@ import { lintGutter } from '@codemirror/lint'
 import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import init, { analyze, classifySource, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
-import { addViewItems, presetName, wireMenu } from './app-header'
+import { addViewItems, presetName, wireMenu, workspaceItems } from './app-header'
 import {
   APPEARANCE_LABEL,
   type Appearance,
@@ -28,6 +28,7 @@ import { lintFromAnalyze } from './lint'
 import { createNotices } from './notice'
 import type { PaneChoice } from './pane-chrome'
 import { createPaneHost, type LayoutEvent } from './pane-host'
+import { createPanel } from './panel'
 import { type LeafId, PaneCollection } from './panes'
 import type { RunReply } from './protocol'
 import { HISTORY_BYTES } from './protocol'
@@ -35,7 +36,7 @@ import { createReadout, type ProgramResult } from './readout'
 import { createReplies } from './replies'
 import { BufferCapReached, type BufferRecord, MAX_WARM_BUFFERS, ScratchBuffers } from './scratch'
 import { type SessionId, SessionPool } from './session-client'
-import { SessionRegistry } from './sessions'
+import { legControlState, SessionRegistry } from './sessions'
 import {
   applySkin,
   PALETTE_CHOICE_LABELS,
@@ -48,6 +49,7 @@ import {
   STYLE_KEY,
   STYLE_LABELS,
 } from './skin'
+import { type BarTarget, barTarget, createStepBar } from './step-bar'
 import type { TmPane } from './tm-pane'
 import { createTransport } from './transport'
 import type { Classified, Diagnostic, LambdaState, TmState } from './types'
@@ -57,9 +59,11 @@ import {
   defaultFocus,
   defaultWorkspace,
   PRESETS,
+  parseSwitches,
   parseWorkspace,
   presetOf,
   type Speed,
+  type Switches,
   serializeWorkspace,
   type Workspace,
   withPanel,
@@ -143,6 +147,7 @@ function neighbourOf(tree: LayoutNode, id: LeafId): LeafId | null {
 async function main(): Promise<EditorView> {
   const results = document.querySelector<HTMLElement>('#results')
   const editorHost = document.querySelector<HTMLElement>('#editor')
+  const stepBarHost = document.querySelector<HTMLElement>('#step-bar')
   const linkStatusHost = document.querySelector<HTMLElement>('#link-status')
   const picker = document.querySelector<HTMLSelectElement>('#encoding')
   const appearanceButton = document.querySelector<HTMLButtonElement>('#appearance')
@@ -175,7 +180,12 @@ async function main(): Promise<EditorView> {
   const buffersButton = document.querySelector<HTMLButtonElement>('#buffers')
   const noticeHost = document.querySelector<HTMLElement>('#notice')
   const liveHost = document.querySelector<HTMLElement>('#live')
-  const root = document.querySelector<HTMLElement>('main')
+  // **`#views`, NOT `<main>` — spec §9.** `renderLayout` opens with `root.replaceChildren()`, so the
+  // layout tree needed a root of its own the moment the inspector column came to live in `<main>` beside
+  // it: an inspector directly under `<main>` would be destroyed on the first layout commit.
+  const root = document.querySelector<HTMLElement>('#views')
+  const inspectorHost = document.querySelector<HTMLElement>('#inspector')
+  const strip = document.querySelector<HTMLElement>('footer.strip')
   if (
     !results ||
     !editorHost ||
@@ -194,6 +204,9 @@ async function main(): Promise<EditorView> {
     !paletteSelect ||
     !buffersButton ||
     !noticeHost ||
+    !stepBarHost ||
+    !inspectorHost ||
+    !strip ||
     !liveHost ||
     !root
   ) {
@@ -632,8 +645,11 @@ async function main(): Promise<EditorView> {
     close: () => {
       const grew = neighbourOf(tree, SOURCE_LEAF)
       tree = closeLeaf(tree, SOURCE_LEAF)
-      paneHost.applyLayout()
-      paneHost.focusPane(grew)
+      // `focusView`, NOT `applyLayout` THEN `focusPane` — its own doc has why the order matters on the
+      // stage. Safe here by arithmetic too (`source` is always `leaves()[0]`, so the neighbour that grows
+      // and the view that becomes focused are the same leaf), and that is exactly the kind of accident
+      // the other three sites were relying on when one of them broke.
+      paneHost.focusView(grew)
       layoutChanged({ kind: 'closed', leaf: SOURCE_LEAF, showed: { kind: 'source' } })
     },
   })
@@ -808,6 +824,7 @@ async function main(): Promise<EditorView> {
     speed: restored.speed,
     focused: restored.focused,
     panels: restored.panels,
+    inspector: restored.inspector,
   }
   /**
    * The focused view, repaired against the tree it names a leaf of.
@@ -883,6 +900,12 @@ async function main(): Promise<EditorView> {
     setTree: (next) => {
       tree = next
     },
+    stage: () => ws.switches.views === 'stage',
+    focusedLeaf,
+    // A THUNK WRAPPER, NOT THE REFERENCE — `viewTitle` is declared below this call (it needs the pane
+    // collection and the registry that the bar's target also reads), and this is the same late-binding
+    // `draw: () => draw()` above already takes for the same reason.
+    viewTitle: (id) => viewTitle(id),
     persist: persistWorkspace,
     setFocused: (id: LeafId) => {
       if (ws.focused === id) return
@@ -983,24 +1006,193 @@ async function main(): Promise<EditorView> {
   // runs — still true here, with the whole tail of `main()` between this line and that call.
   paneHost.seedHost(SOURCE_LEAF, sourceHost)
 
-  // THE WORKSPACE MENU — the preset's name, and `reset preset` (spec §4, §6).
-  workspaceButton.textContent = presetName(presetOf(ws.switches))
-  wireMenu(workspaceButton, workspaceMenu)
+  // THE WORKSPACE MENU — the presets, the switches, and `reset preset` (spec §4, §6).
+
+  /**
+   * THE WORKSPACE BUTTON'S NAME, AND ITS `▾`.
+   *
+   * **THE GLYPH IS WRITTEN HERE AS WELL AS IN `index.html`**, because this replaces the button's whole
+   * content on every preset change — a span placed only in the markup would survive exactly until the
+   * first one. `aria-hidden`, so the accessible name is the preset's name alone: a bare `▾` in a spoken
+   * sentence reads as "down-pointing triangle" (spec §12), and `copies ▾` already does it this way.
+   */
+  const paintWorkspaceButton = (): void => {
+    const caret = document.createElement('span')
+    caret.setAttribute('aria-hidden', 'true')
+    caret.textContent = '▾'
+    workspaceButton.replaceChildren(`${presetName(presetOf(ws.switches))} `, caret)
+  }
+  paintWorkspaceButton()
+
+  /**
+   * Fill the workspace menu from the switches in force.
+   *
+   * **A `const` ARROW AND NOT A HOISTED `function`, AND THAT IS A TYPE FACT RATHER THAN A STYLE ONE.**
+   * `workspaceMenu` is a `querySelector` result narrowed to non-null by the shell guard near the top of
+   * `main()`; TypeScript keeps that narrowing inside a closure CREATED after the guard, and drops it inside
+   * a function DECLARATION, which is hoisted above it — `error TS2345: Argument of type 'HTMLElement |
+   * null'`. It is declared before its two callers for the same reason.
+   */
+  const fillWorkspaceMenu = (): void => {
+    workspaceItems(
+      workspaceMenu,
+      { switches: ws.switches, reset: resetPresetButton },
+      {
+        preset: (p) => setSwitches(PRESETS[p]),
+        // THE ONE NARROWING. `SwitchRow.value` is `string` (its own doc); this is where a menu value
+        // becomes a `Switches` one, and an unknown one is dropped rather than stored — `parseWorkspace`
+        // would refuse the whole envelope on the next load.
+        flip: (key, value) => {
+          const parsed = parseSwitches({ ...ws.switches, [key]: value })
+          if (parsed !== null) setSwitches(parsed)
+        },
+      },
+    )
+  }
+
+  /** Put the page in step with the switches. Each of part 2b's three consumers adds one line here. */
+  const applySwitches = (): void => {
+    paintWorkspaceButton()
+    // THE MENU REPAINTS UNDER THE USER'S HAND, because a pick changes which value is marked and may take
+    // `reset preset` away — `workspaceItems` is what puts the focus back across that rebuild.
+    if (workspaceMenu.matches(':popover-open')) fillWorkspaceMenu()
+    // THE BAR IS ON THE PAGE ONLY WHILE IT IS THE STEP CONTROL (spec §8). `hidden` rather than removed
+    // because the element is `index.html`'s and the bar it holds is built once; `controls-gate.test.ts`
+    // skips anything under a `[hidden]` ancestor, so nothing walks it while it is down.
+    stepBarHost.hidden = ws.switches.steps !== 'bar'
+    // **THE READOUT'S HOSTS MOVE; THEIR IDS DO NOT** (spec §9). One element renders the rows in both
+    // modes, so `#results[data-state]` never stops being written and no test that waits on it can be
+    // looking at the wrong copy.
+    const intoInspector = ws.switches.readout === 'inspector'
+    inspectorHost.hidden = !intoInspector
+    strip.hidden = intoInspector
+    const home = intoInspector ? inspectorBody : strip
+    if (results.parentElement !== home) home.append(results, linkStatusHost)
+    readout.setMode(ws.switches.readout)
+    // **A FULL LAYOUT PASS, NOT A BARE `draw()` — spec §5.** The `views` switch decides which renderer
+    // `applyLayout` calls, so nothing on screen changes without it; and it ends in `persist()` and
+    // `draw()` of its own, which is what repaints the readout after the mode change above. The `steps`
+    // and `readout` switches do not need the pane reconciliation it also performs, and paying for it on
+    // all three is cheaper than a second path that has to stay in step with this one.
+    paneHost.applyLayout()
+  }
+
+  /**
+   * THE ONE WRITER OF THE SWITCHES (spec §4): persist, rename, repaint, and say what changed.
+   *
+   * A NO-OP PICK IS NOT A CHANGE. Choosing the value already in force is a gesture that changes nothing,
+   * and a notice for it would push a real one off the line for eight seconds.
+   */
+  const setSwitches = (next: Switches): void => {
+    if (next.steps === ws.switches.steps && next.views === ws.switches.views && next.readout === ws.switches.readout)
+      return
+    ws = { ...ws, switches: next }
+    persistWorkspace()
+    applySwitches()
+    notices.notify(
+      `${presetName(presetOf(next))} — step controls ${next.steps === 'bar' ? 'in one bar' : 'in each view'}, ${next.views}, ${next.readout}`,
+    )
+  }
+
+  wireMenu(workspaceButton, workspaceMenu, fillWorkspaceMenu)
+
+  /**
+   * A view's title, in the title-selector's own spelling — the bar's prefix (spec §8) and, from part 2b's
+   * Stage task, a tab's label (§5).
+   *
+   * **ONE FUNCTION, BECAUSE A VIEW HAS ONE NAME.** The header, the bar and the tab strip all say what a
+   * view shows, and three spellings of `λ · program` would be three places for the vocabulary sweep to
+   * have missed one.
+   */
+  const viewTitle = (id: LeafId): string => {
+    const entry = panes.get(id)
+    // THE SOURCE VIEW HAS NO PANE ENTRY AND ITS TITLE IS NOT A PAIR (spec §7): it is `source`, always.
+    if (entry === undefined) return 'source'
+    const b = entry.slot.binding
+    const option = sessions.pairs().find((o) => o.leg === b.leg && o.id === b.session)
+    return option === undefined ? '' : pairLabel(option)
+  }
+
+  /**
+   * WHICH VIEW THE BAR DRIVES, AND THE MEMORY BEHIND "the last view that could step" (spec §8).
+   *
+   * **THE MEMORY IS WRITTEN ONLY WHEN A TARGET RESOLVES**, so a focused source view keeps the bar pointed
+   * at the view it was driving rather than blanking it — which is the whole of §8's second sentence.
+   */
+  let lastSteppable: LeafId | null = null
+  const barTargetNow = (): BarTarget | null => {
+    // EVERY PANE IS STEPPABLE: the source LEAF has no `PaneEntry` at all (`draw.ts`'s readout block says
+    // so from the other side), so this list is already "every λ or TM view on the page".
+    const id = barTarget(
+      focusedLeaf(),
+      panes.all().map((p) => p.id),
+      lastSteppable,
+    )
+    if (id === null) return null
+    const entry = panes.get(id)
+    if (entry === undefined) return null
+    lastSteppable = id
+    const b = entry.slot.binding
+    return { id, title: viewTitle(id), controls: legControlState(sessions, b, entry.slot.resolve(sessions)) }
+  }
+
+  const stepBar = createStepBar({
+    target: barTargetNow,
+    events: (id) => {
+      const entry = panes.get(id)
+      return entry === undefined ? null : transport.events(entry.slot)
+    },
+    // THE SAME PAIR `createTransport` WAS BUILT WITH, not a second reader of `ws.speed`: one global speed
+    // (spec §8), so every step control on the page reflects a change at once.
+    speed: () => ws.speed,
+    setSpeed: (s: Speed) => {
+      ws = { ...ws, speed: s }
+      persistWorkspace()
+      draw()
+    },
+  })
+  stepBarHost.append(stepBar.el)
+
+  /**
+   * THE INSPECTOR (spec §9): the readout as a right-hand column, one fact per line.
+   *
+   * **ITS BODY HOLDS `#results` AND `#link-status` THEMSELVES**, moved out of the strip rather than
+   * copied. `#results[data-state]` is the program's compile state and 24 browser test files wait on it;
+   * two elements would be two places for that attribute to be written, and the second one is where it
+   * would be forgotten.
+   *
+   * **ITS OPEN STATE IS THE WORKSPACE's, NOT A VIEW's** (`Workspace.inspector`): there is one inspector,
+   * and keying it on the focused view would collapse and re-open it as the focus moved.
+   */
+  const inspectorBody = document.createElement('div')
+  inspectorBody.className = 'inspector-body'
+  const inspectorPanel = createPanel({
+    name: 'inspector',
+    label: 'inspector',
+    body: inspectorBody,
+    open: ws.inspector,
+    onToggle: (open) => {
+      ws = { ...ws, inspector: open }
+      persistWorkspace()
+    },
+  })
+  inspectorHost.append(inspectorPanel.el)
   resetPresetButton.addEventListener('click', () => {
     workspaceMenu.hidePopover()
-    // `presetOf(…) ?? 'explorer'` because 2a's switches are always Explorer's; 2b removes the item while
-    // custom (spec §4).
+    // `presetOf(…) ?? 'explorer'` IS UNREACHABLE NOW AND STAYS AS THE BACKSTOP IT ALWAYS WAS.
+    // `workspaceItems` does not put this item in the menu while the workspace is custom (spec §4), so the
+    // only preset that can reach this line is a real one — the `??` is what holds if a caller ever gets
+    // here another way, which is the same standing `layout.ts`'s refusals take against their own UI.
     const preset = presetOf(ws.switches) ?? 'explorer'
     tree = defaultLayout()
     ws = { ...ws, switches: PRESETS[preset] }
-    paneHost.applyLayout()
     // **THE FOCUS GOES INTO THE NEW ARRANGEMENT — whole-branch review follow-up, the sibling search
     // C1's fix asked for.** `hidePopover()` above hands focus back to whatever held it before the menu
-    // opened, which for a user reaching this item is a control inside one of the views. `applyLayout()`
-    // then rebuilds the tree from `defaultLayout()`, `renderLayout`'s `root.replaceChildren()` detaches
-    // the host that control lives in, and focus falls to `<body>` — measured in Chrome, a frame later,
-    // which is why a synchronous read at the end of this handler still shows a live element and the
-    // gesture looks safe until it is watched across a frame.
+    // opened, which for a user reaching this item is a control inside one of the views. Rebuilding the
+    // tree from `defaultLayout()` detaches that host — `renderLayout`'s `root.replaceChildren()` — and
+    // focus falls to `<body>`, measured in Chrome a frame later, which is why a synchronous read at the
+    // end of this handler still shows a live element and the gesture looks safe until it is watched
+    // across a frame.
     //
     // **IT DEPENDS ON WHERE THE FOCUS WAS, AND THAT IS NOT A REASON TO SKIP IT.** Reached from a header
     // control the gesture is harmless, because the header is outside `<main>` and no rebuild touches it.
@@ -1008,9 +1200,12 @@ async function main(): Promise<EditorView> {
     // focus every time. `tests/browser/menu-focus.test.ts` drives it from inside a view for exactly that
     // reason, and removing this line fails that one case and no other.
     //
+    // **`focusView`, NOT `applyLayout` THEN `focusPane` — part 2b's whole-branch review.** On the stage
+    // the leaf this names may not be the one mounted, and `focusPane` on a detached host does nothing;
+    // `focusView` records the focus BEFORE the rebuild so the stage mounts the view this line means.
     // `defaultFocus` rather than `focusedLeaf()` because the leaf the user was in may not exist in
     // `defaultLayout()`'s tree at all.
-    paneHost.focusPane(defaultFocus(tree))
+    paneHost.focusView(defaultFocus(tree))
     notices.notify(`${presetName(preset)} reset — the default views are back`)
   })
 
@@ -1406,6 +1601,9 @@ async function main(): Promise<EditorView> {
     readout,
     program: () => program,
     nameOf: (s) => scratchpad.nameOf(s),
+    stepsInView: () => ws.switches.steps === 'view',
+    stage: () => ws.switches.views === 'stage',
+    stepBar,
   })
 
   // NOT the refreshBuffers() start-up call's home either, though linkWiring/draw are real by here:
@@ -1674,6 +1872,11 @@ async function main(): Promise<EditorView> {
   // collection that is genuinely empty, and it remains true that nothing before this line has BUILT
   // one.
   paneHost.applyLayout()
+  // **THE SWITCHES ARE APPLIED AFTER THE FIRST LAYOUT, NOT BEFORE IT** (spec §4). A restored workspace can
+  // carry any of the eight combinations, and each of part 2b's three consumers reads the tree or the panes
+  // that `applyLayout()` above is what creates — so this is the earliest moment the page can be put in the
+  // state the user left it in.
+  applySwitches()
 
   /**
    * **GIVE EACH RESTORED BINDING'S SESSION AN EDITOR HOME, NOW THAT ITS PANE EXISTS — 5d-ii-d T9.**

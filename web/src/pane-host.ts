@@ -11,7 +11,7 @@ import {
   setLeafKind,
   splitLeaf,
 } from './layout'
-import { renderLayout, syncSizes } from './layout-view'
+import { renderLayout, renderStage, syncSizes } from './layout-view'
 import type { PaneChoice, PaneEvents } from './pane-chrome'
 import type { LeafId, PaneCollection, PaneKind } from './panes'
 import { type Leg, ruleCount } from './protocol'
@@ -75,6 +75,11 @@ export type PaneHost = {
    * module's own `rebind` and `split`). See the implementation for which leaf each passes and why.
    */
   focusPane(id: LeafId | null): void
+  /**
+   * Record `id` as the focused view, rebuild the layout around it, and move the focus into it — the three
+   * steps a tree-changing gesture owes, in the one order that works on the stage. See the implementation.
+   */
+  focusView(id: LeafId | null): void
   /** Pre-seed the source pane's host, which `main.ts` owns the contents of. */
   seedHost(id: LeafId, host: HTMLElement): void
   /** Record the session a leaf should start on — see the implementation for who asks and when. */
@@ -169,6 +174,12 @@ export function createPaneHost(deps: {
   neighbourOf(tree: LayoutNode, id: LeafId): LeafId | null
   getTree(): LayoutNode
   setTree(next: LayoutNode): void
+  /** Whether the workspace draws its views as a tabbed stage — spec §5's `views` switch. */
+  stage(): boolean
+  /** The focused leaf, repaired against the tree — in Stage it is the one view on the page. */
+  focusedLeaf(): LeafId
+  /** A view's title, in the title-selector's own spelling — a Stage tab's label (spec §5, §7). */
+  viewTitle(id: LeafId): string
   /** Write the whole workspace — tree, switches, speed, focus, panels — to storage (`main.ts`'s `persistWorkspace`). */
   persist(): void
   /** Record that `id` is the view the user is in. */
@@ -233,6 +244,9 @@ export function createPaneHost(deps: {
     neighbourOf,
     getTree,
     setTree,
+    stage,
+    focusedLeaf,
+    viewTitle,
     persist,
     setFocused,
     panelOpen,
@@ -760,8 +774,7 @@ export function createPaneHost(deps: {
         const grew = neighbourOf(getTree(), id)
         const showed: PaneChoice = { kind: slot.binding.leg, session: slot.binding.session }
         setTree(closeLeaf(getTree(), id))
-        applyLayout()
-        focusPane(grew)
+        focusView(grew)
         layoutChanged({ kind: 'closed', leaf: id, showed })
       },
       panel: (name: string, open: boolean) => {
@@ -814,6 +827,32 @@ export function createPaneHost(deps: {
     const host = hosts.get(id)
     const target = host?.querySelector<HTMLElement>('button:not([disabled]):not([hidden]), select, [tabindex]')
     target?.focus()
+  }
+
+  /**
+   * The whole of "this gesture changed the tree, and THIS is the view it means": record the focus, rebuild,
+   * then put the focus there.
+   *
+   * **THE ORDER IS THE POINT, AND GETTING IT WRONG STRANDED THE FOCUS ON `<body>`.** Every one of these
+   * gestures used to call `applyLayout()` and then `focusPane(id)`, which worked in tiles for a reason that
+   * was never written down: `.focus()` fires `focusin`, `hostFor`'s listener calls `setFocused`, and the
+   * workspace caught up with the DOM afterwards. **The stage has no such side channel.** It mounts the host
+   * of `focusedLeaf()` and detaches every other, so a layout built before the focus was recorded is built
+   * around the OLD leaf — and `.focus()` on the resulting detached host is a spec-defined no-op, so the
+   * workspace never catches up either.
+   *
+   * Measured on the default tree: choose Stage, close the λ view, and `neighbourOf` names `source` while
+   * `defaultFocus` names `tm-0`. The stage mounted `tm-0`, `focusPane('source')` did nothing, and the
+   * focus was on `<body>` — which spec §11 forbids categorically and names this gesture for.
+   *
+   * **IT EXISTS SO THE ORDER CANNOT BE GOT WRONG AGAIN.** Four gestures needed it; a rule written in four
+   * places is a rule with four chances to be forgotten, and the one that was forgotten was the one nothing
+   * tested. `tests/browser/stage-gestures.test.ts` drives the two that change what views exist.
+   */
+  const focusView = (id: LeafId | null): void => {
+    if (id !== null) setFocused(id)
+    applyLayout()
+    focusPane(id)
   }
 
   /**
@@ -1043,21 +1082,42 @@ export function createPaneHost(deps: {
       custody.reconcile()
     } finally {
       for (const l of leaves(getTree())) hostFor(l.id, l.pane)
-      renderLayout(root, getTree(), hosts, {
-        // THE CHEAP PATH — NO `renderLayout`, NO PERSIST. Nothing structural changes during a resize:
-        // `resize` touches `sizes` on exactly one split node, so no pane is created, destroyed or
-        // rebound as a consequence, and rebuilding would destroy the divider performing the gesture.
-        // `draw()` STAYS, and it is the one thing here whose output genuinely depends on pane size —
-        // the TM pane's δ-table is virtualized against a measured `clientHeight`, so dropping it would
-        // show blank space below the last row for the length of the drag.
-        resize: (path, index, delta) => {
-          setTree(resize(getTree(), path, index, delta))
-          syncSizes(root, getTree())
-          draw()
-        },
-        // ONE FULL RECONCILE PER GESTURE, WHICH IS WHERE THE STORAGE WRITE LIVES NOW.
-        commit: () => applyLayout(),
-      })
+      // **IF/ELSE, NOT AN EARLY `return` — AND THAT IS NOT A LINT, IT IS THIS `finally`'s WHOLE PURPOSE.**
+      // A `return` inside a `finally` DISCARDS an exception propagating out of the `try`, which is
+      // exactly the exception the paragraph above says must still leave this function and reach
+      // `window`'s `error` event. Biome names it `noUnsafeFinally`; the doc above names the behaviour it
+      // would have silently undone. The two branches share `persist()` and `draw()` below, so the
+      // stage path costs one condition rather than a second copy of the tail.
+      if (stage()) {
+        // **NO `ResizeHandlers`: A STAGE HAS NO DIVIDERS** (`renderStage`'s own doc). The tree's sizes
+        // are untouched, which is what makes flipping back to tiles give the arrangement the user left.
+        renderStage(root, getTree(), hosts, {
+          focused: focusedLeaf(),
+          title: viewTitle,
+          // SELECTING A TAB IS A FOCUS CHANGE PLUS A RE-RENDER, and it ends in this function's own
+          // `draw()` — spec §5's "selecting a tab calls `draw()` once so the shown view is current".
+          select: (id) => {
+            setFocused(id)
+            applyLayout()
+          },
+        })
+      } else {
+        renderLayout(root, getTree(), hosts, {
+          // THE CHEAP PATH — NO `renderLayout`, NO PERSIST. Nothing structural changes during a resize:
+          // `resize` touches `sizes` on exactly one split node, so no pane is created, destroyed or
+          // rebound as a consequence, and rebuilding would destroy the divider performing the gesture.
+          // `draw()` STAYS, and it is the one thing here whose output genuinely depends on pane size —
+          // the TM pane's δ-table is virtualized against a measured `clientHeight`, so dropping it would
+          // show blank space below the last row for the length of the drag.
+          resize: (path, index, delta) => {
+            setTree(resize(getTree(), path, index, delta))
+            syncSizes(root, getTree())
+            draw()
+          },
+          // ONE FULL RECONCILE PER GESTURE, WHICH IS WHERE THE STORAGE WRITE LIVES NOW.
+          commit: () => applyLayout(),
+        })
+      }
       persist()
       draw()
     }
@@ -1066,6 +1126,7 @@ export function createPaneHost(deps: {
   return {
     applyLayout,
     focusPane,
+    focusView,
     seedHost(id: LeafId, host: HTMLElement): void {
       hosts.set(id, host)
     },
@@ -1139,8 +1200,7 @@ export function createPaneHost(deps: {
       const created = choice.kind === 'source' ? SOURCE_LEAF : nextLeafId()
       if (choice.kind !== 'source') pendingBinding.set(created, choice.session)
       setTree(insertBeside(getTree(), beside, 'row', created, choice.kind === 'source' ? 'source' : choice.kind))
-      applyLayout()
-      focusPane(created)
+      focusView(created)
       layoutChanged({ kind: 'added', leaf: created, shows: choice })
       return created
     },

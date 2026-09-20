@@ -518,6 +518,50 @@ export type PaneView<T> = {
    * argument for why the thunk exists rather than a list handed over at construction.
    */
   setLayoutControls(canClose: boolean, canSplit: boolean, choices: SplitChoices): void
+  /**
+   * Whether this view draws its own step controls — `false` while the `steps` switch is `bar` (spec §8).
+   *
+   * **REMOVED, NOT HIDDEN** (umbrella §4 rule 4): the bar is the only step control on the page while it is
+   * up, so a view's own are a control that cannot apply there. A hidden-but-present copy would be a second
+   * thing `tests/browser/controls-gate.test.ts` walks and a second thing a `Tab` reaches.
+   *
+   * DRIVEN FROM `draw()`'s PER-FRAME PASS, for `setLayoutControls`' reason: it is a fact about the
+   * WORKSPACE rather than about the frame just rendered, so the per-frame pass is the only hook a caller
+   * with no render loop of its own has.
+   */
+  setStepsShown(shown: boolean): void
+}
+
+/**
+ * One leg's `ControlState` — what a step control shows for it.
+ *
+ * **EXTRACTED FROM `PaneSlot.render` BECAUSE THERE ARE TWO STEP CONTROLS NOW** (Plan 7 part 2 spec §8): a
+ * view's own, and the one bar. The bar drives a leg it reaches through the layout rather than through a
+ * slot it owns, so it cannot go through `render` — and a second copy of this argument list is the
+ * two-places-to-be-wrong failure `LegState`'s own doc refuses one type up.
+ *
+ * **THE `awaitingRun` READ IS PER SESSION AND NOT PER LEG** — the generation is the client's, and both legs
+ * of one session share it. That is exactly the subtlety a hand-copied second version would lose, and it is
+ * why this moved rather than being written twice.
+ */
+export function legControlState<K extends Leg>(
+  reg: SessionRegistry,
+  binding: Binding<K>,
+  leg: LegState<LegFrame[K]>,
+): ControlState {
+  return controlState({
+    available: leg.status.available,
+    reason: leg.status.reason,
+    head: leg.hist.head,
+    length: leg.hist.length,
+    oldestStep: leg.hist.oldestStep,
+    currentStep: leg.hist.currentStep,
+    newestStep: leg.hist.newestStep,
+    evicted: leg.hist.evicted,
+    done: leg.done,
+    awaitingRun: reg.entryOf(binding.session).client.awaitingRun,
+    playing: leg.playing,
+  })
 }
 
 /**
@@ -635,24 +679,7 @@ export class PaneSlot<K extends Leg> {
    */
   render(reg: SessionRegistry, pane: PaneView<LegFrame[K]>, leg: LegState<LegFrame[K]>): void {
     const b = this.#binding
-    pane.render(
-      leg.hist.current ?? null,
-      controlState({
-        available: leg.status.available,
-        reason: leg.status.reason,
-        head: leg.hist.head,
-        length: leg.hist.length,
-        oldestStep: leg.hist.oldestStep,
-        currentStep: leg.hist.currentStep,
-        newestStep: leg.hist.newestStep,
-        evicted: leg.hist.evicted,
-        done: leg.done,
-        // PER SESSION, NOT PER LEG — the generation is the client's, and both legs of one session
-        // share it. `reg` and the binding are both already in hand here.
-        awaitingRun: reg.entryOf(b.session).client.awaitingRun,
-        playing: leg.playing,
-      }),
-    )
+    pane.render(leg.hist.current ?? null, legControlState(reg, b, leg))
     pane.setBindings(reg.pairs(), b)
     pane.setDetached(reg.entryOf(b.session).detached)
   }

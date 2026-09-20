@@ -4,6 +4,7 @@ import type { LambdaLeg, RecordEnd, TmLeg } from './protocol'
 import { noSessionRows, resultRows, valueLine } from './results'
 import type { TmScratchReading } from './sessions'
 import type { Diagnostic } from './types'
+import type { ReadoutSwitch } from './workspace'
 
 /**
  * THE READOUT — Plan 7 part 2 spec §9: value and steps for the focused view's session, as one line (the
@@ -52,17 +53,28 @@ const STOPPED: Readonly<Record<RecordEnd, string>> = {
   budget: 'history is full',
 }
 
-export function lambdaCopySegments(
-  name: string,
-  leg: {
-    readonly newestStep: number
-    readonly done: RecordEnd | null
-    readonly status: { readonly available: boolean; readonly reason: string }
-  },
-): string[] {
-  if (!leg.status.available) return [`${name} · ${leg.status.reason}`]
+export type LambdaCopyLeg = {
+  readonly newestStep: number
+  readonly done: RecordEnd | null
+  readonly status: { readonly available: boolean; readonly reason: string }
+}
+
+/**
+ * A λ copy's facts, one per element, the copy's name first.
+ *
+ * **THE PARTS ARE THE SOURCE AND THE JOINED LINE IS DERIVED, NOT THE OTHER WAY ROUND.** The strip wants one
+ * line and the inspector wants one row per fact (spec §9), and the obvious shortcut — split the strip's
+ * line back on its own ` · ` — is wrong: a TM copy's reduced-file sentence CONTAINS a ` · `
+ * (`reduced: <stages> · <n> steps`), so the round trip cuts it in half. One list, two renderings.
+ */
+export function lambdaCopyParts(name: string, leg: LambdaCopyLeg): string[] {
+  if (!leg.status.available) return [name, leg.status.reason]
   const why = leg.done === null ? '' : STOPPED[leg.done]
-  return [[name, `${n(leg.newestStep)} reductions`, ...(why === '' ? [] : [why])].join(' · ')]
+  return [name, `${n(leg.newestStep)} reductions`, ...(why === '' ? [] : [why])]
+}
+
+export function lambdaCopySegments(name: string, leg: LambdaCopyLeg): string[] {
+  return [lambdaCopyParts(name, leg).join(' · ')]
 }
 
 /**
@@ -75,21 +87,91 @@ export function lambdaCopySegments(
  * `worker-error` arm clears the retained reading and writes the reason onto the LEG, which only the λ
  * half was reading (spec §13).
  */
-export function tmCopySegments(
-  name: string,
-  reading: TmScratchReading | null,
-  leg: {
-    readonly newestStep: number
-    readonly status: { readonly available: boolean; readonly reason: string }
-  },
-): string[] {
-  if (!leg.status.available) return [`${name} · ${leg.status.reason}`]
+export type TmCopyLeg = {
+  readonly newestStep: number
+  readonly status: { readonly available: boolean; readonly reason: string }
+}
+
+/** A TM copy's facts, one per element, by `lambdaCopyParts`' rule. */
+export function tmCopyParts(name: string, reading: TmScratchReading | null, leg: TmCopyLeg): string[] {
+  if (!leg.status.available) return [name, leg.status.reason]
   const parts = [name, `${n(leg.newestStep)} transitions`]
   const value = valueLine(reading?.value ?? null)
   if (value !== null) parts.push(value)
   const reduction = reading?.status.reduction ?? null
   if (reduction !== null) parts.push(`reduced: ${reduction.stages.join(', ')} · ${n(reduction.steps)} steps`)
-  return [parts.join(' · ')]
+  return parts
+}
+
+export function tmCopySegments(name: string, reading: TmScratchReading | null, leg: TmCopyLeg): string[] {
+  return [tmCopyParts(name, reading, leg).join(' · ')]
+}
+
+/**
+ * One line of the inspector: what it is, and what it says.
+ *
+ * **A LABEL AND A VALUE, WHERE THE STRIP HAS ONLY A VALUE.** The strip joins facts with ` · ` on one line,
+ * so each has to carry its own noun (`width 8`); the inspector has a line per fact and a column for the
+ * noun, which is what makes the normal form — the one fact the strip cannot hold — fit.
+ *
+ * **`InspectorRow`, NOT `Row`**: `results.ts` already exports a `Row`, with a `leg` and an optional `note`,
+ * and two types called `Row` in one import graph is the kind of collision a reader resolves by guessing.
+ */
+export type InspectorRow = {
+  readonly label: string
+  readonly value: string
+  /**
+   * `results.ts`'s own `note`, on the one row that has one: the λ normal form, when it was cut.
+   *
+   * **IT IS CARRIED BECAUSE THE INSPECTOR IS THE FIRST SURFACE SINCE PART 2a TO PRINT THAT ROW.** The strip
+   * drops the normal form entirely (spec §9), so nothing rendered a `note` and dropping it cost nothing.
+   * The inspector prints the row, and `results.ts` says why the mark has to come with it: a BYTE cut is a
+   * prefix of the real term and honest to show, but a DEPTH cut is not — closing every open paren as the
+   * stack unwinds yields well-formed λ that reparses into a DIFFERENT, shorter term. Unmarked, a user
+   * reads a wrong answer as the answer. `lambda-pane.ts` marks both cuts for the same reason.
+   */
+  readonly note?: string
+}
+
+/**
+ * The program's rows for the inspector (spec §9) — `results.ts`'s own rows, which is the whole point: the
+ * inspector is the readout `#results` always wanted to be, and the compression into segments is the STRIP's
+ * special case rather than the other way round. The normal-form text the strip leaves out is here.
+ */
+export function programRows(r: ProgramResult | null): InspectorRow[] {
+  if (r === null || r.kind === 'error') return []
+  if (r.kind === 'no-session')
+    return noSessionRows([...r.diagnostics]).map((row) => ({ label: row.label, value: row.value }))
+  return resultRows(r.lambda, r.tm).map((row) => ({
+    label: `${row.leg} ${row.label}`,
+    value: row.value,
+    ...(row.note === undefined ? {} : { note: row.note }),
+  }))
+}
+
+/**
+ * A copy's rows: its name is the first row's label, and every other fact is a row of its own.
+ *
+ * **BUILT FROM THE SAME PARTS LIST THE SEGMENT IS** (`lambdaCopyParts`' doc), so the two readouts cannot
+ * disagree about a copy and no ` · ` inside a fact is mistaken for a separator between two.
+ */
+export function copyRows(parts: readonly string[]): InspectorRow[] {
+  const [name, first, ...rest] = parts
+  if (name === undefined) return []
+  if (first === undefined) return [{ label: name, value: '' }]
+  return [{ label: name, value: first }, ...rest.map((value) => ({ label: '', value }))]
+}
+
+/**
+ * The two shapes a readout can draw, as THUNKS rather than two arrays.
+ *
+ * **BECAUSE `show` RUNS ON EVERY RECORDED FRAME DURING PLAYBACK**, and each shape costs a walk of
+ * `results.ts`'s builders. Handing over both would pay for the one the mode is not showing, on every
+ * frame, forever; a thunk pair costs two closures and the renderer calls exactly one of them.
+ */
+export type Lines = {
+  segments(): readonly string[]
+  rows(): readonly InspectorRow[]
 }
 
 /**
@@ -97,11 +179,23 @@ export function tmCopySegments(
  * every frame during playback.
  */
 export function createReadout(host: HTMLElement): {
-  show(program: ProgramResult | null, segments: readonly string[]): void
+  /** Which readout this is drawing — spec §9's `readout` switch. */
+  setMode(next: ReadoutSwitch): void
+  show(program: ProgramResult | null, lines: Lines): void
 } {
   let rendered = ''
+  let mode: ReadoutSwitch = 'strip'
   return {
-    show(program, segments) {
+    setMode(next) {
+      if (next === mode) return
+      mode = next
+      // **NO `rendered` RESET HERE, AND THE ABSENCE IS DELIBERATE.** The draft had one, on the theory that
+      // a switch must repaint even when the facts did not change. It cannot fail to: the key below is
+      // PREFIXED per mode (`s`/`i`), so the two key spaces are disjoint and a mode change always produces
+      // a key the last render did not write. A reset here would be a second mechanism for one fact, and
+      // its sabotage reddened nothing — which is how it was found.
+    },
+    show(program, lines) {
       // **WHAT THIS LINE IS DESCRIBING, SO THE STYLESHEET CAN TELL.** `#results[data-state]` is the
       // PROGRAM's compile state and stays that whatever the strip shows (spec §9) — but the rule that
       // dims a running compile hangs off the same element, and a copy's readout has nothing to do with
@@ -125,11 +219,42 @@ export function createReadout(host: HTMLElement): {
         showWorkerError(host, program.error)
         return
       }
-      const key = segments.join('\x01')
+      // RESOLVED ONCE, NOT TWICE. `Lines`' own doc argues the thunks exist so the renderer pays for one
+      // shape rather than both; calling the chosen one again below to render it would pay for it twice on
+      // every frame that changed.
+      const rows = mode === 'inspector' ? lines.rows() : []
+      const key =
+        mode === 'strip'
+          ? `s\x02${lines.segments().join('\x01')}`
+          : `i\x02${rows.map((r) => `${r.label}\x00${r.value}\x00${r.note ?? ''}`).join('\x01')}`
       if (key === rendered) return
       rendered = key
+      if (mode === 'inspector') {
+        host.replaceChildren(
+          ...rows.map((r) => {
+            const el = document.createElement('div')
+            el.className = 'row'
+            const label = document.createElement('span')
+            label.className = 'row-label'
+            label.textContent = r.label
+            const value = document.createElement('span')
+            value.className = 'row-value'
+            value.textContent = r.value
+            el.append(label, value)
+            // THE CUT IS SHOWN, NOT HIDDEN — see `InspectorRow.note`.
+            if (r.note !== undefined) {
+              const note = document.createElement('span')
+              note.className = 'row-note'
+              note.textContent = r.note
+              el.append(note)
+            }
+            return el
+          }),
+        )
+        return
+      }
       host.replaceChildren(
-        ...segments.map((s) => {
+        ...lines.segments().map((s) => {
           const el = document.createElement('span')
           el.className = 'segment'
           el.textContent = s

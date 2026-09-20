@@ -27,6 +27,7 @@ function fakePane<T>(): PaneView<T> & { frames: (T | null)[] } {
     setBindings(_o: PaneOption[], _c: Binding<Leg>) {},
     setDetached(_d: boolean) {},
     setLayoutControls(_canClose: boolean, _canSplit: boolean) {},
+    setStepsShown(_shown: boolean) {},
   }
 }
 

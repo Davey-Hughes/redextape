@@ -65,6 +65,15 @@ export type Workspace = {
   /** The view the user is in — any leaf, the source view included. It drives the readout (spec §9). */
   readonly focused: LeafId
   readonly panels: Panels
+  /**
+   * Whether the inspector is open — spec §9, and the one field that is NOT a view's panel.
+   *
+   * **NOT IN `panels`, THOUGH §9's SENTENCE ONCE READ THAT WAY.** `panels` is keyed by `LeafId` and
+   * `parseWorkspace` refuses an entry naming a leaf the tree does not hold; there is one inspector, it
+   * belongs to the workspace rather than to a view, and keying it on the FOCUSED view would collapse and
+   * re-open it as the focus moved between views. The spec was corrected to say so.
+   */
+  readonly inspector: boolean
 }
 
 export const WORKSPACE_VERSION = 2
@@ -80,7 +89,14 @@ export function defaultFocus(tree: LayoutNode): LeafId {
 
 export function defaultWorkspace(): Workspace {
   const tree = defaultLayout()
-  return { tree, switches: PRESETS.explorer, speed: DEFAULT_SPEED, focused: defaultFocus(tree), panels: {} }
+  return {
+    tree,
+    switches: PRESETS.explorer,
+    speed: DEFAULT_SPEED,
+    focused: defaultFocus(tree),
+    panels: {},
+    inspector: true,
+  }
 }
 
 /** `panels` with one panel of one view recorded — a new object, as every operation in `layout.ts` returns. */
@@ -107,10 +123,18 @@ export function serializeWorkspace(ws: Workspace): string {
     speed: ws.speed,
     focused: live.has(ws.focused) ? ws.focused : defaultFocus(ws.tree),
     panels,
+    inspector: ws.inspector,
   })
 }
 
-function parseSwitches(v: unknown): Switches | null {
+/**
+ * The switch triple, validated.
+ *
+ * **EXPORTED BECAUSE THE WORKSPACE MENU IS WHERE A VALUE BECOMES ONE** (spec §4). `app-header.ts`'s
+ * `SwitchRow` carries its values as `string` — a table of three two-way choices cannot be typed per row
+ * without a discriminated union of three row types — so the one narrowing happens at the write, here.
+ */
+export function parseSwitches(v: unknown): Switches | null {
   if (typeof v !== 'object' || v === null) return null
   const s = v as Record<string, unknown>
   if (s.steps !== 'view' && s.steps !== 'bar') return null
@@ -157,7 +181,14 @@ export function parseWorkspace(raw: string | null): Workspace | null {
   if (e.version === 1) {
     const tree = parseTree(e.tree)
     if (tree === null) return null
-    return { tree, switches: PRESETS.explorer, speed: DEFAULT_SPEED, focused: defaultFocus(tree), panels: {} }
+    return {
+      tree,
+      switches: PRESETS.explorer,
+      speed: DEFAULT_SPEED,
+      focused: defaultFocus(tree),
+      panels: {},
+      inspector: true,
+    }
   }
   if (e.version !== WORKSPACE_VERSION) return null
 
@@ -170,5 +201,10 @@ export function parseWorkspace(raw: string | null): Workspace | null {
   if (typeof e.focused !== 'string' || !ids.has(e.focused)) return null
   const panels = parsePanels(e.panels, ids)
   if (panels === null) return null
-  return { tree, switches, speed: e.speed, focused: e.focused, panels }
+  // **A MISSING `inspector` IS NOT AN INVALID ONE.** Version 2 shipped in part 2a without this field, so
+  // every workspace stored before part 2b has none — refusing them would reset the layout of exactly the
+  // users the version 2 envelope was built to carry across. A field that IS there and is not a boolean is
+  // held to the standard above like every other (spec §3).
+  if (e.inspector !== undefined && typeof e.inspector !== 'boolean') return null
+  return { tree, switches, speed: e.speed, focused: e.focused, panels, inspector: e.inspector ?? true }
 }

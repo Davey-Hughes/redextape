@@ -68,6 +68,7 @@ describe('parseWorkspace', () => {
       speed: 250 as const,
       focused: 'pane-1',
       panels: { 'tm-0': { rules: false } },
+      inspector: false,
     }
     const raw = serializeWorkspace(ws)
     expect(JSON.parse(raw).version).toBe(WORKSPACE_VERSION)
@@ -132,6 +133,26 @@ describe('parseWorkspace', () => {
   ])('rejects the whole envelope for %s', (_what, spoil) => {
     expect(parseWorkspace(JSON.stringify(spoil(valid())))).toBeNull()
   })
+  // **A FIELD 2a DID NOT WRITE IS NOT AN INVALID FIELD.** Version 2 shipped without `inspector`, so a
+  // workspace stored by part 2a has none; refusing it would reset every upgrading user's layout, which is
+  // the one thing the version 2 envelope exists to avoid (spec §3).
+  it('defaults a missing inspector to open, and refuses one that is not a boolean', () => {
+    const base = {
+      version: 2,
+      tree: SPLIT,
+      switches: PRESETS.explorer,
+      speed: 8,
+      focused: 'lambda-0',
+      panels: {},
+    }
+    expect(parseWorkspace(JSON.stringify(base))?.inspector).toBe(true)
+    expect(parseWorkspace(JSON.stringify({ ...base, inspector: false }))?.inspector).toBe(false)
+    expect(parseWorkspace(JSON.stringify({ ...base, inspector: 'yes' }))).toBeNull()
+  })
+
+  it('opens the inspector for a migrated version 1 layout', () => {
+    expect(parseWorkspace(serializeLayout(SPLIT))?.inspector).toBe(true)
+  })
 })
 
 describe('serializeWorkspace', () => {
@@ -144,6 +165,8 @@ describe('serializeWorkspace', () => {
     const back = JSON.parse(serializeWorkspace(ws))
     expect(back.panels).toEqual({ 'tm-0': { rules: false } })
     expect(back.focused).toBe('lambda-0')
+    expect(back.inspector).toBe(true)
+    expect(JSON.parse(serializeWorkspace({ ...ws, inspector: false })).inspector).toBe(false)
   })
 })
 
@@ -161,5 +184,6 @@ describe('defaultWorkspace', () => {
     expect(ws.switches).toEqual(PRESETS.explorer)
     expect(ws.speed).toBe(8)
     expect(ws.focused).toBe('lambda-0')
+    expect(ws.inspector).toBe(true)
   })
 })

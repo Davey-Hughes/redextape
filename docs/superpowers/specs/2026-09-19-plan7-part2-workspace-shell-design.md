@@ -80,6 +80,7 @@ type Workspace = {
   speed: Speed               // one of §8's ladder values; default 8
   focused: LeafId            // any leaf, the source view included
   panels: Record<LeafId, Record<string, boolean>>   // panel name -> open
+  inspector: boolean         // §9's one inspector, which is the workspace's and not a view's
 }
 ```
 
@@ -96,7 +97,10 @@ type Workspace = {
 - **Validation is `parseLayout`'s standard applied to the new fields**: an unknown switch value, a speed
   off the ladder, a `focused` naming no leaf in the tree, or a panel map keyed by a leaf not in the tree
   makes the whole envelope invalid. A `panels` entry for a leaf that has since closed is dropped on
-  write, not carried.
+  write, not carried. **`inspector` is the one field where absent and invalid differ**: 2a shipped
+  version 2 without it, so a workspace stored by 2a has none and a missing value defaults to open —
+  refusing it would reset the layout of exactly the users this envelope exists to carry across — while
+  a value that is present and not a boolean invalidates the envelope like every other.
 - **`focused`** is set by the same `focusin` listener that calls `markActive`, and by selecting a Stage
   tab. It drives the readout (§9) and, when it can step, the bar (§8). `PaneCollection.active(leg)` stays
   as it is: it answers a per-leg question the link decorations still ask.
@@ -256,8 +260,16 @@ Row wording takes §12's vocabulary: *reductions* and *transitions* for β-steps
   one applies and the link sentence at its right end. It leaves out the normal-form text, which the λ
   view already shows; the full text of anything it truncates is in its `title`.
 - **The inspector** (2b) is a right-hand column built with `panel.ts`: fixed width, collapsible to its
-  header, its open state kept in `panels` under the key `inspector`. Every row on its own line, the
-  normal-form text included, in a scrolling region.
+  header, its open state a field of its own on the workspace (§3's `inspector`). Every row on its own
+  line, the normal-form text included, in a scrolling region. **This said "kept in `panels` under the key
+  `inspector`" until 2b was planned, and `panels` cannot hold it**: that map is keyed by `LeafId` and
+  §3 makes an entry naming a leaf the tree does not hold invalidate the whole envelope, so the only
+  reading of the old sentence that parses is one state per VIEW — an inspector that collapses and
+  re-opens as the focus moves between views. There is one inspector and it belongs to the workspace.
+- **`#results` and `#link-status` move with the readout and keep their ids.** The switch relocates them
+  between `footer.strip` and the inspector column rather than giving the inspector a second pair: two
+  elements would be two places for `#results[data-state]` to be written, and the second is where it
+  would be forgotten.
 - **Neither is a live region.** A change worth announcing goes through §11.
 - **`#results` and `#link-status` become the strip's two halves and keep their ids**, inside a
   `footer.strip` below `<main>`. `#results[data-state]` is the program's compile state (`running` /
@@ -319,9 +331,25 @@ Row wording takes §12's vocabulary: *reductions* and *transitions* for β-steps
   - closing a view moves focus to the title of the view that becomes `focused`;
   - deleting a copy from the menu moves focus to the next row, else the previous, else `copies ▾`;
   - a menu item that closes its menu returns focus to the menu's button, as the popover already does;
-  - a control removed by a state change rather than by its own click — *continue* when recording ends,
-    the split items when Stage is chosen — moves focus to the nearest remaining control in the same
-    header or menu.
+  - a control removed by a state change rather than by its own click — *continue* when recording ends —
+    moves focus to the nearest remaining control in the same header or menu.
+
+    **THE ONLY INSTANCE THIS RULE HAS IS *continue*, AND THIS BULLET USED TO NAME A SECOND ONE THAT
+    CANNOT OCCUR.** It read "…*continue* when recording ends, the split items when Stage is chosen…".
+    2b's pre-flight measured all three of its own instances — the split items when Stage is chosen, a
+    view's step controls when the bar takes them over, *reset preset* when a switch makes the workspace
+    custom — and **none of the three can be reached**: every one is triggered by a switch in the
+    workspace menu, and opening a menu is itself a focus-bearing interaction somewhere else, so at the
+    instant the control is removed the focus is on the menu item the user just clicked. Removing the
+    hand-off from any of the three reddens nothing.
+
+    *continue* is different because a worker reply removes it, not a gesture — which is why it is the one
+    instance with a test (`extend-focus-probe.test.ts`, whose two halves are *is the mechanism real?* and
+    *can a user gesture reach it?*, and which had already answered this question before 2b was designed).
+
+    The three hand-offs 2b ships stay, as defence against a trigger that does not exist yet: a share link
+    (part 6) or a keyboard shortcut (part 3) that moves a switch without a menu. Each carries a comment
+    saying so, so the next reader neither deletes them as dead nor bends a test to cover them.
 
 ## §12 Vocabulary
 

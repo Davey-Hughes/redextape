@@ -18377,3 +18377,161 @@ three that import `dom-accessibility-api`. Working on a branch off main, where t
 not exist, had pruned it from `node_modules`; `pnpm install` restored it and the suite read 396 again.
 CI installs from the lockfile on a clean tree and could not have seen it, so it is recorded as a fact
 about working on two branches rather than as anything this branch did.
+
+#### PLAN 7 PART 2B, PRESETS AND SWITCHES: THE THREE SWITCHES GET THEIR THREE CONSUMERS — A STEP BAR, AN INSPECTOR AND A TABBED STAGE — AND EVERY ONE OF THE BRANCH'S WORST DEFECTS WAS FOUND BY SOMETHING OTHER THAN A TEST: A PRE-FLIGHT BUILD, A FOUR-WAY REVIEW, AND A SCREENSHOT (2026-09-20, branch `plan7-part2b-presets-and-switches`, `d6b57c2..790ec0b`, 13 commits, plus this entry)
+
+**Part 2b of Plan 7** ([design](../specs/2026-09-19-plan7-part2-workspace-shell-design.md),
+[plan](2026-09-20-plan7-part2b-presets-and-switches.md),
+[pre-flight defect log](../notes/2026-09-20-plan7-part2b-preflight-defects.md)). It completes part 2:
+2a shipped the workspace envelope with the three switches stored and held at Explorer's values, and this
+is the three controls that move them and the three renderings that answer.
+
+##### WHAT PART 2B BUILT
+
+- **The workspace menu holds the presets and the switches.** Three presets as one choice, then three
+  two-way switches with the value in force marked, then *reset preset* — which is **removed** while the
+  workspace is custom, because there is no preset for it to restore. Five of the eight switch
+  combinations are *custom*, and the button names them so. The button that opens it finally carries a
+  `▾`, in an `aria-hidden` span, so the accessible name stays `Explorer` rather than gaining a
+  down-pointing triangle.
+- **`steps: bar` puts one set of step controls along the bottom**, prefixed with the title of the view it
+  drives. It follows the focused view, keeps the last view that could step when the focus moves somewhere
+  that cannot, and says *no view can step* — disabled with its reason rather than vanishing — when
+  nothing can.
+- **`readout: inspector` moves the readout into a right-hand column**, one fact per line, with the
+  normal-form text the strip has to cut. `#results` and `#link-status` MOVE rather than being duplicated,
+  so `#results[data-state]` keeps exactly one writer and the 24 browser files that wait on it are
+  untouched.
+- **`views: stage` draws the same tile tree as a tab strip over one view.** Stage is a way of drawing the
+  tree, not a node in it: every other host stays in `pane-host.ts`'s map, off the page, so flipping back
+  gives the arrangement the user left for free rather than by remembering it. The `⋯` menu's split items
+  are removed there, because they can never apply.
+- **`focus-handoff.ts` is one rule for "this control is going away and it has the focus"**, replacing a
+  hand-written copy in `step-controls.ts` and serving three new call sites.
+- **§9's inspector state moved off `panels`** and §11's fourth focus rule lost an instance — both spec
+  corrections this branch made rather than coded around; see below.
+
+##### THE PLAN WAS BUILT BEFORE IT WAS HANDED OUT, AND THAT BUILD FOUND 36 DEFECTS
+
+Every task's code was applied, in order, in a throwaway worktree before anything landed on the branch:
+**11 blocked a step as written, 16 produced a wrong result or a red gate, 3 needed a guess, and 6 were
+design problems.** The [log](../notes/2026-09-20-plan7-part2b-preflight-defects.md) has one entry each.
+The five worth knowing without opening it:
+
+1. **§11's fourth focus rule cannot be reached by any of part 2b's three gestures.** All three removals
+   are triggered by a switch in the workspace menu, and opening a menu is itself a focus-bearing
+   interaction somewhere else — so at the instant the control goes, the focus is on the menu item the
+   user just clicked. `extend-focus-probe.test.ts` had reached this conclusion about the continue button
+   before 2b was planned, in the two halves *is the mechanism real?* and *can a gesture reach it?*; the
+   plan asserted the opposite for all three siblings without consulting it. **The spec was corrected**,
+   the three hand-offs stay as defence against a trigger that does not exist yet (a share link, a keyboard
+   shortcut), and each says so.
+2. **A sabotage row predicting "nothing red" was wrong the first time it was checked.** The claim was
+   about the search, not the tier — three files out of sixty-five had been read, and two of the other
+   sixty-two cover that call site. Every later such row was run against the whole tier because of it.
+3. **The plan's copy-row builder parsed a separator it also emits.** A TM copy's reduced-file sentence
+   contains a ` · `, so splitting the strip's line back apart cuts one fact into two rows — and the tier
+   had carried the counterexample since 2a. Replaced by a shared parts list with two renderings.
+4. **An early `return` inside `applyLayout`'s `finally` would have discarded the exception that `finally`
+   exists to let escape.** Biome names it `noUnsafeFinally`; the comment directly above the plan's own
+   step names the behaviour it would have silently undone.
+5. **A sabotage reddened the parser and left all 422 browser tests green**, because nothing in the tier
+   booted on the envelope shape 2a actually wrote. `workspace-upgrade.test.ts` now fails under it, with
+   the user's two-leaf tree replaced by the default three.
+
+##### THE WHOLE-BRANCH REVIEW FOUND TWO THINGS NOTHING ELSE HAD
+
+Four reviewers over the 38-file diff — the switch consumers, focus and DOM lifecycle, test quality, and
+state and persistence — none given the pre-flight log, so none was anchored on its conclusions.
+
+- **HIGH: closing a view on the stage stranded the focus on `<body>`.** Found independently by two of the
+  four and then reproduced in a browser. `close` and `addView` called `applyLayout()` and *then*
+  `focusPane(id)`, which worked in tiles for a reason never written down: `.focus()` fires `focusin`,
+  `hostFor`'s listener calls `setFocused`, and the workspace caught up afterwards. **The stage has no such
+  side channel** — it mounts `focusedLeaf()`'s host and detaches the rest, so the layout was built around
+  the old leaf and `.focus()` on the resulting detached host is a spec-defined no-op. On the default tree
+  the two leaves differ (`neighbourOf` names `source`, `defaultFocus` names `tm-0`), which is why it broke
+  on the arrangement every user starts from and passed on others. The same root made `+ view` on the stage
+  create a tab the user could not see — and `+ view` is the only way to add a view there.
+  **Fixed at the class:** `focusView` records the focus, rebuilds, then moves it, in that order, in one
+  place — a rule written at four call sites is a rule with four chances to be forgotten, and the one that
+  was forgotten was the one nothing tested.
+- **HIGH: `index.html` had no gate at all.** The plan's own Global Constraints said "`SHELL` must stay
+  identical in content to `web/index.html`" and treated `harness.test.ts` as the enforcement. It is not:
+  it reads `SHELL` and never opens `index.html`. **Measured** — `index.html` reverted to its 2a shell, all
+  533 node tests passed, and the browser tier mounts `SHELL` so it could not see it either. `main()` would
+  have thrown `the page is missing a mount point` on the real site behind a green CI. The gate is now a
+  structural comparison of the whole body, and it catches both that sabotage and a subtler one that moves
+  `#inspector` out of `<main>` with every id still present.
+
+Also found and fixed: `programRows` dropped `results.ts`'s `note`, so the inspector — the first surface
+since 2a to print the λ normal form at all — showed a **depth-cut** term as the answer, and a depth cut is
+not a prefix of the real term but well-formed λ that reparses to a different, shorter one. The Stage
+tabindex did not rove, so `Shift+Tab` returned to the selected tab rather than the arrowed-to one. Nothing
+booted the app with stored switches other than Explorer's, so deleting `applySwitches()` from startup left
+the whole tier green while a user who left in Debugger came back to an Explorer-shaped page. And the
+`draw()` connectedness skip — the one behaviour §5 names and 2b added — had no test that could fail; the
+case named for it asserted an inequality its own first half had already established.
+
+##### THE VISUAL CHECK FOUND WHAT NO TEST COULD SEE
+
+All four workspace states, in light and dark, by hand (§14 item 8). Two defects, neither visible to any
+assertion in the tier:
+
+- **The inspector's rows flowed side by side rather than one per line.** `#results` carries
+  `class="results"` wherever the switch moves it, and `.results` is a wrapping flex row. Measured: three
+  rows sharing `y=227`. The test asserted `.row` count and a label substring, so it was green and blind.
+  One reviewer found it independently by reading the stylesheet — two methods, same defect.
+- **`text-transform: uppercase` rendered `λ` as `Λ`.** The DOM read `λ normal form`; the screen read
+  `Λ NORMAL FORM`. `Λ` is a different letter, and `λ` is the one piece of vocabulary the umbrella's §4
+  table fixes. **Only a screenshot could show it** — every test reads `textContent`, which was correct
+  throughout. `.view-title` already sets `text-transform: none` for this reason; the Stage tabs and the bar
+  title were right by accident of not inheriting `--label-transform`.
+
+Otherwise sound: the selected Stage tab carries a shape (an accent underline) and not only a colour, in
+both themes; the inspector column, the bar and the strip all read against their backgrounds in dark.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`replies.ts` paints disconnected panes.** §5's "hidden views cost nothing" is true of the per-frame
+  pass and false of replies — a hidden view still pays for every compile. Narrowing it would leave a hidden
+  view stale until its tab's `draw()`, which §5 explicitly allows, but it is a change to a path part 2b
+  does not own. **Left for part 4.**
+- **The cost claim itself is not testable where it was tried.** `innerHTML` measures output; with the skip
+  removed the hidden pane's markup comes out byte-identical. A cost claim belongs in the
+  `REDEXTAPE_PROBE` tier beside `frame-cost.test.ts`.
+- **§11's fourth rule has one reachable instance**, and the three this branch added are defence against a
+  trigger part 3 or part 6 may introduce. Their sabotages do not fire, by construction.
+- **`createReadout`'s inspector mode has no unit test** — only app-level coverage through
+  `inspector.test.ts` — and the bar's no-target state is held by a node test rather than by a gesture.
+- **Part 2b closes no item on the umbrella's §9 accessibility list.** All seven items §15 assigns to part 2
+  were closed by 2a's mechanisms; this part adds no new one, and says so rather than claiming a share.
+- **A pre-existing cache collision, not this branch's:** every worker error shares one key in
+  `createReadout`, so a second, different error does not repaint. Identical at `0522e31`.
+
+##### VERIFICATION
+
+Every figure, with the command that produced it, run on `790ec0b` before this entry was written.
+
+| Value | What | Produced by |
+|---|---|---|
+| 13 | commits before this entry | `git log --oneline d6b57c2..790ec0b \| wc -l` |
+| 38 files, +5,730 / −167 | the branch against main | `git diff --shortstat d6b57c2..790ec0b` |
+| 2 | new source modules (`focus-handoff.ts`, `step-bar.ts`) | `git diff --name-only --diff-filter=A d6b57c2..790ec0b -- web/src` |
+| 7 | new browser test files, plus 1 node | `git diff --name-only --diff-filter=A d6b57c2..790ec0b -- web/tests` |
+| 535 in 38 files | node tier | `pnpm exec vitest run --project node` |
+| 455 in 72 files | browser tier | `PATH="/usr/sbin:$PATH" pnpm exec vitest run --project browser` |
+| 96.42 / 90.47 / 98.43 / 98.52 | statements / branches / functions / lines, against floors 95 / 89 / 97 / 97 | `pnpm run test:coverage` under a 16 GiB cgroup cap |
+| 180 | files `biome ci --error-on-warnings` checks clean | `pnpm exec biome ci --error-on-warnings` |
+| 0 | `tsc --noEmit` exit | `pnpm exec tsc --noEmit` |
+| 0 | `check-all.sh` exit, "all configs green — base, LLVM and browser" | `TREE_SITTER=.tools/tree-sitter ./scripts/check-all.sh`, with `CARGO_TARGET_DIR` UNSET |
+| 36 | pre-flight defects (11 / 16 / 3 / 6 by class) | the entries in the defect log |
+| 9 | screenshots of the four states in light and dark | the by-hand visual check |
+
+**Two environment facts this branch had to learn, recorded because both cost real time.**
+`PATH="/usr/sbin:$PATH"` is required for Chrome and **also shadows the pinned `tree-sitter`** with a 0.28.0
+build, so `check-all.sh` refuses at its first line with an error about grammars and nothing about `PATH`;
+run it without the prefix or with `TREE_SITTER=<repo>/.tools/tree-sitter`. And a `CARGO_TARGET_DIR` that a
+now-deleted worktree built into **bakes that worktree's path into cached build scripts**, so reusing it
+from the main checkout fails with `No such file or directory` on a path that no longer exists — the
+cross-contamination hazard, arriving from the other direction.

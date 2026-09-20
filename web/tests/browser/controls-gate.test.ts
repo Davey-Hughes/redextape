@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { computeAccessibleName } from 'dom-accessibility-api'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { SHELL, until } from './harness'
 
 /**
@@ -154,7 +154,119 @@ beforeAll(async () => {
   )
 })
 
-describe('every control in Explorer', () => {
+/**
+ * The four workspace states spec §14 item 5 names: the three presets, and one *custom* combination.
+ *
+ * **`views` IS WHAT CHANGES THE SELECTORS**, not `steps` or `readout`: in Stage one view is on the page,
+ * so the per-view cases are driven from whichever view the stage is showing rather than from two named
+ * leaves. The `custom` row is Explorer with one switch moved, and it is deliberately the switch that
+ * changes the page most — a `custom` that looked like Explorer would walk the same controls twice.
+ */
+const STATES = [
+  { name: 'Explorer', picks: ['[data-preset="explorer"]'], tiled: true },
+  { name: 'Debugger', picks: ['[data-preset="debugger"]'], tiled: true },
+  { name: 'Stage', picks: ['[data-preset="stage"]'], tiled: false },
+  { name: 'custom', picks: ['[data-preset="explorer"]', '[data-switch="views"][data-value="stage"]'], tiled: false },
+] as const
+
+function enter(picks: readonly string[]): void {
+  for (const sel of picks) {
+    document.querySelector<HTMLButtonElement>('#workspace')?.click()
+    document.querySelector<HTMLButtonElement>(`#workspace-menu ${sel}`)?.click()
+  }
+  const menu = document.querySelector<HTMLElement>('#workspace-menu')
+  if (menu?.matches(':popover-open')) menu.hidePopover()
+}
+
+/** The leaves a per-view case can be driven from in this state. */
+function viewLeaves(tiled: boolean): string[] {
+  if (tiled) return ['lambda-0', 'tm-0']
+  const shown = document.querySelector<HTMLElement>('#views [role="tab"][aria-selected="true"]')
+  return shown?.dataset.leaf === undefined ? [] : [shown.dataset.leaf]
+}
+
+describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
+  beforeAll(() => enter(picks))
+  afterAll(() => enter(['[data-preset="explorer"]']))
+
+  it('on the page as it stands', () => check(`${name}: page`))
+
+  it.each([['#workspace'], ['#new-view'], ['#buffers'], ['#settings']])('with %s open', (selector) => {
+    const button = document.querySelector<HTMLButtonElement>(selector)
+    expect(button, selector).not.toBeNull()
+    button?.click()
+    check(`${name}: ${selector}`)
+    const menu = document.getElementById(button?.getAttribute('aria-controls') ?? '')
+    if (menu?.matches(':popover-open')) menu.hidePopover()
+  })
+
+  it("with every view's title and ⋯ menu open", () => {
+    const leaves = viewLeaves(tiled)
+    expect(leaves.length, `${name}: no view to walk`).toBeGreaterThan(0)
+    for (const leaf of leaves) {
+      for (const sel of [`[data-leaf="${leaf}"] button.view-title`, `[data-leaf="${leaf}"] button.view-more`]) {
+        const button = document.querySelector<HTMLButtonElement>(sel)
+        // A VIEW WITH ONE PAIR HAS A PLAIN-TEXT TITLE AND NO BUTTON (spec §7), and a view whose menu
+        // would be empty has no `⋯` (`viewMenu`'s own rule) — both are absences the rules ALLOW, so a
+        // missing control is skipped rather than failed.
+        if (button === null) continue
+        button.click()
+        check(`${name}: ${sel}`)
+        const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
+        if (menu?.matches(':popover-open')) menu.hidePopover()
+      }
+    }
+  })
+
+  /**
+   * **THE SPLIT SUBMENU IS A SECOND MENU INSIDE THE FIRST**, and the pass above never reaches it: `⋯`
+   * shows the main items, and choosing *split right* hides those and builds the pair list in their
+   * place. Those items are built from their text alone, with no tooltip — the one class of control here
+   * whose name has nothing else to fall back on.
+   *
+   * **IN STAGE THE ABSENCE IS ASSERTED RATHER THAN ASSUMED** (spec §5). Without that assertion, a Stage
+   * state in which the split items were still there would pass this case by never finding them, which is
+   * the vacuous-negative failure spec §12 names for renames, arriving here instead.
+   */
+  it('with a split submenu open, where splits apply', () => {
+    for (const leaf of viewLeaves(tiled)) {
+      const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
+      // **THE MENU'S OWN EXISTENCE IS ASSERTED, NOT OPTIONAL-CHAINED.** `viewMenu` removes `⋯` entirely
+      // when nothing applies, so `more?.click()` on a null would open nothing and the `toBeNull()` below
+      // would pass having proved only that a menu nobody opened contains no split items — the vacuous
+      // negative this case's own doc claims to prevent.
+      expect(more, `${name}: ${leaf} has no ⋯ menu to open`).not.toBeNull()
+      more?.click()
+      expect(
+        document.querySelectorAll(`[data-leaf="${leaf}"] .view-menu-main button`).length,
+        `${name}: ${leaf}'s menu opened empty`,
+      ).toBeGreaterThan(0)
+      const split = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-split[data-dir="row"]`)
+      if (!tiled) {
+        expect(split, `${name}: the stage must offer no split`).toBeNull()
+        // AND THE MENU IS STILL WALKED: two of the four states reach this branch, and without this they
+        // contributed one negative assertion and no control-name coverage at all.
+        check(`${name}: ${leaf}'s ⋯ menu on the stage`)
+      } else {
+        expect(split, `${name}: ${leaf} offers no split`).not.toBeNull()
+        split?.click()
+        expect(document.querySelectorAll(`[data-leaf="${leaf}"] .view-menu-pairs button`).length).toBeGreaterThan(0)
+        check(`${name}: ${leaf}'s split submenu`)
+      }
+      const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')
+      if (menu?.matches(':popover-open')) menu.hidePopover()
+    }
+  })
+})
+
+/**
+ * **THE COPIES MENU'S OWN STATES STAY IN EXPLORER ALONE, AND THAT IS A DECISION.** What these two cases
+ * exercise — a notice's *undo*, a paused copy's *resume* — is identical in all four workspace states:
+ * the copies menu is an app-header popover that no switch touches. They also MUTATE the shared page
+ * (delete then undo, pause then resume), so running them four times would be four rounds of state churn
+ * for one signal. `check()` itself is state-agnostic; it enumerates whatever the page holds.
+ */
+describe('every control in Explorer, with the copies menu in each of its states', () => {
   /**
    * **A NOTICE'S ACTION BUTTON IS A CONTROL AND NEVER REACHED THIS GATE — whole-branch review, M8.**
    * Every other case here runs against a page whose notices carry no action, so `notice.ts`'s
@@ -171,42 +283,6 @@ describe('every control in Explorer', () => {
     expect(nameOf(action as HTMLElement), 'the undo control is unnamed').toBe('undo')
     check('page with an undo notice')
     action?.click()
-  })
-
-  it('on the page as it stands', () => check('page'))
-
-  it.each([
-    ['#workspace'],
-    ['#new-view'],
-    ['#buffers'],
-    ['#settings'],
-    ['[data-leaf="lambda-0"] button.view-title'],
-    ['[data-leaf="lambda-0"] button.view-more'],
-    ['[data-leaf="tm-0"] button.view-title'],
-    ['[data-leaf="tm-0"] button.view-more'],
-  ])('with %s open', (selector) => {
-    const button = document.querySelector<HTMLButtonElement>(selector)
-    expect(button, selector).not.toBeNull()
-    button?.click()
-    check(selector)
-    const menu = document.getElementById(button?.getAttribute('aria-controls') ?? '')
-    if (menu?.matches(':popover-open')) menu.hidePopover()
-  })
-
-  /**
-   * **THE SPLIT SUBMENU IS A SECOND MENU INSIDE THE FIRST**, and the pass above never reaches it: `⋯`
-   * shows the main items, and choosing *split right* hides those and builds the pair list in their
-   * place. Those items are built from their text alone, with no tooltip — the one class of control here
-   * whose name has nothing else to fall back on.
-   */
-  it.each([['lambda-0'], ['tm-0']])("with %s's split submenu open", (leaf) => {
-    const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
-    more?.click()
-    document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-split[data-dir="row"]`)?.click()
-    expect(document.querySelectorAll(`[data-leaf="${leaf}"] .view-menu-pairs button`).length).toBeGreaterThan(0)
-    check(`${leaf}'s split submenu`)
-    const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')
-    if (menu?.matches(':popover-open')) menu.hidePopover()
   })
 
   /**
