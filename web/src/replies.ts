@@ -1,5 +1,4 @@
 import type { EditorView } from '@codemirror/view'
-import { showWorkerError } from './banner'
 import type { EditablePane } from './editor-custody'
 import { setDecline, setLink } from './highlight'
 import type { LambdaPane } from './lambda-pane'
@@ -7,37 +6,11 @@ import { LinkIndex } from './link'
 import type { LinkWiring } from './link-wiring'
 import type { PaneCollection } from './panes'
 import { lambdaFrameBytes, type RunReply, ruleCount, tmFrameBytes } from './protocol'
-import { noSessionRows, type Row, resultRows } from './results'
+import type { ProgramResult } from './readout'
 import type { ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
 import { resetLegs, type SessionRegistry, type TmCompiled } from './sessions'
 import type { TmPane } from './tm-pane'
-
-function renderRows(host: HTMLElement, rows: Row[]): void {
-  host.replaceChildren(
-    ...rows.map((r) => {
-      const el = document.createElement('div')
-      el.className = 'row'
-      const leg = document.createElement('span')
-      leg.className = 'leg'
-      leg.textContent = r.leg
-      const label = document.createElement('span')
-      label.className = 'label'
-      label.textContent = r.label
-      const value = document.createElement('span')
-      value.className = 'value'
-      value.textContent = r.value
-      if (r.note) {
-        const note = document.createElement('div')
-        note.className = 'note'
-        note.textContent = r.note
-        value.append(note)
-      }
-      el.append(leg, label, value)
-      return el
-    }),
-  )
-}
 
 /**
  * `onReply` AND `onScratchReply`, MOVED OUT OF `main.ts` WHOLE — the two reply switches, every inline
@@ -58,11 +31,9 @@ function renderRows(host: HTMLElement, rows: Row[]): void {
  * `setEditor` keeps exactly one target; see that call's own comment for why generalising it to "every
  * pane bound to this session" is not the same move.
  *
- * `renderRows` IS NOT A DEPENDENCY. `main.ts` used to define it locally over `results.ts`'s `Row` type;
- * grepping its call sites (`renderRows(results, noSessionRows(...))`, `renderRows(results,
- * resultRows(...))`) shows both live inside `onReply` and neither lives in `onScratchReply` — one
- * caller, not two, so it moved here as a private function instead of threading through the deps object.
- * An injected function with exactly one implementation is a parameter pretending to be a choice.
+ * **THE PROGRAM'S RESULT IS STORED, NOT RENDERED HERE** (Plan 7 part 2 spec §9): `setProgram` hands it to
+ * `main.ts`, and `draw()` renders it into the strip when the focused view shows the program. The rows this
+ * file used to write straight into `#results` would be wrong the moment a copy's view held the focus.
  *
  * **`sourceSession: SessionId` LEFT WITH THE RETIRE, AND THIS PARAGRAPH IS WHERE IT WAS ARGUED FOR.**
  * It read: *"WAS NOT PART OF THE SPECIFIED SIGNATURE, AND IS NEEDED ANYWAY. `onScratchReply`'s
@@ -94,8 +65,8 @@ function renderRows(host: HTMLElement, rows: Row[]): void {
  * `root: HTMLElement` WAS PART OF THE SPECIFIED SIGNATURE AND IS NOT HERE. Neither handler reads it —
  * `showBanner(root, ...)` is `main.ts`'s wasm-load and worker-spawn failure surface (`banner.ts`'s own
  * doc has the split), and both of those failures happen before or outside a reply ever exists. The
- * failure surface a reply handler DOES use is `showWorkerError(results, ...)`, which needs `results`,
- * already in this signature. Grepping the moved bodies for `root` turns up nothing but a comment that
+ * failure surface a reply handler DOES use is `showWorkerError`, reached through `setProgram`'s `error`
+ * kind and `readout.ts`, which renders it into `#results`. Grepping the moved bodies for `root` turns up nothing but a comment that
  * happens to contain the word "root" in an unrelated sentence.
  */
 export function createReplies(deps: {
@@ -138,11 +109,27 @@ export function createReplies(deps: {
    * the key, the envelope and the quota-failure policy are decided.
    */
   onBuffersPersist: () => void
+  /** Say a refusal — `notice.ts`'s `notify`. */
+  notify: (text: string) => void
+  /** Store the program's result, or its failure, for the readout (`readout.ts`'s `ProgramResult`). */
+  setProgram: (r: ProgramResult) => void
 }): {
   onReply(session: SessionId, reply: RunReply): void
   onScratchReply(session: SessionId, reply: RunReply): void
 } {
-  const { sessions, scratchpad, results, view, panes, links: linkWiring, draw, editorHome, onBuffersPersist } = deps
+  const {
+    sessions,
+    scratchpad,
+    results,
+    view,
+    panes,
+    links: linkWiring,
+    draw,
+    editorHome,
+    onBuffersPersist,
+    notify,
+    setProgram,
+  } = deps
 
   /**
    * Store `compiled` on `session`'s entry and fan `setProgram` out to every TM pane bound to it —
@@ -212,7 +199,7 @@ export function createReplies(deps: {
     switch (reply.kind) {
       case 'no-session':
         results.dataset.state = 'idle'
-        renderRows(results, noSessionRows(reply.diagnostics))
+        setProgram({ kind: 'no-session', diagnostics: reply.diagnostics })
         // STALE FRAMES MUST NOT SURVIVE A BROKEN PROGRAM. A pane still showing the last good run
         // under source that does not compile is the worst of both answers.
         resetLegs(legs, null, null, 'not compiled')
@@ -267,14 +254,15 @@ export function createReplies(deps: {
       }
       case 'result':
         results.dataset.state = 'idle'
-        renderRows(results, resultRows(reply.lambda, reply.tm))
+        setProgram({ kind: 'result', lambda: reply.lambda, tm: reply.tm })
+        draw()
         return
       case 'worker-error':
         // See the constructor-time `worker.addEventListener('error', ...)` above for the sibling
         // failure this answers: that one is a module that never loaded, this one is a session call
         // that threw after it did. Both would otherwise leave a pane on "running…" forever — but
         // unlike that one, the app itself is still alive here, so the response renders INTO `#results`
-        // (`showWorkerError`) rather than replacing `<main>` (`showBanner`'s job is the other case; see
+        // (`showWorkerError`, through `setProgram` and the readout) rather than replacing `<main>` (`showBanner`'s job is the other case; see
         // `banner.ts`'s doc for the split). `resetLegs`/`setProgram`/`setDecline`/`draw` below all run
         // against the SAME live nodes they always did — nothing here was ever the problem.
         results.dataset.state = 'idle'
@@ -291,7 +279,7 @@ export function createReplies(deps: {
         setTmProgram(session, null)
         linkWiring.setIndex(null)
         view().dispatch({ effects: [setDecline.of(null), setLink.of(null)] })
-        showWorkerError(results, new Error(reply.message))
+        setProgram({ kind: 'error', error: new Error(reply.message) })
         draw()
         return
     }
@@ -328,9 +316,10 @@ export function createReplies(deps: {
    * already uses, so a machine that parsed and a cursor that stepped no longer vanish with no pane, no
    * status line and no `#link-status` any the wiser.
    *
-   * IT NEVER TOUCHES `results.dataset.state` EXCEPT ON A THROW. That flag is the source compile's
-   * "running…" indicator and `app.test.ts`'s `settled` waits on it; a scratchpad's traffic is not a
-   * compile and must not be seen as one finishing.
+   * IT NEVER TOUCHES `results.dataset.state` AT ALL — `onReply` above holds every write of it. That flag
+   * is the program compile's "running…" indicator and `app.test.ts`'s `settled` waits on it; a copy's
+   * traffic is not a compile and must not be seen as one finishing. The `worker-error` arm below was the
+   * last exception and its own note says why it stopped.
    */
   const onScratchReply = (session: SessionId, reply: RunReply): void => {
     switch (reply.kind) {
@@ -524,9 +513,8 @@ export function createReplies(deps: {
           // landed a single frame, so `scratch-compiled` never fired, `setEditor` was never called, and
           // `#editor` is still `null` — `LambdaPane.setDiagnostics` below
           // (`this.#editor?.setDiagnostics(ds)`) would be exactly the silent no-op the finding names.
-          // `#link-status` is the surface built for that case (`link-status.ts`'s `forkFailed`, whose
-          // own doc has the argument for this surface over the pane), and it is the ONLY reason this
-          // branch still exists.
+          // A notice is the surface for that case (`notice.ts`, Plan 7 part 2 spec §11): it exists
+          // whether or not a view can show anything, and it is the ONLY reason this branch still exists.
           //
           // **WHAT THIS BRANCH USED TO DO BESIDES REPORTING, AND WHAT ITS LOSS COSTS THE USER.**
           // `noSessionReply` retired the buffer here: the pane went back on the source session,
@@ -541,14 +529,12 @@ export function createReplies(deps: {
           // could create buffers and end none — for three tasks, until `main.ts` built that list.
           // Retiring the row from it rebinds this pane home and the ✎ control comes back with the
           // binding, which is §4.1a's remedy reached from the header rather than from a stuck pane.
-          // `fork failed — ` IS COMPOSED HERE, NOT SUPPLIED BY `link-status.ts` — 5d-ii-d review round
-          // 2, Finding 3. This IS a fork failing (the build the fork posted never landed), so this call
-          // site is one of the two places in `src/` that earns the words; `scratch.ts`'s
-          // `BufferCapReached`/`#refuseAtCap` doc has the argument for the other, and `link-wiring.ts`'s
-          // `forkFailed` field doc has the argument for why the renderer stopped adding this on every
-          // caller's behalf.
-          linkWiring.setForkFailed(`fork failed — ${failed.map((d) => d.message).join(' · ')}`)
-          // `draw()` REPAINTS THE STATUS LINE, WHICH IS ALL THAT CHANGED. **IT USED TO BE PRECEDED BY
+          // `the copy did not build — ` IS COMPOSED HERE — 5d-ii-d review round 2, Finding 3. This IS a fork failing
+          // (the build the fork posted never landed), so this call site is one of the two places in
+          // `src/` that earns the words; `scratch.ts`'s `BufferCapReached`/`#refuseAtCap` doc has the
+          // argument for the other.
+          notify(`the copy did not build — ${failed.map((d) => d.message).join(' · ')}`)
+          // `draw()` REPAINTS WHAT ELSE THE REPLY CHANGED. **IT USED TO BE PRECEDED BY
           // `reconcileEditors()`**, because this was the app's one remaining retire site and a retire
           // must leave no `ScratchEditor` behind — mounted, or waiting in `editor-custody.ts`'s
           // `heldEditors` — for a session that no longer exists. It ends no session, so it sweeps
@@ -596,12 +582,19 @@ export function createReplies(deps: {
         return
       }
       case 'worker-error':
-        // THE SAME SURFACE AS THE SOURCE SESSION'S, AND DELIBERATELY. `showWorkerError` renders into
-        // `#results` rather than replacing `<main>` (`banner.ts`'s split), which is right here for the
-        // same reason it is there: the app is alive, one session's thread threw. `resetLegs` first
-        // for `onReply`'s reason — stale frames must not survive under a message saying it broke.
-        results.dataset.state = 'idle'
-        resetLegs(sessions.entryOf(session).legs, null, null, 'the scratchpad failed')
+        // **A COPY'S THREAD THREW, AND THE PROGRAM'S READOUT IS NOT WHERE THAT GOES — Plan 7 part 2, the
+        // pre-flight build's finding 9.5.** This arm used to render into `#results` beside the source
+        // session's own `worker-error`, which was honest while `#results` was one surface for the whole
+        // app. The strip reads the FOCUSED view's session now (spec §9), so storing a copy's failure as
+        // the program's result would replace a program result that is still valid, and show it only
+        // while the program is focused — the message would appear nowhere while the copy's own view is
+        // on screen. So the copy's failure is a notice that names the copy (spec §13: each failure
+        // leaves a working app and one notice), and the program's result is left alone. `#results`'s
+        // `data-state` is the program's compile state and is not touched here for the same reason.
+        //
+        // `resetLegs` first, for `onReply`'s reason — stale frames must not survive under a message
+        // saying it broke. Its reason, `the copy failed`, is what this copy's own readout then reads.
+        resetLegs(sessions.entryOf(session).legs, null, null, 'the copy failed')
         // THE RETAINED READING GOES, AND SO DOES WHAT EVERY TM PANE ON THE BUFFER WAS TOLD OF IT — not only the pane
         // holding the editor, which `setEditor(null)` below reaches. A split pane showing the same buffer would
         // otherwise go on reading `running` over a thread that will never answer again. Whole-branch review of the
@@ -625,7 +618,7 @@ export function createReplies(deps: {
         // own comment above — `undefined` here means the owning pane already closed, in which case
         // there is nothing left mounted to unmount.
         editorHome(session)?.setEditor(null)
-        showWorkerError(results, new Error(reply.message))
+        notify(`${scratchpad.nameOf(session) ?? 'a copy'} stopped — ${reply.message}`)
         draw()
         return
     }

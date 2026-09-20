@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY } from '../../src/buffers-store'
+import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
@@ -28,9 +29,27 @@ import { SHELL, until } from './harness'
  * has storage for everything else, not about a browser with none at all.
  */
 
-const linkStatus = (): string => document.querySelector('#link-status')?.textContent ?? ''
+/** The notice line's text — where the storage report rests since Plan 7 part 2 (spec §11). */
+const noticeText = (): string => document.querySelector('#notice .notice-text')?.textContent ?? ''
 const resultsText = (): string => document.querySelector('#results')?.textContent ?? ''
 const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .detach')
+
+/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
+const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
+
+/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does. */
+function pickBinding(leaf: string, key: string): void {
+  const title = titleOf(leaf)
+  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
+  if (item == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
+    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
+  }
+  item.click()
+}
 
 /**
  * Whether the next `localStorage.setItem` for `BUFFERS_STORAGE_KEY` throws — `false` until a test turns
@@ -63,119 +82,108 @@ describe('a full store', () => {
   /**
    * **THE SECOND FAILING WRITE IS THE FORK'S OWN `scratch-compiled` REPLY, NOT A SECOND CLICK — A
    * DEVIATION FROM THE SKETCH IN `2026-08-16-plan5d-ii-d-persisted-buffers.md`, AND THE REASON IS
-   * WORTH RECORDING.** That plan's illustration clicks `[data-leaf="lambda-0"] .detach` twice in a
-   * row. That does not reach a second write at all: the first fork detaches the pane, and a detached
-   * pane offers no fork (`LambdaPane`'s `#refreshDetach`: `!this.#detached`), so a literal second
-   * click on the same selector finds nothing and is a silent no-op — the assertions after it would
-   * hold vacuously, proving only that nothing happened twice.
+   * WORTH RECORDING.** That plan's illustration clicks the fork control twice in a row. That does not
+   * reach a second write at all: the first fork detaches the view, and a view showing a copy offers no
+   * *edit a copy* (`LambdaPane`'s `#refreshDetach`: `!this.#detached`), so a literal second click finds
+   * nothing and is a silent no-op — the assertions after it would hold vacuously.
    *
-   * A second click that WAS wired to something real would prove the wrong thing anyway. Both other
-   * candidates change `#link-status` for an unrelated reason and would make the comparison fail for a
-   * reason that has nothing to do with `storageFailureReported`: a second fork clears `forkFailed` on
-   * its own success before it persists (`transport.ts`'s `detach`: "a fresh attempt retires yesterday's
-   * news"), and the binding selector's rebind back to `source` un-detaches this pane, which drops the
-   * `· λ pane detached — not linked to source` clause `link-status.ts` composes independently of
-   * `forkFailed` (found by writing exactly that version of this test and watching it fail on the
-   * detachment clause, not on the storage one).
-   *
-   * **THE FORK'S OWN REPLY IS A SECOND WRITE FOR FREE, AND IT DISTURBS NEITHER.** `replies.ts`'s
-   * `onScratchReply` calls `onBuffersPersist()` on the `scratch-compiled` reply the forked worker sends
-   * back (`main.ts`'s own doc on `refreshBuffers`: "a recorded term" is one of the three moments that
-   * reach `persistBuffers` directly) — after the SAME fork, on the SAME still-detached pane, touching
-   * neither `forkFailed` nor `detached`. Waiting for it is the same signal
+   * **THE FORK'S OWN REPLY IS A SECOND WRITE FOR FREE.** `replies.ts`'s `onScratchReply` calls
+   * `onBuffersPersist()` on the `scratch-compiled` reply the copy's worker sends back (`main.ts`'s own
+   * doc on `refreshBuffers`: "a recorded term" is one of the three moments that reach `persistBuffers`
+   * directly) — after the SAME gesture, on the SAME view. Waiting for it is the same signal
    * `scratch-fork.test.ts`'s truncated-frame test uses: `.term-editor` mounts in the SAME handler,
-   * synchronously before `onBuffersPersist()` runs — the `scratch-compiled` arm's own `setEditor`
-   * call, reached through `editorHome` — so its arrival is proof the second persist has already been
+   * synchronously before `onBuffersPersist()` runs — the `scratch-compiled` arm's own `setEditor` call,
+   * reached through `editorHome` — so its arrival is proof the second persist has already been
    * attempted. **`setEditor` IS `lambda-pane.ts`'s `LambdaPane` METHOD, NOT ANYTHING `replies.ts`
    * DEFINES, and this sentence said otherwise until the whole-branch review.** It read
    * `` `replies.ts`'s `LambdaPane.setEditor` ``, which sends a reader grepping `replies.ts` for a  check-attributions: allow
-   * definition that has never been there. Task 2 got the identical shape right (*"called at
-   * `reduce.rs`'s `reduce_step_go`"*); this one is the counter-example, and the fix is to name the arm
-   * that calls it and the file that declares it. This citation used to read `replies.ts` lines 325-341,
-   * which by then was comment prose about `linkIndex` nullability and `setEditor`'s single target, not
-   * either call. That `reduce.rs` citation was itself split across a line wrap here, so no `grep` line
-   * ever held both halves and the gate did not count it at all. It is JOINED now rather than kept as a
-   * documented curiosity: one hand-placed line break was the only thing holding the split — biome never
-   * reflows a comment — so the next prose edit to this paragraph would have moved the gate's site count
-   * with no diff to any citation. The gate's own header records the measurement and keeps narrating the
-   * hole, which is real whether or not this one instance sits in it.
+   * definition that has never been there.
    *
-   * **IT WAS CALLED "the one possessive in 57 conversions that named a symbol its file does not own"
-   * HERE, AND IT WAS ONE OF TWO.** The second is in `lambda-pane-editor.test.ts`: the same commit that
-   * produced these 57 conversions rewrote `types.ts` lines 83-116 into a possessive citation of
-   * `LambdaState` against `types.ts`, and `types.ts` is a barrel that re-exports that type from a
-   * gitignored generated binding — so it owns the symbol no more than `replies.ts` owns `setEditor`.
-   * The declaration-gate branch repointed it at `viewmodel.rs`. Found with `git log -S` on the
-   * citation, not by re-reading: **"the one X" is a claim about every other member of a set, and
-   * nothing but enumerating the set can check it.** No gate will ever say so either — the line above
-   * carries the escape-hatch marker, because the quoted citation has to stay wrong to illustrate the
-   * mistake — so a superlative written inside an exempted line is as unguarded as prose gets.
+   * **WHAT THE OLD VERSION OF THIS TEST PROVED, AND WHY IT NO LONGER CAN.** The report used to be a
+   * once-per-page-load flag written onto `#link-status`, so the question was whether a second failing
+   * write RESTATED it, and the discriminating stage was a second fork whose success cleared the field
+   * first. Plan 7 part 2 made the report the notice line's RESTING STATE (`notice.ts`'s `Notices.rest`,
+   * `main.ts`'s `reportStorageFailure`): setting it twice with the same words is a no-op by
+   * construction, so "reported twice" is not a state this app can reach, and the flag is gone. What is
+   * worth holding now is what the resting state promises — said once when the condition begins, and on
+   * the line whenever nothing else is being said.
    */
-  it('reports once, and the report survives further writes', async () => {
+  it('says the condition once, however many writes fail, and lets the gesture speak', async () => {
     refuseWrites = true
+    // EVERY SENTENCE THE LIVE REGION SAYS, IN ORDER — a single read of `#live` holds only the latest, and
+    // what this test is about is how many times one sentence is said. `notice.ts`'s `say` rewrites the
+    // element's text for every notice, so each write is one record.
+    const said: string[] = []
+    const live = document.querySelector('#live')
+    if (live === null) throw new Error('no live region')
+    const observer = new MutationObserver(() => said.push(live.textContent?.trim() ?? ''))
+    observer.observe(live, { childList: true, characterData: true, subtree: true })
 
-    // Fork, which persists (`onBuffersChanged` -> `refreshBuffers` -> `persistBuffers`) and therefore
-    // fails.
     const fork = forkButton()
-    if (fork === null) throw new Error('no fork control on the λ pane')
+    if (fork === null) throw new Error('no edit-a-copy control on the λ view')
     fork.click()
-    await until(() => linkStatus().includes('not being saved'), 'the storage report')
+    // The copy's own reply is the second failing write — see this block's doc.
+    await until(() => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null, "the copy's own reply")
+    observer.disconnect()
 
-    const first = linkStatus()
-    expect(first.match(/not being saved/g)).toHaveLength(1)
+    const storage = said.filter((t) => t.includes('not being saved'))
+    expect(storage, `said: ${JSON.stringify(said)}`).toHaveLength(1)
+    expect(storage[0]).toBe('copies are not being saved — this browser’s storage for this site is full')
+    // THE GESTURE STILL SPEAKS FOR ITSELF: a condition that lasts does not take the line from the notice
+    // the user's own click produced.
+    expect(noticeText()).toBe('λ copy 1 created — this view shows it')
+  })
 
-    // The fork's own worker answers with the term it derived, which persists a second time — see the
-    // doc above for why this is the write under test rather than a second click.
+  /**
+   * **THE ONE LONG WAIT IN THIS FILE, AND IT IS A CLOCK RATHER THAN A COMPUTATION.** The line returns to
+   * the resting state when the notice over it ends, which is `NOTICE_MS` — eight seconds — after that
+   * notice was made. Nothing in the app shortens it and fake timers cannot reach a timeout the app
+   * created before they were installed, so this test waits it out, alone in its own body: that is the
+   * rule #99 established after a body carrying three long waits timed out on the slower CI runner.
+   */
+  it('returns to the storage warning when the notice over it ends', async () => {
     await until(
-      () => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null,
-      "the scratch's own reply, and its persist",
+      () => noticeText() === 'copies are not being saved — this browser’s storage for this site is full',
+      'the notice line to fall back to the storage warning',
     )
+    expect(document.querySelector<HTMLElement>('#notice')?.hidden).toBe(false)
+  })
 
-    // Unchanged, not appended to.
-    expect(linkStatus()).toBe(first)
-    expect(linkStatus().match(/not being saved/g)).toHaveLength(1)
+  /**
+   * **AND IT GOES WHEN THE CONDITION DOES.** `writeBuffersStorage` clears the resting state on a write
+   * that succeeds, because a warning that outlives its condition teaches a reader to ignore the line.
+   */
+  /**
+   * **A CONDITION THAT COMES BACK IS NOT NEWS TWICE.** A write refused by size succeeds and fails by
+   * turns, so this cycle is ordinary; the line follows the condition, the live region says it once.
+   */
+  it('shows the warning again without saying it again', async () => {
+    const live = document.querySelector('#live')
+    if (live === null) throw new Error('no live region')
+    refuseWrites = false
+    pickBinding('lambda-0', bindingKey('lambda', 'source'))
+    await until(() => document.querySelector<HTMLElement>('#notice')?.hidden === true, 'the warning to clear')
 
-    /**
-     * **THE DISCRIMINATING STAGE — 5d-ii-d review round 2, Finding 2.** Both assertions above pass
-     * whether or not `storageFailureReported` actually guards the second write: `linkStatus`
-     * (`link-status.ts`) recomposes the WHOLE line from the one `forkFailed` field it is handed, so a
-     * report delivered a second time writes the IDENTICAL string as a report delivered once, and
-     * `toBe(first)` / `toHaveLength(1)` cannot tell "guarded" from "coincidentally the same" apart. A
-     * SECOND, GENUINELY NEW FORK can: `transport.ts`'s `detach` handler clears `forkFailed` on its own
-     * SUCCESS path, before its own `persistBuffers()` call — so if the guard is doing its job, that
-     * write's failure has nothing left to restate and the clear stands; if the guard is missing,
-     * `reportStorageFailure()` fires again and overwrites the clear with the storage phrase, on a page
-     * that just forked successfully.
-     *
-     * BACK TO SOURCE FIRST — a detached pane offers no fork control at all (`LambdaPane`'s
-     * `#refreshDetach`: `!this.#detached`), so a second fork needs the same rebind
-     * `scratch-cap.test.ts`'s `backToSource` performs before one is reachable. `\x00` as an escape
-     * rather than the byte, that file's own rule (`scripts/check-text-bytes.sh`).
-     */
-    const select = document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')
-    if (select === null) throw new Error('no binding selector on the λ pane')
-    select.value = 'lambda\x00source'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-    await until(() => forkButton() !== null, 'the fork control to come back with the source binding')
+    const said: string[] = []
+    const observer = new MutationObserver(() => said.push(live.textContent?.trim() ?? ''))
+    observer.observe(live, { childList: true, characterData: true, subtree: true })
+    refuseWrites = true
+    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
+    // THE GESTURE'S OWN NOTICE, NOT THE RESTING STATE: the line comes back to the warning when this
+    // notice ends, eight seconds later, and a body that waits that out beside another wait is the shape
+    // #99 took out of this tier. What this test is about is the live region, which is immediate.
+    await until(() => noticeText().endsWith('created — this view shows it'), "the copy's own notice")
+    observer.disconnect()
+    expect(
+      said.filter((t) => t.includes('not being saved')),
+      `said: ${JSON.stringify(said)}`,
+    ).toHaveLength(0)
+  })
 
-    // THE SECOND FORK. Its own `scratch-compiled` reply persists a second time, exactly as the first
-    // fork's did above — `.term-editor` mounting again (torn down by the rebind above, per
-    // `pane-host.ts`'s `rebind`) is proof that write was attempted, guard or no guard.
-    const secondFork = forkButton()
-    if (secondFork === null) throw new Error('no fork control after the rebind to source')
-    secondFork.click()
-    await until(
-      () => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null,
-      "the second fork's own reply, and its persist",
-    )
-
-    // **WITH THE GUARD: THE REPORT DOES NOT RESTATE, AND THE LINE READS EXACTLY WHAT A SECOND,
-    // SUCCESSFUL FORK LEAVES BEHIND.** The pane this fork just rebound is, by construction, detached —
-    // `ScratchBuffers`'s own doc: every scratch session is `detached: true` and nothing can set it
-    // otherwise — so `λ pane detached — not linked to source` is the honest, positive answer for this
-    // exact moment, not a bare absence of the storage phrase. WITHOUT the guard, `persistBuffers`'s
-    // second failure calls `reportStorageFailure()` again, which overwrites the `null` the fork's own
-    // success path just wrote, and the storage phrase comes back ahead of the detachment clause.
-    expect(linkStatus()).toBe('λ pane detached — not linked to source')
+  it('clears the warning once a write succeeds', async () => {
+    refuseWrites = false
+    pickBinding('lambda-0', bindingKey('lambda', 'source'))
+    await until(() => document.querySelector<HTMLElement>('#notice')?.hidden === true, 'the warning to clear')
+    expect(noticeText()).toBe('')
   })
 })

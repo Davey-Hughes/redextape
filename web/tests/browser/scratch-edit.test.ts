@@ -36,17 +36,14 @@ const SAMPLE = 'let x = 40; x + 2'
 let view: EditorView
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
+/**
+ * `#results` READS THE FOCUSED VIEW'S SESSION (Plan 7 part 2 spec §9), so a read of the PROGRAM'S result
+ * after a copy's view took the focus puts the focus on the program first.
+ */
+const focusProgram = () => document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')?.focus()
 const term = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
 const editorHost = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
 const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
-
-const clickLambda = (label: string) => {
-  const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')].find(
-    (x) => x.textContent === label,
-  )
-  if (b === undefined) throw new Error(`no \`${label}\` button in the λ pane`)
-  b.click()
-}
 
 /** A real keystroke into the scratch's own editor — see the file doc for why not `setText`. */
 function typeIntoScratchEditor(text: string): void {
@@ -72,23 +69,25 @@ describe('editing the scratch, through the app', () => {
     // control is available at the frontier with no scrubbing needed.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
     await until(idle, 'the sample program to compile')
+    focusProgram()
     const resultsBefore = resultsText()
     expect(resultsBefore).not.toBe('')
 
-    // STAGE 1 — fork. Synchronous up to the rebind; `[detached]` and the editor arrive over the wire.
-    clickLambda('✎ fork')
-    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('[detached]')
+    // STAGE 1 — fork. Synchronous up to the rebind; `copy · not linked` and the editor arrive over the wire.
+    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
+    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
     await until(() => editorHost() !== null, 'the editor to mount')
     await until(() => term() !== '', 'the scratchpad to produce its first frame')
 
     // STAGE 2 — a genuine edit changes the frames region, and the SOURCE's own result is untouched.
     // `onScratchReply` never writes `#results` (its own doc: "never touches `results.dataset.state`
-    // except on a throw") — the scratch and the source are two sessions, not one mutable one, which
+    // at all") — the scratch and the source are two sessions, not one mutable one, which
     // is the whole reason three sessions exist (design §4.3).
     const beforeEdit = term()
     typeIntoScratchEditor('(λa. a a) (λb. b)')
     await until(() => term() !== beforeEdit, 'the edited scratch to recompile')
     expect(term()).toContain('b')
+    focusProgram()
     expect(resultsText()).toBe(resultsBefore)
 
     // STAGE 3 — an edit that does not parse. Design §4.4: "leaves the frames region showing the last
@@ -109,7 +108,7 @@ describe('editing the scratch, through the app', () => {
     // USED TO ASSERT THAT IT "retires the scratchpad and takes the editor with it" (5d-i design §4.3:
     // "the same mechanism as poison recovery"). 5d-ii-c decision 2 ends that: `compile.ts` no longer
     // retires anything, so `editorHost()` — which this stage checked was `null` — must still be there,
-    // and the pane must still be `[detached]` on the buffer it was editing.
+    // and the pane must still be `copy · not linked` on the buffer it was editing.
     //
     // **IT IS ASSERTED FROM THE MIDDLE OF A BAD EDIT ON PURPOSE.** The editor is holding `(λa.` from
     // STAGE 3, which is the state the old behaviour was most defensible in: a keystroke in the source
@@ -117,10 +116,11 @@ describe('editing the scratch, through the app', () => {
     // stay, the last good frames stay, and STAGE 5 recovers the buffer by fixing the text.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let y = 1; y + 1' } })
     expect(editorHost()).not.toBeNull()
-    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('[detached]')
+    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
     expect(term()).toBe(lastGood)
     // AND THE SOURCE REALLY DID RECOMPILE, so none of the four lines above passed on a keystroke that
     // never reached `schedule`.
+    focusProgram()
     await until(() => idle() && resultsText().includes('2'), 'the recompile from source')
     expect(editorHost()).not.toBeNull()
     expect(term()).toBe(lastGood)
@@ -132,6 +132,6 @@ describe('editing the scratch, through the app', () => {
     typeIntoScratchEditor('(λm. m) (λn. n)')
     await until(() => term() !== lastGood, 'the buffer to recompile after the source did')
     expect(term()).toContain('n')
-    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('[detached]')
+    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
   })
 })

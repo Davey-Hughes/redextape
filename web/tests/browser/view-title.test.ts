@@ -8,13 +8,14 @@ import { SessionClient } from '../../src/session-client'
 import type { Binding, LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type { LambdaState, TmState } from '../../src/types'
+import { bindingKey } from '../../src/view-header'
 
 /**
  * TWO PANES BOUND TO TWO DIFFERENT λ SESSIONS, RENDERING TWO DIFFERENT TERMS AT THE SAME TIME — plan
  * T7's test, in a real DOM against the real `LambdaPane`.
  *
  * WHY THIS IS NOT DRIVEN THROUGH `main()`, unlike most of this directory, and it is the same reason
- * `detached-badge.test.ts` gives one task earlier: the app cannot reach the state under test. `main.ts`
+ * `view-status.test.ts` gives one task earlier: the app cannot reach the state under test. `main.ts`
  * registers exactly one session, and nothing in this slice can add a second — a `LambdaScratch` session
  * needs a worker message `session-worker.ts` does not have (and this task may not touch that file), and
  * creating one by editing a source-derived λ view is design §4.3, which is T8. An app-level test would
@@ -30,7 +31,7 @@ import type { LambdaState, TmState } from '../../src/types'
  * SO THE REGISTRY IS BUILT HERE AND THE PRODUCTION PATH IS SHARED RATHER THAN RE-IMPLEMENTED.
  * `main.ts`'s `draw()` is, for each pane, `slot.resolve(reg)` followed by `slot.render(reg, pane, leg)`
  * — the two calls `paint` below makes. Resolution, `controlState`, the selector's option list and the
- * `[detached]` badge all live inside `PaneSlot.render`, so nothing about what a binding MEANS is
+ * `copy · not linked` status all live inside `PaneSlot.render`, so nothing about what a binding MEANS is
  * restated in this file.
  *
  * `tests/node/sessions.test.ts` ASSERTS THE SAME CLAIM WITHOUT A DOM and is not redundant with this.
@@ -52,7 +53,7 @@ function fakeClient(): SessionClient {
 function lambdaSession(id: SessionId, label: string, text: string, detached: boolean): SessionEntry {
   const hist = new History<LambdaState>(1_000_000)
   hist.push({ text, spans: [], cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
-  const leg: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, timer: null }
+  const leg: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, playing: false }
   return { id, label, detached, client: fakeClient(), legs: { lambda: leg }, tmProgram: null, tmScratch: null }
 }
 
@@ -73,8 +74,8 @@ function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
     detached: false,
     client: fakeClient(),
     legs: {
-      lambda: { hist: lambdaHist, status: ok, done: null, timer: null },
-      tm: { hist: tmHist, status: ok, done: null, timer: null },
+      lambda: { hist: lambdaHist, status: ok, done: null, playing: false },
+      tm: { hist: tmHist, status: ok, done: null, playing: false },
     },
     // A TM LEG WITH NO MACHINE BEHIND IT, WHICH IS A STATE THE APP HAS TOO — between registering the
     // source session and its first `compiled` reply. The panes here are built directly rather than by
@@ -98,18 +99,39 @@ const paint = (reg: SessionRegistry, slot: PaneSlot<'lambda'>, pane: LambdaPane)
 /** The term the pane is showing, read the way a user reads it. */
 const term = (pane: HTMLElement) => pane.querySelector('pre.term')?.textContent ?? ''
 
-const selector = (pane: HTMLElement) => pane.querySelector<HTMLSelectElement>('.pane-binding select')
+/** The title-selector of the view in `pane` — the pair in force is its `data-binding`. */
+const titleOf = (pane: HTMLElement) => pane.querySelector<HTMLButtonElement>('button.view-title')
 
-/**
- * The `<option>` value the control encodes a `(leg, session)` pair as.
- *
- * SPELLED OUT HERE RATHER THAN IMPORTED FROM THE CONTROL. A helper that asked `pane-chrome.ts` how it
- * encodes a pair would agree with any encoding it chose, including a broken one; writing the two
- * fields and the `\x00` join out by hand is what makes these assertions pin the DOM contract. The
- * escape rather than a literal NUL is `scripts/check-text-bytes.sh`'s rule and applies to test files
- * for exactly the reason it applies to `pane-chrome.ts` — see that control's own comment.
- */
-const optionValue = (leg: Leg, id: SessionId) => `${leg}\x00${id}`
+/** The title's menu. */
+const menuOf = (pane: HTMLElement) => document.getElementById(titleOf(pane)?.getAttribute('aria-controls') ?? '')
+
+/** Pick `key` (`bindingKey(leg, session)`) through the view's title menu, as a user does. */
+function pickBinding(pane: HTMLElement, key: string): void {
+  const title = titleOf(pane)
+  if (title === null) throw new Error('no title-selector on this view')
+  title.click()
+  const item = menuOf(pane)?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
+  if (item == null) {
+    const offered = [...(menuOf(pane)?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map(
+      (b) => b.dataset.binding,
+    )
+    throw new Error(`the view offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
+  }
+  item.click()
+}
+
+/** Every pair the view's title menu offers, as `[key, text]` — opens and closes the menu to read it. */
+function offered(pane: HTMLElement): [string, string][] {
+  const title = titleOf(pane)
+  if (title === null) return []
+  title.click()
+  const items = [...(menuOf(pane)?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b): [string, string] => [
+    b.dataset.binding ?? '',
+    b.textContent ?? '',
+  ])
+  menuOf(pane)?.hidePopover()
+  return items
+}
 
 /** `PaneEvents`'s six required members. `rebind` is the only one any test here fires. */
 const events = (slot: PaneSlot<'lambda'>, after: () => void): PaneEvents => ({
@@ -118,6 +140,8 @@ const events = (slot: PaneSlot<'lambda'>, after: () => void): PaneEvents => ({
   play: () => undefined,
   restart: () => undefined,
   extend: () => undefined,
+  speed: () => 8,
+  setSpeed: () => undefined,
   // THE SESSION ONLY, THOUGH THE PICK NOW CARRIES A LEG — `PaneSlot<K>`'s leg is fixed at
   // construction and has no writer, so this is the whole of what a same-leg pick can do. It is also
   // exactly what `transport.ts`'s production handler does. **THE PANE MULTIPLEXER THAT ACTS ON A
@@ -136,7 +160,7 @@ beforeEach(() => {
   document.body.replaceChildren()
 })
 
-describe('the binding selector', () => {
+describe('the title-selector', () => {
   /**
    * THE TEST PLAN T7 NAMES, WORD FOR WORD. Both panes are painted before either is asserted, and both
    * are asserted before anything is rebound — a "bind, read, rebind, read" sequence would pass on an
@@ -149,7 +173,7 @@ describe('the binding selector', () => {
    */
   it('renders two different λ sessions side by side, at the same time', () => {
     const reg = new SessionRegistry()
-    reg.add(lambdaSession(SOURCE, 'source', '(λx. x) 1', false))
+    reg.add(lambdaSession(SOURCE, 'program', '(λx. x) 1', false))
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', '(λy. y y) 2', true))
 
     const leftHost = host()
@@ -184,9 +208,9 @@ describe('the binding selector', () => {
    * before it; and the pane still bound to the source session must never have had one, which is
    * §4.3's ordinary state (one pane detaches, the other keeps running against source).
    */
-  it('carries the [detached] badge on the pane bound to a scratch, and drops it on rebind', () => {
+  it('says copy · not linked on the view bound to a scratch, and drops it on rebind', () => {
     const reg = new SessionRegistry()
-    reg.add(lambdaSession(SOURCE, 'source', 'a', false))
+    reg.add(lambdaSession(SOURCE, 'program', 'a', false))
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
 
     const attachedHost = host()
@@ -204,28 +228,38 @@ describe('the binding selector', () => {
 
     paint(reg, attached, attachedPane)
     paint(reg, detached, detachedPane)
-    expect(detachedHost.querySelector('h2')?.textContent).toContain('[detached]')
-    expect(attachedHost.querySelector('h2')?.textContent).not.toContain('detached')
+    expect(detachedHost.querySelector('h2')?.textContent).toContain('copy · not linked')
+    expect(attachedHost.querySelector('h2')?.textContent).toBe('λ · program')
+    expect(attachedHost.querySelector('h2')?.textContent).not.toContain('not linked')
 
     detached.rebind(SOURCE)
     paint(reg, detached, detachedPane)
-    expect(detachedHost.querySelector('h2')?.textContent).toBe('lambda')
+    expect(detachedHost.querySelector('h2')?.textContent).toBe('λ · program')
   })
 
   /**
    * THE CONTROL IS ABSENT WHILE IT COULD DO NOTHING, which is `pane-chrome.ts`'s stated idiom (added
    * and removed, never disabled) and §4.5's standard (a thing that provably cannot work should not be
-   * presented as though it might). It is also today's app exactly: one session, so no selector.
+   * presented as though it might).
+   *
+   * **IT IS NOT TODAY'S APP, AND THIS PARAGRAPH SAID IT WAS — whole-branch review, M1.** It read "It is
+   * also today's app exactly: one session, so no selector". The selector lists `(leg, session)` PAIRS,
+   * and `main.ts` registers the program session with BOTH legs, so `pairs()` contributes two on its own
+   * and the plain-text branch is unreachable in the running app (`main.ts`'s own comment on the
+   * registration says so). What reaches it here is this file's λ-ONLY source session, a shape the app
+   * never builds — the same kind of fixture the file's header comment already flags for the two-pane
+   * case. The branch is still worth holding, because `viewHeader` offers it and a later leg arrangement
+   * could reach it; what is not worth claiming is that a user can get there today.
    *
    * ASSERTED IN BOTH DIRECTIONS AND BACK. A control that appears and never leaves passes the middle
-   * assertion; the third is what catches it, and it is reachable — retiring a buffer takes the λ
-   * options back down to one. (That named `§4.3's recompile-from-source` as the gesture that does it,
+   * assertion; the third is what catches it, and it is reachable IN THIS FIXTURE — retiring a buffer
+   * takes this λ-only registry's options back down to one. (That named `§4.3's recompile-from-source` as the gesture that does it,
    * which 5d-ii-c decision 2 removed; what makes the third direction reachable is the retire itself,
    * whichever surface triggers one.)
    */
-  it('appears only once a second session offers this leg, and leaves again when one is retired', () => {
+  it('is a menu only once a second session offers this leg, and plain text again when one is retired', () => {
     const reg = new SessionRegistry()
-    reg.add(lambdaSession(SOURCE, 'source', 'a', false))
+    reg.add(lambdaSession(SOURCE, 'program', 'a', false))
 
     const el = host()
     const slot = new PaneSlot('lambda', SOURCE)
@@ -235,26 +269,24 @@ describe('the binding selector', () => {
     )
 
     paint(reg, slot, pane)
-    expect(selector(el)).toBeNull()
+    expect(titleOf(el)).toBeNull()
+    expect(el.querySelector('h2 span.view-title')?.textContent).toBe('λ · program')
 
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
     paint(reg, slot, pane)
-    const select = selector(el)
-    expect(select).not.toBeNull()
+    expect(titleOf(el)).not.toBeNull()
     // NAMED BY TEXT, NOT BY COLOUR OR POSITION. §6 forbids this slice adding a colour-carried state,
     // and the sessions are told apart by their labels — which is also what a screen reader gets. An
     // implementation that distinguished them any other way would leave these strings unset.
-    expect([...(select?.options ?? [])].map((o) => o.textContent)).toEqual(['source', 'λ scratchpad'])
-    expect(select?.value).toBe(optionValue('lambda', SOURCE))
-    // The `<select>` is inside a `<label>` carrying the caption, so the control is named without an
-    // `aria-label` to keep in step — the same implicit-label idiom `index.html`'s encoding picker uses.
-    // The caption is `shows` rather than `session` because `session` is now the name of one of the two
-    // things the control picks, not the name of the control.
-    expect(select?.closest('label')?.textContent).toContain('shows')
+    expect(offered(el).map(([, text]) => text)).toEqual(['λ · program', 'λ · λ scratchpad'])
+    expect(titleOf(el)?.dataset.binding).toBe(bindingKey('lambda', SOURCE))
+    // THE TITLE SAYS IT OPENS A MENU — the `shows` caption it replaced was a `<label>` naming a
+    // `<select>`; a button that opens something states it with `aria-haspopup`.
+    expect(titleOf(el)?.getAttribute('aria-haspopup')).toBe('menu')
 
     reg.remove(SCRATCH)
     paint(reg, slot, pane)
-    expect(selector(el)).toBeNull()
+    expect(titleOf(el)).toBeNull()
   })
 
   /**
@@ -265,7 +297,7 @@ describe('the binding selector', () => {
    */
   it('rebinds the pane when a session is picked, and follows it back', () => {
     const reg = new SessionRegistry()
-    reg.add(lambdaSession(SOURCE, 'source', 'from source', false))
+    reg.add(lambdaSession(SOURCE, 'program', 'from source', false))
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'from scratch', true))
 
     const el = host()
@@ -277,29 +309,59 @@ describe('the binding selector', () => {
     paint(reg, slot, pane)
     expect(term(el)).toBe('from source')
 
-    const select = selector(el)
-    if (select === null) throw new Error('two λ sessions should have produced a selector')
-    select.value = optionValue('lambda', SCRATCH)
-    select.dispatchEvent(new Event('change'))
+    pickBinding(el, bindingKey('lambda', SCRATCH))
 
     expect(slot.binding).toEqual({ session: SCRATCH, leg: 'lambda' })
     expect(term(el)).toBe('from scratch')
-    expect(el.querySelector('h2')?.textContent).toContain('[detached]')
-    expect(select.value).toBe(optionValue('lambda', SCRATCH))
+    expect(el.querySelector('h2')?.textContent).toContain('copy · not linked')
+    expect(titleOf(el)?.dataset.binding).toBe(bindingKey('lambda', SCRATCH))
 
-    select.value = optionValue('lambda', SOURCE)
-    select.dispatchEvent(new Event('change'))
+    pickBinding(el, bindingKey('lambda', SOURCE))
     expect(term(el)).toBe('from source')
-    expect(el.querySelector('h2')?.textContent).toBe('lambda')
+    expect(el.querySelector('h2')?.textContent).toBe('λ · program')
   })
 
-  // The selector sits on the per-frame path (`draw()` repaints every pane on every recorded frame
-  // during playback), so a repeat render must not rebuild the option nodes — rebuilding them would
-  // also close the dropdown of a user in the middle of choosing. Asserted by identity, which is the
-  // only thing that distinguishes "left alone" from "replaced with an equal one".
-  it('does not rebuild its options when nothing changed', () => {
+  /**
+   * **THE TITLE KEEPS THE FOCUS ACROSS THE PICK IT PERFORMED** — spec §11, "focus never falls to
+   * `<body>`", and umbrella §4 rule 5.
+   *
+   * **THIS IS THE ONE GESTURE WITH NO `focusPane` BEHIND IT**, deliberately: `pane-host.ts`'s same-leg
+   * `rebind` arm leaves focus alone because the view is still there and only its contents changed. That
+   * makes the header's own repaint the whole of the guarantee — and a repaint that takes the title out of
+   * the document and puts it back does not keep it, however identical the element is afterwards. So this
+   * asserts the FOCUS, not the identity: the element is the same either way.
+   */
+  it('keeps the focus on the title it was picked from', () => {
     const reg = new SessionRegistry()
-    reg.add(lambdaSession(SOURCE, 'source', 'a', false))
+    reg.add(lambdaSession(SOURCE, 'program', 'from source', false))
+    reg.add(lambdaSession(SCRATCH, 'copy 1', 'from scratch', true))
+
+    const el = host()
+    const slot = new PaneSlot('lambda', SOURCE)
+    const pane = new LambdaPane(
+      el,
+      events(slot, () => paint(reg, slot, pane)),
+    )
+    paint(reg, slot, pane)
+
+    const title = el.querySelector<HTMLButtonElement>('button.view-title')
+    title?.focus()
+    expect(document.activeElement).toBe(title)
+
+    pickBinding(el, bindingKey('lambda', SCRATCH))
+
+    expect(document.activeElement).not.toBe(document.body)
+    expect(document.activeElement).toBe(el.querySelector('button.view-title'))
+  })
+
+  // The title sits on the per-frame path (`draw()` repaints every view on every recorded frame
+  // during playback), so a repeat render must not rebuild the heading — rebuilding it takes the menu
+  // out of the DOM, which closes it under a user in the middle of choosing. Asserted on the open menu
+  // and by identity, which is the only thing that distinguishes "left alone" from "replaced with an
+  // equal one".
+  it('does not rebuild when nothing changed, so an open menu survives a frame', () => {
+    const reg = new SessionRegistry()
+    reg.add(lambdaSession(SOURCE, 'program', 'a', false))
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
 
     const el = host()
@@ -310,11 +372,14 @@ describe('the binding selector', () => {
     )
 
     paint(reg, slot, pane)
-    const first = selector(el)?.options[0]
+    titleOf(el)?.click()
+    const first = menuOf(el)?.querySelector('button')
     paint(reg, slot, pane)
     paint(reg, slot, pane)
-    expect(selector(el)?.options.length).toBe(2)
-    expect(selector(el)?.options[0]).toBe(first)
+    expect(menuOf(el)?.matches(':popover-open')).toBe(true)
+    expect(menuOf(el)?.querySelectorAll('button').length).toBe(2)
+    expect(menuOf(el)?.querySelector('button')).toBe(first)
+    menuOf(el)?.hidePopover()
   })
 
   /**
@@ -327,14 +392,13 @@ describe('the binding selector', () => {
    * `(tm, λ scratchpad)` would be an option that crashes the next render — the reason design §3.2's
    * axes are not independent and the reason this is one control rather than two.
    *
-   * READ THROUGH `<optgroup>` RATHER THAN THROUGH `select.options`, because `options` flattens the
-   * groups away and the grouping is half of what is under test. The λ group comes first because
-   * `SessionRegistry.pairs()` walks `LEGS` in that order, which is a value rather than a key walk for
-   * exactly this reason.
+   * READ AS THE MENU'S ITEMS IN ORDER — the grouping is the order now, the `<optgroup>`s having gone with
+   * the `<select>`. The λ pairs come first because `SessionRegistry.pairs()` walks `LEGS` in that order,
+   * which is a value rather than a key walk for exactly this reason.
    */
   it('lists both legs, grouped, and omits a pair the session has no leg for', () => {
     const reg = new SessionRegistry()
-    reg.add(bothLegs(SOURCE, 'source', 'a'))
+    reg.add(bothLegs(SOURCE, 'program', 'a'))
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
 
     const el = host()
@@ -345,12 +409,9 @@ describe('the binding selector', () => {
     )
     paint(reg, slot, pane)
 
-    const select = selector(el)
-    expect(select).not.toBeNull()
-    const groups = [...(select?.querySelectorAll('optgroup') ?? [])].map((g) => g.label)
-    expect(groups).toEqual(['λ', 'TM'])
-    const tmOptions = [...(select?.querySelectorAll('optgroup:nth-of-type(2) option') ?? [])].map((o) => o.textContent)
+    const keys = offered(el).map(([key]) => key)
+    expect(keys).toEqual([bindingKey('lambda', SOURCE), bindingKey('lambda', SCRATCH), bindingKey('tm', SOURCE)])
     // The scratch has no TM leg, so the pair is not in the list at all.
-    expect(tmOptions).toEqual(['source'])
+    expect(keys.filter((k) => k.startsWith('tm:'))).toEqual([bindingKey('tm', SOURCE)])
   })
 })

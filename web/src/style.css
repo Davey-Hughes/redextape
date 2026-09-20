@@ -12,8 +12,8 @@
    THE STYLE IS THIS FILE. The non-colour tokens here are Instrument's; the `[data-style]` blocks below
    override them for Paper and Terminal. A style never sets a colour and a palette never sets a font. */
 :root {
-  /* Not just a UA-drawn-widget hint anymore — the encoding `<select>` and each pane's binding
-     selector (`.pane-binding` below) are the widgets `prefers-color-scheme` cannot reach inside, and
+  /* Not just a UA-drawn-widget hint anymore — the encoding `<select>` is the widget
+     `prefers-color-scheme` cannot reach inside, and
      this is still what keeps a dark page from getting a light dropdown, but every token below now
      resolves AGAINST this property via
      `light-dark()`. It is the one switch: `system` (this default, tracking the OS), an explicit
@@ -132,9 +132,9 @@
    every pane beneath it did too — not shrunk to 12px like the `align-items: start` defect this task was
    told to look for, but to nothing, invisibly, because nothing on screen or in a test ever measured it.
 
-   `min-height: 100vh`, NOT `height: 100vh`. A fixed `height` would clip `#results` (`min-height: 12rem`,
-   no maximum — a long run's output can exceed one screen) against `overflow` neither this rule nor any
-   other sets; `min-height` gives `<main>`'s flex-grow a REAL number to distribute into on an ordinary
+   `min-height: 100vh`, NOT `height: 100vh`. A fixed `height` would clip the strip (`#results` wraps,
+   with no maximum) against `overflow` neither this rule nor any other sets; `min-height` gives `<main>`'s
+   flex-grow a REAL number to distribute into on an ordinary
    page (the common case, where the header, the tree and a modest results panel together fall short of
    the viewport) while letting the page grow past 100vh and scroll, exactly as it already did before this
    task, whenever `#results` is tall enough to want that. This is the standard full-height-shell pattern
@@ -151,8 +151,8 @@ body {
 
 .bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--rule);
@@ -172,23 +172,80 @@ body {
   gap: var(--space-2);
 }
 
-/* Same treatment as `.controls button` below — one control in the header bar, not a new style. */
-#appearance {
+.bar-spacer {
+  flex: 1 1 auto;
+}
+/* THE HEADER'S BUTTONS: `#appearance`'s chrome, shared, so the header reads as one row of controls — and not
+   the browser's default dark button, which part 1's roadmap entry recorded the header wearing. */
+#workspace,
+#new-view,
+#buffers,
+#appearance,
+#settings {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
   font: inherit;
-  font-family: var(--font-mono);
   padding: 0.15em 0.6em;
   border-radius: var(--radius);
   border: 1px solid var(--fg-dim);
   background: transparent;
   color: inherit;
   cursor: pointer;
+  white-space: nowrap;
+}
+/* The header's menus, on the view menu's positioning — its comment has the argument. */
+.header-menu {
+  position-area: block-end span-inline-end;
+  position-try-fallbacks:
+    flip-block,
+    flip-inline,
+    flip-block flip-inline;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 0.25rem;
+  margin: 0;
+  min-width: 12rem;
+}
+@supports not (position-area: block-end) {
+  .header-menu {
+    margin: auto;
+  }
+}
+.header-menu > button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  padding: 0.25em 0.6em;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+/* **`:popover-open`, NOT THE BARE CLASS — A CLOSED POPOVER IS HIDDEN BY A UA RULE AN AUTHOR RULE BEATS.**
+   `[popover]:not(:popover-open) { display: none }` comes from the user-agent stylesheet, and any author
+   `display` wins over it whatever its specificity. Written as `.header-menu.settings { display: grid }`,
+   this menu therefore painted over the header and the source view at all times, open or shut — found by
+   looking at the running app, because `:popover-open` is false for it either way and no test reads the
+   computed display of a closed menu. Every other menu here sets no `display` at all, which is why this is
+   the only one that did it. */
+.header-menu.settings {
+  position-area: block-end span-inline-start;
+  padding: var(--space-2) var(--space-3);
+}
+.header-menu.settings:popover-open {
+  display: grid;
+  gap: var(--space-2);
 }
 
 /* Same treatment as `.controls button` — chrome, not a new visual language.
 
-   `.buffer-retire` SHARES THIS RULE RATHER THAN RESTATING IT, AND THAT IS A CORRECTION. It was its own
+   `.buffer-delete` SHARES THIS RULE RATHER THAN RESTATING IT, AND THAT IS A CORRECTION. It was its own
    block beside `.buffer-list`, identical declaration for declaration, under a comment claiming "the same
-   treatment as `.layout-control` and `#appearance`" — and those two differ in padding (0.1em/0.45em
+   treatment as `.layout-control` and `#appearance`" (the split and close controls, before the view menu) — and those two differ in padding (0.1em/0.45em
    here, 0.15em/0.6em there), so the claim was true of one and false of the other while the copy silently
    picked this one. A shared selector cannot disagree with itself, which is the whole of the fix.
 
@@ -200,9 +257,10 @@ body {
    Finding 2. `buffer-list.ts`'s temperature button shipped with no class at all, so nothing in this file
    matched it and it rendered as a native grey sans-serif button beside a monospace bordered one in the
    same row; adding it to THIS selector rather than writing a fourth block is the same reasoning that put
-   `.buffer-retire` here — one declaration, not a second copy to drift out of step with it. */
-.layout-control,
-.buffer-retire,
+   `.buffer-delete` here — one declaration, not a second copy to drift out of step with it. */
+.view-more,
+.view-close,
+.buffer-delete,
 .buffer-temperature,
 .panel-actions button {
   font: inherit;
@@ -218,38 +276,39 @@ body {
 .pane {
   overflow: auto;
 }
-.results {
+/* THE STRIP (spec §9): the readout and the link sentence on one line along the bottom of the workspace. */
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-3);
   border-top: 1px solid var(--rule);
   background: var(--bg-raised);
-  padding: var(--space-3);
   font-family: var(--font-mono);
-  min-height: 12rem;
+  font-size: var(--step--1);
 }
-
-.results[data-state="running"] {
+.results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
+}
+/* DIMMED WHILE THE PROGRAM IS COMPILING, AND ONLY WHILE THE STRIP IS DESCRIBING THE PROGRAM. The
+   attribute is the program's compile state wherever the readout has moved to (spec §9), so without the
+   second half a copy's readout greyed out for a compile that had nothing to do with it. */
+.results[data-state="running"][data-describes="program"] {
   opacity: 0.55;
 }
-
-.row {
-  display: grid;
-  grid-template-columns: 4rem 7rem 1fr;
-  gap: var(--space-2);
-  padding: var(--space-1) 0;
-}
-.row .leg {
-  color: var(--accent);
-  font-weight: 600;
-}
-.row .label {
-  color: var(--fg-dim);
-}
-.row .value {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.note {
-  color: var(--fg-dim);
-  font-style: italic;
+/* ONE LINE, AND A SEGMENT TOO LONG FOR IT IS CUT RATHER THAN ALLOWED TO WIDEN THE PAGE — `λ declined —
+   <reason>` and the stop reasons run long. The whole text is in each segment's own `title` (`readout.ts`),
+   which is what makes the ellipsis honest. */
+.results .segment {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* The source range a backend's refusal names — `sourceSpan(status.node)`, resolved in the worker. */
@@ -354,73 +413,116 @@ body {
   text-transform: var(--label-transform);
   letter-spacing: var(--label-tracking);
   color: var(--fg-dim);
-  margin: 0 0 var(--space-2);
 }
 
-/* `[detached]` — design §4.5's second surface, on the pane's own title.
-
-   NOT COLOUR-ONLY, AND THAT IS THE RULE'S WHOLE CONSTRAINT rather than a preference. §4.5 rejected a
-   whole-pane visual treatment because hue was then the sole discriminator for FIVE states
-   (accessibility item 7 and its two aggravations) and this slice's §6 forbids adding a sixth. So the
-   carriers here are the bracketed TEXT itself (`pane-chrome.ts` writes the brackets, and they survive
-   this rule never reaching the page at all), a BORDER, and a MONOSPACE face against the title's UI
-   font — except under Terminal, whose UI font is monospace too. `color` below is `--fg`, one step up
-   from the `--fg-dim` the heading inherits — a contrast nudge on top of the non-colour signals, not one
-   of them.
-
-   `tests/browser/detached-badge.test.ts` asserts the border computes to a non-zero width, so reducing
-   this to `color:` alone fails a test rather than quietly shipping the thing §4.5 ruled out.
-
-   `letter-spacing: normal` UNDOES `.pane h2`'s `--label-tracking`, which is tracking for a label and
-   pushes the closing bracket a visible gap away from the word inside it. */
-.detached-badge {
-  margin-inline-start: var(--space-2);
+/* A VIEW'S HEADER — Plan 7 part 2 spec §7: title, status, step controls, actions, on one line that wraps
+   rather than overflowing a narrow view. The step controls take the middle and the actions the end. */
+.view-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.view-header .view-title-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+.view-steps {
+  flex: 1 1 auto;
+}
+.view-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-inline-start: auto;
+}
+/* THE TITLE IS A BUTTON THAT READS AS A HEADING. It keeps `.pane h2`'s voice — size, case, tracking — and
+   gains the chrome border only on hover and focus, so a row of views reads as titled regions rather than as
+   a row of controls, while the caret says it opens. */
+/* **THE TITLE IS A NAME, SO IT IS NOT UPPERCASED.** `.pane h2` carries the style's `--label-transform`,
+   which is right for a label — the title read `lambda` and showed `LAMBDA`. It reads `λ · program` now,
+   and uppercasing that gives `Λ · PROGRAM`: a different letter, and in this app a different thing. The
+   rest of the heading's voice — size, tracking, colour — is unchanged. */
+.view-title {
+  font: inherit;
+  color: var(--fg);
+  letter-spacing: inherit;
+  text-transform: none;
+}
+button.view-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.05em 0.35em;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  cursor: pointer;
+}
+button.view-title:hover,
+button.view-title[aria-expanded="true"] {
+  border-color: var(--fg-dim);
+}
+.view-title-caret {
+  rotate: 90deg;
+}
+/* `copy · not linked` — the `[detached]` badge's successor, and its rule: NOT COLOUR-ONLY. A border and the
+   monospace face carry it; `tests/browser/view-status.test.ts` asserts the border computes to a non-zero
+   width, so reducing this to `color:` alone fails a test. */
+.view-status {
   padding: 0 0.35em;
   border: 1px solid currentColor;
   border-radius: var(--radius);
   font-family: var(--font-mono);
   font-size: var(--step--2);
   letter-spacing: normal;
+  text-transform: none;
   color: var(--fg);
 }
+/* The title's menu, on the view menu's positioning — `.view-menu`'s comment has the argument for every
+   declaration this SHARES with it: the implicit anchor, `position-try-fallbacks` as the viewport edge,
+   `--rule`/`--bg` as tokens the page already uses, and why `margin: 0` needs the `@supports` fallback
+   beside it.
 
-/* The binding selector — which session this pane's slot is showing (design §2 decision 1, plan T7).
-
-   NOTHING HERE CARRIES STATE IN COLOUR, which §6 requires of every control this slice adds and §4.5
-   argues at length: hue was then the sole discriminator for five states (accessibility item 7 and its
-   two aggravations), and the badge rule above went to non-colour carriers rather than add a sixth. This
-   control needs none, because it has no state to carry — which session is in force is the `<select>`'s
-   own value, which is text a screen reader reads out and a stylesheet cannot suppress.
-
-   THE SAME TREATMENT AS `.controls button` AND `#appearance`, deliberately: one control in a pane, not
-   a new style. The caption is `.pane h2`'s dimmed voice so the row reads as one line of chrome under
-   the heading rather than as a second heading.
-
-   IT IS ABSENT FROM THE DOM BELOW TWO PAIRS, AND THAT RULE NOW MATCHES ON EVERY PAGE — the opposite
-   of what this paragraph used to tell a reader. It said "IT IS ABSENT FROM THE DOM BELOW TWO SESSIONS,
-   so this rule usually matches nothing", which was true while the control listed sessions and a fresh
-   page had one. It lists `(leg, session)` PAIRS now, and the source session's two legs clear the
-   threshold on their own, so the styling below is what every pane wears from the first paint rather
-   than a rule that waits for a fork. What has not changed is the mechanism: `pane-chrome.ts`'s
-   `paneSelect` REMOVES the element rather than hiding it, and its doc says why. There is still nothing
-   here to make it disappear; do not add a `display: none` reading of that state. */
-.pane-binding {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: calc(-1 * var(--space-1)) 0 var(--space-2);
-  color: var(--fg-dim);
-  font-size: var(--step--2);
+   THE INLINE SIDE IS WHAT DIFFERS, AND IT IS MIRRORED RATHER THAN COPIED. `span-inline-end` opens this
+   menu rightward from the title, which sits at a view's LEFT edge; `.view-menu`'s `span-inline-start`
+   opens leftward from `⋯`, which sits at the right edge. Both open INTO the view, and taking either
+   rule's value for the other would send a menu out over the neighbouring view instead. */
+.view-title-menu {
+  position-area: block-end span-inline-end;
+  position-try-fallbacks:
+    flip-block,
+    flip-inline,
+    flip-block flip-inline;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  padding: 0.25rem;
+  margin: 0;
+  min-width: 12rem;
 }
-.pane-binding select {
+@supports not (position-area: block-end) {
+  .view-title-menu {
+    margin: auto;
+  }
+}
+.view-title-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
   font: inherit;
   font-family: var(--font-mono);
-  padding: 0.1em 0.4em;
+  padding: 0.15em 0.6em;
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  border: 1px solid var(--fg-dim);
   background: transparent;
-  color: var(--fg);
+  color: inherit;
   cursor: pointer;
+}
+.view-title-menu button[aria-current="true"] {
+  border-color: var(--fg-dim);
 }
 
 .term {
@@ -527,24 +629,44 @@ body {
   font-size: var(--step--2);
   color: var(--fg-dim);
 }
+.controls .play {
+  display: inline-flex;
+  align-items: center;
+}
+.controls .speed {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  padding: 0.1em 0.3em;
+  border-radius: var(--radius);
+  border: 1px solid var(--fg-dim);
+  background: transparent;
+  color: var(--fg);
+}
+/* In a view's header the strip is on the title's line, so it loses `.controls`' own top margin. AFTER
+   `.controls` rather than beside `.view-steps`, for Biome's `noDescendingSpecificity`. */
+.view-steps .controls {
+  margin-top: 0;
+}
 
-/* The split picker's menu (`pane-chrome.ts`'s `splitControl`). AFTER `.controls button` ABOVE AND NOT
-   BEFORE IT, which is load-bearing rather than tidy: the menu is appended into the `.controls` strip,
-   so every item inside it is already a `.controls button` and inherits that rule's padding, border and
-   radius. `.pane-picker button` has the SAME specificity (0,2,0), so source order is the only thing
-   deciding which of the two sets the layout — a menu of rows rather than a row of buttons needs these
-   three declarations to win.
+.view-more,
+.view-close {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2em 0.35em;
+}
+/* A view's `⋯` menu (`view-header.ts`'s `viewMenu`) — Plan 7 part 2 spec §7.
 
    NOTHING HERE IS A NEW COLOUR, which §6 requires of every control this slice adds: `--rule` and
    `--bg` are tokens the results pane and the page background already use. A native `popover` sits in
    the top layer, so it needs no z-index of its own to clear the dividers `layout-view.ts` draws
-   between panes — that is one of the two reasons `splitControl` is built on the attribute rather than
+   between panes — that is one of the two reasons `viewMenu` is built on the attribute rather than
    on a hand-rolled dropdown, and the absence of a rule for it here is what that decision looks like
    from the stylesheet's side.
 
    **`position-area` IS NOT DECORATION — WITHOUT IT THIS MENU OPENS IN THE TOP-LEFT CORNER OF THE
    VIEWPORT, and that was measured rather than reasoned about.** The measurement is live, not a
-   memory: `tests/browser/pane-layout-controls.test.ts` positions the control away from the origin,
+   memory: `tests/browser/view-menu.test.ts` positions the control away from the origin,
    loads THIS stylesheet into the tester page, and asserts with `getBoundingClientRect` that the menu
    sits under its own button and nowhere near the corner. Delete this rule and that test fails.
    (It was originally evidenced by a before/after screenshot pair in an untracked working note, which
@@ -556,21 +678,23 @@ body {
 
    THE ANCHOR IS THE BUTTON, AND IT IS IMPLICIT RATHER THAN NAMED. A popover shown by an invoker gets
    that invoker as its implicit anchor element, which `position-area` resolves against with no
-   `anchor-name` to mint and keep unique per pane — `splitControl` sets `popoverTargetElement` and this
-   rule is the whole of the positioning. Each split control therefore anchors to ITS OWN button, which
-   is the requirement one shared anchor would break: `split →` and `split ↓` sit side by side, so a
-   menu anchored to the strip would put both in one place and the second would cover the first.
+   `anchor-name` to mint and keep unique per view — `viewMenu` sets `popoverTargetElement` and this
+   rule is the whole of the positioning. Each `⋯` therefore anchors to ITS OWN button, which is the
+   requirement one shared anchor would break: `⋯` on neighbouring views sit side by side, so a menu
+   anchored to their container would put both in one place and the second would cover the first.
+
+   `span-inline-start`: the menu opens leftward from `⋯`, which sits at a view's right edge.
 
    `position-try-fallbacks` IS THE VIEWPORT EDGE. A pane at the bottom of the window has no room below
    its control strip, and a top-layer element cannot be scrolled to — the document's own scrollbars do
    not reach it — so a menu that only ever opened downward would be unreachable rather than merely
    awkward. `flip-block` opens it above the button instead, `flip-inline` answers the right edge, and
    the pair answers the bottom-right corner where both apply. The tactics flip the margins along with
-   the position, so nothing here is restated per side. `pane-layout-controls.test.ts`'s "where the split
-   picker opens" measures all three claims — beside its own button, one place per control, and above the
-   button at the bottom edge. */
-.pane-picker {
-  position-area: block-end span-inline-end;
+   the position, so nothing here is restated per side. `view-menu.test.ts`'s "where the view menu opens"
+   measures all three claims — beside its own button, one place per menu, and above the button at the
+   bottom edge. */
+.view-menu {
+  position-area: block-end span-inline-start;
   position-try-fallbacks:
     flip-block,
     flip-inline,
@@ -579,7 +703,7 @@ body {
   background: var(--bg);
   padding: 0.25rem;
   margin: 0;
-  min-width: 12rem;
+  min-width: 14rem;
 }
 /* WITHOUT ANCHOR POSITIONING, GIVE THE MARGIN BACK — because `margin: 0` above is the half of the rule
    that does harm on its own. The block above is two declarations that only work together: a UA without
@@ -602,18 +726,39 @@ body {
    (Both this sentence and the one on `.buffer-list`'s copy below priced it at "four lines" for a block
    that is five; the count was never the argument, so it is gone rather than corrected.) */
 @supports not (position-area: block-end) {
-  .pane-picker {
+  .view-menu {
     margin: auto;
   }
 }
-
-.pane-picker button {
-  display: block;
+.view-menu button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.5em;
+  align-items: center;
   width: 100%;
   text-align: left;
+  font: inherit;
+  padding: 0.25em 0.6em;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.view-menu button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.view-menu .view-menu-label {
+  grid-column: 2;
+}
+.view-menu .view-menu-hint {
+  grid-column: 2;
+  font-size: var(--step--2);
+  color: var(--fg-dim);
 }
 
-/* THE HEADER'S BUFFER LIST, ON THE SAME TWO POSITIONING DECLARATIONS AS `.pane-picker` ABOVE — and
+/* THE HEADER'S BUFFER LIST, ON THE SAME TWO POSITIONING DECLARATIONS AS `.view-menu` ABOVE — and
    the argument for them is up there rather than restated here: without `position-area` this list opens
    in the TOP-LEFT CORNER OF THE VIEWPORT, because `margin: 0` is what leaves the UA's `inset: 0`
    over-constrained against a definite width. The anchor is `buffer-list.ts`'s button and it is
@@ -622,14 +767,14 @@ body {
    measures it, from a fixture that moves the header off the origin — the real bar sits at the top-left
    of the page, where a corner-pinned list and a correct one are too close to tell apart.
 
-   IT DOES NOT SHARE A SELECTOR WITH `.pane-picker`, DELIBERATELY. `.pane-picker button` above is
-   `display: block; width: 100%`, which is right for a menu whose entries ARE the choices and wrong for
+   IT DOES NOT SHARE A SELECTOR WITH `.view-menu`, DELIBERATELY. `.view-menu button` above is
+   a full-width grid, which is right for a menu whose entries ARE the choices and wrong for
    a row whose retire control sits beside its text — a shared rule would have to be undone here, which
    is longer than stating both. The width is wider for the same reason: a row carries a name, a pane
    count and a control rather than one label.
 
    NOTHING HERE IS A NEW COLOUR, which §6 requires of every control this slice adds: `--rule` and
-   `--bg` are the tokens `.pane-picker` already uses, and `.buffer-retire` shares `.layout-control`'s own
+   `--bg` are the tokens `.view-menu` already uses, and `.buffer-delete` shares `.view-more`'s own
    rule ABOVE rather than restating it — this sentence used to say "takes the same chrome `.layout-control`
    and `#appearance` take", naming two rules that differ in padding. A native popover is in the top layer,
    so it needs no z-index to clear the header's border or the panes below it. */
@@ -661,7 +806,7 @@ body {
   min-width: min(26rem, 90vw);
   max-width: min(40rem, 90vw);
 }
-/* WITHOUT ANCHOR POSITIONING, GIVE THE MARGIN BACK — `.pane-picker`'s `@supports` block above states
+/* WITHOUT ANCHOR POSITIONING, GIVE THE MARGIN BACK — `.view-menu`'s `@supports` block above states
    this in full, including why the test is written `not (position-area: block-end)` rather than against
    a feature name, and why a branch that cannot fire in a Chromium-only browser tier is still worth
    writing. The same two declarations fail the same way, so they take the same fallback. */
@@ -726,7 +871,7 @@ body {
    `.buffer-temperature` GETS THE SAME RULE FOR THE SAME REASON (5d-ii-d review, Finding 2): it shipped
    with no class and so no rule at all, which reintroduced exactly this failure — a control that shrinks
    under a long term is subject to the bug this comment already documents, just on the newer button. */
-.buffer-retire,
+.buffer-delete,
 .buffer-temperature {
   flex: none;
 }
@@ -964,6 +1109,11 @@ body {
   font-size: 0.85em;
   color: var(--fg-dim);
 }
+/* In the strip (spec §9), at its right end — after the base rule, which it narrows. */
+.strip .link-status {
+  margin-inline-start: auto;
+  padding: 0;
+}
 
 /* The linked subterm inside the λ window. Layered over the token colour rather than replacing it —
    the class is added alongside `.tok-*`, so the text keeps its syntax colour and gains a ground. */
@@ -1051,4 +1201,39 @@ main {
    outside it would sit on top of both. The colour and width are the global rule's. */
 .layout-divider:focus-visible {
   outline-offset: -2px;
+}
+
+/* THE NOTICE LINE (spec §11): one line under the header, the latest notice and at most one action. */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-raised);
+  font-size: var(--step--1);
+}
+.notice[hidden] {
+  display: none;
+}
+.notice-action {
+  font: inherit;
+  padding: 0 0.5em;
+  border: 1px solid var(--fg-dim);
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+/* Present to a screen reader, absent from the page — the standard clip pattern. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }

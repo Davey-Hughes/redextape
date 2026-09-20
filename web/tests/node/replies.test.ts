@@ -48,10 +48,10 @@ import type { Diagnostic, LambdaState, TmProgram, TmScratchStatus, TmState } fro
  * for real rather than casting it away. The two harnesses are separate on purpose: `driver`'s
  * `undefined` is an assertion about which arms may touch what, and reusing it would spend that.
  *
- * **THE CLEARING ARMS ARE NOT HERE, AND THE REASON IS THAT SAME MISSING DOCUMENT.** `no-session` and
- * `worker-error` clear the retention exactly as they clear every TM pane on the session, and both start
- * by writing into `#results` — `renderRows` and `showWorkerError` each call `document.createElement`, so
- * neither arm can be entered at all in this tier. `tests/browser/pane-picker.test.ts` drives the failed
+ * **THE CLEARING ARMS ARE NOT HERE, AND THE REASON IS THAT SAME MISSING `#results`.** `no-session` and
+ * `worker-error` clear the retention exactly as they clear every TM pane on the session, and both open by
+ * writing `results.dataset.state` — `results` is the `undefined` behind a cast named above, so neither arm
+ * can be entered at all in this tier. `tests/browser/pane-picker.test.ts` drives the failed
  * compile through the real app and asserts what it is for: a TM pane created after it is as empty as the
  * panes already on screen.
  */
@@ -68,7 +68,7 @@ function fakeClient(): SessionClient {
 }
 
 function leg<T>(): LegState<T> {
-  return { hist: new History<T>(1_000_000), status: { available: false, reason: '' }, done: null, timer: null }
+  return { hist: new History<T>(1_000_000), status: { available: false, reason: '' }, done: null, playing: false }
 }
 
 /** A session with both legs and nothing compiled yet, exactly as `main.ts` registers the source one. */
@@ -115,12 +115,14 @@ function driver(entry: SessionEntry) {
   const view = { dispatch: (t: unknown) => dispatched.push(t) } as unknown as EditorView
   const links = { setIndex: (i: unknown) => indexed.push(i) } as unknown as LinkWiring
   const replies = createReplies({
+    setProgram: () => undefined,
     sessions: reg,
     scratchpad: undefined as unknown as ScratchBuffers,
     results: undefined as unknown as HTMLElement,
     view: () => view,
     panes: new PaneCollection(),
     links,
+    notify: () => undefined,
     draw: () => {
       drawn += 1
     },
@@ -229,8 +231,8 @@ const noSession = (diagnostics: Diagnostic[]): RunReply => ({ kind: 'no-session'
  * everything except the thread is the app's own object, which is what makes "the buffer is still
  * listed" a claim about `ScratchBuffers` rather than about a stub that agreed to say so.
  *
- * `links` RECORDS `setForkFailed` BECAUSE THAT IS WHERE THE DIAGNOSTICS SURFACE on the path where no
- * editor was ever mounted (`link-status.ts`'s `forkFailed`). `results` and `view` stay `undefined`
+ * `notify` RECORDS WHAT IS SAID BECAUSE A NOTICE IS WHERE THE DIAGNOSTICS SURFACE on the path where no
+ * editor was ever mounted (`notice.ts`'s `createNotices`). `results` and `view` stay `undefined`
  * behind a cast for the reason the file's doc gives — this arm reaches neither, and an arm that starts
  * to should say so loudly.
  *
@@ -253,7 +255,7 @@ function scratchDriver() {
     },
     () => {},
   )
-  let forkFailed: string | null = null
+  const notified: string[] = []
   // COUNTED RATHER THAN STUBBED OUT, because the text of record and the write of it are two claims:
   // `setText` puts a term in memory and only this callback puts it where a reload can find it, and the
   // arm below can satisfy the first while dropping the second (5d-ii-d T5).
@@ -264,11 +266,7 @@ function scratchDriver() {
     historyBytes: 1_000_000,
     onReply: () => undefined,
   })
-  const links = {
-    setForkFailed: (reason: string | null) => {
-      forkFailed = reason
-    },
-  } as unknown as LinkWiring
+  const links = {} as unknown as LinkWiring
   const gutter: Diagnostic[][] = []
   const slot = new PaneSlot('lambda', SOURCE)
   const panes = new PaneCollection()
@@ -286,6 +284,7 @@ function scratchDriver() {
     host: {} as HTMLElement,
   })
   const replies = createReplies({
+    setProgram: () => undefined,
     sessions: reg,
     scratchpad: buffers,
     results: undefined as unknown as HTMLElement,
@@ -296,6 +295,9 @@ function scratchDriver() {
     editorHome: () => undefined,
     onBuffersPersist: () => {
       persists += 1
+    },
+    notify: (t: string) => {
+      notified.push(t)
     },
   })
   // THE MOST RECENT PORT'S MOST RECENT `lambda-scratch` REQUEST — `scratch.test.ts`'s `harness()`
@@ -313,7 +315,7 @@ function scratchDriver() {
     replies,
     slot,
     gutter,
-    forkFailed: () => forkFailed,
+    notified: () => notified,
     lastScratchPost,
     persists: () => persists,
   }
@@ -340,10 +342,10 @@ const lambdaFrame = (text: string): LambdaState => ({
  * implicitly, and a build that failed is not a user asking for the buffer to end.
  *
  * **WHAT THAT COSTS, SAID HERE RATHER THAN ONLY IN A PLAN.** The retire was also what put the pane back
- * on the source session and so made `✎ fork` offerable again (design §4.1a's promised remedy). It is
+ * on the source session and so made `✎ edit a copy` offerable again (design §4.1a's promised remedy). It is
  * not offerable now: the pane stays on a buffer that will never produce a frame, reading `building…`,
  * until the user retires it from the header list (design §4.2/§4.4), which is wired and is where that
- * gesture lives. Retiring rebinds the pane to source and `✎ fork` comes back with the binding. That gap
+ * gesture lives. Retiring rebinds the pane to source and `✎ edit a copy` comes back with the binding. That gap
  * is the same one `compile.ts`'s `schedule` records for the recompile path, widened — and the escape is
  * the same escape, moved from a keystroke nobody aimed to a control they do.
  */
@@ -387,23 +389,49 @@ describe('a poisoned buffer survives its own no-session reply', () => {
   })
 
   /**
-   * **THE DIAGNOSTICS STILL SURFACE, WHICH IS THE HALF THAT DID NOT CHANGE.** `#link-status` is the
-   * surface for this path because no editor was ever mounted to hold a gutter: `scratch-compiled` never
+   * **THE DIAGNOSTICS STILL SURFACE, WHICH IS THE HALF THAT DID NOT CHANGE.** A notice (`notice.ts`) is
+   * the surface for this path because no editor was ever mounted to hold a gutter: `scratch-compiled` never
    * fired for a build that never succeeded, so `LambdaPane.setDiagnostics` is a silent no-op. That
    * argument used to end "…and the retire has just moved the pane anyway"; the rebind is gone and the
    * no-editor half is what carries it now, unchanged.
    */
-  it('reports the reason on the fork-failed surface', () => {
-    const { buffers, replies, slot, gutter, forkFailed } = scratchDriver()
+  it('reports the reason in a notice, since no editor was ever mounted to hold a gutter', () => {
+    const { buffers, replies, slot, gutter, notified } = scratchDriver()
     const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
 
     replies.onScratchReply(id, noSession([DIAGNOSTIC]))
 
-    expect(forkFailed()).toContain('unexpected `(`')
+    expect(notified().join(' ')).toContain('unexpected `(`')
     // AND NOT INTO THE PANE, which is the branch's other half: there is no editor behind
     // `setDiagnostics` on a build that never reached `scratch-compiled`, so routing it there is the
-    // silent no-op `#link-status` exists to replace.
+    // silent no-op the notice exists to replace.
     expect(gutter).toEqual([])
+  })
+
+  /**
+   * **A COPY'S THREAD THREW, AND THE PROGRAM'S READOUT IS NOT WHERE THAT GOES — Plan 7 part 2 spec §9,
+   * §13, and the pre-flight build's finding 9.5.** This arm used to render into `#results`, which was
+   * one surface for the whole app; the strip reads the FOCUSED view's session now, so a copy's failure
+   * stored as the program's result would replace a program result that is still valid and then show up
+   * only while the program is focused — nowhere at all while the copy's own view is on screen. It is a
+   * notice that names the copy, and the copy's own leg carries the reason its readout reads.
+   *
+   * **DRIVABLE IN THIS TIER ONLY SINCE THAT CHANGE.** The arm's `document.createElement` went with
+   * `showWorkerError`; the file's own `scratchDriver` doc records why a `document` in an arm makes it
+   * unreachable here.
+   */
+  it('says a copy stopped, by name, and leaves the program alone', () => {
+    const { reg, buffers, replies, slot, notified } = scratchDriver()
+    const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
+
+    replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'RuntimeError: unreachable' })
+
+    expect(notified()).toEqual(['λ copy 1 stopped — RuntimeError: unreachable'])
+    // THE COPY'S OWN LEG CARRIES WHAT ITS READOUT SAYS, and its frames are gone rather than left under
+    // a message saying the thread broke.
+    const leg = reg.legOf({ session: id, leg: 'lambda' })
+    expect(leg.status).toEqual({ available: false, reason: 'the copy failed' })
+    expect(leg.hist.length).toBe(0)
   })
 
   /**
@@ -414,13 +442,13 @@ describe('a poisoned buffer survives its own no-session reply', () => {
    * assertion above would still pass.
    */
   it('does not report a mid-edit parse failure as a failed fork', () => {
-    const { reg, buffers, replies, slot, gutter, forkFailed } = scratchDriver()
+    const { reg, buffers, replies, slot, gutter, notified } = scratchDriver()
     const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
     reg.legOf({ session: id, leg: 'lambda' }).hist.push(lambdaFrame('λx. x'), 1)
 
     replies.onScratchReply(id, noSession([DIAGNOSTIC]))
 
-    expect(forkFailed()).toBeNull()
+    expect(notified()).toEqual([])
     expect(gutter).toEqual([[DIAGNOSTIC]])
     expect(buffers.list().map((b) => b.id)).toContain(id)
   })

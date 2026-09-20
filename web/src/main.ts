@@ -3,7 +3,15 @@ import { lintGutter } from '@codemirror/lint'
 import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import init, { analyze, classifySource, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
-import { APPEARANCE_LABEL, applyAppearance, nextAppearance, readStored, STORAGE_KEY } from './appearance'
+import { addViewItems, presetName, wireMenu } from './app-header'
+import {
+  APPEARANCE_LABEL,
+  type Appearance,
+  applyAppearance,
+  nextAppearance,
+  readStored,
+  STORAGE_KEY,
+} from './appearance'
 import { showBanner } from './banner'
 import { bufferList } from './buffer-list'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from './buffers-store'
@@ -12,25 +20,20 @@ import { createDraw } from './draw'
 import { createEditorCustody } from './editor-custody'
 import { declineMark, focusMark, highlighting, linkMark, setSpans } from './highlight'
 import { History } from './history'
+import { icon } from './icons'
 import type { LambdaPane } from './lambda-pane'
-import {
-  closeLeaf,
-  defaultLayout,
-  LAYOUT_STORAGE_KEY,
-  type LayoutNode,
-  leaves,
-  parseLayout,
-  SOURCE_LEAF,
-} from './layout'
+import { closeLeaf, defaultLayout, LAYOUT_STORAGE_KEY, type LayoutNode, leaves, SOURCE_LEAF } from './layout'
 import { createLinkWiring, type LinkWiring } from './link-wiring'
 import { lintFromAnalyze } from './lint'
-import { layoutControls } from './pane-chrome'
-import { createPaneHost } from './pane-host'
+import { createNotices } from './notice'
+import type { PaneChoice } from './pane-chrome'
+import { createPaneHost, type LayoutEvent } from './pane-host'
 import { type LeafId, PaneCollection } from './panes'
 import type { RunReply } from './protocol'
 import { HISTORY_BYTES } from './protocol'
+import { createReadout, type ProgramResult } from './readout'
 import { createReplies } from './replies'
-import { BufferCapReached, ScratchBuffers } from './scratch'
+import { BufferCapReached, type BufferRecord, MAX_WARM_BUFFERS, ScratchBuffers } from './scratch'
 import { type SessionId, SessionPool } from './session-client'
 import { SessionRegistry } from './sessions'
 import {
@@ -49,6 +52,18 @@ import type { TmPane } from './tm-pane'
 import { createTransport } from './transport'
 import type { Classified, Diagnostic, LambdaState, TmState } from './types'
 import { assertTokenClasses } from './types'
+import { pairLabel, sourceViewHeader, viewMenu } from './view-header'
+import {
+  defaultFocus,
+  defaultWorkspace,
+  PRESETS,
+  parseWorkspace,
+  presetOf,
+  type Speed,
+  serializeWorkspace,
+  type Workspace,
+  withPanel,
+} from './workspace'
 
 const SAMPLE = 'let x = 40; x + 2'
 
@@ -102,7 +117,7 @@ function seedLeafCounter(tree: LayoutNode): void {
  * than a fact, and a pane that can change leg is what falsifies it.
  *
  * `defaultLayout()`'s LITERAL `lambda-0` / `tm-0` ARE LEFT ALONE, for three reasons and none of them
- * is inertia: browser tests select on them, `reset layout`'s re-minting of exactly those ids is what
+ * is inertia: browser tests select on them, `reset preset`'s re-minting of exactly those ids is what
  * `applyLayout`'s claim-dropping line reasons about, and `seedLeafCounter` reads the digits after the
  * last `-` and does not care which word precedes them. `dataset.kind` is the truthful statement of
  * what a leaf renders.
@@ -131,24 +146,35 @@ async function main(): Promise<EditorView> {
   const linkStatusHost = document.querySelector<HTMLElement>('#link-status')
   const picker = document.querySelector<HTMLSelectElement>('#encoding')
   const appearanceButton = document.querySelector<HTMLButtonElement>('#appearance')
-  const restoreLayoutButton = document.querySelector<HTMLButtonElement>('#restore-layout')
+  const workspaceButton = document.querySelector<HTMLButtonElement>('#workspace')
+  const workspaceMenu = document.querySelector<HTMLElement>('#workspace-menu')
+  const resetPresetButton = document.querySelector<HTMLButtonElement>('#reset-preset')
+  const addViewButton = document.querySelector<HTMLButtonElement>('#new-view')
+  const addViewMenu = document.querySelector<HTMLElement>('#new-view-menu')
+  const settingsButton = document.querySelector<HTMLButtonElement>('#settings')
+  const settingsMenu = document.querySelector<HTMLElement>('#settings-menu')
+  const appearanceChoice = document.querySelector<HTMLSelectElement>('#appearance-choice')
   const styleSelect = document.querySelector<HTMLSelectElement>('#style')
   const paletteSelect = document.querySelector<HTMLSelectElement>('#palette')
   /**
-   * THE BUFFER LIST'S BUTTON — design §4.2's `[buffers 3 ▾]`, queried here exactly as `#appearance` and
-   * `#restore-layout` are, because `bufferList` takes a button rather than building one (its own doc).
+   * THE COPIES MENU'S BUTTON — spec §6's `copies N ▾`, queried here exactly as `#appearance` and
+   * `#reset-preset` are, because `bufferList` takes a button rather than building one (its own doc).
+   * The id stays `#buffers`: `buffer` is an internal name and spec §12 keeps those.
    *
    * **NO `aria-label`, WHERE `2026-08-13-plan5d-ii-c-scratch-buffers.md`'s MARKUP CARRIED
    * `aria-label="scratch buffers"`.** An `aria-label` REPLACES an element's contents as its accessible
-   * name, and the contents here are the readout: `bufferList.update` writes `buffers 3 ▾` into them
+   * name, and the contents here are the readout: `bufferList.update` writes `copies 3 ▾` into them
    * at every moment the count changes,
-   * precisely so the header states how many buffers exist while the list is closed. A label naming the
+   * precisely so the header states how many copies exist while the menu is closed. A label naming the
    * control and not the count would make that readout inaudible to the one reader who cannot see it —
-   * the opposite of what `#restore-layout`'s label does, which EXPANDS a terse visible word rather than
-   * hiding a number. `aria-haspopup`/`aria-expanded` (both `bufferList`'s) are what announce that it
+   * the opposite of what an icon-only button's label does (`view-header.ts`'s `⋯` and `✕`; umbrella §4
+   * rule 1), which SUPPLIES a name to a glyph that has none rather than hiding one the control is
+   * already stating. `aria-haspopup`/`aria-expanded` (both `bufferList`'s) are what announce that it
    * opens something.
    */
   const buffersButton = document.querySelector<HTMLButtonElement>('#buffers')
+  const noticeHost = document.querySelector<HTMLElement>('#notice')
+  const liveHost = document.querySelector<HTMLElement>('#live')
   const root = document.querySelector<HTMLElement>('main')
   if (
     !results ||
@@ -156,14 +182,29 @@ async function main(): Promise<EditorView> {
     !linkStatusHost ||
     !picker ||
     !appearanceButton ||
-    !restoreLayoutButton ||
+    !workspaceButton ||
+    !workspaceMenu ||
+    !resetPresetButton ||
+    !addViewButton ||
+    !addViewMenu ||
+    !settingsButton ||
+    !settingsMenu ||
+    !appearanceChoice ||
     !styleSelect ||
     !paletteSelect ||
     !buffersButton ||
+    !noticeHost ||
+    !liveHost ||
     !root
   ) {
     throw new Error('the page is missing a mount point')
   }
+
+  // THE NOTICE LINE AND THE LIVE REGION (Plan 7 part 2 spec §11) — built before `init()`, because it
+  // touches nothing but the DOM, so every refusal from here on has somewhere to go.
+  // THE FALLBACK IS THE COPIES BUTTON: the line's one action is *undo*, and a user whose undo went away
+  // — expired, or replaced by another gesture's notice — is looking at the copies it was about.
+  const notices = createNotices(noticeHost, liveHost, () => buffersButton)
 
   // Wired BEFORE `init()`, unlike everything below it. The toggle has nothing to do with wasm — it
   // reads and writes `localStorage` and flips an attribute on `<html>` — so it stays live even on the
@@ -190,19 +231,42 @@ async function main(): Promise<EditorView> {
   }
 
   let appearance = readStored(readAppearanceStorage())
-  const relabelAppearance = () => {
-    const { glyph, label } = APPEARANCE_LABEL[appearance]
-    appearanceButton.textContent = glyph
-    appearanceButton.setAttribute('aria-label', label)
+  // THE TOGGLE SHOWS ITS STATE IN A WORD, BESIDE THE GLYPH (Plan 7 part 2 spec §6) — the word is its
+  // accessible name, and `aria-label` is removed so the two cannot disagree. `☀`/`☾` are drawn (Hack lacks
+  // them); `◐` stays text.
+  const glyphFor = (a: Appearance): Node => {
+    if (a === 'light') return icon('sun')
+    if (a === 'dark') return icon('moon')
+    // **`◐` IS TEXT, SO IT HAS TO BE HIDDEN FROM THE NAME EXPLICITLY.** The two drawn glyphs are `icons.ts`
+    // SVGs, which carry `aria-hidden` of their own; a bare text node would join the word and make the
+    // button's accessible name `◐system`, which is the word plus a character no reader can say. The
+    // controls gate reads the name with `dom-accessibility-api`, which honours this.
+    const el = document.createElement('span')
+    el.setAttribute('aria-hidden', 'true')
+    el.textContent = APPEARANCE_LABEL[a].glyph
+    return el
   }
-  applyAppearance(document.documentElement, appearance)
-  relabelAppearance()
-  appearanceButton.addEventListener('click', () => {
-    appearance = nextAppearance(appearance)
+  const relabelAppearance = () => {
+    const { word, label } = APPEARANCE_LABEL[appearance]
+    appearanceButton.replaceChildren(glyphFor(appearance), document.createTextNode(word))
+    appearanceButton.title = label
+    appearanceButton.removeAttribute('aria-label')
+    appearanceChoice.value = appearance
+  }
+  for (const a of ['system', 'light', 'dark'] as const) appearanceChoice.append(new Option(APPEARANCE_LABEL[a].word, a))
+  const setAppearance = (next: Appearance): void => {
+    appearance = next
     applyAppearance(document.documentElement, appearance)
     writeAppearanceStorage(appearance)
     relabelAppearance()
-  })
+  }
+  applyAppearance(document.documentElement, appearance)
+  relabelAppearance()
+  appearanceButton.addEventListener('click', () => setAppearance(nextAppearance(appearance)))
+  appearanceChoice.addEventListener('change', () => setAppearance(readStored(appearanceChoice.value)))
+  // THE SETTINGS MENU, wired before `init()` with the toggle, for the toggle's own reason.
+  wireMenu(settingsButton, settingsMenu)
+  settingsButton.replaceChildren(icon('settings'), document.createTextNode('settings'))
 
   // THE STYLE AND PALETTE (Plan 7 part 1, spec §6), wired before `init()` for the appearance toggle's
   // reason: they touch nothing but storage and `<html>`, so they stay live on the startup-failure path.
@@ -292,9 +356,10 @@ async function main(): Promise<EditorView> {
   // and `SessionEntry.label`'s doc draws the line where it was always really drawn: a session is
   // named where it is CREATED, never in the registry that holds it.
   //
-  // THE LABEL IS STILL WHAT THE BINDING SELECTOR PUTS IN FRONT OF A USER, which is why a buffer's is
-  // words (`scratch 2`) rather than its id — `tests/browser/binding-selector.test.ts` asserts the
-  // options are told apart by their labels and not by colour or position.
+  // THE LABEL IS STILL WHAT THE TITLE-SELECTOR PUTS IN FRONT OF A USER, which is why a buffer's is
+  // words (`λ · copy 2`) rather than its id — `tests/browser/view-title.test.ts` asserts the
+  // pairs are told apart by their labels and not by colour or position. The program session's label is
+  // `program` (Plan 7 part 2 spec §12); its id stays `source`.
   //
   // A `//` BLOCK RATHER THAN `/** */`: it documents a declaration that is GONE, and a doc comment with
   // nothing under it is read as documenting whatever comes next — here `let draw`, which it says nothing
@@ -313,6 +378,13 @@ async function main(): Promise<EditorView> {
    */
   let draw: () => void
   let linkWiring: LinkWiring
+
+  /**
+   * THE PROGRAM'S LAST RESULT (Plan 7 part 2 spec §9) — stored by `replies.ts`'s `setProgram`, rendered by
+   * `draw()` into the strip's readout while the focused view shows the program.
+   */
+  let program: ProgramResult | null = null
+  const readout = createReadout(results)
 
   /**
    * ONE WORKER PER SESSION (design §4.2), AND THE ONLY THING HERE THAT MAY SPAWN OR TERMINATE ONE.
@@ -387,7 +459,7 @@ async function main(): Promise<EditorView> {
   // aims at.
   //
   // **THE SELECTOR IS ON SCREEN FROM THE FIRST PAINT, AND THAT REVERSES WHAT THIS COMMENT USED TO SAY.**
-  // `paneSelect` lists `(leg, session)` PAIRS, and this one entry has BOTH legs, so it contributes two pairs
+  // The title-selector lists `(leg, session)` PAIRS, and this one entry has BOTH legs, so it contributes two pairs
   // on its own and the control's "not shown below two options" threshold is crossed with nothing forked. Its
   // stated idiom is unchanged; what changed is what it counts — pairs now, where a control counting SESSIONS
   // had exactly one to offer until someone forked. See its doc.
@@ -412,7 +484,7 @@ async function main(): Promise<EditorView> {
   // For what this doc used to claim and why it changed, see the history note under `sessions.add`.
   sessions.add({
     id: SOURCE_SESSION,
-    label: 'source',
+    label: 'program',
     detached: false,
     client: pool.bind(SOURCE_SESSION, (reply: RunReply) => replies.onReply(SOURCE_SESSION, reply)),
     legs: {
@@ -420,13 +492,13 @@ async function main(): Promise<EditorView> {
         hist: new History<LambdaState>(HISTORY_BYTES),
         status: { available: false, reason: '' },
         done: null,
-        timer: null,
+        playing: false,
       },
       tm: {
         hist: new History<TmState>(HISTORY_BYTES),
         status: { available: false, reason: '' },
         done: null,
-        timer: null,
+        playing: false,
       },
     },
     // NOTHING COMPILED YET, AND THIS SESSION IS THE ONE THAT EVER WILL — `compiled` is the reply the
@@ -444,6 +516,14 @@ async function main(): Promise<EditorView> {
     sessions,
     scratchpad,
     draw: () => draw(),
+    // A THUNK OVER `ws`, WHICH `main()` DECLARES FURTHER DOWN, and safe for the reason `onBuffersChanged`
+    // below is: the player reads it only during playback, long after `main()` has run.
+    speed: () => ws.speed,
+    setSpeed: (s: Speed) => {
+      ws = { ...ws, speed: s }
+      persistWorkspace()
+      draw()
+    },
     linkWiring: () => linkWiring,
     // A THUNK FOR THE SAME REASON `draw` IS ONE, one step further down the file: `refreshBuffers` is
     // declared below, after the header list it refreshes, which is itself declared after `paneHost`.
@@ -452,6 +532,7 @@ async function main(): Promise<EditorView> {
     // A THUNK FOR THE SAME REASON AS THE LINE ABOVE, ONE STEP FURTHER: `persistBuffers` is declared
     // beside `writeBuffersStorage`, below this call, because it reads `panes` and `scratchpad`.
     onBuffersPersist: () => persistBuffers(),
+    notify: (text: string) => notices.notify(text),
   })
 
   /**
@@ -495,33 +576,33 @@ async function main(): Promise<EditorView> {
    * deleting it from the `append` below rather than by anything more elaborate.** This host ships a
    * close control, and `hostFor`'s detach-not-destroy rule takes the whole subtree out of the document
    * when the source leaf closes; `createLinkWiring` captures the status element once at construction, so
-   * every write after that close landed in a node that had left the page. `✎ fork` stays offered on the
+   * every write after that close landed in a node that had left the page. `edit a copy` stays offered on the
    * λ pane throughout — closing the source PANE ends no session — so a refusal past the buffer cap
    * reported to nobody, which is the Critical this branch already fixed arriving again by a narrower
-   * road. The line's own contract is what settles where it belongs: `link-status.ts` says of `forkFailed`
+   * road. The line's own contract is what settles where it belongs: `link-status.ts` said of its old fork-failure field
    * that this is *"the surface that exists whether or not a pane can show anything"*, and a surface
-   * inside a closeable pane cannot keep that promise. Two of its three live jobs (detached panes, a
-   * failed fork) are app-wide anyway; the third (what is pinned) is about a construct lit in three panes
-   * rather than about this one. So it stays where `index.html` declares it — between the pane tree and
-   * `#results`, outside every host `hostFor` can detach.
+   * inside a closeable pane cannot keep that promise. Refusals have since left the line entirely — they
+   * are notices (`notice.ts`, spec §11) — but the argument survives them: of the two jobs it keeps, the
+   * views-show-copies sentence is app-wide, and what is pinned is about a construct lit in three views
+   * rather than about this one. So it stays where `index.html` declares it — inside `footer.strip`,
+   * after `#results` (spec §9), outside every host `hostFor` can detach.
    */
   const sourceHost = document.createElement('section')
   sourceHost.className = 'pane'
   sourceHost.dataset.leaf = SOURCE_LEAF
   sourceHost.dataset.kind = 'source'
-  const sourceTitle = document.createElement('h2')
-  sourceTitle.textContent = 'source'
+  const sourceHeader = sourceViewHeader()
   /**
-   * THE SOURCE PANE'S OWN CLOSE CONTROL — `layoutControls`'s doc records why source is refused a SPLIT
+   * THE SOURCE VIEW'S OWN `✕` — `splitLeaf`'s doc records why source is refused a SPLIT
    * and not a close: there is one editor, so there is nothing to duplicate into, but closing the source
    * pane is exactly `hostFor`'s detach-not-destroy rule doing its job — the editor and its text wait in
    * `hosts` and come back intact the moment the leaf does. Two gestures bring it back now, and the
-   * second is the one this control was always waiting for: `reset layout`
+   * second is the one this control was always waiting for: `reset preset`
    * (`tests/browser/two-lambda-panes.test.ts`'s "keeps the program" test), which costs every other pane
    * on the page, and any other pane's split picker (`tests/browser/pane-picker.test.ts`), which costs
    * nothing.
    *
-   * A SEPARATE `layoutControls` INSTANCE, NOT ROUTED THROUGH `paneEvents`, BECAUSE THE SOURCE PANE HAS
+   * A SEPARATE `viewMenu` INSTANCE, NOT ROUTED THROUGH `paneEvents`, BECAUSE THE SOURCE PANE HAS
    * NO `PaneSlot`. `paneEvents` is built for a `(LeafId, PaneSlot<K>)` pair — `applyLayout`'s own `if
    * (l.pane === 'source') continue` is exactly the statement that no such pair exists for this leaf —
    * so the closure here re-states `close`'s two lines directly against `SOURCE_LEAF` rather than
@@ -529,25 +610,44 @@ async function main(): Promise<EditorView> {
    * its own doc has the reason: `pane-host.ts`'s picker can CREATE a source leaf, so the id this handler
    * closes over and the id that split mints have to be the same id in a way two literals cannot promise.)
    *
-   * `{ close: ... }` ALONE, NOT SPLIT — `layoutControls`'s own doc has the reason its parameter type
-   * changed to allow this. `update`'s SECOND ARGUMENT IS A LITERAL `false`, ALWAYS: source can never
-   * split (`splitLeaf`'s own refusal), so there is no boolean this pane's chrome could ever compute for
-   * `canSplit` that isn't already known at every call site.
+   * `{ close: ... }` ALONE, NOT SPLIT — a `viewMenu` builds only the items it is given handlers for, so
+   * the source view's `⋯` never appears. `update`'s SECOND ARGUMENT IS A LITERAL `false`, ALWAYS: source
+   * can never split (`splitLeaf`'s own refusal), so there is no boolean this view's chrome could ever
+   * compute for `canSplit` that isn't already known at every call site.
    */
-  // `.controls`, THE SAME CLASS `controlStrip` GIVES THE TRANSPORT STRIP IN `LambdaPane`/`TmPane` — not
-  // a new style, the existing `.controls button` rule (`layoutControls`'s own doc: "one control in a
-  // pane, not a new style").
-  const sourceControls = document.createElement('div')
-  sourceControls.className = 'controls'
-  const sourceLayout = layoutControls(sourceControls, {
+  /**
+   * A LAYOUT CHANGE, SAID AS A NOTICE (Plan 7 part 2 spec §11) — `pane-host.ts` reports a split, a close, a
+   * switch and `+ view`; the source view's own close, below, reports through this too.
+   */
+  const layoutChanged = (e: LayoutEvent): void => {
+    const say = (c: PaneChoice): string =>
+      c.kind === 'source'
+        ? 'source'
+        : pairLabel({ leg: c.kind, label: sessions.has(c.session) ? sessions.entryOf(c.session).label : 'a copy' })
+    if (e.kind === 'added') notices.notify(`view added — ${say(e.shows)}`)
+    else if (e.kind === 'closed') notices.notify(`view closed — ${say(e.showed)}`)
+    else notices.notify(`view now shows ${say(e.shows)}`)
+  }
+  const sourceMenu = viewMenu(sourceHeader.actions, {
     close: () => {
       const grew = neighbourOf(tree, SOURCE_LEAF)
       tree = closeLeaf(tree, SOURCE_LEAF)
       paneHost.applyLayout()
       paneHost.focusPane(grew)
+      layoutChanged({ kind: 'closed', leaf: SOURCE_LEAF, showed: { kind: 'source' } })
     },
   })
-  sourceHost.append(sourceTitle, editorHost, sourceControls)
+  const sourceLayout = { update: (canClose: boolean, canSplit: boolean) => sourceMenu.setLayout(canClose, canSplit) }
+  sourceHost.append(sourceHeader.el, editorHost)
+  // THE SOURCE VIEW CAN HOLD THE FOCUS TOO (spec §3: `focused` is any leaf) — it drives the readout from
+  // Task 9 on. Not `markActive`: that one is per leg, and the source view is on neither (`hostFor`'s own
+  // comment in `pane-host.ts` has the argument).
+  sourceHost.addEventListener('focusin', () => {
+    if (ws.focused === SOURCE_LEAF) return
+    ws = { ...ws, focused: SOURCE_LEAF }
+    persistWorkspace()
+    draw()
+  })
 
   // `localStorage` ACCESS IS GUARDED, same reason and same shape as `readAppearanceStorage`/
   // `writeAppearanceStorage` above: it throws in some privacy modes, and a layout is a preference —
@@ -584,60 +684,49 @@ async function main(): Promise<EditorView> {
    * **ONCE PER PAGE LOAD, NOT ONCE PER WRITE** (design §4.8). The buffers write sits behind the
    * editor's 300 ms debounce, so a user typing into a full store would otherwise get the same line
    * rewritten every 300 ms — which reads as a fault in the app rather than a fact about the browser,
-   * and which would keep overwriting the fork refusals and running-focus reports that share this
-   * surface. Once is enough: the condition does not un-happen within a page load, and the user's
+   * and which would keep replacing every other notice. Once is enough: the condition does not un-happen within a page load, and the user's
    * remedy (clear storage, retire buffers) is outside the app.
    *
-   * **AND "ONCE" IS AN UPPER BOUND, NOT A GUARANTEE THAT THE LINE IS EVER READ — a state that was
-   * silent until the whole-branch review before merge (finding 10b), recorded here rather than fixed.**
-   * `#link-status` is one line shared by every writer of `link-wiring.ts`'s `forkFailed`, and two of
-   * them can wipe this report without replacing it with anything the user asked for:
-   *
-   * 1. `compile.ts`'s `schedule` calls `setForkFailed(null)` UNCONDITIONALLY on every invocation, and
-   *    the source editor's own `updateListener` schedules on every keystroke. So the first character a
-   *    user types after the report clears it, whether or not they read it — and this flag stays `true`,
-   *    so no later failure of the same write can put it back.
-   * 2. On a RESTORED page the warming loop at the end of `main()` writes the cap refusal into the same
-   *    field, after this report can already have been made by `refreshBuffers()`'s start-up write. Two
-   *    true sentences, one line, and the second wins with nothing to say the first happened.
-   *
-   * The 2 case is bounded (a cap that dropped between releases, design §4.4's own words) and the 1 case
-   * is ordinary. Neither is repaired here: a second surface for this is a banner, and `banner.ts` is the
-   * wasm-load and worker-spawn failure surface by its own doc — giving it a third kind of message is a
-   * design decision this slice does not get to make on the way past. What is fixed is the pretence: this
-   * flag means "reported at most once", never "shown for as long as it matters".
+   * **AND "ONCE" IS AN UPPER BOUND, NOT A GUARANTEE THAT THE NOTICE IS EVER READ.** The report is a
+   * persistent notice (`notice.ts`), so a keystroke no longer clears it — but any later notice replaces
+   * it, as a new notice replaces every old one (spec §11), and this flag keeps it from coming back. On
+   * a RESTORED page the warming loop at the end of `main()` can refuse a warm at the cap after this
+   * report was made by `refreshBuffers()`'s start-up write, and that refusal's notice replaces this one.
+   * What is fixed is the pretence: this flag means "reported at most once", never "shown for as long as
+   * it matters".
    */
-  let storageFailureReported = false
   /**
-   * Say that buffers are no longer being saved.
+   * Say that copies are no longer being saved.
    *
-   * **`#link-status` RATHER THAN A BANNER**, because it is the surface that already carries the other
-   * things this app has to tell a user about a gesture that did not produce a visible change — a
-   * refused fork, a refused warm — and `banner.ts` is the wasm-load and worker-spawn failure surface,
-   * which this is not. The wording says the CONSEQUENCE and not the cause: `QuotaExceededError` is
-   * true and useless, and what the user needs to know is that closing the tab now loses work.
+   * **THE NOTICE LINE'S RESTING STATE RATHER THAN A BANNER OR A NOTICE**, because the notice line is the
+   * surface that already carries the other things this app has to tell a user about a gesture that did
+   * not produce a visible change — a refused copy, a refused resume — and `banner.ts` is the wasm-load
+   * and worker-spawn failure surface, which this is not. **A NOTICE WOULD NOT LAST, WHICH IS WHY THIS IS
+   * `rest` AND NOT `notify`** (`notice.ts`'s `Notices.rest`): every notice is replaced by the next one,
+   * and nearly every gesture makes one — a copy created, a view closed — so the one condition here that
+   * genuinely lasts would have been on screen for about one gesture. As a resting state it is what the
+   * line says whenever nothing else is being said, for as long as the condition holds, and it is said in
+   * the live region the moment it begins.
    *
-   * **NONE OF `linkWiring`, `draw` OR (TRANSITIVELY, THROUGH `draw()`) `view` IS GUARDED HERE, AND
-   * THAT IS SAFE ONLY BECAUSE OF WHERE THIS FUNCTION'S CALLERS ARE ALLOWED TO SIT.** All three are
-   * declared `let` above and stay `undefined` until `linkWiring = createLinkWiring(...)`,
-   * `draw = createDraw(...)` and `view = new EditorView(...)` run, further down this function. A
-   * defensive `linkWiring?.setForkFailed(...)` here instead would trade a crash for a silently dropped
-   * report, which is the same failure this whole task exists to remove — so the fix is an ordering
-   * guarantee upstream, not a guard in this function. **THE FULL ARGUMENT LIVES AT THE CALL THAT
-   * DEPENDS ON IT** — search this file for "AUTHORITATIVE ACCOUNT OF WHY", which keeps the last of the
-   * three positions tried and rejected first; the history note under `refreshBuffers` — the start-up
-   * call's position — has the two that produced a `TypeError` (5d-ii-d review round 2, Minor B: this
-   * used to restate that argument in full, one of four copies of it in this file).
+   * **AND IT IS TAKEN BACK WHEN A WRITE SUCCEEDS**, which is what `writeBuffersStorage` does below: the
+   * user may have cleared storage or deleted copies since, and a warning that outlives its condition
+   * teaches a reader to ignore the line. Setting it twice with the same words is a no-op, so the
+   * once-per-page-load flag this used to keep is gone — "reported twice" is not a state this can reach.
+   * The wording says the CONSEQUENCE and not the cause: `QuotaExceededError` is true and useless, and
+   * what the user needs to know is that closing the tab now loses work.
+   *
+   * **IT NEEDS ONLY `notices`, WHICH EXISTS BEFORE `init()`.** It used to write through `linkWiring` and
+   * `draw()`, both `let`s that stay `undefined` until further down this function, so its callers had to
+   * be ordered after both — an ordering that cost three attempts and two `TypeError`s, and that nothing
+   * here depends on any more. `refreshBuffers`'s own start-up call, near the end of `main()`, carries
+   * what is left of that argument.
    */
   const reportStorageFailure = (): void => {
-    if (storageFailureReported) return
-    storageFailureReported = true
-    linkWiring.setForkFailed('buffers are not being saved — this browser’s storage for this site is full')
-    draw()
+    notices.rest('copies are not being saved — this browser’s storage for this site is full')
   }
 
   /**
-   * **THIS WRITER REPORTS WHERE `writeLayoutStorage` SWALLOWS, AND THE ASYMMETRY IS DESIGN §4.8.** That
+   * **THIS WRITER REPORTS WHERE THE LAYOUT'S WRITER SWALLOWS, AND THE ASYMMETRY IS DESIGN §4.8.** That
    * one's comment reads "the layout still works for the rest of this page load, it just will not survive
    * a reload" — a fair trade for a preference. A buffer is WORK, and a user told nothing finds out at
    * the next reload, by absence.
@@ -656,6 +745,9 @@ async function main(): Promise<EditorView> {
   const writeBuffersStorage = (raw: string, hasBuffers: boolean): void => {
     try {
       localStorage.setItem(BUFFERS_STORAGE_KEY, raw)
+      // THE CONDITION ENDED, SO THE WARNING DOES — `reportStorageFailure`'s own doc has the argument.
+      // `rest(null)` on a line that is not resting on anything costs a comparison.
+      notices.rest(null)
     } catch {
       if (hasBuffers) reportStorageFailure()
     }
@@ -700,8 +792,54 @@ async function main(): Promise<EditorView> {
     writeBuffersStorage(serializeBuffers(payload), payload.buffers.length > 0)
   }
 
-  /** The layout tree — restored from `localStorage` if there is a usable value there, the shipped arrangement otherwise. */
-  let tree: LayoutNode = parseLayout(readLayoutStorage()) ?? defaultLayout()
+  /**
+   * THE WORKSPACE — restored from `localStorage` if there is a usable value there (a version 1 layout is
+   * migrated: `workspace.ts`'s `parseWorkspace`), the default otherwise.
+   *
+   * **`tree` STAYS ITS OWN `let`, AND `ws` HOLDS THE REST.** `pane-host.ts` reads and writes the tree through
+   * `getTree`/`setTree` on every gesture, and its doc argues why the tree has one owner; folding it into `ws`
+   * would move that owner without changing anything a reader could see. `persistWorkspace` joins the two at
+   * the one moment they are written.
+   */
+  const restored = parseWorkspace(readLayoutStorage()) ?? defaultWorkspace()
+  let tree: LayoutNode = restored.tree
+  let ws: Omit<Workspace, 'tree'> = {
+    switches: restored.switches,
+    speed: restored.speed,
+    focused: restored.focused,
+    panels: restored.panels,
+  }
+  /**
+   * The focused view, repaired against the tree it names a leaf of.
+   *
+   * **A CLOSE OR A RESET LEAVES `ws.focused` NAMING A LEAF THAT IS GONE**, and until this existed only
+   * the WRITE repaired it (`serializeWorkspace` falls back to `defaultFocus`) — so memory and storage
+   * disagreed, and the readout, which resolves `focused` through `panes.get`, quietly fell back to the
+   * program while some other view had the focus. Two call sites hand-repaired it and a third did not;
+   * this is the one answer all three ask.
+   */
+  const focusedLeaf = (): LeafId => (leaves(tree).some((l) => l.id === ws.focused) ? ws.focused : defaultFocus(tree))
+
+  /**
+   * Drop what the tree no longer holds — the panel state of a closed view, and a focus on one.
+   *
+   * **`defaultLayout()` RE-MINTS `source`, `lambda-0` AND `tm-0` AS LITERALS**, so a leaf id genuinely
+   * comes back: close the TM view with its rules panel shut, then *reset preset*, and the new `tm-0`
+   * would inherit the closed view's panel state — from memory, since the write had already dropped it.
+   * The same clicks then behaved differently depending on whether the page had been reloaded in
+   * between. `editor-custody.ts`'s `editorOwner` records the identical hazard for claims and answers it
+   * the same way, in `applyLayout`'s creation pass.
+   */
+  const normaliseWorkspace = (): void => {
+    const live = new Set(leaves(tree).map((l) => l.id))
+    const panels = Object.fromEntries(Object.entries(ws.panels).filter(([leaf]) => live.has(leaf)))
+    ws = { ...ws, focused: focusedLeaf(), panels }
+  }
+
+  const persistWorkspace = (): void => {
+    normaliseWorkspace()
+    writeLayoutStorage(serializeWorkspace({ tree, ...ws }))
+  }
   // IMMEDIATELY, AND ON THE RESTORED TREE RATHER THAN ONLY THE DEFAULT ONE — see `seedLeafCounter`'s
   // own doc. ONCE, HERE, NOT ON EVERY `applyLayout`: the counter only ever needs to learn about ids it
   // did not mint itself, and this is the one moment such an id can enter the tree. (Re-seeding later
@@ -715,16 +853,16 @@ async function main(): Promise<EditorView> {
    * instead of as six names in this scope, and its doc comments are the record of the review rounds that
    * shaped them.
    *
-   * CONSTRUCTED AFTER `tree`, `sourceLayout` AND `writeLayoutStorage`, AND BEFORE ANY PANE EXISTS, because
+   * CONSTRUCTED AFTER `tree`, `sourceLayout` AND `persistWorkspace`, AND BEFORE ANY PANE EXISTS, because
    * those three are its irreducible ties back to this file: the tree it reads and rewrites, the source
-   * pane's close control it drives at every structural change, and the guarded writer that persists a
-   * layout. `panes` IS HANDED OVER EMPTY — `applyLayout` is still the only thing that ever populates it —
+   * pane's close control it drives at every structural change, and the writer that persists the
+   * workspace. `panes` IS HANDED OVER EMPTY — `applyLayout` is still the only thing that ever populates it —
    * and `draw` is a thunk for the same reason `linkWiring`/`compile` below take one: the `let` it names is
    * not assigned until `createDraw` runs.
    *
    * `tree` STAYS A `let` IN THIS SCOPE AND CROSSES AS A GETTER/SETTER PAIR, not as a field over there and
-   * not as a mutable export. Two of its writers stay here — the restore just above and the `reset layout`
-   * button just below — so a copy in that module would be a second place the current tree lives, and this
+   * not as a mutable export. Two of its writers stay here — the restore just above and the `reset preset`
+   * item below — so a copy in that module would be a second place the current tree lives, and this
    * file would be holding the stale one.
    *
    * `nextLeafId` AND `neighbourOf` CROSS AS FUNCTIONS RATHER THAN MOVING WITH THEIR CALLERS. `leafCounter`
@@ -745,7 +883,17 @@ async function main(): Promise<EditorView> {
     setTree: (next) => {
       tree = next
     },
-    writeLayoutStorage,
+    persist: persistWorkspace,
+    setFocused: (id: LeafId) => {
+      if (ws.focused === id) return
+      ws = { ...ws, focused: id }
+      persistWorkspace()
+    },
+    panelOpen: (leaf: LeafId, name: string) => ws.panels[leaf]?.[name],
+    setPanel: (leaf: LeafId, name: string, open: boolean) => {
+      ws = { ...ws, panels: withPanel(ws.panels, leaf, name, open) }
+    },
+    layoutChanged,
     draw: () => draw(),
     // THE ONE SESSION QUESTION `pane-host.ts` ASKS, ANSWERED HERE BECAUSE THIS FILE IS WHERE THE REGISTRY
     // IS — that module's own doc argues why it takes this rather than the registry it would otherwise
@@ -835,10 +983,90 @@ async function main(): Promise<EditorView> {
   // runs — still true here, with the whole tail of `main()` between this line and that call.
   paneHost.seedHost(SOURCE_LEAF, sourceHost)
 
-  restoreLayoutButton.addEventListener('click', () => {
+  // THE WORKSPACE MENU — the preset's name, and `reset preset` (spec §4, §6).
+  workspaceButton.textContent = presetName(presetOf(ws.switches))
+  wireMenu(workspaceButton, workspaceMenu)
+  resetPresetButton.addEventListener('click', () => {
+    workspaceMenu.hidePopover()
+    // `presetOf(…) ?? 'explorer'` because 2a's switches are always Explorer's; 2b removes the item while
+    // custom (spec §4).
+    const preset = presetOf(ws.switches) ?? 'explorer'
     tree = defaultLayout()
+    ws = { ...ws, switches: PRESETS[preset] }
     paneHost.applyLayout()
+    // **THE FOCUS GOES INTO THE NEW ARRANGEMENT — whole-branch review follow-up, the sibling search
+    // C1's fix asked for.** `hidePopover()` above hands focus back to whatever held it before the menu
+    // opened, which for a user reaching this item is a control inside one of the views. `applyLayout()`
+    // then rebuilds the tree from `defaultLayout()`, `renderLayout`'s `root.replaceChildren()` detaches
+    // the host that control lives in, and focus falls to `<body>` — measured in Chrome, a frame later,
+    // which is why a synchronous read at the end of this handler still shows a live element and the
+    // gesture looks safe until it is watched across a frame.
+    //
+    // **IT DEPENDS ON WHERE THE FOCUS WAS, AND THAT IS NOT A REASON TO SKIP IT.** Reached from a header
+    // control the gesture is harmless, because the header is outside `<main>` and no rebuild touches it.
+    // Reached from inside a view — the ordinary case, since that is where a user works — it strands the
+    // focus every time. `tests/browser/menu-focus.test.ts` drives it from inside a view for exactly that
+    // reason, and removing this line fails that one case and no other.
+    //
+    // `defaultFocus` rather than `focusedLeaf()` because the leaf the user was in may not exist in
+    // `defaultLayout()`'s tree at all.
+    paneHost.focusPane(defaultFocus(tree))
+    notices.notify(`${presetName(preset)} reset — the default views are back`)
   })
+
+  // `+ view` — spec §5, §6: beside the focused view, which may be the source view.
+  wireMenu(addViewButton, addViewMenu, () =>
+    addViewItems(
+      addViewMenu,
+      { options: sessions.pairs(), sourceAvailable: !leaves(tree).some((l) => l.pane === 'source'), current: null },
+      (choice) => {
+        const beside = focusedLeaf()
+        // SAID BY `layoutChanged`'s `added` event, which `addView` reports.
+        paneHost.addView(choice, beside)
+      },
+    ),
+  )
+
+  /**
+   * Undo a delete — spec §10. The copy comes back under its own id and name, COLD, and is warmed; a
+   * refusal at the cap leaves it paused, which is still a copy restored. The views the delete moved to
+   * the program move back if they still exist and still show the program.
+   *
+   * **THE CLAIM BEFORE THE BUILD LANDS** is what lets `replies.ts`'s `scratch-compiled` arm mount the
+   * editor on that view — `editorHome` resolves through the claim, as a fork's does.
+   */
+  const undo = (record: BufferRecord, shown: readonly LeafId[]): void => {
+    scratchpad.reinstate(record)
+    const name = scratchpad.nameOf(record.id) ?? `${record.leg === 'lambda' ? 'λ' : 'TM'} ${record.label}`
+    try {
+      scratchpad.warm(record.id)
+    } catch (e) {
+      if (!(e instanceof BufferCapReached)) throw e
+      notices.notify(`${name} restored, paused — ${MAX_WARM_BUFFERS} copies are running`)
+      refreshBuffers()
+      draw()
+      // THE SAME DEBT AS THE SUCCESS PATH BELOW, AND THIS ARM OWES IT TOO: the undo button is gone
+      // either way, and a refusal is exactly when a user needs to see where they are. No view came
+      // back, so the copies button is the whole of the answer.
+      buffersButton.focus()
+      return
+    }
+    const moved = paneHost.moveBack(shown, SOURCE_SESSION, record.id)
+    const home = moved[0]
+    if (home !== undefined) custody.claim(record.id, home)
+    notices.notify(`${name} restored at step 0`)
+    refreshBuffers()
+    draw()
+    // **UNDO REMOVES THE CONTROL IT WAS ACTIVATED FROM, SO IT OWES THE FOCUS SOMEWHERE — spec §11, and
+    // the accessibility list's item 1 in the control this whole gesture exists for.** `notice.ts` tears
+    // the action button down before running this (it must: a second undo would throw), and a module that
+    // knows nothing about views cannot say where focus should land. The view the copy came back to is
+    // where the user's attention is; with no view to come back to, the control that lists the copies is.
+    // AFTER `draw()`, because the view's title is rebuilt from the new binding by the frame above.
+    const back = home === undefined ? null : document.querySelector<HTMLElement>(`[data-leaf="${home}"] .view-title`)
+    if (back !== null) back.focus()
+    else buffersButton.focus()
+  }
 
   /**
    * **THE HEADER'S BUFFER LIST — design §4.2's surface, and §4.4's poison recovery arriving with it.**
@@ -932,49 +1160,35 @@ async function main(): Promise<EditorView> {
             : null
           : null,
         warm: b.warm,
+        leg: b.leg,
       })),
     (id) => {
+      // WHAT UNDO NEEDS, READ BEFORE THE DELETE ENDS IT: the record, the name, and the views showing it.
+      const record = scratchpad.recordOf(id)
+      const name = scratchpad.nameOf(id) ?? 'a copy'
+      const shown = record === null ? [] : panes.ofSession(record.leg, id).map((p) => p.id)
       scratchpad.retire(id, SOURCE_SESSION, paneHost.reseedingSlots())
-      /**
-       * **A RETIRE ANSWERS THE CAP REFUSAL, SO THE REFUSAL STOPS BEING TRUE HERE — found by driving the
-       * app, not by a test.** The message reads — quoting `#refuseAtCap`'s message template rather than
-       * its rendered text, which is what stayed stale the first two times (a duplication issue noted in
-       * `#refuseAtCap`'s own doc, Minor 1) —
-       * *"all `${MAX_WARM_BUFFERS}` scratch buffers are live; retire or cool one from the buffers list
-       * in the header to make room"*, and until this line the page went on
-       * showing it after the user had done exactly that. `#link-status` said all eight were live while
-       * the header two inches above it read `buffers 7 ▾` — two surfaces disagreeing about the one
-       * number the sentence is about, with the stale one being the advice.
-       *
-       * IT CLEARED ONLY ON THE NEXT SUCCESSFUL FORK (`transport.ts`'s success path), which is one
-       * gesture too late: the whole point of the retire is that the fork can now be RE-ATTEMPTED, and a
-       * user who reads the line before re-attempting is told their own action did not happen.
-       *
-       * UNCONDITIONAL, NOT GUARDED ON THERE BEING A REFUSAL TO CLEAR. `setForkFailed(null)` on a model
-       * already holding `null` is a field write and a repaint this handler performs anyway, and a guard
-       * would be this file deciding which refusals a retire answers — it answers the cap one, and the
-       * sibling (a fork whose BUILD failed) names a buffer the user may have just retired. Both are
-       * stale after this call for the same reason.
-       *
-       * BEFORE `custody.reconcile()`'s `try`, so a throw from the sweep cannot leave the message on
-       * screen — the `finally` below already draws, and this is the state that draw should paint.
-       */
-      linkWiring.setForkFailed(null)
       try {
         custody.reconcile()
       } finally {
         refreshBuffers()
         draw()
       }
+      // THE DELETE NOTICE ANSWERS THE CAP REFUSAL: it replaces any refusal on screen.
+      if (record !== null)
+        notices.notify(`${name} deleted`, { action: { label: 'undo', run: () => undo(record, shown) } })
     },
     (id, warm) => {
       /**
        * **WARMING CAN BE REFUSED AND COOLING CANNOT**, so only one arm has a catch. `ScratchBuffers.warm`
        * raises `BufferCapReached` at the cap for the same reason `fork` does, and it reports through the
-       * same field and the same surface — `link-wiring.ts`'s `forkFailed`, rendered by `link-status.ts`.
+       * same surface — a notice (`notice.ts`).
        * A bare `catch` would swallow `SessionRegistry.add`'s and `SessionPool.bind`'s guards, which are
        * wiring bugs; `instanceof` is what keeps a refusal a refusal.
        */
+      const info = scratchpad.list().find((b) => b.id === id)
+      const name = scratchpad.nameOf(id) ?? 'a copy'
+      const shown = info === undefined ? 0 : panes.ofSession(info.leg, id).length
       try {
         if (warm) {
           scratchpad.warm(id)
@@ -989,17 +1203,21 @@ async function main(): Promise<EditorView> {
         }
       } catch (e) {
         if (!(e instanceof BufferCapReached)) throw e
-        linkWiring.setForkFailed(e.message)
+        notices.notify(e.message)
         draw()
         return
       }
-      linkWiring.setForkFailed(null)
       try {
         custody.reconcile()
       } finally {
         refreshBuffers()
         draw()
       }
+      if (warm) notices.notify(`${name} resumed at step 0`)
+      else
+        notices.notify(
+          `${name} paused${shown === 0 ? '' : ` · ${shown === 1 ? '1 view now shows' : `${shown} views now show`} the program`}`,
+        )
     },
     () => {
       /**
@@ -1008,37 +1226,34 @@ async function main(): Promise<EditorView> {
        * buffer on `leg` with no view to seed from and binds no pane, and is always available — "give me
        * somewhere to paste a `.tm` file" is a different intention from a fork, not the same door
        * narrowed. `'tm'` IS THE ONLY LEG THIS BUTTON EVER MINTS: the menu's own control is `buffer-list.
-       * ts`'s "new TM buffer", built for the TM pane specifically because a λ buffer already has a seed
+       * ts`'s *new TM copy*, built for the TM pane specifically because a λ buffer already has a seed
        * — the source's own step-0 term, through `fork` — and a TM buffer does not (`ScratchBuffers.
        * forkBlank`'s own doc: the TM pane renders a δ-table projected from a compiled program, never the
        * machine source that produced one).
        *
        * `BufferCapReached`, NOT A BARE `catch` — the same standard the retire and temperature handlers
        * above hold themselves to. The other throws `forkBlank` can reach are `SessionRegistry.add`'s and
-       * `SessionPool.bind`'s guards over their own invariants; rendering one of those as a status line
+       * `SessionPool.bind`'s guards over their own invariants; showing one of those as a notice
        * would swallow a wiring bug rather than report a refusal.
        */
+      let id: SessionId
       try {
-        scratchpad.forkBlank('tm')
+        id = scratchpad.forkBlank('tm')
       } catch (e) {
         if (!(e instanceof BufferCapReached)) throw e
-        linkWiring.setForkFailed(e.message)
+        notices.notify(e.message)
         // NO `refreshBuffers()` ON THIS ARM — the header's count did not move, because that is the
         // whole content of the refusal (`transport.ts`'s `detach` handler states the identical rule for
-        // `fork`'s own refusal). `draw()` still runs: the status line is the one thing that DID change.
-        draw()
+        // `fork`'s own refusal).
         return
       }
-      // A FRESH MINT RETIRES YESTERDAY'S NEWS, ON THE SUCCESS PATH — the same rule and the same reason
-      // `transport.ts`'s `detach` handler states for `fork`: a stale "fork failed — all N scratch
-      // buffers are live" must not still be on screen the instant a mint against that very cap succeeds.
-      linkWiring.setForkFailed(null)
       // THE HEADER GAINED A BUFFER, AND `draw()` DOES NOT REACH ITS READOUT — the same split `fork`'s
       // own success path draws (`transport.ts`): `refreshBuffers()` repaints the buffer-list button and
       // persists the collection, `draw()` repaints every pane's own chrome, most importantly the
       // binding selector that gains this buffer as a new option the instant it exists.
       refreshBuffers()
       draw()
+      notices.notify(`${scratchpad.nameOf(id) ?? 'a copy'} created`)
     },
   )
 
@@ -1065,10 +1280,10 @@ async function main(): Promise<EditorView> {
   const refreshBuffers = (): void => {
     const live = scratchpad.list().length
     // **NO HIDE-AT-ZERO, AND NO FOCUS RESTORATION BESIDE IT — 5d-iv design §4.7.** This function used
-    // to read `buffersButton.hidden = live === 0`, plus a line moving focus to the reset-layout button
+    // to read `buffersButton.hidden = live === 0`, plus a line moving focus to the reset-preset button
     // when retiring the last buffer hid the control the click had landed on. That is item 1 of the
     // standing accessibility list, "a control that hides itself on click strands the keyboard"; the
-    // menu now offers "new TM buffer" and so is never empty, which removes the reason for the hide and
+    // menu now offers *new TM copy* and so is never empty, which removes the reason for the hide and
     // therefore the workaround. One instance retired, not the pass discharged.
     buffers.update(live)
     /**
@@ -1105,14 +1320,12 @@ async function main(): Promise<EditorView> {
   // `linkWiring`/`draw`/`view` are all still `undefined` at this point in `main()` — a restored page's
   // first buffers write, refused, threw a bare `TypeError` out of `main()` and killed the page. The
   // call is still made, unconditionally, on every page load; it has just moved past all three
-  // assignments and past the app's own initial `compile.schedule(SAMPLE)`. See that call site's own
-  // comment (search this file for "AUTHORITATIVE ACCOUNT OF WHY") for the full argument and for the
-  // last of the two OTHER positions between here and there that were tried and rejected first; the
-  // history note under `refreshBuffers` — the start-up call's position — has the other one.
+  // assignments and past the app's own initial `compile.schedule(SAMPLE)`. That call site, near the end
+  // of `main()`, carries the argument — including which of those constraints Plan 7 part 2 spent.
 
   /**
-   * THE LINK STATE — `link-wiring.ts`'s own doc has the argument for why `index`/`linkable`/`link`/
-   * `forkFailed` live there now instead of as four `let`s in this scope. `panes` IS HANDED OVER EMPTY,
+   * THE LINK STATE — `link-wiring.ts`'s own doc has the argument for why `index`/`linkable`/`link`
+   * live there now instead of as `let`s in this scope. `panes` IS HANDED OVER EMPTY,
    * NOT "AFTER BOTH PANES EXIST" AS THIS USED TO READ — `PaneCollection` is built above and
    * `applyLayout` (`pane-host.ts`) is the only thing that ever populates it, so every reader here
    * resolves it live rather than at construction time.
@@ -1154,6 +1367,7 @@ async function main(): Promise<EditorView> {
     sessions,
     panes,
     draw: () => draw(),
+    announce: (t: string) => notices.announce(t),
   })
 
   // ASSIGNED HERE, NOT DECLARED HERE — see the `let draw` comment above for why the split is forced
@@ -1184,14 +1398,18 @@ async function main(): Promise<EditorView> {
     // `custody.homeFor`: the methods read `panes`, `sessions` and the two custody maps through the
     // closure `createEditorCustody` returns, and handing the reference over bare would work today only
     // because that object is not built with `this` in mind. This is the one call site that decides
-    // whether "bring the term editor to this pane" appears at all — deferred-a11y item 11.
+    // whether "move the editor here" appears at all — deferred-a11y item 11.
     hasEditor: (session) => custody.hasEditor(session),
+    // THE READOUT'S INPUTS (spec §9) — which view is focused, and the program's stored result.
+    focused: focusedLeaf,
+    sourceSession: SOURCE_SESSION,
+    readout,
+    program: () => program,
+    nameOf: (s) => scratchpad.nameOf(s),
   })
 
   // NOT the refreshBuffers() start-up call's home either, though linkWiring/draw are real by here:
-  // `view` still is not. See the call site's own comment (search this file for "AUTHORITATIVE ACCOUNT
-  // OF WHY") for the full argument — this position is "POSITION 2" in the history note under
-  // `refreshBuffers` — the start-up call's position.
+  // `view` still is not. The call site near the end of `main()` carries the argument.
 
   /**
    * THE DEBOUNCE PIPELINE — `compile.ts`'s own doc has the case for `schedule`'s dependencies and for
@@ -1218,7 +1436,6 @@ async function main(): Promise<EditorView> {
     results,
     picker,
     view: () => view,
-    links: linkWiring,
     sourceSession: SOURCE_SESSION,
   })
 
@@ -1246,6 +1463,10 @@ async function main(): Promise<EditorView> {
     panes,
     links: linkWiring,
     draw,
+    notify: (text: string) => notices.notify(text),
+    setProgram: (r: ProgramResult) => {
+      program = r
+    },
     // **IT TAKES THE REPLY'S OWN SESSION, WHERE IT USED TO BE BOUND TO ONE.** Both call sites in `replies.ts`
     // already hold the session the reply named, so the parameter costs nothing. THIS FILE KEEPS IT WHERE
     // `compile.ts` TAKES NOTHING OF THE KIND, because `replies.ts` has two uses that are not retires:
@@ -1368,66 +1589,20 @@ async function main(): Promise<EditorView> {
   view.dispatch({ effects: setSpans.of(classifySource(SAMPLE) as Classified) })
   compile.schedule(SAMPLE)
 
-  // **THE START-UP CALL THIS FILE USED TO MAKE RIGHT AFTER `refreshBuffers`'s OWN DEFINITION, MOVED HERE —
-  // AND THIS IS THE AUTHORITATIVE ACCOUNT OF WHY.** Three positions were tried or considered before this one
-  // and each was wrong for a different reason — the two that produced a `TypeError` are in the history note,
-  // and the third is below. Two other spots in this file used to restate this whole argument independently —
-  // right after `refreshBuffers`'s own definition, and right after `draw = createDraw(...)` — plus a third
-  // that annotated a position between two statements where no code exists at all; all three are now short
-  // pointers to this comment instead (5d-ii-d review round 2, Minor B: the four copies totalled roughly 95
-  // comment lines for one relocated statement).
+  // **THE START-UP CALL, AFTER `compile.schedule(SAMPLE)`, AND THE ORDERING THAT FORCED IT IS SPENT.**
+  // This call sat right after `refreshBuffers`'s own definition until 5d-ii-d, and moved three times:
+  // `reportStorageFailure` wrote through `linkWiring` and `draw()`, both `let`s that stay `undefined`
+  // until far below that definition, so an early call threw a `TypeError` and killed the page; and a
+  // call placed after `view = new EditorView(...)` was wiped by `compile.schedule(SAMPLE)`'s own
+  // unconditional clear of the fork-failure line before anyone could read it.
   //
-  // **POSITION 3 — RIGHT AFTER `view = new EditorView(...)`, A FEW LINES ABOVE THIS ONE. FAR ENOUGH ON
-  // `linkWiring`/`draw`/`view`, WRONG ANYWAY — FOUND BY A TEST, NOT BY READING.** `compile.ts`'s
-  // `schedule` calls `linkWiring.setForkFailed(null)` UNCONDITIONALLY on every invocation, including
-  // this app-internal first one for the sample program two lines below `view`'s construction — its own
-  // doc's argument ("a report about a click on the OLD program is not news about whatever the user is
-  // typing now") reads `schedule` as always following whatever set `forkFailed`, which is true of every
-  // OTHER caller of `reportStorageFailure` (a fork, a retire, a later write) but was not true of a call
-  // at position 3: a real report set there would be set and then wiped by `compile.schedule(SAMPLE)`
-  // before `main()` ever returned — visible to nobody, `storageFailureReported` left `true`, and no
-  // later failure of the SAME write (design: once per page load) able to re-report it.
-  //
-  // **HERE — AFTER `compile.schedule(SAMPLE)` — IS THE FIRST POSITION WHERE ALL THREE PRECONDITIONS
-  // HOLD AT ONCE.** `linkWiring`/`draw`/`view` are all real, assigned values by this line rather than
-  // the `undefined` a `let` starts as, so `reportStorageFailure` can safely call
-  // `linkWiring.setForkFailed(...)` and `draw()`, and `draw()` can safely call `view().dispatch(...)` —
-  // and ordering this call after `compile.schedule(SAMPLE)` is what stops "the sample program's own
-  // compile" from being able to race a report that has not happened yet.
-  //
-  // **NOTHING BETWEEN THE OLD POSITION AND HERE READS WHAT THIS CALL PRODUCES**, so moving it changes
-  // WHEN the write happens and not WHAT it writes. `buffersButton.hidden` and `buffers.update(live)`
-  // (both written inside `refreshBuffers`) are read by nobody else in `main()`, and the browser has
-  // painted no frame since `await init()` up top — nothing between there and `return view` below
-  // awaits, so there is no repaint for a reader to observe early. `persistBuffers`'s own write still
-  // sees an empty `panes` collection here exactly as it did at the old call site, since
-  // `applyLayout()` (the only thing that populates `panes`) has not run yet either way — see
-  // `refreshBuffers`'s own doc on why that makes this call's `bindings` correct only provisionally,
-  // corrected by the write-back after `applyLayout()` at the very end of `main()`.
-  //
-  // **AND ONE CONSEQUENCE THE MOVE DID CHANGE, RATHER THAN MERELY RISK — 5d-ii-d review round 2,
-  // Finding 1.** Everything above checks that `linkWiring`/`draw`/`view` are real and that nothing
-  // reads a stale write; none of it checks `panes`, because before this move nothing reachable from
-  // here touched it. This call can run `draw()` before
-  // `paneHost.applyLayout()` has ever run — on the quota path, through
-  // `reportStorageFailure()` -> `draw()` -> `linkWiring.drawLink(...)` -> `detachedPanes()`, which reads
-  // `panes.active(...)`. Safe for the reason `THE LINK STATE` comment above (`linkWiring`'s own
-  // construction) now states in full: `panes` is genuinely empty at this point, every reader of it
-  // tolerates empty, and `applyLayout` is still the only thing that ever populates it. That paragraph is
-  // the authoritative account of THIS consequence, the way this one is the authoritative account of the
-  // move itself.
-  //
-  // **WHAT WOULD BREAK THIS: moving `linkWiring = createLinkWiring(...)`, `draw = createDraw(...)` or
-  // `view = new EditorView(...)` below this line; moving `compile.schedule(SAMPLE)` below this line;
-  // or adding any new call to `persistBuffers`, `writeBuffersStorage`, or `refreshBuffers` itself
-  // above this point in `main()`.** A worker reply cannot race this into happening early — replies
-  // arrive on `message` events, a macrotask that cannot fire until `main()` yields, and nothing
-  // between `await init()` and `return view` awaits — but a same-file change that calls one of those
-  // functions earlier in the text, or that reorders `compile.schedule(SAMPLE)` after this line, would
-  // reintroduce a version of the hazard this comment exists to prevent.
-  //
-  // For what this doc used to claim and why it changed, see the history note under `refreshBuffers` —
-  // the start-up call's position.
+  // **NEITHER CONSTRAINT SURVIVES PLAN 7 PART 2.** The report is the notice line's resting state
+  // (`notice.ts`'s `Notices.rest`), set through `notices`, which is built before `init()` and needs
+  // neither `linkWiring`, `draw` nor `view`; and nothing clears the notice line on a keystroke. What
+  // still holds is the thing this position was always really about: `persistBuffers` reads its bindings
+  // off `panes`, which `applyLayout()` — at the end of `main()` — is the only thing that fills, so the
+  // payload written here is provisional, and the write-back after that call is what corrects it. See
+  // `refreshBuffers`'s own doc.
   refreshBuffers()
 
   /**
@@ -1436,24 +1611,23 @@ async function main(): Promise<EditorView> {
    * now hold. Refusing is the honest answer (nothing is evicted); the buffer stays cold and stays
    * listed, which is exactly the state the header list exists to make reachable.
    *
-   * **THE THIRD STEP OF THE RESTORE, AND IT IS DOWN HERE RATHER THAN BESIDE THE OTHER TWO BECAUSE OF
-   * `linkWiring`.** The refusal has to reach a surface — `link-wiring.ts`'s `forkFailed`, the same
-   * field the fork path and the header list's warm control both report through — and `linkWiring` is
-   * not assigned until two hundred lines below the restore block. Everything this loop does is still
+   * **THE THIRD STEP OF THE RESTORE, AND IT IS DOWN HERE RATHER THAN BESIDE THE OTHER TWO FOR A
+   * REASON THAT HAS GONE.** The refusal has to reach a surface, and it used to be `link-wiring.ts`'s
+   * `linkWiring`, not assigned until two hundred lines below the restore block; it is a notice now
+   * (`notice.ts`), the surface the fork path and the header list's warm control both report through. Everything this loop does is still
    * before the first `applyLayout()` just below, which is the only ordering the restore actually
    * requires: `pendingBinding` is read there, not here.
    *
-   * **NOT `fork failed — …`, AND THAT IS A DECISION RECORDED HERE — 5d-ii-d review round 2, Finding
+   * **NOT `cannot make a copy — …`, AND THAT IS A DECISION RECORDED HERE — 5d-ii-d review round 2, Finding
    * 3.** `scratchpad.warm(session)` is what this loop calls, never `fork`, and `#link-status` used to
-   * say "fork failed" about it anyway only because `link-status.ts` prefixed every `forkFailed` value
+   * say "fork failed" about it anyway only because `link-status.ts` prefixed every fork-failure value
    * the same way regardless of writer. A restore is not a fork: nothing here was clicked, nothing here
    * even runs in response to a gesture this page load has seen yet — it is `main()`'s own start-up code
    * discovering that a cap lowered since a previous page's write left more warm buffers named than the
    * current build allows. `ScratchBuffers.warm`'s `BufferCapReached` (`scratch.ts`'s `#refuseAtCap`)
    * therefore carries no prefix at all now, here or from the header list's own warm control below —
-   * `e.message` is the bare cap sentence, "all N scratch buffers are live; retire or cool one from the
-   * buffers list in the header to make room", true and complete without naming a gesture that did not
-   * happen.
+   * `e.message` is the bare cap sentence, "all N copies are running; pause or delete one from the
+   * copies menu to make room", true and complete without naming a gesture that did not happen.
    *
    * **IT WALKS `restoredBindings` AND NOT `restoredBuffers.bindings`, WHICH IS THE POLICY AND NOT A
    * TIDY-UP.** §4.2's rule is that a buffer a restored PANE names gets a worker; a binding the restore
@@ -1479,7 +1653,7 @@ async function main(): Promise<EditorView> {
       scratchpad.warm(session)
     } catch (e) {
       if (!(e instanceof BufferCapReached)) throw e
-      linkWiring.setForkFailed(e.message)
+      notices.notify(e.message)
       for (const [leaf, s] of restoredBindings) {
         if (s === session) paneHost.seedBinding(leaf, SOURCE_SESSION)
       }

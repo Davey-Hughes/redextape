@@ -38,7 +38,7 @@ beforeAll(async () => {
  * **WHAT THIS FILE ACTUALLY PINS, STATED PLAINLY — IT IS THE WRITER'S BEHAVIOUR, NOT THE READER'S.**
  * Both assertions below are satisfied by an implementation that never reads `redextape.buffers` at
  * all, not only by one that reads it and correctly refuses a corrupt payload. The first (`#buffers`
- * reads the zero-buffer label, no `.detached-badge`) is vacuously true whenever nothing restores,
+ * reads the zero-buffer label, no `.view-status`) is vacuously true whenever nothing restores,
  * corrupt payload or none. The second (the stored value equals `{minted:0,buffers:[],bindings:{}}`) is
  * produced by `refreshBuffers()`'s ordinary, unconditional start-up write (`main.ts`'s start-up
  * `refreshBuffers()` call, made after `compile.schedule(SAMPLE)` — that call site's own comment is the
@@ -56,15 +56,16 @@ describe('a corrupt buffers payload', () => {
   it('a corrupt buffers key leaves the page with no buffers and every pane on source', () => {
     // **THE BUTTON READS THE ZERO-BUFFER LABEL — 5d-iv T10.** This used to assert `#buffers`'s own
     // `hidden` was `true`, which `main.ts`'s `refreshBuffers` no longer sets at any count: the menu now
-    // offers "new TM buffer" and so is never empty, which is exactly why the control is reachable at
+    // offers "new TM copy" and so is never empty, which is exactly why the control is reachable at
     // zero rather than withheld. `textContent` is what still answers "did nothing restore" — the label
-    // is `buffers ▾` (`buffer-list.ts`'s `update`, the zero case this task added) only when the count is
+    // is `copies ▾` (`buffer-list.ts`'s `update`, the zero case this task added) only when the count is
     // genuinely zero, which a restored buffer would move off of.
-    expect(document.querySelector<HTMLButtonElement>('#buffers')?.textContent).toBe('buffers ▾')
-    // AND NO PANE IS DETACHED. `.detached-badge` is `pane-chrome.ts`'s own class for the `[detached]`
+    expect(document.querySelector<HTMLButtonElement>('#buffers')?.textContent).toBe('copies ▾')
+    // AND NO PANE IS DETACHED. `.view-status` is `view-header.ts`'s own class for the `copy · not linked`
     // marker, mounted and unmounted rather than hidden, and a buffer is the only session in this app
     // that can produce one — so its absence is "every pane is on the source session" stated in the DOM.
-    expect(document.querySelector('[data-leaf="lambda-0"] .detached-badge')).toBeNull()
+    expect(document.querySelector('[data-leaf="lambda-0"] .view-status')).toBeNull()
+    expect(document.querySelector('[data-leaf="lambda-0"] .view-title')?.textContent).toBe('λ · program')
   })
 
   /**

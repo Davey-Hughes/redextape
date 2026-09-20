@@ -3,7 +3,8 @@ import { setFocus } from './highlight'
 import type { LambdaPane } from './lambda-pane'
 import { isCoincident, type Link, runningFocus, sourceNodeOwner } from './link'
 import type { LinkWiring } from './link-wiring'
-import type { PaneCollection } from './panes'
+import type { LeafId, PaneCollection } from './panes'
+import { lambdaCopySegments, type ProgramResult, programSegments, tmCopySegments } from './readout'
 import type { SessionId } from './session-client'
 import type { SessionRegistry } from './sessions'
 import type { TmPane } from './tm-pane'
@@ -56,8 +57,29 @@ export function createDraw(deps: {
   leaves: () => number
   sourceAvailable: () => boolean
   hasEditor: (session: SessionId) => boolean
+  /** The view the user is in — the readout describes its session (spec §9). */
+  focused: () => LeafId
+  /** The program's session id, `main.ts`'s `SOURCE_SESSION`, passed in rather than re-spelled here. */
+  sourceSession: SessionId
+  readout: { show(program: ProgramResult | null, segments: readonly string[]): void }
+  /** The program's last result, as `replies.ts` stored it. */
+  program: () => ProgramResult | null
+  nameOf: (session: SessionId) => string | null
 }): () => void {
-  const { view, sessions, panes, links: linkWiring, leaves, sourceAvailable, hasEditor } = deps
+  const {
+    view,
+    sessions,
+    panes,
+    links: linkWiring,
+    leaves,
+    sourceAvailable,
+    hasEditor,
+    focused,
+    sourceSession,
+    readout,
+    program,
+    nameOf,
+  } = deps
   return () => {
     // "THE" λ AND TM PANES, RESOLVED THROUGH THE COLLECTION RATHER THAN CLOSED OVER — AND EITHER MAY
     // BE ABSENT. This block used to destructure `of(leg)[0]` and throw when it came back `undefined`,
@@ -67,7 +89,7 @@ export function createDraw(deps: {
     // offers `close` on the single λ pane a fresh page ships, and clicking it left this throwing on
     // every subsequent frame. Worse, `applyLayout` persists the new tree BEFORE calling `draw()`, so
     // the λ-less arrangement was already committed to `localStorage` and the dead app came back on
-    // reload — only `reset layout` escaped it. `PaneCollection.active` is now the one place that
+    // reload — only `reset preset` escaped it. `PaneCollection.active` is now the one place that
     // answers this question, and it answers `undefined` when the leg is empty; see its own doc for why
     // all four consumers were once holding the same expired invariant privately, and for how it now
     // picks among several panes on the same leg — the pane the user last focused, per leg, falling back
@@ -213,5 +235,28 @@ export function createDraw(deps: {
     // the pin. Still "at the end" in the sense the original comment meant: everything above it is a
     // `history`/`index` read, nothing below reads `drawLink`'s output.
     linkWiring.drawLink(l, isCoincident(linkWiring.link, tmFocus))
+
+    // THE READOUT (spec §9): the focused view's session. A focused source view has no pane entry
+    // (`panes.get('source')` is `undefined`) and shows the program, as does any view bound to it.
+    const entry = panes.get(focused())
+    if (entry === undefined || entry.slot.binding.session === sourceSession) {
+      readout.show(program(), programSegments(program()))
+    } else {
+      const session = entry.slot.binding.session
+      // **NOT THE SESSION ID — IT IS THE ONE PLACE THE VOCABULARY SWEEP CANNOT SEE.** `nameOf` answers
+      // `null` only for a session the copies store does not hold, which is a wiring bug rather than a
+      // state; printing `scratch-3` at a user would ship the old words in the one form no grep for a
+      // literal finds.
+      const name = nameOf(session) ?? 'a copy'
+      const leg = entry.slot.resolve(sessions)
+      const segments =
+        entry.slot.binding.leg === 'lambda'
+          ? lambdaCopySegments(name, { newestStep: leg.hist.newestStep, done: leg.done, status: leg.status })
+          : tmCopySegments(name, sessions.entryOf(session).tmScratch, {
+              newestStep: leg.hist.newestStep,
+              status: leg.status,
+            })
+      readout.show(null, segments)
+    }
   }
 }

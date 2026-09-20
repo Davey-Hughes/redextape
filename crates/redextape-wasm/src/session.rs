@@ -1085,7 +1085,7 @@ pub fn lambda_scratch_at(src: &str, step: u32, byte_budget: usize) -> ForkedAt {
         return ForkedAt {
             diagnostics: vec![Diagnostic::error(
                 Span { start: 0, end: 0 },
-                "the term at this step is too large to fork — scrub to an earlier step",
+                "the term at this step is too large to copy — scrub to an earlier step",
             )],
             scratch: None,
             text: None,
@@ -1315,7 +1315,7 @@ fn tm_scratch_with_caps(src: &str, caps: tm::TmCaps) -> TmScratched {
     // excuse it as dead code; under the feature the condition is a constant `false`.
     if !cfg!(feature = "probe-no-tm-scratch-ceiling") && src.len() > MAX_SCRATCH_TM_BYTES {
         let message = format!(
-            "this file is {} bytes; a TM buffer builds files up to {} bytes — `redextape run` has no such limit",
+            "this file is {} bytes; a TM copy builds files up to {} bytes — `redextape run` has no such limit",
             grouped(src.len() as u64),
             grouped(MAX_SCRATCH_TM_BYTES as u64)
         );
@@ -2021,7 +2021,7 @@ mod tests {
         assert!(out.scratch.is_none(), "a cut term must not seed a scratch");
         assert!(out.text.is_none());
         assert_eq!(out.diagnostics.len(), 1);
-        assert!(out.diagnostics[0].message.contains("too large to fork"));
+        assert!(out.diagnostics[0].message.contains("too large to copy"));
     }
 
     // --- the TM leg ---------------------------------------------------------------------------
@@ -2565,7 +2565,7 @@ state halt: accept
         assert_eq!(
             messages,
             vec![format!(
-                "this file is {} bytes; a TM buffer builds files up to {} bytes — `redextape run` has no such limit",
+                "this file is {} bytes; a TM copy builds files up to {} bytes — `redextape run` has no such limit",
                 grouped(MAX_SCRATCH_TM_BYTES as u64 + 1),
                 grouped(MAX_SCRATCH_TM_BYTES as u64)
             )]

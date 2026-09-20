@@ -24,7 +24,11 @@ export type LegState<T> = {
   hist: History<T>
   status: { available: boolean; reason: string }
   done: RecordEnd | null
-  timer: ReturnType<typeof setInterval> | null
+  /**
+   * Whether the play button is on for this leg — `player.ts`'s flag, which the player follows and
+   * `resetLegs` clears.
+   */
+  playing: boolean
 }
 
 /**
@@ -139,7 +143,7 @@ export type SessionEntry = {
    * and §3.1 makes `source_node` `null` for every state a `TmScratch` renders, so "can this session
    * participate in the sync anchor" is decided when the session is created and never changes. A pane
    * is detached exactly when the session it is bound to is — which is what makes both §4.5 surfaces
-   * (the `[detached]` badge and `link-status.ts`'s sentence) one lookup rather than a second flag to
+   * (the `copy · not linked` status and `link-status.ts`'s sentence) one lookup rather than a second flag to
    * keep in step.
    *
    * NOT DERIVED FROM `id !== 'source'`. That comparison would put the app's naming convention inside
@@ -252,8 +256,7 @@ export function resetLegs(
     if (leg === undefined) continue
     leg.hist.clear()
     leg.done = null
-    if (leg.timer !== null) clearInterval(leg.timer)
-    leg.timer = null
+    leg.playing = false
   }
   if (lambdaLeg !== undefined)
     lambdaLeg.status = { available: lambda?.available ?? false, reason: lambda?.reason ?? reason }
@@ -325,7 +328,7 @@ export class SessionRegistry {
    * Register a session.
    *
    * THROWS ON AN ID ALREADY HELD, mirroring `SessionPool.bind` and for a related reason: an entry owns
-   * histories and a play timer, so replacing one silently would strand a running `setInterval` on a
+   * histories and their playback flags, so replacing one silently would leave the player stepping a
    * `LegState` nothing can reach any more.
    *
    * **THE CALL SITE THIS THROW USED TO NAME AS ITS REASON IS GONE, AND THE THROW IS NOT.** The
@@ -334,7 +337,7 @@ export class SessionRegistry {
    * nothing would report."* 5d-ii-c decision 1 deleted that branch — `ScratchBuffers.fork` mints a
    * name no entry can already hold, so nothing asks `has` on this method's behalf and no path in the
    * app reaches this line any more. It stays because the leak is a property of THIS method: whatever
-   * asked, replacing an entry silently would strand its timer, and a container that answered a
+   * asked, replacing an entry silently would strand its playback, and a container that answered a
    * duplicate id by overwriting would make that unreportable rather than impossible.
    */
   add(entry: SessionEntry): void {
@@ -458,7 +461,7 @@ export class SessionRegistry {
    * every pane on every recorded frame during playback. Accepted rather than cached, which is the
    * argument `options` above used to carry: it is one array of a handful of small objects against a
    * `controlState` call that formats step counts into strings on the same tick, and
-   * `pane-chrome.ts`'s `paneSelect.update` compares its rendered key before it touches the DOM, so
+   * the title-selector (`view-header.ts`'s `viewHeader`) compares its rendered key before it touches the DOM, so
    * nothing downstream pays for the allocation.
    */
   pairs(): PaneOption[] {
@@ -489,7 +492,7 @@ export type PaneView<T> = {
   render(frame: T | null, controls: ControlState): void
   /**
    * `PaneOption[]` AND A WHOLE `Binding<Leg>`, NOT `BindingOption[]` AND A `SessionId`. The pane's
-   * selector offers `(leg, session)` PAIRS (`pairs()` above, `pane-chrome.ts`'s `paneSelect`), so both
+   * title-selector offers `(leg, session)` PAIRS (`pairs()` above, `view-header.ts`'s `viewHeader`), so both
    * halves of what it displays have to cross this boundary: the list of pairs, and which pair is in
    * force. `Binding<Leg>` and not `Binding<K>` — a `PaneView<T>` is parameterised by its FRAME type,
    * which is what pins its renderer, and the pair on offer is deliberately not restricted to the leg
@@ -499,7 +502,7 @@ export type PaneView<T> = {
   setDetached(detached: boolean): void
   /**
    * **`choices` RIDES THE CALL THAT MOUNTS THE CONTROL, WHICH IS WHY IT IS HERE AND NOT ON A SETTER OF
-   * ITS OWN.** The split control is a picker now (`pane-chrome.ts`'s `splitControl`), and its menu is
+   * ITS OWN.** The split control is a picker now (`view-header.ts`'s `viewMenu`), and its menu is
    * built on open from a list only the app can produce — the registry's pairs, the pane's own binding,
    * and whether the layout tree is currently without a source leaf. Two routes reached the pane from
    * `draw()`'s per-frame loop: widen this call, or add a sibling setter beside it. This one is the
@@ -509,9 +512,9 @@ export type PaneView<T> = {
    * whatever the previous frame left, which is the class of staleness this file already refuses for
    * `setBindings` by driving it from the one per-frame pass.
    *
-   * THE VALUE IS READ ON OPEN, NOT ON ARRIVAL. Both panes store it in a field and hand `layoutControls` a
+   * THE VALUE IS READ ON OPEN, NOT ON ARRIVAL. Both panes store it in a field and hand `viewMenu` a
    * thunk over that field, so this call costs a field write on every recorded frame during playback and
-   * the menu that reads it is built at most once per user gesture — `splitControl`'s own doc has the
+   * the menu that reads it is built at most once per user gesture — `viewMenu`'s own doc has the
    * argument for why the thunk exists rather than a list handed over at construction.
    */
   setLayoutControls(canClose: boolean, canSplit: boolean, choices: SplitChoices): void
@@ -590,12 +593,13 @@ export class PaneSlot<K extends Leg> {
    * Point this slot at a different session, keeping its leg.
    *
    * PLAYBACK STAYS WITH THE LEG IT STARTED ON, and this method is deliberately not where that is
-   * decided — it is decided by `play` parking its timer on the `LegState` rather than on the slot,
+   * decided — it is decided by `play` setting its flag on the `LegState` rather than on the slot,
    * which T4 flagged as the choice this task would have to make. The reason to keep it there: a play
    * head is a property of a HISTORY, and a pane looking away is not the user un-pressing play. Two
-   * slots may now be bound to one leg, so the alternative — stopping the timer on rebind — would let
-   * one pane's selector silently stop the other pane's playback. The leg clears its own timer when it
-   * reaches the frontier (`transport.ts`'s `play`), so an unwatched run is bounded rather than forever.
+   * slots may now be bound to one leg, so the alternative — stopping playback on rebind — would let
+   * one pane's selector silently stop the other pane's playback. The player clears the leg's flag when
+   * it reaches the frontier (`player.ts`'s `createPlayer`), so an unwatched run is bounded rather than
+   * forever.
    */
   rebind(session: SessionId): void {
     this.#binding = { session, leg: this.#binding.leg }
@@ -627,7 +631,7 @@ export class PaneSlot<K extends Leg> {
    * added or retired elsewhere changes what this pane may be pointed at. Driving them from the one
    * per-frame call means there is no second path that could leave a selector listing a session that no
    * longer exists; both setters are no-ops when nothing changed, which is the same guard
-   * `LambdaPane.renderLink` and `detachedBadge` already state for the same path.
+   * `LambdaPane.renderLink` and `viewHeader`'s setters already state for the same path.
    */
   render(reg: SessionRegistry, pane: PaneView<LegFrame[K]>, leg: LegState<LegFrame[K]>): void {
     const b = this.#binding
@@ -646,6 +650,7 @@ export class PaneSlot<K extends Leg> {
         // PER SESSION, NOT PER LEG — the generation is the client's, and both legs of one session
         // share it. `reg` and the binding are both already in hand here.
         awaitingRun: reg.entryOf(b.session).client.awaitingRun,
+        playing: leg.playing,
       }),
     )
     pane.setBindings(reg.pairs(), b)

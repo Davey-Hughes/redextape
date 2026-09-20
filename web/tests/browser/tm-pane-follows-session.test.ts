@@ -11,6 +11,7 @@ import { type PoolPort, SessionPool } from '../../src/session-client'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import { TmPane } from '../../src/tm-pane'
 import type { TmProgram, TmScratchStatus } from '../../src/types'
+import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
@@ -61,6 +62,8 @@ const inertEvents = (): PaneEvents => ({
   play: vi.fn(),
   restart: vi.fn(),
   extend: vi.fn(),
+  speed: () => 8,
+  setSpeed: vi.fn(),
   rebind: vi.fn(),
   editScratch: vi.fn(),
   collapse: vi.fn(),
@@ -92,6 +95,7 @@ describe('a TM buffer whose worker died', () => {
     const [held, split] = made
     if (held === undefined || split === undefined) throw new Error('two panes were not made')
     const replies = createReplies({
+      setProgram: () => undefined,
       sessions: reg,
       scratchpad: buffers,
       results: document.createElement('section'),
@@ -102,6 +106,7 @@ describe('a TM buffer whose worker died', () => {
       // THE FIRST PANE IS THE EDITOR'S HOME, as a buffer bound through a pane's selector makes it.
       editorHome: () => held.pane,
       onBuffersPersist: () => undefined,
+      notify: () => undefined,
     })
 
     replies.onScratchReply(id, { kind: 'tm-scratch-compiled', gen: 1, tm: REDUCED, tmProgram: PROGRAM, tapeNames: [] })
@@ -169,22 +174,40 @@ const forkOf = (id: string) => {
   const button = leaf(id).querySelector<HTMLButtonElement>('button.detach')
   return button === null ? 'absent' : button.disabled ? `disabled: ${button.title}` : 'enabled'
 }
-const selectOf = (id: string) => leaf(id).querySelector<HTMLSelectElement>('.pane-binding select')?.value
+const selectOf = (id: string) => leaf(id).querySelector<HTMLButtonElement>('button.view-title')?.dataset.binding
+/** Every pair `id`'s title menu offers, as keys — opens and closes the menu to read it. */
+function offered(id: string): string[] {
+  const title = leaf(id).querySelector<HTMLButtonElement>('button.view-title')
+  if (title === null) return []
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const keys = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding ?? '')
+  menu?.hidePopover()
+  return keys
+}
 const tmLeaves = () =>
   [...document.querySelectorAll<HTMLElement>('[data-kind="tm"]')].map((el) => el.dataset.leaf ?? '')
 
-/** `pane-picker.test.ts`'s `pickSplit`, answering the leaf it created. */
-async function split(id: string, item: string): Promise<string> {
+/**
+ * Split `id` to the right through its `⋯` menu and answer the leaf it created — `pick` is `'same'`
+ * (another view of this), `'source'`, or a `bindingKey(leg, session)`.
+ */
+async function split(id: string, pick: string): Promise<string> {
   const before = tmLeaves()
-  const button = document.querySelector<HTMLButtonElement>(
-    `[data-leaf="${id}"] button[aria-label="split left and right"]`,
-  )
-  if (button === null) throw new Error(`no split control on [data-leaf="${id}"]`)
-  button.click()
-  const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
-  const items = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
-  const chosen = items.find((b) => b.textContent === item)
-  if (chosen === undefined) throw new Error(`no "${item}" — offered: ${items.map((b) => b.textContent).join(' | ')}`)
+  const more = leaf(id).querySelector<HTMLButtonElement>('button.view-more')
+  if (more === null) throw new Error(`no view menu on [data-leaf="${id}"]`)
+  more.click()
+  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
+  menu?.querySelector<HTMLButtonElement>('button.view-split[data-dir="row"]')?.click()
+  const selector =
+    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
+  const chosen = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
+  if (chosen == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
+      (b) => b.textContent,
+    )
+    throw new Error(`no ${pick} — offered: ${offered.join(' | ')}`)
+  }
   chosen.click()
   await until(() => tmLeaves().length === before.length + 1, 'the split to add a TM pane')
   const created = tmLeaves().find((l) => !before.includes(l))
@@ -192,17 +215,19 @@ async function split(id: string, item: string): Promise<string> {
   return created
 }
 
-/** Pick `(tm, session)` in a pane's own selector, the gesture a user makes. */
+/** Pick `(tm, session)` in a view's own title menu, the gesture a user makes. */
 function rebind(id: string, session: string): void {
-  const select = leaf(id).querySelector<HTMLSelectElement>('.pane-binding select')
-  if (select === null) throw new Error(`no binding selector on [data-leaf="${id}"]`)
-  select.value = `tm\x00${session}`
-  if (select.value !== `tm\x00${session}`) throw new Error(`[data-leaf="${id}"] offers no TM pair for ${session}`)
-  select.dispatchEvent(new Event('change'))
+  const title = leaf(id).querySelector<HTMLButtonElement>('button.view-title')
+  if (title === null) throw new Error(`no title-selector on [data-leaf="${id}"]`)
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${bindingKey('tm', session)}"]`)
+  if (item == null) throw new Error(`[data-leaf="${id}"] offers no TM pair for ${session}`)
+  item.click()
 }
 
 function close(id: string): void {
-  leaf(id).querySelector<HTMLButtonElement>('button[aria-label="close this pane"]')?.click()
+  leaf(id).querySelector<HTMLButtonElement>('button[aria-label="close this view"]')?.click()
 }
 
 /** The source program's δ table height, read off `tm-0` before it is bound to the buffer. */
@@ -230,11 +255,7 @@ function clickBufferControl(label: string): void {
 async function visitNewBuffer(session: string): Promise<void> {
   openBufferList()
   document.querySelector<HTMLButtonElement>('.buffer-list button.new-tm')?.click()
-  const select = leaf('tm-0').querySelector<HTMLSelectElement>('.pane-binding select')
-  await until(
-    () => [...(select?.options ?? [])].some((o) => o.value === `tm\x00${session}`),
-    `${session} to be offered`,
-  )
+  await until(() => offered('tm-0').includes(bindingKey('tm', session)), `${session} to be offered`)
   rebind('tm-0', session)
   await until(() => leaf('tm-0').querySelector('.cm-editor') !== null, `the ${session} editor to mount`)
   const dom = leaf('tm-0').querySelector<HTMLElement>('.cm-editor')
@@ -250,10 +271,10 @@ async function visitNewBuffer(session: string): Promise<void> {
  * and a split made on source then rebound onto the buffer. Also split one pane on source that stays there, for the
  * moved panes to be compared with. Answers the panes a cool or retire of the buffer moves, and that reference.
  */
-async function panesOnBuffer(session: string, label: string): Promise<{ moved: string[]; reference: string }> {
-  const reference = await split('tm-0', 'TM · source')
-  const same = await split('tm-0', `TM · ${label} (same)`)
-  const rebound = await split('tm-0', 'TM · source')
+async function panesOnBuffer(session: string): Promise<{ moved: string[]; reference: string }> {
+  const reference = await split('tm-0', bindingKey('tm', 'source'))
+  const same = await split('tm-0', 'same')
+  const rebound = await split('tm-0', bindingKey('tm', 'source'))
   rebind(rebound, session)
   const moved = ['tm-0', same, rebound]
   await until(() => moved.every((id) => valueTextOf(id) === 'value: 2'), `every pane on ${session} to read 2`)
@@ -277,7 +298,7 @@ function expectShowsSource(moved: string[], reference: string): void {
     fork: forkOf(id),
   })
   const source = {
-    binding: 'tm\x00source',
+    binding: bindingKey('tm', 'source'),
     table: sourceTable,
     status: statusOf(reference),
     value: '',
@@ -298,7 +319,7 @@ describe('a TM pane rebound, cooled or retired off a reduced buffer', () => {
   })
 
   it('forgets the buffer’s sentence, value, machine and fork facts when a split of it is rebound to source', async () => {
-    const created = await split('tm-0', 'TM · TM scratch 1 (same)')
+    const created = await split('tm-0', 'same')
     expect(valueTextOf(created)).toBe('value: 2')
     expect(forkOf(created)).toBe('absent')
     rebind(created, 'source')
@@ -310,7 +331,7 @@ describe('a TM pane rebound, cooled or retired off a reduced buffer', () => {
   })
 
   it('shows the buffer’s sentence, value and tape label when a pane on source is rebound onto it', async () => {
-    const created = await split('tm-0', 'TM · source')
+    const created = await split('tm-0', bindingKey('tm', 'source'))
     expect(tableHeightOf(created)).toBe(sourceTable)
     expect(forkOf(created)).toBe('enabled')
     rebind(created, 'scratch-1')
@@ -328,9 +349,12 @@ describe('a TM pane rebound, cooled or retired off a reduced buffer', () => {
    * had held the editor, had no fork control at all.
    */
   it('tells every pane a cool moves what source holds: its machine, its status and a fork control', async () => {
-    const { moved, reference } = await panesOnBuffer('scratch-1', 'TM scratch 1')
-    clickBufferControl('cool TM scratch 1')
-    await until(() => moved.every((id) => selectOf(id) === 'tm\x00source'), 'the cool to move every pane to source')
+    const { moved, reference } = await panesOnBuffer('scratch-1')
+    clickBufferControl('pause TM copy 1')
+    await until(
+      () => moved.every((id) => selectOf(id) === bindingKey('tm', 'source')),
+      'the cool to move every pane to source',
+    )
     expectShowsSource(moved, reference)
     for (const id of moved.slice(1)) close(id)
     close(reference)
@@ -338,9 +362,12 @@ describe('a TM pane rebound, cooled or retired off a reduced buffer', () => {
 
   it('tells every pane a retire moves what source holds, as a cool does', async () => {
     await visitNewBuffer('scratch-2')
-    const { moved, reference } = await panesOnBuffer('scratch-2', 'TM scratch 2')
-    clickBufferControl('retire TM scratch 2')
-    await until(() => moved.every((id) => selectOf(id) === 'tm\x00source'), 'the retire to move every pane to source')
+    const { moved, reference } = await panesOnBuffer('scratch-2')
+    clickBufferControl('delete TM copy 2')
+    await until(
+      () => moved.every((id) => selectOf(id) === bindingKey('tm', 'source')),
+      'the retire to move every pane to source',
+    )
     expectShowsSource(moved, reference)
     for (const id of moved.slice(1)) close(id)
     close(reference)

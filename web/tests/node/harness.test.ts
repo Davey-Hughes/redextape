@@ -2,9 +2,30 @@ import { describe, expect, it } from 'vitest'
 import { SHELL, until } from '../browser/harness'
 
 describe('SHELL', () => {
-  it('carries the five elements the app mounts into', () => {
-    for (const sel of ['#appearance', '#restore-layout', '#buffers', '#encoding', '#results']) {
-      expect(SHELL).toContain(sel.slice(1))
+  it('carries the elements the app mounts into', () => {
+    for (const sel of [
+      '#appearance',
+      '#workspace',
+      '#reset-preset',
+      '#new-view',
+      '#buffers',
+      '#encoding',
+      '#settings',
+      '#style',
+      '#palette',
+      '#notice',
+      '#live',
+      '#results',
+      '#link-status',
+      '#appearance-choice',
+      '#workspace-menu',
+      '#new-view-menu',
+      '#settings-menu',
+    ]) {
+      // `id="…"`, NOT THE BARE WORD: a substring test is satisfied by a NEIGHBOUR's id — `#new-view` by
+      // `id="new-view-menu"`, `#settings` by `id="settings-menu"`, `#appearance` by the settings label's
+      // own text — so deleting the element this list is about would leave it green.
+      expect(SHELL).toContain(`id="${sel.slice(1)}"`)
     }
     expect(SHELL).toContain('<main></main>')
   })

@@ -1,6 +1,8 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { LAYOUT_STORAGE_KEY, type LayoutNode, parseLayout, setLeafKind } from '../../src/layout'
+import { LAYOUT_STORAGE_KEY, type LayoutNode, setLeafKind } from '../../src/layout'
+import { bindingKey } from '../../src/view-header'
+import { parseWorkspace } from '../../src/workspace'
 import { SHELL, until } from './harness'
 
 /**
@@ -17,15 +19,14 @@ import { SHELL, until } from './harness'
  * THE HARNESS IS `two-lambda-panes.test.ts`'s, DELIBERATELY UNMODIFIED — the same shell, the same
  * one-mount-per-file `beforeAll` (ES module imports are cached, so `main()` runs once per page and
  * Vitest gives each test FILE its own page), and a `beforeEach` that undoes the tree shape through
- * `reset layout` and puts the source program back. Its own doc has the argument for each, including why
+ * `reset preset` and puts the source program back. Its own doc has the argument for each, including why
  * the first compile has to be waited for before any fork click can land. **THE SECOND HALF OF THAT
  * SENTENCE USED TO READ "a live scratchpad, through a source recompile"**, which stopped being true
  * with 5d-ii-c decision 2: a keystroke ends no buffer, so a buffer a test forks outlives it. Only the
  * last test here forks, and nothing runs after it — where `two-lambda-panes.test.ts`, whose every test
- * forks, rebinds its λ panes back to `source` explicitly for exactly this reason. Selectors are that file's verbatim: `.controls .detach` for the
+ * forks, rebinds its λ panes back to `source` explicitly for exactly this reason. Selectors are that file's verbatim: `button.detach` for the
  * fork (the button carries real text, not an `aria-label`), `aria-label` for the glyph-only layout
- * controls, and `leg\x00session` for the selector's option values — `\x00` as an escape is
- * `scripts/check-text-bytes.sh`'s rule.
+ * controls, and `bindingKey(leg, session)` for the title menu's items.
  *
  * **KINDS ARE READ FROM `data-kind`, AND THAT IS THE POINT OF THE ATTRIBUTE RATHER THAN A CONVENIENCE
  * HERE.** `hostFor` writes it once when it mints a host and a kind change REUSES that host, so
@@ -48,31 +49,17 @@ const kindOf = (leaf: string) => document.querySelector<HTMLElement>(`[data-leaf
  */
 const places = () =>
   [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => `${e.dataset.leaf}@${e.style.flex}`)
-const btn = (leaf: string, label: string) =>
-  document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button[aria-label="${label}"]`)
 /**
  * Split `leaf` into a second pane of the same kind on the same session — `two-lambda-panes.test.ts`'s
  * `splitSame`, verbatim, and its doc carries the argument: the split control opens a picker now, whose
- * first entry is the pane's own pair labelled `(same)`, so the gesture that used to be one click is two
+ * first entry is the pane's own pair labelled "another view of this", so the gesture that used to be one click is two
  * and still means what it meant. Both splits below exist to give the switched pane a NEIGHBOUR, which is
  * what makes the tree uneven enough for "kept its place and its size" to be a claim — what the neighbour
  * shows is not what either test is about, so the duplicate case is the right entry here.
  */
-const splitSame = (leaf: string, control: string): void => {
-  const button = btn(leaf, control)
-  if (button === null) throw new Error(`no "${control}" control on [data-leaf="${leaf}"]`)
-  button.click()
-  const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
-  const first = menu?.querySelector<HTMLButtonElement>('button') ?? null
-  if (first === null || !(first.textContent ?? '').endsWith('(same)')) {
-    throw new Error(`${leaf}'s "${control}" menu does not start with the duplicate case: ${first?.textContent}`)
-  }
-  first.click()
-}
-const selectOf = (leaf: string) =>
-  document.querySelector<HTMLSelectElement>(`[data-leaf="${leaf}"] .pane-binding select`)
-/** The `<option>` value the pane selector encodes a `(leg, session)` pair as — `two-lambda-panes.test.ts`'s. */
-const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
+const splitSame = (leaf: string, dir: 'row' | 'column'): void => splitVia(leaf, dir, 'same')
+/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
+const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
 const editorsIn = (leaf: string) => document.querySelectorAll(`[data-leaf="${leaf}"] .cm-editor`).length
 const termOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .term`)?.textContent ?? ''
 /**
@@ -85,23 +72,47 @@ const showing = (leaf: string) => ({
   status: document.querySelector(`[data-leaf="${leaf}"] .tm-status`)?.textContent ?? '',
 })
 const stepOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .step`)?.textContent ?? ''
-const storedTree = (): LayoutNode | null => parseLayout(localStorage.getItem(LAYOUT_STORAGE_KEY))
+const storedTree = (): LayoutNode | null => parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.tree ?? null
 
 /**
- * Pick a `(leg, session)` pair in `leaf`'s binding selector, through the real `<select>`.
+ * Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does.
  *
- * **IT ASSERTS THE OPTION WAS THERE, WHICH IS NOT PEDANTRY** — `select.value = x` for an option the
- * list does not hold silently leaves the value at `''`, and the `change` handler then splits an empty
- * string and reports a pair naming no session. Every assertion in every test below would go on passing
- * against a pick that never happened. `two-lambda-panes.test.ts` records the same hazard at the one
- * place it sets a value.
+ * **IT ASSERTS THE ITEM WAS THERE, WHICH IS NOT PEDANTRY** — a pick that never happened would leave every
+ * assertion in every test below passing against the pane's old pair.
  */
-const pick = (leaf: string, value: string): void => {
-  const select = selectOf(leaf)
-  if (select === null) throw new Error(`no binding selector on [data-leaf="${leaf}"]`)
-  select.value = value
-  if (select.value !== value) throw new Error(`the selector on ${leaf} does not offer \`${value}\``)
-  select.dispatchEvent(new Event('change', { bubbles: true }))
+const pick = (leaf: string, key: string): void => {
+  const title = titleOf(leaf)
+  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
+  if (item == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
+    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
+  }
+  item.click()
+}
+
+/**
+ * Split `leaf` through its `⋯` menu, as a user does: `pick` is `'same'` (another view of this), `'source'`,
+ * or a `bindingKey(leg, session)`.
+ */
+function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
+  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
+  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
+  more.click()
+  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
+  menu?.querySelector<HTMLButtonElement>(`button.view-split[data-dir="${dir}"]`)?.click()
+  const selector =
+    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
+  const item = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
+  if (item == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
+      (b) => b.textContent,
+    )
+    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
+  }
+  item.click()
 }
 
 let view: EditorView
@@ -117,7 +128,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   localStorage.removeItem(LAYOUT_STORAGE_KEY)
-  document.querySelector<HTMLButtonElement>('#restore-layout')?.click()
+  document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
   await until(
     () =>
@@ -155,7 +166,7 @@ describe('a pane changes which leg it renders', () => {
     const onError = (e: ErrorEvent) => errors.push(e.message)
     window.addEventListener('error', onError)
     try {
-      splitSame('lambda-0', 'split left and right')
+      splitSame('lambda-0', 'row')
       await until(() => lambdaLeaves().length === 2, 'the split to produce a second λ pane')
 
       const placesBefore = places()
@@ -169,7 +180,7 @@ describe('a pane changes which leg it renders', () => {
       expect(termOf('lambda-0')).not.toBe('')
       expect(lambdaStep).not.toBe('')
 
-      pick('lambda-0', optionValue('tm', 'source'))
+      pick('lambda-0', bindingKey('tm', 'source'))
       await until(() => kindOf('lambda-0') === 'tm', 'the λ pane to become a TM pane')
 
       // THE HOST WAS REBUILT, NOT RELABELLED. `.state-table` is `TmPane`'s and `.term` is
@@ -182,7 +193,7 @@ describe('a pane changes which leg it renders', () => {
       expect(storedTree()).toEqual(setLeafKind(treeBefore, 'lambda-0', 'tm'))
 
       // AND IT IS SHOWING THE PAIR THAT WAS PICKED, RESOLVED.
-      expect(selectOf('lambda-0')?.value).toBe(optionValue('tm', 'source'))
+      expect(titleOf('lambda-0')?.dataset.binding).toBe(bindingKey('tm', 'source'))
       expect(stepOf('lambda-0')).toBe(stepOf('tm-0'))
       expect(stepOf('lambda-0')).not.toBe(lambdaStep)
       expect(errors).toEqual([])
@@ -211,7 +222,7 @@ describe('a pane changes which leg it renders', () => {
     try {
       expect(showing('tm-0').rows).toBeGreaterThan(0)
 
-      pick('lambda-0', optionValue('tm', 'source'))
+      pick('lambda-0', bindingKey('tm', 'source'))
       await until(() => kindOf('lambda-0') === 'tm', 'the λ pane to become a TM pane')
 
       const shown = showing('lambda-0')
@@ -250,9 +261,9 @@ describe('a pane changes which leg it renders', () => {
     const onError = (e: ErrorEvent) => errors.push(e.message)
     window.addEventListener('error', onError)
     try {
-      document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')?.click()
+      document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
       await until(() => editorsIn('lambda-0') > 0, 'the fork to mount an editor')
-      splitSame('lambda-0', 'split left and right')
+      splitSame('lambda-0', 'row')
       await until(() => lambdaLeaves().length === 2, 'the split to produce a second λ pane')
       const survivor = lambdaLeaves().find((id) => id !== 'lambda-0') ?? ''
       expect(survivor).not.toBe('')
@@ -267,7 +278,7 @@ describe('a pane changes which leg it renders', () => {
       viewBefore.dispatch({ selection: { anchor: cursorAt } })
 
       // THE SWITCH, ON THE PANE THAT IS HOLDING THE EDITOR.
-      pick('lambda-0', optionValue('tm', 'source'))
+      pick('lambda-0', bindingKey('tm', 'source'))
       await until(() => kindOf('lambda-0') === 'tm', 'the editor-holding λ pane to become a TM pane')
 
       // MOUNTED NOWHERE, DESTROYED NOWHERE — in custody, which no surface shows directly. The
@@ -276,7 +287,7 @@ describe('a pane changes which leg it renders', () => {
       expect(document.querySelectorAll('.term-editor .cm-editor').length).toBe(0)
       expect(document.querySelectorAll('.cm-editor').length).toBe(1)
 
-      const claim = btn(survivor, 'bring the term editor to this pane')
+      const claim = document.querySelector<HTMLButtonElement>(`[data-leaf="${survivor}"] button.claim-editor`)
       expect(claim).not.toBeNull()
       claim?.click()
       await until(() => editorsIn(survivor) === 1, 'the survivor to claim the held editor')
@@ -298,13 +309,13 @@ describe('a pane changes which leg it renders', () => {
   /**
    * **THE CONTROL THE PICK WAS MADE WITH IS DESTROYED BY THE PICK — IMPORTANT FINDING, REVIEW OF THE
    * COMMIT THAT ADDED THE CROSS-LEG ARM.** `applyLayout` reaches the incoming pane's
-   * `host.replaceChildren(…)`, which takes the `<select>` the user is operating with it, and nothing
+   * `host.replaceChildren(…)`, which takes the title-selector the user is operating with it, and nothing
    * put focus anywhere afterwards: a keyboard user who arrowed to a TM pair and pressed Enter was left
    * on `<body>`, one Tab away from the top of the document. `close` answered exactly this with
    * `focusPane(grew)`; this arm answers it with `focusPane(id)`, the same leaf, because the pane did
    * not go anywhere — only its contents changed.
    *
-   * IT FOCUSES THE `<select>` FIRST, WHICH IS THE HALF THAT MAKES THIS A TEST RATHER THAN A GESTURE.
+   * IT FOCUSES THE TITLE-SELECTOR FIRST, WHICH IS THE HALF THAT MAKES THIS A TEST RATHER THAN A GESTURE.
    * `document.activeElement` is `<body>` on a page nobody has clicked, so an assertion that focus is
    * inside the pane afterwards would pass against a no-op if focus had never been anywhere else.
    * Parking it on the control that is about to be destroyed is what makes the "not `<body>`" assertion
@@ -316,12 +327,12 @@ describe('a pane changes which leg it renders', () => {
    * not ask to be.
    */
   it('puts focus back in the pane whose control the switch destroyed', async () => {
-    const select = selectOf('lambda-0')
-    if (select === null) throw new Error('the λ pane has no binding selector')
-    select.focus()
-    expect(document.activeElement).toBe(select)
+    const title = titleOf('lambda-0')
+    if (title === null) throw new Error('the λ view has no title-selector')
+    title.focus()
+    expect(document.activeElement).toBe(title)
 
-    pick('lambda-0', optionValue('tm', 'source'))
+    pick('lambda-0', bindingKey('tm', 'source'))
     await until(() => kindOf('lambda-0') === 'tm', 'the λ pane to become a TM pane')
 
     expect(document.activeElement).not.toBe(document.body)
@@ -329,8 +340,8 @@ describe('a pane changes which leg it renders', () => {
     expect((landed as HTMLElement | null)?.dataset.leaf).toBe('lambda-0')
     // THE OLD CONTROL IS GONE, WHICH IS WHY THIS NEEDED AN ANSWER AT ALL — a rescue that had merely
     // kept the same element alive would satisfy every assertion above and none of decision 1's.
-    expect(document.activeElement).not.toBe(select)
-    expect(select.isConnected).toBe(false)
+    expect(document.activeElement).not.toBe(title)
+    expect(title.isConnected).toBe(false)
   })
 
   /**
@@ -358,24 +369,24 @@ describe('a pane changes which leg it renders', () => {
     const onError = (e: ErrorEvent) => errors.push(e.message)
     window.addEventListener('error', onError)
     try {
-      document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')?.click()
+      document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
       await until(() => editorsIn('lambda-0') > 0, 'the fork to register a scratch buffer')
       expect(kindOf('tm-0')).toBe('tm')
 
       // THE PAIR THE FORK PRODUCED, READ OFF THE PANE THAT PERFORMED IT. This test picked the literal
-      // `optionValue('lambda', 'lambda-scratch')` — 5d-i's one fixed scratch id — and 5d-ii-c decision 1
+      // `bindingKey('lambda', 'lambda-scratch')` — 5d-i's one fixed scratch id — and 5d-ii-c decision 1
       // mints `scratch-N` per fork instead. The number depends on how many forks this FILE ran before
       // this test (one `main()` per page), so it cannot be written down; the pane that just forked is
       // where the app itself records it. `pick` throws if the value it is handed is not in the target
       // selector, which is what keeps this from silently picking nothing.
-      const buffer = selectOf('lambda-0')?.value ?? ''
-      expect(buffer).not.toBe(optionValue('lambda', 'source'))
+      const buffer = titleOf('lambda-0')?.dataset.binding ?? ''
+      expect(buffer).not.toBe(bindingKey('lambda', 'source'))
 
       pick('tm-0', buffer)
       await until(() => kindOf('tm-0') === 'lambda', 'the TM pane to become a λ pane on the buffer')
 
-      expect(selectOf('tm-0')?.value).toBe(buffer)
-      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('[detached]')
+      expect(titleOf('tm-0')?.dataset.binding).toBe(buffer)
+      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('copy · not linked')
       await until(() => termOf('tm-0') !== '', "the scratch's own term to paint in the switched pane")
       // TWO λ PANES ON THE SCRATCH AND NO TM PANE AT ALL, which is a legal state — `draw.ts` and
       // `link-wiring.ts` answer an empty leg with `undefined` rather than a throw.
@@ -390,7 +401,7 @@ describe('a pane changes which leg it renders', () => {
       // **AND NOT A SOURCE KEYSTROKE EITHER, WHICH IS WHAT IT WAS UNTIL 5d-ii-c DECISION 2.** That
       // keystroke used to retire the buffer, so the switched pane was rebound to `source` and repainted
       // from a session it was never built for — this stage asserted exactly that, ending on
-      // `not.toContain('[detached]')` and on both λ panes showing the source's own leg. A keystroke ends
+      // a negative check of the old `[detached]` badge and on both λ panes showing the source's own leg. A keystroke ends
       // no buffer now (design §4.3's table), so it moves nothing and there would be nothing to observe.
       // AN EDIT OF THE BUFFER drives the same per-pane loop `draw.ts` threw in, and says something the
       // retire could not: the switched pane follows the buffer's OWN later frames, on a binding it
@@ -409,7 +420,7 @@ describe('a pane changes which leg it renders', () => {
       // Both λ panes resolve the one buffer's λ leg, so the two showing the same term is that repaint
       // having reached this pane rather than only the one holding the editor.
       expect(termOf('tm-0')).toBe(termOf('lambda-0'))
-      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('[detached]')
+      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('copy · not linked')
 
       // AND THE KEYSTROKE PATH, which reaches `link-wiring.ts` from the source editor's own update
       // listener without going through `draw.ts` first — the other entry point the Critical could be
@@ -420,8 +431,8 @@ describe('a pane changes which leg it renders', () => {
         () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle',
         'the source recompile to settle',
       )
-      expect(selectOf('tm-0')?.value).toBe(buffer)
-      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('[detached]')
+      expect(titleOf('tm-0')?.dataset.binding).toBe(buffer)
+      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('copy · not linked')
       expect(termOf('tm-0')).toBe(termOf('lambda-0'))
       expect(errors).toEqual([])
     } finally {

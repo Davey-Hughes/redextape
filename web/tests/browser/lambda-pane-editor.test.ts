@@ -8,7 +8,7 @@ import type { LambdaState } from '../../src/types'
  * new refusal — a pane showing a link window must not offer a fork, now that `detach` carries a step
  * rather than the pane's own body text (`lambda-pane.ts`'s `#refreshDetach` doc).
  *
- * PANES ARE CONSTRUCTED DIRECTLY, matching `detached-badge.test.ts`'s idiom: this is chrome and body
+ * PANES ARE CONSTRUCTED DIRECTLY, matching `view-status.test.ts`'s idiom: this is chrome and body
  * wiring built in the constructor and moved by `setEditor`/`render`/`renderLink` directly, with
  * nothing on the path to it that needs `main()`.
  */
@@ -26,6 +26,8 @@ const events = (): PaneEvents => ({
   play: vi.fn(),
   restart: vi.fn(),
   extend: vi.fn(),
+  speed: () => 8,
+  setSpeed: vi.fn(),
   rebind: vi.fn(),
   detach: vi.fn(),
   editScratch: vi.fn(),
@@ -53,6 +55,7 @@ const CONTROLS = {
   canBack: false,
   canForward: true,
   canPlay: true,
+  playing: false,
   stepText: '0',
   continueLabel: null,
 }
@@ -70,8 +73,8 @@ describe('LambdaPane editor region', () => {
     pane.setEditor('\\x. x')
     expect(el.querySelector('.term-editor')).not.toBeNull()
     pane.setEditor(null)
-    // Removed, not hidden — the same standard `detachedBadge` states, and what makes "the editor is
-    // gone" have one answer.
+    // Removed, not hidden — the same standard `view-header.ts`'s `setDetached` holds for the
+    // `copy · not linked` status, and what makes "the editor is gone" have one answer.
     expect(el.querySelector('.term-editor')).toBeNull()
   })
 

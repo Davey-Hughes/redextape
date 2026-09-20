@@ -2,6 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import type { Leg } from '../../src/protocol'
 import type { SessionId } from '../../src/session-client'
+import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
@@ -73,8 +74,8 @@ const buffersMenu = (): HTMLElement => {
  * **FORCES THE LIST OPEN FIRST, THE WAY `buffer-restore.test.ts`'s OWN `openList` DOES, AND FOR THE
  * SAME REASON.** `bufferList`'s rows are built on `beforetoggle` — a closed list keeps whatever it last
  * rendered, which can predate a mint that happened while it was shut (`buffer-list.ts`'s own doc: "A
- * closed list has no state to keep fresh"). The "new TM buffer" control dismisses the popover before it
- * mints (`buffer-list.ts`'s own click handler, mirroring `retire`'s), so every mint in this file leaves
+ * closed list has no state to keep fresh"). The *new TM copy* control dismisses the popover before it
+ * mints (`buffer-list.ts`'s own click handler, the one gesture in that menu that still does), so every mint in this file leaves
  * the list closed on stale rows; reading it without reopening would answer what the list showed BEFORE
  * the mint, not what it holds now.
  */
@@ -84,37 +85,36 @@ const bufferRows = (): HTMLElement[] => {
   return [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row')]
 }
 
-/** `\x00` as an escape rather than the byte — `scripts/check-text-bytes.sh`'s rule, and the pane
- * selector's own `(leg, session)` encoding, spelled out here rather than imported so this pins the DOM
- * contract instead of agreeing with whatever `pane-chrome.ts` currently does. */
-const optionValue = (leg: Leg, id: SessionId) => `${leg}\x00${id}`
-
 /**
- * Every mounted pane's current binding, keyed by leaf id — read off the selector's own encoded value
- * rather than tracked separately, so `it('mints a warm TM buffer...')`'s "nothing rebound" claim is a
- * fact about the DOM rather than about a value this file kept on the side.
+ * Every mounted view's current binding, keyed by leaf id — read off the title-selector's own
+ * `data-binding` rather than tracked separately, so `it('mints a warm TM buffer...')`'s "nothing
+ * rebound" claim is a fact about the DOM rather than about a value this file kept on the side.
  *
- * A LEAF WITH NO SELECTOR CONTRIBUTES NOTHING, which is `paneSelect`'s own below-two-options
- * self-removal (`pane-chrome.ts`) rather than a gap here: the source leaf, before anything has forked
- * or minted, offers no selector at all.
+ * A LEAF WITH NO TITLE-SELECTOR CONTRIBUTES NOTHING: the source view's title is plain text, and a view
+ * with one pair on offer shows its title as plain text too.
  */
 const paneBindings = (): Record<string, string> => {
   const bindings: Record<string, string> = {}
   for (const pane of document.querySelectorAll<HTMLElement>('[data-leaf]')) {
     const leaf = pane.dataset.leaf
-    const select = pane.querySelector<HTMLSelectElement>('.pane-binding select')
-    if (leaf !== undefined && select !== null) bindings[leaf] = select.value
+    const title = pane.querySelector<HTMLButtonElement>('button.view-title')
+    if (leaf !== undefined && title !== null) bindings[leaf] = title.dataset.binding ?? ''
   }
   return bindings
 }
 
-/** Rebind `pane`'s own selector to `(leg, session)` — the gesture a user makes through the control,
- * not a direct write to whatever `main.ts` holds underneath it. */
+/** Rebind `pane` to `(leg, session)` through its title menu — the gesture a user makes through the
+ * control, not a direct write to whatever `main.ts` holds underneath it. */
 const pickBinding = (pane: HTMLElement, target: { leg: Leg; session: SessionId }): void => {
-  const select = pane.querySelector<HTMLSelectElement>('.pane-binding select')
-  if (select === null) throw new Error('no binding selector on this pane')
-  select.value = optionValue(target.leg, target.session)
-  select.dispatchEvent(new Event('change'))
+  const title = pane.querySelector<HTMLButtonElement>('button.view-title')
+  if (title === null) throw new Error('no title-selector on this view')
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const item = menu?.querySelector<HTMLButtonElement>(
+    `button[data-binding="${bindingKey(target.leg, target.session)}"]`,
+  )
+  if (item == null) throw new Error(`this view offers no ${bindingKey(target.leg, target.session)}`)
+  item.click()
 }
 
 /** Wait until the TM pane's own text stops changing — `tm-scratch-fork.test.ts`'s own `settleOn`,
@@ -225,9 +225,9 @@ describe('the blank TM buffer', () => {
    * does fail when the bug is reintroduced. Fixed here by retiring every buffer the page holds, counted
    * off the open list rather than assumed, so the state this test drives to is the state it claims to.
    *
-   * **`button.buffer-retire`, NOT `button.retire`** — `buffer-list.ts`'s `bufferRow` gives the retire
-   * control the class `buffer-retire`; `.retire` matches nothing, and a query that finds nothing here
-   * would still pass this test on a build where the last buffer was never actually retired.
+   * **`button.buffer-delete`, NOT `button.retire`** — `buffer-list.ts`'s `bufferRow` gives the delete
+   * control the class `buffer-delete`; `.retire` matches nothing, and a query that finds nothing here
+   * would still pass this test on a build where the last copy was never actually deleted.
    *
    * **`.focus()` BEFORE EVERY OPEN, WHICH `2026-08-17-plan5d-iv-editable-tm.md`'S TEST CODE DID NOT
    * CALL FOR — VERIFIED AGAINST THE TREE RATHER THAN TAKEN ON FAITH.** A bare scripted `.click()`
@@ -255,7 +255,7 @@ describe('the blank TM buffer', () => {
     for (let n = 0; n < toRetire; n++) {
       app.buffersButton().focus()
       if (app.buffersButton().getAttribute('aria-expanded') !== 'true') app.buffersButton().click()
-      const row = app.buffersMenu().querySelector<HTMLButtonElement>('button.buffer-retire')
+      const row = app.buffersMenu().querySelector<HTMLButtonElement>('button.buffer-delete')
       if (row === null) throw new Error('the open list has rows left to retire but no retire control')
       row.click()
       await app.settled()

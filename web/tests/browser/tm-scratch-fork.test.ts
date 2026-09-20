@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
+import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
@@ -85,7 +86,7 @@ const editorViewOf = (pane: HTMLElement): EditorView => {
  *
  * **A QUIESCENCE POLL CANNOT SEE THIS ARRIVE, AND THAT IS NOT A TUNING PROBLEM.** `settleOn` (deleted
  * with this comment's arrival) declared the pane settled after 500 ms of unchanged text. The click's
- * own handler repaints the heading to `[detached]` SYNCHRONOUSLY (`tm-buffer-restore.test.ts`'s
+ * own handler repaints the heading to `copy · not linked` SYNCHRONOUSLY (`tm-buffer-restore.test.ts`'s
  * `detachedWithNoEditorYet` doc measured that), so that change is already in the DOM before the poll
  * takes its first sample — and from that sample until the `tm-scratch-compiled` reply mounts this
  * editor, the text then does not change again AT ALL. Measured, not assumed: over five runs the first
@@ -112,22 +113,17 @@ const editorViewOf = (pane: HTMLElement): EditorView => {
 const forkEditorMounted = (pane: HTMLElement): boolean => pane.querySelector('.cm-editor') !== null
 
 /**
- * The `<option>` value `paneSelect` encodes a `(leg, session)` pair as — `scratch-app.test.ts`'s own
- * `optionValue`, spelled out here for the same reason that file's doc gives: this pins the DOM contract
- * rather than agreeing with whatever the control currently does.
- */
-const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
-
-/**
- * Rebind the TM pane back to the source session through its own selector, if it is currently showing
- * anything else. A no-op the first time this file mounts (nothing has forked yet, so the selector is
- * not even on screen below two options — `paneSelect`'s own idiom).
+ * Rebind the TM view back to the source session through its own title menu, if it is currently showing
+ * anything else. A no-op when it already shows the program.
  */
 const bringTmPaneHome = (): void => {
-  const select = tmPaneHost().querySelector<HTMLSelectElement>('.pane-binding select')
-  if (select === null) return
-  select.value = optionValue('tm', 'source')
-  select.dispatchEvent(new Event('change'))
+  const title = tmPaneHost().querySelector<HTMLButtonElement>('button.view-title')
+  if (title === null || title.dataset.binding === bindingKey('tm', 'source')) return
+  title.click()
+  document
+    .getElementById(title.getAttribute('aria-controls') ?? '')
+    ?.querySelector<HTMLButtonElement>(`button[data-binding="${bindingKey('tm', 'source')}"]`)
+    ?.click()
 }
 
 type App = {
@@ -188,7 +184,10 @@ describe('forking a TM pane', () => {
     await app.compiled()
     const button = app.tmPane().querySelector<HTMLButtonElement>('button.detach')
     expect(button?.disabled).toBe(true)
-    expect(button?.title).toMatch(/94,?182/)
+    // THE REASON IS THE ITEM'S DESCRIPTION NOW, AND ITS SECOND LINE — `viewMenu`'s `CopyState`; the old
+    // button carried it as its `title`.
+    expect(button?.getAttribute('aria-description')).toMatch(/94,?182/)
+    expect(button?.querySelector('.view-menu-hint')?.textContent).toMatch(/94,?182/)
   })
 
   /**
@@ -237,7 +236,7 @@ describe('forking a TM pane', () => {
     // already caught once (Important 3), wearing different clothes. The wait carries the claim
     // instead, and names it in its own timeout message.
     await until(() => forkEditorMounted(app.tmPane()), "the fork's own editor to mount")
-    expect(app.tmPane().textContent).toMatch(/detached/i)
+    expect(app.tmPane().textContent).toMatch(/copy · not linked/)
 
     // THE ASSERTION: the source's own run finishes despite the fork, rather than stalling forever —
     // see this test's own doc for why this axis and not a step comparison.
@@ -250,9 +249,9 @@ describe('forking a TM pane', () => {
    * rebound onto its own new scratch, and a second click reaches `transport.ts`'s `detachMachine`
    * with no machine text (a TM scratch's own `tmProgram.tmText` is always `null` —
    * `replies.ts`'s `tm-scratch-compiled` arm constructs it that way on purpose) and throws
-   * `detachMachine reached with no machine text` rather than doing nothing. A detached pane has
-   * nothing left to fork (`pane-chrome.ts`'s `detachButton` doc: "A DETACHED PANE HAS NOTHING TO
-   * FORK"), so the control must withdraw the instant this pane's OWN session becomes the scratch it
+   * `detachMachine reached with no machine text` rather than doing nothing. A view already showing a
+   * copy has nothing left to copy — `TmPane.#refreshDetach` states that rule and enforces it — so the
+   * control must withdraw the instant this pane's OWN session becomes the scratch it
    * just made — not only when some later reply happens to tell it to.
    */
   it('withdraws its own fork control once it is showing the fork, so a second click cannot reach it', async () => {
@@ -267,7 +266,7 @@ describe('forking a TM pane', () => {
     // that withdrew the control on the reply, which is the defect the test exists to catch.
     expect(detach()).toBeNull()
     await until(() => forkEditorMounted(app.tmPane()), "the fork's own editor to mount")
-    expect(app.tmPane().textContent).toMatch(/detached/i)
+    expect(app.tmPane().textContent).toMatch(/copy · not linked/)
   })
 
   /**

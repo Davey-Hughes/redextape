@@ -86,16 +86,21 @@ describe('focus when a frontier control is withdrawn', () => {
     picker.value = originalEncoding
   }, 90_000)
 
-  // THE ONE ROUTE THAT DOES STRAND FOCUS, NAMED SO THE FINDING IS FALSIFIABLE RATHER THAN AN ABSENCE.
-  // A document change dispatched while focus sits on `[continue]` reaches the hazard — and no user
-  // gesture performs one: typing needs focus in the editor, and the picker needs focus on the picker.
-  it('is reachable only by a programmatic dispatch, which no user gesture performs', async () => {
+  // THE ONE ROUTE THAT USED TO STRAND FOCUS, AND NO LONGER DOES. A document change dispatched while focus
+  // sits on `[continue]` withdraws it under the keyboard — no user gesture performs one (typing needs focus
+  // in the editor, the picker needs focus on the picker), but the route is real. This asserted focus on
+  // `<body>`; Plan 7 part 2 (spec §11) closes the hazard, so `step-controls.ts` hands the focus to the
+  // nearest control that still works.
+  it('hands focus to a working neighbour when a programmatic dispatch withdraws the focused continue button', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: BUDGET_SRC } })
     await until(() => stepText().includes('history is full'))
 
     const extend = mustFind<HTMLButtonElement>('[data-leaf="tm-0"] .controls .extend')
     extend.focus()
     view.dispatch({ changes: { from: view.state.doc.length, insert: ' ' } })
-    expect(document.activeElement).toBe(document.body)
+    const now = document.activeElement
+    expect(now).not.toBe(document.body)
+    expect(now?.closest('[data-leaf="tm-0"] .controls')).not.toBeNull()
+    expect(now instanceof HTMLButtonElement && !now.disabled && !now.hidden).toBe(true)
   }, 90_000)
 })

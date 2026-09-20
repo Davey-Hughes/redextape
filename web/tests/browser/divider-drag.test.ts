@@ -1,7 +1,8 @@
 import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { LAYOUT_STORAGE_KEY, parseLayout } from '../../src/layout'
+import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { KEY_STEP } from '../../src/layout-view'
+import { parseWorkspace } from '../../src/workspace'
 import { SHELL } from './harness'
 
 /**
@@ -63,7 +64,7 @@ const verticalDivider = (): HTMLElement => {
 const storedRowSizes = (): number[] => {
   const raw = localStorage.getItem(LAYOUT_STORAGE_KEY)
   if (raw === null) throw new Error('nothing stored')
-  const tree = parseLayout(raw)
+  const tree = parseWorkspace(raw)?.tree ?? null
   if (tree === null || tree.kind !== 'split') throw new Error('stored tree is not a split')
   const inner = tree.children[0]
   if (inner === undefined || inner.kind !== 'split') throw new Error('stored inner node is not a split')
@@ -74,6 +75,17 @@ const pointer = (type: string, x: number): PointerEvent =>
   new PointerEvent(type, { bubbles: true, clientX: x, clientY: 300, pointerId: 1 })
 
 describe('dragging a divider on a mounted app', () => {
+  /**
+   * **THE DIVIDER SAYS WHAT IT RESIZES, IN THE WORD THE APP USES** — Plan 7 part 2 spec §12: a pane is a
+   * view. Nothing else in the tier reads this name, so without this assertion the rename could be
+   * reverted and every test would stay green.
+   */
+  it('names what it resizes', () => {
+    expect(verticalDivider().getAttribute('aria-label')).toBe('resize views left and right')
+    const horizontal = document.querySelector<HTMLElement>('[role="separator"][aria-orientation="horizontal"]')
+    expect(horizontal?.getAttribute('aria-label')).toBe('resize views up and down')
+  })
+
   beforeEach(async () => {
     await mountApp()
   })

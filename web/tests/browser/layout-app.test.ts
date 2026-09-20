@@ -7,7 +7,7 @@ import { SHELL } from './harness'
  *
  * `sessions.ts`'s `SessionRegistry` doc recorded the gap in as many words: "the app has ONE λ pane, so
  * two panes on two λ sessions is still unperformable through it", which is why
- * `binding-selector.test.ts` builds its panes by hand. This file is what closes that, and the
+ * `view-title.test.ts` builds its panes by hand. This file is what closes that, and the
  * two-terms assertion below is the reason the slice is sequenced first.
  *
  * THE SHELL AND THE DYNAMIC IMPORT ARE THIS FILE'S OWN ADDITION, NOT PART OF THE PLAN'S ILLUSTRATIVE
@@ -19,8 +19,9 @@ import { SHELL } from './harness'
  * top-level code runs, so there is no point in this file's source order where a `document.body.
  * innerHTML` write could land before `main()`'s first `document.querySelector` call. This mirrors
  * `scratch-app.test.ts`'s own mounting idiom exactly, with the SHELL updated to the tree-driven
- * `index.html` this task ships (an empty `<main>`, `#editor`/`#link-status` as bare top-level nodes,
- * `#restore-layout` beside `#appearance`) rather than the fixed four-section one it replaces.
+ * `index.html` this task ships (an empty `<main>`, a bare top-level `#editor`, `#results`/`#link-status`
+ * inside `footer.strip`, `#reset-preset` in the workspace menu) rather than the fixed four-section one
+ * it replaces.
  */
 
 const $ = <T extends Element>(sel: string) => document.querySelector<T>(sel)
@@ -33,29 +34,41 @@ const panes = () => [...document.querySelectorAll('[data-leaf]')].map((e) => (e 
  */
 const lambdaPanes = () => [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')].map((e) => e.dataset.leaf)
 const splitRowOn = (leaf: string) =>
-  document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button[aria-label="split left and right"]`)
+  document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] .view-menu button.view-split[data-dir="row"]`)
 
 /**
  * Split `leaf` into a second pane of the same kind on the same session — the gesture every test here
  * used to reach with one click on the control `splitRowOn` finds.
  *
  * **A SPLIT IS TWO CLICKS NOW, AND THE FIRST ENTRY IS WHY IT IS STILL ONE GESTURE.** The control opens a
- * picker (`pane-chrome.ts`'s `splitControl`), whose first item is the pane's own `(leg, session)` pair
- * labelled `(same)` — put there precisely so the case that WAS the whole gesture stays one click away.
+ * picker (`view-header.ts`'s `viewMenu`), whose first item is the pane's own `(leg, session)` pair
+ * labelled "another view of this" — put there precisely so the case that WAS the whole gesture stays one click away.
  * The label is checked rather than assumed: `find(...)?.click()` on a missing entry is a silent no-op,
  * and taking the first item of a menu that had reordered would quietly make every test below a test of a
  * different split. `pane-picker.test.ts` is where the other entries are exercised.
  */
-const splitRow = (leaf: string): void => {
-  const button = splitRowOn(leaf)
-  if (button === null) throw new Error(`no split control on [data-leaf="${leaf}"]`)
-  button.click()
-  const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
-  const first = menu?.querySelector<HTMLButtonElement>('button') ?? null
-  if (first === null || !(first.textContent ?? '').endsWith('(same)')) {
-    throw new Error(`${leaf}'s split menu does not start with the duplicate case: ${first?.textContent}`)
+const splitRow = (leaf: string): void => splitVia(leaf, 'row', 'same')
+
+/**
+ * Split `leaf` through its `⋯` menu, as a user does: `pick` is `'same'` (another view of this), `'source'`,
+ * or a `bindingKey(leg, session)`.
+ */
+function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
+  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
+  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
+  more.click()
+  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
+  menu?.querySelector<HTMLButtonElement>(`button.view-split[data-dir="${dir}"]`)?.click()
+  const selector =
+    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
+  const item = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
+  if (item == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
+      (b) => b.textContent,
+    )
+    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
   }
-  first.click()
+  item.click()
 }
 
 // ONE MOUNT FOR THE FILE, THE SAME REASON EVERY SIBLING FILE GIVES: ES module imports are cached, so
@@ -88,9 +101,9 @@ describe('the layout tree in the app', () => {
 
   /**
    * **THE ABSENCE IS REAL, BUT THIS TEST NO LONGER SAYS WHICH FACT PRODUCES IT — MINOR FINDING, AND
-   * NOTED HERE RATHER THAN RESTRUCTURED AWAY.** `layoutControls` withholds the split controls for either
+   * NOTED HERE RATHER THAN RESTRUCTURED AWAY.** `viewMenu` withholds the split controls for either
    * of two independent reasons: `canSplit: false`, or a caller that supplies no `choices` at all (that
-   * function's own doc, and `pane-layout-controls.test.ts` pins both at the control's tier). `main.ts`
+   * function's own doc, and `view-menu.test.ts` pins both at the control's tier). `main.ts`
    * builds the source pane's strip with no `choices`, so this assertion would hold even if the
    * `canSplit` half were wired the other way, and nothing in this file pins the flag.
    *
@@ -107,7 +120,7 @@ describe('the layout tree in the app', () => {
     splitRow('lambda-0')
     const second = lambdaPanes()[1]
     const close = document.querySelector<HTMLButtonElement>(
-      `[data-leaf="${second}"] button[aria-label="close this pane"]`,
+      `[data-leaf="${second}"] button[aria-label="close this view"]`,
     )
     close?.click()
     expect(document.activeElement).not.toBe(document.body)
@@ -120,7 +133,7 @@ describe('the layout tree in the app', () => {
    * handler did not, and the `root.replaceChildren()` in `layout-view.ts` detaches the subtree the clicked
    * control is in, so the browser blurred it and the user was left on `<body>` — one Tab from the top of
    * the document, having just asked for a pane. Not a regression (the pre-picker split behaved the same),
-   * but `splitControl`'s own doc argues that for a CREATION control with no other route to it "building
+   * but `viewMenu`'s own doc argues that for a CREATION control with no other route to it "building
    * the keyboard path is the fix, not deferring it", and a handler that completes the gesture by
    * discarding focus abandons that argument one call later.
    *
@@ -135,8 +148,10 @@ describe('the layout tree in the app', () => {
    * somewhere they did not ask to be.
    */
   it('splitting a pane moves focus into the pane it created, rather than to the body', () => {
-    const control = splitRowOn('lambda-0')
-    if (control === null) throw new Error('the λ pane has no split control')
+    // THE `⋯` IT IS CHOSEN FROM, NOT THE ITEM: the item sits in a closed popover, where `.focus()` is a
+    // silent no-op and the park this test depends on would never happen.
+    const control = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-more')
+    if (control === null) throw new Error('the λ view has no ⋯ menu')
     control.focus()
     expect(document.activeElement).toBe(control)
 
@@ -157,6 +172,10 @@ describe('the layout tree in the app', () => {
     // The stored value describes what is on screen — a reload is asserted in the round-trip unit
     // test; here the claim is that the write happened and matches.
     const stored = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? '{}')
+    // THE VERSION 2 WORKSPACE (Plan 7 part 2 spec §3): the tree under `tree`, beside the switches,
+    // the speed, the focus and the panels.
+    expect(stored.version).toBe(2)
+    for (const field of ['switches', 'speed', 'focused', 'panels']) expect(stored).toHaveProperty(field)
     const ids: string[] = []
     const walk = (n: { kind: string; id?: string; children?: unknown[] }) => {
       if (n.kind === 'leaf' && n.id !== undefined) ids.push(n.id)

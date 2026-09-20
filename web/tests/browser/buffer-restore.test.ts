@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
 import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout } from '../../src/layout'
+import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
@@ -58,8 +59,10 @@ import { SHELL, until } from './harness'
 const SEEDED = serializeBuffers({
   minted: 2,
   buffers: [
-    { id: 'scratch-1', label: 'scratch 1', text: '(\\a. a)', collapsed: false, leg: 'lambda' },
-    { id: 'scratch-2', label: 'scratch 2', text: '(\\b. b) (\\c. c)', collapsed: true, leg: 'lambda' },
+    // STORED THE WAY A PAGE BEFORE PLAN 7 PART 2 WROTE THEM, so the restore's rename is exercised: the
+    // rows below read `copy N` (spec §12).
+    { id: 'scratch-1', label: 'λ scratch 1', text: '(\\a. a)', collapsed: false, leg: 'lambda' },
+    { id: 'scratch-2', label: 'λ scratch 2', text: '(\\b. b) (\\c. c)', collapsed: true, leg: 'lambda' },
   ],
   bindings: { 'lambda-0': 'scratch-2', 'tm-0': 'scratch-1' },
 })
@@ -68,6 +71,23 @@ const SEEDED = serializeBuffers({
 // while resolving `let tree` and the restore beside it, so anything written after that read is never
 // seen. The layout key is seeded rather than merely cleared so that `lambda-0` is a leaf this file can
 // count on: the bindings above name it, and a tree left over from a sibling would not have it.
+/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
+const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
+
+/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does. */
+function pickBinding(leaf: string, key: string): void {
+  const title = titleOf(leaf)
+  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
+  if (item == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
+    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
+  }
+  item.click()
+}
+
 beforeAll(async () => {
   localStorage.setItem(LAYOUT_STORAGE_KEY, serializeLayout(defaultLayout()))
   localStorage.setItem(BUFFERS_STORAGE_KEY, SEEDED)
@@ -83,8 +103,6 @@ const rowNames = (): (string | null)[] =>
 const term = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
 const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
 const stored = () => parseBuffers(localStorage.getItem(BUFFERS_STORAGE_KEY))
-/** `\x00` as an escape rather than the byte — `scripts/check-text-bytes.sh`'s rule. */
-const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
 
 /** What the mounted editor actually holds. Read off CodeMirror rather than off the DOM, whose text
  * nodes are virtualized and would answer only the visible lines. */
@@ -168,10 +186,11 @@ describe('buffers restored from storage', () => {
     // **`— orphan` IS ALSO THE REFUSED `tm-0` BINDING, READ OFF THE ONLY SURFACE THAT COUNTS PANES.**
     // `SEEDED` names `tm-0 → scratch-1`; a version that seeded it would either have killed the page
     // (it did — see `SEEDED`'s own doc) or, guarded elsewhere, left this row reading `1 pane`.
-    expect(rowNames()).toEqual(['scratch 1 — orphan — asleep', 'scratch 2 — 1 pane'])
+    expect(rowNames()).toEqual(['λ copy 1 · not shown · paused', 'λ copy 2 · 1 view · running'])
     // AND THE TM PANE IS ON THE SOURCE SESSION, which is what `— orphan` means from the pane's side:
     // a δ-table is rendered there, which a λ-only buffer could never have supplied.
-    expect(document.querySelector('[data-leaf="tm-0"] .detached-badge')).toBeNull()
+    expect(document.querySelector('[data-leaf="tm-0"] .view-status')).toBeNull()
+    expect(document.querySelector('[data-leaf="tm-0"] .view-title')?.textContent).toBe('TM · program')
   })
 
   /**
@@ -187,10 +206,10 @@ describe('buffers restored from storage', () => {
    */
   it('the bound pane shows the restored term rather than the sample program', async () => {
     await until(() => term() !== '', 'the restored buffer to rebuild and produce a frame')
-    // A SCRATCH SESSION, NOT THE SOURCE ONE — `[detached]` is `LambdaPane`'s badge for a pane bound to a
+    // A SCRATCH SESSION, NOT THE SOURCE ONE — `copy · not linked` is the view's status for a view bound to a
     // session that can never take part in the link (design §4.5), which every buffer is and the source
     // session never is. Without this the assertion below would be satisfied by any λ term at all.
-    expect(heading()).toContain('[detached]')
+    expect(heading()).toContain('copy · not linked')
     expect(term()).toContain('λc')
   })
 
@@ -227,14 +246,14 @@ describe('buffers restored from storage', () => {
    */
   it('warming the restored orphan from its row gives it a session built from its persisted text', async () => {
     await openList()
-    const warm = document.querySelector<HTMLButtonElement>('button[aria-label="warm scratch 1"]')
+    const warm = document.querySelector<HTMLButtonElement>('button[aria-label="resume λ copy 1 — restarts at step 0"]')
     expect(warm).not.toBeNull()
     warm?.click()
 
     // SYNCHRONOUS, AND THAT IS THE ASSERTION: `handleTemperature` rebuilds the rows around the caller's
     // own handler returning, so the row is already redrawn by the time this line runs. A `until` here
     // would hide a version that redrew a frame later or not at all.
-    expect(rowNames()[0]).toBe('scratch 1 — orphan')
+    expect(rowNames()[0]).toBe('λ copy 1 · not shown · running')
 
     await until(() => termsAfterReopen()[0] !== 'no term yet', 'the warmed orphan to rebuild its term')
     // `(\a. a)` PRINTED — the identity, from the text that was in `localStorage` and nowhere else.
@@ -330,10 +349,7 @@ describe('buffers restored from storage', () => {
    * test above reads that pane.
    */
   it('a rebind moves the stored binding with the pane', async () => {
-    const select = document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')
-    if (select === null) throw new Error('no binding selector on the λ pane')
-    select.value = optionValue('lambda', 'source')
-    select.dispatchEvent(new Event('change', { bubbles: true }))
+    pickBinding('lambda-0', bindingKey('lambda', 'source'))
 
     await until(() => stored()?.bindings['lambda-0'] === undefined, 'the stored binding to follow the pane')
     // AND THE BUFFER IS STILL THERE. Nothing ends a buffer implicitly (5d-ii-c decision 2), so a rebind

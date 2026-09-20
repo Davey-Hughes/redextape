@@ -61,7 +61,7 @@ export function renderLayout(
   // not destroy the control performing them. WHAT STILL REBUILDS IS EVERY GESTURE'S COMMIT, AND THAT
   // INCLUDES AN ORDINARY RESIZE, NOT ONLY A STRUCTURAL CHANGE. `handlers.commit` (`pane-host.ts`'s
   // `applyLayout`) calls `renderLayout` unconditionally from its `finally` block on every call it makes —
-  // a drag's `pointerup`, a keyboard gesture's `keyup`/`blur`, a split, a close, `reset layout`, a
+  // a drag's `pointerup`, a keyboard gesture's `keyup`/`blur`, a split, a close, `reset preset`, a
   // restore all reach it the same way — so a resize still rebuilds the whole tree once, at the moment the
   // gesture ends; it merely does so once per GESTURE now instead of once per FRAME. This rescue is what
   // keeps a keyboard user's place across every one of those rebuilds, resize's own commit included, and
@@ -224,7 +224,7 @@ function divider(
   el.setAttribute('aria-valuenow', String(Math.round(size * 100)))
   el.setAttribute('aria-valuemin', String(Math.round(MIN_PANE_FRACTION * 100)))
   el.setAttribute('aria-valuemax', String(Math.round((1 - MIN_PANE_FRACTION) * 100)))
-  el.setAttribute('aria-label', dir === 'row' ? 'resize panes left and right' : 'resize panes up and down')
+  el.setAttribute('aria-label', dir === 'row' ? 'resize views left and right' : 'resize views up and down')
   el.tabIndex = 0
 
   const extent = () => (dir === 'row' ? box.getBoundingClientRect().width : box.getBoundingClientRect().height)

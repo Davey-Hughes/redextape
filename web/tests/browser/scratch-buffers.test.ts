@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
@@ -33,21 +34,35 @@ import { SHELL, until } from './harness'
 let view: EditorView
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
+/**
+ * `#results` READS THE FOCUSED VIEW'S SESSION (Plan 7 part 2 spec §9), so a read of the PROGRAM'S result
+ * after a copy's view took the focus puts the focus on the program first.
+ */
+const focusProgram = () => document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')?.focus()
 const term = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
 const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
 const editorHost = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
-const selector = () => document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')
+/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
+const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
+const selector = () => titleOf('lambda-0')
 const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
 
-/**
- * The `<option>` value the pane selector encodes a `(leg, session)` pair as — spelled out here rather
- * than imported from `pane-chrome.ts`, so this pins the DOM contract instead of agreeing with whatever
- * the control currently does. `\x00` as an escape is `scripts/check-text-bytes.sh`'s rule.
- */
-const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
+/** Every item `leaf`'s title menu offers, as `{ key, text }` — opens and closes the menu to read it. */
+function offered(leaf: string): { key: string; text: string }[] {
+  const title = titleOf(leaf)
+  if (title === null) return []
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const items = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => ({
+    key: b.dataset.binding ?? '',
+    text: b.textContent ?? '',
+  }))
+  menu?.hidePopover()
+  return items
+}
 
 /**
- * The λ `<option>` for the one scratch buffer the pane's selector offers — BY ELIMINATION, since the
+ * The λ item for the one scratch buffer the view's title menu offers — BY ELIMINATION, since the
  * source session is the only λ session whose id `main.ts` writes down.
  *
  * READ OUT OF THE DOM RATHER THAN WRITTEN DOWN, the idiom `scratch-rebind-editor.test.ts` and
@@ -60,10 +75,10 @@ const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
  * two of them live, and a helper that quietly took the first would make every assertion after it
  * describe whichever one happened to sort earliest.
  */
-const bufferOption = (): HTMLOptionElement => {
-  const buffers = [
-    ...document.querySelectorAll<HTMLOptionElement>('[data-leaf="lambda-0"] .pane-binding optgroup[label="λ"] option'),
-  ].filter((o) => o.textContent !== 'source')
+const bufferOption = (): { key: string; text: string } => {
+  const buffers = offered('lambda-0').filter(
+    (o) => o.key.startsWith('lambda:') && o.key !== bindingKey('lambda', 'source'),
+  )
   const only = buffers[0]
   if (buffers.length !== 1 || only === undefined) {
     throw new Error(`expected exactly one scratch buffer in the λ group, found ${buffers.length}`)
@@ -93,16 +108,8 @@ const buffersDisplay = () => {
 const bufferRows = () => [...document.querySelectorAll<HTMLElement>('.buffer-row-name')].map((e) => e.textContent)
 
 /** A row's retire control, reached by the accessible name that names ITS buffer rather than by index. */
-const retireControl = (label: string) =>
-  document.querySelector<HTMLButtonElement>(`.buffer-list button[aria-label="retire ${label}"]`)
-
-const clickLambda = (label: string) => {
-  const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')].find(
-    (x) => x.textContent === label,
-  )
-  if (b === undefined) throw new Error(`no \`${label}\` button in the λ pane`)
-  b.click()
-}
+const retireControl = (name: string) =>
+  document.querySelector<HTMLButtonElement>(`.buffer-list button[aria-label="delete ${name}"]`)
 
 /** `scratch-app.test.ts`'s own `settled`, and the same invariant argument applies — see its doc there. */
 async function settled(src: string): Promise<void> {
@@ -160,17 +167,17 @@ describe('a scratch buffer across a recompile of the source', () => {
   it('keeps the pane on its buffer, still showing the term typed into it, and keeps the editor mounted', async () => {
     // STAGE 0 — a settled source program, and the λ pane on it.
     await settled('let x = 40; x + 2')
-    expect(heading()).toBe('lambda')
+    expect(heading()).toBe('λ · program')
 
     // STAGE 1 — fork. The pane moves onto a minted buffer and an editor arrives over the wire.
-    clickLambda('✎ fork')
-    expect(heading()).toContain('[detached]')
+    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
+    expect(heading()).toContain('copy · not linked')
     await until(() => editorHost() !== null, 'the editor to mount')
     await until(() => term() !== '', 'the buffer to produce its first frame')
     const buffer = bufferOption()
-    const label = buffer.textContent ?? ''
-    expect(label).toMatch(/^λ scratch \d+$/)
-    expect(selector()?.value).toBe(buffer.value)
+    const label = buffer.text
+    expect(label).toMatch(/^λ · copy \d+$/)
+    expect(selector()?.dataset.binding).toBe(buffer.key)
 
     // STAGE 2 — TYPE A TERM NO SOURCE PROGRAM IN THIS TEST COULD PRODUCE. This is what makes the
     // assertion after the recompile mean "the buffer's own work is still there" rather than "a λ
@@ -190,21 +197,22 @@ describe('a scratch buffer across a recompile of the source', () => {
     // first synchronously and then again once the source has actually finished compiling.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let z = 9; z * 3' } })
 
-    expect(heading()).toContain('[detached]')
-    expect(selector()?.value).toBe(buffer.value)
+    expect(heading()).toContain('copy · not linked')
+    expect(selector()?.dataset.binding).toBe(buffer.key)
     expect(editorHost()).not.toBeNull()
 
     // AND THE SOURCE REALLY DID RECOMPILE — 27, from a program the pane is not showing. Without this
     // the whole test would pass on a keystroke that never reached `schedule` at all.
+    focusProgram()
     await until(() => idle() && resultsText().includes('27'), 'the source recompile')
 
     // THE ASSERTION. The pane is still on its buffer, the buffer is still in the λ group under the name
     // it was minted with, and the term is the one the user typed — not the source's new λ leg, and not
     // a re-seed of the buffer from it.
-    expect(heading()).toContain('[detached]')
-    expect(bufferOption().textContent).toBe(label)
-    expect(selector()?.value).toBe(buffer.value)
-    expect(selector()?.value).not.toBe(optionValue('lambda', 'source'))
+    expect(heading()).toContain('copy · not linked')
+    expect(bufferOption().text).toBe(label)
+    expect(selector()?.dataset.binding).toBe(buffer.key)
+    expect(selector()?.dataset.binding).not.toBe(bindingKey('lambda', 'source'))
     expect(term()).toBe(edited)
     // AND THE EDITOR IS STILL THERE TO GO ON TYPING IN — the retire took it down with the session
     // (`§4.3`: "the text in the box is lost"), and nothing takes it down now.
@@ -234,23 +242,26 @@ describe('a scratch buffer across a recompile of the source', () => {
  * **AND IT PINS WHERE FOCUS LANDS**, which is not in its name because it is the same gesture rather than
  * a second one. **THIS USED TO PIN THAT RETIRING THE LAST BUFFER WITHDRAWS THE HEADER CONTROL FOCUS HAD
  * JUST LANDED ON, AND SENDS FOCUS TO `#restore-layout` INSTEAD — 5d-iv T10 RETIRED THAT.** The menu now
- * offers "new TM buffer" and is therefore never empty, so `main.ts`'s `refreshBuffers` no longer hides
- * `#buffers` at zero and has nothing left to strand the keyboard over: the popover's own hide algorithm
- * already hands focus back to the invoker (`buffer-list.ts`'s `bufferRow` calls `menu.hidePopover()`
- * before `onRetire`), and an invoker that is never taken out of the tab order keeps it. What this test
- * still pins is that the button holds focus and stays reachable through the very retire that used to
+ * offers *new TM copy* and is therefore never empty, so `main.ts`'s `refreshBuffers` no longer hides
+ * `#buffers` at zero and has nothing left to strand the keyboard over. Deleting the LAST row is the one
+ * case that still closes the list: `buffer-list.ts`'s `handleDelete` finds no row to move focus to,
+ * calls `menu.hidePopover()` and focuses the invoker itself — an invoker that is never taken out of the
+ * tab order is there to receive it. What this test
+ * still pins is that the button holds focus and stays reachable through the very delete that used to
  * evict it — the accessibility list's item 1, one instance retired.
  */
 describe('the header buffer list', () => {
-  it('lists a buffer no pane is showing as an orphan, and retiring it ends the buffer and its editor', async () => {
+  it('lists a copy no view is showing as not shown, and deleting it ends the copy and its editor', async () => {
     // STAGE 0 — what the test above left, asserted rather than assumed. The button reads ONE buffer,
     // which is `transport.ts`'s fork telling the header its count changed; a readout wired only to the
     // retire would still read the zero-buffer label here.
-    const label = bufferOption().textContent ?? ''
-    expect(label).toMatch(/^λ scratch \d+$/)
+    // THE MENU SAYS `λ · copy 1`; THE COPIES MENU SAYS `λ copy 1` — the same name, spelled for each.
+    const buffer = bufferOption()
+    const label = buffer.text.replace(/^λ · /, 'λ ')
+    expect(label).toMatch(/^λ copy \d+$/)
     const button = buffersButton()
     expect(buffersDisplay()).not.toBe('none')
-    expect(button?.textContent).toBe('buffers 1 ▾')
+    expect(button?.textContent).toBe('copies 1 ▾')
 
     // THE EDITOR'S OWN NODE, TAKEN WHILE IT IS STILL MOUNTED — `.cm-editor` IS the `EditorView`'s `dom`.
     // It is read here for the mounted assertion below and for nothing else; see STAGE 3's own note for
@@ -263,16 +274,16 @@ describe('the header buffer list', () => {
     // goes into custody rather than being destroyed, so the pane that asks for it next gets that view
     // back with its text and undo intact.
     const close = document.querySelector<HTMLButtonElement>(
-      '[data-leaf="lambda-0"] button[aria-label="close this pane"]',
+      '[data-leaf="lambda-0"] button[aria-label="close this view"]',
     )
     if (close === null) throw new Error('no close control on the λ pane')
     close.click()
     expect(document.querySelector('[data-leaf="lambda-0"]')).toBeNull()
     expect(buffersDisplay()).not.toBe('none')
-    expect(button?.textContent).toBe('buffers 1 ▾')
+    expect(button?.textContent).toBe('copies 1 ▾')
 
-    // STAGE 2 — THE ORPHAN ROW, which is the whole reason this control exists: no pane names this buffer
-    // any more, and the row is asserted on its own rendered text (§5) rather than on a control existing.
+    // STAGE 2 — THE *not shown* ROW, which is the whole reason this control exists: no view names this
+    // copy any more, and the row is asserted on its own rendered text (§5) rather than on a control existing.
     //
     // **`focus()` BEFORE `click()`, AND IT IS THE PRECONDITION FOR STAGE 3'S LAST ASSERTION RATHER THAN
     // A FLOURISH.** A bare `element.click()` dispatches the event without focusing anything, which no
@@ -283,39 +294,42 @@ describe('the header buffer list', () => {
     // fix — unfocused invoker left `.cm-scroller`, focused invoker left `<body>`.
     button?.focus()
     button?.click()
-    expect(bufferRows()).toEqual([`${label} — orphan`])
+    expect(bufferRows()).toEqual([`${label} · not shown · running`])
 
-    // STAGE 3 — retire it. The list dismisses first (`buffer-list.ts`'s order), so a row naming a buffer
-    // that has gone is never left on screen.
+    // STAGE 3 — delete it. The list is rebuilt around the delete (`buffer-list.ts`'s `handleDelete`), so a
+    // row naming a copy that has gone is never left on screen; this was the LAST row, so the rebuild
+    // leaves nothing and the list closes.
     retireControl(label)?.click()
     expect(document.querySelector('.buffer-list')?.matches(':popover-open')).toBe(false)
 
     // **THE BUFFER IS GONE FROM THE HEADER — AND THE BUTTON NO LONGER WITHDRAWS, WHICH IS A REVERSAL —
     // 5d-iv T10.** This used to assert the button withdrew entirely rather than offering an empty list,
     // which was `main.ts`'s decision at the time and the same standard pane chrome applies elsewhere.
-    // The menu is no longer ever empty (it offers "new TM buffer"), which removed the premise for that
+    // The menu is no longer ever empty (it offers *new TM copy*), which removed the premise for that
     // decision along with the decision itself: the readout is the zero-buffer label, not an empty count,
     // and the control stays reachable exactly when a user with nothing to reclaim wants somewhere to
     // paste a `.tm` file.
-    expect(button?.textContent).toBe('buffers ▾')
+    expect(button?.textContent).toBe('copies ▾')
     expect(buffersDisplay()).not.toBe('none')
 
     // **AND THE KEYBOARD IS STILL SOMEWHERE — ON THE BUTTON ITSELF, WHICH IS ALSO A REVERSAL.** This
     // used to assert `#restore-layout`, because `#buffers` withdrew the instant the retire that had just
     // focused it: `hidePopover` gave focus back to the invoker, and the very next line then took that
     // invoker out of the tab order, so `main.ts` moved focus to `#restore-layout` deliberately rather
-    // than strand it on `<body>`. `#buffers` is never withdrawn now, so `hidePopover`'s hand-back is the
-    // whole of what places focus, with nothing after it to undo — the accessibility list's item 1, "a
-    // control that hides itself on click strands the keyboard," retired by removing the hide rather than
-    // by relocating the catch.
+    // than strand it on `<body>`. `#buffers` is never withdrawn now, so `handleDelete`'s own
+    // `button.focus()` on the empty list is the whole of what places focus, with nothing after it to
+    // undo — the accessibility list's item 1, "a control that hides itself on click strands the
+    // keyboard," retired by removing the withdrawal rather than by relocating the catch.
     expect(document.activeElement).toBe(button)
 
     // AND FROM EVERY PANE'S SELECTOR, which is the registry side of the same fact — design §5's
     // "retiring an orphan from the list removes it from every pane's selector", read off the TM pane
     // because the λ pane that was showing the buffer is the one this test closed.
-    const options = [...document.querySelectorAll<HTMLOptionElement>('[data-leaf="tm-0"] .pane-binding option')]
-    expect(options.length).toBeGreaterThan(0)
-    expect(options.map((o) => o.textContent)).not.toContain(label)
+    // BY KEY, NOT BY TEXT: an item reads `λ · λ scratch 1`, so a text search for a bare label would pass
+    // whether or not the buffer was still offered.
+    const keys = offered('tm-0').map((o) => o.key)
+    expect(keys).toContain(bindingKey('tm', 'source'))
+    expect(keys).not.toContain(buffer.key)
 
     // **THE TWO LINES THAT BRACKETED THE CLOSE AND THE RETIRE ARE GONE, AND THE REASON IS A
     // MEASUREMENT.** They read `expect(editorNode.parentElement).not.toBeNull()` after STAGE 1 (held in

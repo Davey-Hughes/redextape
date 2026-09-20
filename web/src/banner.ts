@@ -50,9 +50,10 @@ export function workerErrorText(e: unknown): string {
 /**
  * Report a `worker-error` INTO `#results`, not over the page. `showBanner`'s `replaceChildren` is
  * right for "the app did not start" because nothing under `<main>` works yet; it is wrong here
- * because everything under `<main>` still does. `main.ts`'s `worker-error` arm calls this instead of
- * `showBanner`, after resetting both legs and clearing the decline mark — this only has to render the
- * message, not decide the rest of the response.
+ * because everything under `<main>` still does. `replies.ts`'s `worker-error` arm records the failure
+ * with `setProgram` instead of calling `showBanner`, after resetting both legs and clearing the decline
+ * mark, and `readout.ts`'s `createReadout` is what calls this — so this only has to render the message,
+ * not decide the rest of the response.
  */
 export function showWorkerError(results: HTMLElement, e: unknown): void {
   const el = document.createElement('div')

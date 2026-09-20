@@ -88,9 +88,9 @@ describe('the app, end to end', () => {
     // Highlighting does not wait for the worker — it is applied in the same dispatch as the document.
     expect(document.querySelector('.tok-keyword')?.textContent).toBe('let')
 
-    await until(() => resultsText().includes('β-steps'))
-    expect(resultsText()).toContain('7 β-steps')
-    expect(resultsText()).toContain('2,870 δ-steps')
+    await until(() => resultsText().includes('reductions'))
+    expect(resultsText()).toContain('7 reductions')
+    expect(resultsText()).toContain('2,870 transitions')
     expect(resultsText()).toContain('42')
   })
 
@@ -100,7 +100,7 @@ describe('the app, end to end', () => {
   // name) rather than `"λ"` alone — nothing before this test asserted the CONTENTS of any token class
   // inside `[data-leaf="lambda-0"]`, so 114 tests and six eye checks all missed it.
   it('renders the λ pane’s first binder span as exactly "λ", not "λ" plus its name', async () => {
-    await until(() => resultsText().includes('β-steps'))
+    await until(() => resultsText().includes('reductions'))
     await until(() => document.querySelector('[data-leaf="lambda-0"] .tok-binder') !== null)
     const first = document.querySelector('[data-leaf="lambda-0"] .tok-binder')
     expect(first?.textContent).toBe('λ')
@@ -126,7 +126,7 @@ describe('the app, end to end', () => {
     // exclude. `lambdaRows` (`results.ts`) is the only producer of that string and it needs a compiled
     // `state` to reach the line that emits it, so a non-compiling program cannot honestly show it. The
     // test above this one leaves those β-steps on screen, so the string really is there to lose.
-    expect(resultsText()).not.toContain('β-steps')
+    expect(resultsText()).not.toContain('reductions')
     // `lintGutter` renders its marker asynchronously, after the lint source resolves. Verified against
     // the rendered DOM (not just read off `@codemirror/lint`'s source): `cm-lintRange` is the underline
     // mark in the document and `cm-lint-marker` is the gutter dot `lintGutter()` adds — both classes are
@@ -143,7 +143,7 @@ describe('the app, end to end', () => {
     // `crates/redextape-wasm/src/session.rs`'s `lambda_status`.
     expect(resultsText()).toContain('unbound')
     // The TM leg still answers — a declined backend is not a failed compile.
-    expect(resultsText()).toContain('δ-steps')
+    expect(resultsText()).toContain('transitions')
     // `sourceSpan(status.node)`, resolved in the worker and marked here.
     await until(() => document.querySelectorAll('.decline').length > 0)
   })
@@ -187,12 +187,12 @@ describe('the app, end to end', () => {
     // mark clearing first is expected and the text assertion below must wait for its own signal
     // rather than piggyback on the mark's.
     await until(() => document.querySelectorAll('.decline').length === 0)
-    await until(() => resultsText().includes('β-steps'))
+    await until(() => resultsText().includes('reductions'))
     expect(resultsText()).not.toContain('declined')
 
     // Leave the buffer as the other tests found it, in case one is ever added after this.
     retype('let x = 40; x + 2')
-    await until(() => resultsText().includes('β-steps'))
+    await until(() => resultsText().includes('reductions'))
   })
 
   // IMPORTANT 2's proof: a `worker-error` must not kill the app. `main.ts` used to answer it with
@@ -230,8 +230,8 @@ describe('the app, end to end', () => {
     picker.value = 'unary'
     bogus.remove()
     retype('let x = 40; x + 2')
-    await until(() => resultsText().includes('β-steps'))
-    expect(resultsText()).toContain('7 β-steps')
+    await until(() => resultsText().includes('reductions'))
+    expect(resultsText()).toContain('7 reductions')
   })
 
   // TASK 9's PROOF. `onReply`'s `compiled` arm now dispatches `setLink.of(null)` alongside
@@ -371,7 +371,7 @@ describe('the app, end to end', () => {
   // mounted `main.ts` once for the file, and this test needs the REAL `#appearance` button that
   // produced, not a second one from a fresh mount.
   describe('appearance toggle', () => {
-    it('cycles data-theme and the aria-label through system, light, dark and back, and persists the choice', () => {
+    it('cycles data-theme and the visible word through system, light, dark and back, and persists the choice', () => {
       const button = document.querySelector<HTMLButtonElement>('#appearance')
       expect(button).not.toBeNull()
       if (!button) return
@@ -379,24 +379,30 @@ describe('the app, end to end', () => {
       // This file's `Storage` starts empty (`tests/browser/setup.ts` installs a fresh one per file), so
       // the button mounted reading `system` — no `data-theme` attribute, since `system` is its absence,
       // not the literal string `"system"`.
+      // THE VISIBLE WORD IS THE NAME NOW (Plan 7 part 2 spec §6); `title` keeps the full label. `◐` is a
+      // text glyph Hack draws, so it is part of the text; `☀`/`☾` are drawn icons and add none.
       expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
-      expect(button.getAttribute('aria-label')).toBe('appearance: system')
+      expect(button.textContent).toBe('◐system')
+      expect(button.title).toBe('appearance: system')
+      expect(button.getAttribute('aria-label')).toBeNull()
 
       button.click()
       expect(document.documentElement.getAttribute('data-theme')).toBe('light')
-      expect(button.getAttribute('aria-label')).toBe('appearance: light')
+      expect(button.textContent).toBe('light')
+      expect(button.title).toBe('appearance: light')
       expect(localStorage.getItem(STORAGE_KEY)).toBe('light')
 
       button.click()
       expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
-      expect(button.getAttribute('aria-label')).toBe('appearance: dark')
+      expect(button.textContent).toBe('dark')
+      expect(button.title).toBe('appearance: dark')
       expect(localStorage.getItem(STORAGE_KEY)).toBe('dark')
 
       // Back to system: the attribute is REMOVED, not set to `"system"` — the same fact
       // `appearance.test.ts`'s node test checks directly, exercised here through the real button.
       button.click()
       expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
-      expect(button.getAttribute('aria-label')).toBe('appearance: system')
+      expect(button.textContent).toBe('◐system')
       expect(localStorage.getItem(STORAGE_KEY)).toBe('system')
     })
   })
@@ -608,7 +614,7 @@ describe('the app, end to end', () => {
     })
 
     // THE CHEAP HALF OF THE PATH THREE DOC COMMENTS NAME AS MOST LIKELY TO BE GOTTEN WRONG
-    // (`transport.ts`'s `forward`, `controls.ts`'s `canRecordFurther`, `pane-chrome.ts`'s controlStrip) —
+    // (`transport.ts`'s `forward`, `controls.ts`'s `canRecordFurther`, `step-controls.ts`'s `stepControls`) —
     // and nothing exercised it until now. `▶` at the frontier of an `'ended'` run must not ask the
     // worker for anything: the step readout must not move and the extend button must stay hidden.
     it('does nothing when ▶ is pressed at the frontier of a run that already ended', async () => {
@@ -924,11 +930,17 @@ describe('the app, end to end', () => {
       table().dispatchEvent(new Event('scroll'))
       expect(reattach.hidden).toBe(false)
 
+      reattach.focus()
       reattach.click()
       // No step happened, so a working reattach recomputes the same target it had before detaching —
       // this asserts the redraw is synchronous with the click, not merely that following resumed.
       expect(table().scrollTop).toBe(followedTop)
       expect(reattach.hidden).toBe(true)
+      // AND THE BUTTON THAT HID ITSELF DID NOT TAKE THE FOCUS WITH IT (Plan 7 part 2 spec §11): the rules
+      // panel's toggle, beside it, holds it.
+      expect(document.activeElement).toBe(
+        document.querySelector('[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle'),
+      )
     })
 
     // A SCROLL EVENT ARRIVING WHILE THE TABLE IS HIDDEN MUST NOT DETACH IT.

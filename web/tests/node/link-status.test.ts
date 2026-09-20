@@ -23,7 +23,7 @@ describe('linkStatus', () => {
       'this construct has no recorded position in the λ term',
     )
     expect(linkStatus({ state: 'linked', tm: true, lambda: 'not-step-0', focus: false })).toBe(
-      'the λ link is only defined at step 0 — restart the λ pane to see it',
+      'the λ link is only defined at step 0 — restart the λ view to see it',
     )
     expect(linkStatus({ state: 'linked', tm: true, lambda: 'declined', focus: false })).toBe(
       'this program has no λ lowering, so no construct has a λ link',
@@ -76,7 +76,7 @@ describe('linkStatus', () => {
 
 /**
  * Design §4.5's first surface: the line that already narrates the correspondence states which panes
- * are OUTSIDE it. The badge — the second surface — is `tests/browser/detached-badge.test.ts`, because
+ * are OUTSIDE it. The badge — the second surface — is `tests/browser/view-status.test.ts`, because
  * this module is pure logic and that one needs a DOM; §4.5's own note that the both-surfaces test
  * splits by runner.
  *
@@ -102,10 +102,10 @@ describe('linkStatus · detachment', () => {
   // could only say "something is detached" passes every other case here and fails these two.
   it('names only the pane that is detached', () => {
     expect(linkStatus({ state: 'none', detached: { lambda: true, tm: false } })).toBe(
-      'λ pane detached — not linked to source',
+      'λ view shows a copy — not linked to the program',
     )
     expect(linkStatus({ state: 'none', detached: { lambda: false, tm: true } })).toBe(
-      'TM pane detached — not linked to source',
+      'TM view shows a copy — not linked to the program',
     )
   })
 
@@ -113,7 +113,7 @@ describe('linkStatus · detachment', () => {
   // correspondence; repeating it verbatim either side of a `·` reads as two unrelated failures.
   it('names both panes in one clause when both are detached', () => {
     expect(linkStatus({ state: 'none', detached: { lambda: true, tm: true } })).toBe(
-      'λ and TM panes detached — not linked to source',
+      'λ and TM views show copies — not linked to the program',
     )
   })
 
@@ -122,7 +122,7 @@ describe('linkStatus · detachment', () => {
   // what resolved inside it, and every clause after it is about the panes still inside.
   it('reports detachment ahead of the pin narration', () => {
     expect(linkStatus({ state: 'stale', detached: { lambda: true, tm: false } })).toBe(
-      'λ pane detached — not linked to source · linking resumes when this compiles',
+      'λ view shows a copy — not linked to the program · linking resumes when this compiles',
     )
   })
 
@@ -139,7 +139,7 @@ describe('linkStatus · detachment', () => {
         focus: false,
         detached: { lambda: true, tm: false },
       }),
-    ).toBe('λ pane detached — not linked to source · this construct emits no machine states')
+    ).toBe('λ view shows a copy — not linked to the program · this construct emits no machine states')
   })
 
   // The mirror, and `focus: true` is the load-bearing half: `TmState.source_node` is `None` for every
@@ -154,12 +154,12 @@ describe('linkStatus · detachment', () => {
         focus: true,
         detached: { lambda: false, tm: true },
       }),
-    ).toBe('TM pane detached — not linked to source · the λ term is truncated before this construct')
+    ).toBe('TM view shows a copy — not linked to the program · the λ term is truncated before this construct')
   })
 
   it('leaves only the detachment clause when both panes are detached', () => {
     expect(
       linkStatus({ state: 'linked', tm: false, lambda: 'declined', focus: true, detached: { lambda: true, tm: true } }),
-    ).toBe('λ and TM panes detached — not linked to source')
+    ).toBe('λ and TM views show copies — not linked to the program')
   })
 })

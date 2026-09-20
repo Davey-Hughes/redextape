@@ -67,7 +67,8 @@ localStorage.setItem = (key: string, value: string): void => {
   passthroughSetItem(key, value)
 }
 
-const linkStatus = (): string => document.querySelector('#link-status')?.textContent ?? ''
+/** The notice line's text — where the storage report is said since Plan 7 part 2 (spec §11). */
+const noticeText = (): string => document.querySelector('#notice .notice-text')?.textContent ?? ''
 
 describe('a restored page with a refusing writer', () => {
   /**
@@ -79,8 +80,8 @@ describe('a restored page with a refusing writer', () => {
    * `reportStorageFailure` runs to completion instead of throwing.
    *
    * **THE SECOND ASSERTION IS WHAT RULES OUT AN EVASIVE FIX.** A version that made this pass by
-   * swallowing the write failure (a bare `catch`, or `linkWiring?.setForkFailed(...)` with nothing to
-   * follow up) would also make `main()` return cleanly — but `#link-status` would stay silent about a
+   * swallowing the write failure (a bare `catch`, or a guarded notify with nothing to follow up) would
+   * also make `main()` return cleanly — but the notice line would stay silent about a
    * failure that is real, which is the same silence design §4.8 was written to remove. Requiring the
    * report to actually appear is what makes this a test of "degrades gracefully" and not merely
    * "does not crash".
@@ -88,6 +89,6 @@ describe('a restored page with a refusing writer', () => {
   it('comes up rather than dying at start-up on the restore-time write', async () => {
     document.body.innerHTML = SHELL
     await (await import('../../src/main')).ready
-    expect(linkStatus()).toContain('not being saved')
+    expect(noticeText()).toContain('not being saved')
   })
 })

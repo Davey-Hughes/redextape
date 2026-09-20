@@ -29,6 +29,8 @@ const events = (): PaneEvents => ({
   play: vi.fn(),
   restart: vi.fn(),
   extend: vi.fn(),
+  speed: () => 8,
+  setSpeed: vi.fn(),
   rebind: vi.fn(),
   editScratch: vi.fn(),
   collapse: vi.fn(),
@@ -68,6 +70,7 @@ const CONTROLS = {
   canBack: false,
   canForward: true,
   canPlay: true,
+  playing: false,
   stepText: '0',
   continueLabel: null,
 }
@@ -85,7 +88,8 @@ describe('the TM pane editor region', () => {
   })
 
   /**
-   * REMOVED, NOT HIDDEN — the property `detachedBadge` states and this pane must share. `hidden` would
+   * REMOVED, NOT HIDDEN — the property `view-header.ts`'s `setDetached` holds for the `copy · not linked`
+   * status, and this pane must share it. `hidden` would
    * leave a live CodeMirror instance in the DOM holding a document and an update listener, and
    * "reattaching removes the editor" would have no single answer.
    */

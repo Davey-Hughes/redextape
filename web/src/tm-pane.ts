@@ -2,24 +2,18 @@ import type { ControlState } from './controls'
 import type { EditablePane } from './editor-custody'
 import { EDITOR_DEBOUNCE_MS } from './editor-debounce'
 import { n } from './format'
-import {
-  controlStrip,
-  detachButton,
-  detachedBadge,
-  layoutControls,
-  type PaneEvents,
-  paneSelect,
-  type SplitChoices,
-  textPanel,
-} from './pane-chrome'
+import type { Dir } from './layout'
+import { type PaneChoice, type PaneEvents, type SplitChoices, textPanel } from './pane-chrome'
 import { createPanel, type Panel } from './panel'
 import type { Leg } from './protocol'
 import { valueLine } from './results'
 import { ScratchEditor } from './scratch-editor'
 import type { Binding, PaneOption } from './sessions'
 import { centredScrollTop, Follow, focusedRows, highlight, linkedRows, ROW_HEIGHT, StateIndex } from './state-table'
+import { stepControls } from './step-controls'
 import { tapeRows } from './tape'
 import type { TmProgram, TmScratchStatus, TmState, ValueReading } from './types'
+import { type ViewHeader, type ViewMenu, viewHeader, viewMenu } from './view-header'
 import { visibleWindow } from './virtual-list'
 
 export { ROW_HEIGHT } from './state-table'
@@ -48,9 +42,9 @@ export const OVERSCAN = 4
 export class TmPane implements EditablePane {
   #status: HTMLElement
   #tapes: HTMLElement
-  #strip: ReturnType<typeof controlStrip>
-  #badge: ReturnType<typeof detachedBadge>
-  #select: ReturnType<typeof paneSelect>
+  #steps: ReturnType<typeof stepControls>
+  /** The view's header — `LambdaPane`'s `#header`, the same component. */
+  #header: ViewHeader
   /**
    * The upper half of design §4.2's split body, ported to this leg — a stable parent that outlives any
    * editor mounted or unmounted inside it, so `setEditor` can do both without touching the pane's own
@@ -85,7 +79,6 @@ export class TmPane implements EditablePane {
    * class landed on.
    */
   #body: HTMLElement
-  #layout: ReturnType<typeof layoutControls>
   /**
    * What this pane's split menus offer — `LambdaPane.#choices`'s twin, and its doc carries the argument
    * for the starting value and for reading it through a thunk rather than handing a list over once.
@@ -140,12 +133,12 @@ export class TmPane implements EditablePane {
   #value: HTMLElement
 
   /**
-   * The fork control, or `null` on a pane whose events carry no `detachMachine` handler — design
-   * §4.3's trigger for this leg, ported from `LambdaPane`'s own `#detach`. **BUILT ONLY WHEN THE
-   * HANDLER EXISTS**, for that field's own reason: a caller with no `detachMachine` gets a pane with no
-   * fork offered rather than one that offers a fork and swallows it.
+   * The view's `⋯` menu and `✕` — `LambdaPane.#menu`'s twin. `edit a copy` is **BUILT ONLY WHEN THE
+   * HANDLER EXISTS**, for that field's own reason: a caller with no `detachMachine` gets a view with no
+   * copy offered rather than one that offers a copy and swallows it. No `claim`: `PaneEvents.showEditor`
+   * is λ-only, as its doc says.
    */
-  #detach: ReturnType<typeof detachButton> | null = null
+  #menu: ViewMenu
   /**
    * The last `setForkAvailable` call's two facts, kept so `#refreshDetach` can re-evaluate them on
    * every frame rather than only at the moment they arrived — Critical fix, fix round on Task 9.
@@ -158,7 +151,7 @@ export class TmPane implements EditablePane {
    * it — nothing calls `setForkAvailable` again to say the new session has nothing to fork. Storing
    * the two facts here is what lets a LATER call that has nothing to do with forking — `setDetached`,
    * driven every frame by `PaneSlot.render` regardless of which session this pane is bound to — still
-   * re-derive the right answer. Same idiom `LambdaPane.#detach`'s own doc states for `#detached`
+   * re-derive the right answer. Same idiom `LambdaPane.#menu`'s own doc states for `#detached`
    * itself: a fact two different calls both need has to be readable by whichever one runs second.
    */
   #tmText: string | null = null
@@ -199,13 +192,12 @@ export class TmPane implements EditablePane {
   /** The DOM index of `this.#rows.children[0]`, within `#index`. See `#drawTable`'s doc. */
   #firstDrawn = 0
 
-  constructor(host: HTMLElement, on: PaneEvents) {
-    const title = document.createElement('h2')
-    title.textContent = 'turing machine'
-    this.#badge = detachedBadge(title)
-    // Anchored to the title for the reason `LambdaPane`'s constructor states: the control removes
-    // itself below two options and needs somewhere to go back to.
-    this.#select = paneSelect(title, on.rebind)
+  /**
+   * `panels` is the view's stored panel state (`workspace.ts`'s `Panels`), read once here; the rules panel
+   * reports every later toggle through `on.panel`.
+   */
+  constructor(host: HTMLElement, on: PaneEvents, panels: { readonly rules?: boolean } = {}) {
+    this.#header = viewHeader(on.rebind)
     this.#status = document.createElement('div')
     this.#status.className = 'tm-status'
     this.#value = document.createElement('div')
@@ -218,20 +210,18 @@ export class TmPane implements EditablePane {
     this.#onEdit = on.editScratch
     this.#tapes = document.createElement('div')
     this.#tapes.className = 'tapes'
-    this.#strip = controlStrip(on)
-    this.#layout = layoutControls(this.#strip.el, on, () => this.#choices)
-    // BUILT ONLY WHEN THE HANDLER EXISTS — `#detach`'s own doc has the argument, ported from
-    // `LambdaPane`'s identical guard. `detachMachine` carries no argument (`PaneEvents.detachMachine`'s
-    // own doc: a machine has no step-k text to report), so the button's click listener is the handler
-    // itself rather than a closure over a frame this pane holds.
+    this.#steps = stepControls(on)
+    // `detachMachine` carries no argument (`PaneEvents.detachMachine`'s own doc: a machine has no step-k
+    // text to report), so the item's run is the handler itself rather than a closure over a frame.
     const detachMachine = on.detachMachine
-    if (detachMachine !== undefined) {
-      this.#detach = detachButton(
-        this.#strip.el,
-        detachMachine,
-        'fork this machine into a TM scratchpad — the source session keeps running',
-      )
-    }
+    this.#menu = viewMenu(this.#header.actions, {
+      ...(on.splitRow !== undefined && on.splitColumn !== undefined
+        ? { split: (dir: Dir, c: PaneChoice) => (dir === 'row' ? on.splitRow?.(c) : on.splitColumn?.(c)) }
+        : {}),
+      ...(on.close !== undefined ? { close: on.close } : {}),
+      ...(detachMachine !== undefined ? { editCopy: { run: detachMachine, what: 'the whole machine' } } : {}),
+      choices: () => this.#choices,
+    })
     // THE TEXT PANEL — the same control `LambdaPane` builds, with the same name ("text") where the two
     // used to say "term editor" and "machine source". It wraps `#editorHost` and hides it itself; this
     // callback only reports the gesture, for the buffer's record.
@@ -246,10 +236,14 @@ export class TmPane implements EditablePane {
     this.#reattach.textContent = 'follow current rule'
     this.#reattach.hidden = true
     this.#reattach.addEventListener('click', () => {
+      const had = document.activeElement === this.#reattach
       this.#follow.attach()
       // Redraw now, not at the next step — otherwise the current row stays wherever the manual scroll
       // left it until the machine happens to advance.
       this.#drawTable()
+      // THE BUTTON HIDES ITSELF — `#drawTable` sets `#reattach.hidden` once the table follows again — AND
+      // MUST NOT TAKE THE FOCUS WITH IT (spec §11): the rules panel's toggle, beside it, takes it.
+      if (had && this.#reattach.hidden) this.#rulesPanel.toggle.focus()
     })
 
     this.#rows = document.createElement('div')
@@ -304,7 +298,11 @@ export class TmPane implements EditablePane {
       name: 'rules',
       label: 'rules',
       body: this.#tableHost,
-      onToggle: () => this.#drawTable(),
+      open: panels.rules ?? true,
+      onToggle: (open) => {
+        this.#drawTable()
+        on.panel?.('rules', open)
+      },
     })
     this.#rulesPanel.actions.append(this.#reattach)
 
@@ -314,8 +312,9 @@ export class TmPane implements EditablePane {
     // invisible until `setEditor` gives it something to show.
     this.#body = document.createElement('div')
     this.#body.className = 'tm-pane'
-    this.#body.append(this.#collapse.el, this.#status, this.#value, this.#tapes, this.#rulesPanel.el, this.#strip.el)
-    host.replaceChildren(title, this.#body)
+    this.#body.append(this.#collapse.el, this.#status, this.#value, this.#tapes, this.#rulesPanel.el)
+    this.#header.steps.append(this.#steps.el)
+    host.replaceChildren(this.#header.el, this.#body)
   }
 
   /**
@@ -407,7 +406,7 @@ export class TmPane implements EditablePane {
   }
 
   /**
-   * Show or hide the `[detached]` badge — design §4.5's second surface, paired with the sentence
+   * Show or hide the `copy · not linked` status — design §4.5's second surface, paired with the sentence
    * `link-status.ts` puts in `#link-status`. Same name and same shape as `LambdaPane.setDetached`;
    * that method's doc carries the naming argument, which is not repeated here.
    *
@@ -421,10 +420,10 @@ export class TmPane implements EditablePane {
    * ended buffers; 5d-ii-c decision 2 removed that, and a recompile now leaves a detached pane
    * detached.) They can be true independently and in any combination.
    *
-   * The badge's text is left as `[detached]` because §4.5 fixes that wording and the two are not
-   * confusable ON SCREEN — the badge sits in the `<h2>`, after the pane's name, while the follow state
+   * The status reads `copy · not linked` (Plan 7 part 2 spec §12) and the two are not confusable ON
+   * SCREEN — the status sits in the header's `<h2>`, after the view's title, while the follow state
    * is a button captioned `follow current rule` in the rules panel's header. In CODE they are one word
-   * apart, so the private field is `#badge` rather than anything containing "detach", and this note
+   * apart, so the status lives in `#header` rather than in anything containing "detach", and this note
    * exists so the next reader of `#drawTable`'s `#reattach.hidden` line does not go looking for a
    * connection.
    *
@@ -440,7 +439,7 @@ export class TmPane implements EditablePane {
    */
   setDetached(detached: boolean): void {
     this.#detached = detached
-    this.#badge.update(detached)
+    this.#header.setDetached(detached)
     if (!detached && this.#editor !== null) this.setEditor(null)
     // A PANE ON SOURCE DESCRIBES NO BUFFER, so nothing a buffer told it may stay on screen, whichever route moved it
     // there. Every route that moves a pane onto source reseeds it before this runs (`pane-host.ts`'s `seedTmPane` doc
@@ -473,7 +472,7 @@ export class TmPane implements EditablePane {
    * `#editorHost` here only ever carries the bare `'term-editor'` class or none at all.
    *
    * **NO `#refreshClaim` CALL, UNLIKE `LambdaPane.setEditor`.** `PaneEvents.showEditor`'s own doc states
-   * the "bring the term editor to this pane" control exists only on a pane whose slot may be bound to a
+   * the "move the editor here" control exists only on a pane whose slot may be bound to a
    * scratch, "which today means the λ leg" — this pane is built with no `showEditor` handler and has no
    * claim control to refresh.
    */
@@ -609,7 +608,7 @@ export class TmPane implements EditablePane {
   }
 
   /**
-   * Record the machine a fork would carry and the count a refusal would name — `detachButton`'s rule,
+   * Record the machine a fork would carry and the count a refusal would name — `viewMenu`'s `CopyState` rule,
    * as a data dependency rather than a convention — design §4.3. Stores the two facts and defers to
    * `#refreshDetach`, the same split `setDetached` above and `LambdaPane.setEditor`/`setDetached`
    * already use: a setter that only ever WROTE the control from here would go stale the moment this
@@ -635,8 +634,8 @@ export class TmPane implements EditablePane {
    * session last reported, forever, on a pane that had since rebound onto its own new scratch — the
    * button stayed present and enabled, and a second click reached `transport.ts`'s `detachMachine`
    * with `tmText === null` (a scratch's own `tmProgram.tmText` is always `null`,
-   * `replies.ts`'s `tm-scratch-compiled` arm builds it that way) and threw. `detachButton`'s own doc
-   * states the rule this enforces: "A DETACHED PANE HAS NOTHING TO FORK."
+   * `replies.ts`'s `tm-scratch-compiled` arm builds it that way) and threw. The rule this enforces:
+   * A VIEW ALREADY SHOWING A COPY HAS NOTHING LEFT TO COPY.
    *
    * **`this.#tmText !== null || this.#rules > 0` IS WHETHER THE CONTROL SHOWS AT ALL — widened from a
    * bare `rules > 0`, Minor fix in the same round.** A `TmCompiled` whose program parsed to zero δ
@@ -650,17 +649,20 @@ export class TmPane implements EditablePane {
    * `text === null` IS STILL WHETHER IT IS DISABLED, UNCHANGED FROM BEFORE THIS ROUND. A session WITH
    * a machine that is over `MAX_FORK_RULES` (`text === null`, `rules > 0`) is the one case this pane
    * presents disabled rather than absent: the machine exists, the refusal is a size limit rather than
-   * an absence, and `detachButton`'s own doc has the argument for why that distinction is worth a
+   * an absence, and `CopyState`'s own doc has the argument for why that distinction is worth a
    * visible control. `rules` is for the WORDING of the disabled reason and never for the decision to
    * disable — the worker already made that decision, with `forkable`, encoded entirely in whether
    * `text` is `null`. Guarded by `!this.#detached` too, for the same reason presence is: a pane that
    * has just withdrawn the control entirely has nothing left to disable.
    */
   #refreshDetach(): void {
-    this.#detach?.update(!this.#detached && (this.#tmText !== null || this.#rules > 0))
-    if (!this.#detached && this.#rules > 0 && this.#tmText === null) {
-      this.#detach?.setReason(`${n(this.#rules)} rules — too large to open in an editor`)
+    if (this.#detached || (this.#tmText === null && this.#rules === 0)) {
+      this.#menu.setCopy(null)
+      return
     }
+    this.#menu.setCopy(
+      this.#tmText === null ? { reason: `${n(this.#rules)} rules — too large to open in an editor` } : 'ready',
+    )
   }
 
   /**
@@ -670,7 +672,7 @@ export class TmPane implements EditablePane {
    * `Binding<'tm'>`, and neither is repeated here.
    */
   setBindings(options: PaneOption[], current: Binding<Leg>): void {
-    this.#select.update(options, current)
+    this.#header.setBindings(options, current)
   }
 
   /**
@@ -681,12 +683,12 @@ export class TmPane implements EditablePane {
    */
   setLayoutControls(canClose: boolean, canSplit: boolean, choices: SplitChoices): void {
     this.#choices = choices
-    this.#layout.update(canClose, canSplit)
+    this.#menu.setLayout(canClose, canSplit)
   }
 
   render(frame: TmState | null, controls: ControlState): void {
     this.#frame = frame
-    this.#strip.update(controls)
+    this.#steps.update(controls)
     if (frame === null || this.#program === null) {
       this.#drawStatus()
       this.#tapes.replaceChildren()

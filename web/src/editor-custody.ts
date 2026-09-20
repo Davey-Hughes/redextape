@@ -32,7 +32,7 @@ export type EditablePane = {
  * LEAVES THIS MODULE, AND THAT IS THE WHOLE POINT OF THE EXTRACTION RATHER THAN A HOUSEKEEPING
  * PREFERENCE.** Every one of the three review rounds recorded in the doc comments below was a question
  * about WHICH DOMAIN A LOOP RAN OVER — a custody entry outliving its session, a re-minted leaf id
- * inheriting a claim, and a sweep whose loop could not reach what `reset layout` had orphaned — and a
+ * inheriting a claim, and a sweep whose loop could not reach what `reset preset` had orphaned — and a
  * `Map` any of `main()`'s lines can iterate is a `Map` any of them can iterate over the wrong domain.
  * The five members below are the entire surface those call sites actually used: two writes, one erase,
  * one read, and the sweep.
@@ -146,7 +146,7 @@ export function createEditorCustody(deps: {
    * and `reconcileEditors` only ever iterates `panes.of('lambda')` — so the `ScratchEditor` would be left
    * mounted in a host no longer in the tree, with nothing holding a reference that could reach it.
    * Meanwhile the surviving pane, still bound to the scratch and still holding no editor, would go on
-   * offering "bring the term editor to this pane" (`LambdaPane.#refreshClaim`'s `#detached && #editor
+   * offering "move the editor here" (`LambdaPane.#refreshClaim`'s `#detached && #editor
    * === null`), and clicking it would do nothing — forever. **That is the exact failure this slice's own
    * standard names first: a control that provably cannot work must not be offered.** Rather than
    * withdraw the control, the editor is taken into custody so the control works — which is what design
@@ -159,7 +159,7 @@ export function createEditorCustody(deps: {
    *
    * **A LEAF ID IS A WEAKER KEY THAN A SESSION, NOT MERELY A DIFFERENTLY-SHAPED ONE.** `nextLeafId`
    * only counts up, but it is not the only source of ids: `defaultLayout()` writes `source`, `lambda-0`
-   * and `tm-0` down as literals and `reset layout` re-mints all three, so a closed `lambda-0` comes
+   * and `tm-0` down as literals and `reset preset` re-mints all three, so a closed `lambda-0` comes
    * back — and `parseLayout` can restore any id a stored tree holds. A leaf id can therefore be
    * inherited by a pane that has nothing to do with the one that claimed the editor. `applyLayout`'s
    * pane-creation loop drops exactly that inheritance for `editorOwner` (which IS keyed by leaf) where
@@ -211,7 +211,7 @@ export function createEditorCustody(deps: {
     // matches its leaf, and pass 2 calls `dropClaimsOn(l.id)` for every leaf without a pane BEFORE it
     // builds one and before `reconcile()` runs at all — so by the time this function can be called, no
     // claim names that leaf. That line's own comment carries the same fact from the other side; it must
-    // not be read as being only about `reset layout`'s re-minted ids.
+    // not be read as being only about `reset preset`'s re-minted ids.
     //
     // (2) USED TO CATCH IT ANYWAY, WHILE ONLY A λ SCRATCH COULD EVER BE CLAIMED — no longer the whole
     // story since 5d-iv Task 9 gave a TM scratch an editor of its own: `pane-host.ts`'s `detachMachine`
@@ -239,7 +239,7 @@ export function createEditorCustody(deps: {
    * Make every `ScratchEditor` in the app — mounted on a pane, or waiting in custody — agree with where
    * this file says it belongs. The other half of the editor-moves rule, for the one way ownership can
    * change with nothing arriving on the wire to drive it: the
-   * "bring the term editor to this pane" control (`claimEditorButton`). **Not to be confused with the
+   * "move the editor here" control (`viewMenu`). **Not to be confused with the
    * text panel's own disclosure (`textPanel`)**, which is a different action on a different pane — it
    * un-collapses an editor this pane ALREADY owns, and moves nothing.
    * `replies.ts`'s `scratch-compiled` case is the other way ownership takes
@@ -260,7 +260,7 @@ export function createEditorCustody(deps: {
    * `editorOwner.keys()` would make this function's opening sentence — a claim about EVERY editor —
    * false of any held editor whose session holds no claim, and that is not a hypothetical state:
    * `applyLayout`'s pane-creation loop DROPS the claim recorded against an arriving leaf id, and `reset
-   * layout` re-mints `defaultLayout()`'s literal ids, so dropping it is exactly what `reset layout` does
+   * preset` re-mints `defaultLayout()`'s literal ids, so dropping it is exactly what `reset preset` does
    * after a close. `tests/browser/two-lambda-panes.test.ts` is the test that reaches that state, and it
    * has to concatenate two sequences because neither reaches it alone.
    *
@@ -309,7 +309,7 @@ export function createEditorCustody(deps: {
    * (`main.ts`), which calls `ScratchBuffers.retire` and then this function; the gesture that drives it
    * is the list's retire control. **The second half of that clause is not a detail**: a body that ran
    * both passes over one loop over `editorOwner.keys()` could not see an entry no claim named, and one
-   * exists after every `reset layout`. (2) `receiveEditor` THROWS rather than overwriting, so if the two
+   * exists after every `reset preset`. (2) `receiveEditor` THROWS rather than overwriting, so if the two
    * ever do both fire, the app says so at the moment of the mistake instead of silently orphaning a live
    * view — and the throw costs the caller its gesture and nothing more (see `applyLayout`'s
    * `try`/`finally`). (3) The order below then means that even a case satisfying both — a session with

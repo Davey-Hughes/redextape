@@ -13,8 +13,8 @@ import type { SessionId } from './session-client'
  * TASTE (design §3.1). `layout-view.ts`'s `divider` binds `pointermove` to `ResizeHandlers.resize`,
  * which touches only the dragged split's `sizes` and never persists — that is what makes a drag's
  * frames cheap. It is `pointerup`, calling `ResizeHandlers.commit`, that reaches `pane-host.ts`'s
- * `applyLayout` — ending in `writeLayoutStorage(serializeLayout(getTree()))` — once per gesture, and
- * every other layout change (a split, a close, a rebind, `reset layout`) reaches the same writer just
+ * `applyLayout` — ending in `persist()`, which writes the workspace — once per gesture, and
+ * every other layout change (a split, a close, a rebind, `reset preset`) reaches the same writer just
  * as directly. A fork's seed is printed at `LAMBDA_BYTE_BUDGET` — 65,536 bytes — so buffer text behind
  * that key would put a few hundred kilobytes through `JSON.stringify` on every one of those ordinary
  * gestures, not only a drag. Two keys keeps the layout write exactly as cheap as it is today and needs

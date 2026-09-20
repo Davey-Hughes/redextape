@@ -156,6 +156,37 @@ function hasSource(root: LayoutNode): boolean {
 }
 
 /**
+ * Put a new leaf of `kind` beside the leaf `id`, in a split of direction `dir` — `splitLeaf` without its
+ * refusal of the source leaf as the SUBJECT.
+ *
+ * **`+ view` IS WHY THIS EXISTS** (Plan 7 part 2 spec §5). It adds the pick beside the focused view, and the
+ * focused view can be the source view — or the only view, when every other has been closed. `splitLeaf`'s
+ * subject refusal is about the `⋯` menu's split items, which duplicate the view they are chosen on, and there
+ * is one editor, so the source view offers none; that argument says nothing about putting a DIFFERENT view
+ * next to it. The other refusals are the tree's own invariants and stay: at most one source leaf, and no id
+ * twice (`splitLeaf`'s own doc has both arguments).
+ */
+export function insertBeside(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: PaneKind): LayoutNode {
+  if (findLeaf(root, id) === null) throw new Error(`cannot insert beside a leaf that is not in the tree: ${id}`)
+  if (kind === 'source' && hasSource(root)) throw new Error('the tree already has a source leaf')
+  if (findLeaf(root, newId) !== null) throw new Error(`cannot split into an id already in the tree: ${newId}`)
+
+  const rewrite = (node: LayoutNode): LayoutNode => {
+    if (node.kind === 'leaf') {
+      if (node.id !== id) return node
+      return {
+        kind: 'split',
+        dir,
+        sizes: [0.5, 0.5],
+        children: [node, { kind: 'leaf', id: newId, pane: kind }],
+      }
+    }
+    return { ...node, children: node.children.map(rewrite) }
+  }
+  return rewrite(root)
+}
+
+/**
  * Replace the leaf `id` with a split holding it and a new leaf of `kind`.
  *
  * `kind` IS THE CALLER'S CHOICE, NOT A COPY OF THE SPLIT LEAF'S. It used to be: splitting the λ pane
@@ -192,27 +223,15 @@ function hasSource(root: LayoutNode): boolean {
  * but never returned. `parseLayout` already treats a duplicate id as an invalid tree on load, so this
  * refusal keeps the tree unable to reach that state in the first place rather than only detecting it
  * after the fact.
+ *
+ * **ITS LAST TWO REFUSALS ARE `insertBeside`'s**, to which it delegates once the subject passes; the table
+ * above still describes what a caller of either sees.
  */
 export function splitLeaf(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: PaneKind): LayoutNode {
   const target = findLeaf(root, id)
   if (target === null) throw new Error(`cannot split a leaf that is not in the tree: ${id}`)
   if (target.pane === 'source') throw new Error('the source pane cannot be split: there is one editor to duplicate')
-  if (kind === 'source' && hasSource(root)) throw new Error('the tree already has a source leaf')
-  if (findLeaf(root, newId) !== null) throw new Error(`cannot split into an id already in the tree: ${newId}`)
-
-  const rewrite = (node: LayoutNode): LayoutNode => {
-    if (node.kind === 'leaf') {
-      if (node.id !== id) return node
-      return {
-        kind: 'split',
-        dir,
-        sizes: [0.5, 0.5],
-        children: [node, { kind: 'leaf', id: newId, pane: kind }],
-      }
-    }
-    return { ...node, children: node.children.map(rewrite) }
-  }
-  return rewrite(root)
+  return insertBeside(root, id, dir, newId, kind)
 }
 
 /**
@@ -409,6 +428,21 @@ function validate(node: unknown, ids: Set<string>): node is LayoutNode {
 }
 
 /**
+ * A bare tree, validated — `parseLayout`'s check without the envelope, for `workspace.ts`, whose version 2
+ * envelope carries the same tree under different neighbours.
+ *
+ * THE SAME TWO RULES AND NO THIRD: every node passes `validate`, and at most one leaf is the source leaf.
+ * Split out rather than duplicated because the envelope is the only thing the two formats disagree about.
+ */
+export function parseTree(tree: unknown): LayoutNode | null {
+  const ids = new Set<string>()
+  if (!validate(tree, ids)) return null
+  const sources = leaves(tree).filter((l) => l.pane === 'source').length
+  if (sources > 1) return null
+  return tree
+}
+
+/**
  * The stored layout, or `null` if there is nothing usable there.
  *
  * `null` RATHER THAN A THROW OR A DEFAULT. The caller already knows what the default is
@@ -429,12 +463,5 @@ export function parseLayout(raw: string | null): LayoutNode | null {
   const envelope = parsed as Record<string, unknown>
   if (envelope.version !== LAYOUT_VERSION) return null
 
-  const ids = new Set<string>()
-  const tree = envelope.tree
-  if (!validate(tree, ids)) return null
-
-  const sources = leaves(tree).filter((l) => l.pane === 'source').length
-  if (sources > 1) return null
-
-  return tree
+  return parseTree(envelope.tree)
 }

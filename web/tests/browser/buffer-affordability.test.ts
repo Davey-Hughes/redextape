@@ -81,7 +81,7 @@ import type { LambdaState } from '../../src/types'
  * per-buffer `Worker` handle and its client is now stated (~11,395 bytes/buffer — `protocol.ts`'s `DROP_HISTORY_ON_UNFOCUS` doc's
  * own figure, and ONLY that: that doc's own words are "the `Worker` handle and its client and nothing
  * else", not the play timer or the pane-state entry a prior revision of this comment also named. Only
- * the play timer lives in `main.ts`'s session registry (`sessions.ts`'s `LegState.timer`), per
+ * the play state lives in `main.ts`'s session registry (`sessions.ts`'s `LegState.playing`, a timer until Plan 7 part 2), per
  * `session-client.ts`'s `SessionPool` doc's own distinction between what the pool tracks and what the registry
  * does; the pane-state entry does not — it lives in `panes.ts`'s `PaneCollection` instead, not in a
  * `SessionEntry` (`sessions.ts`'s `SessionEntry` fields are `id`, `label`, `detached`, `client`, `legs`,
@@ -486,8 +486,8 @@ describe('worker affordability', () => {
     // `Worker` handle and its client and nothing else") at ~11,395 bytes per extra worker bound and
     // driven. A prior revision of this comment also named "play-timer and pane-state entry" as part of
     // that figure; both are real per-buffer main-thread costs but neither is inside the 11,395-byte
-    // reading. Only the play timer lives in `main.ts`'s session registry (`LegState.timer`,
-    // `sessions.ts`'s `LegState.timer`), per `session-client.ts`'s `SessionPool` doc's own distinction between what the pool tracks
+    // reading. Only the play state lives in `main.ts`'s session registry (`LegState.playing`,
+    // `sessions.ts`'s `LegState.playing`), per `session-client.ts`'s `SessionPool` doc's own distinction between what the pool tracks
     // and what the registry does — the pane-state entry does not, it lives in `panes.ts`'s
     // `PaneCollection` instead, not in a `SessionEntry` (`sessions.ts`'s `SessionEntry` has no pane field), and
     // that citation says nothing about it. Neither figure is quantified anywhere in this repo. That is

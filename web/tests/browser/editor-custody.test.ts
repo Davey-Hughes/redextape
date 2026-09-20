@@ -44,7 +44,7 @@ const OTHER: SessionId = 'scratch-2'
 /** A leaf with no pane in the collection — what a claim points at after the pane that made it closed. */
 const GHOST: LeafId = 'pane-gone'
 
-/** A `ClientPort` with no thread behind it — `binding-selector.test.ts`'s helper, and its reason. */
+/** A `ClientPort` with no thread behind it — `view-title.test.ts`'s helper, and its reason. */
 function fakeClient(): SessionClient {
   const port: ClientPort = { postMessage: () => undefined, addEventListener: () => undefined }
   return new SessionClient(port, () => undefined)
@@ -59,7 +59,7 @@ function lambdaSession(id: SessionId): SessionEntry {
     hist: new History<LambdaState>(1_000_000),
     status: { available: false, reason: '' },
     done: null,
-    timer: null,
+    playing: false,
   }
   return {
     id,
@@ -101,7 +101,7 @@ beforeEach(() => {
  * A real `LambdaPane` on a real host, registered in the collection under `leaf` and bound to `session`.
  *
  * `showEditor` IS OPTIONAL AND ITS ABSENCE IS LOAD-BEARING, not a default filled in for convenience:
- * `LambdaPane` builds the "bring the term editor to this pane" control only for a pane whose events
+ * `LambdaPane` builds the "move the editor here" control only for a pane whose events
  * carry that handler (`#claim`'s own doc), so every test above this line gets a pane with no such button
  * in its DOM at all — which is what keeps them about custody. The item-11 tests below pass one, because
  * the button is the thing they are about.
@@ -122,6 +122,8 @@ function addPane(
     play: () => undefined,
     restart: () => undefined,
     extend: () => undefined,
+    speed: () => 8,
+    setSpeed: () => undefined,
     rebind: (binding) => slot.rebind(binding.session),
     detach: () => undefined,
     ...(showEditor === undefined ? {} : { showEditor }),
@@ -136,9 +138,8 @@ function addPane(
   return { pane, slot, host }
 }
 
-/** The claim control in `host`, by the label `claimEditorButton` gives it, or `null` when it is withdrawn. */
-const claimControl = (host: HTMLElement) =>
-  host.querySelector<HTMLButtonElement>('button[aria-label="bring the term editor to this pane"]')
+/** *move the editor here* in `host`, by the class `view-header.ts`'s `viewMenu` gives it, or `null` when it is withdrawn. */
+const claimControl = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('button.claim-editor')
 
 /**
  * A real `ScratchEditor`, mounted in a host of its own.
@@ -305,7 +306,7 @@ describe('reconcileEditors: an editor in custody whose session has been retired'
 })
 
 /**
- * **DEFERRED-A11Y ITEM 11: "bring the term editor to this pane" OFFERED WHERE IT PROVABLY CANNOT WORK.**
+ * **DEFERRED-A11Y ITEM 11: "move the editor here" OFFERED WHERE IT PROVABLY CANNOT WORK.**
  *
  * `LambdaPane.#refreshClaim` gated the control on `#detached && #editor === null` and read that pair as
  * "this session has an editor, mounted elsewhere". It was only ever an approximation, and it held

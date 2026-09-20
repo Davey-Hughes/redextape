@@ -1,18 +1,15 @@
 import { canRecordFurther } from './controls'
 import type { LinkWiring } from './link-wiring'
 import type { PaneEvents } from './pane-chrome'
+import { createPlayer } from './player'
 import type { Leg } from './protocol'
 import { BufferCapReached, type ScratchBuffers } from './scratch'
+import type { SessionId } from './session-client'
 import type { Binding, LegState, PaneSlot, SessionRegistry } from './sessions'
+import type { Speed } from './workspace'
 
 /**
- * Milliseconds between frames during playback (120 ms ≈ 8 fps). A main-thread `setInterval` walk over
- * recorded frames — it never touches wasm, which is the whole reason the history lives on this side.
- */
-const PLAY_MS = 120
-
-/**
- * `play`, THE INTERVAL THAT WALKS RECORDED FRAMES, AND `events`, THE PER-PANE CLICK HANDLERS — moved
+ * `play`, WHICH HANDS A LEG TO THE PLAYER THAT WALKS RECORDED FRAMES, AND `events`, THE PER-PANE CLICK HANDLERS — moved
  * out of `main.ts` verbatim. See the doc comment on each below for what it does; this one is only
  * about the dependencies.
  *
@@ -26,7 +23,7 @@ const PLAY_MS = 120
  *
  * `linkWiring` IS NOT IN THE ORIGINAL TASK SIGNATURE THIS FACTORY WAS SPECIFIED WITH. `events(...)`'s
  * `detach`/`linkState`/`linkLambda` handlers read `linkWiring.index`/`.linkable` and call
- * `.setForkFailed`/`.setLinkTo` — in `main.ts`, before this move, that worked as an ordinary closure
+ * `.setLinkTo` — in `main.ts`, before this move, that worked as an ordinary closure
  * over a same-scope `const`; across a module boundary it has to be a real dependency instead. Because
  * `linkWiring().index` is a fresh call each time it appears, TypeScript cannot narrow a null check on
  * one occurrence across to the next the way it did for `linkWiring.index` (a stable property read) —
@@ -37,6 +34,12 @@ export function createTransport(deps: {
   sessions: SessionRegistry
   scratchpad: ScratchBuffers
   draw: () => void
+  /** The workspace's speed, in steps a second — read by the player on every frame. */
+  speed: () => Speed
+  /** Set the workspace's one speed — `main.ts` writes the workspace and draws. */
+  setSpeed: (s: Speed) => void
+  /** Say a refusal — `notice.ts`'s `notify`. */
+  notify: (text: string) => void
   linkWiring: () => LinkWiring
   /**
    * A buffer has just been created — the header list's readout is stale until this returns.
@@ -46,7 +49,7 @@ export function createTransport(deps: {
    * so the button can be current while the list is CLOSED without any repaint recomputing it (its own
    * doc); the two moments the count changes are a fork and a retire, and the retire is `main.ts`'s own
    * handler. This is the other one. Routing it through `draw` instead would put the header's readout on
-   * the playback clock — a `setInterval` at 8 fps — to catch a number that changes on a click.
+   * the playback clock — every animation frame while a leg plays — to catch a number that changes on a click.
    *
    * `recompile` BELOW DELIBERATELY DOES NOT CALL IT: it rebuilds the term behind a buffer that already
    * exists, so the count is the one thing an edit cannot change.
@@ -68,43 +71,31 @@ export function createTransport(deps: {
   play<T>(leg: LegState<T>): void
   events<K extends Leg>(slot: PaneSlot<K>): PaneEvents
 } {
-  const { sessions, scratchpad, draw, linkWiring, onBuffersChanged, onBuffersPersist } = deps
+  const { sessions, scratchpad, draw, linkWiring, onBuffersChanged, onBuffersPersist, notify } = deps
+  const player = createPlayer({ speed: deps.speed, draw })
 
   /**
-   * Playback is an interval over recorded frames and stops at the frontier. It never asks the worker
-   * for more — `▶` at the frontier does that, deliberately, so play cannot run away with a cap raise
-   * nobody clicked.
+   * Start or stop `leg` playing — playback is `player.ts`'s one animation-frame loop now, which walks
+   * recorded frames and stops at the frontier, never asking the worker for more.
    *
-   * BACK TO `<T>(leg: LegState<T>)` FROM T4's `(leg: AnyLeg)`, AND THE CONSTRAINT FLIPPED RATHER THAN
-   * THE TASTE. T4 changed it because `T` could not be inferred from `SessionLegs[K]` — a DEFERRED
-   * indexed access is not syntactically `LegState<T>` (TS2345). This task made `SessionLegs` a mapped
-   * type so `legOf` could return an INSTANTIATED `LegState<LegFrame[K]>` for `PaneView<LegFrame[K]>`
-   * to consume (see `SessionLegs`'s own doc for why both forms cannot be had at once), and that is
-   * exactly the shape `T` infers from — while `AnyLeg`, a union of two instantiations, is now the one
-   * that fails. Both spellings say the same thing: this function walks a history and parks a timer,
-   * and never looks at a frame. `T` is unused in the body, which is that claim written in the type.
+   * `<T>(leg: LegState<T>)`, because this function toggles a leg and never looks at a frame: `T` is
+   * unused in the body, which is that claim written in the type.
+   *
+   * **IT DRAWS, BECAUSE THE PLAYER ONLY DRAWS WHEN A STEP IS TAKEN.** The play button shows `⏸` from
+   * `LegState.playing`, and the first step at 8/s is ~125 ms away (a full second at 1/s); a pause takes no
+   * step at all, so without this the button would go on saying `pause` after the click that paused it.
    */
   const play = <T>(leg: LegState<T>) => {
-    if (leg.timer !== null) {
-      clearInterval(leg.timer)
-      leg.timer = null
-      return
-    }
-    leg.timer = setInterval(() => {
-      if (!leg.hist.forward()) {
-        if (leg.timer !== null) clearInterval(leg.timer)
-        leg.timer = null
-      }
-      draw()
-    }, PLAY_MS)
+    player.toggle(leg)
+    draw()
   }
 
   /**
    * One pane's control handlers, resolved through its slot's binding on every click.
    *
    * TAKES THE SLOT, NOT THE BINDING AND NOT THE `LegState`. Both panes are constructed once, at mount,
-   * and keep the handler object they were given for the life of the page — `pane-chrome.ts`'s
-   * `controlStrip` wires each `addEventListener` exactly once, in `button()`. A handler that closed
+   * and keep the handler object they were given for the life of the page — `step-controls.ts`'s
+   * `stepControls` wires each `addEventListener` exactly once, at construction. A handler that closed
    * over an already-resolved leg would go on driving the leg this pane was bound to AT MOUNT; a
    * handler that closed over a `Binding` VALUE would do the same thing one level up, because `rebind`
    * replaces the binding rather than editing it. The slot is the thing that is still current after a
@@ -115,6 +106,9 @@ export function createTransport(deps: {
    * identity (§3.2b); a binding carries both, so passing them apart is a way for them to disagree.
    */
   const events = <K extends Leg>(slot: PaneSlot<K>): PaneEvents => ({
+    // ONE SPEED FOR THE WORKSPACE, NOT PER VIEW — every view's step controls read and set the same value.
+    speed: deps.speed,
+    setSpeed: deps.setSpeed,
     back: () => {
       slot.resolve(sessions).hist.back()
       draw()
@@ -129,15 +123,15 @@ export function createTransport(deps: {
       }
       draw()
     },
-    // RESOLVED AT THE CLICK LIKE EVERY OTHER HANDLER HERE, AND THE INTERVAL THEN HOLDS THE LEG IT
-    // RESOLVED TO — `play` parks its timer ON that `LegState` (`leg.timer`), which is what makes a
-    // second click a stop rather than a second interval.
+    // RESOLVED AT THE CLICK LIKE EVERY OTHER HANDLER HERE, AND THE PLAYER THEN HOLDS THE LEG IT
+    // RESOLVED TO — `play` sets the flag ON that `LegState` (`LegState.playing`), which is what makes a
+    // second click a stop rather than a second run.
     //
     // T4 ASKED THIS TASK TO DECIDE WHETHER PLAYBACK FOLLOWS THE PANE OR STAYS WITH THE LEG, AND IT
     // STAYS WITH THE LEG. A play head is a property of a history, and a pane looking away is not the
     // user un-pressing play; more concretely, two slots may now be bound to the same leg, so stopping
-    // the timer on rebind would let one pane's selector silently stop the other pane's playback. The
-    // interval clears itself at the frontier, so an unwatched run is bounded rather than forever. See
+    // playback on rebind would let one pane's selector silently stop the other pane's playback. The
+    // player stops at the frontier, so an unwatched run is bounded rather than forever. See
     // `PaneSlot.rebind` for the same decision stated where the rebind happens.
     play: () => play(slot.resolve(sessions)),
     restart: () => {
@@ -148,10 +142,9 @@ export function createTransport(deps: {
     // THE SELECTOR'S PICK, ON THE SESSION AXIS. `PaneSlot.rebind` writes the session and nothing else —
     // the leg is fixed by `K` and has no writer anywhere in the app, which is what keeps `Binding<K>`'s
     // type property (see `PaneSlot`'s doc). `draw()` immediately afterwards because a rebind changes
-    // what this pane shows, what its `[detached]` badge says, and what the status line narrates, and
-    // none of those has another path to the DOM. The `<select>` is also sitting on the option the user
-    // just chose, and only a repaint puts it back on the pair in force (`paneSelect.update`'s
-    // `select.value = want`).
+    // what this pane shows, what its `copy · not linked` status says, and what the status line narrates,
+    // and none of those has another path to the DOM. The title-selector reads the pair in force only
+    // once a repaint hands it over (`ViewHeader.setBindings`).
     //
     // **THE LEG COMPARISON THAT USED TO BE ON THIS LINE HAS MOVED UP TO `pane-host.ts`, AND THE ANSWER
     // MOVED WITH IT: A CROSS-LEG PICK IS NOW ACTED ON RATHER THAN DECLINED.** The history is worth
@@ -264,48 +257,37 @@ export function createTransport(deps: {
             // **THE CAP'S REFUSAL IS AN ANSWER TO THE USER AND IS CAUGHT HERE** (design §4.5, and the
             // Critical this task's review raised). `ScratchBuffers.fork` refuses at `MAX_WARM_BUFFERS`
             // rather than evicting, and this click listener is the last frame before the raw DOM
-            // dispatch (`pane-chrome.ts`'s `detachButton`) — there is no `window` error handler in
+            // dispatch (`view-header.ts`'s `viewMenu`) — there is no `window` error handler in
             // `src/` behind it, so an uncaught throw here would reach the console and nothing else.
-            // `#link-status` is where it goes instead, through the same `forkFailed` field `replies.ts`
-            // uses for the sibling refusal (a fork whose BUILD fails). `e.message` already reads
-            // `fork failed — …` by the time it gets here — `scratch.ts`'s `fork` passes that prefix to
-            // `#refuseAtCap` itself (5d-ii-d review round 2, Finding 3: `link-status.ts` used to add it
-            // for every caller of `setForkFailed`, which was wrong for the two that are not forks) — so
-            // this handler hands the message through unchanged, same as `replies.ts` does for its own.
+            // A notice is where it goes instead (`notice.ts`, Plan 7 part 2 spec §11), as `replies.ts`
+            // does for the sibling refusal (a fork whose BUILD fails). `e.message` already carries its
+            // own prefix by the time it gets here — `scratch.ts`'s `fork` passes it to `#refuseAtCap`
+            // itself — so this handler hands the message through unchanged.
             //
             // **`BufferCapReached` AND NOT A BARE `catch`.** The other throws reachable from `fork` are
             // `SessionRegistry.add`'s and `SessionPool.bind`'s guards over their own invariants; those
             // are wiring bugs, and rendering one as a status line would swallow it. Anything else is
             // re-thrown unchanged.
+            let id: SessionId
             try {
-              scratchpad.fork(slot, wiring.index.lambdaText, step, 'lambda')
+              id = scratchpad.fork(slot, wiring.index.lambdaText, step, 'lambda')
             } catch (e) {
               if (!(e instanceof BufferCapReached)) throw e
-              wiring.setForkFailed(e.message)
+              notify(e.message)
               // NO `onBuffersChanged()` ON THIS ARM — the header's count did not move, because that is
-              // the whole content of the refusal. `draw()` still runs: the status line is the one thing
-              // that DID change, and `draw()` ends in `drawLink`.
+              // the whole content of the refusal.
               draw()
               return
             }
-            // A FRESH ATTEMPT RETIRES YESTERDAY'S NEWS, **AND IT CLEARS ON THE SUCCESS PATH RATHER THAN
-            // AHEAD OF THE CALL**. `forkFailed` is a report about the LAST click on this control, and a
-            // stale message must not sit on `#link-status` through a fork that worked. This line used
-            // to run BEFORE the fork, on the reasoning that "a new click means the user is trying
-            // again" — which was right until the fork could answer synchronously: `setForkFailed` is a
-            // pure state write (`link-wiring.ts`) and nothing repaints between there and here, so a
-            // clear ahead of a REFUSED fork would drop the previous failure from the model while it was
-            // still on screen, and the two would disagree until some unrelated frame repainted. Clearing
-            // here says the same thing about a fork that is now genuinely pending, and the arm above
-            // overwrites rather than clears. See `forkFailed`'s own doc for the other clear site.
-            wiring.setForkFailed(null)
+            // SAY WHAT IT MADE — and that notice is what replaces any refusal still on screen.
+            notify(`${scratchpad.nameOf(id) ?? 'a copy'} created — this view shows it`)
             // THE HEADER GAINED A BUFFER, AND ITS READOUT IS THE ONE SURFACE `draw()` BELOW DOES NOT
             // REACH — `draw.ts` paints panes and pane chrome, and the buffer list is header chrome
-            // beside `reset layout`. See this dependency's own doc for why the count travels on a click
+            // beside the workspace menu. See this dependency's own doc for why the count travels on a click
             // rather than on the frame clock.
             onBuffersChanged()
             // IMMEDIATELY, NOT ON THE SCRATCHPAD'S FIRST REPLY. The rebind has already happened, so
-            // this pane's `[detached]` badge, its selector (which gains a second option the instant a
+            // this view's `copy · not linked` status, its selector (which gains a second option the instant a
             // second session is registered) and the status line are all stale until something paints
             // — and the first frame is a worker round trip away.
             draw()
@@ -427,21 +409,21 @@ export function createTransport(deps: {
             // gives in full: the other throws reachable from `fork` are `SessionRegistry.add`'s and
             // `SessionPool.bind`'s guards over their own invariants, and rendering one of those as a
             // status line would swallow a wiring bug.
+            let id: SessionId
             try {
-              scratchpad.fork(slot, text, 0, 'tm')
+              id = scratchpad.fork(slot, text, 0, 'tm')
             } catch (e) {
               if (!(e instanceof BufferCapReached)) throw e
-              linkWiring().setForkFailed(e.message)
+              notify(e.message)
               // NO `onBuffersChanged()` ON THIS ARM, `detach`'s OWN REASON: the header's count did not
               // move, because that is the whole content of the refusal.
               draw()
               return
             }
-            // SAME ORDER AS `detach` ABOVE, AND THE SAME REASON FOR EACH LINE: a fresh attempt retires
-            // yesterday's news on the SUCCESS path, the header's buffer count is stale until this
-            // returns, and everything about this pane — its badge, its selector, its status line — is
-            // stale the instant the synchronous rebind above returns.
-            linkWiring().setForkFailed(null)
+            // SAME ORDER AS `detach` ABOVE, AND THE SAME REASON FOR EACH LINE: the header's buffer count is
+            // stale until this returns, and everything about this pane — its status, its title, its
+            // status line — is stale the instant the synchronous rebind above returns.
+            notify(`${scratchpad.nameOf(id) ?? 'a copy'} created — this view shows it`)
             onBuffersChanged()
             draw()
           },

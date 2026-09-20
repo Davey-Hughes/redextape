@@ -48,11 +48,14 @@ export function readStored(raw: string | null): Appearance {
  * The glyph and the `aria-label` text for one state, keyed by state. The label names the CURRENT
  * state rather than just "theme" — a glyph alone announces to a screen reader as a bare character,
  * not as a control with state.
+ *
+ * **`word` IS WHAT THE TOGGLE SHOWS BESIDE THE GLYPH NOW, AND ITS NAME** (Plan 7 part 2 spec §6): the
+ * visible word is the accessible name, and `label` rides as the tooltip.
  */
-export const APPEARANCE_LABEL: Record<Appearance, { glyph: string; label: string }> = {
-  system: { glyph: '◐', label: 'appearance: system' },
-  light: { glyph: '☀', label: 'appearance: light' },
-  dark: { glyph: '☾', label: 'appearance: dark' },
+export const APPEARANCE_LABEL: Record<Appearance, { glyph: string; word: string; label: string }> = {
+  system: { glyph: '◐', word: 'system', label: 'appearance: system' },
+  light: { glyph: '☀', word: 'light', label: 'appearance: light' },
+  dark: { glyph: '☾', word: 'dark', label: 'appearance: dark' },
 }
 
 /**

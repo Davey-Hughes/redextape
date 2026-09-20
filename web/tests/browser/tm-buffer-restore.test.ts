@@ -11,6 +11,7 @@ import list_1_2 from '../../../crates/redextape-core/tests/fixtures/list_1_2.tm?
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
 import type { Leg } from '../../src/protocol'
 import type { SessionId } from '../../src/session-client'
+import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
@@ -103,17 +104,18 @@ const bufferRows = (): HTMLElement[] => {
   return [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row')]
 }
 
-/** `\x00` as an escape rather than the byte — `tm-blank-buffer.test.ts`'s own `optionValue`, duplicated
- * here for the same reason this file duplicates every other page helper (this file's own doc). */
-const optionValue = (leg: Leg, id: SessionId) => `${leg}\x00${id}`
-
-/** Rebind `pane`'s own selector to `(leg, session)` through the control a user has, not a direct write
+/** Rebind `pane` to `(leg, session)` through its title menu, the control a user has, not a direct write
  * to whatever `main.ts` holds underneath it — `tm-blank-buffer.test.ts`'s own `pickBinding`. */
 const pickBinding = (pane: HTMLElement, target: { leg: Leg; session: SessionId }): void => {
-  const select = pane.querySelector<HTMLSelectElement>('.pane-binding select')
-  if (select === null) throw new Error('no binding selector on this pane')
-  select.value = optionValue(target.leg, target.session)
-  select.dispatchEvent(new Event('change'))
+  const title = pane.querySelector<HTMLButtonElement>('button.view-title')
+  if (title === null) throw new Error('no title-selector on this view')
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const item = menu?.querySelector<HTMLButtonElement>(
+    `button[data-binding="${bindingKey(target.leg, target.session)}"]`,
+  )
+  if (item == null) throw new Error(`this view offers no ${bindingKey(target.leg, target.session)}`)
+  item.click()
 }
 
 /**
@@ -160,7 +162,7 @@ function startStateGoesToHalt(pane: HTMLElement, start: string): boolean {
  * implies — the one state a pure text-quiescence poll cannot see past.
  *
  * **WHY QUIESCENCE ALONE IS NOT ENOUGH, MEASURED RATHER THAN ASSUMED.** A fork's click handler flips a
- * pane's heading to `[detached]` and names the new buffer SYNCHRONOUSLY, before any worker reply lands
+ * pane's heading to `copy · not linked` and names the new buffer SYNCHRONOUSLY, before any worker reply lands
  * — checked directly against an earlier draft of this file: `brings a warm TM buffer back showing its
  * machine`, below, failed intermittently with "no editor mounted in this pane" because that synchronous
  * placeholder text can sit unchanged for the whole 500ms window a text-only `settleOn` requires, while
@@ -170,10 +172,10 @@ function startStateGoesToHalt(pane: HTMLElement, start: string): boolean {
  * fork's own first mount.
  */
 const detachedWithNoEditorYet = (pane: HTMLElement): boolean =>
-  /detached/i.test(pane.textContent ?? '') && pane.querySelector('.term-editor') === null
+  /copy · not linked/.test(pane.textContent ?? '') && pane.querySelector('.term-editor') === null
 
 /**
- * Wait until `snapshot()` stops changing for 500ms AND neither pane is stuck `[detached]` with no
+ * Wait until `snapshot()` stops changing for 500ms AND neither pane is stuck `copy · not linked` with no
  * editor mounted yet — `tm-scratch-fork.test.ts`'s own `settleOn`, with the extra condition
  * `detachedWithNoEditorYet` exists to close.
  *
@@ -271,7 +273,7 @@ describe('restoring buffers on both legs', () => {
     const second = await remountApp()
     await second.settled()
     expect(second.editorText(second.tmPane())).toBe(text)
-    expect(second.tmPane().textContent).toMatch(/detached/i)
+    expect(second.tmPane().textContent).toMatch(/copy · not linked/)
   })
 
   it('brings a λ buffer and a TM buffer back on their own legs', async () => {
@@ -318,7 +320,10 @@ describe('restoring buffers on both legs', () => {
     await second.settled()
     const row = second.bufferRows()[0]
     if (row === undefined) throw new Error('no buffer row on the restored page')
-    expect(row.textContent).not.toMatch(/asleep/i)
+    // THE NAME LINE, NOT THE ROW: a warm row's own controls read `pause` then `delete`, which run together
+    // in the row's text as `pausedelete` and would match /paused/ on a running copy.
+    expect(row.querySelector('.buffer-row-name')?.textContent).not.toMatch(/paused/)
+    expect(row.querySelector('.buffer-row-name')?.textContent).toMatch(/· running$/)
   })
 
   /**
@@ -374,7 +379,8 @@ describe('restoring buffers on both legs', () => {
 
     // THE BINDING WAS DROPPED, NOT HONOURED — the λ pane is on the source session, not the tm-leg
     // buffer the corrupt payload named for it.
-    expect(document.querySelector('[data-leaf="lambda-0"] .detached-badge')).toBeNull()
+    expect(document.querySelector('[data-leaf="lambda-0"] .view-status')).toBeNull()
+    expect(document.querySelector('[data-leaf="lambda-0"] .view-title')?.textContent).toBe('λ · program')
     // AND THE BUFFER ITSELF SURVIVES, ORPHANED AND COLD — dropping a binding is not the same as ending a
     // buffer (design decision 2: nothing ends a buffer implicitly). `restore` puts every buffer back
     // cold, and nothing named this one to warm it.
@@ -382,8 +388,10 @@ describe('restoring buffers on both legs', () => {
     expect(rows).toHaveLength(1)
     const row = rows[0]
     if (row === undefined) throw new Error('no buffer row on the restored page')
-    expect(row.textContent).toMatch(/orphan/i)
-    expect(row.textContent).toMatch(/asleep/i)
+    // THE NAME LINE, NOT THE WHOLE ROW: a running row's own controls read `pause` then `delete`, and a
+    // row's `textContent` runs them together as `pausedelete` — which matches `/paused/` and makes the
+    // claim in this test's name ("cold") unfalsifiable.
+    expect(row.querySelector('.buffer-row-name')?.textContent).toBe('TM copy 1 · not shown · paused')
   })
 
   /**
@@ -441,7 +449,7 @@ describe('restoring buffers on both legs', () => {
    * measured, not assumed.** Against the unfixed source the restored buffer's text is empty
    * (`localStorage` never got the paste), so its `tmScratch('')` request never produces a machine,
    * `tm-scratch-compiled` never fires, and `setEditor` never mounts a `.term-editor`. That pane is
-   * ALSO permanently `[detached]` (any scratch-bound pane reads so, warm or not), so `settled()`'s own
+   * ALSO permanently `copy · not linked` (any scratch-bound pane reads so, warm or not), so `settled()`'s own
    * `detachedWithNoEditorYet` guard — built for a fork's synchronous placeholder, this file's own doc
    * above — never clears either, and the shared helper hangs for its own full internal timeout rather
    * than failing fast. Waiting on the mount directly gives a short, legible failure instead.

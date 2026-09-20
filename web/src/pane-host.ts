@@ -3,11 +3,11 @@ import { LambdaPane } from './lambda-pane'
 import {
   closeLeaf,
   type Dir,
+  insertBeside,
   type LayoutNode,
   leaves,
   resize,
   SOURCE_LEAF,
-  serializeLayout,
   setLeafKind,
   splitLeaf,
 } from './layout'
@@ -84,6 +84,18 @@ export type PaneHost = {
    * as a pick through its selector does — see the implementation.
    */
   reseedingSlots(): Detachable[]
+  /**
+   * Move each of `leaves` that still shows `from` onto `to`, reseeding a TM view first as `reseedingSlots`
+   * does — undo's half of a delete (spec §10), which moves back the views the delete moved, if they still
+   * exist and still show the program. Returns the leaves it moved.
+   */
+  moveBack(leaves: readonly LeafId[], from: SessionId, to: SessionId): LeafId[]
+  /**
+   * Add a view showing `choice` beside `beside` — `+ view` (spec §5, §6). `insertBeside`, not `splitLeaf`: the
+   * view beside which it lands may be the source view. Records what the new leaf starts on, as `split` does,
+   * applies the layout, focuses what it created, and returns its id.
+   */
+  addView(choice: PaneChoice, beside: LeafId): LeafId
 }
 
 /**
@@ -96,14 +108,14 @@ export type PaneHost = {
  * and `applyLayout` below is what fills it.
  *
  * **`getTree`/`setTree` RATHER THAN A `tree` FIELD, AND RATHER THAN A MUTABLE EXPORT.** `main()`'s
- * `let tree` is written by four things — `parseLayout`'s restore, the `reset layout` button, this
+ * `let tree` is written by four things — `parseLayout`'s restore, the `reset preset` item, this
  * module's split/close/resize (through `setTree`), and `sourceLayout`'s own close handler, built
  * directly in `main()` because it has no `PaneSlot` and therefore no `paneEvents` to route a `close`
  * gesture through — and nothing else, and only the third group moved. A copy here would have to be
  * pushed back on the other three; an exported binding would put the current tree in two modules at
  * once. A getter read at every use is the shape with one answer.
  *
- * **`sourceSession`, `sourceLayout`, `writeLayoutStorage`, `nextLeafId` AND
+ * **`sourceSession`, `sourceLayout`, `persist`, `nextLeafId` AND
  * `neighbourOf` ARE WHAT THE MOVED BODIES REACHED FOR ACROSS THE NEW BOUNDARY, and naming them is the
  * point of listing them separately.** (`tmProgramOf` is not one of them: it answers a question this
  * module asks on its own account rather than restoring a reference `main()`'s scope used to supply for
@@ -111,8 +123,8 @@ export type PaneHost = {
  * remaining session-id constant;
  * `sourceLayout` is the source pane's own close control, which `applyLayout` drives because `canClose`
  * changes only at a structural change and the source leaf has no `PaneEntry` for `draw()` to find;
- * `writeLayoutStorage` is `main.ts`'s guarded `localStorage` writer, kept beside the guarded reader
- * that restores the tree rather than split from it; and `nextLeafId`/`neighbourOf` are module-level in
+ * `persist` is `main.ts`'s `persistWorkspace`, which writes through the guarded `localStorage` writer
+ * kept beside the guarded reader that restores the workspace rather than split from it; and `nextLeafId`/`neighbourOf` are module-level in
  * `main.ts` because `leafCounter` is deliberately per-module rather than per-`main()` call and
  * `main.ts`'s own source-pane close control is `neighbourOf`'s other caller.
  *
@@ -138,6 +150,14 @@ export type PaneHost = {
  *
  * For what this doc used to claim and why it changed, see the history note under `createPaneHost`.
  */
+/**
+ * A layout change worth a notice (Plan 7 part 2 spec §11): a view added, closed, or switched to show something
+ * else. `main.ts` words it.
+ */
+export type LayoutEvent =
+  | { readonly kind: 'added' | 'switched'; readonly leaf: LeafId; readonly shows: PaneChoice }
+  | { readonly kind: 'closed'; readonly leaf: LeafId; readonly showed: PaneChoice }
+
 export function createPaneHost(deps: {
   root: HTMLElement
   panes: PaneCollection
@@ -149,7 +169,16 @@ export function createPaneHost(deps: {
   neighbourOf(tree: LayoutNode, id: LeafId): LeafId | null
   getTree(): LayoutNode
   setTree(next: LayoutNode): void
-  writeLayoutStorage(raw: string): void
+  /** Write the whole workspace — tree, switches, speed, focus, panels — to storage (`main.ts`'s `persistWorkspace`). */
+  persist(): void
+  /** Record that `id` is the view the user is in. */
+  setFocused(id: LeafId): void
+  /** A view's stored state for one of its panels, or `undefined` for none. */
+  panelOpen(leaf: LeafId, name: string): boolean | undefined
+  /** Record a view's panel state; `persist` is the caller's to make. */
+  setPanel(leaf: LeafId, name: string, open: boolean): void
+  /** A view was added, closed, or switched to show something else — `main.ts` says it as a notice (spec §11). */
+  layoutChanged(e: LayoutEvent): void
   draw(): void
   /**
    * The machine `session` last compiled, or `null` if it has not compiled one — what a freshly built
@@ -204,7 +233,11 @@ export function createPaneHost(deps: {
     neighbourOf,
     getTree,
     setTree,
-    writeLayoutStorage,
+    persist,
+    setFocused,
+    panelOpen,
+    setPanel,
+    layoutChanged,
     draw,
     tmProgramOf,
     tmScratchOf,
@@ -229,7 +262,7 @@ export function createPaneHost(deps: {
    * editor down; `warm` then spawns and posts a build that lands with NO pane claiming a leaf, so
    * `replies.ts`'s `scratch-compiled` arm resolves `editorHome(session)` to `undefined` and mounts
    * nothing. Binding a pane back through the selector afterwards re-posts no build and claims no leaf,
-   * and "bring the term editor to this pane" is correctly withheld because `custody.hasEditor` is false —
+   * and "move the editor here" is correctly withheld because `custody.hasEditor` is false —
    * there is genuinely no editor to bring. Frames render; the text is unreachable, permanently.
    *
    * **`custody.hasEditor` IS THE GATE, AND USING THE CLAIM CONTROL'S OWN PREDICATE IS THE POINT.**
@@ -400,14 +433,25 @@ export function createPaneHost(deps: {
     //
     // `draw()` IS WHAT REPAINTS THE TWO SURFACES FROM THE NEWLY ACTIVE PANE. It is a full frame for a
     // focus click, which is the same cost every transport click already pays; `active`'s fallback makes
-    // the whole listener a no-op in outcome for a leg holding one pane. NOT RE-ENTRANT WITH A RENDER:
-    // nothing `draw()` does moves focus (it dispatches to the source `EditorView` and repaints panes;
-    // the only `.focus()` calls in the app are `focusPane` and `renderLayout`'s divider rescue, and a
-    // divider is a SIBLING of the hosts, never inside one — the split menu's `autofocus` is the
-    // popover's own show algorithm, driven by a click rather than by a paint), so a frame painted here
-    // cannot cause the event that painted it.
+    // the whole listener a no-op in outcome for a leg holding one pane.
+    //
+    // **`draw()` CAN NOW MOVE THE FOCUS, AND THIS PARAGRAPH USED TO SAY IT COULD NOT — whole-branch
+    // review, M3.** It claimed "the only `.focus()` calls in the app are `focusPane` and `renderLayout`'s
+    // divider rescue". That was true when it was written and is not now: Plan 7 part 2 put a focus
+    // handoff inside `step-controls.ts`'s `update()`, which runs from `PaneSlot.render` and so from
+    // `draw()` itself, precisely so a continue button that disappears under the keyboard does not take
+    // the focus with it (umbrella rule 5, spec §11).
+    //
+    // **THE RE-ENTRANCY IS STILL BOUNDED, BY THE HANDOFF'S OWN GUARD RATHER THAN BY THERE BEING NO
+    // HANDOFF.** It fires only when `document.activeElement` is that same view's continue button, so the
+    // `focusin` it provokes names the leaf the focus was already on: `markActive` and `setFocused` are
+    // both no-ops, and the nested `draw()` terminates at depth 2 because the continue button is hidden by
+    // then and the guard is false on the way back through. A handoff that moved focus to a DIFFERENT
+    // leaf would not have that argument, which is why the guard is the thing to keep rather than the
+    // sentence above it.
     el.addEventListener('focusin', () => {
       panes.markActive(id)
+      setFocused(id)
       draw()
     })
     hosts.set(id, el)
@@ -427,9 +471,10 @@ export function createPaneHost(deps: {
    * registry and the session's own `tmProgram`, neither of which knows a `LeafId` exists; `editorOwner`
    * is keyed by one, so pairing the two has to happen here, the same division `splitRow`/`splitColumn`/
    * `close` already draw for the layout gestures below them. `showEditor` HAS NO TM COUNTERPART — a TM
-   * pane never builds a `claimEditorButton` (`PaneEvents.showEditor`'s own doc: the affordance "exists
-   * only on a pane whose slot may be bound to a scratch, which today means the λ leg" — a TM scratch's
-   * editor never moves between panes the way a λ one can).
+   * view builds a `viewMenu` like any other, but never its *move the editor here* item
+   * (`PaneEvents.showEditor`'s own doc: the affordance "exists only on a pane whose slot may be bound
+   * to a scratch, which today means the λ leg" — a TM scratch's editor never moves between panes the
+   * way a λ one can).
    *
    * For what this doc used to claim and why it changed, see the history note under `paneEvents`.
    */
@@ -443,14 +488,14 @@ export function createPaneHost(deps: {
      *
      * **IT ENDS IN `focusPane` TOO NOW, AND THIS PARAGRAPH USED TO ARGUE THE OPPOSITE — IMPORTANT
      * FINDING, REVIEW OF THE COMMIT THAT ADDED THE PICKER.** A split's own controls survive it —
-     * `layoutControls` builds its buttons once and `renderLayout` MOVES hosts rather than rebuilding
+     * `viewMenu` builds its buttons once and `renderLayout` MOVES hosts rather than rebuilding
      * them — and surviving the gesture is not the same as answering it, which is the whole finding.
      *
      * Every other gesture in this closure now ends with focus somewhere the user asked to be: `close`
      * names the pane that grew, `rebind`'s cross-leg arm names the leaf itself. A split was the one left
      * dropping the user on `<body>`, one Tab from the top of the document, having just asked for a pane —
      * and the sibling review in this slice ruled the identical defect Important on the cross-leg path,
-     * where the control merely happened to be destroyed as well. `splitControl`'s own doc settles it from
+     * where the control merely happened to be destroyed as well. `viewMenu`'s own doc settles it from
      * the other side: this is a CREATION control with no other route to it, so "building the keyboard
      * path is the fix, not deferring it" — and a handler that completes that gesture by discarding focus
      * abandons the argument one call later.
@@ -497,6 +542,7 @@ export function createPaneHost(deps: {
       }
       applyLayout()
       focusPane(created)
+      layoutChanged({ kind: 'added', leaf: created, shows: choice })
     }
 
     return {
@@ -524,9 +570,34 @@ export function createPaneHost(deps: {
             // is what actually relocates the mounted `ScratchEditor`, which is what lets this handler stay
             // as small as `PaneEvents.showEditor`'s own doc says it should be: report the click, know
             // nothing else.
+            // **AND IT PUTS THE FOCUS BACK, LIKE EVERY OTHER `applyLayout` CALLER — CRITICAL FINDING,
+            // WHOLE-BRANCH REVIEW BEFORE MERGE.** `renderLayout`'s `root.replaceChildren()` detaches
+            // every child of `<main>`, and detaching the subtree holding `document.activeElement` drops
+            // focus to `<body>`; its one rescue matches `.layout-divider` by `data-path`/`data-index`,
+            // which no control inside a host has. That is why `split`, `close`, the cross-leg rebind
+            // arm, `addView` and `main.ts`'s source-view close all end in `focusPane`. This one did not,
+            // and the gesture reaches it. Spec §11's "Focus never falls to `<body>`" is categorical, and
+            // the asymmetry it left inside one menu was the tell: *edit a copy* never calls
+            // `applyLayout` (`transport.ts`'s `detach` rebinds and calls `draw()`), so only this item
+            // lost the focus.
+            //
+            // **WHAT `shut()` LEAVES BEHIND IS THE PRE-OPEN ELEMENT, NOT THE INVOKER AND NOT THE ITEM —
+            // measured, after two wrong guesses, and this comment asserted the invoker until it was.**
+            // `hidePopover()` restores focus to whatever held it before the popover opened, so a menu
+            // item never strands the focus by itself; what strands it is this handler rebuilding the
+            // tree underneath the element that restoration just targeted.
+            // `tests/browser/scratch-buffers.test.ts` had already written this down — "with the invoker
+            // unfocused, `hidePopover` returns focus to whatever held it" — which is what a guess here
+            // contradicted. Instrumented in `two-lambda-panes.test.ts`'s own focus case, the sequence is
+            // `button.view-title`, then the first menu item on open, then `button.view-title` again on
+            // shut: never the `⋯` invoker, because a script-driven `click()` does not focus a button.
+            //
+            // That is also why the same-leg arm of `rebind` below needs no such call and was measured
+            // not to: it rebuilds no layout, so nothing detaches what the restoration targeted.
             showEditor: () => {
               custody.claim(slot.binding.session, id)
               applyLayout()
+              focusPane(id)
             },
           }
         : {}),
@@ -583,8 +654,8 @@ export function createPaneHost(deps: {
       // IT TARGETS `id`, NOT A NEIGHBOUR, and that is the difference from `close`. The pane is still
       // there — same leaf, same place, same size — so the thing the user was pointing at has not moved;
       // it is showing something else. `focusPane` takes the first enabled control in the host, which
-      // for both pane classes is the binding selector itself (`paneSelect` anchors it to the `<h2>`,
-      // ahead of every button), so focus lands back on the control the pick was made with.
+      // for both pane classes is the title-selector itself (first in the view's header, ahead of
+      // every other button), so focus lands back on the control the pick was made with.
       rebind: (choice: Binding<Leg>) => {
         if (choice.leg === slot.binding.leg) {
           /**
@@ -671,20 +742,31 @@ export function createPaneHost(deps: {
           // before the mount — `setEditor`'s own `#refreshClaim` settles the claim control, and nothing
           // else on screen depends on the editor's presence, so no second draw is owed.
           if (moved !== null) mountScratchEditor(id, moved, choice.session)
+          // SAID ONLY WHEN THE PAIR CHANGED — picking the pair already in force switches nothing.
+          if (choice.session !== leaving) {
+            layoutChanged({ kind: 'switched', leaf: id, shows: { kind: choice.leg, session: choice.session } })
+          }
           return
         }
         pendingBinding.set(id, choice.session)
         setTree(setLeafKind(getTree(), id, choice.leg))
         applyLayout()
         focusPane(id)
+        layoutChanged({ kind: 'switched', leaf: id, shows: { kind: choice.leg, session: choice.session } })
       },
       splitRow: (choice: PaneChoice) => split('row', choice),
       splitColumn: (choice: PaneChoice) => split('column', choice),
       close: () => {
         const grew = neighbourOf(getTree(), id)
+        const showed: PaneChoice = { kind: slot.binding.leg, session: slot.binding.session }
         setTree(closeLeaf(getTree(), id))
         applyLayout()
         focusPane(grew)
+        layoutChanged({ kind: 'closed', leaf: id, showed })
+      },
+      panel: (name: string, open: boolean) => {
+        setPanel(id, name, open)
+        persist()
       },
     }
   }
@@ -700,8 +782,9 @@ export function createPaneHost(deps: {
    * deliberately, per this module's own rule above.)
    *
    * THE ACCESSIBILITY LIST'S ITEM 1, AGGRAVATED PAST EVERYTHING ON IT AND THEREFORE FIXED HERE RATHER
-   * THAN FILED. That item's measured instance is `tm-pane.ts`'s reattach, which strands focus on
-   * `<body>` after a click; `[continue]` shares the idiom but survives its own click in the common case
+   * THAN FILED. That item's measured instance was `tm-pane.ts`'s reattach, which stranded focus on
+   * `<body>` after a click until Plan 7 part 2 handed it to the rules toggle; `[continue]` shares the idiom
+   * (`step-controls.ts` now hands its focus on too) but survives its own click in the common case
    * because `controls.ts` keeps the button when a run hits `budget` again. A close control removes the
    * clicked element UNCONDITIONALLY, every time, so leaving this would add the list's worst instance in
    * the same slice that writes the list.
@@ -709,15 +792,19 @@ export function createPaneHost(deps: {
    * IT TARGETS A NAMED LEAF, NOT THE FIRST FOCUSABLE THING ON THE PAGE — for a close, the space the
    * departed pane occupied is now the neighbour's, so that is where the user is looking.
    *
-   * `:not([disabled])` IS LOAD-BEARING, NOT DEFENSIVE STYLE — found by this task's own Step 8 dry run.
-   * A `querySelector('button, ...')` with no exclusion matches the transport strip's `↺` FIRST, in DOM
-   * order, ahead of the layout controls this close just repainted — and `↺`/`◀`/`▶`/`⏵` are disabled
+   * `:not([disabled])` NO LONGER CHANGES THE OUTCOME ANYWHERE, AND IT STAYS — whole-branch review, M4.
+   * This paragraph argued that `↺` is the first button in the host, which it was when the argument was
+   * written. `viewHeader`'s `frame()` appends `heading, steps, actions`, so the TITLE button — never
+   * disabled, and present on every λ and TM view — precedes `↺` in DOM order now, and the source view's
+   * first button is its `✕`. So the exclusions below are belt-and-braces rather than load-bearing today.
+   * They stay because what they guard against is a property of the step controls, not of the header's
+   * running order: `↺`/`◀`/`▶`/`⏵` are disabled
    * (`controls.ts`'s `canRestart`/`canBack`/`canForward`/`canPlay`) whenever the leg they belong to has
    * no history yet, which is exactly the state a pane can be in the moment this fires. `.focus()` on a
    * disabled control is a silent no-op per the HTML spec, not a thrown error, so without this the
    * symptom is indistinguishable from the bug Step 8 exists to reproduce: `document.activeElement`
    * stays `<body>` even though the call ran. `[hidden]` gets the same treatment for the same reason —
-   * the continue button (`pane-chrome.ts`'s `extend`) is hidden rather than disabled when there is nothing
+   * the continue button (`step-controls.ts`'s `extend`) is hidden rather than disabled when there is nothing
    * to continue, and a hidden element cannot take focus either.
    *
    * For what this doc used to claim and why it changed, see the history note under `focusPane`.
@@ -758,12 +845,12 @@ export function createPaneHost(deps: {
    * ask it. The host being kept by `hostFor` is no help either — it is kept so that a leaf which RETURNS
    * comes back intact, and a `LambdaPane` built over a returning host rebuilds its children from scratch
    * (`replaceChildren` in the constructor), so the editor left inside the old one is unreachable
-   * whichever way the id goes. See `heldEditors` for what this repaired and why the survivor's "bring
-   * the term editor to this pane" control was previously offered on a promise it could not keep.
+   * whichever way the id goes. See `heldEditors` for what this repaired and why the survivor's "move the
+   * editor here" control was previously offered on a promise it could not keep.
    *
    * A NEW LEAF'S SESSION COMES FROM `pendingBinding`, NOT ALWAYS `SOURCE_SESSION` — see that map's own
    * doc. Consulted and cleared in the same pass. The clearing is belt-and-braces, and what makes a stale
-   * entry unreachable is timing rather than uniqueness: `reset layout` re-mints `defaultLayout()`'s three
+   * entry unreachable is timing rather than uniqueness: `reset preset` re-mints `defaultLayout()`'s three
    * literal ids, so an id genuinely can arrive here having been used before (`heldEditors` has the
    * correction in full), and all three writers (`splitRow`, `splitColumn`, and `rebind`'s cross-leg arm)
    * write the entry and call `applyLayout` in the next statement, so every entry is consumed by the pass
@@ -817,14 +904,14 @@ export function createPaneHost(deps: {
       if (l.pane === 'source') continue // the source pane is chrome inside its host, not a PaneView
       // A LEAF ID ARRIVING FRESH DROPS ANY EDITOR CLAIM RECORDED AGAINST IT — Minor finding, re-review
       // of the whole-branch review's own custody fix, and the behaviour half of the correction
-      // `heldEditors`' doc carries above. `reset layout` re-mints `defaultLayout()`'s three LITERAL ids,
+      // `heldEditors`' doc carries above. `reset preset` re-mints `defaultLayout()`'s three LITERAL ids,
       // so a closed `lambda-0` genuinely does come back, and `editorOwner` was still naming it: the
       // moment the user pointed the NEW `lambda-0` at the scratch, `editorHomeFor` resolved it as the
       // editor's home and the next layout gesture delivered the held editor onto a pane that never asked
-      // for it — while the "bring the term editor to this pane" control withdrew itself as it arrived.
+      // for it — while the "move the editor here" control withdrew itself as it arrived.
       // That is the silent relocation design §4.2 and §4.3 both refuse, performed by nobody.
       //
-      // **`reset layout` IS NO LONGER THE ONLY WAY AN ID REACHES THIS LINE HOLDING A CLAIM, AND READING
+      // **`reset preset` IS NO LONGER THE ONLY WAY AN ID REACHES THIS LINE HOLDING A CLAIM, AND READING
       // IT THAT NARROWLY WOULD OPEN A CRASH PATH.** A leg change drops the leaf's entry in pass 1 and
       // rebuilds it here under the SAME id, so a claim can name a leaf whose next pane is a `TmPane`.
       // This line is what keeps that unrepresentable downstream: it runs for every leaf without a pane,
@@ -874,7 +961,7 @@ export function createPaneHost(deps: {
         // **A NEW λ PANE IS SEEDED FROM ITS SESSION FOR THE IDENTICAL REASON THE TM BRANCH BELOW IS**,
         // and this line is the λ half of a repair that shipped with only its TM half. `scratch-compiled`
         // is the reply that mounts a scratch editor and it fires once per build, so a pane created after
-        // that reply — a split onto an existing buffer, a cross-leg pick back to λ, `reset layout`, or a
+        // that reply — a split onto an existing buffer, a cross-leg pick back to λ, `reset preset`, or a
         // restored layout whose buffer the warming loop above `applyLayout()` has already warmed — never
         // gets one from that reply. ONLY THE LAST OF THOSE FOUR IS A BUFFER WITH NO EDITOR ANYWHERE: the
         // other three name a buffer whose editor is already mounted on a sibling pane or waiting in
@@ -889,7 +976,8 @@ export function createPaneHost(deps: {
         panes.add({ id: l.id, kind: 'lambda', slot, pane, host })
       } else {
         const slot = new PaneSlot('tm', session)
-        const pane = new TmPane(host, paneEvents(l.id, slot))
+        const rules = panelOpen(l.id, 'rules')
+        const pane = new TmPane(host, paneEvents(l.id, slot), rules === undefined ? {} : { rules })
         // **A NEW TM PANE IS SEEDED FROM ITS SESSION, BECAUSE THE REPLY THAT WOULD HAVE TOLD IT HAS
         // ALREADY BEEN AND GONE.** `TmPane.setProgram` was called from `replies.ts` and from nowhere
         // else, so a pane created after its session's last `compiled` reply rendered no tapes, no status
@@ -897,10 +985,10 @@ export function createPaneHost(deps: {
         // just asked for. Pre-existing rather than this slice's doing, and repaired here rather than at
         // the gesture because every route to a new pane comes through this loop — a split, a cross-leg
         // pick (which drops the entry in pass 1 and arrives back here under the same leaf id), and
-        // `reset layout`. Seeding at the picker instead would leave the others blank for no reason a
+        // `reset preset`. Seeding at the picker instead would leave the others blank for no reason a
         // reader could infer.
         //
-        // **`reset layout` IS A ROUTE ONLY WHERE THE TREE ACTUALLY LOST A TM PANE, WHICH IS NARROWER THAN
+        // **`reset preset` IS A ROUTE ONLY WHERE THE TREE ACTUALLY LOST A TM PANE, WHICH IS NARROWER THAN
         // "it rebuilds the panes".** Pass 1 drops an entry only when `live.get(p.id) !== p.kind`, so a
         // `tm-0` that is still a live TM pane survives the reset untouched and never reaches this line.
         // Close that pane, or point its leaf at the other leg, and the reset re-mints `tm-0` — a leaf
@@ -970,7 +1058,7 @@ export function createPaneHost(deps: {
         // ONE FULL RECONCILE PER GESTURE, WHICH IS WHERE THE STORAGE WRITE LIVES NOW.
         commit: () => applyLayout(),
       })
-      writeLayoutStorage(serializeLayout(getTree()))
+      persist()
       draw()
     }
   }
@@ -1035,6 +1123,26 @@ export function createPaneHost(deps: {
           p.slot.rebind(session)
         },
       }))
+    },
+    moveBack(leaves: readonly LeafId[], from: SessionId, to: SessionId): LeafId[] {
+      const moved: LeafId[] = []
+      for (const id of leaves) {
+        const p = panes.get(id)
+        if (p === undefined || p.slot.binding.session !== from) continue
+        if (p.kind === 'tm') seedTmPane(p.pane as unknown as TmPane, to)
+        p.slot.rebind(to)
+        moved.push(id)
+      }
+      return moved
+    },
+    addView(choice: PaneChoice, beside: LeafId): LeafId {
+      const created = choice.kind === 'source' ? SOURCE_LEAF : nextLeafId()
+      if (choice.kind !== 'source') pendingBinding.set(created, choice.session)
+      setTree(insertBeside(getTree(), beside, 'row', created, choice.kind === 'source' ? 'source' : choice.kind))
+      applyLayout()
+      focusPane(created)
+      layoutChanged({ kind: 'added', leaf: created, shows: choice })
+      return created
     },
   }
 }

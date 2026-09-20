@@ -19,6 +19,8 @@ export type LegView = {
    * controls that send one are withdrawn rather than left to fail in silence.
    */
   awaitingRun: boolean
+  /** Whether this leg's play button is on — `LegState.playing`. */
+  playing: boolean
 }
 
 export type ControlState = {
@@ -26,6 +28,8 @@ export type ControlState = {
   canForward: boolean
   canPlay: boolean
   canRestart: boolean
+  /** Whether playback is running, so the play button shows ⏸ and is named "pause" (spec §8, umbrella rule 3). */
+  playing: boolean
   /**
    * The continue button's label, or `null` for NO BUTTON AT ALL. Whether asking the worker for more
    * frames would achieve anything is exactly `continueLabel !== null` — there is no separate
@@ -69,7 +73,7 @@ function doneText(done: RecordEnd): string {
  * `awaitingRun` IS A PARAMETER HERE RATHER THAN A CHECK INSIDE `controlState`, AND NOT BECAUSE THE
  * OTHER CALLER WOULD OTHERWISE MISBEHAVE — checked, it could not. This function's second caller is
  * the frontier `▶` click handler in `transport.ts`, and that handler cannot reach this gate's
- * `awaitingRun` half: `controlStrip` renders the forward button `disabled` whenever `canForward` is
+ * `awaitingRun` half: `stepControls` renders the forward button `disabled` whenever `canForward` is
  * false, a disabled button receives no click from a user gesture, and while `awaitingRun` holds
  * `canForward` reduces to `head < length - 1` — which is exactly the case where `hist.forward()`
  * succeeds and short-circuits before this gate is consulted. The repaint that sets the flag is
@@ -93,6 +97,7 @@ export function controlState(v: LegView): ControlState {
       canForward: false,
       canPlay: false,
       canRestart: false,
+      playing: false,
       continueLabel: null,
       stepText: v.reason,
     }
@@ -126,6 +131,7 @@ export function controlState(v: LegView): ControlState {
     canForward: v.head < v.length - 1 || canRecordFurther(v.done, v.awaitingRun),
     canPlay: v.length > 1,
     canRestart: v.length > 0,
+    playing: v.playing,
     continueLabel,
     stepText,
   }

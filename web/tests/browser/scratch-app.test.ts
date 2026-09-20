@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
@@ -29,29 +30,49 @@ import { SHELL, until } from './harness'
 let view: EditorView
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
+/**
+ * `#results` READS THE FOCUSED VIEW'S SESSION (Plan 7 part 2 spec §9), so a read of the PROGRAM'S result
+ * after a copy's view took the focus puts the focus on the program first.
+ */
+const focusProgram = () => document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')?.focus()
 const term = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
 const step = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''
 const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
-const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')
-const selector = () => document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')
+const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')
+/** The title-selector of the λ view — the pair in force is its `data-binding`. */
+const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
+const selector = () => titleOf('lambda-0')
 /**
- * The λ `<optgroup>`'s own options — WHICH SESSIONS OFFER A λ LEG, which is the question every
- * assertion in this file was really asking of the selector before it listed both legs.
+ * The title menu's λ items, as `{ key, text }` — WHICH SESSIONS OFFER A λ LEG, which is the question every
+ * assertion in this file was really asking of the selector before it listed both legs. Opens and closes
+ * the menu to read it.
  *
- * `select.options` FLATTENS THE GROUPS AWAY and would now answer with the TM group's entries mixed in,
- * so a fork that added nothing would still look right the moment the source session's TM leg was
- * counted. Reading the group by its own label is what keeps the assertion about λ.
+ * FILTERED BY KEY, because the menu lists TM pairs too, so a fork that added nothing would still look right
+ * the moment the source session's TM leg was counted. Reading the λ keys is what keeps the assertion
+ * about λ.
  */
-const lambdaOptionElements = () => [
-  ...document.querySelectorAll<HTMLOptionElement>('[data-leaf="lambda-0"] .pane-binding optgroup[label="λ"] option'),
-]
-const lambdaOptions = () => lambdaOptionElements().map((o) => o.textContent)
-/**
- * The `<option>` value the pane selector encodes a `(leg, session)` pair as — spelled out here rather
- * than imported from `pane-chrome.ts`, so this pins the DOM contract instead of agreeing with whatever
- * the control currently does. `\x00` as an escape is `scripts/check-text-bytes.sh`'s rule.
- */
-const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
+const lambdaOptionElements = (): { key: string; text: string }[] => {
+  const title = selector()
+  if (title === null) return []
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const items = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+    .map((b) => ({ key: b.dataset.binding ?? '', text: b.textContent ?? '' }))
+    .filter((o) => o.key.startsWith('lambda:'))
+  menu?.hidePopover()
+  return items
+}
+const lambdaOptions = () => lambdaOptionElements().map((o) => o.text)
+/** Pick `key` (`bindingKey(leg, session)`) through the λ view's title menu, as a user does. */
+function pickBinding(leaf: string, key: string): void {
+  const title = titleOf(leaf)
+  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
+  if (item == null) throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)}`)
+  item.click()
+}
 const statusLine = () => document.querySelector('#link-status')?.textContent ?? ''
 
 /** `app.test.ts`'s `settled`, and the same invariant argument applies — see its doc there. */
@@ -212,8 +233,8 @@ describe('the fork control, end to end', () => {
     // session offers λ until a fork happens — is what the λ group's own contents say, and that is what
     // is asserted instead. `main.ts`'s note on registering the source session carries the same
     // correction.
-    expect(heading()).toBe('lambda')
-    expect(lambdaOptions()).toEqual(['source'])
+    expect(heading()).toBe('λ · program')
+    expect(lambdaOptions()).toEqual(['λ · program'])
     expect(forkButton()).not.toBeNull()
 
     // Two steps in, so the seed is a term the SOURCE SESSION IS NOT AT STEP 0 OF. §4.3 seeds with
@@ -224,7 +245,7 @@ describe('the fork control, end to end', () => {
     // `↺` FIRST, BECAUSE A SETTLED PANE IS AT THE FRONTIER AND NOT AT THE START. Recording pushes the
     // play head along with it, so `let x = 40; x + 2` finishes at `step 7 of 7` and `▶` there means
     // "record one more" — which for an `ended` leg is nothing at all. `restart` seeks to the oldest
-    // retained frame, which is step 0 exactly until eviction has happened (`controlStrip`'s own note).
+    // retained frame, which is step 0 exactly until eviction has happened (`stepControls`' own note).
     clickLambda('↺')
     clickLambda('▶')
     clickLambda('▶')
@@ -234,13 +255,13 @@ describe('the fork control, end to end', () => {
 
     // STAGE 2 — the fork. Everything up to the first reply is synchronous, so this is asserted
     // without a wait: the pane is on the scratchpad, says so, and has a selector to come back with.
-    clickLambda('✎ fork')
+    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
 
-    expect(heading()).toContain('[detached]')
+    expect(heading()).toContain('copy · not linked')
     // §4.5's OTHER SURFACE, and the pairing is the point: the badge is the glanceable one and the
     // status line is the authoritative narration. `link-wiring.ts`'s `detachedPanes` reads the same
     // `SessionEntry.detached` the badge does, so the two cannot disagree.
-    expect(statusLine()).toContain('λ pane detached')
+    expect(statusLine()).toContain('λ view shows a copy')
     // The control is gone, because a pane already on the scratchpad has nothing to fork — and the
     // selector is the affordance for the same intent that still works: it is how a user comes back.
     // It did not ARRIVE here, which this comment used to say. Since the control started listing
@@ -263,14 +284,14 @@ describe('the fork control, end to end', () => {
     // session, not two and not none.
     const buffer = lambdaOptionElements()[1]
     expect(lambdaOptions()).toHaveLength(2)
-    expect(lambdaOptions()[0]).toBe('source')
-    expect(lambdaOptions()[1]).toMatch(/^λ scratch \d+$/)
+    expect(lambdaOptions()[0]).toBe('λ · program')
+    expect(lambdaOptions()[1]).toMatch(/^λ · copy \d+$/)
     // AND THE PANE IS ON IT — against the option element the app itself built, not against a name this
     // file guessed. The second line is what stops that from being satisfied by the pane having stayed
-    // where it was: `optionValue('lambda', 'source')` is the one λ pair whose id this file can still
+    // where it was: `bindingKey('lambda', 'source')` is the one λ pair whose id this file can still
     // write down, and it is the value the selector held one line before the fork.
-    expect(select.value).toBe(buffer?.value)
-    expect(select.value).not.toBe(optionValue('lambda', 'source'))
+    expect(select.dataset.binding).toBe(buffer?.key)
+    expect(select.dataset.binding).not.toBe(bindingKey('lambda', 'source'))
     // BEFORE ANY REPLY: the leg exists and has nothing in it yet, and the step readout says which of
     // those two it is. `controlState` renders `reason` while `!available`, which is what
     // `ScratchBuffers` seeds the leg's status with rather than leaving it `''`.
@@ -310,11 +331,12 @@ describe('the fork control, end to end', () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 5' } })
 
     // SYNCHRONOUSLY, because that is when the retire used to happen — before the debounce was armed.
-    expect(heading()).toContain('[detached]')
-    expect(statusLine()).toContain('λ pane detached')
+    expect(heading()).toContain('copy · not linked')
+    expect(statusLine()).toContain('λ view shows a copy')
     expect(lambdaOptions()).toHaveLength(2)
-    expect(select.value).toBe(buffer?.value)
+    expect(select.dataset.binding).toBe(buffer?.key)
 
+    focusProgram()
     await until(
       () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText().includes('45'),
       'the recompile',
@@ -323,8 +345,8 @@ describe('the fork control, end to end', () => {
     // keystroke reached `schedule` rather than doing nothing. The pane is still detached, still on the
     // same buffer, and still at the buffer's step 0: not the source's newly recorded leg, and not a
     // re-seed of the buffer from it.
-    expect(heading()).toContain('[detached]')
-    expect(select.value).toBe(buffer?.value)
+    expect(heading()).toContain('copy · not linked')
+    expect(select.dataset.binding).toBe(buffer?.key)
     expect(step()).toBe('step 0 of 5')
     expect(term()).toBe(bufferTerm)
     // The fork control stays away for the reason it went away: this pane is still on a buffer.
@@ -333,11 +355,10 @@ describe('the fork control, end to end', () => {
     // STAGE 5 — THE WAY HOME IS THE SELECTOR, which is the affordance STAGE 4's retire used to
     // pre-empt, and the assertions below are the ones that stage used to make about the source leg.
     // `scratch-rebind-editor.test.ts` is where the editor's half of this rebind is pinned.
-    select.value = optionValue('lambda', 'source')
-    select.dispatchEvent(new Event('change'))
+    pickBinding('lambda-0', bindingKey('lambda', 'source'))
 
-    expect(heading()).toBe('lambda')
-    expect(statusLine()).not.toContain('detached')
+    expect(heading()).toBe('λ · program')
+    expect(statusLine()).not.toContain('shows a copy')
     // The pane is showing the SOURCE session's newly recorded leg — at its frontier, with no trailing
     // `…`, which is a leg that ran to its end rather than the buffer's leftovers. The fork control is
     // back for the same reason it went away: this pane is attached again.
@@ -349,7 +370,7 @@ describe('the fork control, end to end', () => {
     // it ends nothing, so the λ group still offers the buffer to go back to. Under the old behaviour
     // this list was `['source']` by now and there was nothing to go back to.
     expect(lambdaOptions()).toHaveLength(2)
-    expect(lambdaOptionElements()[1]?.value).toBe(buffer?.value)
+    expect(lambdaOptionElements()[1]?.key).toBe(buffer?.key)
   })
 })
 

@@ -147,7 +147,7 @@ function fakeClient(): SessionClient {
 function sourceEntry(text = 'from source'): SessionEntry {
   const hist = new History<LambdaState>(1_000_000)
   hist.push(lambdaFrame(text), 1)
-  const lambda: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, timer: null }
+  const lambda: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, playing: false }
   // NO MACHINE — nothing here sends a `compiled` reply, which is the only thing that retains one.
   return {
     id: SOURCE,
@@ -250,8 +250,8 @@ describe('ScratchBuffers.fork', () => {
     expect(b.binding.session).toBe(second)
     expect(reg.options('lambda')).toEqual([
       { id: SOURCE, label: 'source' },
-      { id: first, label: 'λ scratch 1' },
-      { id: second, label: 'λ scratch 2' },
+      { id: first, label: 'copy 1' },
+      { id: second, label: 'copy 2' },
     ])
   })
 
@@ -302,8 +302,8 @@ describe('ScratchBuffers.fork', () => {
     const second = buffers.fork(new PaneSlot('lambda', SOURCE), 'y', 0, 'lambda')
 
     expect(buffers.list()).toEqual([
-      { id: first, label: 'λ scratch 1', warm: true, leg: 'lambda' },
-      { id: second, label: 'λ scratch 2', warm: true, leg: 'lambda' },
+      { id: first, label: 'copy 1', warm: true, leg: 'lambda' },
+      { id: second, label: 'copy 2', warm: true, leg: 'lambda' },
     ])
   })
 
@@ -343,7 +343,7 @@ describe('ScratchBuffers.fork', () => {
 
     const entry = reg.entryOf(id)
     expect(entry.detached).toBe(true)
-    expect(entry.label).toBe('λ scratch 1')
+    expect(entry.label).toBe('copy 1')
     expect(entry.legs.tm).toBeUndefined()
     expect(entry.legs.lambda?.status).toEqual({ available: false, reason: 'building…' })
     // A λ-only session must not be offered to a TM slot: `legOf` throws for a leg a session lacks, and
@@ -423,9 +423,10 @@ describe('ScratchBuffers.fork', () => {
     const refused = new PaneSlot('lambda', SOURCE)
 
     expect(() => buffers.fork(refused, 'one too many', 0, 'lambda')).toThrow(BufferCapReached)
-    expect(() => buffers.fork(refused, 'one too many', 0, 'lambda')).toThrow(/retire/)
+    expect(() => buffers.fork(refused, 'one too many', 0, 'lambda')).toThrow(/pause or delete one/)
+    expect(() => buffers.fork(refused, 'one too many', 0, 'lambda')).toThrow(/^cannot make a copy — /)
     expect(() => buffers.fork(refused, 'one too many', 0, 'lambda')).toThrow(new RegExp(`${MAX_WARM_BUFFERS}`))
-    expect(() => buffers.fork(refused, 'one too many', 0, 'lambda')).not.toThrow(/scratch 1/)
+    expect(() => buffers.fork(refused, 'one too many', 0, 'lambda')).not.toThrow(/copy 1/)
 
     expect(buffers.list()).toHaveLength(MAX_WARM_BUFFERS)
     expect(buffers.list()[0]?.id).toBe(oldest)
@@ -506,7 +507,7 @@ describe('ScratchBuffers.retire', () => {
       hist: new History(1_000_000),
       status: { available: true, reason: '' },
       done: null,
-      timer: null,
+      playing: false,
     }
     reg.add(source)
     const lambda = new PaneSlot('lambda', SOURCE)
@@ -591,14 +592,13 @@ describe('ScratchBuffers.retire', () => {
   })
 
   /**
-   * A RETIRED SESSION'S PLAY TIMER MUST NOT SURVIVE IT. `SessionRegistry.remove` deletes a map key and
-   * cannot see a running `setInterval`; `add`'s own doc names the leak ("a stranded `setInterval` on a
+   * A RETIRED SESSION'S PLAYBACK MUST NOT SURVIVE IT. `SessionRegistry.remove` deletes a map key and
+   * cannot see a leg the player is still stepping; `add`'s own doc names the leak (the player "stepping a
    * `LegState` nothing can reach any more"), and `resetLegs` inside `retire` is what pays it off.
    *
-   * A REAL TIMER, NOT A SPY. The failure this guards is an interval that goes on firing, and only a
-   * real one can be observed as cleared — `leg.timer === null` is `resetLegs`'s own record of having
-   * called `clearInterval`, and holding the `LegState` after the entry is gone is exactly what a leaked
-   * play head does.
+   * THE FLAG IS THE TRUTH THE PLAYER FOLLOWS (`player.ts`'s own doc): it lets go of a leg whose flag
+   * something else cleared, so `leg.playing === false` is `resetLegs`'s record of having stopped it, and
+   * holding the `LegState` after the entry is gone is exactly what a leaked play head does.
    */
   it('stops the retired buffer’s playback rather than stranding it', () => {
     const { reg, buffers } = harness()
@@ -609,11 +609,11 @@ describe('ScratchBuffers.retire', () => {
     const leg = reg.legOf({ session: id, leg: 'lambda' })
     leg.hist.push(lambdaFrame('λx. x'), 1)
     leg.done = 'ended'
-    leg.timer = setInterval(() => undefined, 1_000)
+    leg.playing = true
 
     buffers.retire(id, SOURCE, [slot])
 
-    expect(leg.timer).toBe(null)
+    expect(leg.playing).toBe(false)
     expect(leg.done).toBe(null)
     expect(leg.hist.length).toBe(0)
   })
@@ -670,7 +670,40 @@ describe('ScratchBuffers.retire', () => {
     expect(ports[1]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'second', step: 0 }])
     expect(ports[1]?.terminated).toBe(0)
     expect(slot.binding.session).toBe(second)
-    expect(buffers.list()).toEqual([{ id: second, label: 'λ scratch 2', warm: true, leg: 'lambda' }])
+    expect(buffers.list()).toEqual([{ id: second, label: 'copy 2', warm: true, leg: 'lambda' }])
+  })
+})
+
+describe('recordOf and reinstate — undoing a delete', () => {
+  it('puts a deleted copy back cold, under its own id and label', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const slot = new PaneSlot('lambda', SOURCE)
+    const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
+    buffers.setCollapsed(id, true)
+    const record = buffers.recordOf(id)
+    if (record === null) throw new Error('a live copy has a record')
+    buffers.retire(id, SOURCE, [slot])
+    expect(buffers.list()).toEqual([])
+    buffers.reinstate(record)
+    expect(buffers.list()).toEqual([{ id, label: 'copy 1', warm: false, leg: 'lambda' }])
+    expect(buffers.nameOf(id)).toBe('λ copy 1')
+    // **THE TEXT AND THE COLLAPSE FLAG ARE WHAT MAKE IT THE SAME COPY**, and `list()` carries neither —
+    // it answers id, label, warmth and leg. A `recordOf` that dropped the text, or a `reinstate` that
+    // took a fresh one, would leave every assertion above standing and the copy restored empty.
+    expect(buffers.snapshot({}).buffers).toEqual([
+      { id, label: 'copy 1', text: 'λx. x', collapsed: true, leg: 'lambda' },
+    ])
+  })
+
+  it('throws for an id it still holds', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), 'λx. x', 0, 'lambda')
+    const record = buffers.recordOf(id)
+    if (record === null) throw new Error('a live copy has a record')
+    expect(() => buffers.reinstate(record)).toThrow(/already held/)
+    expect(buffers.recordOf('scratch-99')).toBeNull()
   })
 })
 
@@ -680,7 +713,7 @@ describe('ScratchBuffers.retire', () => {
  * is the escape**. `noSessionReply` called `retire` on the phantom path — terminating the worker,
  * dropping the buffer from both containers, and rebinding its panes home — and the three cases below
  * were written around that. The DISCRIMINATOR is untouched and is what they assert now: which SURFACE
- * the diagnostics belong on, `#link-status` or the buffer's own editor gutter.
+ * the diagnostics belong on, a notice (`notice.ts`) or the buffer's own editor gutter.
  *
  * WHAT ENDS A BUFFER IS NOW `retire` AND NOTHING ELSE, and `describe('ScratchBuffers.retire')` above is
  * where that is asserted. Its one caller in `src/` is the retire handler behind design §4.2's header
@@ -1137,6 +1170,23 @@ describe('cold and warm buffers', () => {
  * the restore and nothing else.
  */
 describe('snapshot and restore', () => {
+  // A COPY STORED BEFORE PLAN 7 PART 2 IS SAID THE NEW WAY (spec §12) — and only a label of exactly that
+  // shape is touched.
+  it('restores stored λ and TM scratch labels as copies, and leaves any other label alone', () => {
+    const { buffers } = harness()
+    buffers.restore({
+      minted: 4,
+      buffers: [
+        { id: 'scratch-3', label: 'λ scratch 3', text: 'λx. x', collapsed: false, leg: 'lambda' },
+        { id: 'scratch-4', label: 'TM scratch 4', text: '', collapsed: false, leg: 'tm' },
+        { id: 'scratch-5', label: 'other name', text: '', collapsed: false, leg: 'lambda' },
+      ],
+      bindings: {},
+    })
+    expect(buffers.list().map((b) => b.label)).toEqual(['copy 3', 'copy 4', 'other name'])
+    expect(buffers.nameOf('scratch-4')).toBe('TM copy 4')
+  })
+
   it('round-trips buffers through a snapshot', () => {
     const h = harness()
     const a = h.buffers.fork(new PaneSlot('lambda', SOURCE), 'a', 0, 'lambda')
@@ -1146,7 +1196,7 @@ describe('snapshot and restore', () => {
     const fresh = harness()
     fresh.buffers.restore(snap)
 
-    expect(fresh.buffers.list()).toEqual([{ id: a, label: 'λ scratch 1', warm: false, leg: 'lambda' }])
+    expect(fresh.buffers.list()).toEqual([{ id: a, label: 'copy 1', warm: false, leg: 'lambda' }])
     // THE BINDINGS ARE CARRIED, NOT COMPUTED — `snapshot`'s one parameter exists because this class
     // cannot see a pane, so the only claim it can make about `bindings` is that what went in comes out.
     expect(snap.bindings).toEqual({ 'lambda-0': a })
@@ -1221,21 +1271,19 @@ describe('two legs, one collection', () => {
    * ONE COUNTER ACROSS BOTH LEGS, WHICH IS WHAT KEEPS `mintedIndex`'s `scratch-N` FORM AND THE
    * NEVER-REISSUED GUARANTEE. Two counters would mint `scratch-1` twice.
    */
-  it('mints from one id space and puts the leg in the label', () => {
+  it('mints from one id space and says the leg in the name, not the label', () => {
     const { buffers, slotOf } = harness()
     expect(buffers.fork(slotOf(), 'a', 0, 'lambda')).toBe('scratch-1')
     expect(buffers.fork(slotOf(), 'b', 0, 'tm')).toBe('scratch-2')
     const rows = buffers.list()
     expect(rows.map((r) => r.leg)).toEqual(['lambda', 'tm'])
-    // **THE EXACT STRING, NOT `toContain` — 5d-iv T5 REVIEW FIX (Important 3).** `toContain('1')` /
-    // `toContain('2')` is satisfied by ANY label that happens to contain that digit, including a `TM`
-    // buffer minted with the λ label by mistake (`'λ scratch 2'` contains `'2'` exactly as `'TM scratch
-    // 2'` does) — `#mint`'s leg ternary can be replaced by the unconditional λ template and this
-    // assertion would not notice. The exact string is the only assertion that reads the PREFIX, which is
-    // the one thing the ternary decides.
-    expect(rows[0]?.label).toBe('λ scratch 1')
-    expect(rows[1]?.label).toBe('TM scratch 2')
-    expect(rows[0]?.label).not.toBe(rows[1]?.label)
+    // **THE EXACT STRING, NOT `toContain` — 5d-iv T5 REVIEW FIX (Important 3).** The label is `copy N`
+    // since Plan 7 part 2 (spec §12), so the leg is `nameOf`'s to say, and the exact name is the only
+    // assertion that reads the PREFIX, which is the one thing the leg decides.
+    expect(rows[0]?.label).toBe('copy 1')
+    expect(rows[1]?.label).toBe('copy 2')
+    expect(buffers.nameOf('scratch-1')).toBe('λ copy 1')
+    expect(buffers.nameOf('scratch-2')).toBe('TM copy 2')
   })
 
   it('mints a blank tm buffer with no pane bound to it', () => {
@@ -1306,6 +1354,6 @@ describe('two legs, one collection', () => {
     const fresh = harness()
     fresh.buffers.restore(snap)
 
-    expect(fresh.buffers.list()).toEqual([{ id, label: 'TM scratch 1', warm: false, leg: 'tm' }])
+    expect(fresh.buffers.list()).toEqual([{ id, label: 'copy 1', warm: false, leg: 'tm' }])
   })
 })

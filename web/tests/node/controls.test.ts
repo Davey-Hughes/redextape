@@ -12,6 +12,7 @@ const view = (over: Partial<LegView> = {}): LegView => ({
   evicted: false,
   done: null,
   awaitingRun: false,
+  playing: false,
   ...over,
 })
 
@@ -171,5 +172,13 @@ describe('canRecordFurther', () => {
     expect(canRecordFurther('ended', true)).toBe(false)
     expect(canRecordFurther('depth-refused', true)).toBe(false)
     expect(canRecordFurther(null, true)).toBe(false)
+  })
+})
+
+describe('playing', () => {
+  it('is what the leg says while the leg is available, and false when it is not', () => {
+    expect(controlState(view({ length: 3, playing: true })).playing).toBe(true)
+    expect(controlState(view({ length: 3, playing: false })).playing).toBe(false)
+    expect(controlState(view({ available: false, playing: true })).playing).toBe(false)
   })
 })

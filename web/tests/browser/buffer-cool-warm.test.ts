@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
@@ -33,9 +34,26 @@ import { SHELL, until } from './harness'
  * buffers — the default tree, and a fork that mints `scratch 1`.
  */
 
-/** `scratch-edit.test.ts`'s program, for its reason: it truncates at neither budget, so `✎ fork` is
+/** `scratch-edit.test.ts`'s program, for its reason: it truncates at neither budget, so `✎ edit a copy` is
  * offered at the frontier with no scrubbing needed. */
 const SAMPLE = 'let x = 40; x + 2'
+
+/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
+const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
+
+/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does. */
+function pickBinding(leaf: string, key: string): void {
+  const title = titleOf(leaf)
+  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
+  if (item == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
+    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
+  }
+  item.click()
+}
 
 let view: EditorView
 
@@ -47,17 +65,6 @@ const editorHost = () => document.querySelector<HTMLElement>('[data-leaf="lambda
 const everyEditorHost = () => [...document.querySelectorAll('.term-editor')]
 const rowNames = () =>
   [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-name')].map((e) => e.textContent)
-
-/** `\x00` as an escape rather than the byte — `scripts/check-text-bytes.sh`'s rule. */
-const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
-
-const clickLambda = (label: string) => {
-  const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')].find(
-    (x) => x.textContent === label,
-  )
-  if (b === undefined) throw new Error(`no \`${label}\` button in the λ pane`)
-  b.click()
-}
 
 /**
  * Open the header's buffer list, leaving it open if it already is — `buffer-restore.test.ts`'s helper
@@ -126,7 +133,7 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // against — captured rather than spelled, so this file asserts a round trip rather than a literal.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
     await until(idle, 'the sample program to compile')
-    clickLambda('✎ fork')
+    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
     await until(() => editorHost() !== null, 'the fork to mount its editor')
     await until(() => term() !== '', 'the forked buffer to produce its first frame')
     const forked = editorDoc()
@@ -137,17 +144,18 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // and still holds its text. Both halves are asserted because the defect this file exists for lives
     // between them — a buffer that survives while its editor does not.
     await openList()
-    clickRowControl('cool λ scratch 1')
-    expect(heading()).not.toContain('[detached]')
+    clickRowControl('pause λ copy 1')
+    expect(heading()).not.toContain('not linked')
+    expect(heading()).toContain('λ · program')
     expect(editorHost()).toBeNull()
-    expect(rowNames()).toEqual(['λ scratch 1 — orphan — asleep'])
+    expect(rowNames()).toEqual(['λ copy 1 · not shown · paused'])
 
     // STAGE 2 — WARM. The row loses its asleep marker synchronously (`handleTemperature` rebuilds the
     // rows around the caller's handler returning), and NOTHING MOUNTS, which is correct and is asserted
     // rather than assumed: no pane is bound to this buffer, so there is no pane for an editor to mount
     // onto. This is the state the fix must not change.
-    clickRowControl('warm λ scratch 1')
-    expect(rowNames()).toEqual(['λ scratch 1 — orphan'])
+    clickRowControl('resume λ copy 1 — restarts at step 0')
+    expect(rowNames()).toEqual(['λ copy 1 · not shown · running'])
     expect(everyEditorHost()).toHaveLength(0)
     closeList()
 
@@ -155,11 +163,8 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // after a warm. Before `pane-host.ts`'s `mountScratchEditor` this produced a pane rendering the
     // buffer's frames with no editor and no control able to summon one, and the wait below is what
     // timed out.
-    const select = document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')
-    if (select === null) throw new Error('no binding selector on the λ pane')
-    select.value = optionValue('lambda', 'scratch-1')
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-    expect(heading()).toContain('[detached]')
+    pickBinding('lambda-0', bindingKey('lambda', 'scratch-1'))
+    expect(heading()).toContain('copy · not linked')
 
     // THE MOUNT IS SYNCHRONOUS WITH THE `change` EVENT, so anything past a frame or two is the absence
     // rather than a slow machine — which is why this wait is worth naming. The bound itself is
@@ -196,6 +201,6 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // satisfy every assertion above and read two rows here. Reopened first, per `closeList`'s doc: the
     // rebind two stages up changed this row's pane count and no repaint reaches a list already open.
     await openList()
-    expect(rowNames()).toEqual(['λ scratch 1 — 1 pane'])
+    expect(rowNames()).toEqual(['λ copy 1 · 1 view · running'])
   })
 })

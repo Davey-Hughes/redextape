@@ -3,7 +3,6 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { createEditorCustody } from '../../src/editor-custody'
 import { History } from '../../src/history'
 import { LambdaPane } from '../../src/lambda-pane'
-import { linkStatus } from '../../src/link-status'
 import { createLinkWiring } from '../../src/link-wiring'
 import { PaneCollection } from '../../src/panes'
 import type { RunReply } from '../../src/protocol'
@@ -103,7 +102,7 @@ function realPool(): { pool: SessionPool; spawned: Spawned[] } {
 }
 
 function leg<T>(): LegState<T> {
-  return { hist: new History<T>(HISTORY_BYTES), status: { available: false, reason: '' }, done: null, timer: null }
+  return { hist: new History<T>(HISTORY_BYTES), status: { available: false, reason: '' }, done: null, playing: false }
 }
 
 /**
@@ -192,7 +191,7 @@ describe('detach is a fork', () => {
    * while the worker answers nothing.
    *
    * IT ALSO PINS THE ROUND-TRIP THE FORK CONTROL DEPENDS ON. `lambda/syntax.rs` promises printer and
-   * parser round-trip, and `detachButton` leans on that promise to decide a fork is possible — this
+   * parser round-trip, and `viewMenu` leans on that promise to decide a fork is possible — this
    * seeds the scratchpad with a term in exactly the printer's own output form (`λ`, application by
    * juxtaposition) and asserts it reduced rather than answering `no-session`.
    */
@@ -398,11 +397,13 @@ describe('the no-session report for a failed fork', () => {
         play: () => undefined,
         restart: () => undefined,
         extend: () => undefined,
+        speed: () => 8,
+        setSpeed: () => undefined,
         rebind: (binding) => slot.rebind(binding.session),
         detach: () => undefined,
       })
       slot.render(reg, pane, slot.resolve(reg))
-      expect(host.querySelector('.controls .detach')).not.toBeNull()
+      expect(host.querySelector('button.detach')).not.toBeNull()
 
       // THE PHANTOM BUILD. `detach` has already rebound the slot by the time this call returns —
       // the CRITICAL finding's own bug, reproduced here before it is fixed by what comes next.
@@ -432,7 +433,7 @@ describe('the no-session report for a failed fork', () => {
       // rebound the pane, `SessionEntry.detached` read `false` again, and `#refreshDetach` re-offered ✎
       // — 5d-i design §4.1a's promised remedy. The pane is still on the buffer that will never build, so
       // the gate hides it, and design §4.4's header list is what has to reach the buffer instead.
-      expect(host.querySelector('.controls .detach')).toBeNull()
+      expect(host.querySelector('button.detach')).toBeNull()
 
       // **AND THAT IS NO LONGER A DEAD END, WHICH IS THE REVISION THE COMMENT ABOVE ASKED FOR.** It
       // ended "Asserted rather than merely described, so the day the list lands this line has to be
@@ -446,18 +447,12 @@ describe('the no-session report for a failed fork', () => {
       expect(pad.retire(SCRATCH, SOURCE, [slot])).toBe(true)
       slot.render(reg, pane, slot.resolve(reg))
       expect(slot.binding.session).toBe(SOURCE)
-      expect(host.querySelector('.controls .detach')).not.toBeNull()
+      expect(host.querySelector('button.detach')).not.toBeNull()
 
-      // THE DIAGNOSTIC IS VISIBLE — composed exactly as `replies.ts`'s `onScratchReply` composes the
-      // `forkFailed` field it hands `link-wiring.ts`, `fork failed — ` prefix included (5d-ii-d review
-      // round 2, Finding 3: that prefix is this call's own text now, not something `linkStatus` adds —
-      // see `link-status.ts`'s `forkFailed` field doc). This is the half that did not change: the
-      // surface was chosen because no editor is ever mounted on this path, not because of the rebind
-      // that has now gone away.
-      const message = `fork failed — ${(failed ?? []).map((d) => d.message).join(' · ')}`
-      const line = linkStatus({ state: 'none', forkFailed: message })
-      expect(line).toContain('fork failed')
-      for (const d of failReply.diagnostics) expect(line).toContain(d.message)
+      // THE DIAGNOSTIC'S SURFACE IS A NOTICE NOW (Plan 7 part 2 spec §11), not a `#link-status` clause —
+      // so what is visible is asserted where the notice is raised: the `createReplies` test below
+      // reads what the production switch hands its `notify`.
+      expect(failed).not.toBeNull()
 
       // THE LIVE-EDIT CASE, FOR CONTRAST, ON THE SAME `ScratchBuffers` OBJECT. Design §4.4: "an edit
       // that does not parse leaves the frames region showing the last good run" — and the contrast is
@@ -561,9 +556,8 @@ describe('the no-session report for a failed fork', () => {
    * dependencies" — is the kind of arity this slice prefers not to restate: it was already one deletion
    * away from being wrong when it was written, and the claim does not need it.)
    *
-   * `links` IS THE REAL `createLinkWiring`, NOT A RECORDER, which is what makes the report assertion a
-   * statement about the app: `forkFailed` is read back through the same accessor `drawLink` composes
-   * `#link-status` from.
+   * `notify` IS A RECORDER, AND THAT IS ALL THE REPORT NEEDS: the switch hands the notice to it, and the
+   * notice line is `notice.ts`'s own concern (`tests/browser/notice.test.ts`).
    */
   it('leaves the buffer live on the phantom no-session, through `createReplies` rather than around it', {
     timeout: 120_000,
@@ -595,6 +589,8 @@ describe('the no-session report for a failed fork', () => {
         play: () => undefined,
         restart: () => undefined,
         extend: () => undefined,
+        speed: () => 8,
+        setSpeed: () => undefined,
         rebind: (binding) => slot.rebind(binding.session),
         detach: () => undefined,
         // PRESENT SO THE CLAIM CONTROL IS BUILT AT ALL — `LambdaPane`'s `#claim` is `null` on a pane
@@ -614,6 +610,7 @@ describe('the no-session report for a failed fork', () => {
 
       let drawn = 0
       const links = createLinkWiring({
+        announce: () => undefined,
         view: () => view,
         statusHost,
         sessions: reg,
@@ -622,13 +619,18 @@ describe('the no-session report for a failed fork', () => {
           drawn += 1
         },
       })
+      const notified: string[] = []
       const replies = createReplies({
+        setProgram: () => undefined,
         sessions: reg,
         scratchpad: pad,
         results,
         view: () => view,
         panes,
         links,
+        notify: (t: string) => {
+          notified.push(t)
+        },
         draw: () => {
           drawn += 1
         },
@@ -655,7 +657,7 @@ describe('the no-session report for a failed fork', () => {
       const failReply = seen.find((r) => r.kind === 'no-session')
       if (failReply === undefined || failReply.kind !== 'no-session') throw new Error('expected a no-session reply')
 
-      expect(links.forkFailed).toBeNull()
+      expect(notified).toEqual([])
       replies.onScratchReply(SCRATCH, failReply)
 
       // **THE ASSERTIONS THE DELETED RETIRE OWNS, INVERTED.** These three read `reg.has(SCRATCH)` false,
@@ -667,10 +669,11 @@ describe('the no-session report for a failed fork', () => {
       expect(pad.list().map((b) => b.id)).toEqual([SCRATCH])
       expect(slot.binding.session).toBe(SCRATCH)
       // AND THE REPORT STILL LANDS, so a green survival is not a green test over a switch that fell
-      // through somewhere else: `forkFailed` was `null` a line above the call and carries the worker's
-      // own diagnostics after it.
-      expect(links.forkFailed).not.toBeNull()
-      for (const d of failReply.diagnostics) expect(links.forkFailed ?? '').toContain(d.message)
+      // through somewhere else: nothing was notified a line above the call, and the notice carries the
+      // worker's own diagnostics after it.
+      expect(notified).toHaveLength(1)
+      expect(notified[0]).toContain('the copy did not build')
+      for (const d of failReply.diagnostics) expect(notified[0] ?? '').toContain(d.message)
       expect(drawn).toBeGreaterThan(0)
 
       // **DEFERRED-A11Y ITEM 11, OVER THE BUILD THAT REALLY FAILED.** Everything above pins what the
@@ -704,7 +707,7 @@ describe('the no-session report for a failed fork', () => {
       // session; both are needed because the gate reads both.
       pane.setDetached(true)
       pane.setEditorAvailable(custody.hasEditor(SCRATCH))
-      expect(host.querySelector('button[aria-label="bring the term editor to this pane"]')).toBeNull()
+      expect(host.querySelector('button.claim-editor')).toBeNull()
     } finally {
       view.destroy()
       pool.unbind(SOURCE)
@@ -781,7 +784,7 @@ describe('the fork control forks a truncated frame, through the app', () => {
     // truncated hid the fork control outright — `lambda-pane.ts`'s own module doc calls this shape
     // "most non-trivial terms".
     expect(document.querySelector('[data-leaf="lambda-0"] .truncated')).not.toBeNull()
-    const fork = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')
+    const fork = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')
     expect(fork).not.toBeNull()
 
     fork?.click()
@@ -797,7 +800,7 @@ describe('the fork control forks a truncated frame, through the app', () => {
 
     // AND THE SOURCE SESSION IS STILL THE ONE THE PANE LEFT — the scratch is a second session, not a
     // mutation of the first (§4.3, and this file's first `describe` proves the mechanism directly).
-    // `[detached]` is the DOM's own witness that a second session now exists at all.
-    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('[detached]')
+    // `copy · not linked` is the DOM's own witness that a second session now exists at all.
+    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
   })
 })

@@ -21,7 +21,7 @@ export type Row = { leg: string; label: string; value: string; note?: string }
 function runNote(run: RunStatus | null): string | null {
   switch (run) {
     case 'Running':
-      return 'recording stopped before the run did — the term below is not finished reducing'
+      return 'recording stopped before the run did — the term is not finished reducing'
     case 'Capped':
       return 'spent its step budget'
     case 'DepthRefused':
@@ -48,7 +48,7 @@ function lambdaRows(l: LambdaLeg): Row[] {
     if (l.state.cut === 'Bytes') row.note = '… truncated at 64 KiB'
     if (l.state.cut === 'Depth') row.note = '… too deep to show in full'
     rows.push(row)
-    rows.push({ leg: 'λ', label: 'steps', value: `${n(l.state.step)} β-steps` })
+    rows.push({ leg: 'λ', label: 'steps', value: `${n(l.state.step)} reductions` })
   }
   const note = runNote(l.status.run)
   if (note) rows.push({ leg: 'λ', label: 'run', value: note })
@@ -76,8 +76,8 @@ function tmRows(t: TmLeg): Row[] {
       leg: 'TM',
       label: 'steps',
       value: finished
-        ? `${n(t.status.total_steps)} δ-steps`
-        : `stopped after ${n(t.status.total_steps)} δ-steps at a cap`,
+        ? `${n(t.status.total_steps)} transitions`
+        : `stopped after ${n(t.status.total_steps)} transitions at a cap`,
     })
   }
 

@@ -1,5 +1,4 @@
 import type { EditorView } from '@codemirror/view'
-import type { LinkWiring } from './link-wiring'
 import type { SessionId } from './session-client'
 import type { SessionRegistry } from './sessions'
 
@@ -18,8 +17,11 @@ const DEBOUNCE_MS = 300
  * `view` IS A THUNK, NOT A VALUE, SAME REASON AS `link-wiring.ts`, `draw.ts` AND `replies.ts`. The
  * picker's `change` listener is wired here, at construction, but `main.ts` does not assign `let view:
  * EditorView` until the `EditorView` itself is constructed — which happens AFTER this factory runs, so
- * a value parameter would capture `undefined` forever. `links`, by contrast, is a real value by the
- * point `main.ts` calls this factory — already assigned, same as it is for `createReplies`.
+ * a value parameter would capture `undefined` forever.
+ *
+ * **`links` LEFT WITH THE LAST REFUSAL CLEAR — Plan 7 part 2 spec §11.** `schedule` cleared
+ * `link-wiring.ts`'s old fork-failure report on every keystroke; refusals are notices now, which time
+ * out on their own, and nothing else here ever read the link state.
  *
  * **FOUR DEPENDENCIES LEFT WITH THE RETIRE, AND THIS PARAGRAPH IS WHERE THEY USED TO BE ARGUED FOR.**
  * `scratchpad: ScratchBuffers`, `panes: PaneCollection`, `draw: () => void` and `reconcileEditors:
@@ -64,10 +66,9 @@ export function createCompile(deps: {
   results: HTMLElement
   picker: HTMLSelectElement
   view: () => EditorView
-  links: LinkWiring
   sourceSession: SessionId
 }): { schedule(src: string): void } {
-  const { sessions, results, picker, view, links: linkWiring, sourceSession } = deps
+  const { sessions, results, picker, view, sourceSession } = deps
 
   let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -89,11 +90,6 @@ export function createCompile(deps: {
   const schedule = (src: string) => {
     clearTimeout(timer)
     results.dataset.state = 'running'
-    // A SOURCE KEYSTROKE IS ALSO THE OTHER CLEAR SITE FOR `forkFailed` — see its own doc. `schedule`
-    // runs on every keystroke, unconditionally, which is what makes this the right place: a report
-    // about a click on the OLD program is not news about whatever the user is typing now. That was the
-    // argument while this keystroke could also end a buffer, and it is unchanged now that it cannot.
-    linkWiring.setForkFailed(null)
     // **A SOURCE KEYSTROKE ENDS NO BUFFER, AND THIS IS WHERE THE CALL THAT ENDED ONE WAS DELETED —
     // 5d-ii-c decision 2, design §4.3.** `schedule` used to call `scratchpad.retire(...)` on this line,
     // synchronously at dispatch: it terminated the buffer's worker and rebound every pane bound to it
@@ -108,7 +104,7 @@ export function createCompile(deps: {
     // was wedged. Removing it removed a safety mechanism, and **this paragraph read "until the header
     // list is mounted beside `reset layout` there is no way to reclaim a poisoned buffer at all"** while
     // `buffer-list.ts` was written, tested and imported by nobody. `main.ts` builds it now, beside
-    // `reset layout`, and its retire is the escape — reachable whether or not a pane still shows the
+    // the workspace menu, and its delete is the escape — reachable whether or not a pane still shows the
     // buffer, which is why §4.4 put it in the header rather than in pane chrome. Recorded here rather
     // than only in a plan, because this file is where a reader asks what a recompile does to a buffer.
     //

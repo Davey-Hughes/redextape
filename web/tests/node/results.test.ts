@@ -32,13 +32,13 @@ describe('resultRows — the happy path', () => {
 
   it('shows the λ normal form, step count and value', () => {
     expect(find(rows, 'λ', 'normal form')?.value).toBe('λf. λx. f (f x)')
-    expect(find(rows, 'λ', 'steps')?.value).toBe('7 β-steps')
+    expect(find(rows, 'λ', 'steps')?.value).toBe('7 reductions')
     expect(find(rows, 'λ', 'value')?.value).toBe('42')
   })
 
   it('shows the TM fitted width, step count and value', () => {
     expect(find(rows, 'TM', 'width')?.value).toBe('8 cells')
-    expect(find(rows, 'TM', 'steps')?.value).toBe('2,870 δ-steps')
+    expect(find(rows, 'TM', 'steps')?.value).toBe('2,870 transitions')
     expect(find(rows, 'TM', 'value')?.value).toBe('42')
   })
 })
@@ -67,12 +67,12 @@ describe('resultRows — a cut names its cause', () => {
 describe('resultRows — total_steps is read against tmValue, not against run', () => {
   // The pair `browser.rs` pins: a finished run reports run: "Running" because the CURSOR has not moved.
   it('calls it a length when a final configuration exists', () => {
-    expect(find(resultRows(lambdaOk, tmOk), 'TM', 'steps')?.value).toBe('2,870 δ-steps')
+    expect(find(resultRows(lambdaOk, tmOk), 'TM', 'steps')?.value).toBe('2,870 transitions')
   })
 
   it('calls it a cap when tmValue is Unfinished, even though run is identical', () => {
     const capped: TmLeg = { status: { ...tmOk.status }, value: 'Unfinished' }
-    expect(find(resultRows(lambdaOk, capped), 'TM', 'steps')?.value).toBe('stopped after 2,870 δ-steps at a cap')
+    expect(find(resultRows(lambdaOk, capped), 'TM', 'steps')?.value).toBe('stopped after 2,870 transitions at a cap')
   })
 
   it('does not name which cap it hit', () => {

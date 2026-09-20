@@ -18231,3 +18231,149 @@ pnpm exec biome ci --error-on-warnings tests/browser/session-memory.test.ts  →
 | ~17 MB, ~62 MB | the local and CI page baselines | `residentOne − deltaOne` from the local run and from run 439 |
 | 70 | ballast megabytes | the sabotage's own loop bound |
 | 256 KB, 8, 2 | `SETTLED_BYTES`, `SETTLE_PASSES`, and the collections every local round used | the constants in the file, and the `collects` field in each round's console line |
+
+#### PLAN 7 PART 2a, THE VIEW CHROME AND THE VOCABULARY: A VIEW'S TITLE IS ITS SELECTOR AND ITS `⋯` MENU HOLDS ITS ACTIONS, ONE NOTICE LINE AND ONE LIVE REGION REPLACE `#link-status`, THE STRIP FOLLOWS THE FOCUSED VIEW, AND EVERY USER-VISIBLE WORD IS THE UMBRELLA'S. A BUILD OF THE PLAN BEFORE ANY IMPLEMENTER SAW IT FOUND 81 DEFECTS IN IT; OPENING THE APP AND LOOKING AT IT FOUND TWO THE WHOLE SUITE AGREED WERE ABSENT; AND THE SIBLING SEARCH A CRITICAL'S FIX ASKED FOR TOOK ONE OF ITS OWN FIXES BACK OUT, BECAUSE THE SABOTAGE WOULD NOT FIRE (2026-09-19 to 2026-09-20, branch `plan7-part2a-view-chrome`, `cbf7d95..bb24f42`, 35 commits including this entry's first version, plus two revisions)
+
+**The first of part 2's two PRs.** Spec `docs/superpowers/specs/2026-09-19-plan7-part2-workspace-shell-design.md`, plan `docs/superpowers/plans/2026-09-19-plan7-part2a-view-chrome.md`. The app stays Explorer-shaped: the three switches are stored and held at Explorer's values, and 2b adds the other presets.
+
+##### WHAT THIS BUILT
+
+- **A workspace envelope, version 2, under `redextape.layout`** (`workspace.ts`), holding the tile tree, the three switches, one global speed, the focused leaf and the panel states. A version 1 layout migrates with its tree kept. `parseWorkspace` rejects the whole envelope rather than repairing part of it — a bad tree, an unknown switch value, a speed off the ladder, a `focused` naming no leaf in its own tree, or a malformed panel map each return `null` and the app starts from the default — and a leaf that leaves the tree takes its panel state and any focus on it with it.
+- **One `requestAnimationFrame` player** (`player.ts`) in place of the per-leg `setInterval`, with a fractional carry and a 100 ms frame clamp, driving a ten-rung steps-per-second ladder (1 to 5,000, default 8) shared by every view.
+- **One view header** (`view-header.ts`, `step-controls.ts`) built by both view classes and the source view: the title is the `(leg, session)` selector, the `⋯` menu holds split, close, *edit a copy* and *move the editor here*, and the transport is one component rendering a `ControlState`.
+- **A new app header** with a workspace menu, `+ view`, `copies ▾`, encoding, appearance and a settings menu holding style, palette and appearance.
+- **One notice surface and one live region** (`notice.ts`): every refusal that used to be written to `#link-status` goes through it. Every notice expires; the storage warning is the line's resting state; a resting condition is said once per page load.
+- **A strip readout that follows the focused view's session** (`readout.ts`), the source view included.
+- **A copies menu** with pause, resume and delete-with-undo.
+- **The umbrella's §4 vocabulary throughout**: copies and views, not buffers and panes.
+
+##### WHAT THE PRE-FLIGHT FOUND
+
+The plan was built end to end in a throwaway worktree before any implementer saw it, and the log is `docs/superpowers/notes/2026-09-19-plan7-part2a-preflight-defects.md`. It records **81 numbered defects**; 79 carry a severity — **10 that block, 37 wrong, 29 unclear, 3 design** — and two are follow-ups carrying none. The first is the shape of the rest: Task 1's `workspace.ts` doc cited `player.ts`, which Task 2 creates, so the attributions gate refuses the commit. A plan's prose is reviewed before execution and its code is not.
+
+##### WHAT LOOKING AT IT FOUND
+
+Spec §14 item 8 asks for a visual check by hand. It found two defects that **the whole suite agreed were absent** — both are visual facts no assertion was reading:
+
+- **A closed popover painted.** `[popover]:not(:popover-open) { display: none }` is a user-agent rule and any author `display` beats it, whatever its specificity. Written `.header-menu.settings { display: grid }`, the settings menu sat over the header and the source view from first load, open or shut. No test could see it: `:popover-open` is false for a menu in that state, so everything that asks whether a menu is open agreed it was shut, and nothing asked what it PAINTED.
+- **The title shouted its own name.** `.view-title { text-transform: inherit }` picked up `.pane h2`'s `--label-transform`, so `λ · program` rendered `Λ · PROGRAM` — a different letter, and in this app a different thing.
+
+The test that holds the first sweeps every `[popover]` rather than the three menus that were on the page when it was found, and enumerates what it swept into its failure message.
+
+##### WHAT THE WHOLE-BRANCH REVIEW FOUND, AND WHAT THE SIBLING SEARCH DID TO IT
+
+One Critical: ***move the editor here* stranded focus on `<body>`**, where every other `applyLayout` caller ends in `focusPane`. Spec §11's "Focus never falls to `<body>`" is categorical, and the item this branch was about to claim closed is that one.
+
+The sibling search over every `applyLayout` call site found ***reset preset*** doing the same, and a third candidate that was not. That third one is the finding worth keeping:
+
+- **The mechanism took three attempts to state.** It is not that focus is stranded on the hidden menu item — `hidePopover()` restores focus to whatever held it before the popover opened. It is that a handler which rebuilds the tree detaches the host containing the element that restoration just targeted, and `renderLayout`'s only rescue matches `.layout-divider`. The rule has two conditions, not one.
+- **So `rebind`'s same-leg arm got a `focusPane` and then had it taken back out.** It returns before reaching the one its cross-leg neighbour always called, which looks exactly like the same defect. The probe that appeared to confirm it never checked where the focus was BEFORE the gesture; it had inherited `<body>` from the probe before it. With that precondition asserted, the gesture lands on the title button with the fix removed, and the fix's sabotage could not be made to fire.
+- **The test file's baseline is load-bearing, and both other choices were measured useless.** Starting from `<body>`, sabotaging one fix turned three cases red — two of them only inheriting the first's. Starting from a header control, that same sabotage turned nothing red, because the header is outside `<main>` and no rebuild touches it. Starting inside a view, it fails exactly the one case whose fix was removed.
+
+The review's other findings: the strip was not dimmed during the app's first compile (`show(null, [])`'s key is the empty string `rendered` already holds, so the unchanged-key return fired before `data-describes` was written); the spec contradicted itself on whether a delete hides the copies menu and on which notice names a view count; eight comments described an app that had changed under them; and three tests could not fail or never ran the step they were named for.
+
+##### THE ACCESSIBILITY ITEMS
+
+The umbrella's §9 assigns items 1, 6, 9, 10, 13 and 14 to part 2, and item 7 to parts 1 and 2.
+
+| Item | Closed by | Checked by |
+|---|---|---|
+| 1 | §11's focus rules | `menu-focus.test.ts` (five gestures), `two-lambda-panes.test.ts`'s "keeps the focus in the view that took the editor", `copies-undo.test.ts`'s undo case, `controls-gate.test.ts`'s focus leg |
+| 6 | `#link-status` is now one half of the strip, its sentence goes through the live region, and the refusals that used to be written to it moved to the notice line | `strip.test.ts`'s "announces it" and "announces it again after an edit, though the sentence is the same one" — the second compares the region's RAW text, because `say` toggles a trailing space so a repeated sentence is still a change |
+| 7 (part 2's half) | a link change is stated in words, not only in colour | the same two tests |
+| 9 | layout notices | `layout-notices.test.ts` |
+| 10 | copy notices | `copies-undo.test.ts`, `scratch-cap.test.ts` |
+| 13 | pause and resume raise notices | `copies-undo.test.ts` |
+| 14 | the pause notice names the views it moved | `copies-undo.test.ts`'s "moves its view to the program and says how many" |
+
+##### WHAT THIS DID NOT CLOSE
+
+- **2b's whole subject**: the other two presets, the switches, and the workspace menu that holds them. The switches are stored and pinned at Explorer's values.
+- **A narrow view wraps its header into three rows**, with `⋯ ✕` alone on the last, detached from the title. Seen at 800×600, where the λ leaf is 400 px. Wrapping is the designed behaviour (spec §7: "one line that wraps rather than overflowing a narrow view"); only the grouping is untidy. The one CSS route to a tidier grouping is `order` on `.view-actions`/`.view-steps`, which desynchronises visual order from focus order — a keyboard user would go title → `⋯` → `✕` → transport while reading title → transport → `⋯` → `✕`. The umbrella's rule 5 protects that, so the wrap stays.
+- **A copy persisted with no recorded term re-wedges on every reload.** `redextape.buffers` can hold `{"id":"scratch-1","label":"copy 1","text":"","leg":"tm"}` — a buffer whose fork build never landed, so no editor mounted and no text was recorded. Each reload rebuilds that empty text, fails `missing \`tapes <n>\``, and re-persists it. The wedged state itself is documented and deliberate, with its escape in `copies ▾`; what is new is that persistence makes it survive a reload. A plan-5d interaction: 2a neither introduced nor touched `buffers-store.ts`'s write policy.
+- **The workspace button carries no `▾`** where `copies 2 ▾` does, and both open menus. Recorded in the spec and left to 2b, which reworks that menu. Adding one is not only a character: a bare `▾` reaches the accessible name, so it needs an `aria-hidden` span in the markup, in the test harness's shell and in both assertions on the button's text.
+- **`LambdaPane.setLayoutControls` and `TmPane.setLayoutControls` have no direct unit test.** The deleted `pane-layout-controls.test.ts` had one; the wiring is still exercised by app-level tests that click `button.view-more`, so this is a lost unit rather than a silent hole.
+- **Two of the spec's five end-to-end flows are unpinned.** "Play at 5,000/s and switch views mid-run" — nothing in the browser tier plays at any speed but the default 8/s, and switching a view's binding while its leg plays is untested in both tiers; the node `player.test.ts` also never covers a leg toggled on while another is already playing, which gets credited the full inter-frame elapsed. "Pause every copy at the cap, then resume one" — the cap boundary itself is not driven.
+- **Spec §11's fourth focus rule is implemented twice and missed once.** A control removed by a state change rather than by its own click should hand focus on: `step-controls.ts` does it for *continue* when a recording ends, and `notice.ts` does it when the action it holds expires. `viewMenu.sync()` removes items without doing so. No gesture reaches that third case today — every state change that removes an item requires acting somewhere that light-dismisses the popover, and `canSplit` is a literal `p.kind !== 'source'` — but 2b's "the split items when Stage is chosen" is the spec's own named instance.
+- **`viewHeader`'s plain-text branch is unreachable in the running app.** The selector lists `(leg, session)` pairs and the program session is registered with both legs, so `pairs()` never returns fewer than two. The branch is held only by a λ-only fixture, which is now what its comment says.
+- **`parseLayout`, `serializeLayout` and `LAYOUT_VERSION` are reached only from tests**, as the version-1 producer for the migration path. `src/` still cites the names in comments; nothing in it calls the functions or reads the constant.
+
+##### VERIFICATION
+
+Run on 2026-09-19 at the commit that is now `20a7aba`, in one `systemd-run --user` unit with
+`MemoryMax=16G -p MemorySwapMax=0` and `PATH`, `CARGO_HOME`, `RUSTUP_HOME` and `HOME` set explicitly —
+a transient unit inherits none of them. `PATH` needs both `/usr/sbin` (Chrome, for `check-all.sh`'s
+browser tier) and `$CARGO_HOME/bin` (wasm-pack). An earlier run of the same script had only the first,
+and `check-all.sh` exited 1 with `error: wasm-pack not found` after every native leg had passed — an
+exit code that says the gate failed when what failed was one tier's precondition.
+
+```
+scripts/check-all.sh                                    → exit 0
+cargo llvm-cov nextest --workspace --fail-under-lines 90 → exit 0; TOTAL 95.30% lines, 94.76% functions,
+                                                           95.69% regions; 1,766 tests, 33 skipped
+scripts/check-slow.sh                                   → exit 0 ("slow tier green")
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua,colours}.sh
+  --self-test, then the full scan                       → exit 0, all fourteen
+pnpm run build:wasm (web/)                              → exit 0
+pnpm exec biome ci --error-on-warnings (web/)           → exit 0, 169 files (1 info: biome.json's
+                                                           deprecation notice)
+pnpm run typecheck (web/)                               → exit 0
+pnpm run test:coverage (web/)                           → exit 0, 101 files / 917 tests;
+                                                           96.67 / 90.96 / 98.75 / 98.71 against
+                                                           thresholds 95 / 89 / 97 / 97
+pnpm run build:app (web/)                               → exit 0
+```
+
+**One commit landed after that run, and after the first version of this entry: now `bb24f42`.** Asked what
+was left to check before merging, the answer was a comment written two commits before its subject was
+understood — the `showEditor` fix and its test both said `hidePopover()` hands focus back to the
+invoker, where it restores focus to whatever held it before the popover opened, as
+`scratch-buffers.test.ts` had already recorded. It changes comments in two files and no behaviour. What
+covers it: the pre-commit gates (`biome ci`, `web typecheck`, and the tree-wide text, citation,
+attribution, doc-figure and shared-doc scans), the six hygiene scans re-run in full at it, both
+web tiers re-run there (64 files / 396 tests, 37 files / 521 tests), and the C1 sabotage re-applied to
+the restored file, which still fails its test by name.
+
+The by-hand visual check ran against the Vite dev server in Chromium with `localStorage` cleared, at
+1440x900 and 800x600, in light and dark, across all three styles, with every one of the eight popovers
+opened in turn. No element overflowed its container at either size
+(`documentElement.scrollWidth === clientWidth`, and no `.pane`/`[data-leaf]`/`.term`/`#notice`/`#results`
+with `scrollWidth > clientWidth`), and no menu opened off-screen. The readout was driven through a real
+copy: focusing the view showing `copy 1` gave `lambda copy 1 - 0 reductions`, focusing the TM view gave
+`lambda 42 - 7 reductions  TM 42 - 2,870 transitions - width 64`.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 35 | commits in the range | `git log --oneline cbf7d95..bb24f42 \| wc -l` |
+| 104; 12,275 and 3,486 | files changed, insertions, deletions | `git diff --stat cbf7d95..bb24f42 \| tail -1` |
+| 81 | numbered defects in the pre-flight log | `grep -cE '^### [0-9]' docs/superpowers/notes/2026-09-19-plan7-part2a-preflight-defects.md` |
+| 10, 37, 29, 3 (79 total) | those defects by severity | `grep -oE '\*\*Severity\*\* - [a-z]+' <that file> \| sort \| uniq -c` |
+| 2 | defects carrying no severity line | the difference, identified as 2.4 and 3.13 by an `awk` pass over the same file |
+| 1 Critical, 5 Important, 9 Minor | the whole-branch review's findings | its report, `C1`, `I1`-`I5`, `M1`-`M9` |
+| ten rungs, 1 to 5,000, default 8 | the speed ladder | `grep -n 'SPEEDS = \|DEFAULT_SPEED' web/src/workspace.ts` |
+| 100 | the player's frame clamp, in ms | `grep -n 'MAX_FRAME_MS = ' web/src/player.ts` |
+| 2 | the workspace envelope's version | `grep -n 'WORKSPACE_VERSION' web/src/workspace.ts` |
+| 400 px | the lambda leaf's width at 800x600, where the header wraps to three rows | `getBoundingClientRect()` on `[data-leaf="lambda-0"]` in the running app |
+| eight | popovers on an Explorer page | `document.querySelectorAll('[popover]')` in the running app: two header menus, the copies list, the settings menu, and each view's title and `...` menus |
+| five | gestures `menu-focus.test.ts` drives | the `it` count in that file |
+| 396 / 64, 521 / 37 | browser and node tests and their files | `pnpm exec vitest run --project browser` and `--project node`, and their sum in `test:coverage`'s 917 / 101 |
+| 95.30, 94.76, 95.69; 1,766, 33 | the Rust coverage figures and its test counts | the `llvm-cov` line in the block above |
+| 96.67, 90.96, 98.75, 98.71; 95, 89, 97, 97 | the web coverage figures and their thresholds | `test:coverage`'s `All files` row, and `thresholds:` in `web/vite.config.ts` |
+| 169 | files Biome checks | the `biome ci` line in the block above |
+
+**REBASED ONTO `cbf7d95` AFTER #101, AND THE SHAs ABOVE ARE THE REBASED ONES.** #101 fixed
+`session-memory.test.ts`, whose bound on a baseline-dependent ratio had failed this branch's CI on a
+file it does not touch; that entry sits above this one. The rebase conflicted only in this file, where
+both branches appended an entry — the resolution rebuilt it as main's roadmap plus this entry, because
+git's own resolution of two appends interleaves them and passes every gate. No source file conflicted,
+and `git diff --stat` reads the same 104 files and 12,275 insertions against the new base as against the
+old. Both web tiers were re-run at `bb24f42` and read 64 files / 396 tests and 37 / 521, unchanged.
+
+**A LOCAL RUN OF THAT RE-RUN FAILED FIRST, AND IT WAS THE CHECKOUT RATHER THAN THE CODE.** Three files
+could not be imported at all — `app-header`, `controls-gate` and `view-menu`, which are exactly the
+three that import `dom-accessibility-api`. Working on a branch off main, where that dev dependency does
+not exist, had pruned it from `node_modules`; `pnpm install` restored it and the suite read 396 again.
+CI installs from the lockfile on a clean tree and could not have seen it, so it is recorded as a fact
+about working on two branches rather than as anything this branch did.

@@ -3,11 +3,13 @@ import {
   closeLeaf,
   defaultLayout,
   defaultLayout as dl,
+  insertBeside,
   LAYOUT_VERSION,
   type LayoutNode,
   leaves,
   MIN_PANE_FRACTION,
   parseLayout,
+  parseTree,
   resize,
   SOURCE_LEAF,
   serializeLayout,
@@ -72,6 +74,10 @@ describe('splitLeaf', () => {
     // findLeaf uses .find(), so a duplicate id would silently hide the second leaf behind the first
     // rather than surface as a tree parseLayout could also reject on load.
     expect(() => splitLeaf(defaultLayout(), 'lambda-0', 'row', 'tm-0', 'lambda')).toThrow(/tm-0/)
+  })
+
+  it('still refuses the source leaf as its subject', () => {
+    expect(() => splitLeaf(defaultLayout(), 'source', 'row', 'pane-1', 'lambda')).toThrow(/source pane cannot be split/)
   })
 })
 
@@ -465,5 +471,35 @@ describe('splitLeaf with an explicit kind', () => {
     }
     const next = splitLeaf(noSource, 'a', 'row', 'c', 'source')
     expect(leaves(next).find((l) => l.id === 'c')?.pane).toBe('source')
+  })
+})
+
+describe('insertBeside', () => {
+  it('accepts the source leaf as its subject, including when it is the only leaf', () => {
+    const only = { kind: 'leaf', id: 'source', pane: 'source' } as const
+    const next = insertBeside(only, 'source', 'row', 'pane-1', 'lambda')
+    expect(leaves(next).map((l) => [l.id, l.pane])).toEqual([
+      ['source', 'source'],
+      ['pane-1', 'lambda'],
+    ])
+  })
+
+  it('puts the new leaf after its subject in leaves() order', () => {
+    const next = insertBeside(defaultLayout(), 'lambda-0', 'row', 'pane-1', 'tm')
+    expect(leaves(next).map((l) => l.id)).toEqual(['source', 'lambda-0', 'pane-1', 'tm-0'])
+  })
+
+  it('still refuses a second source leaf and a duplicate id', () => {
+    expect(() => insertBeside(defaultLayout(), 'tm-0', 'row', 'source', 'source')).toThrow(/already has a source leaf/)
+    expect(() => insertBeside(defaultLayout(), 'tm-0', 'row', 'lambda-0', 'lambda')).toThrow(/already in the tree/)
+    expect(() => insertBeside(defaultLayout(), 'pane-9', 'row', 'pane-1', 'lambda')).toThrow(/not in the tree/)
+  })
+})
+
+describe('parseTree', () => {
+  it('validates a bare tree the way parseLayout validates an envelope', () => {
+    expect(parseTree(defaultLayout())).toEqual(defaultLayout())
+    expect(parseTree({ kind: 'leaf', id: 'x', pane: 'source' })).toBeNull()
+    expect(parseTree('nope')).toBeNull()
   })
 })

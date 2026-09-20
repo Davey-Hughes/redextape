@@ -16,7 +16,7 @@ import type { LambdaState, TmProgram, TmState } from '../../src/types'
  *
  * The claim is that two panes bound to two DIFFERENT λ sessions render two different terms
  * simultaneously, and the plan is explicit that "anything weaker passes on a single-session
- * implementation". `tests/browser/binding-selector.test.ts` asserts the same thing with real
+ * implementation". `tests/browser/view-title.test.ts` asserts the same thing with real
  * `LambdaPane`s and real text in a real DOM; this file asserts it against the resolution itself, with
  * recording fakes, which is what makes the failure legible when it breaks — a browser failure says
  * "two panes read the same string", this one says which binding resolved to which leg.
@@ -44,7 +44,7 @@ function fakeClient(): SessionClient {
 }
 
 function leg<T>(): LegState<T> {
-  return { hist: new History<T>(1_000_000), status: { available: true, reason: '' }, done: null, timer: null }
+  return { hist: new History<T>(1_000_000), status: { available: true, reason: '' }, done: null, playing: false }
 }
 
 /** A λ frame whose only distinguishing feature is its text — which is the whole discriminator here. */
@@ -154,7 +154,7 @@ describe('SessionRegistry', () => {
   })
 
   // `SessionPool.bind`'s asymmetry, mirrored: a second `add` asks for something unhonourable (the
-  // replaced entry's play timer would be stranded on a `LegState` nothing can reach), a second
+  // replaced entry's playback would be stranded on a `LegState` nothing can reach), a second
   // `remove` asks for a state already true.
   it('refuses a duplicate add and tolerates a duplicate remove', () => {
     const reg = new SessionRegistry()
@@ -296,7 +296,10 @@ describe('PaneSlot', () => {
       // which is the point of not supplying them.
       scratchpad: {} as ScratchBuffers,
       draw: () => draws++,
+      speed: () => 8,
+      setSpeed: () => undefined,
       linkWiring: () => ({}) as LinkWiring,
+      notify: () => undefined,
       // A THROW RATHER THAN A NO-OP, FOR THE SAME REASON THE TWO CASTS ABOVE ARE CASTS: only `detach`
       // announces a new buffer, and a `rebind` that told the header list its count had changed would be
       // reporting a gesture that creates nothing. This test would say so.
@@ -333,7 +336,7 @@ describe('PaneSlot', () => {
       /cannot take a lambda pick/,
     )
     // AND THE SLOT DID NOT MOVE ON THE WAY OUT — a throw AFTER `slot.rebind` would leave exactly the
-    // state this exists to prevent, reported rather than avoided. Both halves, for `detached-badge`'s
+    // state this exists to prevent, reported rather than avoided. Both halves, for `view-status`'s
     // reason: the assertion that something did not happen is not the assertion that it was announced.
     expect(tm.binding).toEqual({ session: 'source', leg: 'tm' })
     expect(() => tm.resolve(reg)).not.toThrow()
@@ -352,13 +355,13 @@ describe('PaneSlot', () => {
    * **THE `catch` AROUND THE FORK LETS A WIRING BUG THROUGH AND KEEPS A REFUSAL — Important-shaped gap
    * that shipped ARGUED rather than tested, and was named as such before merge.**
    *
-   * `detach` is the last frame before the raw DOM dispatch of `✎ fork`'s click listener, and there is no
+   * `detach` is the last frame before the raw DOM dispatch of `✎ edit a copy`'s click listener, and there is no
    * `window` error handler anywhere in `src/` behind it. That is what makes the catch necessary — a cap
    * refusal reaching the console is the Critical this branch already fixed — and it is also exactly what
    * makes the `instanceof` load-bearing: a BARE catch would take `SessionRegistry.add`'s and
-   * `SessionPool.bind`'s invariant guards, which are wiring bugs, and render them as a dim status line
-   * that says `fork failed — …`. The bug would look like a refusal, and the user would be told to retire
-   * a buffer.
+   * `SessionPool.bind`'s invariant guards, which are wiring bugs, and show them as a notice
+   * that says `cannot make a copy — …`. The bug would look like a refusal, and the user would be told to
+   * pause or delete a copy.
    *
    * **BOTH ARMS IN ONE TEST, BECAUSE EITHER ALONE PASSES ON THE WRONG IMPLEMENTATION.** A bare `catch`
    * satisfies the cap half; `throw e` with no catch at all satisfies the re-throw half. Only the pair
@@ -373,7 +376,7 @@ describe('PaneSlot', () => {
     const reg = new SessionRegistry()
     reg.add(entry('source', { label: 'source', lambda: ['from source'], tm: [0] }))
 
-    let forkFailed: string | null = null
+    const notified: string[] = []
     let draws = 0
     let buffersChanged = 0
     let thrown: unknown = new Error('a pool invariant broke')
@@ -388,15 +391,14 @@ describe('PaneSlot', () => {
         },
       } as unknown as ScratchBuffers,
       draw: () => draws++,
+      speed: () => 8,
+      setSpeed: () => undefined,
       // `index.lambdaText` IS THE ONE FIELD THE GUARD ABOVE THE `try` READS — an empty string makes
       // `detach` return before it ever forks, which would pass every assertion below vacuously.
-      linkWiring: () =>
-        ({
-          index: { lambdaText: 'λx. x' },
-          setForkFailed: (r: string | null) => {
-            forkFailed = r
-          },
-        }) as unknown as LinkWiring,
+      linkWiring: () => ({ index: { lambdaText: 'λx. x' } }) as unknown as LinkWiring,
+      notify: (t: string) => {
+        notified.push(t)
+      },
       onBuffersChanged: () => buffersChanged++,
       // A THROW, FOR THE REASON THE TWO CASTS ABOVE ARE CASTS: `detach` is not a rebind, and the fork
       // it performs persists through `onBuffersChanged` reaching `main.ts`'s `refreshBuffers`. A
@@ -410,11 +412,11 @@ describe('PaneSlot', () => {
     const events = transport.events(slot)
 
     // THE WIRING BUG. It leaves the handler unchanged and reaches nothing that renders — which is the
-    // behaviour that keeps it loud, and the reason `forkFailed` must still be `null` afterwards.
+    // behaviour that keeps it loud, and the reason nothing may have been notified afterwards.
     expect(() => events.detach?.(0)).toThrow(/a pool invariant broke/)
-    expect(forkFailed).toBeNull()
+    expect(notified).toEqual([])
     // AND NOTHING WAS REPORTED AS IF IT HAD HAPPENED: no repaint, no count change. A `catch` that
-    // re-threw AFTER calling `setForkFailed` would satisfy the line above and fail here.
+    // re-threw AFTER calling `notify` would satisfy the line above and fail here.
     expect(draws).toBe(0)
     expect(buffersChanged).toBe(0)
 
@@ -423,23 +425,24 @@ describe('PaneSlot', () => {
     // **BUILT FROM `MAX_WARM_BUFFERS` AND THE REAL WORDING, WHERE THIS USED TO HAND-SPELL A MESSAGE FROM
     // TWO RENAMES AGO — whole-branch review before merge, finding 4.** It read
     // `new BufferCapReached('all 8 scratch buffers are live; retire one')`: the cap is
-    // `MAX_WARM_BUFFERS` and the sentence `ScratchBuffers.#refuseAtCap` actually raises ends "retire or
-    // cool one from the buffers list in the header to make room". Nothing failed, because the assertion
+    // `MAX_WARM_BUFFERS`, and the sentence `ScratchBuffers.#refuseAtCap` raises ends "pause or delete one
+    // from the copies menu to make room" — it ended "retire or cool one from the buffers list in the
+    // header" when the drift was found. Nothing failed, because the assertion
     // below looked for `'retire one'` and that survived as a SUBSTRING of `'retire or cool one'` — by
     // luck of wording, not by design. Task 8's rename sweep was `rg -l MAX_BUFFERS`, which a
     // hand-spelled string cannot match, so a fixture claiming to be the app's own message drifted
     // silently past the commit that changed it.
     //
-    // THE ASSERTION MOVES TO `'retire or cool one'` WITH IT, so a future wording change breaks this test
-    // instead of quietly passing on a shorter prefix of the old one. What this test is about is
+    // THE ASSERTION MOVES WITH THE WORDING — `'pause or delete one'` today — so a future wording change
+    // breaks this test instead of quietly passing on a shorter prefix of the old one. What this test is about is
     // unchanged: the `instanceof` branch in `transport.ts`'s `detach` reports a `BufferCapReached`
-    // rather than re-throwing it, and the message reaches `forkFailed` intact.
+    // rather than re-throwing it, and the message reaches `notify` intact.
     thrown = new BufferCapReached(
-      `all ${MAX_WARM_BUFFERS} scratch buffers are live; retire or cool one from the buffers list in the header to make room`,
+      `cannot make a copy — all ${MAX_WARM_BUFFERS} copies are running; pause or delete one from the copies menu to make room`,
     )
     expect(() => events.detach?.(0)).not.toThrow()
-    expect(forkFailed).toContain('retire or cool one')
-    // THE STATUS LINE IS THE ONE THING THAT CHANGED, so a draw and no buffer-count report.
+    expect(notified.join(' ')).toContain('pause or delete one')
+    // THE NOTICE IS THE ONE THING THAT CHANGED, so a draw and no buffer-count report.
     expect(draws).toBe(1)
     expect(buffersChanged).toBe(0)
   })
@@ -466,7 +469,7 @@ describe('PaneSlot', () => {
     source.tmProgram = { program, tapeNames: ['TAPE'], tmText: 'tapes 1\nstart pc0\nstate pc0:\n' }
     reg.add(source)
 
-    let forkFailed: string | null = null
+    const notified: string[] = []
     let draws = 0
     let buffersChanged = 0
     let thrown: unknown = new Error('a pool invariant broke')
@@ -480,16 +483,16 @@ describe('PaneSlot', () => {
         },
       } as unknown as ScratchBuffers,
       draw: () => draws++,
+      speed: () => 8,
+      setSpeed: () => undefined,
       // NO `index` FIELD HERE, UNLIKE THE λ TEST'S FAKE — `detachMachine` never reads `linkWiring()`
       // for its text (`sessions.entryOf(...).tmProgram?.tmText` is the whole resolution), so a fake
       // that omitted `index` would still be exercising the real handler rather than papering over a
       // read it does not perform.
-      linkWiring: () =>
-        ({
-          setForkFailed: (r: string | null) => {
-            forkFailed = r
-          },
-        }) as unknown as LinkWiring,
+      linkWiring: () => ({}) as unknown as LinkWiring,
+      notify: (t: string) => {
+        notified.push(t)
+      },
       onBuffersChanged: () => buffersChanged++,
       onBuffersPersist: () => {
         throw new Error('a machine fork must not persist through the rebind dependency')
@@ -501,16 +504,16 @@ describe('PaneSlot', () => {
 
     // THE WIRING BUG, IDENTICAL IN SHAPE TO THE λ CASE ABOVE.
     expect(() => events.detachMachine?.()).toThrow(/a pool invariant broke/)
-    expect(forkFailed).toBeNull()
+    expect(notified).toEqual([])
     expect(draws).toBe(0)
     expect(buffersChanged).toBe(0)
 
     // THE REFUSAL, THROUGH THE SAME HANDLER.
     thrown = new BufferCapReached(
-      `all ${MAX_WARM_BUFFERS} scratch buffers are live; retire or cool one from the buffers list in the header to make room`,
+      `cannot make a copy — all ${MAX_WARM_BUFFERS} copies are running; pause or delete one from the copies menu to make room`,
     )
     expect(() => events.detachMachine?.()).not.toThrow()
-    expect(forkFailed).toContain('retire or cool one')
+    expect(notified.join(' ')).toContain('pause or delete one')
     expect(draws).toBe(1)
     expect(buffersChanged).toBe(0)
   })
@@ -535,7 +538,10 @@ describe('PaneSlot', () => {
         },
       } as unknown as ScratchBuffers,
       draw: () => undefined,
-      linkWiring: () => ({ setForkFailed: () => undefined }) as unknown as LinkWiring,
+      speed: () => 8,
+      setSpeed: () => undefined,
+      linkWiring: () => ({}) as unknown as LinkWiring,
+      notify: () => undefined,
       onBuffersChanged: () => undefined,
       onBuffersPersist: () => undefined,
     })
@@ -550,7 +556,7 @@ describe('PaneSlot', () => {
    * needs a binding to flip, and per §3.2b none exists." A binding exists now, and it flips here.
    *
    * ASSERTED ABSENT AFTER THE REBIND, not only present before it — an implementation that sets the
-   * badge and never clears it passes the first half. That is the same rule `detached-badge.test.ts`
+   * badge and never clears it passes the first half. That is the same rule `view-status.test.ts`
    * states for the surface itself; this is the rule applied to what DRIVES it.
    */
   it('reports detachment from the session it is bound to, and stops when rebound', () => {
@@ -637,14 +643,14 @@ describe('resetLegs', () => {
     const tmLeg = e.legs.tm
     if (lambdaLeg === undefined || tmLeg === undefined) throw new Error('the fixture built both legs')
     lambdaLeg.done = 'ended'
-    lambdaLeg.timer = setInterval(() => undefined, 1_000)
+    lambdaLeg.playing = true
 
     resetLegs(e.legs, null, null, 'not compiled')
 
     expect(lambdaLeg.hist.length).toBe(0)
     expect(tmLeg.hist.length).toBe(0)
     expect(lambdaLeg.done).toBe(null)
-    expect(lambdaLeg.timer).toBe(null)
+    expect(lambdaLeg.playing).toBe(false)
     expect(lambdaLeg.status).toEqual({ available: false, reason: 'not compiled' })
     expect(tmLeg.status).toEqual({ available: false, reason: 'not compiled' })
   })

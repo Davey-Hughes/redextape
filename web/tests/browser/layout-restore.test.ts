@@ -1,11 +1,13 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout, splitLeaf } from '../../src/layout'
+import { parseWorkspace } from '../../src/workspace'
 import { SHELL } from './harness'
 
 /**
  * THE RESTORE-FROM-STORAGE PATH, THROUGH `main()` — the branch's only exercise of it.
  *
- * `main()` resolves its tree with `parseLayout(readLayoutStorage()) ?? defaultLayout()`, and until this
+ * `main()` resolves its tree with `parseWorkspace(readLayoutStorage()) ?? defaultWorkspace()` (a version 1
+ * layout is migrated), and until this
  * file that expression had only ever taken the fallback: `layout-app.test.ts` and
  * `two-lambda-panes.test.ts` both mount onto an empty `Storage`, by design, so every browser test in the
  * suite booted from `defaultLayout()`. Everything a restored tree can carry that a default one cannot was
@@ -57,31 +59,40 @@ const leafIds = () => [...document.querySelectorAll('[data-leaf]')].map((e) => (
  */
 const lambdaLeaves = () =>
   [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')].map((e) => e.dataset.leaf ?? '')
-const splitRowOn = (leaf: string) =>
-  document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button[aria-label="split left and right"]`)
-
 /**
  * Split `leaf` into a second pane of the same kind on the same session — `layout-app.test.ts`'s
  * `splitRow`, verbatim, and its doc carries the argument: the control opens a picker now, whose first
- * entry is the pane's own pair labelled `(same)`, so the gesture that used to be one click is two and
+ * entry is the pane's own pair labelled "another view of this", so the gesture that used to be one click is two and
  * still means what it meant. The label is checked rather than assumed, because a silent no-op here would
  * leave the test below asserting a split that never happened.
  */
-const splitRow = (leaf: string): void => {
-  const button = splitRowOn(leaf)
-  if (button === null) throw new Error(`no split control on [data-leaf="${leaf}"]`)
-  button.click()
-  const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
-  const first = menu?.querySelector<HTMLButtonElement>('button') ?? null
-  if (first === null || !(first.textContent ?? '').endsWith('(same)')) {
-    throw new Error(`${leaf}'s split menu does not start with the duplicate case: ${first?.textContent}`)
-  }
-  first.click()
-}
+const splitRow = (leaf: string): void => splitVia(leaf, 'row', 'same')
 
 // SEEDED BEFORE THE MOUNT, not in a `beforeEach` — `main()` reads the key exactly once, synchronously,
 // while resolving `let tree`, so anything written after that read is never seen. Same reason every
 // sibling file gives for clearing it here rather than there.
+/**
+ * Split `leaf` through its `⋯` menu, as a user does: `pick` is `'same'` (another view of this), `'source'`,
+ * or a `bindingKey(leg, session)`.
+ */
+function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
+  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
+  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
+  more.click()
+  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
+  menu?.querySelector<HTMLButtonElement>(`button.view-split[data-dir="${dir}"]`)?.click()
+  const selector =
+    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
+  const item = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
+  if (item == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
+      (b) => b.textContent,
+    )
+    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
+  }
+  item.click()
+}
+
 beforeAll(async () => {
   localStorage.setItem(LAYOUT_STORAGE_KEY, STORED)
   document.body.innerHTML = SHELL
@@ -91,6 +102,15 @@ beforeAll(async () => {
 describe('a layout restored from storage', () => {
   it('mounts the stored arrangement rather than falling back to the default', () => {
     expect(leafIds()).toEqual(['source', 'lambda-0', 'lambda-1', 'tm-0'])
+  })
+
+  // BEFORE THE SPLIT BELOW, WHICH REWRITES THE STORED TREE: this reads what the migration wrote, and
+  // after that test the stored tree also holds `pane-2`.
+  it('rewrites the migrated layout as version 2, the tree intact', () => {
+    const stored = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? '{}')
+    expect(stored.version).toBe(2)
+    expect(stored.switches).toEqual({ steps: 'view', views: 'tiles', readout: 'strip' })
+    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.tree).toEqual(JSON.parse(STORED).tree)
   })
 
   /**
@@ -118,7 +138,7 @@ describe('a layout restored from storage', () => {
    */
   it('splits into a fresh id rather than colliding with one the stored tree already carries', () => {
     // ONE SPLIT, AND ONLY ONE — the two clicks inside `splitRow` are one gesture (open the picker, take
-    // the `(same)` entry), not two attempts. That distinction is the point: a SECOND split always worked
+    // the "another view of this" entry), not two attempts. That distinction is the point: a SECOND split always worked
     // even before the fix, because the refused attempt had still incremented the counter, so a test that
     // retried would pass against the bug it exists to catch.
     splitRow('lambda-0')

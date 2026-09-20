@@ -125,6 +125,9 @@ const focusReading = () => {
   return `${claim}:${el.textContent ?? ''}`
 }
 
+/** Press a step control by its accessible name — `play` is an icon now, so it has no text to find it by. */
+const clickByName = (name: string) =>
+  document.querySelector<HTMLButtonElement>(`[data-leaf="lambda-0"] .controls [aria-label="${name}"]`)?.click()
 const click = (label: string) => {
   const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')].find(
     (x) => x.textContent === label,
@@ -222,17 +225,18 @@ describe('the running focus', () => {
     expect(focusReading(), 'a None step must clear the previous step’s mark').toBe('')
   }, 30_000)
 
-  // THE SAME SEQUENCE, THROUGH `⏵` RATHER THAN `▶`. A different code path: `transport.ts`'s `play()` is a
-  // `setInterval` over recorded frames, and every other test in this file drives `draw()` from a
-  // synchronous button handler instead. Nothing anywhere else in the suite exercises `⏵` at all.
+  // THE SAME SEQUENCE, THROUGH `⏵` RATHER THAN `▶`. A different code path: `transport.ts`'s `play()` hands
+  // the leg to `player.ts`'s animation-frame loop over recorded frames, and every other test in this file
+  // drives `draw()` from a synchronous button handler instead. Nothing anywhere else in the suite exercises `⏵` at all.
   //
   // OBSERVED, NOT SAMPLED, AND THAT IS THE WHOLE DESIGN OF THIS TEST. A polling version of it — 5 ms
-  // ticks against `PLAY_MS`'s 120 ms, which in practice sees every frame several times over — was
+  // ticks against the old 120 ms play interval, which in practice sees every frame several times over — was
   // written first and SURVIVED EVERY MUTATION tried against this file, including collapsing `Within`
   // into `Exact` and never clearing the mark, because a set-membership assertion tolerant enough to
   // never flake is also tolerant enough to accept a wrong sequence. A `MutationObserver` on the
   // editor's content is exact instead: every `draw()` writes the decoration synchronously inside its
-  // own interval tick, so each frame gets its own microtask checkpoint and its own callback.
+  // own animation frame (at the default 8/s the player takes at most one step per frame), so each frame
+  // gets its own microtask checkpoint and its own callback.
   //
   // DEDUPED ON CONSECUTIVE EQUALITY, AND BLANKS ARE FILTERED OUT OF THE ORDERED ASSERTION. CodeMirror
   // may touch the content DOM more than once per frame (its own measure pass), and a redraw that
@@ -251,7 +255,15 @@ describe('the running focus', () => {
     observer.observe(view.contentDOM, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] })
     record()
 
-    click('⏵')
+    clickByName('play')
+    expect(document.querySelector('[data-leaf="lambda-0"] button.play')?.getAttribute('aria-label')).toBe('pause')
+    // **AND BACK, WHICH IS THE HALF THAT CANNOT CORRECT ITSELF.** Playing, the button's face is right
+    // again at the first step a few frames later whatever happens here; a PAUSE takes no step at all, so
+    // without `transport.ts`'s own `draw()` after the toggle the button would go on reading `pause`
+    // until something unrelated repainted the view.
+    clickByName('pause')
+    expect(document.querySelector('[data-leaf="lambda-0"] button.play')?.getAttribute('aria-label')).toBe('play')
+    clickByName('play')
     await until(() => stepText().includes('step 7'))
     observer.disconnect()
     record()
@@ -451,7 +463,7 @@ describe('the running focus', () => {
   it('clears the focus on this program’s untagged steps, and never errors on the tagged ones either', async () => {
     await settledAtZero(SPARSELY_TAGGED)
     const before = pageErrors.length
-    expect(resultsText(), 'the program still runs to an answer').toContain('β-steps')
+    expect(resultsText(), 'the program still runs to an answer').toContain('reductions')
 
     // MEASURED, NOT ASSUMED — see `SPARSELY_TAGGED`'s doc for how, and for the mechanism behind each
     // entry. A test tolerant enough to accept blanks at every step (the property this test used to

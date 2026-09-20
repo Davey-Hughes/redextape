@@ -12,8 +12,9 @@ import type { Span } from './types'
  * THE LINK STATE AND EVERYTHING THAT READS IT — the cluster `main.ts` held as four `let`s visible to a
  * thousand lines.
  *
- * `index`, `linkable`, `link` and `forkFailed` are one fact in four variables: what the current
- * compile's link index is, whether it exists, what is pinned, and why a fork was refused. Nothing
+ * `index`, `linkable` and `link` are one fact in three variables: what the current compile's link
+ * index is, whether it exists, and what is pinned. (A fourth, the fork-failure field, carried refusals onto
+ * `#link-status` until Plan 7 part 2 made refusals notices — `notice.ts`.) Nothing
  * outside this module writes any of them now, which is the whole point of the extraction — the
  * previous shape let any of `main()`'s thousand lines assign `link` and left the reader to find out
  * which ones did.
@@ -27,7 +28,7 @@ import type { Span } from './types'
 export type LinkWiring = {
   setIndex(index: LinkIndex | null): void
   /**
-   * THE ONE STATE FIELD WITH A READ ACCESSOR AS WELL AS A WRITER, unlike `linkable`/`link`/`forkFailed`
+   * THE ONE STATE FIELD WITH A READ ACCESSOR AS WELL AS A WRITER, unlike `linkable`/`link`
    * below, which are only ever read through the narrower questions the other accessors answer.
    * `draw.ts` and the click handlers `transport.ts`'s `events(...)` builds resolve nodes straight
    * through the index (`index.linkFor`, `index.nodeForState`, `index.nodeAtLambda`, `index.lambdaText`)
@@ -51,8 +52,6 @@ export type LinkWiring = {
   get linkable(): boolean
   get link(): Pin | null
   clearLink(): void
-  setForkFailed(reason: string | null): void
-  get forkFailed(): string | null
   lambdaLinkState(lambdaSpan: Span | null): LambdaLinkState
   lambdaLinkWindow(l: Link | null): LambdaWindow | null
   drawLink(l: Link | null, focusCoincident: boolean): void
@@ -66,8 +65,13 @@ export function createLinkWiring(deps: {
   sessions: SessionRegistry
   panes: PaneCollection
   draw: () => void
+  /**
+   * Put a sentence in the live region only — `notice.ts`'s `announce`. A link GESTURE announces the
+   * link sentence (Plan 7 part 2 spec §11); a keystroke never does.
+   */
+  announce: (text: string) => void
 }): LinkWiring {
-  const { view, sessions, panes, draw } = deps
+  const { view, sessions, panes, draw, announce } = deps
   const linkStatusHost = deps.statusHost
 
   /**
@@ -99,7 +103,7 @@ export function createLinkWiring(deps: {
    *
    * TWO LOOKUPS RATHER THAN A FLAG, and that is what makes §4.5's pairing cheap: detachment is a
    * property of the SESSION (`SessionEntry.detached`), so a pane is detached exactly when the session
-   * it is bound to is, and both surfaces — this sentence and the pane's own `[detached]` badge, which
+   * it is bound to is, and both surfaces — this sentence and the view's own `copy · not linked` status, which
    * `PaneSlot.render` sets from the same field — cannot disagree.
    *
    * §5 OWED THE JOINT CASE TO "THE TASK THAT WIRES `main.ts`", which is this one: T6 shipped both
@@ -107,8 +111,8 @@ export function createLinkWiring(deps: {
    *
    * A LEG WITH NO PANE READS `false`, WHICH IS THE HONEST ANSWER RATHER THAN A CONVENIENT ONE.
    * Detachment is a property of the SESSION a pane is BOUND to, so with no pane there is no binding to
-   * read and nothing is outside the correspondence — and the clause this drives ("λ pane detached —
-   * not linked to source") would otherwise narrate a pane the user is not looking at.
+   * read and nothing is outside the correspondence — and the clause this drives ("λ view shows a copy —
+   * not linked to the program") would otherwise narrate a pane the user is not looking at.
    */
   const detachedPanes = (): DetachedPanes => {
     const lambda = theLambdaSlot()
@@ -137,40 +141,6 @@ export function createLinkWiring(deps: {
   let index: LinkIndex | null = null
   let linkable = false
   let link: Pin | null = null
-
-  /**
-   * The most recent report `#link-status` owes the user that is not part of the current pin, or `null`
-   * — CRITICAL finding, plan 5d-iii's ninth task. `link-status.ts`'s `forkFailed` field is what this
-   * feeds; see that field's own doc for why `#link-status` is the surface and not the pane
-   * `onScratchReply`'s `no-session` arm was trying to reach.
-   *
-   * **NAMED FOR A FORK ATTEMPT'S FAILURE, WHICH WAS ONCE THE ONLY THING THIS EVER HELD — 5d-ii-d review
-   * round 2, Finding 3.** `main.ts` now also writes here on a buffers-storage quota failure and on a
-   * `warm` refused at the cap during a page restore, neither of which is a fork. The name stayed
-   * (renaming would ripple through every caller of `setForkFailed` for no behavioural gain) and so did
-   * the shape — one string, or nothing — because every one of these is the same kind of fact: the most
-   * recent thing that happened outside the current pin that the user has to be told about. What changed
-   * with the finding is that `link-status.ts` no longer assumes every value here is a fork's own words;
-   * a writer that IS reporting a fork says so in the string it hands to `setForkFailed`, and a writer
-   * that is not (the storage report, the restore refusal) does not.
-   *
-   * CLEARED WHEN A FORK SUCCEEDS (`events(...)`'s `detach` handler) AND ON THE NEXT SOURCE KEYSTROKE
-   * (`schedule`), NOT LEFT TO ACCUMULATE. Neither event means the message stopped being true — it means
-   * it stopped being NEWS: a stale failure from three edits ago sitting on the one line design §4.5
-   * already uses for live, current-tick narration would be the same silent-wrongness standard this file
-   * refuses everywhere else (`draw()`'s own comments), just aimed at a message instead of a highlight.
-   * The storage report and the restore refusal answer this same question on their own terms — see their
-   * call sites in `main.ts`.
-   *
-   * **THAT SENTENCE SAID "ON THE NEXT FORK ATTEMPT", AND 5d-ii-c's CAP MADE THE DIFFERENCE VISIBLE.**
-   * The clear ran AHEAD of `ScratchBuffers.fork` while a fork could only fail later, on a reply — every
-   * attempt that got that far was pending, so clearing and waiting said something true. `MAX_WARM_BUFFERS`
-   * (design §4.5) gave a fork a way to be refused on the spot, and a refused attempt must not clear the
-   * previous failure first: this is a pure state write with no repaint, so between the clear and the
-   * handler's `catch` the model would hold `null` while `#link-status` still showed the old message. The
-   * refused arm OVERWRITES instead, which is the same "stopped being news" rule with no window in it.
-   */
-  let forkFailed: string | null = null
 
   /**
    * Which λ state the link is in — the three-way distinction `link-status.ts` exists to keep apart.
@@ -227,17 +197,12 @@ export function createLinkWiring(deps: {
    */
   const drawLink = (l: Link | null, focusCoincident: boolean) => {
     const detached = detachedPanes()
-    // SPREAD, NOT ASSIGNED `undefined` — the same `exactOptionalPropertyTypes` idiom `events(...)`
-    // already uses for `detach`/`editScratch`/`linkState`/`linkLambda` below: `LinkStatus.forkFailed`
-    // is optional, and `{ forkFailed: undefined }` does not satisfy an optional property under that
-    // flag.
-    const failed = forkFailed === null ? {} : { forkFailed }
     if (!linkable) {
-      linkStatusHost.textContent = linkStatus({ state: 'stale', detached, ...failed })
+      linkStatusHost.textContent = linkStatus({ state: 'stale', detached })
       return
     }
     if (l === null) {
-      linkStatusHost.textContent = linkStatus({ state: 'none', detached, ...failed })
+      linkStatusHost.textContent = linkStatus({ state: 'none', detached })
       return
     }
     linkStatusHost.textContent = linkStatus({
@@ -246,7 +211,6 @@ export function createLinkWiring(deps: {
       lambda: lambdaLinkState(l.lambda),
       focus: focusCoincident,
       detached,
-      ...failed,
     })
   }
 
@@ -313,7 +277,21 @@ export function createLinkWiring(deps: {
     // its `#drawTable` pass on the (soon-stale) previous link state — thrown away before the browser
     // ever paints it — so the fan-out below is the LAST word and its one-shot target is still armed
     // when it runs.
+    const before = linkStatusHost.textContent ?? ''
     draw()
+    // ANNOUNCED HERE AND NOWHERE ELSE (spec §11): `setLinkTo` is the link gesture — a source click or
+    // `Mod-'`, a λ token, a rule row. `draw()` just wrote the sentence; a keystroke reaches `drawLink`
+    // through `draw()` alone and says nothing.
+    //
+    // **WHAT CHANGED IS MEASURED AGAINST THE LINE, NOT AGAINST THE LAST THING ANNOUNCED.** A memo of the
+    // last announcement goes stale the moment anything else writes the line — and something does, on
+    // every keystroke: the source editor's `updateListener` clears the link, so the line reads "linking
+    // resumes when this compiles" and then empties when the compile lands, both unannounced and
+    // correctly so. With a memo, clicking the same construct again after an edit produced the same
+    // sentence as last time and was therefore silent, though the line had just changed from nothing to
+    // that sentence — which is the accessibility item this announcement exists to close.
+    const sentence = linkStatusHost.textContent ?? ''
+    if (sentence !== before) announce(sentence)
     // PER-LEG, NOT PER-PANE — every TM pane follows the same link, resolved once above and fanned out
     // here. `p.pane` NEEDS THE CAST for the reason `draw.ts`'s identical loop documents: `PaneView<T>`
     // is deliberately narrow and does not carry `setLink`, which is a fact about the concrete `TmPane`
@@ -347,12 +325,6 @@ export function createLinkWiring(deps: {
     clearLink(): void {
       linkable = false
       link = null
-    },
-    setForkFailed(reason: string | null): void {
-      forkFailed = reason
-    },
-    get forkFailed(): string | null {
-      return forkFailed
     },
     lambdaLinkState,
     lambdaLinkWindow,

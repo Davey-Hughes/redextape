@@ -24,18 +24,36 @@
  * rather than ones an earlier instance's listeners are still attached to.
  */
 export const SHELL = `
-  <header class="bar"><span class="wordmark">redextape</span>
+  <header class="bar">
+    <span class="wordmark">redextape</span>
+    <button type="button" id="workspace" aria-haspopup="menu" aria-controls="workspace-menu" aria-expanded="false">Explorer</button>
+    <div id="workspace-menu" class="header-menu" popover>
+      <button type="button" id="reset-preset">reset preset — restores the default views</button>
+    </div>
+    <button type="button" id="new-view" aria-haspopup="menu" aria-controls="new-view-menu" aria-expanded="false">+ view</button>
+    <div id="new-view-menu" class="header-menu" popover></div>
+    <button type="button" id="buffers">copies <span aria-hidden="true">▾</span></button>
+    <label class="encoding">
+      encoding
+      <select id="encoding"></select>
+    </label>
+    <span class="bar-spacer"></span>
     <button type="button" id="appearance"></button>
-    <label class="skin">style <select id="style"></select></label>
-    <label class="skin">palette <select id="palette"></select></label>
-    <button type="button" id="restore-layout" aria-label="restore the default pane layout">reset layout</button>
-    <button type="button" id="buffers">buffers</button>
-    <label class="encoding">encoding <select id="encoding"></select></label>
+    <button type="button" id="settings" aria-haspopup="menu" aria-controls="settings-menu" aria-expanded="false">settings</button>
+    <div id="settings-menu" class="header-menu settings" popover>
+      <label class="skin">style <select id="style"></select></label>
+      <label class="skin">palette <select id="palette"></select></label>
+      <label class="skin">appearance <select id="appearance-choice"></select></label>
+    </div>
   </header>
+  <div id="notice" class="notice" hidden></div>
+  <div id="live" class="visually-hidden" role="status"></div>
   <main></main>
   <div id="editor"></div>
-  <div id="link-status" class="link-status"></div>
-  <section id="results" class="pane results"></section>`
+  <footer class="strip">
+    <section id="results" class="results"></section>
+    <div id="link-status" class="link-status"></div>
+  </footer>`
 
 /** Longest predicate source a failure message will quote before it starts eliding. */
 const MAX_SOURCE_CHARS = 120

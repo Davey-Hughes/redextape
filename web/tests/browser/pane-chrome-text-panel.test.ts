@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { icon } from '../../src/icons'
-import { claimEditorButton, textPanel } from '../../src/pane-chrome'
+import { textPanel } from '../../src/pane-chrome'
 
 function toggleOf(el: HTMLElement): HTMLButtonElement {
   const t = el.querySelector<HTMLButtonElement>('.panel-toggle')
@@ -78,20 +77,5 @@ describe('textPanel', () => {
     t.update(false)
     t.update(true)
     expect(onToggle).not.toHaveBeenCalled()
-  })
-})
-
-describe('claimEditorButton', () => {
-  it('carries the move-editor-here icon, not disclose’s, under its unchanged aria-label', () => {
-    const parent = document.createElement('div')
-    const button = claimEditorButton(parent, () => {})
-    button.update(true)
-    const el = parent.querySelector('button.claim-editor')
-    if (el === null) throw new Error('claimEditorButton did not append a button.claim-editor')
-    const path = el.querySelector('svg.icon path')
-    if (path === null) throw new Error('the claim button has no svg.icon')
-    expect(path.getAttribute('d')).toBe(icon('move-editor-here').querySelector('path')?.getAttribute('d'))
-    expect(path.getAttribute('d')).not.toBe(icon('disclose').querySelector('path')?.getAttribute('d'))
-    expect(el.getAttribute('aria-label')).toBe('bring the term editor to this pane')
   })
 })

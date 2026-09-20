@@ -2,22 +2,15 @@ import type { ControlState } from './controls'
 import type { EditablePane } from './editor-custody'
 import { EDITOR_DEBOUNCE_MS } from './editor-debounce'
 import type { LambdaWindow } from './lambda-window'
-import {
-  claimEditorButton,
-  controlStrip,
-  detachButton,
-  detachedBadge,
-  layoutControls,
-  type PaneEvents,
-  paneSelect,
-  type SplitChoices,
-  textPanel,
-} from './pane-chrome'
+import type { Dir } from './layout'
+import { type PaneChoice, type PaneEvents, type SplitChoices, textPanel } from './pane-chrome'
 import type { Leg } from './protocol'
 import { ScratchEditor } from './scratch-editor'
 import type { Binding, PaneOption } from './sessions'
 import { byteIndexAt, byteToIndex, decorationRanges, indexToByte } from './spans'
+import { stepControls } from './step-controls'
 import type { Diagnostic, LambdaState } from './types'
+import { type ViewHeader, type ViewMenu, viewHeader, viewMenu } from './view-header'
 
 export type { PaneEvents }
 
@@ -40,20 +33,23 @@ function ellipsis(): HTMLElement {
  */
 export class LambdaPane implements EditablePane {
   #text: HTMLElement
-  #strip: ReturnType<typeof controlStrip>
-  #badge: ReturnType<typeof detachedBadge>
-  #select: ReturnType<typeof paneSelect>
+  #steps: ReturnType<typeof stepControls>
   /**
-   * The fork control, or `null` on a pane whose events carry no `detach` handler — design §4.3's
-   * trigger; see `detachButton` for why it is a button at all.
-   *
-   * BUILT ONLY WHEN THE HANDLER EXISTS, rather than built always and calling `on.detach?.()`. That is
-   * the same standard §4.5 states and the `linkLambda` handler below does NOT need: a click that goes
-   * nowhere is invisible, but a control that cannot work is on screen. A caller with no `detach` — a
-   * test fixture, or any future pane that renders λ frames it does not own — gets a pane with no fork
-   * offered rather than one that offers a fork and swallows it.
+   * The view's header (`view-header.ts`'s `viewHeader`): the title that is the selector, the
+   * `copy · not linked` status, and the slot the transport strip mounts in.
    */
-  #detach: ReturnType<typeof detachButton> | null = null
+  #header: ViewHeader
+  /**
+   * The view's `⋯` menu and `✕` (`view-header.ts`'s `viewMenu`): split right, split down, edit a copy,
+   * move the editor here.
+   *
+   * AN ITEM IS BUILT ONLY WHEN ITS HANDLER EXISTS, rather than built always and calling `on.detach?.()`.
+   * That is the same standard §4.5 states and the `linkLambda` handler below does NOT need: a click that
+   * goes nowhere is invisible, but a control that cannot work is on screen. A caller with no `detach` — a
+   * test fixture, or any future pane that renders λ frames it does not own — gets a view with no copy
+   * offered rather than one that offers a copy and swallows it.
+   */
+  #menu: ViewMenu
   #frame: LambdaState | null = null
   #link: LambdaWindow | null = null
   /**
@@ -77,20 +73,12 @@ export class LambdaPane implements EditablePane {
   #editor: ScratchEditor | null = null
   #collapse: ReturnType<typeof textPanel>
   /**
-   * The "bring the term editor to this pane" control, or `null` on a pane whose events carry no `showEditor` handler
-   * — the same "built only when the handler exists" idiom `#detach` states above, and for the same
-   * reason: a caller with no `showEditor` gets a pane that never offers to claim an editor rather than
-   * one that offers to and swallows the click.
-   */
-  #claim: ReturnType<typeof claimEditorButton> | null = null
-  #layout: ReturnType<typeof layoutControls>
-  /**
    * What this pane's split menus offer, last pushed by `setLayoutControls` — see `SplitChoices` for why
    * the starting value is "nothing on offer, and no pair in force" rather than an invented binding, and
    * `PaneView.setLayoutControls` for why the whole list arrives on the call that mounts the control.
    *
-   * A FIELD READ THROUGH A THUNK RATHER THAN A LIST HANDED TO `layoutControls` ONCE. The menu is built
-   * when it opens (`splitControl`'s doc), so what it needs is the CURRENT value at that moment; a list
+   * A FIELD READ THROUGH A THUNK RATHER THAN A LIST HANDED TO `viewMenu` ONCE. The split's pairs are built
+   * when a split is chosen (`viewMenu`'s doc), so what it needs is the CURRENT value at that moment; a list
    * passed at construction would be the one thing a build-on-open cannot fix.
    */
   #choices: SplitChoices = { options: [], sourceAvailable: false, current: null }
@@ -107,14 +95,14 @@ export class LambdaPane implements EditablePane {
    *
    * A FIELD RATHER THAN A READ OF THE BADGE'S OWN STATE. The fork control's availability is a
    * function of TWO inputs that arrive through two different calls — the binding (`setDetached`) and
-   * the frame (`render`) — so whichever arrives second has to see the first. `detachedBadge` holds an
+   * the frame (`render`) — so whichever arrives second has to see the first. The view header holds an
    * equivalent boolean privately for its own no-op guard; asking it would make one widget's internal
    * state another's input.
    */
   #detached = false
   /**
    * Whether this pane's session has an editor to bring here at all — `#refreshClaim`'s THIRD input, and
-   * the one whose absence made "bring the term editor to this pane" a control that provably could not
+   * the one whose absence made "move the editor here" a control that provably could not
    * work (deferred-a11y item 11, fixed here).
    *
    * **THE TWO INPUTS IT JOINS ONLY APPROXIMATED THIS, AND 5d-ii-c's DECISION 2 IS WHAT SEPARATED THEM.**
@@ -145,38 +133,33 @@ export class LambdaPane implements EditablePane {
   #editorAvailable = false
 
   constructor(host: HTMLElement, on: PaneEvents) {
-    const title = document.createElement('h2')
-    title.textContent = 'lambda'
-    this.#badge = detachedBadge(title)
-    // ANCHORED TO THE TITLE, NOT PLACED IN `replaceChildren` BELOW, because the control removes itself
-    // whenever the slot has fewer than two PAIRS to offer (see `paneSelect`) and has to know
-    // where to go back. `title.after` is a no-op until the title has a parent, which it gets on the
-    // `host.replaceChildren` line below — and nothing calls `setBindings` before then.
-    this.#select = paneSelect(title, on.rebind)
+    // THE HEADER CARRIES THE TITLE-SELECTOR AND THE STATUS — `view-header.ts`'s own doc has why the title
+    // is the selector and why the status sits inside the heading.
+    this.#header = viewHeader(on.rebind)
     this.#text = document.createElement('pre')
     this.#text.className = 'term'
-    this.#strip = controlStrip(on)
-    this.#layout = layoutControls(this.#strip.el, on, () => this.#choices)
-    // IN THE CONTROL STRIP, NOT ON THE `<h2>`'s ROW BESIDE THE SELECTOR. The heading already carries
-    // two things — the pane's name and §4.5's `[detached]` badge — and both are STATEMENTS about the
-    // pane; the strip is where its verbs live. It is also why no stylesheet rule was needed: the
-    // button is a `.controls button` like the four beside it. `detachedBadge` and `paneSelect` take
-    // the title for the same kind of reason in the other direction.
+    this.#steps = stepControls(on)
+    // THE FRAME'S STEP, NOT THE WINDOW'S, for `edit a copy`. The run closure supplies the step of the
+    // frame this leg is actually at, which is what design §4.1's replay reduces to.
+    //
+    // **A VIEW SHOWING A LINK WINDOW MUST NOT FORK, AND `#refreshDetach` ENFORCES IT.** A step says
+    // nothing about which of the two bodies is on screen, so the guard is an explicit condition in
+    // `#refreshDetach`, which checks `#link` alongside `#detached` and the presence of a frame. It does
+    // NOT check the frame's cut: §4.1a moved that refusal to the worker, which answers a diagnostic while
+    // this control stays offered. `pane-chrome.ts`'s `detach` doc and `#refreshDetach`'s own doc both
+    // carry the full argument.
     const detach = on.detach
-    if (detach !== undefined) {
-      // THE FRAME'S STEP, NOT THE WINDOW'S. This line supplies the step of the frame this leg is
-      // actually at, which is what design §4.1's replay reduces to.
-      //
-      // **A PANE SHOWING A LINK WINDOW MUST NOT FORK, AND `#refreshDetach` NOW ENFORCES IT.** This
-      // used to hold for free: the handler passed the pane's own body text, and the frame's text was
-      // chosen over the window's for the reason recorded above. A step carries no such distinction —
-      // it says nothing about which of the two bodies is on screen — so the guard is an explicit
-      // condition in `#refreshDetach`, which checks `#link` alongside `#detached` and the presence of
-      // a frame. It does NOT check the frame's cut: §4.1a moved that refusal to the worker, which
-      // answers a diagnostic while this control stays offered. `pane-chrome.ts`'s `detach` doc and
-      // `#refreshDetach`'s own doc both carry the full argument.
-      this.#detach = detachButton(this.#strip.el, () => detach(this.#frame?.step ?? 0))
-    }
+    this.#menu = viewMenu(this.#header.actions, {
+      ...(on.splitRow !== undefined && on.splitColumn !== undefined
+        ? { split: (dir: Dir, c: PaneChoice) => (dir === 'row' ? on.splitRow?.(c) : on.splitColumn?.(c)) }
+        : {}),
+      ...(on.close !== undefined ? { close: on.close } : {}),
+      ...(detach !== undefined
+        ? { editCopy: { run: () => detach(this.#frame?.step ?? 0), what: 'the term at this step' } }
+        : {}),
+      ...(on.showEditor !== undefined ? { claim: on.showEditor } : {}),
+      choices: () => this.#choices,
+    })
     // THE HOST IS IN THE DOM FROM CONSTRUCTION AND CARRIES NO CLASS UNTIL AN EDITOR IS MOUNTED.
     // A stable parent is what lets `setEditor` mount and unmount without touching the pane's child
     // order; the class is what `.term-editor` selects, so an empty host matches nothing and "is there
@@ -187,11 +170,8 @@ export class LambdaPane implements EditablePane {
     // see `PaneEvents.collapse`'s own doc for why the app needs telling (the state is recorded against
     // the buffer, not the pane).
     this.#collapse = textPanel(this.#editorHost, (collapsed) => on.collapse?.(collapsed))
-    const showEditor = on.showEditor
-    if (showEditor !== undefined) {
-      this.#claim = claimEditorButton(this.#strip.el, showEditor)
-    }
-    host.replaceChildren(title, this.#collapse.el, this.#text, this.#strip.el)
+    this.#header.steps.append(this.#steps.el)
+    host.replaceChildren(this.#header.el, this.#collapse.el, this.#text)
 
     // λ TEXT -> SOURCE, the third direction. Delegated from the `<pre>` rather than bound per token,
     // because tokens are recreated on every draw. `data-at` carries the token's byte offset in the
@@ -212,7 +192,7 @@ export class LambdaPane implements EditablePane {
   }
 
   render(frame: LambdaState | null, controls: ControlState): void {
-    this.#strip.update(controls)
+    this.#steps.update(controls)
     this.#frame = frame
     this.#redraw()
     // THE FRAME IS HALF OF WHETHER A FORK IS POSSIBLE — see `#refreshDetach`. Driven from here and
@@ -225,7 +205,7 @@ export class LambdaPane implements EditablePane {
    * Mount an editor over this pane's term seeded with `text`, or unmount it with `null` — design
    * §4.2's upper region.
    *
-   * MOUNTED AND UNMOUNTED, NEVER HIDDEN, for `detachedBadge`'s reason taken one step further: a hidden
+   * MOUNTED AND UNMOUNTED, NEVER HIDDEN, for the view status's reason taken one step further: a hidden
    * CodeMirror instance is a live instance with a live debounce, and §5 asks for a test that
    * reattaching a pane REMOVES the editor. Removal is what makes that question have one answer.
    *
@@ -292,14 +272,14 @@ export class LambdaPane implements EditablePane {
   /**
    * Detach this pane's mounted editor WITHOUT DESTROYING IT, for a caller about to remount it on a
    * different pane — the editor-moves rule's other half of `receiveEditor`, and together the two are
-   * what `editor-custody.ts`'s `reconcileEditors` uses to answer the "bring the term editor to this pane" control. `null` if
+   * what `editor-custody.ts`'s `reconcileEditors` uses to answer the "move the editor here" control. `null` if
    * this pane holds none, so a caller can call this on every lambda pane and only act on the one that
    * says yes.
    *
    * LEAVES `#detached` UNTOUCHED. This pane may still be bound to the scratch session that just lost
    * its editor — the binding did not change, only which pane renders the editor for it — so the fork
    * control's own refusal (`#refreshDetach`'s `!this.#detached`) must not flip, and `#refreshClaim`
-   * below is what re-offers "bring the term editor to this pane" here the instant this method makes `#editor === null`
+   * below is what re-offers "move the editor here" here the instant this method makes `#editor === null`
    * true while `#detached` is still true.
    */
   takeEditor(): ScratchEditor | null {
@@ -351,8 +331,8 @@ export class LambdaPane implements EditablePane {
    *
    * **AND IT ASKED FOR IT AGAIN, ONE ROUND LATER — WHICH IS WHY THIS PARAGRAPH NO LONGER CLAIMS IT
    * "CANNOT".** That sentence read "and it no longer can (see its doc for the root fix)". A third review
-   * round then reached this throw in six clicks (`fork`, `close`, `reset layout`, type in the source,
-   * fork again, split), because the root fix's sweep ran over the CLAIM map while the entry that
+   * round then reached this throw in six clicks (*edit a copy*, `close`, *reset preset*, type in the
+   * source, *edit a copy* again, split), because the root fix's sweep ran over the CLAIM map while the entry that
    * outlived its session sat in the CUSTODY map with no claim naming it — see `reconcileEditors`' own
    * doc for the interaction. The fix is there, in the caller's domains, and it is a better fix than a
    * promise here would have been: **this throw is not a backstop for an argument, it is the only reason
@@ -413,7 +393,7 @@ export class LambdaPane implements EditablePane {
    * third input rather than something this class could work out for itself.
    *
    * THE NO-OP GUARD IS THE SAME ONE EVERY PER-FRAME SETTER IN THIS FILE STATES, and here it also keeps
-   * `#refreshClaim` — and so `claimEditorButton.update`'s DOM write — off the hot path on the frames
+   * `#refreshClaim` — and so `ViewMenu.setClaim`'s DOM write — off the hot path on the frames
    * where nothing moved, which is most of them during playback.
    */
   setEditorAvailable(available: boolean): void {
@@ -447,7 +427,7 @@ export class LambdaPane implements EditablePane {
    * unaffected by which text the body is showing.
    */
   setBindings(options: PaneOption[], current: Binding<Leg>): void {
-    this.#select.update(options, current)
+    this.#header.setBindings(options, current)
   }
 
   /**
@@ -458,17 +438,17 @@ export class LambdaPane implements EditablePane {
    * duplicated, and which `(leg, session)` pairs exist to create. Same division as `setBindings`, which
    * takes the options rather than computing them.
    *
-   * `choices` IS STORED AND NOT PASSED ON, because `layoutControls` reads it through the thunk this
+   * `choices` IS STORED AND NOT PASSED ON, because `viewMenu` reads it through the thunk this
    * pane gave it at construction — see `#choices`, and `PaneView.setLayoutControls` for why the list
    * arrives here rather than through a setter of its own.
    */
   setLayoutControls(canClose: boolean, canSplit: boolean, choices: SplitChoices): void {
     this.#choices = choices
-    this.#layout.update(canClose, canSplit)
+    this.#menu.setLayout(canClose, canSplit)
   }
 
   /**
-   * Show or hide the `[detached]` badge — design §4.5's second surface, paired with the sentence
+   * Show or hide the `copy · not linked` status — design §4.5's second surface, paired with the sentence
    * `link-status.ts` puts in `#link-status`.
    *
    * `setDetached`, NOT `renderDetached`, THOUGH §4.5 CALLS IT "analogous to `renderLink`". The
@@ -480,7 +460,7 @@ export class LambdaPane implements EditablePane {
    * and this pane's counterpart is named to match across the two.
    *
    * A PURE SETTER, LIKE `TmPane.setFocus` AND UNLIKE `renderLink`: nothing here needs a redraw,
-   * because `detachedBadge` mutates the title directly and the body is the caller's separate
+   * because the view header repaints its heading itself and the body is the caller's separate
    * decision — a detached λ pane shows its scratch's own term, which arrives through `render` like
    * any other frame.
    *
@@ -518,19 +498,19 @@ export class LambdaPane implements EditablePane {
    */
   setDetached(detached: boolean): void {
     this.#detached = detached
-    this.#badge.update(detached)
+    this.#header.setDetached(detached)
     if (!detached && this.#editor !== null) this.setEditor(null)
     this.#refreshDetach()
     // `setEditor(null)` ABOVE ALREADY CALLS `#refreshClaim` WHEN IT FIRES, but that branch is
     // conditional on `#editor !== null` and this call is not: a pane freshly bound to a scratch (still
-    // `#editor === null`, never having held one) needs "bring the term editor to this pane" offered the first time
+    // `#editor === null`, never having held one) needs "move the editor here" offered the first time
     // `#detached` turns true, which is a transition `setEditor(null)` never sees because there was
     // never an editor here to unmount.
     this.#refreshClaim()
   }
 
   /**
-   * Offer "bring the term editor to this pane" exactly when this pane's session has one to show and this pane is not
+   * Offer "move the editor here" exactly when this pane's session has one to show and this pane is not
    * already showing it — wave 3 (5d-ii-a)'s editor-moves rule.
    *
    * THE SAME "PAIR OF INPUTS ARRIVE THROUGH TWO DIFFERENT CALLS" SHAPE AS `#refreshDetach`: `#detached`
@@ -543,7 +523,7 @@ export class LambdaPane implements EditablePane {
    * the one showing its editor"; without the third that sentence quietly assumes the editor exists.
    */
   #refreshClaim(): void {
-    this.#claim?.update(this.#detached && this.#editor === null && this.#editorAvailable)
+    this.#menu.setClaim(this.#detached && this.#editor === null && this.#editorAvailable)
   }
 
   /**
@@ -569,8 +549,8 @@ export class LambdaPane implements EditablePane {
    * refusal that never mounts an editor at all: a failed build never reaches `scratch-compiled`, so
    * `setEditor` is never called and `#editor` stays `null` — `setDiagnostics`'s own doc already says
    * that call is a no-op with no editor mounted, which is what a diagnostic routed there would have
-   * silently hit. `onScratchReply`'s `no-session` arm puts the diagnostic on `#link-status`
-   * (`link-status.ts`'s `forkFailed`) instead, which is a surface this pane does not have to be able to
+   * silently hit. `onScratchReply`'s `no-session` arm puts the diagnostic in a notice
+   * (`notice.ts`'s `createNotices`) instead, which is a surface this pane does not have to be able to
    * show anything for.
    *
    * **AND THE CONTROL DOES NOT COME BACK AFTERWARDS, WHICH THIS PARAGRAPH USED TO PROMISE.** It said
@@ -598,8 +578,7 @@ export class LambdaPane implements EditablePane {
    * than inherited for free — this one `frame.cut` never covered and does not touch.
    */
   #refreshDetach(): void {
-    const frame = this.#frame
-    this.#detach?.update(!this.#detached && this.#link === null && frame !== null)
+    this.#menu.setCopy(!this.#detached && this.#link === null && this.#frame !== null ? 'ready' : null)
   }
 
   /**

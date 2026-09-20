@@ -135,7 +135,7 @@ describe('renderLayout', () => {
     expect(document.activeElement).toBe(before)
 
     // The real caller re-renders once per gesture's COMMIT, not once per FRAME — a drag's `pointerup`, a
-    // keyboard gesture's `keyup`/`blur`, and every structural change (split, close, reset layout) all end
+    // keyboard gesture's `keyup`/`blur`, and every structural change (split, close, reset preset) all end
     // in `pane-host.ts`'s `applyLayout`, which calls `renderLayout` unconditionally from its `finally`
     // block on every call. That is what destroys `before` and rebuilds it as a new node with the same
     // path/index. A resize no longer re-renders on each FRAME (`syncSizes` moves the elements already

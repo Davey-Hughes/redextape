@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
@@ -14,7 +15,7 @@ import { SHELL, until } from './harness'
  * change anywhere, on either pane — the edit landed on a session that was not on screen.
  *
  * DRIVEN THROUGH THE MOUNTED APP, NOT AGAINST A HAND-BUILT REGISTRY, because the defect is in the
- * WIRING between `PaneSlot.render` and `LambdaPane`, not in either alone. `binding-selector.test.ts`'s
+ * WIRING between `PaneSlot.render` and `LambdaPane`, not in either alone. `view-title.test.ts`'s
  * hand-built harness calls `paint` (`slot.render` then nothing else) the same way `main.ts`'s `draw()`
  * does — it would have caught this too, had any of its cases forked an editor first, but none of them
  * builds a `LambdaScratch` with a real editor behind it (T7's own doc: this app's one λ pane is what
@@ -31,20 +32,42 @@ import { SHELL, until } from './harness'
  * which is the assertion this file exists for and the reason it is not folded into that one.
  */
 
+/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
+const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
+
+/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does. */
+function pickBinding(leaf: string, key: string): void {
+  const title = titleOf(leaf)
+  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
+  if (item == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
+    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
+  }
+  item.click()
+}
+
+/** Every pair `leaf`'s title menu offers, as keys — opens and closes the menu to read it. */
+function offered(leaf: string): string[] {
+  const title = titleOf(leaf)
+  if (title === null) return []
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const keys = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding ?? '')
+  menu?.hidePopover()
+  return keys
+}
+
 let view: EditorView
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
-const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .detach')
-const selector = () => document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')
+const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')
+const selector = () => titleOf('lambda-0')
 /**
- * The `<option>` value the pane selector encodes a `(leg, session)` pair as — spelled out here rather
- * than imported from `pane-chrome.ts`, so this pins the DOM contract instead of agreeing with whatever
- * the control currently does. `\x00` as an escape is `scripts/check-text-bytes.sh`'s rule.
- */
-const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
-/**
- * The λ `<option>` for the one scratch buffer the λ pane's selector offers — BY ELIMINATION, since the
+ * The λ item's key for the one scratch buffer the λ view's title menu offers — BY ELIMINATION, since the
  * source session is the only λ session whose id `main.ts` writes down.
  *
  * **THIS REPLACES A LITERAL `'lambda-scratch'`, AND THE MINTED ID WOULD BE NO BETTER A CONSTANT.**
@@ -53,10 +76,8 @@ const optionValue = (leg: string, id: string) => `${leg}\x00${id}`
  * ones in tests that failed early. Reading the option keeps the assertion an identity check against the
  * DOM rather than an agreement with a counter.
  */
-const bufferOption = (): HTMLOptionElement => {
-  const buffers = [
-    ...document.querySelectorAll<HTMLOptionElement>('[data-leaf="lambda-0"] .pane-binding optgroup[label="λ"] option'),
-  ].filter((o) => o.textContent !== 'source')
+const bufferOption = (): string => {
+  const buffers = offered('lambda-0').filter((k) => k.startsWith('lambda:') && k !== bindingKey('lambda', 'source'))
   const only = buffers[0]
   if (buffers.length !== 1 || only === undefined) {
     throw new Error(`expected exactly one scratch buffer in the λ group, found ${buffers.length}`)
@@ -93,13 +114,13 @@ describe('rebinding a forked λ pane through the binding selector', () => {
     )
   })
 
-  it('removes .term-editor from the DOM — it does not merely drop the [detached] badge', async () => {
+  it('removes .term-editor from the DOM — it does not merely drop the "copy · not linked" status', async () => {
     await settled('let x = 40; x + 2')
 
     const fork = forkButton()
     if (fork === null) throw new Error('the λ pane should offer a fork on a settled, attached pane')
     fork.click()
-    expect(heading()).toContain('[detached]')
+    expect(heading()).toContain('copy · not linked')
 
     await until(() => editor() !== null, 'the editor to mount')
     // **THE WAIT IS THE ASSERTION, AND THIS LINE USED TO RESTATE THE WAIT'S OWN PREDICATE.** It read
@@ -124,23 +145,20 @@ describe('rebinding a forked λ pane through the binding selector', () => {
     // control lists `(leg, session)` pairs, and the source session's two legs put it on screen before
     // any fork. What the fork produced is the BUFFER's option, which is what the next line reads.
     if (select === null) throw new Error('the pane selector should be on screen from the first paint')
-    // WAS `optionValue('lambda', 'lambda-scratch')` — see `bufferOption` for why that constant is gone
+    // WAS `bindingKey('lambda', 'lambda-scratch')` — see `bufferOption` for why that constant is gone
     // and why the minted id does not replace it. `bufferOption` throwing unless there is exactly one is
     // the other half of what this line used to say: the fork produced a second λ session, and one.
-    expect(select.value).toBe(bufferOption().value)
+    expect(select.dataset.binding).toBe(bufferOption())
 
-    // THE REBIND — through the real `<select>`, the same `change` event `main.ts` listens for, not a
-    // direct call into `slot.rebind`. `paneSelect`'s own option values are `(leg, session)` PAIRS —
-    // they were bare `SessionId`s until the control was widened to both axes, which is why this goes
-    // through `optionValue` rather than the literal id — and `main.ts`'s `SOURCE_SESSION` is the
-    // literal string `'source'`.
-    select.value = optionValue('lambda', 'source')
-    select.dispatchEvent(new Event('change'))
+    // THE REBIND — through the real title menu, the same pick a user makes, not a direct call into
+    // `slot.rebind`. The items carry `(leg, session)` PAIRS (`bindingKey`), and `main.ts`'s
+    // `SOURCE_SESSION` is the literal string `'source'`.
+    pickBinding('lambda-0', bindingKey('lambda', 'source'))
 
     // THE OLD SURFACES STILL PASS: the badge is gone and the selector agrees. Neither of these two
     // assertions is what this test exists for — the one below is.
-    expect(heading()).toBe('lambda')
-    expect(select.value).toBe(optionValue('lambda', 'source'))
+    expect(heading()).toBe('λ · program')
+    expect(select.dataset.binding).toBe(bindingKey('lambda', 'source'))
     // THE REGRESSION. Without `LambdaPane.setDetached`'s teardown, this stayed non-null: the scratch's
     // editor, still mounted, still listening, over a body now showing the source's term.
     expect(editor()).toBeNull()
@@ -176,25 +194,22 @@ describe('rebinding a forked λ pane through the binding selector', () => {
     // 1. BACK TO A FORKABLE PANE. The test above left `lambda-0` on source with its buffer still live
     //    (nothing ends a buffer implicitly), which is exactly the state a fork needs.
     await settled('let y = 1; y + y')
-    const p = () => document.querySelector<HTMLSelectElement>('[data-leaf="lambda-0"] .pane-binding select')
+    const p = () => titleOf('lambda-0')
     forkButton()?.click()
     await until(() => editor() !== null, "the first pane's editor to mount")
-    const bufferA = p()?.value ?? ''
-    expect(bufferA).not.toBe(optionValue('lambda', 'source'))
+    const bufferA = p()?.dataset.binding ?? ''
+    expect(bufferA).not.toBe(bindingKey('lambda', 'source'))
 
-    // 2. A SECOND λ PANE ON THE SAME BUFFER, through the real split picker's `(same)` entry — the
-    //    gesture `two-lambda-panes.test.ts` establishes. It arrives holding no editor: there is one
+    // 2. A SECOND λ VIEW ON THE SAME BUFFER, through the real `⋯` menu's "another view of this" entry —
+    //    the gesture `two-lambda-panes.test.ts` establishes. It arrives holding no editor: there is one
     //    `ScratchEditor` per buffer and `lambda-0` has it.
-    const split = document.querySelector<HTMLButtonElement>(
-      '[data-leaf="lambda-0"] button[aria-label="split left and right"]',
-    )
-    if (split === null) throw new Error('no split control on the forked λ pane')
-    split.click()
-    const menu = document.getElementById(split.getAttribute('aria-controls') ?? '')
-    const same = menu?.querySelector<HTMLButtonElement>('button') ?? null
-    if (same === null || !(same.textContent ?? '').endsWith('(same)')) {
-      throw new Error(`the split menu does not start with the duplicate case: ${same?.textContent}`)
-    }
+    const more = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-more')
+    if (more === null) throw new Error('no view menu on the forked λ view')
+    more.click()
+    const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
+    menu?.querySelector<HTMLButtonElement>('button.view-split[data-dir="row"]')?.click()
+    const same = menu?.querySelector<HTMLButtonElement>('.view-menu-pairs button[data-same]') ?? null
+    if (same === null) throw new Error('the split menu offers no "another view of this"')
     same.click()
     const second = [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')]
       .map((e) => e.dataset.leaf ?? '')
@@ -202,15 +217,12 @@ describe('rebinding a forked λ pane through the binding selector', () => {
     if (second === undefined) throw new Error('the split produced no second λ pane')
 
     // 3. THE SECOND PANE MAKES BUFFER B — home to source first, because a detached pane offers no ✎.
-    const secondSelect = document.querySelector<HTMLSelectElement>(`[data-leaf="${second}"] .pane-binding select`)
-    if (secondSelect === null) throw new Error('no binding selector on the second λ pane')
-    secondSelect.value = optionValue('lambda', 'source')
-    secondSelect.dispatchEvent(new Event('change', { bubbles: true }))
-    const secondFork = document.querySelector<HTMLButtonElement>(`[data-leaf="${second}"] .controls .detach`)
+    pickBinding(`${second}`, bindingKey('lambda', 'source'))
+    const secondFork = document.querySelector<HTMLButtonElement>(`[data-leaf="${second}"] button.detach`)
     if (secondFork === null) throw new Error('the second pane should offer a fork once it is back on source')
     secondFork.click()
     await until(() => document.querySelector(`[data-leaf="${second}"] .term-editor`) !== null, "B's editor to mount")
-    const bufferB = secondSelect.value
+    const bufferB = titleOf(second)?.dataset.binding ?? ''
     expect(bufferB).not.toBe(bufferA)
     // AND `lambda-0` STILL HOLDS A's EDITOR — asserted, because everything below is about what happens
     // to this exact view and a test that had already lost it would pass vacuously.
@@ -219,14 +231,13 @@ describe('rebinding a forked λ pane through the binding selector', () => {
     // 4. THE GESTURE. `lambda-0` goes from buffer A straight to buffer B: detached on both sides, which
     //    is the whole of why the teardown the first test pins does not fire.
     const first = p()
-    if (first === null) throw new Error('no binding selector on the first λ pane')
-    first.value = bufferB
-    first.dispatchEvent(new Event('change', { bubbles: true }))
+    if (first === null) throw new Error('no title-selector on the first λ view')
+    pickBinding('lambda-0', bufferB)
 
     // THE REGRESSION. Without the handover this stayed non-null: buffer A's live CodeMirror, mounted
     // over buffer B's frames, with `editScratch` ready to route its keystrokes to B.
     expect(editor()).toBeNull()
-    expect(first.value).toBe(bufferB)
+    expect(p()?.dataset.binding).toBe(bufferB)
     // **AND THE NODE IS GONE, NOT MERELY THE CLASS — this line is the one the fix's first version
     // passed while still shipping the defect.** `editor()` reads `.term-editor`, which is a class on the
     // pane's editor HOST; `takeEditor` stripped it and left `editor.dom` parented underneath, so the
@@ -240,12 +251,9 @@ describe('rebinding a forked λ pane through the binding selector', () => {
     //    `destroy`. Rebinding back to A leaves the pane detached with no editor, which is precisely the
     //    state deferred-a11y item 11's control exists for: `hasEditor(A)` is true because custody has
     //    it, so the control is offered, and clicking it runs the sweep that mounts the SAME view here.
-    first.value = bufferA
-    first.dispatchEvent(new Event('change', { bubbles: true }))
+    pickBinding('lambda-0', bufferA)
     expect(editor()).toBeNull()
-    const claim = document.querySelector<HTMLButtonElement>(
-      '[data-leaf="lambda-0"] button[aria-label="bring the term editor to this pane"]',
-    )
+    const claim = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.claim-editor')
     expect(claim).not.toBeNull()
     claim?.click()
     await until(() => editor() !== null, "A's editor to come back out of custody")

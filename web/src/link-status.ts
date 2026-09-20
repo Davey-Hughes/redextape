@@ -101,7 +101,7 @@ export type LinkStatus = {
    * THIS IN**, on all three arms, from `detachedPanes()`; the optionality is what the other producers
    * of this type — this file's own tests among them — still spend. Under `exactOptionalPropertyTypes`
    * an optional property is added by spread, never assigned `undefined`, which is the idiom `drawLink`
-   * uses for `forkFailed` beside it.
+   * uses for it.
    */
   detached?: DetachedPanes
 } & (
@@ -131,90 +131,13 @@ export type LinkStatus = {
        */
       focus: boolean
     }
-) & {
-    /**
-     * The most recent thing `#link-status` has to report that is not part of the CURRENT pin, or
-     * absent — CRITICAL finding, plan 5d-iii's ninth task, and `#link-status`'s THIRD live-updating job.
-     *
-     * **NAMED FOR ITS FIRST WRITER, AND THAT NAME OUTLIVED BEING THE ONLY ONE — 5d-ii-d review round 2,
-     * Finding 3.** A fork that failed at the cap or on a bad build was this field's only tenant when it
-     * was named, and this function used to add a hardcoded `fork failed — ` prefix to whatever it held
-     * as a consequence — every writer got the same words whether or not a fork was what it was reporting
-     * on. Two more writers now compose a message through this exact field without ever having forked
-     * anything: `main.ts`'s storage-quota report ("buffers are not being saved — …") and its
-     * restore-time cap refusal (a `warm`, not a `fork`, refused at `MAX_WARM_BUFFERS`). The field kept its
-     * name — renaming it ripples through `link-wiring.ts`, `main.ts`, `transport.ts` and `replies.ts` for
-     * no behavioural gain — but `linkStatus` no longer assumes what it holds: this string is rendered
-     * verbatim, and it is each WRITER's own job to say `fork failed — ` when, and only when, a fork is
-     * what failed. `scratch.ts`'s `BufferCapReached`/`#refuseAtCap` have the argument for the one place
-     * that call is made two different ways depending on which of `fork`/`warm` is asking.
-     *
-     * WHY THIS LINE AND NOT THE PANE'S OWN EDITOR. `onScratchReply`'s `no-session` arm can be answering
-     * a fork whose build never succeeded even once, and there is no editor to put a diagnostic in:
-     * `scratch-compiled` never fired, so `LambdaPane.setEditor` was never called and `setDiagnostics`
-     * (`this.#editor?.setDiagnostics(ds)`) is a silent no-op against `#editor === null`. This line is
-     * the surface that exists whether or not a pane can show anything — the same argument `detached`
-     * above makes for why detachment belongs here and not only on the pane's own badge, one step
-     * further: there is no pane-local surface to put it on at all.
-     *
-     * **AND THAT SENTENCE WAS FALSE OF THE APP FOR AS LONG AS IT HAS BEEN WRITTEN DOWN — deferred-a11y
-     * item 12, fixed before 5d-ii-c merged.** `main.ts` appended `#link-status` INTO the source pane's
-     * host, and that host ships a close control, so from 5d-ii-a onward "the surface that exists whether
-     * or not a pane can show anything" was a surface one click could take out of the document. `✎ fork`
-     * stays offered after that click — closing the source PANE ends no session — so a refusal past the
-     * buffer cap composed its message and wrote it into a detached node. The element no longer moves into
-     * any host; it stays where `index.html` declares it, between the pane tree and `#results`. The claim
-     * is left standing rather than softened because it is the right claim: what changed is that the code
-     * now honours it, and the value of writing a contract down is that the day it stops being true is
-     * findable. Nothing here reads any differently — this field's producers and consumers are unchanged.
-     *
-     * **THIS FIELD'S NAME USED TO END "…AND PUT THE PANE BACK ON THE SOURCE SESSION", AND THE REST OF
-     * THIS PARAGRAPH RESTED ON THAT.** It read that `ScratchBuffers.noSessionReply` "retires that
-     * phantom scratchpad synchronously, which is what makes the pane's fork control reappear at all
-     * (design §4.1a)", that retiring "is also what makes `LambdaPane.setDiagnostics` unusable", and that
-     * this was "the surface that survives the rebind the retirement just performed". 5d-ii-c decision 2
-     * deletes the retire: nothing ends a buffer implicitly, so the pane stays on the buffer that failed
-     * and the fork control stays hidden. **Only the middle claim was ever load-bearing here**, and it
-     * never depended on the retire — the no-op is a consequence of no editor having been mounted, which
-     * is true of a failed build however the app responds to one.
-     *
-     * A TOP-LEVEL FIELD, LIKE `detached`, NOT A FOURTH `state` ARM — same reasoning as `LinkStatus`'s
-     * own doc gives for `detached`: this answers a different question (what is the most recent thing
-     * this page needs to say that is not part of the current pin — a failed fork, a storage refusal, a
-     * warm refused at restore) from the one `state` answers (what is currently pinned), and the two are
-     * independent — any of them can coincide with nothing pinned, a stale index, or a live link, so
-     * folding this into `state` would be the same three-way duplication that field's doc already refuses
-     * once, for however many kinds of report end up living here.
-     *
-     * LEADS, AHEAD OF `detached` — the one exception to "most-global first" `linkStatus`'s own doc
-     * states for `detached`'s position, and deliberately so: what earns this the front of the line is
-     * that it is the most RECENT thing that happened, not the most global fact currently true.
-     *
-     * **THE SECOND REASON GIVEN FOR THAT ORDER EXPIRED WITH THE RETIRE, AND THE ORDER DID NOT.** It ran
-     * "by the time this renders, `detached.lambda` already reads `false` (the retirement that produced
-     * this value ran before `draw()`), so there is no scoping conflict to get backwards" — the pane
-     * stays on the failed buffer now, so both clauses are true at once and the line reads `fork failed —
-     * … · λ pane detached — not linked to source`. That is a truer sentence than the one that argument
-     * was protecting: the pane really is detached, onto the buffer this message is about.
-     *
-     * CLEARED BY THE CALLER, NOT BY THIS FUNCTION — `linkStatus` is a pure read of whatever `main.ts`
-     * passes in on the current tick, same as every other field here; deciding how long a stale report
-     * stays on screen is `main.ts`'s own lifecycle question for every writer, not only the fork one (a
-     * fork that succeeds and a source keystroke both clear it; a fork refused at the cap replaces it;
-     * a storage-quota report and a restore-time cap refusal have their own once-per-load and
-     * once-per-restore rules, `main.ts`'s own call sites have the arguments) — `link-wiring.ts`'s field
-     * doc has the fork case's ordering argument in full, and answering any of this here would make this
-     * function stateful, which the whole
-     * rest of the file goes out of its way not to be.
-     */
-    forkFailed?: string
-  }
+)
 
 const LAMBDA_TEXT: Record<LambdaLinkState, string> = {
   shown: '',
   truncated: 'the λ term is truncated before this construct',
   unmapped: 'this construct has no recorded position in the λ term',
-  'not-step-0': 'the λ link is only defined at step 0 — restart the λ pane to see it',
+  'not-step-0': 'the λ link is only defined at step 0 — restart the λ view to see it',
   declined: 'this program has no λ lowering, so no construct has a λ link',
   absent: '',
 }
@@ -224,19 +147,19 @@ const ATTACHED: DetachedPanes = { lambda: false, tm: false }
 /**
  * The detachment clause, or `''` when both panes are inside the correspondence.
  *
- * ONE CLAUSE FOR BOTH PANES, NOT THE SAME SENTENCE TWICE. "not linked to source" is one fact about
+ * ONE CLAUSE FOR BOTH VIEWS, NOT THE SAME SENTENCE TWICE. "not linked to the program" is one fact about
  * one correspondence; emitting it either side of a `·` would read as two unrelated failures, and the
  * line is already carrying up to three other parts.
  *
- * "detached" IS SAID IN THE SAME BREATH AS WHAT IT MEANS, deliberately. `[detached]` alone is the
- * badge's job — glanceable, in the pane, with the pane's own title beside it to say which pane. This
- * line is the authoritative narration (§4.5), and a reader who has never seen a scratch session
- * cannot derive "not linked to source" from the word.
+ * "shows a copy" IS SAID IN THE SAME BREATH AS WHAT IT MEANS, deliberately. `copy · not linked` in the
+ * view's header is the glanceable half, with the view's own title beside it to say which view. This
+ * line is the authoritative narration (§4.5), and a reader who has never made a copy cannot derive
+ * "not linked to the program" from the word (Plan 7 part 2 spec §12's vocabulary).
  */
 function detachedText(d: DetachedPanes): string {
-  if (d.lambda && d.tm) return 'λ and TM panes detached — not linked to source'
-  if (d.lambda) return 'λ pane detached — not linked to source'
-  if (d.tm) return 'TM pane detached — not linked to source'
+  if (d.lambda && d.tm) return 'λ and TM views show copies — not linked to the program'
+  if (d.lambda) return 'λ view shows a copy — not linked to the program'
+  if (d.tm) return 'TM view shows a copy — not linked to the program'
   return ''
 }
 
@@ -271,11 +194,9 @@ function detachedText(d: DetachedPanes): string {
 export function linkStatus(s: LinkStatus): string {
   const detached = s.detached ?? ATTACHED
   const parts: string[] = []
-  // FIRST — see `forkFailed`'s own doc for why this is the one field that leads ahead of detachment
-  // rather than after it. RENDERED VERBATIM, WITH NO PREFIX ADDED HERE — see that same doc (5d-ii-d
-  // review round 2, Finding 3) for why the words a fork-refusal message carries are the message's own
-  // and not this function's to add: this field also carries reports that are not about a fork at all.
-  if (s.forkFailed !== undefined) parts.push(s.forkFailed)
+  // REFUSALS ARE NOT SAID HERE ANY MORE. This line carried a fork-failure report ahead of everything
+  // else until Plan 7 part 2 (spec §11): refusals are notices now (`notice.ts`), shown under the header
+  // and said in the one live region, and this line carries the link sentence only.
   const detachment = detachedText(detached)
   if (detachment !== '') parts.push(detachment)
   if (s.state === 'stale') {

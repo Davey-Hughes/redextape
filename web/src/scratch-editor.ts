@@ -85,8 +85,9 @@ export class ScratchEditor {
    * EXPOSED SO A CALLER CAN RELOCATE IT — `LambdaPane.receiveEditor` (wave 3's editor-moves rule) is
    * the one caller, and it exists precisely because moving `dom` into a different parent element is
    * what CodeMirror already supports for free: `Node.append` on a node already in the document MOVES
-   * it rather than duplicating it (`pane-chrome.ts`'s `layoutControls` doc states the same DOM fact for
-   * its own button reordering). No CodeMirror API is needed beyond that; this getter is the only reason
+   * it rather than duplicating it — the DOM removes a node from its old parent before inserting it, so
+   * there is never a moment with two copies and never a detach call to write. No CodeMirror API is
+   * needed beyond that; this getter is the only reason
    * `#view` was ever private.
    */
   get dom(): HTMLElement {

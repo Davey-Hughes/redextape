@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import FIXTURE from '../../../crates/redextape-core/tests/fixtures/five_minus_three_single_tape.tm?raw'
 import { VALUE_CHUNK } from '../../src/protocol'
+import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
@@ -52,20 +53,31 @@ function paste(id: string, text: string): void {
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text } })
 }
 
-/** `pane-picker.test.ts`'s `pickSplit`, restated for the reason every browser file restates its helpers. */
-function pickSplit(id: string, control: string, item: string): void {
-  const button = document.querySelector<HTMLButtonElement>(`[data-leaf="${id}"] button[aria-label="${control}"]`)
-  if (button === null) throw new Error(`no "${control}" control on [data-leaf="${id}"]`)
-  button.click()
-  const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
-  const items = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
-  const chosen = items.find((b) => b.textContent === item)
-  if (chosen === undefined) throw new Error(`no "${item}" — offered: ${items.map((b) => b.textContent).join(' | ')}`)
-  chosen.click()
-}
-
 const tmLeaves = () =>
   [...document.querySelectorAll<HTMLElement>('[data-kind="tm"]')].map((el) => el.dataset.leaf ?? '')
+
+/**
+ * Split `leaf` through its `⋯` menu, as a user does: `pick` is `'same'` (another view of this), `'source'`,
+ * or a `bindingKey(leg, session)` — `pane-picker.test.ts`'s `splitVia`, restated for the reason every
+ * browser file restates its helpers.
+ */
+function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
+  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
+  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
+  more.click()
+  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
+  menu?.querySelector<HTMLButtonElement>(`button.view-split[data-dir="${dir}"]`)?.click()
+  const selector =
+    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
+  const item = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
+  if (item == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
+      (b) => b.textContent,
+    )
+    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
+  }
+  item.click()
+}
 
 beforeAll(async () => {
   document.body.innerHTML = SHELL
@@ -75,11 +87,20 @@ beforeAll(async () => {
 
   document.querySelector<HTMLButtonElement>('#buffers')?.click()
   document.querySelector<HTMLButtonElement>('.buffer-list button.new-tm')?.click()
-  const select = leaf('tm-0').querySelector<HTMLSelectElement>('.pane-binding select')
-  await until(() => [...(select?.options ?? [])].some((o) => o.value === 'tm\x00scratch-1'), 'the buffer to be offered')
-  if (select === null) throw new Error('no binding selector on the TM pane')
-  select.value = 'tm\x00scratch-1'
-  select.dispatchEvent(new Event('change'))
+  const title = leaf('tm-0').querySelector<HTMLButtonElement>('button.view-title')
+  if (title === null) throw new Error('no title-selector on the TM view')
+  const item = () =>
+    document
+      .getElementById(title.getAttribute('aria-controls') ?? '')
+      ?.querySelector<HTMLButtonElement>(`button[data-binding="${bindingKey('tm', 'scratch-1')}"]`)
+  // THE MENU IS BUILT ON OPEN, so the wait opens it and reads it; a closed menu has no items to offer.
+  await until(() => {
+    const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+    if (menu?.matches(':popover-open') === true) menu.hidePopover()
+    title.click()
+    return item() != null
+  }, 'the buffer to be offered')
+  item()?.click()
   await until(() => leaf('tm-0').querySelector('.cm-editor') !== null, 'the buffer editor to mount')
 })
 
@@ -97,7 +118,7 @@ describe('a reduced file in a TM buffer', () => {
 
   it('seeds a TM pane split from it with the sentence and the value', async () => {
     const before = tmLeaves()
-    pickSplit('tm-0', 'split left and right', 'TM · TM scratch 1 (same)')
+    splitVia('tm-0', 'row', 'same')
     await until(() => tmLeaves().length === before.length + 1, 'the split to add a TM pane')
     const created = tmLeaves().find((id) => !before.includes(id))
     if (created === undefined) throw new Error('the split added no TM pane')

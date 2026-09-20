@@ -216,8 +216,8 @@ type Pooled = { readonly client: SessionClient; readonly port: PoolPort }
  *
  * TWO MAPS KEYED BY `SessionId` — THIS ONE AND `main.ts`'s REGISTRY — AND THEY ARE NOT THE SAME FACT
  * WRITTEN TWICE. This one says what a session RUNS ON and is the only thing allowed to change it; the
- * registry says what a session HAS (its histories, its play timer), which are a renderer's nouns in a
- * module that owns the DOM. Merging them would either drag `History` and `setInterval` into this file
+ * registry says what a session HAS (its histories, its playback flags), which are a renderer's nouns in a
+ * module that owns the DOM. Merging them would either drag `History` and the player into this file
  * or put `new Worker` back in `main.ts`, and §4.2 places the pool here precisely to stop the second.
  */
 export class SessionPool {

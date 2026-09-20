@@ -17,7 +17,7 @@ import { SHELL, until } from './harness'
  * test.ts` already asserts `forkBlank`'s own throw and message; a message is not a diagnostic until
  * something renders it, and only a real DOM click through `main.ts`'s wiring can tell those apart. This
  * repo has taken a Critical finding on exactly that gap once already (`scratch-cap.test.ts`'s own doc:
- * "the user clicked ✎ fork at the cap and got nothing at all"), for the fork gesture; this is the
+ * "the user clicked ✎ edit a copy at the cap and got nothing at all"), for the fork gesture; this is the
  * mirror for the blank-buffer one.
  *
  * **ITS OWN FILE, FOR `scratch-cap.test.ts`'s OWN REASON.** Reaching this refusal means `MAX_WARM_
@@ -27,17 +27,21 @@ import { SHELL, until } from './harness'
  *
  * **EVERY ASSERTION IS ON RENDERED TEXT OR ON A STRUCTURAL COUNT, NEVER ON `ScratchBuffers.list()`
  * DIRECTLY** (§5, and the same standard `scratch-cap.test.ts` holds itself to): the refusal is read off
- * `#link-status`, and "nothing was minted" is read off both the header's own `buffers N ▾` readout and
+ * the notice line (`#notice`, spec §11), and "nothing was minted" is read off both the header's own `copies N ▾` readout and
  * the open menu's own `.buffer-row` count, so a fix that moved one without the other would still fail.
  */
 
 let view: EditorView
 
-const statusLine = () => document.querySelector('#link-status')?.textContent ?? ''
+/** The notice line's text — where a refusal is said since Plan 7 part 2 (spec §11) — or `''` while it is hidden. */
+const statusLine = () => {
+  const notice = document.querySelector<HTMLElement>('#notice')
+  return notice === null || notice.hidden ? '' : (notice.querySelector('.notice-text')?.textContent ?? '')
+}
 const buffersButton = () => document.querySelector<HTMLButtonElement>('#buffers')
 
 /**
- * Open the header's buffer list if it is not already open, and click "new TM buffer" — the gesture
+ * Open the copies menu if it is not already open, and click *new TM copy* — the gesture
  * `tm-blank-buffer.test.ts`'s own tests use, repeated here past the cap.
  *
  * **REOPENED EVERY TIME, NOT CACHED**, for `buffer-list.ts`'s own reason `scratch-cap.test.ts`'s
@@ -50,7 +54,7 @@ function clickNewTm(): void {
   if (button === null) throw new Error('no #buffers control in the header')
   if (button.getAttribute('aria-expanded') !== 'true') button.click()
   const newTm = document.querySelector<HTMLButtonElement>('.buffer-list button.new-tm')
-  if (newTm === null) throw new Error('no "new TM buffer" control in the open list')
+  if (newTm === null) throw new Error('no "new TM copy" control in the open list')
   newTm.click()
 }
 
@@ -80,33 +84,35 @@ describe('the buffer cap, from the blank-buffer control that hits it', () => {
 
   it('refuses a blank TM buffer past the cap with a message on the status line, and mints nothing', async () => {
     // STAGE 0 — a page that has never minted, asserted rather than assumed.
-    expect(buffersButton()?.textContent).toBe('buffers ▾')
-    expect(statusLine()).not.toContain('scratch buffers are live')
+    expect(buffersButton()?.textContent).toBe('copies ▾')
+    expect(statusLine()).not.toContain('copies are running')
+    expect(document.querySelector<HTMLElement>('#notice')?.hidden).toBe(true)
 
-    // STAGE 1 — fill to the cap through "new TM buffer" alone. Unlike the fork gesture this needs no
+    // STAGE 1 — fill to the cap through "new TM copy" alone. Unlike the fork gesture this needs no
     // pane and no alternation with a rebind: `forkBlank` mints and binds nothing (`ScratchBuffers.
     // forkBlank`'s own doc), so every one of these leaves every existing pane exactly where it was.
     for (let n = 1; n <= MAX_WARM_BUFFERS; n++) {
       clickNewTm()
-      expect(buffersButton()?.textContent).toBe(`buffers ${n} ▾`)
+      expect(buffersButton()?.textContent).toBe(`copies ${n} ▾`)
     }
 
     // STAGE 2 — THE REFUSAL, AND IT IS ON SCREEN. Before `buffer-list.ts`'s `onNewTm` catch arm existed to
     // render it, this would have thrown out of a click handler (`ScratchBuffers.forkBlank`'s own
-    // `#refuseAtCap`) with nothing on `#link-status` to show for it — the same failure mode
+    // `#refuseAtCap`) with nothing on the notice line to show for it — the same failure mode
     // `scratch-cap.test.ts`'s file doc records for the fork gesture, reached through the other door.
     clickNewTm()
-    expect(statusLine()).toContain(`all ${MAX_WARM_BUFFERS} scratch buffers are live`)
-    expect(statusLine()).toContain('retire or cool one from the buffers list in the header')
-    // NO `fork failed — ` PREFIX, UNLIKE THE FORK REFUSAL — `ScratchBuffers.forkBlank` calls
-    // `#refuseAtCap('')`, not `#refuseAtCap('fork failed — ')` the way `fork` does; this control is not
-    // a fork and its own refusal does not borrow that gesture's words.
-    expect(statusLine()).not.toContain('fork failed')
+    expect(statusLine()).toContain(`all ${MAX_WARM_BUFFERS} copies are running`)
+    expect(statusLine()).toContain('pause or delete one from the copies menu')
+    // NO `cannot make a copy — ` PREFIX, UNLIKE THE COPY REFUSAL — `ScratchBuffers.forkBlank` calls
+    // `#refuseAtCap('')`, not `#refuseAtCap('cannot make a copy — ')` the way `fork` does; this control
+    // is not a copy of anything and its own refusal does not borrow that gesture's words.
+    expect(statusLine()).not.toContain('cannot make a copy')
+    expect(statusLine()).toMatch(/^all \d+ copies are running/)
 
     // STAGE 3 — NOTHING WAS MINTED, read off two surfaces that would disagree if the catch arm fell
     // through to the success path (or ran a second mint) instead of returning: the header's own count
     // and the menu's own rows.
-    expect(buffersButton()?.textContent).toBe(`buffers ${MAX_WARM_BUFFERS} ▾`)
+    expect(buffersButton()?.textContent).toBe(`copies ${MAX_WARM_BUFFERS} ▾`)
     expect(bufferRowCount()).toBe(MAX_WARM_BUFFERS)
   })
 })

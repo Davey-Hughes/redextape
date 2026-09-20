@@ -30,8 +30,8 @@ export type Detachable = {
  * One live scratch buffer, as the surfaces outside this module see it: the session it is, and what a
  * user calls it.
  *
- * NOT `SessionEntry`, AND NOT A SUPERSET OF IT. A buffer's entry holds a history, a client and a play
- * timer; a caller asking "what buffers are there" is asking for a menu, and handing it the machinery
+ * NOT `SessionEntry`, AND NOT A SUPERSET OF IT. A buffer's entry holds a history, a client and a playback
+ * flag; a caller asking "what buffers are there" is asking for a menu, and handing it the machinery
  * would make every reader of that menu a reader of the session model. `SessionEntry.label`'s doc draws
  * the same line from the other side — the label is UI text, the id is a map key.
  */
@@ -40,6 +40,15 @@ export type BufferInfo = {
   readonly label: string
   readonly warm: boolean
   readonly leg: Leg
+}
+
+/** What undoing a delete needs to put a copy back: its id, name, leg, text and collapse flag. */
+export type BufferRecord = {
+  readonly id: SessionId
+  readonly label: string
+  readonly leg: Leg
+  readonly text: string
+  readonly collapsed: boolean
 }
 
 /**
@@ -143,7 +152,7 @@ type BufferState = {
  * extrapolation and the direct reading agree, so no non-linearity showed up between four buffers and
  * eleven. **11 IS THEREFORE A MEASUREMENT, NOT ONLY AN EXTRAPOLATION**: it is both the largest count
  * the pre-registered budget's arithmetic derives AND the count eleven probe workers — each holding a
- * bare `LambdaScratch`, not an app buffer with a client, a pane or a play timer — were measured to fit
+ * bare `LambdaScratch`, not an app buffer with a client, a pane or a leg in the player's loop — were measured to fit
  * under, with margin to spare, once their summed wasm linear memory and their eleven exhausted rings'
  * summed retained heap (two readings never simultaneously resident, so the total is arithmetic rather
  * than one reading — see `buffer-affordability.test.ts`'s "never resident simultaneously" comment in
@@ -160,13 +169,13 @@ type BufferState = {
  * about this constant a rename cannot fix by itself — a reader still has to know it.
  *
  * **THE REFUSAL'S OWN WORDING THEREFORE UNDERSTATES ITS SCOPE, RECORDED HERE RATHER THAN FIXED.**
- * `#refuseAtCap`'s message reads "all `MAX_WARM_BUFFERS` scratch buffers are live" — true of every WARM
+ * `#refuseAtCap`'s message reads "all `MAX_WARM_BUFFERS` copies are running" — true of every WARM
  * buffer, the only kind this constant prices, but readable as a claim about every buffer on the page.
  * A page can hold more buffers than that: a cold buffer costs nothing (the paragraph above), so a page
  * with, say, 15 buffers total and 11 of them warm sits exactly at the cap, and `warm` below (asking for
- * one of the four cold ones back) refuses with the identical sentence a `fork` would, on a page that is
- * visibly not "all live". `BufferCapReached` is out of scope for 5d-ii-d — design §4.4 keeps it
- * "unchanged in kind" — so this is noted rather than reworded.
+ * one of the four cold ones back) refuses with the identical sentence a `fork` would, on a page whose
+ * copies menu visibly lists four that are paused. `BufferCapReached` is out of scope for 5d-ii-d —
+ * design §4.4 keeps it "unchanged in kind" — so this is noted rather than reworded.
  *
  * **WHAT RIDES ON THE FIGURE.** The tests that exercise the cap import this constant rather than
  * spelling a number, so they follow it wherever it goes. `tests/browser/two-lambda-panes.test.ts`
@@ -185,11 +194,12 @@ export const MAX_WARM_BUFFERS = 11
  * naming the list", as a type its caller can act on.
  *
  * **A CLASS RATHER THAN A PLAIN `Error`, BECAUSE THE CALLER HAS TO TELL THIS FROM A BUG.**
- * `transport.ts`'s detach handler and `main.ts`'s temperature/restore handlers catch this one and put
- * its message on `#link-status`; the other things `fork`/`warm` can raise are `SessionRegistry.add`'s
- * and `SessionPool.bind`'s guards over their own invariants (a replaced entry strands a running
- * `setInterval`; a replaced client misdelivers frames), and those are wiring bugs rather than answers
- * to a user. A bare `catch` at either call site would render one of them as a status line and swallow
+ * `transport.ts`'s detach handler and `main.ts`'s pause/resume/restore handlers catch this one and show
+ * its message as a notice (`notice.ts`, spec §10: refusals at the cap are notices); the other things
+ * `fork`/`warm` can raise are `SessionRegistry.add`'s
+ * and `SessionPool.bind`'s guards over their own invariants (a replaced entry strands its
+ * playback; a replaced client misdelivers frames), and those are wiring bugs rather than answers
+ * to a user. A bare `catch` at either call site would show one of them as a notice and swallow
  * it. `instanceof` is what keeps a refusal a refusal and lets everything else go on being loud.
  *
  * **THE MESSAGE IS THE PAYLOAD AND THERE IS NO SECOND FIELD.** It is composed here because this is the
@@ -320,9 +330,9 @@ export class ScratchBuffers {
    * cold buffer is in this map and in neither container behind `legOf`, by construction (design §4.2),
    * and `SessionRegistry.entryOf` throws for an id it does not hold. **5d-ii-d T4 CLOSED THAT HAZARD.**
    * The row builder reads `sessions.legOf(...)` only when `b.warm` is true and reads `null` for a cold
-   * row otherwise, so a cold buffer's row no longer throws when the header list opens — it reads
-   * "asleep" (`buffer-list.ts`'s `BufferRow.warm` has the argument for why that reads differently from
-   * "no term"). The header list's temperature control has its own call to `cool` (`main.ts`'s
+   * row otherwise, so a cold buffer's row no longer throws when the copies menu opens — it reads
+   * *paused* (`buffer-list.ts`'s `BufferRow.warm` has the argument for why that reads differently from
+   * "no term"). The copies menu's pause/resume control has its own call to `cool` (`main.ts`'s
    * `onTemperature` handler), so a buffer goes cold on a gesture with no retire anywhere in it — the row
    * builder's `warm` branch is what makes that safe, not this map's record-keeping.
    *
@@ -369,7 +379,7 @@ export class ScratchBuffers {
    * **THERE IS NO `has` BRANCH, AND ITS ABSENCE IS THE WHOLE OF DECISION 1.** A fork that happens
    * spawns, seeds, and names its own buffer. `SessionRegistry.add` and `SessionPool.bind` both refuse
    * an id they already hold, and both stay as guards over their own invariants (a replaced entry
-   * strands a running `setInterval`; a replaced client misdelivers frames) rather than over anything
+   * strands its playback; a replaced client misdelivers frames) rather than over anything
    * this call site does: `#minted` only ever goes up, so the id below is one neither container has seen.
    *
    * **THE SEED IS THE SOURCE'S STEP-0 TEXT PLUS A STEP, AND THIS FUNCTION DOES NOT GO LOOKING FOR
@@ -434,7 +444,7 @@ export class ScratchBuffers {
    * a pane with no account of how to get the room back.
    *
    * **IT USED TO NAME THE BUFFERS TOO, AND THAT WAS WORSE THAN SAYING NOTHING — changed after reading
-   * the line on a real page.** The names are `scratch 1` through `scratch N` BY CONSTRUCTION — a
+   * the line on a real page.** The names are `copy 1` through `copy N` BY CONSTRUCTION — a
    * counter's output, carrying nothing that distinguishes one buffer from another — so the enumeration
    * it carried ran to sixty characters of noise, and grows with the cap, standing between the diagnosis
    * and the only actionable clause in the sentence, on a one-line dim status readout with no wrap.
@@ -445,22 +455,22 @@ export class ScratchBuffers {
    * differs between buffers rather than with one copy of a counter per buffer. Naming them here as
    * well would be the fan-out `BufferInfo`'s own doc exists to prevent, now that there is something real to fan out.
    *
-   * THE COUNT STAYS, because it is the thing the user cannot see from the button (`buffers 8 ▾` says how
+   * THE COUNT STAYS, because it is the thing the user cannot see from the button (`copies 8 ▾` says how
    * many exist, not that eight is the limit) and it is what makes the refusal a rule rather than a
    * malfunction.
    *
    * **AND IT REACHES A SURFACE, WHICH IS THE HALF OF §4.5 A THROW ON ITS OWN DOES NOT DELIVER.** The
-   * only caller in `src/` is `transport.ts`'s detach handler, running inside the `✎ fork` button's own
-   * click listener (`pane-chrome.ts`'s `detachButton`); it catches `BufferCapReached`, hands the message
-   * to `link-wiring.ts`'s `setForkFailed` and repaints, so `link-status.ts` renders it on
-   * `#link-status`. **THE `fork failed — ` WORDS ARE PART OF THIS THROW'S OWN MESSAGE, NOT SOMETHING
-   * `link-status.ts` ADDS** (5d-ii-d review round 2, Finding 3) — `this.#refuseAtCap('fork failed — ')`
+   * only caller in `src/` is `transport.ts`'s detach handler, running inside the `edit a copy` item's own
+   * click listener (`view-header.ts`'s `viewMenu`); it catches `BufferCapReached` and hands the message
+   * to its `notify` dependency, so it is shown as a notice (`notice.ts`). **THE `cannot make a copy — `
+   * WORDS ARE PART OF THIS THROW'S OWN MESSAGE, NOT SOMETHING THE RENDERER ADDS** (5d-ii-d review round 2, Finding 3) — `this.#refuseAtCap('cannot make a copy — ')`
    * is the call this method makes, and `#refuseAtCap`'s own doc has the argument for why the prefix
    * lives at the call site rather than in the renderer or in `BufferCapReached` itself: `warm`'s
-   * refusal reaches the identical field and is not a fork, so a prefix baked into either of those two
-   * would have named a gesture that did not happen for one of this class's two callers. `replies.ts`
-   * writes the same field for the SIBLING refusal — a fork whose build fails — with the same words in
-   * its own text for the same reason, which is what makes this a wire being connected rather than a
+   * refusal raises the identical notice and is not a copy being made, so a prefix baked into either of
+   * those two would have named a gesture that did not happen for one of this class's two callers.
+   * `replies.ts` composes its own prefix for the SIBLING refusal — a fork whose build fails, worded
+   * `the copy did not build — ` because that is the gesture THAT call site names — for the same reason,
+   * which is what makes this a wire being connected rather than a
    * surface being invented. **Uncaught, it would have reached nothing**: there is no `window` error
    * handler in `src/` (`main.ts`'s is a WORKER `error` listener, which a main-thread click never
    * reaches), so the message would have gone to the console and the user would have seen no answer at
@@ -469,8 +479,8 @@ export class ScratchBuffers {
    * **NOTHING IS LEFT HALF-DONE ON THE REFUSED PATH**, which is what makes the catch a report rather
    * than a repair: this method mutates nothing before it refuses, the slot is still on the session it
    * was on, `pane-host.ts`'s wrapper claims custody only when the binding actually moved, and the
-   * handler's `setForkFailed(null)` sits on the SUCCESS path so a refusal cannot clear a previous
-   * failure out of the model while leaving it on screen. That last one is a fix rather than a
+   * handler used to clear the report only on the SUCCESS path so a refusal could not clear a previous
+   * failure out of the model while leaving it on screen (a notice now needs no clear). That last one is a fix rather than a
    * description — the clear ran before the call in the first commit, and this sentence was untrue by a
    * frame until it moved.
    *
@@ -490,7 +500,7 @@ export class ScratchBuffers {
    * `noSessionReply`'s doc has both), and 5d-ii-c decision 2 means nothing retires the buffer for it. Its
    * record keeps the seed forever, so the next page load restores a buffer that builds and runs while
    * holding a DIFFERENT term from the one the user forked. The buffer is still theirs and still named
-   * by the counter (`λ scratch N`, for the one caller `src/` has today — `transport.ts`'s detach
+   * by the counter (`copy N`, for the one caller `src/` has today — `transport.ts`'s detach
    * handler forks the λ leg only); what it contains is the program they forked FROM rather than the
    * point they forked AT.
    *
@@ -507,10 +517,10 @@ export class ScratchBuffers {
    * For what this doc used to claim and why it changed, see the history note under `fork`.
    */
   fork(slot: Detachable, src: string, step: number, leg: Leg): SessionId {
-    // `'fork failed — '` — THIS CALL IS THE ONE OF THE TWO CALLERS FOR WHICH THAT IS TRUE. See
+    // `'cannot make a copy — '` — THIS CALL IS THE ONE OF THE TWO CALLERS FOR WHICH THAT IS TRUE. See
     // `#refuseAtCap`'s own doc for why the prefix is a call-site argument rather than baked into the
     // shared message.
-    if (this.warmCount() >= MAX_WARM_BUFFERS) this.#refuseAtCap('fork failed — ')
+    if (this.warmCount() >= MAX_WARM_BUFFERS) this.#refuseAtCap('cannot make a copy — ')
     return this.#mint(src, step, leg, slot)
   }
 
@@ -540,7 +550,9 @@ export class ScratchBuffers {
   #mint(src: string, step: number, leg: Leg, slot: Detachable | null): SessionId {
     this.#minted += 1
     const id: SessionId = `scratch-${this.#minted}`
-    const label = leg === 'lambda' ? `λ scratch ${this.#minted}` : `TM scratch ${this.#minted}`
+    // `copy N` — THE LEG IS SAID WHEREVER THE LABEL IS SHOWN (`nameOf`, `view-header.ts`'s `pairLabel`),
+    // so the label carries only the number (Plan 7 part 2 spec §12).
+    const label = `copy ${this.#minted}`
     const state: BufferState = { id, label, leg, text: src, collapsed: false, warm: false }
     this.#spawn(state, src, step)
     this.#buffers.set(id, state)
@@ -779,7 +791,7 @@ export class ScratchBuffers {
    * SOMETHING BAKED IN HERE OR IN `link-status.ts` — 5d-ii-d review round 2, Finding 3.** A renderer
    * that cannot tell its callers apart has no honest way to prefix only some of them, and `warm`'s
    * refusal reaches the same field as `fork`'s over restore/header-list paths that are not forks.
-   * `fork` passes `'fork failed — '`, because that call genuinely is a fork failing. `warm` passes
+   * `fork` passes `'cannot make a copy — '`, because that call genuinely is a copy refused. `warm` passes
    * `''`: warming a cold buffer back up — whether the user
    * asked for that from the header list or a restore is doing it on their behalf — is a different
    * gesture, and the plain sentence (cap and remedy, no gesture named) is exactly what is true of it.
@@ -790,7 +802,7 @@ export class ScratchBuffers {
    */
   #refuseAtCap(prefix: string): never {
     throw new BufferCapReached(
-      `${prefix}all ${MAX_WARM_BUFFERS} scratch buffers are live; retire or cool one from the buffers list in the header to make room`,
+      `${prefix}all ${MAX_WARM_BUFFERS} copies are running; pause or delete one from the copies menu to make room`,
     )
   }
 
@@ -821,8 +833,8 @@ export class ScratchBuffers {
     const pending = { available: false, reason: 'building…' }
     const legs =
       state.leg === 'lambda'
-        ? { lambda: { hist: new History<LambdaState>(this.#bytes), status: pending, done: null, timer: null } }
-        : { tm: { hist: new History<TmState>(this.#bytes), status: pending, done: null, timer: null } }
+        ? { lambda: { hist: new History<LambdaState>(this.#bytes), status: pending, done: null, playing: false } }
+        : { tm: { hist: new History<TmState>(this.#bytes), status: pending, done: null, playing: false } }
     this.#reg.add({
       id: state.id,
       label: state.label,
@@ -856,6 +868,40 @@ export class ScratchBuffers {
     const gen = client.supersede()
     if (state.leg === 'lambda') client.scratch(gen, src, step)
     else client.tmScratch(gen, src)
+  }
+
+  /**
+   * A copy's name as the copies menu and every notice say it — `λ copy 1`, `TM copy 2` — or `null` for an id
+   * this holds no copy under. The label is `copy N`; the leg is said in front of it, because a title already
+   * says the leg its own way (`λ · copy 1`) and a label carrying it would say it twice there.
+   */
+  nameOf(id: SessionId): string | null {
+    const b = this.#buffers.get(id)
+    return b === undefined ? null : `${b.leg === 'lambda' ? 'λ' : 'TM'} ${b.label}`
+  }
+
+  /** What undoing a delete needs to put a copy back: its id, name, leg, text and collapse flag. */
+  recordOf(id: SessionId): BufferRecord | null {
+    const b = this.#buffers.get(id)
+    return b === undefined ? null : { id: b.id, label: b.label, leg: b.leg, text: b.text, collapsed: b.collapsed }
+  }
+
+  /**
+   * Put a deleted copy back, COLD, under its own id and name — spec §10's undo. The caller warms it, and a
+   * refusal at the cap leaves it paused, which is still a copy restored.
+   *
+   * **THE ID CANNOT HAVE BEEN REUSED:** `#mint` only counts up, so a deleted `scratch-3` is never minted again,
+   * and an id this still holds is a wiring bug — thrown, as `SessionRegistry.add` throws.
+   *
+   * **A RESTORED COPY GOES TO THE END OF THE MAP, SO THE COPIES MENU IS NO LONGER OLDEST-FIRST FOR IT.**
+   * `Map.set` on a key the map no longer holds appends, and `list()` below is that insertion order —
+   * so `λ copy 1`, deleted and undone while `λ copy 2` is still live, comes back BELOW it. The name is
+   * what a user finds a row by, and it is the one this restores; the position is not, and buying it
+   * back would mean rebuilding the whole map on every undo.
+   */
+  reinstate(record: BufferRecord): void {
+    if (this.#buffers.has(record.id)) throw new Error(`a copy is already held under ${record.id}`)
+    this.#buffers.set(record.id, { ...record, warm: false })
   }
 
   /**
@@ -924,7 +970,7 @@ export class ScratchBuffers {
    * cannot produce.
    *
    * **CALLED BEFORE ANY FORK, AND NOTHING ENFORCES THAT HERE.** `main.ts` restores while resolving its
-   * layout, which is before a pane exists to carry the `✎ fork` control, so `#minted` cannot already
+   * layout, which is before a pane exists to carry the `edit a copy` item, so `#minted` cannot already
    * have moved. A guard would be this class asserting an ordering its one caller establishes by
    * construction — and the honest version of it (refusing a restore into a non-empty collection) would
    * have no caller to refuse.
@@ -932,9 +978,12 @@ export class ScratchBuffers {
   restore(value: PersistedBuffers): void {
     this.#minted = value.minted
     for (const b of value.buffers) {
+      // A COPY STORED BEFORE PLAN 7 PART 2 IS NAMED `λ scratch N` OR `TM scratch N`; SAY IT THE NEW WAY
+      // (spec §12). Only a label that is exactly that shape is touched, once; the next write stores it.
+      const n = /^(?:λ|TM) scratch (\d+)$/.exec(b.label)?.[1]
       this.#buffers.set(b.id, {
         id: b.id,
-        label: b.label,
+        label: n === undefined ? b.label : `copy ${n}`,
         leg: b.leg,
         text: b.text,
         collapsed: b.collapsed,
@@ -1078,12 +1127,12 @@ export class ScratchBuffers {
    * longer has. What remains below is the discriminator and the answer.
    *
    * **THE PANE STAYS ON A BUFFER THAT WILL NEVER PRODUCE A FRAME**, reading the `building…` placeholder
-   * `fork` seeded, with the reason on `#link-status` and no PANE-LOCAL way out. That is the same gap
+   * `fork` seeded, with the reason in a notice and no PANE-LOCAL way out. That is the same gap
    * `compile.ts`'s `schedule` records for the recompile path, widened to cover every way a buffer can
    * end up wedged: design §4.4 puts poison recovery in the header list precisely because a wedged buffer
    * has to be reachable whether or not a pane is still showing it. **THAT LIST IS WIRED**, so the way
-   * out is one gesture away from any state: open `buffers` and retire the row, which rebinds this pane
-   * home and offers `✎ fork` again — the remedy 5d-i §4.1a promises, delivered from the header instead
+   * out is one gesture away from any state: open `copies ▾` and delete the row, which rebinds this pane
+   * home and offers `edit a copy` again — the remedy 5d-i §4.1a promises, delivered from the header instead
    * of from the pane that is stuck. `tests/browser/scratch-fork.test.ts` asserts exactly that sequence.
    *
    * `null` FOR AN ID THAT IS NOT A LIVE BUFFER, which is the same answer the no-buffer case always
@@ -1109,8 +1158,8 @@ export class ScratchBuffers {
    * **THE TWO REASONS STILL DEMAND OPPOSITE ANSWERS EVEN THOUGH NEITHER ENDS A BUFFER NOW**, which is
    * why the discriminator below survives the deletion of the retire it used to gate. What differs is
    * WHERE THE DIAGNOSTICS GO: a build that never reached `scratch-compiled` mounted no editor, so
-   * `setDiagnostics` is the silent no-op this paragraph already describes and `#link-status` is the only
-   * surface left; a buffer mid-edit has a mounted editor with a gutter built for exactly this. Reporting
+   * `setDiagnostics` is the silent no-op this paragraph already describes and a notice (`notice.ts`) is
+   * the only surface left; a buffer mid-edit has a mounted editor with a gutter built for exactly this. Reporting
    * a mid-edit parse failure as a failed FORK would also be a lie about which gesture failed.
    *
    * **THE DISCRIMINATOR IS WHETHER THE λ LEG HAS EVER RECORDED A FRAME.** A fork posts exactly one
