@@ -251,6 +251,8 @@ export type ViewMenu = {
   setCopy(state: CopyState): void
   /** Whether `move the editor here` applies: the view shows a copy whose editor is elsewhere. */
   setClaim(available: boolean): void
+  /** Whether `format` applies: this view has an editor holding a document the server serves. */
+  setFormattable(available: boolean): void
 }
 
 export type ViewMenuOptions = {
@@ -259,6 +261,14 @@ export type ViewMenuOptions = {
   /** `what` is the second line: what is copied — "the term at this step", "the whole machine". */
   readonly editCopy?: { readonly run: () => void; readonly what: string }
   readonly claim?: () => void
+  /**
+   * Reformat this view's document — Plan 7 part 3a, the slot part 2a left in this menu.
+   *
+   * **IT NEVER REPORTS A FAILURE, BECAUSE THERE IS NOT ONE TO REPORT.** `Language::format` answers
+   * `None` for text that does not parse and the client turns that into no edits, so formatting a
+   * half-typed buffer does nothing visible. That is what makes *format on blur* safe to leave on.
+   */
+  readonly format?: () => void
   readonly choices?: () => SplitChoices
 }
 
@@ -416,6 +426,15 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     })
   }
 
+  const fmt = opts.format === undefined ? null : item('format-doc', 'format', undefined, 'format')
+  if (fmt !== null && opts.format !== undefined) {
+    const run = opts.format
+    fmt.addEventListener('click', () => {
+      shut()
+      run()
+    })
+  }
+
   menu.addEventListener('beforetoggle', (e) => {
     const open = e.newState === 'open'
     more.setAttribute('aria-expanded', String(open))
@@ -432,6 +451,7 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
   let canSplit = false
   let copy: CopyState = null
   let claimable = false
+  let formattable = false
   const what = opts.editCopy?.what ?? ''
 
   const sync = (): void => {
@@ -453,6 +473,7 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
       wanted.push(edit)
     }
     if (claim !== null && claimable) wanted.push(claim)
+    if (fmt !== null && formattable) wanted.push(fmt)
     // RECONCILED, NOT REPLACED, FOR `paint`'s REASON ONE LEVEL OUT: `replaceChildren` takes every item
     // out of the document, and an item holding the focus does not get it back. Reachable while the menu
     // is open and a frame changes what applies — a copy created elsewhere, a recording ending.
@@ -504,6 +525,11 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     setClaim(next: boolean): void {
       if (next === claimable) return
       claimable = next
+      sync()
+    },
+    setFormattable(next: boolean): void {
+      if (next === formattable) return
+      formattable = next
       sync()
     },
   }

@@ -1,10 +1,24 @@
 import { createPanel } from './panel'
 import type { Leg } from './protocol'
+import type { ScratchEditorConfig } from './scratch-editor'
 import type { SessionId } from './session-client'
 import type { Binding, PaneOption } from './sessions'
 import type { Speed } from './workspace'
 
 export type PaneEvents = {
+  /**
+   * The LSP document this pane's editor is, resolved when the editor is built.
+   *
+   * **A THUNK, BECAUSE A SLOT'S BINDING MOVES AND THE DOCUMENT FOLLOWS THE SESSION.** A pane is
+   * constructed once and rebound many times; resolving the URI at construction would pin an
+   * editor built later to whichever buffer the pane happened to show first. `transport.ts` reads
+   * `slot.binding` inside this, the same way `editScratch` does.
+   *
+   * Optional for the same reason the two members below it are: a test builds a pane with only the
+   * handlers it drives, and an editor with no document simply has no language features.
+   */
+  lspDocument?(): ScratchEditorConfig['document']
+
   back(): void
   forward(): void
   play(): void

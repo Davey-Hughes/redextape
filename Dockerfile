@@ -8,7 +8,7 @@
 # `crates/redextape-wasm` and `web/` both exist now, so this build is live: CI runs it on every push
 # to `main` (see .forgejo/workflows/ci.yml's `web` gate).
 
-########################  1. WASM (Rust -> wasm32) → /app/pkg  #################################
+########################  1. WASM (Rust -> wasm32) → /app/pkg, /app/pkg-lsp  ###################
 FROM rust:slim-bookworm AS wasm
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
@@ -20,6 +20,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
 RUN wasm-pack build crates/redextape-wasm --release --target web --out-dir /app/pkg
+# **TWO ARTEFACTS SINCE PLAN 7 PART 3a, AND THIS STAGE HAS TO BUILD BOTH.** `web/src/lsp-worker.ts`
+# imports `../../pkg-lsp/redextape_lsp_wasm.js`; without this line stage 2's `build:app` fails to
+# resolve it. NOTHING IN CI CATCHES THAT — the `docker` job never runs on a PR, and `pnpm run
+# build:app` is the only place the import is resolved for the image, so the web job's own
+# `build:lsp-wasm` step does not stand in for it. Same class as the HEALTHCHECK note in stage 3.
+RUN wasm-pack build crates/redextape-lsp-wasm --release --target web --out-dir /app/pkg-lsp
 
 ########################  2. Web bundle (Vite) → /app/web/dist  ################################
 FROM node:26-slim AS web
@@ -30,11 +36,13 @@ RUN npm install -g pnpm@11.20.0
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/ ./
-# The WASM package produced above, imported by the web app as `../pkg`.
+# The WASM packages produced above, imported by the web app as `../pkg` and `../../pkg-lsp`.
 COPY --from=wasm /app/pkg /app/pkg
+COPY --from=wasm /app/pkg-lsp /app/pkg-lsp
 ARG COMMIT_HASH
 ENV COMMIT_HASH=$COMMIT_HASH
-# `build:app`, not `build`: this stage has no Rust toolchain — stage 1 already produced /app/pkg.
+# `build:app`, not `build`: this stage has no Rust toolchain — stage 1 already produced both
+# /app/pkg and /app/pkg-lsp.
 RUN pnpm run build:app
 
 ########################  3. Runtime (static nginx)  ##########################################

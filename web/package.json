@@ -6,9 +6,10 @@
   "scripts": {
     "build:wasm": "wasm-pack build ../crates/redextape-wasm --release --target web --out-dir ../../pkg",
     "build:wasm:dev": "wasm-pack build ../crates/redextape-wasm --dev --target web --out-dir ../../pkg",
+    "build:lsp-wasm": "wasm-pack build ../crates/redextape-lsp-wasm --release --target web --out-dir ../../pkg-lsp",
     "build:bindings": "bash ../scripts/build-web-bindings.sh",
     "build:app": "vite build",
-    "build": "pnpm run build:wasm && pnpm run build:bindings && pnpm run build:app",
+    "build": "pnpm run build:wasm && pnpm run build:lsp-wasm && pnpm run build:bindings && pnpm run build:app",
     "dev": "vite",
     "preview": "vite preview",
     "typecheck": "pnpm run build:bindings && tsc --noEmit",

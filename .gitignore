@@ -5,6 +5,10 @@
 
 # WebAssembly build output (wasm-pack / wasm-bindgen / trunk)
 /pkg/
+# ...and the LSP server's own artefact, built by `pnpm run build:lsp-wasm` from
+# `crates/redextape-lsp-wasm`. A SECOND OUT-DIR RATHER THAN A SECOND FILE IN `/pkg/`, because
+# wasm-pack owns everything it writes to an out-dir and would prune the other crate's output.
+/pkg-lsp/
 **/pkg/
 *.wasm
 

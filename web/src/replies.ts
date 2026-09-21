@@ -1,7 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import type { EditablePane } from './editor-custody'
 import { setDecline, setLink } from './highlight'
-import type { LambdaPane } from './lambda-pane'
 import { LinkIndex } from './link'
 import type { LinkWiring } from './link-wiring'
 import type { PaneCollection } from './panes'
@@ -566,18 +565,13 @@ export function createReplies(deps: {
         // than leaving last frame on screen for one more keystroke. `leg.hist`/`leg.status` are
         // whatever the last successful build left them — this arm does not touch either.
         //
-        // THE DIAGNOSTICS ARE NOW RENDERED. There is a pane that can be typed into (`LambdaPane`'s
-        // split body, T7) and `setDiagnostics` puts them in its own gutter — the push-based path
-        // design §4.4 gives a scratch, as against `lint.ts`'s pull-based linter, which has no worker
-        // reply to pull from. The comment this replaces said "a scratchpad has no pane of its own to
-        // put them in until one can be typed into" — one can now, so the claim is amended in the
-        // commit that makes it false, matching this branch's own standard (5d-i's decision 6, and T5
-        // and T7 both did the same to earlier claims this slice outgrew).
-        //
-        // PER-SESSION, UNLIKE `setEditor` ABOVE — `setDiagnostics` only annotates gutters on an
-        // ALREADY-mounted editor; it creates no new instance, so fanning it out over
-        // `panes.ofSession('lambda', session)` carries none of `setEditor`'s desync risk.
-        for (const p of panes.ofSession('lambda', session)) (p.pane as LambdaPane).setDiagnostics(reply.diagnostics)
+        // **THE DIAGNOSTICS NO LONGER COME FROM HERE, AND THAT IS PART 3a's WHOLE POINT.** This arm
+        // used to fan `reply.diagnostics` out over `panes.ofSession('lambda', session)` and call
+        // `LambdaPane.setDiagnostics`. It served λ copies and nothing else — `tm-pane.ts` never had
+        // such a method — so a TM copy showed an empty gutter no matter what was wrong with it.
+        // Every editor is an LSP document now and its diagnostics arrive on that document's own
+        // sink, so this path is gone rather than duplicated. `reply.diagnostics` is still on the
+        // wire and still read by the readout; what left is this second consumer of it.
         draw()
         return
       }

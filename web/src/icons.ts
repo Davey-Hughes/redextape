@@ -23,6 +23,7 @@ export type IconName =
   | 'sun'
   | 'moon'
   | 'settings'
+  | 'format'
 
 /** Stroke paths on a 16×16 grid. Drawn for this app; no icon set is vendored. */
 const PATHS: Readonly<Record<IconName, string>> = {
@@ -45,6 +46,10 @@ const PATHS: Readonly<Record<IconName, string>> = {
   // draws it.
   sun: 'M8 5 A3 3 0 1 0 8 11 A3 3 0 1 0 8 5 M8 1.5 V3 M8 13 V14.5 M1.5 8 H3 M13 8 H14.5 M3.4 3.4 L4.5 4.5 M11.5 11.5 L12.6 12.6 M3.4 12.6 L4.5 11.5 M11.5 4.5 L12.6 3.4',
   moon: 'M11.5 2.5 A5.5 5.5 0 1 0 13.5 10.5 A4.5 4.5 0 0 1 11.5 2.5 Z',
+  // Three left-aligned rules of unequal length — the shape text takes once it is laid out, which
+  // is what the action does. Deliberately NOT a wand or a brush: the operation is deterministic
+  // (`print ∘ parse`) and a magic glyph would suggest otherwise.
+  format: 'M3 4.5 H13 M3 8 H10 M3 11.5 H12',
   settings:
     'M8 5.75 A2.25 2.25 0 1 0 8 10.25 A2.25 2.25 0 1 0 8 5.75 M8 1.5 V3.5 M8 12.5 V14.5 M1.5 8 H3.5 M12.5 8 H14.5 M3.4 3.4 L4.8 4.8 M11.2 11.2 L12.6 12.6 M3.4 12.6 L4.8 11.2 M11.2 4.8 L12.6 3.4',
 }

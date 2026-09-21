@@ -925,6 +925,19 @@ export function createPaneHost(deps: {
       if (p.slot.binding.leg === 'lambda') {
         const held = (p.pane as LambdaPane).takeEditor()
         if (held !== null) custody.hold(p.slot.binding.session, held)
+      } else {
+        // **A TM EDITOR IS DESTROYED RATHER THAN HELD, AND SINCE PART 3a IT HAS TO BE DESTROYED AT
+        // ALL.** This branch did not exist: a `TmPane` leaving `panes` — a close, or a cross-leg
+        // pick under the same leaf — was removed with neither `takeEditor()` nor `destroy()`, and
+        // its editor simply became garbage. That is no longer harmless. `ScratchEditor.destroy()`
+        // is what sends `didClose`, so without it the document stays in `LspClient`'s map, which
+        // holds its diagnostics sink, which closes over the editor and its pending debounce — and
+        // `#died` then replays `didOpen` for a document no view holds, for the life of the page.
+        //
+        // DESTROYED, NOT HELD, BECAUSE NOTHING CAN RECLAIM IT. Custody exists to serve `move the
+        // editor here`, and a TM view does not offer it (`setClaim` has one caller, in
+        // `lambda-pane.ts`). Holding a TM editor would put it in a map nothing reads.
+        ;(p.pane as TmPane).takeEditor()?.destroy()
       }
       panes.remove(p.id)
     }
@@ -1015,8 +1028,17 @@ export function createPaneHost(deps: {
         panes.add({ id: l.id, kind: 'lambda', slot, pane, host })
       } else {
         const slot = new PaneSlot('tm', session)
+        // **EVERY PANEL A VIEW OWNS HAS TO BE READ BACK, NOT JUST THE FIRST ONE.** `rules` was the
+        // only panel a TM view had when this line was written; `outline` (Plan 7 part 3a) wrote its
+        // state through `on.panel` and nothing read it, so it persisted correctly and restored
+        // closed every time. An entry is passed only when it is stored, so each panel keeps its own
+        // default — `rules` opens, `outline` does not.
         const rules = panelOpen(l.id, 'rules')
-        const pane = new TmPane(host, paneEvents(l.id, slot), rules === undefined ? {} : { rules })
+        const outline = panelOpen(l.id, 'outline')
+        const pane = new TmPane(host, paneEvents(l.id, slot), {
+          ...(rules === undefined ? {} : { rules }),
+          ...(outline === undefined ? {} : { outline }),
+        })
         // **A NEW TM PANE IS SEEDED FROM ITS SESSION, BECAUSE THE REPLY THAT WOULD HAVE TOLD IT HAS
         // ALREADY BEEN AND GONE.** `TmPane.setProgram` was called from `replies.ts` and from nowhere
         // else, so a pane created after its session's last `compiled` reply rendered no tapes, no status

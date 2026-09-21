@@ -5,11 +5,12 @@ import type { LambdaWindow } from './lambda-window'
 import type { Dir } from './layout'
 import { type PaneChoice, type PaneEvents, type SplitChoices, textPanel } from './pane-chrome'
 import type { Leg } from './protocol'
+import type { ScratchEditorConfig } from './scratch-editor'
 import { ScratchEditor } from './scratch-editor'
 import type { Binding, PaneOption } from './sessions'
 import { byteIndexAt, byteToIndex, decorationRanges, indexToByte } from './spans'
 import { stepControls } from './step-controls'
-import type { Diagnostic, LambdaState } from './types'
+import type { LambdaState } from './types'
 import { type ViewHeader, type ViewMenu, viewHeader, viewMenu } from './view-header'
 
 export type { PaneEvents }
@@ -89,6 +90,8 @@ export class LambdaPane implements EditablePane {
    * invisible" split `PaneEvents.detach`'s doc draws for the fork button.
    */
   #onEdit: ((src: string) => void) | undefined
+  /** Resolves this pane's current binding to an LSP document — see `PaneEvents.lspDocument`. */
+  #lspDocument: (() => ScratchEditorConfig['document']) | undefined
   /**
    * Whether the session this pane is bound to is outside the source correspondence — §4.5's fact,
    * kept because the fork control needs it and `setDetached` is not the only thing that moves it.
@@ -150,6 +153,9 @@ export class LambdaPane implements EditablePane {
     // carry the full argument.
     const detach = on.detach
     this.#menu = viewMenu(this.#header.actions, {
+      // REMOVED WHERE THERE IS NO EDITOR, not disabled: a view showing a running leg has no
+      // document to format, which is the umbrella's rule for a control that cannot apply.
+      format: () => void this.#editor?.format(),
       ...(on.splitRow !== undefined && on.splitColumn !== undefined
         ? { split: (dir: Dir, c: PaneChoice) => (dir === 'row' ? on.splitRow?.(c) : on.splitColumn?.(c)) }
         : {}),
@@ -166,6 +172,7 @@ export class LambdaPane implements EditablePane {
     // an editor" has one answer in the DOM as well as in the field.
     this.#editorHost = document.createElement('div')
     this.#onEdit = on.editScratch
+    this.#lspDocument = on.lspDocument
     // THE TEXT PANEL WRAPS THE EDITOR HOST and hides it itself; this callback only REPORTS the gesture —
     // see `PaneEvents.collapse`'s own doc for why the app needs telling (the state is recorded against
     // the buffer, not the pane).
@@ -248,6 +255,7 @@ export class LambdaPane implements EditablePane {
     if (text === null) {
       this.#editor?.destroy()
       this.#editor = null
+      this.#syncEditorControls()
       this.#editorHost.className = ''
       this.#collapse.update(false)
       this.#refreshClaim()
@@ -261,12 +269,27 @@ export class LambdaPane implements EditablePane {
         initial: text,
         debounceMs: EDITOR_DEBOUNCE_MS,
         onEdit: (src) => onEdit?.(src),
+        // RESOLVED HERE, NOT AT CONSTRUCTION — the binding this pane shows now is the buffer
+        // the editor being built belongs to.
+        document: this.#lspDocument?.(),
       })
       this.#collapse.update(true, collapsed)
       this.#refreshClaim()
+      this.#syncEditorControls()
       return
     }
     this.#editor.setText(text)
+  }
+
+  /**
+   * Keep the controls that need an editor in step with whether this view has one.
+   *
+   * **CALLED FROM EVERY SITE THAT ASSIGNS `#editor`, WHICH IS WHY IT IS A METHOD AND NOT A BOOLEAN
+   * PASSED AROUND.** There are four: the mount, the unmount, `takeEditor` and `receiveEditor`. A
+   * control offered on a view with no editor would do nothing when clicked.
+   */
+  #syncEditorControls(): void {
+    this.#menu.setFormattable(this.#editor !== null)
   }
 
   /**
@@ -286,6 +309,7 @@ export class LambdaPane implements EditablePane {
     const editor = this.#editor
     if (editor === null) return null
     this.#editor = null
+    this.#syncEditorControls()
     // **THE NODE LEAVES TOO, AND FOR TWO CALLERS IT NEVER USED TO HAVE TO — found by driving the app in
     // a browser, which is the only thing that could have found it.** This method dropped the reference
     // and stripped the host's class and left `editor.dom` parented where it was, because both original
@@ -372,6 +396,7 @@ export class LambdaPane implements EditablePane {
     const onEdit = this.#onEdit
     editor.onEdit = (src) => onEdit?.(src)
     this.#editor = editor
+    this.#syncEditorControls()
     this.#collapse.update(true, collapsed)
     this.#refreshClaim()
   }
@@ -400,11 +425,6 @@ export class LambdaPane implements EditablePane {
     if (available === this.#editorAvailable) return
     this.#editorAvailable = available
     this.#refreshClaim()
-  }
-
-  /** Diagnostics for the editor's own buffer — design §4.4. A no-op with no editor mounted. */
-  setDiagnostics(ds: Diagnostic[]): void {
-    this.#editor?.setDiagnostics(ds)
   }
 
   /**

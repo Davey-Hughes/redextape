@@ -126,7 +126,35 @@ export default defineConfig({
       // four numbers. `tests/browser/worker.test.ts` is the only thing standing behind this module,
       // and nothing mechanical fires when that stops being enough. Re-measure and delete this entry
       // when Vitest gains worker coverage.
-      exclude: ['src/session-worker.ts'],
+      // TWO ENTRIES NOW, AND THE SECOND EARNED ITS PLACE THE SAME WAY THE FIRST DID — by being
+      // MEASURED as an instrumentation limit rather than assumed to be one. The bar stated above is
+      // "a dated comment recording what was measured, not a hunch that a file is hard to reach".
+      //
+      // MEASURED 2026-09-20 (plan 7 part 3a, task 6): `src/lsp-worker.ts` reports 0% on all four
+      // metrics while `tests/browser/lsp-diagnostics.test.ts` mounts the real app, which spawns the
+      // real worker, and asserts diagnostics that can only have come through it. That the worker is
+      // genuinely exercised is not inferred from the test passing — it was SABOTAGED both ways:
+      // removing `lspClient.changeDocument` and removing `lspClient.openDocument` each redden all
+      // four of that file's tests. So the module runs, and v8 cannot see it: coverage collects
+      // through CDP against the page and does not attach to a dedicated worker's context, exactly as
+      // the entry above records for `session-worker.ts`.
+      //
+      // THIS EXCLUSION WAS DELIBERATELY NOT ADDED WHEN THE FILE LANDED, and the reason is worth
+      // keeping. At that point nothing spawned it at all, so its 0% was a TESTING gap, and excluding
+      // it would have hidden an untested file behind a comment about instrumentation — the precise
+      // failure the `include` entry above exists to prevent. The exclusion became arguable only once
+      // a test drove it. The task that wrote that test is the one that made this measurement.
+      //
+      // WHAT IT COSTS, stated because an exclusion that only advertises its justification is half an
+      // argument: 87 lines, and the four figures move from 95.85 / 89.91 / 97.46 / 97.95 with it
+      // counted to 96.37 / 90.28 / 98.19 / 98.48 with it excluded — both measured the same day, on
+      // the same tree. **THE FLOORS BELOW ARE NOT MOVED FOR THIS**, and the convention they carry
+      // says why: the place to re-run `floor(measured) - 1` is a slice's close, where a reviewer
+      // sees the argument beside the number, not mid-slice on one task's delta. New UNTESTED code inside this module
+      // will not move any of them. `tests/browser/lsp-diagnostics.test.ts` is what stands behind it,
+      // and nothing mechanical fires when that stops being enough. Re-measure and delete this entry
+      // when Vitest gains worker coverage — which would retire the entry above at the same time.
+      exclude: ['src/session-worker.ts', 'src/lsp-worker.ts'],
       reporter: ['text', 'html'],
       // MEASURED 2026-08-12 (plan 5d-ii-a's close, after the whole-branch review's fixes): lines 97.40
       // (1501/1541), functions 96.83 (306/316), branches 89.17 (824/924), statements 94.80

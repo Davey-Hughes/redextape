@@ -138,6 +138,21 @@ const paintLambda = (reg: SessionRegistry, slot: PaneSlot<'lambda'>, pane: PaneV
 const paintTm = (reg: SessionRegistry, slot: PaneSlot<'tm'>, pane: PaneView<TmState>) =>
   slot.render(reg, pane, slot.resolve(reg))
 
+/**
+ * Inert language-server handle for the transport fixtures below, which drive stepping and binding
+ * rather than language features. ONE stub rather than one per fixture: widening `lspClient`'s type is
+ * a regular event in part 3a, and four copies would each have to be found and widened by hand.
+ */
+const LSP_STUB = {
+  openDocument() {},
+  changeDocument() {},
+  closeDocument() {},
+  format: async () => [],
+  documentSymbols: async () => [],
+  definition: async () => null,
+  references: async () => [],
+}
+
 describe('SessionRegistry', () => {
   it('throws for a session it does not hold rather than answering with nothing', () => {
     const reg = new SessionRegistry()
@@ -299,6 +314,9 @@ describe('PaneSlot', () => {
       draw: () => draws++,
       speed: () => 8,
       setSpeed: () => undefined,
+      // Inert: these fixtures drive stepping and binding, not language features.
+      lspClient: () => LSP_STUB,
+      formatOnBlur: () => false,
       linkWiring: () => ({}) as LinkWiring,
       notify: () => undefined,
       // A THROW RATHER THAN A NO-OP, FOR THE SAME REASON THE TWO CASTS ABOVE ARE CASTS: only `detach`
@@ -396,6 +414,9 @@ describe('PaneSlot', () => {
       setSpeed: () => undefined,
       // `index.lambdaText` IS THE ONE FIELD THE GUARD ABOVE THE `try` READS — an empty string makes
       // `detach` return before it ever forks, which would pass every assertion below vacuously.
+      // Inert: these fixtures drive stepping and binding, not language features.
+      lspClient: () => LSP_STUB,
+      formatOnBlur: () => false,
       linkWiring: () => ({ index: { lambdaText: 'λx. x' } }) as unknown as LinkWiring,
       notify: (t: string) => {
         notified.push(t)
@@ -490,6 +511,9 @@ describe('PaneSlot', () => {
       // for its text (`sessions.entryOf(...).tmProgram?.tmText` is the whole resolution), so a fake
       // that omitted `index` would still be exercising the real handler rather than papering over a
       // read it does not perform.
+      // Inert: these fixtures drive stepping and binding, not language features.
+      lspClient: () => LSP_STUB,
+      formatOnBlur: () => false,
       linkWiring: () => ({}) as unknown as LinkWiring,
       notify: (t: string) => {
         notified.push(t)
@@ -541,6 +565,9 @@ describe('PaneSlot', () => {
       draw: () => undefined,
       speed: () => 8,
       setSpeed: () => undefined,
+      // Inert: these fixtures drive stepping and binding, not language features.
+      lspClient: () => LSP_STUB,
+      formatOnBlur: () => false,
       linkWiring: () => ({}) as unknown as LinkWiring,
       notify: () => undefined,
       onBuffersChanged: () => undefined,

@@ -36,10 +36,14 @@ export function byteToIndex(text: string): Uint32Array {
 /**
  * A single byte offset, looked up in a `byteToIndex` map and clamped into it.
  *
- * ONE HOME, not three. `decorationRanges` below, `highlight.ts`'s `declineMark`, and
- * `diagnostics.ts`'s `lintRanges` each need exactly this lookup — a byte offset can come in negative,
- * past the map's end, or (its intended case) mid-character, and all three must resolve it the same
+ * ONE HOME, FOR EVERY CALLER. `decorationRanges` below, `highlight.ts`'s marks, `lambda-pane.ts`'s
+ * frame rendering and `lambda-window.ts` each need exactly this — a byte offset can come in negative,
+ * past the map's end, or (its intended case) mid-character, and all of them must resolve it the same
  * way rather than risk drifting apart one clamp expression at a time.
+ *
+ * **NO COUNT AND NO LIST OF THREE**, because both were wrong. Part 3a rewrote this doc to drop a
+ * reference to the deleted `lintRanges` and put `link.ts` in its place; `link.ts` does not call this
+ * function at all, and the callers are four modules rather than three.
  */
 export function byteIndexAt(map: Uint32Array, byteOffset: number): number {
   return map[Math.min(Math.max(byteOffset, 0), map.length - 1)] as number

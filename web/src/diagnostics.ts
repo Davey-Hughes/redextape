@@ -1,45 +1,46 @@
-import { byteIndexAt, byteToIndex } from './spans'
-import type { Diagnostic } from './types'
+import type { Text } from '@codemirror/state'
+import type { LspDiagnostic, LspRange } from './lsp-protocol'
+import { offsetOf } from './lsp-text'
 
 export type LintRange = { from: number; to: number; severity: 'error' | 'warning'; message: string }
 
 /**
- * Core's `Diagnostic` as `@codemirror/lint`'s shape: `Span` renamed and `Severity` lower-cased.
+ * `publishDiagnostics`' payload as `@codemirror/lint`'s shape.
  *
- * `d.span` IS THE SAME BYTE-OFFSET CONTRACT AS `classify_source`'s spans — see `spans.ts`'s
- * `byteToIndex` doc. `analyze` writes offsets from Rust's `str` position, so a non-ASCII `//` comment
- * (or any non-ASCII text before the diagnostic) shifts the byte offset away from the UTF-16 index by
- * exactly the gap between the two units — converted here before the clamp and the widening below,
- * the same shape `decorationRanges` uses, rather than trusting `span.start`/`span.end` as JS indices
- * directly.
+ * **THE ZERO-WIDTH CASE IS STILL THE COMMON ONE, AND THE WIDENING SURVIVES THE MOVE OFF BYTES.**
+ * A zero-width range is not an edge case: driven against the real server, ten of fifteen broken
+ * programs produce at least one. `let x = ` reports `0:8-0:8` twice. CodeMirror renders nothing at
+ * all for `from === to`, so the marker would silently not appear on some of the most likely broken
+ * programs there are. That is a property of CodeMirror rather than of the offsets, which is why
+ * the byte arithmetic this replaced could go and this could not.
  *
- * THE ZERO-WIDTH CASE IS THE COMMON ONE, not an edge. `let x = ;` reports at the point the parser
- * noticed something missing, and CodeMirror renders nothing at all for `from === to` — so the marker
- * would silently not appear on the single most likely broken program. Widened by one CHARACTER — not
- * one UTF-16 code unit — backwards at the end of the document, and dropped only when there is no
- * document to widen into. Widening by a code unit would, for a zero-width diagnostic that lands on an
- * astral character, produce a position inside its surrogate pair, which CodeMirror rejects or renders
- * wrongly.
+ * Widened by one CHARACTER rather than one UTF-16 code unit, and backwards at the end of the
+ * document: widening by a code unit onto an astral character produces a position inside its
+ * surrogate pair, which CodeMirror rejects or renders wrongly.
  */
-export function lintRanges(ds: Diagnostic[], text: string): LintRange[] {
-  const map = byteToIndex(text)
-  const docLength = text.length
+export function lspLintRanges(ds: LspDiagnostic[], doc: Text): LintRange[] {
   const out: LintRange[] = []
   for (const d of ds) {
-    let from = byteIndexAt(map, d.span.start)
-    let to = Math.min(byteIndexAt(map, d.span.end), docLength)
-    if (from >= to) {
-      if (docLength === 0) continue
-      from = Math.min(from, docLength - 1)
-      // `byteToIndex` only ever resolves TO a character's own start, but this clamp is raw UTF-16
-      // arithmetic and can land on the second half of a surrogate pair when the document's very last
-      // character is astral — back up to that character's start so the widening below sees a whole
-      // code point rather than half of one.
-      if (from > 0 && (text.charCodeAt(from) & 0xfc00) === 0xdc00) from -= 1
-      const codePoint = text.codePointAt(from) ?? 0
-      to = from + (codePoint > 0xffff ? 2 : 1)
+    const range: LspRange = d.range
+    // **AN INVERTED RANGE IS SWAPPED, NOT COLLAPSED**, which is `lsp-text.ts`'s `rangeOf` policy —
+    // one rule for the situation rather than two. Collapsing to `end` threw away the extent and
+    // then relied on the zero-width widening below to invent a new one.
+    let from = Math.min(offsetOf(doc, range.start), offsetOf(doc, range.end))
+    let to = Math.max(offsetOf(doc, range.start), offsetOf(doc, range.end))
+    if (from === to) {
+      if (doc.length === 0) continue
+      if (from >= doc.length) from = doc.length - 1
+      const text = doc.sliceString(from, Math.min(from + 2, doc.length))
+      // A low surrogate here means the clamp landed inside a pair; back up to the character's start.
+      if (from > 0 && (text.charCodeAt(0) & 0xfc00) === 0xdc00) from -= 1
+      const codePoint = doc.sliceString(from, Math.min(from + 2, doc.length)).codePointAt(0) ?? 0
+      to = Math.min(from + (codePoint > 0xffff ? 2 : 1), doc.length)
     }
-    out.push({ from, to, severity: d.severity === 'Error' ? 'error' : 'warning', message: d.message })
+    // Severity 1 is Error; everything else the server can send is a warning or weaker, and the
+    // gutter has two levels. `undefined` means the server did not say, which LSP leaves to the
+    // client — an unmarked problem is still a problem, so it shows as an error rather than silently
+    // as the weaker of the two.
+    out.push({ from, to, severity: d.severity === 2 ? 'warning' : 'error', message: d.message })
   }
   return out
 }

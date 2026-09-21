@@ -3,10 +3,12 @@ import type { EditablePane } from './editor-custody'
 import { EDITOR_DEBOUNCE_MS } from './editor-debounce'
 import { n } from './format'
 import type { Dir } from './layout'
+import { createOutlinePanel } from './outline'
 import { type PaneChoice, type PaneEvents, type SplitChoices, textPanel } from './pane-chrome'
 import { createPanel, type Panel } from './panel'
 import type { Leg } from './protocol'
 import { valueLine } from './results'
+import type { ScratchEditorConfig } from './scratch-editor'
 import { ScratchEditor } from './scratch-editor'
 import type { Binding, PaneOption } from './sessions'
 import { centredScrollTop, Follow, focusedRows, highlight, linkedRows, ROW_HEIGHT, StateIndex } from './state-table'
@@ -65,6 +67,8 @@ export class TmPane implements EditablePane {
    * argument.
    */
   #onEdit: ((src: string) => void) | undefined
+  /** Resolves this pane's current binding to an LSP document — see `PaneEvents.lspDocument`. */
+  #lspDocument: (() => ScratchEditorConfig['document']) | undefined
   /**
    * The pane's own body — everything below the heading row, wrapped in one element for `host.replaceChildren`
    * below.
@@ -173,6 +177,8 @@ export class TmPane implements EditablePane {
    * which is the machine's rule count.
    */
   #rulesPanel: Panel
+  /** This view's outline, present only while it holds an editable copy. */
+  #outline: ReturnType<typeof createOutlinePanel>
   #reattach: HTMLButtonElement
   #index: StateIndex | null = null
   #follow = new Follow()
@@ -196,7 +202,11 @@ export class TmPane implements EditablePane {
    * `panels` is the view's stored panel state (`workspace.ts`'s `Panels`), read once here; the rules panel
    * reports every later toggle through `on.panel`.
    */
-  constructor(host: HTMLElement, on: PaneEvents, panels: { readonly rules?: boolean } = {}) {
+  constructor(
+    host: HTMLElement,
+    on: PaneEvents,
+    panels: { readonly rules?: boolean; readonly outline?: boolean } = {},
+  ) {
     this.#header = viewHeader(on.rebind)
     this.#status = document.createElement('div')
     this.#status.className = 'tm-status'
@@ -208,6 +218,7 @@ export class TmPane implements EditablePane {
     this.#editorHost = document.createElement('div')
     this.#editorHost.className = ''
     this.#onEdit = on.editScratch
+    this.#lspDocument = on.lspDocument
     this.#tapes = document.createElement('div')
     this.#tapes.className = 'tapes'
     this.#steps = stepControls(on)
@@ -215,6 +226,9 @@ export class TmPane implements EditablePane {
     // text to report), so the item's run is the handler itself rather than a closure over a frame.
     const detachMachine = on.detachMachine
     this.#menu = viewMenu(this.#header.actions, {
+      // REMOVED WHERE THERE IS NO EDITOR, not disabled: a view showing a running leg has no
+      // document to format, which is the umbrella's rule for a control that cannot apply.
+      format: () => void this.#editor?.format(),
       ...(on.splitRow !== undefined && on.splitColumn !== undefined
         ? { split: (dir: Dir, c: PaneChoice) => (dir === 'row' ? on.splitRow?.(c) : on.splitColumn?.(c)) }
         : {}),
@@ -306,15 +320,39 @@ export class TmPane implements EditablePane {
     })
     this.#rulesPanel.actions.append(this.#reattach)
 
+    // **A TM VIEW'S OUTLINE IS ITS STATES** — measured against the real server, which answers a
+    // `state` block per symbol at kind 5. Closed by default, like the source view's: a machine of
+    // 1,199 states is the ordinary case, and a list of them above the tapes is not what a reader
+    // opened a TM view to see.
+    this.#outline = createOutlinePanel({
+      open: panels.outline ?? false,
+      onToggle: (open) => on.panel?.('outline', open),
+      symbols: async () => {
+        const doc = this.#lspDocument?.()
+        return doc === undefined ? [] : doc.client.documentSymbols(doc.uri)
+      },
+      reveal: (range) => this.#editor?.reveal(range),
+    })
+
     // `#body` CARRIES EVERYTHING BELOW THE HEADING, WITH THE TEXT PANEL FIRST — design §4.1's "editor
     // region above, today's tape rows and δ-table below". An attached pane (no editor mounted) is
     // unchanged: the panel starts `hidden` and contributes no box to the flow, so this reordering is
     // invisible until `setEditor` gives it something to show.
     this.#body = document.createElement('div')
     this.#body.className = 'tm-pane'
-    this.#body.append(this.#collapse.el, this.#status, this.#value, this.#tapes, this.#rulesPanel.el)
+    this.#body.append(
+      this.#collapse.el,
+      this.#status,
+      this.#value,
+      this.#tapes,
+      this.#rulesPanel.el,
+      this.#outline.panel.el,
+    )
     this.#header.steps.append(this.#steps.el)
     host.replaceChildren(this.#header.el, this.#body)
+    // The pane starts attached, with no editor — so the controls that need one start withdrawn
+    // rather than waiting for the first assignment to withdraw them.
+    this.#syncEditorControls()
   }
 
   /**
@@ -485,6 +523,7 @@ export class TmPane implements EditablePane {
     if (text === null) {
       this.#editor?.destroy()
       this.#editor = null
+      this.#syncEditorControls()
       this.#editorHost.className = ''
       this.#collapse.update(false)
       // THE SCRATCH STATUS GOES WITH THE EDITOR — see `#scratch`'s own doc. Cleared here rather than
@@ -503,11 +542,34 @@ export class TmPane implements EditablePane {
         initial: text,
         debounceMs: EDITOR_DEBOUNCE_MS,
         onEdit: (src) => onEdit?.(src),
+        onServerUpdate: () => this.#outline.refresh(),
+        // RESOLVED HERE, NOT AT CONSTRUCTION — the binding this pane shows now is the buffer
+        // the editor being built belongs to.
+        document: this.#lspDocument?.(),
       })
       this.#collapse.update(true, collapsed)
+      this.#syncEditorControls()
       return
     }
     this.#editor.setText(text)
+  }
+
+  /**
+   * Keep the controls that need an editor in step with whether this view has one.
+   *
+   * **CALLED FROM EVERY SITE THAT ASSIGNS `#editor`, WHICH IS WHY IT IS A METHOD AND NOT A BOOLEAN
+   * PASSED AROUND.** Four of those: the mount, the unmount, `takeEditor` and `receiveEditor` — plus
+   * the constructor's last statement, so a pane starts with the controls an editorless view should
+   * have rather than waiting for the first assignment to withdraw them. A control offered on a view
+   * with no editor would do nothing when clicked.
+   */
+  #syncEditorControls(): void {
+    this.#menu.setFormattable(this.#editor !== null)
+    // **THE OUTLINE GOES WITH THE EDITOR, NOT WITH THE VIEW.** A TM view showing the program has
+    // no document for the server to outline; a list that could never fill is removed rather than
+    // shown empty, which is the umbrella's §4 rule 4.
+    this.#outline.panel.el.hidden = this.#editor === null
+    if (this.#editor !== null) this.#outline.refresh()
   }
 
   /**
@@ -520,6 +582,7 @@ export class TmPane implements EditablePane {
     const editor = this.#editor
     if (editor === null) return null
     this.#editor = null
+    this.#syncEditorControls()
     editor.dom.remove()
     this.#editorHost.className = ''
     this.#collapse.update(false)
@@ -537,6 +600,18 @@ export class TmPane implements EditablePane {
    * carries the full argument (the two review findings that made the throw and the `collapsed` seeding
    * necessary) and is not repeated here.
    */
+  /**
+   * **`onServerUpdate` IS NOT RE-POINTED HERE, AND THAT IS A KNOWN EDGE RATHER THAN AN OVERSIGHT.**
+   * `onEdit` is — the defect `LambdaPane.receiveEditor`'s doc says took a browser session to find.
+   * `onServerUpdate` is bound at construction to the outline of the pane that BUILT the editor, so
+   * a relocated editor would refresh that pane's outline rather than this one's.
+   *
+   * No gesture reaches it today: a TM view offers no `move the editor here` (`setClaim` has one
+   * caller, in `lambda-pane.ts`), and since part 3a a TM editor is destroyed rather than held when
+   * its pane goes, so nothing can hand one to a different pane. A setter is not added for a path
+   * nothing takes — the rule this branch applied twice already — and this note is what a future
+   * gesture should read before opening one.
+   */
   receiveEditor(editor: ScratchEditor, collapsed = false): void {
     if (this.#editor !== null) throw new Error('a TM pane was handed a second editor while still holding one')
     this.#editorHost.className = 'term-editor'
@@ -546,6 +621,7 @@ export class TmPane implements EditablePane {
     const onEdit = this.#onEdit
     editor.onEdit = (src) => onEdit?.(src)
     this.#editor = editor
+    this.#syncEditorControls()
     this.#collapse.update(true, collapsed)
   }
 

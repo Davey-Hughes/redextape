@@ -44,6 +44,7 @@ export const SHELL = `
       <label class="skin">style <select id="style"></select></label>
       <label class="skin">palette <select id="palette"></select></label>
       <label class="skin">appearance <select id="appearance-choice"></select></label>
+        <label class="skin"><input type="checkbox" id="format-on-blur" /> format on blur</label>
     </div>
   </header>
   <div id="notice" class="notice" hidden></div>

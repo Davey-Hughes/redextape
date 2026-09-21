@@ -18535,3 +18535,179 @@ run it without the prefix or with `TREE_SITTER=<repo>/.tools/tree-sitter`. And a
 now-deleted worktree built into **bakes that worktree's path into cached build scripts**, so reusing it
 from the main checkout fails with `No such file or directory` on a path that no longer exists — the
 cross-contamination hazard, arriving from the other direction.
+
+#### PLAN 7 PART 3a, THE LSP IN THE BROWSER: `redextape-lsp` RUNS IN A WORKER AND SERVES DIAGNOSTICS, FORMAT, THE OUTLINE AND NAVIGATION TO EVERY EDITOR — AND THE SERVER NEEDED NO CHANGE AT ALL, WHICH WAS MEASURED BEFORE THE SPEC WAS WRITTEN. A TM COPY SHOWS A DIAGNOSTIC FOR THE FIRST TIME. THE BRANCH SHIPPED TWO FEATURES THE SERVER CANNOT SUPPORT AND DELETED BOTH, AND ITS WORST DEFECTS WERE FOUND BY A CODE REVIEW, A DOCKER BUILD AND A BROWSER RATHER THAN BY ANY GATE (2026-09-20 to 2026-09-21, branch `plan7-part3a-lsp-in-the-browser`, `bc592b6..HEAD`, 13 commits, plus this entry and the whole-branch review's fixes)
+
+**Part 3a of Plan 7** ([design](../specs/2026-09-20-plan7-part3-editor-intelligence-design.md),
+[plan](2026-09-20-plan7-part3a-lsp-in-the-browser.md)). It is PR 1 of 2: 3b takes colouring, hover and
+the vim keymap.
+
+##### WHAT PART 3a BUILT
+
+- **`redextape-lsp-wasm`**, a ninth crate: one `#[wasm_bindgen]` type whose whole boundary is a JSON
+  message in and a JSON array out. It adds no behaviour to `redextape-lsp`, which is unchanged by this
+  branch — the split that crate's module doc argues for is what made the web phase free.
+- **`lsp-worker.ts`** owns the server handle and holds no policy; **`lsp-client.ts`** holds all of it
+  behind a port interface with no thread in it, so correlation, the document set and the restart-once
+  rule are exercised against a recording fake.
+- **Diagnostics in every editor.** The source editor's synchronous `analyze` path is deleted and
+  `lint.ts` with it; λ copies stop taking them from the session worker's run reply; **a TM copy shows
+  one for the first time** — `setDiagnostics` had callers in `lambda-pane.ts` and nowhere else.
+- **Format**, in each view's `⋯` menu and behind an opt-in *format on blur* setting.
+- **The outline**, a panel listing a document's symbols — `fn` definitions and `let` bindings for
+  source, `state` blocks for TM, nothing for λ.
+- **Navigation**: `F12` to a definition, `Shift-F12` cycling references with the count in the notice.
+- **Accessible names on both editable regions**, which closes deferred-accessibility item 16.
+
+##### THE SERVER NEEDED NO CHANGE, AND THAT WAS MEASURED BEFORE THE SPEC EXISTED
+
+A throwaway `cdylib` wrapping `Server`, built with `wasm-pack --target nodejs` and driven from Node,
+answered `initialize`, `didOpen`, `didChange`, `formatting`, `documentSymbol`, `definition` and
+`references` correctly with `redextape-lsp` untouched, and returned exactly one diagnostic for broken
+input in each of the four languages. So the risk was never whether the server worked in a browser; it
+was the worker, the client and the deletions, and the plan said so per task.
+
+##### TWO FEATURES THE SERVER CANNOT SUPPORT, BOTH SHIPPED AND BOTH DELETED
+
+**The umbrella's §5.4 asks for "jumps across views", and no such jump exists.** `Server::definition`
+builds its `Location` from `params.text_document.uri`, `references` does the same, and `NameIndex` is
+per document: every target is in the document that was asked about. This branch first built URI routing
+through the client, a `reveal` handler on every document, and a notice for a target no view was
+showing — a guard for a case that cannot arise, which is the shape this repository has already paid for
+as twenty-three timeout ceilings that could never fire. All of it is gone. `lsp-nav.ts`'s module doc
+records where it would grow back if the server ever gains a workspace index.
+
+**And `ScratchEditor` grew `diagnosticsSink` and `formattable` for tests that were never written.** Zero
+callers. Found by the coverage gate rather than by review, and deleted rather than covered.
+
+##### FOUR DEFECTS FOUND BY SOMETHING OTHER THAN A FAILING TEST
+
+One of these was a sabotage that did not fire; the others were a code review, a deleted directory and a test that did fail. The headline of an earlier draft of this entry called all four sabotages.
+
+1. **A dead worker's `error` event terminated its own replacement.** Listeners on a dead port cannot be
+   removed and `terminate()` cannot unqueue events already dispatched, so a panic with two messages in
+   flight delivered two events and the second ran the death path against the new worker. One worker
+   death left the replacement terminated, the restart budget spent and a notice reading "stopped twice".
+   Found by a code review of the branch's own foundation, requested before building on it.
+2. **`build:lsp-wasm` was never added**, so the worker's import resolved only because an ad-hoc build
+   was sitting on disk. `tsc --noEmit` was reported clean on that basis — the harness supplying the
+   thing under test. Deleting `pkg-lsp/` reproduces TS2307.
+3. **Format on blur undid the keystrokes it was meant to preserve.** A blur inside the 300 ms debounce
+   has a recompile pending; flushing it rebuilt the buffer from the text as typed, the format landed,
+   and then the recompile's reply re-seeded the editor from the buffer. **The first fix then named the
+   wrong mechanism**: the comment said the ORDER was load-bearing, and restoring the original order left
+   the test green. Recompiling the pre-format text reddens it. What matters is which text the recompile
+   carries, because that reply is what re-seeds the editor.
+4. **A sabotage that did not fire.** Making `readFormatOnBlur` return `false` unconditionally left every
+   browser test green, because they set the checkbox and never read storage back — so the round trip
+   that carries the setting across a page load was untested. It now has a node test the same sabotage
+   reddens.
+
+##### THREE MEASUREMENTS THAT CHANGED A DECISION
+
+- **Diagnostics timings were first taken with a `languageId` the server does not match**, so it did no
+  analysis and the figures came back about nine times too low — low in the direction that would have
+  made the reversal look free. Caught by a *zero*: every language returned no diagnostics on input
+  written to be broken. The real figures are 0.15 ms for a source document and 14.58 ms for an 814 KB
+  TM, against the 100 ms debounce `@codemirror/lint` already imposed.
+- **`lsp-worker.ts` was deliberately NOT excluded from coverage when it landed**, because nothing
+  spawned it then and its 0% was a testing gap. Once a browser test drove it — proven by sabotage, not
+  by the test passing — v8 still reported 0%, which is the instrumentation gap the exclusion is for. The
+  four figures move from 95.85 / 89.91 / 97.46 / 97.95 with it counted to 96.37 / 90.28 / 98.19 / 98.48
+  with it excluded.
+- **A test named for the zero-width diagnostic case was not testing one.** `let x = ;` reports
+  `0:8-0:9`. Enumerating fifteen broken programs found ten that produce a genuine zero-width range,
+  `let x = ` among them.
+
+##### AND THREE MORE FOUND AFTER EVERY GATE WAS GREEN, BY BUILDING THE IMAGE AND OPENING IT
+
+Every gate listed below passed with the first of these present, which is the point of recording them.
+
+- **The image would not have built.** The Dockerfile's stage 1 built `crates/redextape-wasm` only and
+  stage 2 copied `/app/pkg` only, so `pnpm run build:app` could not resolve `lsp-worker.ts`'s import
+  of `../../pkg-lsp`. Proved rather than reasoned: moving `pkg-lsp/` aside makes `build:app` exit 1.
+  **No CI job can catch this** — the `docker` job never runs on a PR — which is the same sentence
+  that file already carries about its `HEALTHCHECK`. Fixed, then built, run and health-checked by
+  hand: HTTP 200, `healthy`, and both `.wasm` files present in `/usr/share/nginx/html/assets/`.
+- **The outline had no ceiling.** Measured in the built app at 1440×900: 1,199 rows — `fact(3)`'s
+  state count — make a panel **34,779 px** tall, which pushes a TM view's tapes and δ table that far
+  down the page; at `MAX_FORK_RULES` it is 1,450,008 px. Building the rows is not the cost (8 ms at
+  1,199, 334 ms at 50,000); the height is. It now takes `max-height: 40vh`, the ceiling
+  `.state-table` already uses.
+- **The outline's open state was written and never read.** `pane-host.ts` read `rules` and no other
+  panel, so the outline persisted correctly and restored closed every time.
+
+##### A DEFECT SEEN IN A BROWSER THAT NO TEST WOULD REPRODUCE
+
+Reloading the built app after using it threw `Cannot read properties of undefined (reading
+'documentSymbols')` before the page finished loading: `main.ts`'s `lspClient` was a `let` assigned
+after the editor was built, while `TmPane`'s constructor already resolves `transport.ts`'s
+`lspDocument` thunk to refresh a restored outline. TypeScript cannot see it — definite-assignment
+analysis does not follow closures — and every test starts with empty storage, so no panel is ever
+restored open. The client is now built before anything that can resolve the thunk.
+
+**Three attempts to reproduce it in a test failed**, and the test written for it says so rather than
+implying a guard it does not give: with the panel restored open, with a restored copy as well, and
+with an `error`/`unhandledrejection` listener watching, the old order stays green. `symbols()` is
+async, so the throw becomes a rejection `createOutlinePanel`'s own `.catch` swallows. What that file
+does guard is the bullet above it — stubbing the panel read-back reddens two of its three tests. The
+ordering fix stands on being right, not on being tested.
+
+##### THE WHOLE-BRANCH REVIEW, WHICH FOUND WHAT ELEVEN TASK-LEVEL PASSES DID NOT
+
+Run after every gate was green, over the half of the branch no earlier review had seen.
+
+- **It corrected this branch's own conclusion.** `lsp-restored-panel.test.ts` was written for the
+  crash above and its docstring said three attempts had failed to reproduce it. They had failed
+  because the seed opened the *TM* view's outline, whose `symbols` thunk is `async` — the throw
+  becomes a rejection `createOutlinePanel`'s `.catch` swallows. `main.ts`'s thunk is a plain arrow and
+  throws synchronously out of `main()`. Seeding the SOURCE panel reproduces it deterministically, and
+  the file now exits 1 against the old order. The sentence claimed "the old order"; the seed tested
+  only the half that hides it.
+- **A TM view's editor was dropped without `destroy()`.** `pane-host.ts`'s custody handover is
+  λ-only, so a TM pane leaving `panes` — a close, or a cross-leg pick — took neither `takeEditor()`
+  nor `destroy()`. Harmless before this branch, when the editor merely became garbage; now
+  `destroy()` is what sends `didClose`, so the document stayed in `LspClient`'s map, which holds the
+  sink, which closes over the editor — and `#died` replayed `didOpen` for it on every worker restart.
+  TM editors are now destroyed; custody is not used, because a TM view offers no *move the editor
+  here* to reclaim one with.
+- **`format` from the `⋯` menu did not flush the pending edit, and the test named for that property
+  could not see it.** Only the blur path flushed. The test was titled "flushing the pending edit so
+  the last keystrokes are not undone" and asserted `toContain('tapes 1')`, `'start s'` and
+  `'accept'` — every one of them true of the pre-edit text. The flush now lives in `format()` itself,
+  so both doors share it, and the test asserts that a whole `state` block typed inside the debounce
+  window survives. Removing the flush reddens it.
+- **Four prose claims the finished code had made false**, all written by this branch: `spans.ts`
+  named `link.ts` as a caller of `byteIndexAt`, which it is not, and counted three callers where
+  there are four; a browser test named a file that was never created and a method that no longer
+  exists; and both `style.css` and `outline.ts` claimed a front end gaining nesting would need no
+  change here, when depth 3 renders flush with depth 1 until a rule is added.
+- **A race `destroy()`'s doc said was closed.** A format launched from the blur handler is an async
+  continuation with no timer to cancel, and clicking `retire` blurs the editor — so it could
+  recompile a removed buffer and dispatch into a destroyed view. Guarded now, and the floating
+  promise is caught rather than `void`ed.
+
+##### WHAT IT COSTS
+
+A second wasm artefact: `pkg-lsp/redextape_lsp_wasm_bg.wasm` is **283,076 bytes gzipped** beside the
+session's 271,498. Combining the two crates would save 67,967 at a profile with `lto` and
+`opt-level = "s"`, which the workspace does not set — the design's §3.1 records both figures and why the
+boundaries stay separate.
+
+##### VERIFICATION
+
+```
+$ cargo test -p redextape-lsp-wasm
+test result: ok. 8 passed; 0 failed
+
+$ cd web && pnpm vitest run
+Test Files  121 passed (121)
+     Tests  1069 passed (1069)
+
+$ cd web && pnpm run test:coverage   # exit 0, floors 95 / 89 / 97 / 97
+Statements   : 96.38%   Branches : 89.96%   Functions : 97.78%   Lines : 98.52%
+
+$ gzip -c pkg-lsp/redextape_lsp_wasm_bg.wasm | wc -c
+283076
+```
+

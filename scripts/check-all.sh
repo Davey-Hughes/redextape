@@ -161,6 +161,15 @@ LEGS=(
   # so it is a config like `ts`, and a config no leg builds is one whose tests never run.
   "base|clippy|-p redextape-wasm --features probe-no-tm-scratch-ceiling --all-targets"
   "base|test|-p redextape-wasm --features probe-no-tm-scratch-ceiling"
+  # `redextape-lsp-wasm` is a `cdylib` the browser loads, so "does it build for wasm32" is a
+  # different question from the one the `--workspace` rows above answer, which build natively.
+  #
+  # IT IS NOT CEREMONY, AND THE REASON IS THIS CRATE'S DEPENDENCY GRAPH RATHER THAN ITS CODE. It
+  # pulls in `redextape-lsp`, which carries `lsp-server` in `[dependencies]` for `main.rs`'s sake —
+  # a transport crate with threads and channels that no browser build has any use for. It happens to
+  # compile for wasm32 today, so this row is not what stops it being linked in; what this row stops
+  # is the NEXT dependency added to either crate that does not.
+  "base|wasm|-p redextape-lsp-wasm --lib"
   "base|build|-p redextape-native --no-default-features"
   "base|clippy|-p redextape-native --no-default-features --all-targets"
   "base|test|-p redextape-native --no-default-features"

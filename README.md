@@ -41,7 +41,7 @@ The plan sequence, and the running log of what implementation falsified:
 
 ## Architecture
 
-Eight crates under `crates/`.
+Nine crates under `crates/`.
 
 **`redextape-core`** — the whole language, with **no dependencies** (`cargo tree -p redextape-core
 --edges normal` lists only itself), which is what keeps it WASM-clean:
@@ -97,6 +97,16 @@ either way. For `conform.nvim` users who route formatting through it rather than
 of them, so opting in takes four entries rather than one — `redextape`, `redextape_asm`,
 `redextape_lambda` and `redextape_tm`, each `{ lsp_format = "fallback" }`, or conform's `["_"]`
 catch-all. Not required either way.
+
+**`redextape-lsp-wasm`** is the ninth, and it is named here in the same commit that moved the count
+above — the drift this section documents twice already, not repeated a third time. It is the
+`#[wasm_bindgen]` surface that lets the browser run the same server Neovim talks to: one exported
+type, `LspServer`, whose `handle` takes one JSON-RPC message and returns the messages that go back as
+a JSON array. It adds no behaviour to `redextape-lsp` at all — the split that crate's module doc
+argues for is what made this possible, and the whole crate is marshalling. Unlike `redextape-wasm` it
+generates no TypeScript: LSP's types come from Microsoft's `MetaModel` via `gen-lsp-types`, so a
+generated copy would describe a shape this project does not own, and the web client hand-writes the
+handful of messages it actually sends instead.
 
 ### The oracle
 

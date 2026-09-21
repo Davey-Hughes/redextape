@@ -436,20 +436,25 @@ describe('a poisoned buffer survives its own no-session reply', () => {
 
   /**
    * THE LIVE-EDIT PATH IS UNTOUCHED AND STILL DISTINGUISHED. A buffer with a frame behind it takes the
-   * other branch — the diagnostics go to the pane's own gutter and nothing is reported as a failed fork
-   * — and that discrimination is the whole reason `noSessionReply` still returns something rather than
-   * nothing. Without this case the arm could report every parse failure as a fork failure and every
-   * assertion above would still pass.
+   * other branch — nothing is reported as a failed fork and the buffer survives — and that
+   * discrimination is the whole reason `noSessionReply` still returns something rather than nothing.
+   * Without this case the arm could report every parse failure as a fork failure and every assertion
+   * above would still pass.
+   *
+   * **THE GUTTER IS NO LONGER PART OF THAT DISCRIMINATION, AND THIS TEST USED TO ASSERT IT.** The
+   * diagnostics on this reply went to `LambdaPane.setDiagnostics`, which served λ copies and left TM
+   * copies with an empty gutter whatever was wrong with them. Every editor is an LSP document now and
+   * its diagnostics arrive on that document's own sink. What this case still pins — no notice, buffer
+   * retained — is the whole of what the branch decides.
    */
   it('does not report a mid-edit parse failure as a failed fork', () => {
-    const { reg, buffers, replies, slot, gutter, notified } = scratchDriver()
+    const { reg, buffers, replies, slot, notified } = scratchDriver()
     const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
     reg.legOf({ session: id, leg: 'lambda' }).hist.push(lambdaFrame('λx. x'), 1)
 
     replies.onScratchReply(id, noSession([DIAGNOSTIC]))
 
     expect(notified()).toEqual([])
-    expect(gutter).toEqual([[DIAGNOSTIC]])
     expect(buffers.list().map((b) => b.id)).toContain(id)
   })
 })

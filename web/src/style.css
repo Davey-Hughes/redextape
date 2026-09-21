@@ -1432,3 +1432,50 @@ main {
   margin-inline-start: 0;
   padding: var(--space-1) 0 0;
 }
+
+/* THE OUTLINE — Plan 7 part 3a. One row per symbol the server reports, in the panel primitive part 1
+   built. Nesting is rendered from `data-depth` rather than from markup structure, because the shape the
+   server sends is a tree while the data every front end produces today is flat.
+   TWO DEPTHS HAVE RULES, AND A THIRD WOULD NEED ONE. An earlier version of this comment said a
+   stylesheet reading one attribute needs no change the day the data stops being flat; it does — depth
+   3 and beyond fall back to `var(--outline-depth, 0)` and render flush with the top level. Nothing
+   produces one today, so the rules stop where the data does. */
+.outline {
+  display: flex;
+  flex-direction: column;
+  padding: 0.25em 0;
+  /* **BOUNDED, FOR THE REASON THE δ TABLE IS.** An outline lists every symbol a document has, and a
+     TM copy's symbols are its states: `fact(3)` compiles to 1,199 of them and `MAX_FORK_RULES` admits
+     a machine with far more. MEASURED in the built app at 1440×900: 1,199 rows make a panel 34,779px
+     tall, which pushes a TM view's tapes and δ table that far down the page, and 50,000 rows make it
+     1,450,008px. Building the rows is not the cost — 8ms at 1,199 and 334ms at 50,000 — the height
+     is. `40vh` is the ceiling `.state-table` already uses. */
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.outline-row {
+  text-align: left;
+  font: inherit;
+  padding: 0.15em 0.6em;
+  padding-inline-start: calc(0.6em + var(--outline-depth, 0) * 1em);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.outline-row[data-depth="1"] {
+  --outline-depth: 1;
+}
+.outline-row[data-depth="2"] {
+  --outline-depth: 2;
+}
+.outline-row:hover {
+  background: var(--bg-raised);
+}
+.outline-empty {
+  margin: 0;
+  padding: 0.15em 0.6em;
+  font-size: var(--step--2);
+  color: var(--fg-dim);
+}

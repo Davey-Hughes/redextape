@@ -1099,6 +1099,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "redextape-lsp-wasm"
+version = "0.0.0"
+dependencies = [
+ "console_error_panic_hook",
+ "redextape-lsp",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "redextape-native"
 version = "0.0.0"
 dependencies = [

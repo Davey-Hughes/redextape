@@ -1,11 +1,14 @@
 import { canRecordFurther } from './controls'
 import type { LinkWiring } from './link-wiring'
+import type { LspClient } from './lsp-client'
+import { documentUri, LANGUAGE_OF_PANE } from './lsp-protocol'
 import type { PaneEvents } from './pane-chrome'
 import { createPlayer } from './player'
 import type { Leg } from './protocol'
 import { BufferCapReached, type ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
 import type { Binding, LegState, PaneSlot, SessionRegistry } from './sessions'
+import { pairLabel } from './view-header'
 import type { Speed } from './workspace'
 
 /**
@@ -42,6 +45,19 @@ export function createTransport(deps: {
   notify: (text: string) => void
   linkWiring: () => LinkWiring
   /**
+   * The language server, for the documents this transport's editors are.
+   *
+   * A THUNK, FOR THE REASON THIS FACTORY'S OWN DOC ALREADY GIVES ABOUT `draw` AND `linkWiring`:
+   * `main.ts` builds the transport long before it builds the client, and a value parameter would
+   * capture `undefined` forever.
+   */
+  lspClient: () => Pick<
+    LspClient,
+    'openDocument' | 'changeDocument' | 'closeDocument' | 'format' | 'documentSymbols' | 'definition' | 'references'
+  >
+  /** Whether an editor losing focus should reformat — the settings menu's `format on blur`. */
+  formatOnBlur: () => boolean
+  /**
    * A buffer has just been created — the header list's readout is stale until this returns.
    *
    * **THE FORK BELOW IS THE ONLY PLACE IN `src/` THAT MAKES A BUFFER, AND THE READOUT IS ON A DIFFERENT
@@ -71,7 +87,17 @@ export function createTransport(deps: {
   play<T>(leg: LegState<T>): void
   events<K extends Leg>(slot: PaneSlot<K>): PaneEvents
 } {
-  const { sessions, scratchpad, draw, linkWiring, onBuffersChanged, onBuffersPersist, notify } = deps
+  const {
+    sessions,
+    scratchpad,
+    draw,
+    linkWiring,
+    onBuffersChanged,
+    onBuffersPersist,
+    notify,
+    lspClient,
+    formatOnBlur,
+  } = deps
   const player = createPlayer({ speed: deps.speed, draw })
 
   /**
@@ -322,6 +348,22 @@ export function createTransport(deps: {
     // (`this.#onEdit = on.editScratch`), unconditional on leg. `slot.binding.session` resolves
     // identically on either leg, so there is nothing leg-specific left in this handler's body — moving
     // it out of the spread is the whole fix.
+    // **THE DOCUMENT FOLLOWS THE SESSION, NOT THE SLOT.** `editor-custody.ts` holds editors under
+    // `SessionId` and a session has exactly one leg, so this pair is the editor's identity even
+    // as it moves between panes. Read inside the thunk, like `editScratch` below, because a
+    // slot's binding changes under a pane that was constructed once.
+    lspDocument: () => ({
+      uri: documentUri(slot.binding.session, LANGUAGE_OF_PANE[slot.binding.leg]),
+      languageId: LANGUAGE_OF_PANE[slot.binding.leg],
+      client: lspClient(),
+      formatOnBlur,
+      notify,
+      // The same words the view's own title uses, so the two cannot drift apart.
+      label: pairLabel({
+        leg: slot.binding.leg,
+        label: sessions.has(slot.binding.session) ? sessions.entryOf(slot.binding.session).label : 'a copy',
+      }),
+    }),
     editScratch: (src: string) => {
       scratchpad.recompile(slot.binding.session, src)
     },

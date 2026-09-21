@@ -1,8 +1,8 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-import { lintGutter } from '@codemirror/lint'
+import { lintGutter, setDiagnostics as setCmDiagnostics } from '@codemirror/lint'
 import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
-import init, { analyze, classifySource, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
+import init, { classifySource, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
 import { addViewItems, presetName, wireMenu, workspaceItems } from './app-header'
 import {
   APPEARANCE_LABEL,
@@ -16,16 +16,22 @@ import { showBanner } from './banner'
 import { bufferList } from './buffer-list'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from './buffers-store'
 import { createCompile } from './compile'
+import { lspLintRanges } from './diagnostics'
 import { createDraw } from './draw'
 import { createEditorCustody } from './editor-custody'
+import { readFormatOnBlur, writeFormatOnBlur } from './editor-prefs'
 import { declineMark, focusMark, highlighting, linkMark, setSpans } from './highlight'
 import { History } from './history'
 import { icon } from './icons'
 import type { LambdaPane } from './lambda-pane'
 import { closeLeaf, defaultLayout, LAYOUT_STORAGE_KEY, type LayoutNode, leaves, SOURCE_LEAF } from './layout'
 import { createLinkWiring, type LinkWiring } from './link-wiring'
-import { lintFromAnalyze } from './lint'
+import { LspClient } from './lsp-client'
+import { navKeymap } from './lsp-nav'
+import { documentUri } from './lsp-protocol'
+import { applyEdits, revealRange } from './lsp-text'
 import { createNotices } from './notice'
+import { createOutlinePanel } from './outline'
 import type { PaneChoice } from './pane-chrome'
 import { createPaneHost, type LayoutEvent } from './pane-host'
 import { createPanel } from './panel'
@@ -52,7 +58,7 @@ import {
 import { type BarTarget, barTarget, createStepBar } from './step-bar'
 import type { TmPane } from './tm-pane'
 import { createTransport } from './transport'
-import type { Classified, Diagnostic, LambdaState, TmState } from './types'
+import type { Classified, LambdaState, TmState } from './types'
 import { assertTokenClasses } from './types'
 import { pairLabel, sourceViewHeader, viewMenu } from './view-header'
 import {
@@ -159,6 +165,7 @@ async function main(): Promise<EditorView> {
   const settingsButton = document.querySelector<HTMLButtonElement>('#settings')
   const settingsMenu = document.querySelector<HTMLElement>('#settings-menu')
   const appearanceChoice = document.querySelector<HTMLSelectElement>('#appearance-choice')
+  const formatOnBlurBox = document.querySelector<HTMLInputElement>('#format-on-blur')
   const styleSelect = document.querySelector<HTMLSelectElement>('#style')
   const paletteSelect = document.querySelector<HTMLSelectElement>('#palette')
   /**
@@ -200,6 +207,7 @@ async function main(): Promise<EditorView> {
     !settingsButton ||
     !settingsMenu ||
     !appearanceChoice ||
+    !formatOnBlurBox ||
     !styleSelect ||
     !paletteSelect ||
     !buffersButton ||
@@ -244,6 +252,10 @@ async function main(): Promise<EditorView> {
   }
 
   let appearance = readStored(readAppearanceStorage())
+  /** The language server. Assigned below, before any pane can resolve `lspDocument`. */
+  let lspClient: LspClient
+  /** The settings menu's `format on blur`, read at every blur. */
+  let formatOnBlur = readFormatOnBlur()
   // THE TOGGLE SHOWS ITS STATE IN A WORD, BESIDE THE GLYPH (Plan 7 part 2 spec §6) — the word is its
   // accessible name, and `aria-label` is removed so the two cannot disagree. `☀`/`☾` are drawn (Hack lacks
   // them); `◐` stays text.
@@ -276,6 +288,33 @@ async function main(): Promise<EditorView> {
   applyAppearance(document.documentElement, appearance)
   relabelAppearance()
   appearanceButton.addEventListener('click', () => setAppearance(nextAppearance(appearance)))
+
+  formatOnBlurBox.checked = formatOnBlur
+  formatOnBlurBox.addEventListener('change', () => {
+    formatOnBlur = formatOnBlurBox.checked
+    writeFormatOnBlur(formatOnBlur)
+  })
+
+  /**
+   * **BUILT HERE, BEFORE ANY PANE EXISTS, AND THE POSITION IS LOAD-BEARING.** `transport.ts`'s
+   * `lspDocument` thunk reads this to hand every copy's editor its client, and a pane can resolve
+   * that thunk while it is still being CONSTRUCTED: `TmPane` syncs the controls that need an editor,
+   * which refreshes its outline, which asks for symbols. With a restored workspace whose outline
+   * panel was left open, that happens on the first frame of the page.
+   *
+   * Built after the editor instead — which is where this sat, because the source document's
+   * diagnostics sink needs `view` — it was still `undefined` at that moment, and the page threw
+   * `Cannot read properties of undefined (reading 'documentSymbols')` before it finished loading. No
+   * test saw it: every one of them starts with empty storage, so no panel is ever restored open.
+   * Found by reloading the built app after clicking around in it.
+   *
+   * Only `openDocument` needs `view`, and it stays below where `view` exists.
+   */
+  lspClient = new LspClient(
+    () => new Worker(new URL('./lsp-worker.ts', import.meta.url), { type: 'module' }),
+    (text) => notices.notify(text),
+  )
+  lspClient.start()
   appearanceChoice.addEventListener('change', () => setAppearance(readStored(appearanceChoice.value)))
   // THE SETTINGS MENU, wired before `init()` with the toggle, for the toggle's own reason.
   wireMenu(settingsButton, settingsMenu)
@@ -341,6 +380,8 @@ async function main(): Promise<EditorView> {
   }
 
   let view: EditorView
+  /** The source editor's document. Per view, never fetched, never parsed — see `documentUri`. */
+  const SOURCE_URI = documentUri(SOURCE_LEAF, 'redextape')
 
   /**
    * THE SESSION REGISTRY — the container design §3.2b says decision 1 presupposes.
@@ -526,6 +567,10 @@ async function main(): Promise<EditorView> {
    * `draw` and `linkWiring` are thunks, for the reason the `let`s above give.
    */
   const transport = createTransport({
+    // A THUNK: `lspClient` is not assigned until after the editor is built, far below this call.
+    lspClient: () => lspClient,
+    // READ AT BLUR, not captured, so toggling the setting takes effect without remounting an editor.
+    formatOnBlur: () => formatOnBlur,
     sessions,
     scratchpad,
     draw: () => draw(),
@@ -642,6 +687,16 @@ async function main(): Promise<EditorView> {
     else notices.notify(`view now shows ${say(e.shows)}`)
   }
   const sourceMenu = viewMenu(sourceHeader.actions, {
+    // The source view always has its editor, so unlike a copy's this never comes and goes —
+    // `setFormattable(true)` is set once below rather than tracked.
+    format: () => {
+      lspClient
+        .format(SOURCE_URI)
+        .then((edits) => applyEdits(view, edits))
+        .catch(() => {
+          // The client has already said the server is gone; this is one gesture, not a second report.
+        })
+    },
     close: () => {
       const grew = neighbourOf(tree, SOURCE_LEAF)
       tree = closeLeaf(tree, SOURCE_LEAF)
@@ -1693,6 +1748,14 @@ async function main(): Promise<EditorView> {
         lineNumbers(),
         history(),
         highlightActiveLine(),
+        keymap.of(
+          navKeymap({
+            uri: () => SOURCE_URI,
+            client: () => lspClient,
+            reveal: (range) => revealRange(view, range),
+            notify: (text) => notices.notify(text),
+          }),
+        ),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         highlighting,
         declineMark,
@@ -1703,6 +1766,18 @@ async function main(): Promise<EditorView> {
         // to be airtight about the stale-index rule on every keystroke rather than only on clicks.
         // `mouseup` rather than `mousedown`, so a drag that selects text does not also link.
         EditorView.domEventHandlers({
+          // NO FLUSH HERE, UNLIKE A COPY'S. This editor posts `changeDocument` on every keystroke
+          // rather than on a debounce, so the server's copy is never behind what is on screen.
+          blur: () => {
+            if (!formatOnBlur) return false
+            lspClient
+              .format(SOURCE_URI)
+              .then((edits) => applyEdits(view, edits))
+              .catch(() => {
+                // The client reports the server; a blur is not the place to repeat it.
+              })
+            return false
+          },
           mouseup: (event, v) => {
             const pos = v.posAtCoords({ x: event.clientX, y: event.clientY })
             if (pos === null) return false
@@ -1728,14 +1803,23 @@ async function main(): Promise<EditorView> {
             },
           },
         ]),
+        // `lintGutter()` STAYS AND `lintFromAnalyze` GOES. Diagnostics are PUSHED now, from the
+        // LSP worker through `setDiagnostics` below, so there is nothing for a `linter` source to
+        // pull. The gutter is the surface either way.
         lintGutter(),
-        lintFromAnalyze((src) => analyze(src) as Diagnostic[]),
+        // DEFERRED-ACCESSIBILITY ITEM 16. CodeMirror gives its content a `textbox` role and no
+        // name; on a workspace showing three editors at once they all announced the same way.
+        EditorView.contentAttributes.of({ 'aria-label': 'source program editor' }),
         EditorView.updateListener.of((u) => {
           if (!u.docChanged) return
           const src = u.state.doc.toString()
           // Synchronous, in the same frame as the keystroke. This is the whole reason `classifySource`
           // is not behind the worker.
           u.view.dispatch({ effects: setSpans.of(classifySource(src) as Classified) })
+          // NOT DEBOUNCED, unlike `compile.schedule` below. `@codemirror/lint`'s 100 ms delay was
+          // a PULL-side debounce and there is no pull any more; the server costs 0.15 ms on a
+          // source document of this size, measured, and it is on another thread.
+          lspClient.changeDocument(SOURCE_URI, src)
           // STALE FROM THIS KEYSTROKE UNTIL THE NEXT COMPILE. `linkMark` clears its own decoration on
           // `docChanged`; this clears the state behind it, the status line, AND THE OTHER TWO PANES —
           // design §6 case 4 requires all three cleared, not only the source echo. Before this, the λ
@@ -1783,6 +1867,44 @@ async function main(): Promise<EditorView> {
       ],
     }),
   })
+
+  /**
+   * The source view's outline — the panel primitive's newest consumer.
+   *
+   * **CLOSED UNLESS THE WORKSPACE SAYS OTHERWISE**, unlike the TM rules panel which defaults open.
+   * A rules table is what a TM view is for; an outline is a way of navigating a file, and a list
+   * of every `fn` taking room above the editor on a first visit is a cost paid by everyone for
+   * something few will have asked for yet.
+   */
+  const sourceOutline = createOutlinePanel({
+    open: ws.panels[SOURCE_LEAF]?.outline ?? false,
+    onToggle: (open) => {
+      ws = { ...ws, panels: withPanel(ws.panels, SOURCE_LEAF, 'outline', open) }
+      persistWorkspace()
+    },
+    symbols: () => lspClient.documentSymbols(SOURCE_URI),
+    reveal: (range) => revealRange(view, range),
+  })
+  // INSERTED RATHER THAN APPENDED: the panel sits between the view's header and its editor, and
+  // it is built here — after `ws`, `persistWorkspace` and `view` all exist — rather than where
+  // the rest of the source view is assembled.
+  sourceHost.insertBefore(sourceOutline.panel.el, editorHost)
+
+  // **BUILT AFTER `view`, AND THE FACTORY IS WHERE THE FAILURE POLICY LIVES** — the reason
+  // `SessionPool` takes one too: a notice needs the app's DOM, and this module is the one that
+  // has it.
+  // **THE SINK IS PART OF OPENING THE DOCUMENT**, so there is no router to keep in step and no way
+  // for this editor to receive another document's diagnostics. Every copy's editor opens its own the
+  // same way, from inside `ScratchEditor`.
+  lspClient.openDocument(SOURCE_URI, 'redextape', SAMPLE, {
+    diagnostics: (ds) => {
+      view.dispatch(setCmDiagnostics(view.state, lspLintRanges(ds, view.state.doc)))
+      // ONE SETTLED EDIT, ONE PUBLISH — so this is the cheapest signal that the server has caught
+      // up with the document, and the outline asks only while it is open.
+      sourceOutline.refresh()
+    },
+  })
+  sourceMenu.setFormattable(true)
 
   view.dispatch({ effects: setSpans.of(classifySource(SAMPLE) as Classified) })
   compile.schedule(SAMPLE)

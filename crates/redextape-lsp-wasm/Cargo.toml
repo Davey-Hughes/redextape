@@ -1,0 +1,29 @@
+[package]
+name = "redextape-lsp-wasm"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# `rlib` ALONGSIDE `cdylib` FOR THE REASON `redextape-wasm` GIVES: `cdylib` is what wasm-pack links,
+# and `rlib` is what lets `cargo test` compile this crate natively. Without it the only way to
+# exercise `handle` would be a browser, and `cargo llvm-cov` instruments the native build — the whole
+# crate would land in the coverage denominator uncovered.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The whole point of the crate. `Server::handle` is pure over `gen-lsp-types` structs, which is the
+# property `redextape-lsp`'s own module doc argues for at length as what "keeps the web phase
+# possible"; this crate is that web phase and adds nothing to the server.
+redextape-lsp = { path = "../redextape-lsp" }
+wasm-bindgen = "0.2.126"
+# THE BOUNDARY IS JSON STRINGS, SO THIS IS THE WHOLE MARSHALLING LAYER — there is no
+# `serde-wasm-bindgen` here and no `ts-rs`, unlike `redextape-wasm`. See `lib.rs`'s module doc: LSP's
+# types are generated from Microsoft's MetaModel into `gen-lsp-types`, so a TypeScript copy generated
+# from OUR Rust declarations would be a second description of a shape this project does not own.
+serde_json = "1"
+console_error_panic_hook = "0.1.7"
