@@ -12,6 +12,15 @@
  *
  * Not every token has a consumer yet: `on-accent` and `warn` are defined now so their contrast is held
  * from the start, and parts 2 and 3 of Plan 7 use them.
+ *
+ * `tok-binder` IS THE ONE CLASS OUTSIDE THE MINI-LANGUAGE'S OWN THAT GETS A COLOUR RATHER THAN
+ * `tok-neutral`, AND THE λ GRAMMAR IS WHY. `REDEXTAPE_LAMBDA` in `capture_map.rs` maps its captures to
+ * exactly three classes — `Binder`, `Ident` and `Punct`. `tok-ident` is `fg` in all six variants and
+ * `tok-punct` is `tok-neutral` or all but indistinguishable from it, so a λ editor whose binder also
+ * drew `tok-neutral` had two colours for three classes, with `λf` and `(` the same pixels. The classes
+ * the TM and asm forms add keep sharing `tok-neutral`: they arrive in editors that already colour a
+ * keyword, a number and a state name apart. `palettes.test.ts`'s *keeps `tok-binder` apart from every
+ * other token* is the gate, not this paragraph.
  */
 export const COLOUR_TOKENS = [
   'bg',
@@ -32,6 +41,7 @@ export const COLOUR_TOKENS = [
   'tok-bool',
   'tok-operator',
   'tok-punct',
+  'tok-binder',
 ] as const
 
 export type ColourToken = (typeof COLOUR_TOKENS)[number]
@@ -72,6 +82,7 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-bool': '#1d4ed8',
       'tok-operator': '#7c2d92',
       'tok-punct': '#665f56',
+      'tok-binder': '#166b16',
     },
     dark: {
       bg: '#191714',
@@ -92,6 +103,7 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-bool': '#86b6ff',
       'tok-operator': '#d6a2f0',
       'tok-punct': '#a39a8f',
+      'tok-binder': '#86c47a',
     },
   },
   terminal: {
@@ -116,6 +128,7 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-bool': '#12548f',
       'tok-operator': '#6b2fa0',
       'tok-punct': '#526457',
+      'tok-binder': '#a51375',
     },
     dark: {
       bg: '#0b0e14',
@@ -136,6 +149,7 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-bool': '#79c0ff',
       'tok-operator': '#d2a8ff',
       'tok-punct': '#8b97aa',
+      'tok-binder': '#f76fc6',
     },
   },
   instrument: {
@@ -160,6 +174,7 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-bool': '#9a3412',
       'tok-operator': '#6d28d9',
       'tok-punct': '#4f6477',
+      'tok-binder': '#9f1188',
     },
     dark: {
       bg: '#101820',
@@ -180,6 +195,7 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-bool': '#f0956a',
       'tok-operator': '#c4a8f5',
       'tok-punct': '#8ea3b5',
+      'tok-binder': '#f472dc',
     },
   },
 }

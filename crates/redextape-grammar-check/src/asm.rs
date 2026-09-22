@@ -67,33 +67,25 @@ pub const CORPUS: &[(&str, &str)] = &[
 /// a stale copy out of a build directory.
 pub const HIGHLIGHTS: &str = include_str!("../../../grammars/tree-sitter-redextape-asm/queries/highlights.scm");
 
-/// Where the two vocabularies meet, FOR ASM. Design §5.1 of the tree-sitter spec records why the
-/// tables are per-grammar.
+/// Where the two vocabularies meet, for this language.
 ///
-/// **TWO ROWS PROJECT TO `Label` AND THE DIFFERENTIAL CANNOT TELL THEM APART.** `Operand::class`
-/// maps a label operand to `Label` and `print_asm_mapped` pushes `Label` for a declaration too;
-/// `TokenClass::StateName` is a TM-only distinction. The captures are kept separate so an editor
-/// can theme a definition differently from a reference — the projection map is allowed to be
-/// many-to-one, and `capture_map_has_no_duplicate_keys` checks it is a function, not an injection.
-/// `each_label_capture_lands_on_its_own_positions` in `tests/asm.rs` is what actually holds the two
-/// apart, because `compare_classified` structurally cannot.
+/// **THE TABLE MOVED TO `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It moved
+/// because the web app needs it and cannot link this crate: `build.rs` compiles four generated
+/// `parser.c` into this one, so there is no wasm build of it. What stays here is everything that ties
+/// the table to a query — totality over `HIGHLIGHTS`, and the no-unused-row rule — because those are
+/// tests about a grammar rather than facts about a naming map.
 ///
-/// **`@comment` HAS NO PRINTER.** It is in the map because a query uses it and
-/// `capture_map_is_total` requires a row; `Comment` never appears on the authority side.
+/// **THE MANY-TO-ONE `Label` ROWS ARE HELD APART BY A TEST, NOT BY THE MAP ITSELF.**
+/// `capture_map_has_no_duplicate_keys` checks the map is a function, not an injection, so it says
+/// nothing about the two rows that already share a class. `each_label_capture_lands_on_its_own_positions`
+/// in `tests/asm.rs` is what actually holds them apart, because `compare_classified` structurally
+/// cannot.
 ///
-/// There is no `@punctuation.bracket` row and no `@operator` row: this form has no brackets and
-/// emits no `Operator` class, and either row would fail `every_capture_row_is_used`.
-pub const CAPTURE_CLASSES: &[(&str, TokenClass)] = &[
-    ("keyword", TokenClass::Keyword),
-    ("type", TokenClass::Ident),
-    ("function", TokenClass::Mnemonic),
-    ("variable.builtin", TokenClass::Register),
-    ("number", TokenClass::Nat),
-    ("label", TokenClass::Label),
-    ("label.reference", TokenClass::Label),
-    ("punctuation.delimiter", TokenClass::Punct),
-    ("comment", TokenClass::Comment),
-];
+/// `@comment`'s row exists only because a query uses it and `capture_map_is_total` requires one for
+/// every capture a query emits.
+///
+/// Either a `@punctuation.bracket` row or an `@operator` row would fail `every_capture_row_is_used`.
+pub use redextape_core::capture_map::REDEXTAPE_ASM as CAPTURE_CLASSES;
 
 /// Asm's grammar: its generated parser, its highlight queries and its capture table together as one
 /// `Grammar` value.

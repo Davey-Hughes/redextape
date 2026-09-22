@@ -167,6 +167,18 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      # UNSCOPED, like every gate above it except `check-lua`, and for a reason this one can state
+      # exactly: the file that goes stale is `grammars/<g>/<g>.wasm` and the file being committed is
+      # `grammars/<g>/grammar.js` or `src/parser.c`. `check-lua` below is already scoped to
+      # `^grammars/.*/src/parser\.c$` for its own reasons, which is the same input set seen from the
+      # other side; this hook stays unscoped so that a hand-edited artefact is caught too, which is
+      # the whole point of its second hash. Self-test first, then the scan.
+      - id: check-grammar-wasm
+        name: committed grammar .wasm match their parser.c
+        entry: bash -c 'scripts/check-grammar-wasm.sh --self-test && scripts/check-grammar-wasm.sh'
+        language: system
+        always_run: true
+        pass_filenames: false
       - id: check-lua
         name: lua parses and parser names agree
         entry: bash -c 'scripts/check-lua.sh --self-test && scripts/check-lua.sh'

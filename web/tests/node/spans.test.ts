@@ -139,9 +139,11 @@ describe('byteToIndex', () => {
     expect(map[4]).toBe(2) // byte 4: 'b', past '€' entirely
   })
 
-  // An unpaired surrogate is not a valid Unicode scalar value, but `classifySource`'s callers hand
+  // An unpaired surrogate is not a valid Unicode scalar value, but this converter's callers hand
   // whatever `TextEncoder` did with the actual document text — which is what a JS string can contain
-  // if, say, an edit splits a surrogate pair mid-keystroke. The converter is right here BY COINCIDENCE,
+  // if, say, an edit splits a surrogate pair mid-keystroke. (The caller named here was
+  // `classifySource` until Plan 7 part 3b deleted it; `print_lambda_capped`'s frame spans and
+  // `sourceSpan` are the byte-offset producers left.) The converter is right here BY COINCIDENCE,
   // and the coincidence is worth recording so a future rewrite does not break it silently.
   it('agrees with TextEncoder on a lone surrogate, and the two agree by coincidence', () => {
     const lone = '\uD800' // an unpaired high surrogate.

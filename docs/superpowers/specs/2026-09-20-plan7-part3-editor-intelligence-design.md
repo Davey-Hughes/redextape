@@ -10,23 +10,47 @@ the umbrella guessed at and added one constraint it did not anticipate (§6.2).
 
 Code facts below were read at `bc592b6` (#102, part 2b's squash merge).
 
-## §1 Scope, and the two PRs
+**Amended 2026-09-21, at `79b0f14` (#103, 3a's squash merge), while pricing 3b's plan.** The amendment
+splits hover out into its own PR (§1), corrects §6.1's account of the capture→colour map from one table
+to the four that already exist, gives §7's manifest a second hash column, says how §11.3's browser
+differential reaches a Rust authority that cannot be called from a browser, and prices two costs §9
+understated. It also withdraws two claims this document made that are false against the tree: §7's
+description of the `*.wasm` rule's comment, and §8's "its value in the other encodings" for a language
+with no char literal. Every figure it adds is in §14.1, with the command behind it.
 
-One design, two PRs, each with its own plan and roadmap entry. 3a is designed knowing what 3b needs, so
-no shape it ships has to change for 3b.
+## §1 Scope, and the three PRs
+
+One design, three PRs, each with its own plan and roadmap entry. 3a is designed knowing what 3b and 3c
+need, so no shape it ships has to change for either.
 
 **3a — the LSP in the browser.** In: the `redextape-lsp-wasm` crate and its build (§3.1); the LSP worker
 and its client (§3.2, §3.3); documents, language ids and positions (§4); and the five features the server
 already serves today — diagnostics in every editor, format with opt-in format-on-blur, the outline panel,
 definition and references (§5). The `analyze`-based lint path is deleted in the same change.
 
-**3b — colour, hover and vim.** In: web-tree-sitter over the four committed grammar `.wasm` (§6); the
-grammar artefacts and their drift gate (§7); hover in the server and the client (§8); the vim keymap
-compartment (§9). `classify_source`'s decoration path is deleted in the same change.
+**3b — colour and vim.** In: web-tree-sitter over the four committed grammar `.wasm` (§6); the grammar
+artefacts and their freshness gate (§7); the vim keymap compartment (§9). `classify_source`'s decoration
+path in `web/` is deleted in the same change — the function itself stays, because it is the authority
+`redextape-grammar-check` holds the grammars to (§11.3).
 
-**The split is "served today" against "new work".** Every feature in 3a was proven to run in wasm
-unmodified before this spec was written (§2.3), so 3a carries no new Rust behaviour at all. Every
-feature in 3b is either new Rust (hover) or a new dependency (web-tree-sitter, `@replit/codemirror-vim`).
+**3c — hover.** In: `textDocument/hover` in the server and a client for it (§8), for source, TM and asm.
+
+**3a's split from the rest is "served today" against "new work".** Every feature in 3a was proven to run
+in wasm unmodified before this spec was written (§2.3), so 3a carries no new Rust behaviour at all. 3b
+carries no new Rust behaviour either — it is two new dependencies (`web-tree-sitter`,
+`@replit/codemirror-vim`) and a gate. 3c is the only part of the whole of part 3 that adds behaviour to
+`redextape-lsp`.
+
+**Hover was 3b's until a pre-flight priced it, and this is the correction.** An earlier draft of this
+section shipped hover inside 3b on the strength of §8's own sentence that it "can be deferred out of 3b
+without touching anything else". That sentence is true and it is why the split is cheap; what it does not
+say is how much hover costs. The pre-flight for 3b's plan found that `NameIndex` — the position→name
+resolver `definition` and `references` already share — reaches four of §8's seven answers and none of the
+other three, because **`Rule`, `State`, `Machine`, `Instr` and `Program` carry no spans at all** and a
+source literal is not a name occurrence. So the three remaining answers each need a resolution path that
+does not exist, plus an asm instruction table that has to be authored from doc comments (§8). Hover is the
+largest of the four chunks, not the smallest, and putting it in 3b would have made that branch half again
+the size of 3a's thirteen commits. §14 names the pre-flight behind each of those claims.
 
 **Out, and where it goes:** the λ layout, folding and term map, and the TM rule table and state diagram,
 which decide what those views *draw* (part 4); asm stepping and the registers panel (part 5); a
@@ -68,10 +92,15 @@ Two language services run **synchronously, on the main thread**, and both are de
 - `lint.ts` feeds `@codemirror/lint` from `analyze`, at `delay: 100` rather than the library's 750 ms
   default, so a marker lands before `compile.ts`'s 300 ms debounce paints "not compiled".
 
-`session-worker.ts` states the reason neither is in a worker: "`classifySource` and `analyze` are NOT
+`session-worker.ts` stated the reason neither is in a worker: "`classifySource` and `analyze` are NOT
 here: they are free functions, they are what the editor calls on every keystroke, and a round trip per
 keystroke is exactly the lag this split exists to avoid."
 
+**Past tense, because 3b deleted the sentence this section quotes.** That file now records that
+"neither half survives" — `analyze` has had no web caller since 3a made diagnostics a push from the LSP
+worker, and `classifySource` went with the decoration path it fed. The quotation stays because §6.1
+below is an argument *against* that reasoning and needs it on the page; it is marked as what the file
+said at `bc592b6` rather than as what a reader will find there now.
 **§6.1 and §5.1 reverse both of those decisions, and the reversal is measured, not asserted.** The
 reasoning above is about the *session* worker, which owns a `Session` handle and is busy running
 reductions. The LSP worker owns a `Server` and is idle between keystrokes, and the grammar-driven
@@ -236,8 +265,10 @@ full-document `didChange` to its `publishDiagnostics`, in wasm, five runs each:
 | TM, 814,207 bytes | 14.58 ms |
 
 The transport is not the cost: `structuredClone` of a 6,100,000-byte string is 0.512 ms, so even at the
-TM buffer ceiling the message crossing is a rounding error against the analysis. Every figure above is
-inside the 100 ms debounce `lint.ts` already imposes, except at the extreme — and the extreme is §5.1.1.
+TM buffer ceiling the message crossing is a rounding error against the analysis. **The debounce these
+were once measured against is gone** — part 3a deleted `lint.ts`, so the source editor sends a
+`didChange` per keystroke and the λ and TM editors send on `compile.ts`'s 300 ms (§14). Every figure
+above is under 15 ms and lands in a worker, except at the extreme — and the extreme is §5.1.1.
 
 **Nothing regresses for the mini-language**, and that is provable rather than hoped: the server's source
 diagnostics *are* `analyze`'s, asserted by a test in `language.rs`. What changes is the thread and the
@@ -248,13 +279,17 @@ gutter showing none". Each produces exactly one diagnostic on the broken fixture
 
 #### §5.1.1 The ceiling
 
-`MAX_SCRATCH_TM_BYTES` is 6,100,000, and 14.58 ms at 814,207 bytes extrapolates linearly to about
-109 ms there — past the debounce, though in a worker, so it lags rather than janks. `textDocumentSync`
-is Full, so each keystroke re-analyses the whole document.
+`MAX_SCRATCH_TM_BYTES` is 6,100,000, and `didChange` → `publishDiagnostics` just past it costs
+**135.2 ms** (§14.2). This section first put it at about 109 ms by scaling the 814,207-byte row
+linearly, which came in 24% low. It is in a worker either way, so it lags rather than janks.
+`textDocumentSync` is Full, so each keystroke re-analyses the whole document.
 
-**One ceiling covers diagnostics and colouring both** (§6.2), it is a measured byte figure rather than
-this extrapolation, and the plan's pre-flight measures it **in a browser**, not in Node as every figure
-here was taken. Above it, an editor shows no diagnostics and no colour, with one notice saying so.
+**ONE CEILING WAS PLANNED FOR BOTH AND ONLY COLOURING GOT ONE, WHICH §10 NOW STATES AS A DECISION
+RATHER THAN A GAP.** Colour parses on the main thread, where a document this size stalls every
+keystroke; diagnostics cost that 135.2 ms on another thread, and the main thread's whole share of them
+is 0.238 ms. So `COLOUR_CEILING_UNITS` (§6.2) is a colour ceiling — a measured byte figure rather than
+this extrapolation, taken **in a browser**, not in Node as every figure here was. Above it an editor
+shows uncoloured with one notice saying so, and keeps its diagnostics.
 
 ### §5.2 Format
 
@@ -327,11 +362,36 @@ four grammars generate ABI 15, and `web-tree-sitter` 0.27.0 loads all four, repo
 and parses real emitted `fact(3)` text in every language with `hasError` false while running each
 grammar's committed query. The 0.25.10 CLI pin and the 0.27.0 runtime are compatible, measured.
 
-**Capture names map to part 1's palette tokens.** The queries' vocabulary is already fixed and already
-held by a Rust differential (§11.3): `@keyword`, `@boolean`, `@number`, `@comment`, `@operator`,
-`@punctuation.bracket`, `@punctuation.delimiter`, `@variable`, `@function`, `@function.call`,
-`@variable.parameter`, and λ's, TM's and asm's own. Part 1 made every colour a palette token; this maps
-capture name to token and adds no colour of its own, so the colour gate stays satisfied by construction.
+**Capture names reach part 1's palette through `TokenClass`, and there are FOUR maps, not one.** An
+earlier draft of this paragraph listed a single capture vocabulary — `@keyword`, `@boolean`, `@number`,
+`@comment`, `@operator`, `@punctuation.bracket`, `@punctuation.delimiter`, `@variable`, `@function`,
+`@function.call`, `@variable.parameter` — and waved at "λ's, TM's and asm's own". That is wrong in a way
+that matters: the four maps already exist in Rust, as a `CAPTURE_CLASSES` table per language in
+`redextape-grammar-check`, and **they disagree with each other on three capture names by design**.
+
+| Capture | mini-language | λ | TM | asm |
+|---|---|---|---|---|
+| `@function` | `Ident` | — | — | **`Mnemonic`** |
+| `@variable.parameter` | `Ident` | **`Binder`** | — | — |
+| `@label.reference` | — | — | **`StateName`** | `Label` |
+
+A single table would have had to pick a winner for each row and would have coloured an asm mnemonic as an
+identifier. So the colourer carries the language's own table, keyed by the `languageId` the editor already
+holds, and `TokenClass` is the shared vocabulary underneath — the same enum `analysis.rs` declares, whose
+fourteen variants `theme.ts`'s `tokenClassName` already turns into the fourteen `.tok-*` classes
+`style.css` already styles. This paragraph said *"from seven palette tokens. This part adds no colour of
+its own"*, and part 3b added exactly one: `tok-binder`, an eighth token, because the λ table reaches
+`Binder`, `Ident` and `Punct` and nothing else, and all three collapsed onto two colours: `Binder` drew
+`--tok-neutral`, `Ident` drew `--tok-ident`, which is `--fg` in every variant, and `Punct` drew
+`--tok-punct`, which is `--tok-neutral` in both dark variants. No capture gained a class and no class
+gained a rule outside the palette, so the colour gate is still satisfied by construction.
+
+**The four tables move to `redextape-core` and cross the wasm boundary, so `web/` holds no copy of them.**
+They are pure `&[(&str, TokenClass)]` data with no tree-sitter dependency; `redextape-grammar-check` goes
+on consuming them from their new home, and `redextape-wasm` exports them beside the `tokenClasses()` it
+already exports for exactly this reason. A hand-written TS mirror was the alternative and is declined: a
+map that disagrees per language in three places is precisely the shape a hand copy gets wrong, and a drift
+test over a copy is a weaker claim than having no copy.
 
 ### §6.2 Viewport-scoped queries are a requirement, not an optimisation
 
@@ -341,8 +401,24 @@ Running a grammar's highlight query over a whole real TM document:
 
 | TM document | parse | whole-document query | viewport query, 60 lines |
 |---|---|---|---|
-| 229,181 bytes | 22.9 ms | 39.4 ms, **82,464 captures** | 0.27 ms, 420 captures |
-| 814,207 bytes | 80.9 ms | 159.8 ms, **292,547 captures** | 0.21 ms, 340 captures |
+| 229,181 bytes | 37.1 ms | 67.5 ms, **82,464 captures** | 0.65 ms, 897 captures |
+| 814,207 bytes | 130.0 ms | 221.8 ms, **292,547 captures** | 0.56 ms, 773 captures |
+
+**The viewport column was wrong in every earlier draft, and the mechanism is the point.** It read 420
+and 340, and both were measured over half the window they claimed. `QueryOptions.startIndex` and
+`endIndex` in `web-tree-sitter` 0.27.0 are **2 × UTF-16 code units**, while `node.startIndex` on the
+captures those options return is plain code units — an asymmetry inside one API. Every probe this
+design was built on passed a code-unit count straight through, so each measured half the range it was
+labelled with: the "60-line viewport" figure of 420 in fact spanned to unit 1,223, which is **line 35**.
+
+Measured on pure ASCII so nothing else can explain it — a 9-unit document `(ab) (cd)` yields 3 of its
+6 captures at `endIndex: 9` and all 6 at `endIndex: 18`, the latter identical to passing no range.
+
+**The conclusion this section draws is unchanged**, which is why the correction is a figure and not a
+redesign: 897 against 82,464 is still ninety-two times less work, and the whole-document counts were
+never affected because they pass no range at all and reproduce exactly. The parse and query timings
+above are re-taken in the same session as the corrected counts rather than carried over from the runs
+that produced the wrong ones.
 
 82,464 decorations in one `RangeSet` is the same class of problem the δ table already solved with
 `virtual-list.ts`. So the colourer queries **only the ranges CodeMirror is about to draw**, from
@@ -351,8 +427,20 @@ orders of magnitude less work, and it is measured on real `redextape emit --lang
 on a synthetic file.
 
 The parse itself is not viewport-scoped and cannot be — tree-sitter parses the document to hold a tree
-it can update incrementally. 80.9 ms at 814,207 bytes extrapolates to about 600 ms at the 6,100,000-byte
-buffer ceiling, which is §5.1.1's ceiling doing double duty.
+it can update incrementally. 130.0 ms at 814,207 bytes extrapolates to about 974 ms at the 6,100,000-byte
+buffer ceiling (130.0 × 6,100,000 ÷ 814,207), which is §5.1.1's ceiling doing double duty. **This
+paragraph read "80.9 ms … about 600 ms" two paragraphs below the table above having already been
+re-taken to 130.0 ms** — the table was corrected and this sentence, quoting the same measurement, was
+not. There is no third figure here: it is the same stale carry-over §14 also had, arithmetic included.
+
+**"Incrementally" is load-bearing and was measured in a browser, not assumed.** A full reparse of a
+103,028-unit TM in Chromium is 8.1 ms and an incremental one — `tree.edit` with the change, then
+`parse(text, oldTree)` — is **0.4 ms**, twenty times less, for an edit placed near the end of the
+document where the least of the old tree can be reused. A full reparse per keystroke extrapolates to
+about 480 ms at the ceiling; the incremental path does not grow with the document at all. So **the parse
+clock and the query clock are separate**: the tree is edited and reparsed on a document change, and the
+decorations are rebuilt from the existing tree on a viewport change. Rebuilding the tree on viewport
+change as well is the obvious first implementation and it is the one to avoid.
 
 ### §6.3 What colour costs when it fails
 
@@ -368,6 +456,46 @@ uncoloured, one notice, everything else working.
 λ, 17,079 for TM and 8,081 for asm — so the tree carries them cheaply, and CI needs neither emscripten
 nor docker to build the web app.
 
+**This section priced the grammars and never priced the engine that runs them, which is the larger
+number.** `web-tree-sitter` ships its own parser runtime as a fifth `.wasm`, fetched at
+`Parser.init({ locateFile })`: **209,613 bytes raw**. So the built image carries **seven** `.wasm`, not
+the six an earlier draft of the plan counted — the two wasm-pack artefacts, the four grammars, and the
+runtime — and "the tree carries them cheaply" is a claim about the repository, not about the download.
+
+**The wire figures are what the running server sends, because every other way of computing them gave a
+different answer.** Four attempts at "the grammars, gzipped" produced 12,903, 13,997, 14,175 and
+14,211, depending on whether the files were concatenated first and which `gzip` flags were used — and
+none of them is the number a user pays, because `deploy/nginx.conf` sets `gzip on` with
+`application/wasm` in `gzip_types` and compresses at its own level. Measured against the built image
+with `curl -H 'Accept-Encoding: gzip' -o /dev/null -w '%{size_download}'`:
+
+| | raw | what nginx sends |
+|---|---|---|
+| the four grammars | 44,358 | **15,052** |
+| the `web-tree-sitter` runtime | 209,613 | **94,777** |
+| colour, total | 253,971 | **109,829** |
+
+The runtime is **6.3 times** the four grammars on the wire. A figure computed with `gzip -9` reads
+82,848 for it — 12,000 bytes under what is actually served, and flattering in the direction that
+matters.
+
+**λ's is small enough that Vite inlined it, and the build config now stops that.** At 2,514 bytes it
+falls under Vite's default `assetsInlineLimit` of 4096, so a production build turned it into a
+`data:application/wasm;base64,` URI in the JS bundle while the other three were emitted as hashed
+assets. The inlined form was measured working in Chromium — fetched, `application/wasm`,
+`compileStreaming` fine — so this is a uniformity problem, not a breakage. It is fixed anyway, because
+**the threshold flips behaviour with no signal**: a grammar that grows past 4 KB silently changes how
+it loads in production. It also gave λ alone a different failure surface from its three siblings,
+which contradicts §10's row that each grammar loads independently, and made dev and production differ
+for one language only. `build.assetsInlineLimit` now declines to inline `.wasm` and leaves every other
+asset type on Vite's default.
+
+**This was missed by the pre-flight that was supposed to settle it**, and the mechanism is worth
+recording: the probe that established "a relative `?url` escaping the Vite root is emitted into
+`dist/`" used the mini-language and TM grammars, 16,684 and 17,079 bytes. Both are far over the
+threshold, so neither could expose it. The boundary was verified on the two cases incapable of
+showing it.
+
 Building one needs `tree-sitter build --wasm`, which runs emscripten, which on a machine without it runs
 `emscripten/emsdk:4.0.4` under docker. CI has neither, and docker-in-docker on the Forgejo runner is its
 own project. Two build notes, both learned by doing it:
@@ -379,59 +507,179 @@ own project. Two build notes, both learned by doing it:
   `.tools/tree-sitter` at 0.25.10, which is what `scripts/install-treesitter-ci.sh` installs and what
   must build these.
 
-**The gate is a source-hash manifest, not a rebuild.** `grammars/wasm-manifest.json` records, per
-grammar, the SHA-256 of the `src/parser.c` that produced its `.wasm`. `scripts/check-grammar-wasm.sh`
-recomputes those hashes and fails when one differs — so a grammar edited and regenerated without its
-`.wasm` rebuilt is caught, on CI, with no docker. It takes `--self-test` like its siblings, proving the
-detector still detects. A documented `--rebuild` path rebuilds all four and refreshes the manifest, for
-developers who have docker.
+**The gate is a hash manifest, not a rebuild, and it records BOTH ends.** `grammars/wasm-manifest.json`
+records, per grammar, the SHA-256 of the `src/parser.c` that produced its `.wasm` **and** the SHA-256 of
+the `.wasm` itself. `scripts/check-grammar-wasm.sh` recomputes both and fails when either differs, on CI,
+with no docker and no emscripten — `sha256sum` is all it needs. It takes `--self-test` like its siblings,
+proving the detector still detects. A documented `--rebuild` path rebuilds all four and refreshes the
+manifest, for developers who have docker.
 
-**What this gate does not catch, stated because a gate that only advertises its coverage is half an
-argument:** it compares *inputs*, not outputs. A committed `.wasm` corrupted or replaced by hand, with
-`parser.c` untouched, passes. The differential in §11.3 is what stands behind the artefact's actual
-behaviour; this gate stands behind its freshness. Neither alone is enough and the pair is the claim.
+**Recording the output hash is a correction to an earlier draft of this section, and the measurement is
+what allowed it.** That draft recorded `parser.c` alone and then admitted the hole in the next paragraph:
+it compared *inputs*, not outputs, so a committed `.wasm` corrupted or replaced by hand with `parser.c`
+untouched would pass. The reason given for stopping at inputs was that CI cannot rebuild the artefact and
+therefore cannot check it. That reason does not hold: checking an artefact's hash is not rebuilding it.
+The build was then measured to be byte-reproducible — the same grammar, rebuilt after deleting the
+artefact and written to a different output filename, produced an identical SHA-256 — so recording the
+output hash costs one field per grammar and causes no churn, because a legitimate `--rebuild` writes the
+same bytes back. §14 carries the hash and the command.
 
-`.gitignore` needs an exception: `*.wasm` is currently global, with a comment explaining it covers
-`grammars/*/parser.so`'s sibling artefacts. The four paths are negated explicitly, one line each, rather
-than by a directory glob that would also admit a stray build output.
+| Failure | `parser.c` hash | `.wasm` hash |
+|---|---|---|
+| grammar regenerated, `.wasm` left stale | caught | caught |
+| `.wasm` replaced or corrupted by hand, `parser.c` untouched | missed | **caught** |
+| both edited together so they agree | missed | missed |
 
-## §8 Hover
+The bottom row is the residue every hash manifest has and neither column closes it. The differential in
+§11.3 is what stands behind the artefact's actual *behaviour*; this gate stands behind its *identity*.
+Neither alone is enough and the pair is the claim.
 
-New server work — the only new Rust behaviour in part 3 — plus a client. `initialize` gains
-`hoverProvider: true` and `handle` gains a `textDocument/hover` arm.
+`.gitignore` needs an exception: `*.wasm` is currently global, one line with no comment of its own, four
+lines below the block comment that belongs to `/pkg/`. (An earlier draft of this paragraph said that rule
+carried a comment about `grammars/*/parser.so`'s sibling artefacts. It does not — `grammars/*/parser.so`
+is a separate rule at the foot of the file with its own unrelated comment about nvim-treesitter compiling
+in place.) The four paths are negated explicitly, one line each, rather than by a directory glob that
+would also admit a stray build output; the file's one existing negation, `!.env.example`, sits adjacent to
+what it negates, and these four cannot, so they carry a comment saying what they are.
+
+**The negations close a second hole as a side effect, which is worth stating because it is the more
+interesting one.** `check_grammars` in `scripts/check-all.sh` already fails on an untracked file under
+`grammars/`, and its own comment records that `--exclude-standard` honours `.gitignore` and that this is
+"this check's own blind spot". While the four `.wasm` are ignored, that arm cannot see them at all. Once
+they are negated and committed, it can.
+
+## §8 Hover — PR 3c
+
+New server work — the only new Rust behaviour in the whole of part 3 — plus a client. `initialize` gains
+`hoverProvider: true` and `handle` gains a `textDocument/hover` arm, shaped exactly like the `definition`
+arm beside it: `HoverParams` flattens the same `TextDocumentPositionParams`, and `HoverRequest`'s result
+type is `Option<Hover>`, so "nothing to say" is a well-typed `null` rather than a new type.
 
 **Three of four languages answer; λ answers nothing.**
 
-| Language | What hover says |
-|---|---|
-| source | for a function name, its name and arity; for a builtin, its one-line description; for a literal, its value in the other encodings |
-| TM | on a state name, how many rules it has; on a rule, what it does in words — what it reads, writes, which way it moves and where it goes |
-| asm | what the instruction does, and its operand roles |
-| λ | nothing |
+| Language | What hover says | Resolves a position how |
+|---|---|---|
+| source | for a function name, its name and arity | `NameIndex` |
+| source | for a builtin, its one-line description | `NameIndex` |
+| source | for a `Nat` or `Bool` literal, its value in the other bases | **new** |
+| TM | on a state name, how many rules it has | `NameIndex` |
+| TM | on a rule, what it does in words — what it reads, writes, which way it moves and where it goes | **new** |
+| asm | on a label, where it is defined | `NameIndex` |
+| asm | on an instruction, what it does and its operand roles | **new** |
+| λ | nothing | — |
 
-**asm's row is served but not reachable in the app until part 5**, for §5.1's reason: there is no asm
-editor to hover in. It is written and tested at the server (§11.2) so part 5 inherits it finished.
+**Four of those seven answers are nearly free and three are not, which is why hover is its own PR.**
+`NameIndex` is the position→name resolver `definition` and `references` already share, it is cached per
+document version, and a cursor one past the last byte of a name still resolves to that name. It indexes
+name occurrences and nothing else. So:
 
-**λ's silence is a designed gap, not a defect, and the umbrella says so first.** The λ term type carries
-no source positions, so there is nothing to resolve a document position against. It is recorded here so
-that a future reader finds the reason rather than filing a bug, and so that the test suite asserts
-*empty* for λ hover rather than omitting the case.
+- **`Rule`, `State`, `Machine`, `Instr` and `Program` carry no spans.** They are pure data models. A
+  cursor inside `write [b]` or on an `li` mnemonic resolves to nothing, and the rule-level and
+  instruction-level answers need a position→construct path that does not exist. `.tm` and `.asm` are both
+  line-oriented and `outline.rs`'s `enclosing_line` is the precedent to follow rather than threading spans
+  through the machine model.
+- **A literal is not an occurrence either**, so the source literal row needs its own resolution, and
+  **no decimal/hex/binary rendering helper exists anywhere in the Rust tree**. An earlier draft of this
+  table said "its value in the other encodings"; the source language has `Nat` and `Bool` literals and no
+  char literal at all, so the row now says *bases* and means it. `redextape_core::tm::Encoding` is a
+  different sense of the word — a trait for laying arithmetic onto tape cells — and is not this.
+- **No asm instruction description or operand-role table exists**, and the pieces that come closest are
+  all `pub(super)` inside `redextape_core::tm`: `asm_syntax.rs`'s `MNEMONICS` (24 spellings, the
+  authoritative list), its `Shape`, and `asm.rs`'s `instr_parts`. The prose to transcribe is the doc
+  comments on `asm.rs`'s `Instr` variants, which say what each instruction does but are compile-time
+  comments with no runtime representation. 3c authors the table; whether it lives in `redextape-lsp` or
+  beside `MNEMONICS` in core with a drift test is 3c's plan's decision, and `asm_syntax.rs`'s own
+  `table_agrees_with_the_printer` is the pattern for the latter.
+- **Arity is not in `NameIndex` either.** `DefKind::Fn` is a bare discriminant. Arity is `params.len()` on
+  `ast.rs`'s `Stmt::Fn`, so even the cheapest row needs the LSP crate to reach the AST — and
+  `parser.rs`'s `parse_for_nav`, the entry point `nav_rxt` uses, is `pub(crate)`.
 
-Hover is the one feature that can be deferred out of 3b without touching anything else, which is why it
-is grouped with the new-dependency work rather than with 3a.
+**One behavioural decision 3c must make rather than inherit.** `TmDocument::machine` is `None` whenever
+the file carries an error diagnostic, so a TM hover built on the machine goes quiet on broken input —
+where `definition` deliberately still answers, because `NameIndex` survives a failed parse by design and
+`definition_in_a_broken_file_still_answers` holds it to that. Hover on a state name can keep that
+property; hover on a rule cannot, without a second source for the rule's contents.
+
+**asm's rows are served but not reachable in the app until part 5**, for §5.1's reason: there is no asm
+editor to hover in. They are written and tested at the server (§11.2) so part 5 inherits a proven language
+rather than an untested one.
+
+**λ's silence is a designed gap, not a defect, and the umbrella says so first.** `term.rs`'s `LambdaTerm`
+carries a de Bruijn `Node`, a `maxfree` and a `depth`, and no span on any variant — the only provenance
+anywhere is an `Option<NodeId>` on `App`, which points into the Core AST, not into the `.rxlambda` text.
+So there is nothing to resolve a document position against. `language.rs` already records the same fact
+for navigation and holds `Language::Lambda.nav` to answering `None`. It is recorded here so that a future
+reader finds the reason rather than filing a bug, and so that the test suite asserts *empty* for λ hover
+rather than omitting the case — a test that should be sabotage-verified, since a fixture that would
+produce a hover under any fallback is the only way to show it can fail.
 
 ## §9 The vim keymap
 
 `@replit/codemirror-vim` 6.4.0, in a CodeMirror `Compartment`, switched by a *keymap* setting —
 *default* or *vim* — in the settings menu part 2a built. The umbrella's §5 calls vim "a keymap
 compartment", and a compartment is exactly what lets the setting change without rebuilding the editor.
+It exports `vim(options?: { status?: boolean }): Extension`, `Vim`, `getCM` and `CodeMirror`, and the
+extension is the whole of what this part uses.
+
+**Two costs this section understated, both found pricing 3b.** First, the package peer-depends on
+**five** CodeMirror packages and `web/package.json` has three of them — `@codemirror/language` and
+`@codemirror/search` are new, so the keymap adds three dependencies rather than one. Second, there is
+**no `Compartment` anywhere in the repository today**, and there are **two editor construction sites**
+rather than one: `scratch-editor.ts` builds the λ and TM copies, `main.ts` builds the source editor from
+its own inline extension list. Both are bare array literals with no reconfiguration path. So "a keymap
+compartment" is a change to both lists plus the first reconfiguration mechanism the app has had.
+
+**The colourer does not share that compartment, and a draft of this paragraph said it should.** A
+compartment exists to swap an extension *after* the editor is built, which is what a keymap setting
+needs and what a colourer does not: §6's colourer is one `ViewPlugin` installed at construction whose
+own state changes — it holds no decorations until its grammar resolves, and it recomputes them on every
+viewport and document change thereafter. Reaching for a compartment there would be a reconfiguration
+mechanism standing in for an async field. Both construction sites gain two entries; only one of them is
+a compartment.
 
 **vim owns keys inside a focused editor.** One rule, stated once:
 
 - While an editor has focus and the keymap is *vim*, vim receives `Esc` and every normal-mode key.
 - App shortcuts reachable inside an editor take a modifier, so they cannot collide with a normal-mode
-  key.
+  key. **This clause is true of the three bindings that exist and is NOT a general guarantee** — see
+  below.
 - Outside an editor, nothing changes — the app's keys behave as they do today in both keymaps.
+
+**`vim()` contributes no keymap at all, and the placement this section implied would have been wrong.**
+It yields four extension parts — two `PrecExtension`, a `ViewPlugin` carrying `domEventHandlers`, and a
+`StateField` — and competes at the DOM-event-handler level rather than through the keymap facet. Its
+`keydown` returns `undefined` and calls `preventDefault()` only when vim consumed the key, and
+CodeMirror treats `defaultPrevented` as handled; so ORDER decides, and unmapped keys fall through. A
+draft of this section said to place the compartment before `keymap.of([...defaultKeymap,
+...historyKeymap])`, which is both the wrong mechanism and, because both editors open with
+`navKeymap`, the wrong position — it would have sat below the first `keymap.of(...)`. The slot goes
+above **every** `keymap.of(...)`.
+
+**And that is what bounds the second clause.** Sitting above every keymap means vim wins any key it
+maps, including modifier combinations it binds itself — `<C-c>`, `<C-r>`, `<C-o>` and others. The app's
+three in-editor bindings survive because vim binds none of them, which was checked rather than assumed:
+`F12` appears nowhere in the shipped package. So "a modifier cannot collide" holds for today's three and
+would not hold for an arbitrary future `Mod-<letter>`. Anyone adding a fourth in-editor binding has to
+check it against vim's own table, not against this sentence.
+
+**The escape-hatch cost, measured from the server rather than from the build:** `vim()` is loaded
+eagerly even when the setting is *default*. nginx sends the app's main chunk as **245,583 bytes** with
+it and **194,446** with it stubbed out — **+51,137 on the wire, on every visit including every visit
+that never uses vim**. A dynamic `import()` behind the setting would recover it. Not taken here,
+recorded so the next reader does not have to measure it again.
+
+**Those replace 205,915 / 162,487 / +43,428, for the reason §7 gives.** Those were the build's own
+`gzip` on its own output; `deploy/nginx.conf` sets `gzip on` with no `gzip_comp_level`, so a user is
+served level 1 and a larger file. The old delta was not wrong about the comparison — both sides used
+one method — only about the size of what it compared. `gzip -1` is close enough to look like a
+shortcut and is not one: on this chunk it reads 245,491 against nginx's 245,583, so both figures above
+come from `curl` against the running image, and both sides were rebuilt from this tree so the
+difference is the stub's alone (§14.3).
+
+**Against what a visit actually pulls, that is 5%, not 26%.** A cold load fetches **1,008,253** bytes
+of the app's own assets on the wire — **1,278,557** counting the five webfonts — and **646,564** of
+that is the two Rust `.wasm`. The keymap is **5.1%** of the first. It is +26.3% of the main chunk, and
+the main chunk is not what a user waits for.
 
 The rejected alternative was `Esc` in normal mode moving focus out of the editor. It is convenient and
 it is what the umbrella's §4 rule 2 forbids for glyphs, applied to a key: one `Esc`, two meanings,
@@ -450,9 +698,29 @@ None blocks editing or compiling.
 | The LSP worker dies | Editors keep working without language features. The client restarts it once and replays `initialize` and every open document; a second death leaves features off with one notice. |
 | The LSP wasm fails to fetch | Same as a dead worker, without the restart — the notice says language features are unavailable. |
 | A grammar fails to load | That language shows uncoloured, one notice. The other three are unaffected, because each grammar loads independently. |
-| A document is over the ceiling | No colour and no diagnostics for that document, one notice saying which. Editing, compiling and running are untouched. |
+| A document is over the colour ceiling | That document shows uncoloured, one notice saying which. **Diagnostics keep running**, deliberately — the paragraphs below say why. Editing, compiling and running are untouched. |
 | `format` on an unparseable buffer | Nothing visible. `Language::format` returns `None`, which arrives as JSON `null`, and the client normalises it to no edits (§5.2). |
 | A definition or reference in no open view | The notice line says the target is not open. No view is created. |
+
+**The diagnostics half of that fourth row was designed, never built, and should not be.** This section
+promised "no colour and no diagnostics"; part 3b shipped the colour half, and the notice it shows
+already says only *"… is showing uncoloured: this document is too large to colour"*. The two halves do
+not share a mechanism. Colour parses **on the main thread**, where §14.1's 8.1 ms at 103,028 units grows
+into a per-keystroke stall, and that is the whole reason `colour.ts` has a `COLOUR_CEILING_UNITS` at
+all. Diagnostics run **in the LSP worker**: on a 6,164,376-unit TM, just past the ceiling, `didChange` →
+`publishDiagnostics` costs **135.2 ms**, and the main thread's entire share of that is the **0.238 ms**
+`structuredClone` carrying the text into the worker (§14.2). Not even a string traversal is added —
+both editors already call `doc.toString()` once per edit for the recompile and hand `changeDocument`
+the same value. So a ceiling here would cap latency on another thread rather than a freeze. The
+precedent is not exact, and saying so is the point: the twenty-three timeout ceilings `lsp-client.ts`
+and `lsp-nav.ts` both cite could never fire at all, where this one could. What the two share is the
+root — a guard sized from a cost that was reasoned about instead of measured.
+
+**The case is reachable, which is why the row is corrected rather than deleted.** `MAX_SCRATCH_TM_BYTES`
+guards `tm_scratch` in `crates/redextape-wasm/src/session.rs`, which is the session's scratch buffer;
+nothing in `web/` limits the length of text typed or pasted into an editor, and `COLOUR_CEILING_UNITS`
+reuses that number only to stop colouring. A document this size can reach an editor. What §14.2 settles
+is what it costs when one does.
 
 ## §11 Tests
 
@@ -474,7 +742,10 @@ from a feature is a visible hole in a table rather than an absent file:
 - **format** — each of the three reformats; an unparseable buffer in each is unchanged.
 - **definition and references** — within a document, and across two views.
 - **outline** — the panel lists `fact` for source; the panel is absent for λ.
-- **hover** — source and TM answer, λ answers empty (3b).
+- **colour** — each of the three editors carries `.tok-*` classes from its own grammar, and the computed
+  colour on one of them is the palette's, not a default (3b). Asserting the class alone would pass on a
+  class no stylesheet styles.
+- **hover** — source and TM answer, λ answers empty (3c).
 
 **asm is tested at the server, not in the app**, because it has no editor until part 5. A node test
 drives `LspServer.handle` over asm text for diagnostics, format and hover, so part 5 inherits a proven
@@ -487,9 +758,25 @@ captures that `redextape-grammar-check` already holds the grammars to in Rust. T
 reads raw query matches and projects them to `TokenClass`, and it is the authority this test borrows
 rather than a second one.
 
+**The authority cannot be called from a browser, and an earlier draft of this section did not say how it
+would be reached.** `redextape-grammar-check` compiles the four `src/parser.c` into itself through a
+`build.rs` and `cc`, and binds each grammar's raw `tree_sitter_*` symbol; there is no wasm build of it and
+no `Language::load` in it. So the Rust side emits and the browser side compares: a Rust test writes a
+tracked golden fixture holding, per language and per program, the offset-ordered `(span, TokenClass)`
+sequence `captures` produces, and the browser test recomputes the same sequence from the committed `.wasm`
+under web-tree-sitter and asserts equality. The same Rust test verifies the committed fixture rather than
+only writing it, so CI fails on a stale one without needing to write anything.
+
+**The shape both sides must produce is already fixed by the Rust one**, and it is not the raw capture
+list: `captures` collects into a map keyed by byte range, requires two captures on one range to agree, and
+returns one entry per range in offset order — the same shape and unit as `classify_source`, which is what
+makes the existing Rust differential an equality rather than a reconciliation. The browser side collapses
+its captures the same way or the comparison is not the one this section claims.
+
 **This is the test that fails if the ABI moves**, if the pinned CLI is bumped, or if a committed
 `.wasm` no longer matches its `grammar.js` — the last of which §7's manifest gate also catches, from the
-other side.
+other side. It does **not** stand behind the capture→`TokenClass` map, because after §6.1 there is no
+second copy of that map to disagree with: `web/` reads the same four tables over the wasm boundary.
 
 ### §11.4 The language-id test
 
@@ -515,11 +802,13 @@ is what §9 of the umbrella means by parts 1–6 stopping the list from growing.
 
 | Question | Chosen | Declined |
 |---|---|---|
-| How to ship part 3 | one spec, two PRs — 3a served-today, 3b new work | one PR; LSP whole including hover in 3a; colour first |
+| How to ship part 3 | one spec, three PRs — 3a served-today, 3b colour and vim, 3c hover | one PR; two PRs with hover inside 3b; LSP whole including hover in 3a; colour first |
+| Capture → colour | the four per-language `CAPTURE_CLASSES` tables move to core and cross the wasm boundary | one merged table; a hand-written TS mirror held equal by a drift test |
+| §11.3's authority | a Rust test emits and verifies a tracked golden captures fixture the browser test reads | calling `redextape-grammar-check` from a browser, which its `cc` build makes impossible |
 | Source colouring | tree-sitter replaces `classify_source` in `web/` | keeping `classify_source` for source; tree-sitter with `classify_source` as fallback |
 | Source diagnostics | the LSP worker serves all four; `analyze` path deleted | keeping `analyze` synchronous for source; `analyze` as a first paint the LSP supersedes |
 | Wasm layout | two artefacts, a new `redextape-lsp-wasm` crate | one combined artefact, saving 68 KB gzipped |
-| Grammar `.wasm` | committed, gated on a `parser.c` source hash | built in CI; built at web build time; committed ungated; a rebuild-and-compare gate CI cannot run |
+| Grammar `.wasm` | committed, gated on a `parser.c` hash **and** the artefact's own hash | built in CI; built at web build time; committed ungated; the `parser.c` hash alone; a rebuild-and-compare gate CI cannot run |
 | Query scope | viewport ranges only | whole document; parsing only the viewport |
 | Over the ceiling | uncoloured and undiagnosed, with one notice | parse in a worker; no ceiling |
 | Hover | source, TM, asm; λ empty by design | source only; all four via printed-form spans; defer hover entirely |
@@ -542,14 +831,14 @@ the plan's pre-flight rather than taken from here.
 | `emscripten/emsdk:4.0.4` | image `tree-sitter build --wasm --docker` pulls | the pull's own output, running it at 0.25.10 |
 | 16,684 / 2,514 / 17,079 / 8,081, totalling 44,358 | the four grammar `.wasm` — mini-language, λ, TM, asm | `.tools/tree-sitter build --wasm --docker -o <out> grammars/<g>` for each, then `stat -c%s` |
 | 15, 15, 15, 15 / `hasError` false | ABI reported, and a clean parse, loading each `.wasm` under `web-tree-sitter` 0.27.0 | a Node probe: `Language.load`, `parser.parse`, `new Query(lang, highlights.scm)`, over `redextape emit` output in each language |
-| 22.9 ms / 39.4 ms / 82,464 | parse, whole-document query, captures — TM, 229,181 bytes | the same probe, on `emit fact.rxt --lang tm` with `fact(3)` |
-| 80.9 ms / 159.8 ms / 292,547 | the same — TM, 814,207 bytes | the same probe, on `emit --lang tm --encoding binary` with `fact(6)` |
-| 0.27 ms / 420, 0.21 ms / 340 | viewport query, first 60 lines of each | `query.captures(root, { startIndex: 0, endIndex })` in the same probe |
-| about 600 ms | parse extrapolated to 6,100,000 bytes | 80.9 × 6,100,000 ÷ 814,207, linear |
+| 37.1 ms / 67.5 ms / 82,464 | parse, whole-document query, captures — TM, 229,181 bytes | the same probe, on `emit fact.rxt --lang tm` with `fact(3)`. **This row read 22.9 ms / 39.4 ms**, contradicting §6.2's own re-taken table two sections above it — the counts were never wrong (they pass no range), but these timings were carried over from the pre-doubling runs instead of being re-taken alongside the corrected counts. Reconciled to §6.2's table |
+| 130.0 ms / 221.8 ms / 292,547 | the same — TM, 814,207 bytes | the same probe, on `emit --lang tm --encoding binary` with `fact(6)`. **This row read 80.9 ms / 159.8 ms**, the same stale-carry-over as the row above |
+| 0.65 ms / 897, 0.56 ms / 773 | viewport query, first 60 lines of each | `query.captures(root, { startIndex: 0, endIndex: units * 2 })`. **The `* 2` is load-bearing and was absent from every earlier run of this probe**, which is why this row read 0.27 ms / 420 and 0.21 ms / 340 — half the window each time. §6.2 |
+| about 974 ms | parse extrapolated to 6,100,000 bytes | 130.0 × 6,100,000 ÷ 814,207, linear. **This read "about 600 ms"**, computed from the same stale 80.9 ms this table's row above has now dropped — recomputed from the re-taken 130.0 ms |
 | 6,100,000 | `MAX_SCRATCH_TM_BYTES` | `grep -rn 'MAX_SCRATCH_TM_BYTES' crates/redextape-wasm/src/session.rs` |
-| 100 ms, 300 ms | `lint.ts`'s lint delay, `compile.ts`'s `DEBOUNCE_MS` | `grep -n 'delay:' web/src/lint.ts`; `grep -rn 'DEBOUNCE_MS' web/src/compile.ts` |
+| 0 ms, 300 ms | what a `didChange` actually waits for — the source editor sends one per keystroke, the λ and TM editors send on the recompile's own timer | `main.ts`'s source `updateListener` calls `changeDocument` undebounced; `scratch-editor.ts`'s `#schedule` uses its injected `debounceMs`, which is `compile.ts`'s `DEBOUNCE_MS`. **This row read "100 ms, 300 ms — `lint.ts`'s lint delay"**, and part 3a deleted `lint.ts`: the 100 ms was `@codemirror/lint`'s PULL-side delay, and there is no pull any more |
 | 0.15 / 0.05 / 0.06 / 4.57 / 14.58 ms | `didChange` → `publishDiagnostics`, five runs each, source / λ / asm / TM 229 KB / TM 814 KB | a Node probe driving `LspServer.handle` with the correct `languageId` |
-| about 109 ms | that, extrapolated to 6,100,000 bytes | 14.58 × 6,100,000 ÷ 814,207, linear |
+| 135.2 ms | that, MEASURED just past the ceiling rather than extrapolated to it | §14.2, which also re-took the 814,207-byte row this one was scaled from. **This row read "about 109 ms"** — 14.58 × 6,100,000 ÷ 814,207, linear — and the path is mildly superlinear, so the extrapolation came in 24% low |
 | 0.512 ms | `structuredClone` of a 6,100,000-byte string, 20 runs | `node -e` over `"x".repeat(n)` |
 | 776,988 / 271,498 | session wasm **as the tree builds it**, raw and gzipped | `wasm-pack build crates/redextape-wasm --release --target web`, then `stat -c%s` and `gzip -c \| wc -c`. Rebuilt before measuring: the `pkg/` on disk predated its own crate's last commit |
 | 825,451 / 283,076 | LSP wasm the same way | `wasm-pack build crates/redextape-lsp-wasm --release --target web --out-dir ../../pkg-lsp`, same two commands |
@@ -566,3 +855,70 @@ to, so the server did no analysis at all and the numbers came back 0.02–1.64 m
 low, and low in the direction that would have made §5.1's reversal look free. It was caught not by a
 failure but by a *zero*: every language returned zero diagnostics on input written to be broken, and a
 probe reporting an absence is a claim about the probe. §4 and §11.4 are both consequences.
+
+### §14.1 Figures added by 3b's pre-flight, 2026-09-21
+
+Taken after 3a merged, while pricing 3b. Four of them changed a decision above; the rest are the counts
+the plan's code has to be right about.
+
+| Value | What | Produced by |
+|---|---|---|
+| 16,684 / 2,514 / 17,079 / 8,081, totalling 44,358 | the four `.wasm`, rebuilt independently of the build that first produced §14's row | `.tools/tree-sitter build --wasm --docker -o grammars/<g>/<g>.wasm grammars/<g>` for each, then `stat -c%s`. The figures reproduce to the byte |
+| `33d9a74347ba77afbdd854a7f05c5a96a08c9dec4cb5fa19f4db09f1671eb35d` | the mini-language `.wasm`'s SHA-256, **identical across two builds**, the second after deleting the artefact and writing to a different output filename | `sha256sum` after each build. This is what §7's second hash column rests on |
+| 82,464 / 897 | whole-document and 60-line-viewport captures, TM at 229,181 bytes | a Node probe: `Parser.init`, `Language.load`, `parser.parse`, `new Query`, `query.captures(root)` and `query.captures(root, { startIndex: 0, endIndex: units * 2 })`. This row read 420 until the doubling was found; the whole-document count passes no range and was never affected |
+| 15 | `LANGUAGE_VERSION`, web-tree-sitter 0.27.0's newest supported ABI | the same probe. The grammars generate 15, so the pin and the runtime meet exactly, with no headroom in either direction |
+| `hasError` false, four of four | a clean parse in every language | the same probe, over `redextape emit` output. A fixture here is emitted rather than typed, because emitted output **cannot** be syntactically wrong. An earlier draft of this row justified that by claiming hand-written TM and asm parse with `hasError` true; **that was an overgeneralisation from two fixtures whose syntax I had guessed at**. `redextape-grammar-check`'s own hand-typed TM corpus parses with `hasError` false, and its tests assert as much. The rule is right; the reason given for it was not |
+| 11 / 5 / 11 / 9 | rows in `CAPTURE_CLASSES` for the mini-language, λ, TM and asm | `mini.rs`, `lambda.rs`, `tm.rs`, `asm.rs` in `crates/redextape-grammar-check/src/` |
+| 3 | capture names the four tables disagree on — `@function`, `@variable.parameter`, `@label.reference` | comparing those four tables, row by row. §6.1's table |
+| 14 / 14 / 8 | `TokenClass` variants, `.tok-*` classes in `style.css`, palette colour tokens | `analysis.rs`'s enum; `style.css`'s rule block; `palettes.ts`'s `COLOUR_TOKENS`. Seven of the fourteen classes collapse onto `--tok-neutral`. This row read 7 tokens and eight collapsing until part 3b gave `Binder` a token of its own: the λ grammar reaches `Binder`, `Ident` and `Punct` and nothing else, and with `--tok-ident` equal to `--fg` and `--tok-punct` equal to or beside `--tok-neutral`, a λ editor had two colours for three classes |
+| 24 | asm mnemonic spellings hover must cover, against 16 `Instr` variants | `MNEMONICS` in `crates/redextape-core/src/tm/asm_syntax.rs` |
+| 5 | builtin names, none carrying a description | `BUILTIN_NAMES` in `crates/redextape-core/src/prelude.rs` |
+| 2 | CodeMirror peer packages `@replit/codemirror-vim` 6.4.0 needs that `web/package.json` does not have — `@codemirror/language`, `@codemirror/search` | its `peerDependencies` against `web/package.json`'s `devDependencies`. §9 named one new dependency; it is three |
+| 4 | extension parts `vim()` yields — two `PrecExtension`, a `ViewPlugin` with `domEventHandlers`, a `StateField` | flattening `vim()`'s return in Node. **No keymap facet among them**, which is why §9's placement instruction was wrong |
+| 4 | packages the keymap adds, not three — `@replit/codemirror-vim`, `@codemirror/language`, `@codemirror/search`, and `@replit/codemirror-vim-core` transitively | `pnpm add` plus the installed `package.json`'s `dependencies` |
+| 205,915 / 162,487 / +43,428 | the app's main chunk under the BUILD's own `gzip` with `vim()`, with it stubbed out, and the difference | `pnpm build:app` twice, gzipped chunk size each time. **Superseded by §14.3**: nginx compresses at level 1, so what is served is 245,583 / 194,446 / **+51,137**, and the served delta is 18% larger than this one. The comparison these expressed was sound — one method on both sides — the quantity was not the one a user pays. §9 |
+| 209,613 / 83,464 | `web-tree-sitter`'s own runtime `.wasm`, raw and gzipped — the FIFTH wasm colouring needs, and larger than all four grammars together | `stat -c%s` and `gzip -c \| wc -c` on `node_modules/web-tree-sitter/web-tree-sitter.wasm`. §7 |
+| 7 | `.wasm` files in the built image under `/usr/share/nginx/html/assets/` — two wasm-pack artefacts, four grammars, one runtime | `docker build` then `docker run` and listing the directory. The plan said six; it forgot the runtime |
+| 82,464 / 416 | whole-document captures against ONE REAL VIEWPORT'S, measured in a Chromium tab running the app rather than in Node — 198x | a temporary browser test mounting the app, forking a TM pane, pasting the 229,181-byte fixture, reading the editor's real `visibleRanges` (`[0, 1208]`, set by `.term-editor`'s `max-height: 8lh`) and querying through `colour.ts`'s own registry. **The whole-document count reproduces the Node figure exactly**, which is what says the grammar has not drifted |
+| 0 | occurrences of `F12` in the shipped vim package | a grep of its `dist`, which is what makes §9's third clause true for today's three in-editor bindings rather than assumed |
+| 2 | editor construction sites, not one — `scratch-editor.ts`'s and `main.ts`'s inline list | both are bare array literals; there is **no `Compartment` anywhere in the repo** today, so §9's is the first |
+| UTF-16 code units | the unit of `node.startIndex` and of `QueryOptions`' `startIndex`/`endIndex` | a browser probe parsing `(λx. λy. x)` — 11 UTF-16 units, 13 UTF-8 bytes — whose root `endIndex` is **11**. So the tree-sitter path needs none of `spans.ts`'s `byteToIndex` conversion, which `classify_source`'s byte offsets do need. A conversion applied anyway would mis-place every span after the first non-ASCII character |
+| 8.1 ms / 0.4 ms | full versus incremental reparse, 103,028-unit TM, Chromium, median of seven | a browser probe: `parser.parse(doc)` against `tree.edit(...)` then `parser.parse(edited, tree)`, the edit placed 40 units from the end. §6.2 |
+| 12.8 ms / 32,591 | whole-document query and its captures, same document, same browser | the same probe, `query.captures(root)` |
+| 293 | captures for that document's first viewport, 1,272 units at a 400 px editor height | the same probe. Its time is **below the browser's coarsened `performance.now()` resolution**, so no figure is quoted for it. **This row read 88**, half its window, until the `QueryOptions` doubling above was found; `web/src/colour.ts`'s header and the plan's own pre-flight both quote 293 and note the 88 explicitly, and this table — the authority both of them cite — was the one still carrying the halved figure |
+| 0 → 293 | decorations in the DOM before and after the grammar resolves, under a `ViewPlugin` | a browser probe mounting a real `EditorView` over that fixture and dispatching an empty transaction when `Language.load` settles. **This row read 0 → 88**, the same halved figure as the row above |
+| 3 of 4 | grammar `.wasm` a production build emits as hashed assets — **λ's is inlined as a `data:` URI instead** | a scratch Vite 8.2.1 build importing λ's and TM's with `?url`: TM landed at `dist/assets/tree-sitter-redextape-tm-CU9tyEhY.wasm`, λ did not appear as a file and `data:application/wasm;base64,` appears in the bundle. λ's grammar is 2,514 bytes, under Vite's default `assetsInlineLimit` of 4096; the other three are 16,684 / 17,079 / 8,081 and are over it |
+
+### §14.2 The diagnostics ceiling, measured — 2026-09-22
+
+§10 promised a ceiling on diagnostics as well as on colour, and part 3b built neither. This table is
+what says not to build one. Node again, against a `wasm-pack --target nodejs` build of
+`redextape-lsp-wasm`, so these are comparable to §14's rows and to nothing in a browser.
+
+| Value | What | Produced by |
+|---|---|---|
+| 6,164,376 | the fixture, in bytes and in UTF-16 units alike — real emitted output, 1.05% past the 6,100,000 ceiling | a generated program of `fact` plus nine helpers, then `redextape emit <prog> --lang tm --encoding binary`. Emitted rather than synthesised because the fixture has to parse, and `redextape run` on it prints `49`. **The argument to `fact` does not size the output**: `fact(6)` and `fact(7)` both emit 814,207 bytes, so the fixture is grown by adding functions, not by counting higher |
+| 16.0 ms | `didChange` → `publishDiagnostics` on the 814,207-byte TM, median of nine | a Node probe driving `LspServer.handle` — `initialize`, `didOpen`, then `didChange` carrying the full document text, which is the shape `lsp-client.ts`'s `changeDocument` sends. **This row is the instrument check**: §14's figure for the same document is 14.58 ms, so this probe agrees with the one that produced it |
+| 135.2 ms | the same, at 6,164,376 units, median of nine (128.1 low, 158.2 high) | the same probe. 24% above §14's `about 109 ms` extrapolation, and 12% above a linear scaling of this table's own 16.0 ms |
+| 127.6 ms | `didOpen` → `publishDiagnostics` at that size | the same probe, on its first message after `initialize` |
+| 0.238 ms | `structuredClone` of the whole `didChange` message at that size, median of twenty | `node -e` over the message `changeDocument` builds. **This is the main thread's entire share of the diagnostics path**, and §14's 0.512 ms for a bare string of the same order agrees with it |
+| 1, 0 | diagnostics reported for a broken 40-byte TM, and for that same text under `languageId: redextape_x` | the same probe, run as two controls before the timings. **The emitted fixtures report zero diagnostics, which is correct and is also exactly what a probe doing nothing reports** — §14's own footgun. Only these two controls separate the cases |
+| 0 ms, 300 ms | what a `didChange` waits for, per editor | §14's corrected row above. `lint.ts`'s 100 ms is gone with the file |
+| nothing | what stops a document this size reaching an editor | `MAX_SCRATCH_TM_BYTES` guards `tm_scratch` in `crates/redextape-wasm/src/session.rs` — the session's scratch buffer, not editor text. No length gate on typed or pasted text exists in `web/`, and `colour.ts`'s `COLOUR_CEILING_UNITS` reuses the number only to stop colouring |
+
+### §14.3 The vim keymap on the wire — 2026-09-22
+
+§14.1 priced the keymap with the build's own `gzip`. Every other cost figure on this branch is now what
+nginx sends (§7), and that is a different number. Both sides below were built from the same tree into
+the same image and served by the same nginx, so the difference is the stub's and nothing else's.
+
+| Value | What | Produced by |
+|---|---|---|
+| 245,583 / 685,600 | the main chunk with `vim()`, served and raw | `docker build` from this tree, `docker run`, then `curl -H 'Accept-Encoding: gzip' -o /dev/null -w '%{size_download}'` against `/assets/index-<hash>.js`, and the same `curl` without the header |
+| 194,446 / 546,895 | the same chunk with `vim()` stubbed — the import dropped and `keymapExtension` returning `[]` on both arms | the same three commands against an image built from the same tree with only that edit. The stubbed chunk holds **0** occurrences of vim's own mode strings (`normal-mode`, `visualBlock`, `vim-mode`) against the baseline's **54**, which is what says the stub removed the package rather than something else |
+| +51,137 | what the keymap costs on the wire, on every visit including every visit that never uses vim | 245,583 − 194,446. §14.1's `+43,428` used the build's own `gzip` on both sides: a sound comparison of a quantity nobody is served, 18% under this one |
+| 245,491 against 245,583; 245,343 against 245,430 | `gzip -1 -n -c` against what nginx sends, on this chunk and on the previously built image's | **`gzip -1` is NOT a faithful stand-in, and it was checked before being trusted rather than after.** `deploy/nginx.conf` sets `gzip on` with no `gzip_comp_level`, so nginx is at level 1 — and it still undershoots by 87 and 92 bytes. Every figure in this table comes from the server |
+| 1,008,253 / 1,278,557 | what a cold load pulls on the wire — the app's own assets, then the same counting the five webfonts | one `curl` per asset over the set a real cold load fetches. That set comes from the browser: `performance.getEntriesByType('resource')` on the page, **plus the two `.wasm` the workers fetch, which the page's own timeline does not contain**. The keymap is 5.1% of the first figure |
+| 646,564 | the two Rust `.wasm` inside that, served | the same per-asset `curl` — `redextape_wasm_bg` at 318,119 and `redextape_lsp_wasm_bg` at 328,445 |
+| 245,583 and 94,777 | the browser's own `encodedBodySize` for the main chunk and for `web-tree-sitter.wasm` | the same `performance.getEntriesByType('resource')` call. **The instrument check**: the first reproduces this table's `curl` to the byte, and the second reproduces §7's 94,777 to the byte |
+| 153 | wire bytes by which the image `redextape:3b` differs from this tree's main chunk | that image serves 245,430; `2d9a710` changed `palettes.ts` after it was built. Both sides above were re-taken from this tree rather than reusing that number, which is why neither is 245,430 |

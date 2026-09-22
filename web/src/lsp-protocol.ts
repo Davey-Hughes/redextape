@@ -80,6 +80,27 @@ export const LANGUAGE_OF_PANE = {
   tm: 'redextape_tm',
 } as const satisfies Record<'source' | 'lambda' | 'tm', LanguageId>
 
+/**
+ * How each language reads in a sentence shown to a user — the colourer's failure notice is the one
+ * caller, which `main.ts` builds from `colour.ts`'s `createGrammarRegistry`.
+ *
+ * **THE WORDS ARE THE APP'S EXISTING ONES, NOT NEW ONES**, per the umbrella's rule that every
+ * user-visible word is the umbrella's: `source` is what `main.ts`'s `layoutChanged` calls the source
+ * view, and `λ`/`TM` are `view-header.ts`'s `legLabel` — the same two glyphs every view title and
+ * every menu item already carries. A second vocabulary for the same three surfaces is what this map
+ * exists to avoid.
+ *
+ * `redextape_asm` HAS NO EDITOR UNTIL PART 5, so its entry can never reach a notice today. It is here
+ * because `satisfies Record<LanguageId, string>` is what keeps this map total, and a map that went
+ * partial the moment a fourth editor appeared would fail at the call site rather than here.
+ */
+export const LANGUAGE_LABEL = {
+  redextape: 'source',
+  redextape_lambda: 'λ',
+  redextape_tm: 'TM',
+  redextape_asm: 'asm',
+} as const satisfies Record<LanguageId, string>
+
 /** The file extension each language's synthetic document URI carries. Never fetched, never parsed. */
 export const EXTENSION_OF_LANGUAGE = {
   redextape: 'rxt',

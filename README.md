@@ -17,7 +17,10 @@ and three backends — λ, Turing machine, and native — all work, and each is 
 on every commit. `crates/redextape-wasm` compiles the compiler to WASM through **nine exports** — the
 ninth, `tapeNames()`, labels the five Turing-machine tape rows from the lowering's own constants
 (`build.rs`) rather than a hand-copied list, so it can only speak for machines this compiler produced.
-`web/` is a real app: a source pane with live syntax highlighting and lint diagnostics, a λ pane, and a
+`web/` is a real app: a source pane with lint diagnostics and syntax highlighting driven by a committed
+tree-sitter grammar — the same colourer the λ and TM copy editors take, whose grammar loads
+asynchronously so only the first paint waits on it, while every reparse and rebuild after that runs
+inside the same `ViewUpdate` as the keystroke that triggered it — a λ pane, and a
 Turing-machine pane showing all five tapes, a status line, and — Plan 5a-ii — a virtualized δ-table
 beside them: current state and the rule about to fire highlighted, following the machine by default and
 a control to reattach it after a manual scroll detaches it, toggleable, and tested rendering only a
@@ -300,23 +303,29 @@ nextest is missing rather than falling back, so the gate behaves the same everyw
 `scripts/setup-dev.sh` installs it. Because nextest does not run doctests, the script pairs every
 config with an explicit `cargo test --doc` at the same feature flags.
 
-There are **eleven** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
+There are **twelve** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
 heavier; a `web/` change runs `biome ci` and `tsc --noEmit`; a Lua or `parser.c` change runs
 `check-lua`, which parses the tracked Lua and asserts `plugin/redextape.lua`'s parser names still
 equal the `tree_sitter_*` symbols the committed parsers export — a mismatch there loads the wrong
 language in an editor rather than failing, so nothing else in this tree could see it. The other
-six — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
-`check-shared-docs` and `check-colours` — are unscoped and run on every commit whatever is staged,
-because all six catch things that arrive in a path nobody thought to list; the first three walk
-`git ls-files`, the fourth reads four READMEs, the fifth holds every marked region in a document to
-the single copy under `grammars/shared/`, and the sixth scans tracked `.css` and `.ts` files under
-`web/src/` for colour literals outside the palette, skipping `palettes.ts` itself and the marked
-fallback block in `style.css`. `check-colours` is the newest of the six and `check-attributions` the
-slowest, at ~3.2 s against the next slowest's ~1.25 s (each hook's `--self-test` and scan, measured
-2026-09-18), because it strips comments and string literals out of every cited file rather than
-matching patterns line by line — the price of being able to tell a file that OWNS a symbol from one
-that merely talks about it. All **eleven** are fast enough for every commit, at ~5.7 s for the
-unscoped six together. Run `scripts/check-all.sh` before merging.
+seven — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
+`check-shared-docs`, `check-colours` and `check-grammar-wasm` — are unscoped and run on every commit
+whatever is staged, because all seven catch things that arrive in a path nobody thought to list; the
+first three walk `git ls-files`, the fourth reads four READMEs, the fifth holds every marked region
+in a document to the single copy under `grammars/shared/`, the sixth scans tracked `.css` and `.ts`
+files under `web/src/` for colour literals outside the palette, skipping `palettes.ts` itself and the
+marked fallback block in `style.css`, and the seventh hashes each grammar's `src/parser.c` and its
+`.wasm` against `grammars/wasm-manifest.json` — unscoped because the file that goes stale is the
+`.wasm`, and the file being committed is `grammar.js` or `src/parser.c`, on the other side of the
+same input set `check-lua`'s own scoping already names. `check-grammar-wasm` is the newest of the
+seven and `check-attributions` the slowest, at ~3.2 s against the next slowest's ~1.25 s (each
+hook's `--self-test` and scan, measured 2026-09-18), because it strips comments and string literals
+out of every cited file rather than matching patterns line by line — the price of being able to tell
+a file that OWNS a symbol from one that merely talks about it. All **twelve** are fast enough for
+every commit: measured interleaved in one session (2026-09-21, five rounds, alternating which set
+went first, after one untimed warm-up of each), the unscoped six ran 5.867-5.955 s and the same six
+plus `check-grammar-wasm` ran 6.042-6.084 s — the ranges do not overlap, so the ~0.09-0.22 s gap is
+the seventh hook's own cost and not run-to-run noise. Run `scripts/check-all.sh` before merging.
 
 `scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps marked
 `#[ignore = "slow tier: ..."]` — nine of them today — which `cargo test` skips by default and CI

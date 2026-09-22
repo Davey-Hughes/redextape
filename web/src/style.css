@@ -55,6 +55,7 @@
   --tok-bool: light-dark(#9a3412, #f0956a);
   --tok-operator: light-dark(#6d28d9, #c4a8f5);
   --tok-punct: light-dark(#4f6477, #8ea3b5);
+  --tok-binder: light-dark(#9f1188, #f472dc);
   /* palette:fallback:end */
 
   /* The construct a click linked (`.linked` below). A SEPARATE HUE FROM `--accent`, not a tint of it —
@@ -358,7 +359,9 @@ body {
   border-radius: 2px;
 }
 
-/* Six reachable from `classify_source`. */
+/* Six of the SEVEN the mini-language's own grammar reaches; `@comment` is the seventh, and the block
+   below is what paints it. Named by that grammar rather than by `classify_source`, which fed these
+   classes until Plan 7 part 3b deleted it; `theme.ts`'s `tokenClassName` has the full argument. */
 .tok-keyword {
   color: var(--tok-keyword);
   font-weight: 600;
@@ -379,12 +382,13 @@ body {
   color: var(--tok-punct);
 }
 
-/* Eight classes. SEVEN come only from the λ and asm/TM text forms, and were styled ahead of time so
- * Plan 5 would not ship invisible spans. `.tok-comment` is no longer one of them: since the trivia
- * slice, `lex` returns `//` comments and `classify_source` classifies them, so this rule is what
- * paints comments in ordinary source. */
+/* Seven classes. SIX come only from the asm and TM forms, and were styled ahead of time so Plan 5
+ * would not ship invisible spans — all six are reachable on screen now that those forms have
+ * grammars of their own (`grammars/`, wired in Plan 7 part 3b). `.tok-comment` stopped being one of
+ * them earlier, in the trivia slice, when `lex` began returning `//` comments; this rule is what paints
+ * them in ordinary source. λ contributed the seventh, `.tok-binder`, until it was given a colour of its
+ * own below. */
 .tok-comment,
-.tok-binder,
 .tok-mnemonic,
 .tok-register,
 .tok-label,
@@ -392,6 +396,15 @@ body {
 .tok-tapesymbol,
 .tok-move {
   color: var(--tok-neutral);
+}
+
+/* THE ONE CLASS OUTSIDE THE MINI-LANGUAGE'S OWN WITH A PALETTE TOKEN OF ITS OWN, because of what the λ
+ * grammar reaches rather than because a binder is special. `REDEXTAPE_LAMBDA` maps its captures to
+ * `Binder`, `Ident` and `Punct` and to nothing else; `--tok-ident` is `--fg` in every variant and
+ * `--tok-punct` sits on or beside `--tok-neutral`, so sharing the block above left a λ editor drawing
+ * `λf` and `(` in one colour. `palettes.ts`'s header has the rest of the argument. */
+.tok-binder {
+  color: var(--tok-binder);
 }
 
 /* CodeMirror's own chrome.

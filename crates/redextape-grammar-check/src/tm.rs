@@ -98,33 +98,17 @@ pub const CORPUS: &[(&str, &str)] = &[
 /// stale copy out of a build directory.
 pub const HIGHLIGHTS: &str = include_str!("../../../grammars/tree-sitter-redextape-tm/queries/highlights.scm");
 
-/// Where the two vocabularies meet, FOR TM. Design §5.1 records why the tables are per-grammar.
+/// Where the two vocabularies meet, for this language.
 ///
-/// **TWO ROWS PROJECT TO `Ident` AND BOTH ARE REQUIRED.** `@variable` is `encoding`'s operand and
-/// `@type` is `result`'s; `write_header` classifies both `Ident` because neither an encoding name nor
-/// a type has a class of its own. Splitting the capture is what gets `result List<Nat>` coloured as a
-/// type in an editor, and collapsing them would fail `capture_map_is_total` the moment the query file
-/// kept using both.
+/// **THE TABLE MOVED TO `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It moved
+/// because the web app needs it and cannot link this crate: `build.rs` compiles four generated
+/// `parser.c` into this one, so there is no wasm build of it. What stays here is everything that ties
+/// the table to a query — totality over `HIGHLIGHTS`, and the no-unused-row rule — because those are
+/// tests about a grammar rather than facts about a naming map.
 ///
-/// **`@label` AND `@label.reference` ARE THE PAIR DESIGN §5.2 EXISTS FOR** — `Label` for a state name
-/// where it is DEFINED, `StateName` for the same name as a `start` or `goto` target. TM is the
-/// grammar that pays for that decision, and this is where the two become visible to the differential
-/// as distinct.
-///
-/// There is no `@operator` row: TM emits no `Operator` class, and `->` is `@punctuation.delimiter`.
-pub const CAPTURE_CLASSES: &[(&str, TokenClass)] = &[
-    ("keyword", TokenClass::Keyword),
-    ("number", TokenClass::Nat),
-    ("label", TokenClass::Label),
-    ("label.reference", TokenClass::StateName),
-    ("variable", TokenClass::Ident),
-    ("type", TokenClass::Ident),
-    ("character", TokenClass::TapeSymbol),
-    ("constant.builtin", TokenClass::Move),
-    ("comment", TokenClass::Comment),
-    ("punctuation.bracket", TokenClass::Punct),
-    ("punctuation.delimiter", TokenClass::Punct),
-];
+/// Collapsing the `@variable`/`@type` split back into one row would fail `capture_map_is_total` the
+/// moment the query file kept using both.
+pub use redextape_core::capture_map::REDEXTAPE_TM as CAPTURE_CLASSES;
 
 /// TM's grammar: its generated parser, its highlight queries and its capture table together as one
 /// `Grammar` value.

@@ -19,6 +19,32 @@ export type PaneEvents = {
    */
   lspDocument?(): ScratchEditorConfig['document']
 
+  /**
+   * The colourer this pane's editor takes — `colour.ts`'s `treeSitterColour`, for this pane's language.
+   *
+   * A THUNK FOR `lspDocument`'s REASON, ONE STEP WEAKER. A pane's LEG is fixed by its renderer type, so
+   * the language could in principle be resolved at construction; the thunk is here so both editor
+   * facts are resolved at the same moment, by the same file (`transport.ts` reads `slot.binding.leg`
+   * for each), rather than one of them being pinned a rebind earlier than the other.
+   *
+   * Optional for `lspDocument`'s reason too: a test builds a pane with only the handlers it drives, and
+   * an editor with no colourer is simply uncoloured.
+   */
+  colour?(): ScratchEditorConfig['colour']
+
+  /**
+   * The page's keymap setting, which this pane's editor joins when it is built.
+   *
+   * **A VALUE RATHER THAN A THUNK, WHICH THE TWO ABOVE ARE.** Those resolve facts about a BINDING, and
+   * a slot's binding moves under a pane that was constructed once. There is one keymap for the whole
+   * page: it does not depend on which buffer this pane is showing, and `main.ts` builds it before it
+   * builds the transport, so there is no ordering to defer either.
+   *
+   * Optional for `lspDocument`'s reason: a test builds a pane with only what it drives, and an editor
+   * with no setting keeps CodeMirror's own bindings.
+   */
+  keymap?: ScratchEditorConfig['keymap']
+
   back(): void
   forward(): void
   play(): void

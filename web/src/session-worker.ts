@@ -3,9 +3,14 @@
  *
  * THE HANDLE CANNOT LEAVE THIS THREAD. `Session` is an opaque wasm-bindgen object with no serialized
  * form, so the worker owns it and answers questions about it rather than handing it over. That is
- * also why `classifySource` and `analyze` are NOT here: they are free functions, they are what the
- * editor calls on every keystroke, and a round trip per keystroke is exactly the lag this split
- * exists to avoid.
+ * also why the module's FREE functions are not here: they take no session, so there is nothing for a
+ * worker to own, and a round trip to reach one would be lag bought for nothing. This paragraph named
+ * `classifySource` and `analyze` as the pair and said the editor called them on every keystroke.
+ * Neither half survives: `analyze` has had no web caller since diagnostics became a push from the LSP
+ * worker, and `classifySource` was deleted with the decoration path it fed (Plan 7 part 3b — the
+ * editors colour from tree-sitter grammars now, on the main thread, out of `colour.ts`). What the main
+ * thread still calls straight through is `captureClasses`, `encodings` and `tokenClasses`, each once at
+ * start-up rather than per keystroke.
  *
  * THE SESSION NOW OUTLIVES ITS MESSAGE, which is the one structural change in this file. PR 3c freed
  * the handle at the end of every request; `[continue]` needs it alive to resume. Exactly one is live

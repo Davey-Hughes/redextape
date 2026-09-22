@@ -2,7 +2,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { lintGutter, setDiagnostics as setCmDiagnostics } from '@codemirror/lint'
 import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
-import init, { classifySource, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
+import init, { captureClasses, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
 import { addViewItems, presetName, wireMenu, workspaceItems } from './app-header'
 import {
   APPEARANCE_LABEL,
@@ -15,12 +15,14 @@ import {
 import { showBanner } from './banner'
 import { bufferList } from './buffer-list'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from './buffers-store'
+import { type CaptureTable, classMapFrom, createGrammarRegistry, treeSitterColour } from './colour'
 import { createCompile } from './compile'
 import { lspLintRanges } from './diagnostics'
 import { createDraw } from './draw'
 import { createEditorCustody } from './editor-custody'
-import { readFormatOnBlur, writeFormatOnBlur } from './editor-prefs'
-import { declineMark, focusMark, highlighting, linkMark, setSpans } from './highlight'
+import { KeymapSetting, keymapSlot } from './editor-keymap'
+import { KEYMAP_LABEL, KEYMAP_MODES, parseKeymapMode, readFormatOnBlur, writeFormatOnBlur } from './editor-prefs'
+import { declineMark, focusMark, linkMark } from './highlight'
 import { History } from './history'
 import { icon } from './icons'
 import type { LambdaPane } from './lambda-pane'
@@ -28,7 +30,8 @@ import { closeLeaf, defaultLayout, LAYOUT_STORAGE_KEY, type LayoutNode, leaves, 
 import { createLinkWiring, type LinkWiring } from './link-wiring'
 import { LspClient } from './lsp-client'
 import { navKeymap } from './lsp-nav'
-import { documentUri } from './lsp-protocol'
+import type { LanguageId } from './lsp-protocol'
+import { documentUri, LANGUAGE_LABEL } from './lsp-protocol'
 import { applyEdits, revealRange } from './lsp-text'
 import { createNotices } from './notice'
 import { createOutlinePanel } from './outline'
@@ -58,7 +61,7 @@ import {
 import { type BarTarget, barTarget, createStepBar } from './step-bar'
 import type { TmPane } from './tm-pane'
 import { createTransport } from './transport'
-import type { Classified, LambdaState, TmState } from './types'
+import type { LambdaState, TmState } from './types'
 import { assertTokenClasses } from './types'
 import { pairLabel, sourceViewHeader, viewMenu } from './view-header'
 import {
@@ -166,6 +169,7 @@ async function main(): Promise<EditorView> {
   const settingsMenu = document.querySelector<HTMLElement>('#settings-menu')
   const appearanceChoice = document.querySelector<HTMLSelectElement>('#appearance-choice')
   const formatOnBlurBox = document.querySelector<HTMLInputElement>('#format-on-blur')
+  const keymapChoice = document.querySelector<HTMLSelectElement>('#keymap')
   const styleSelect = document.querySelector<HTMLSelectElement>('#style')
   const paletteSelect = document.querySelector<HTMLSelectElement>('#palette')
   /**
@@ -208,6 +212,7 @@ async function main(): Promise<EditorView> {
     !settingsMenu ||
     !appearanceChoice ||
     !formatOnBlurBox ||
+    !keymapChoice ||
     !styleSelect ||
     !paletteSelect ||
     !buffersButton ||
@@ -296,6 +301,24 @@ async function main(): Promise<EditorView> {
   })
 
   /**
+   * **THE KEYMAP SETTING — Plan 7 part 3b, design §9.** Built here, beside the settings that already
+   * live in this menu, and before `createTransport` below, because every editor the transport builds
+   * joins it at construction.
+   *
+   * **THE OPTIONS ARE WRITTEN IN JavaScript, LIKE `appearanceChoice`'s AND THE TWO SKIN SELECTS',
+   * RATHER THAN IN `index.html`.** The words a control offers and the values it stores are the same
+   * fact; writing them twice is how the two drift, and `KEYMAP_LABEL` is the one place either can be
+   * changed. `<select>` also takes its accessible name from the `<label>` wrapping it in the markup,
+   * which is what the controls gate checks it against.
+   */
+  const keymapSetting = new KeymapSetting()
+  for (const m of KEYMAP_MODES) keymapChoice.append(new Option(KEYMAP_LABEL[m], m))
+  keymapChoice.value = keymapSetting.mode
+  keymapChoice.addEventListener('change', () => {
+    keymapSetting.set(parseKeymapMode(keymapChoice.value))
+  })
+
+  /**
    * **BUILT HERE, BEFORE ANY PANE EXISTS, AND THE POSITION IS LOAD-BEARING.** `transport.ts`'s
    * `lspDocument` thunk reads this to hand every copy's editor its client, and a pane can resolve
    * that thunk while it is still being CONSTRUCTED: `TmPane` syncs the controls that need an editor,
@@ -371,6 +394,61 @@ async function main(): Promise<EditorView> {
 
   // Checked once, here, immediately after the module is live. See `assertTokenClasses`.
   assertTokenClasses(tokenClasses() as string[])
+
+  /**
+   * **THE COLOURER'S TWO APP-WIDE VALUES, BUILT BEFORE ANYTHING THAT CONSTRUCTS AN EDITOR, AND THE
+   * POSITION IS LOAD-BEARING FOR THE REASON `lspClient` ABOVE RECORDS.** Every editor on the page takes
+   * a colourer resolved through `transport.ts`'s `events`, and a pane can resolve that while it is
+   * still being CONSTRUCTED — with a restored workspace whose outline panel was left open, on the first
+   * frame of the page. `lspClient` shipped exactly that defect one task ago: it was a `let` assigned
+   * after the editor was built, and a restored panel reached the thunk before the value existed, so the
+   * page threw before it finished loading and no test saw it (every test starts with empty storage).
+   * These are `const`s above every construction site instead, which is the same fix stated as an
+   * ordering rather than as a repair.
+   *
+   * **AFTER `await init()`, WHICH IS WHY THIS IS NOT BESIDE `lspClient` ITSELF.** `captureClasses()` is
+   * a wasm export; called before the module is live it throws. `init()` is the line above the token
+   * check, and everything that builds an editor is below this one, so this is the whole of the window
+   * both constraints leave.
+   *
+   * ONE REGISTRY FOR THE PAGE, so a grammar is fetched once rather than once per view — and a FAILED
+   * fetch is remembered as a failure, which is what keeps one broken `.wasm` from producing a notice per
+   * editor (`createGrammarRegistry`'s own doc, design §10).
+   */
+  const captureTables = classMapFrom(captureClasses() as CaptureTable[])
+  const grammars = createGrammarRegistry({
+    onFailure: (id, reason) => notices.notify(`${LANGUAGE_LABEL[id]} is showing uncoloured: ${reason}`),
+    // THE SHARED RUNTIME, SO THE SENTENCE IS NOT A LANGUAGE'S — `createGrammarRegistry`'s own doc has
+    // the mechanism. One `web-tree-sitter.wasm` that will not fetch leaves every editor uncoloured, and
+    // saying that once is both what design §10 asks for and what is true; three per-language notices
+    // for one cause were neither.
+    onRuntimeFailure: (reason) => notices.notify(`every editor is showing uncoloured: ${reason}`),
+  })
+  /**
+   * One colourer per editor, over the one registry and the one class map.
+   *
+   * **THE CEILING NOTICE IS WIRED HERE AND THIS IS THE ONLY PLACE THAT BUILDS A COLOURER.** Design §10
+   * gives a document over `COLOUR_CEILING_UNITS` one notice saying which editor is uncoloured — the row
+   * promised "no colour and no diagnostics" until the diagnostics path was measured at 135.2 ms in a
+   * worker at that size, a lag rather than a freeze, so only the colour half exists and the notice below
+   * says only that. `ColourOptions.onCeiling` was the hook for it — declared, invoked, and passed by
+   * neither of the two `treeSitterColour` calls this file used to make, so the notice existed in the
+   * design and nowhere else. The source editor's call site now goes through this function rather than
+   * spelling the same fields out, which is what keeps "both call sites" from being a thing that can
+   * drift again; `onCeiling` is required on the type, so a third one cannot be built without it.
+   *
+   * THE WORDS ARE `onFailure`'s ABOVE, one clause changed. Both sentences say the same thing about the
+   * same editor and differ only in why, which is the umbrella's rule that every user-visible word is
+   * already the app's.
+   */
+  const colourFor = (languageId: LanguageId) =>
+    treeSitterColour({
+      languageId,
+      registry: grammars,
+      classes: () => captureTables,
+      onCeiling: (id) =>
+        notices.notify(`${LANGUAGE_LABEL[id]} is showing uncoloured: this document is too large to colour`),
+    })
 
   for (const name of encodings() as string[]) {
     const opt = document.createElement('option')
@@ -571,6 +649,10 @@ async function main(): Promise<EditorView> {
     lspClient: () => lspClient,
     // READ AT BLUR, not captured, so toggling the setting takes effect without remounting an editor.
     formatOnBlur: () => formatOnBlur,
+    // A VALUE, NOT A THUNK — an editor JOINS the setting rather than reading it. Its own doc says why.
+    keymap: keymapSetting,
+    // A VALUE, NOT A THUNK — built above `transport` for the ordering reason its own doc gives.
+    colour: colourFor,
     sessions,
     scratchpad,
     draw: () => draw(),
@@ -1748,6 +1830,9 @@ async function main(): Promise<EditorView> {
         lineNumbers(),
         history(),
         highlightActiveLine(),
+        // ABOVE BOTH KEYMAPS BELOW, NOT BETWEEN THEM — `editor-keymap.ts`'s `keymapSlot` has the
+        // mechanism, and it is about DOM event handlers rather than about key bindings.
+        keymapSlot(keymapSetting.mode),
         keymap.of(
           navKeymap({
             uri: () => SOURCE_URI,
@@ -1757,7 +1842,9 @@ async function main(): Promise<EditorView> {
           }),
         ),
         keymap.of([...defaultKeymap, ...historyKeymap]),
-        highlighting,
+        // `colourFor`, NOT A SECOND `treeSitterColour` CALL SPELLING THE SAME FIELDS OUT. The two used
+        // to be written separately and the ceiling notice reached neither; see `colourFor`'s doc.
+        colourFor('redextape'),
         declineMark,
         linkMark,
         focusMark,
@@ -1813,9 +1900,11 @@ async function main(): Promise<EditorView> {
         EditorView.updateListener.of((u) => {
           if (!u.docChanged) return
           const src = u.state.doc.toString()
-          // Synchronous, in the same frame as the keystroke. This is the whole reason `classifySource`
-          // is not behind the worker.
-          u.view.dispatch({ effects: setSpans.of(classifySource(src) as Classified) })
+          // NO HIGHLIGHTING DISPATCH HERE ANY MORE. `classifySource` used to be called synchronously on
+          // this line, in the same frame as the keystroke; the colourer above is a `ViewPlugin` that
+          // reparses from this same update without being told, so there is nothing for this listener to
+          // push. See `colour.ts`'s two-clocks paragraph.
+          //
           // NOT DEBOUNCED, unlike `compile.schedule` below. `@codemirror/lint`'s 100 ms delay was
           // a PULL-side debounce and there is no pull any more; the server costs 0.15 ms on a
           // source document of this size, measured, and it is on another thread.
@@ -1868,6 +1957,10 @@ async function main(): Promise<EditorView> {
     }),
   })
 
+  // JOINED AFTER CONSTRUCTION, because `follow` takes the view the assignment above was still
+  // building. The slot above already holds this mode; joining is what carries a LATER change into it.
+  keymapSetting.follow(view)
+
   /**
    * The source view's outline — the panel primitive's newest consumer.
    *
@@ -1906,7 +1999,6 @@ async function main(): Promise<EditorView> {
   })
   sourceMenu.setFormattable(true)
 
-  view.dispatch({ effects: setSpans.of(classifySource(SAMPLE) as Classified) })
   compile.schedule(SAMPLE)
 
   // **THE START-UP CALL, AFTER `compile.schedule(SAMPLE)`, AND THE ORDERING THAT FORCED IT IS SPENT.**

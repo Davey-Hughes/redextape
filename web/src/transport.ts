@@ -1,6 +1,9 @@
+import type { Extension } from '@codemirror/state'
 import { canRecordFurther } from './controls'
+import type { KeymapSetting } from './editor-keymap'
 import type { LinkWiring } from './link-wiring'
 import type { LspClient } from './lsp-client'
+import type { LanguageId } from './lsp-protocol'
 import { documentUri, LANGUAGE_OF_PANE } from './lsp-protocol'
 import type { PaneEvents } from './pane-chrome'
 import { createPlayer } from './player'
@@ -58,6 +61,27 @@ export function createTransport(deps: {
   /** Whether an editor losing focus should reformat — the settings menu's `format on blur`. */
   formatOnBlur: () => boolean
   /**
+   * The page's keymap setting — the settings menu's *keymap*, which every editor this factory builds
+   * joins.
+   *
+   * **A VALUE, WHERE `formatOnBlur` ABOVE IS A THUNK, AND THE DIFFERENCE IS FORCED BY THE MECHANISM.**
+   * A blur asks that thunk and acts on the answer, so nothing has to be told when it changes. A keymap
+   * lives in a CodeMirror `Compartment`, which only changes when a transaction carrying `reconfigure`
+   * is dispatched into each view — so the setting has to be an object the editors can join, not a
+   * value they can read. `editor-keymap.ts`'s own doc has the argument in full.
+   */
+  keymap: KeymapSetting
+  /**
+   * The colourer for one language — `main.ts`'s one grammar registry, curried.
+   *
+   * **A FUNCTION OF THE LANGUAGE RATHER THAN A READY EXTENSION, BECAUSE THIS FACTORY SERVES BOTH LEGS.**
+   * `events` below is called once per pane and a pane's leg decides its language; handing the transport
+   * a single extension would colour a TM copy with the λ grammar. It is not a thunk in `lspClient`'s
+   * sense — `main.ts` builds the registry before this call, for the ordering reason `lspClient`'s own
+   * doc records about a restored panel resolving a thunk before its value existed.
+   */
+  colour: (languageId: LanguageId) => Extension
+  /**
    * A buffer has just been created — the header list's readout is stale until this returns.
    *
    * **THE FORK BELOW IS THE ONLY PLACE IN `src/` THAT MAKES A BUFFER, AND THE READOUT IS ON A DIFFERENT
@@ -97,6 +121,8 @@ export function createTransport(deps: {
     notify,
     lspClient,
     formatOnBlur,
+    keymap,
+    colour,
   } = deps
   const player = createPlayer({ speed: deps.speed, draw })
 
@@ -348,6 +374,13 @@ export function createTransport(deps: {
     // (`this.#onEdit = on.editScratch`), unconditional on leg. `slot.binding.session` resolves
     // identically on either leg, so there is nothing leg-specific left in this handler's body — moving
     // it out of the spread is the whole fix.
+    // ONE EXTENSION PER EDITOR, BUILT FROM THE ONE REGISTRY — the grammar is fetched once for the page
+    // however many editors ask for it (`colour.ts`'s `createGrammarRegistry` caches per language,
+    // including a failure), so building a plugin here costs nothing beyond the plugin.
+    colour: () => colour(LANGUAGE_OF_PANE[slot.binding.leg]),
+    // A VALUE, NOT A THUNK — one keymap serves the page, so there is no binding to resolve. See the
+    // dependency's own doc for why it is an object rather than a getter.
+    keymap,
     // **THE DOCUMENT FOLLOWS THE SESSION, NOT THE SLOT.** `editor-custody.ts` holds editors under
     // `SessionId` and a session has exactly one leg, so this pair is the editor's identity even
     // as it moves between panes. Read inside the thunk, like `editScratch` below, because a

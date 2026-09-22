@@ -1,49 +1,25 @@
-import { RangeSetBuilder, StateEffect, StateField } from '@codemirror/state'
+import { StateEffect, StateField } from '@codemirror/state'
 import type { DecorationSet } from '@codemirror/view'
 import { Decoration, EditorView } from '@codemirror/view'
-import { byteIndexAt, byteToIndex, decorationRanges } from './spans'
-import type { Classified, Span } from './types'
-
-/** Carries a fresh classification into the editor's state. */
-export const setSpans = StateEffect.define<Classified>()
-
-function build(spans: Classified, text: string): DecorationSet {
-  const b = new RangeSetBuilder<Decoration>()
-  for (const { from, to, className } of decorationRanges(spans, text)) {
-    b.add(from, to, Decoration.mark({ class: className }))
-  }
-  return b.finish()
-}
+import { byteIndexAt, byteToIndex } from './spans'
+import type { Span } from './types'
 
 /**
- * Highlighting via DECORATIONS, not a Lezer grammar.
+ * THE THREE MARKS, AND THE `highlighting` FIELD THAT USED TO SIT ABOVE THEM IS GONE.
  *
- * The case against one here is redundancy and scope. `classify_source` already ships and already
- * returns the spans this field renders, so a grammar would be a second description of the same token
- * structure with nothing keeping the two in agreement. What it would additionally buy — incremental
- * re-parse, bracket matching, structural folding — is not in v1 scope.
+ * It was a `StateField` fed a `setSpans` effect carrying `classify_source`'s byte-offset spans, pushed
+ * from `main.ts`'s update listener in the same frame as every keystroke. Plan 7 part 3b replaced it
+ * with `colour.ts`'s `treeSitterColour` — a `ViewPlugin` over a committed tree-sitter grammar, which
+ * needs no effect because it reads the same `ViewUpdate` the editor already hands it, and which serves
+ * the λ and TM copies as well as this one. One mechanism across four languages, at the cost of the
+ * synchrony: a grammar arrives over a fetch, so the first frame after a mount is uncoloured.
  *
- * It is NOT ruled out on authority, and this comment claimed it was until 2026-08-19. The roadmap's
- * tree-sitter entry forbids a second AUTHORITATIVE grammar, and its own test for "authoritative" is
- * lowering: a grammar there may never lower a CST into Core. A Lezer grammar driving highlighting
- * lowers nothing, so by that test it sits inside the highlighting-only lane the entry permits rather
- * than outside it. The entry names neither Lezer nor CodeMirror at all.
+ * WHAT STAYS HERE IS EVERYTHING THAT IS NOT SYNTAX. The three fields below are three other facts about
+ * the SOURCE document on three other clocks — a backend's refusal, a click's link, the running focus —
+ * and none of them is derivable from a parse tree. They keep the BYTE-offset contract — the one the
+ * deleted field shared with them — because they read spans a Rust backend produced, not offsets a
+ * parser read back.
  */
-export const highlighting = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
-  update(deco, tr) {
-    for (const e of tr.effects) {
-      // `classify_source` returns BYTE offsets; `decorationRanges` converts them to UTF-16 indices
-      // against the actual document text, which is why the whole doc — not just its length — is read
-      // here. Passing `tr.state.doc.length` (a UTF-16 count) straight through as if it were a byte
-      // budget under-clamped every non-ASCII document by exactly the gap between the two units.
-      if (e.is(setSpans)) return build(e.value, tr.state.doc.toString())
-    }
-    // No fresh classification this transaction: move what we have so it stays attached to its text.
-    return tr.docChanged ? deco.map(tr.changes) : deco
-  },
-  provide: (f) => EditorView.decorations.from(f),
-})
 
 /** The source range a backend's refusal names, or `null` to clear it. */
 export const setDecline = StateEffect.define<Span | null>()
@@ -51,9 +27,10 @@ export const setDecline = StateEffect.define<Span | null>()
 /**
  * A backend's refusal, marked where it happened.
  *
- * A SEPARATE FIELD FROM `highlighting` because it changes on a different clock — highlighting on every
+ * A SEPARATE FIELD FROM THE COLOURER because it changes on a different clock — colouring on every
  * keystroke, this only when a compile comes back. Folding them together would mean recomputing one
- * whenever the other moved.
+ * whenever the other moved. (The colourer is `colour.ts`'s `treeSitterColour` now rather than a field
+ * in this file; the clocks are what the argument was ever about.)
  */
 export const declineMark = StateField.define<DecorationSet>({
   create: () => Decoration.none,
@@ -62,8 +39,8 @@ export const declineMark = StateField.define<DecorationSet>({
       if (!e.is(setDecline)) continue
       const span = e.value
       if (!span) return Decoration.none
-      // `sourceSpan` is the same BYTE-offset contract as `classify_source` — see `highlighting`'s
-      // comment above and `spans.ts`'s `byteToIndex` doc. Converted before clamping, same as there;
+      // `sourceSpan` is the same BYTE-offset contract `classify_source` had — see `spans.ts`'s
+      // `byteToIndex` doc. Converted before clamping, same as there;
       // the map's own last entry is the document's UTF-16 length, so clamping into the map already
       // clamps into the document.
       const map = byteToIndex(tr.state.doc.toString())
@@ -88,8 +65,8 @@ export const setLink = StateEffect.define<Span | null>()
  * `x` or the statement containing it. Without this mark the other two panes would light up for a
  * construct the user cannot identify.
  *
- * A THIRD FIELD RATHER THAN A BRANCH IN `declineMark`, for the reason that field states about
- * `highlighting`: these change on different clocks. A decline changes when a compile comes back; a
+ * A SECOND FIELD RATHER THAN A BRANCH IN `declineMark`, for the reason that field states about the
+ * colourer: these change on different clocks. A decline changes when a compile comes back; a
  * link changes on a click.
  */
 export const linkMark = StateField.define<DecorationSet>({
@@ -134,10 +111,11 @@ const FOCUS_CLASS: Record<'exact' | 'within' | 'coincident', string> = {
 /**
  * The construct the CURRENT β-step belongs to, painted as a SECOND LAYER beside `linkMark`'s pin.
  *
- * A FOURTH FIELD, ON A FOURTH CLOCK — `highlighting` moves on every keystroke, `declineMark` on every
- * compile, `linkMark` on every click; this one moves on every β-step, which is why it is not folded
- * into any of the three rather than repeating their own "different clocks, different fields" reasoning
- * for a fourth time.
+ * THE THIRD FIELD, ON THE FOURTH CLOCK — there is one more clock than there are fields here, because
+ * the colourer is no longer one of them. It moves on every keystroke, `declineMark` on every compile,
+ * `linkMark` on every click; this one moves on every β-step, which is why it is not folded into either
+ * of the other two rather than repeating their own "different clocks, different fields" reasoning for
+ * a third time.
  *
  * INDEPENDENT OF `linkMark`, NOT GATED ON IT. 5b's own precedent: a direct gesture (a click) does not
  * stop the run, so this field keeps updating on every `draw()` call whether or not a pin is set —

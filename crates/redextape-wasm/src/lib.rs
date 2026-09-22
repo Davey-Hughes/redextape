@@ -226,21 +226,6 @@ pub fn tm_scratch(src: &str) -> Result<JsValue, JsValue> {
     Ok(out.into())
 }
 
-/// `classifySource(src)` -> `[Span, TokenClass][]`.
-///
-/// NO SESSION, BY DESIGN. An editor highlights while a program is mid-edit and unparseable, so this
-/// path must not depend on anything a compile produces.
-///
-/// # Errors
-///
-/// Returns `Err` only if `to_value` cannot marshal the token spans to a JS value. This crate's own
-/// types always serialize, so in practice a caller sees this only if `serde-wasm-bindgen` itself
-/// changes behaviour; it crosses as a thrown JS exception like any other failure at this boundary.
-#[wasm_bindgen(js_name = classifySource)]
-pub fn classify_source(src: &str) -> Result<JsValue, JsValue> {
-    to_value(&session::classify_source(src))
-}
-
 /// `analyze(src)` -> `Diagnostic[]`.
 ///
 /// THE LINT PATH, and the reason it is not `compile`: see `session::analyze`.
@@ -288,6 +273,33 @@ pub fn encodings() -> Result<JsValue, JsValue> {
 #[wasm_bindgen(js_name = tokenClasses)]
 pub fn token_classes() -> Result<JsValue, JsValue> {
     to_value(&redextape_core::analysis::token_class_names())
+}
+
+/// `captureClasses()` -> `[languageId, [captureName, TokenClass][]][]`.
+///
+/// EXPORTED RATHER THAN MIRRORED IN TYPESCRIPT, for the reason `tokenClasses()` gives directly above:
+/// a table in another language is a second authoritative registry that not even the compiler is
+/// watching. This one is worse than most, because the four tables **disagree** on three capture names
+/// — `@function`, `@variable.parameter` and `@label.reference` — so a hand copy that merged them would
+/// colour an asm mnemonic as an identifier and nothing in either language would notice.
+///
+/// AN ARRAY OF PAIRS RATHER THAN AN OBJECT, because `serde-wasm-bindgen` marshals a Rust map to a JS
+/// `Map` rather than to a plain object: a consumer that wrote `tables[languageId]` against a `Map`
+/// would read `undefined` and never be told why. An array of tuples cannot be mistaken for an index,
+/// so the consumer builds whichever one it wants.
+///
+/// # Errors
+///
+/// Returns `Err` only if `to_value` cannot marshal the tables to a JS value; not expected for this
+/// crate's own types. It crosses as a thrown JS exception like any other failure at this boundary.
+#[wasm_bindgen(js_name = captureClasses)]
+pub fn capture_classes() -> Result<JsValue, JsValue> {
+    let tables: Vec<(&str, Vec<(&str, redextape_core::analysis::TokenClass)>)> =
+        redextape_core::capture_map::CAPTURE_MAPS
+            .iter()
+            .map(|m| (m.language_id, m.rows.iter().map(|(n, c)| (*n, *c)).collect()))
+            .collect();
+    to_value(&tables)
 }
 
 /// The lowering's tape names, in tape order. The NINTH export.
@@ -792,5 +804,16 @@ impl TmScratch {
     #[wasm_bindgen(js_name = tapeNames)]
     pub fn tape_names(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.tape_names())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The boundary hands over every language and every row, and adds nothing.
+    #[test]
+    fn capture_classes_carries_all_four_tables_unchanged() {
+        let want: Vec<(&str, usize)> =
+            redextape_core::capture_map::CAPTURE_MAPS.iter().map(|m| (m.language_id, m.rows.len())).collect();
+        assert_eq!(want, vec![("redextape", 11), ("redextape_lambda", 5), ("redextape_tm", 11), ("redextape_asm", 9)]);
     }
 }

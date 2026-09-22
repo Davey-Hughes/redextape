@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ControlState } from '../../src/controls'
+import type { KeymapSetting } from '../../src/editor-keymap'
 import { History } from '../../src/history'
 import type { LinkWiring } from '../../src/link-wiring'
 import type { Leg, RunReply, RunRequest } from '../../src/protocol'
@@ -314,9 +315,13 @@ describe('PaneSlot', () => {
       draw: () => draws++,
       speed: () => 8,
       setSpeed: () => undefined,
-      // Inert: these fixtures drive stepping and binding, not language features.
+      // Inert: these fixtures drive stepping and binding, neither language features nor colour.
       lspClient: () => LSP_STUB,
+      colour: () => [],
       formatOnBlur: () => false,
+      // NEVER REACHED, AND A CAST FOR `scratchpad`'s REASON: a keymap setting is joined by an EDITOR,
+      // and no fixture in this file builds one.
+      keymap: {} as KeymapSetting,
       linkWiring: () => ({}) as LinkWiring,
       notify: () => undefined,
       // A THROW RATHER THAN A NO-OP, FOR THE SAME REASON THE TWO CASTS ABOVE ARE CASTS: only `detach`
@@ -414,9 +419,13 @@ describe('PaneSlot', () => {
       setSpeed: () => undefined,
       // `index.lambdaText` IS THE ONE FIELD THE GUARD ABOVE THE `try` READS — an empty string makes
       // `detach` return before it ever forks, which would pass every assertion below vacuously.
-      // Inert: these fixtures drive stepping and binding, not language features.
+      // Inert: these fixtures drive stepping and binding, neither language features nor colour.
       lspClient: () => LSP_STUB,
+      colour: () => [],
       formatOnBlur: () => false,
+      // NEVER REACHED, AND A CAST FOR `scratchpad`'s REASON: a keymap setting is joined by an EDITOR,
+      // and no fixture in this file builds one.
+      keymap: {} as KeymapSetting,
       linkWiring: () => ({ index: { lambdaText: 'λx. x' } }) as unknown as LinkWiring,
       notify: (t: string) => {
         notified.push(t)
@@ -511,9 +520,13 @@ describe('PaneSlot', () => {
       // for its text (`sessions.entryOf(...).tmProgram?.tmText` is the whole resolution), so a fake
       // that omitted `index` would still be exercising the real handler rather than papering over a
       // read it does not perform.
-      // Inert: these fixtures drive stepping and binding, not language features.
+      // Inert: these fixtures drive stepping and binding, neither language features nor colour.
       lspClient: () => LSP_STUB,
+      colour: () => [],
       formatOnBlur: () => false,
+      // NEVER REACHED, AND A CAST FOR `scratchpad`'s REASON: a keymap setting is joined by an EDITOR,
+      // and no fixture in this file builds one.
+      keymap: {} as KeymapSetting,
       linkWiring: () => ({}) as unknown as LinkWiring,
       notify: (t: string) => {
         notified.push(t)
@@ -565,9 +578,13 @@ describe('PaneSlot', () => {
       draw: () => undefined,
       speed: () => 8,
       setSpeed: () => undefined,
-      // Inert: these fixtures drive stepping and binding, not language features.
+      // Inert: these fixtures drive stepping and binding, neither language features nor colour.
       lspClient: () => LSP_STUB,
+      colour: () => [],
       formatOnBlur: () => false,
+      // NEVER REACHED, AND A CAST FOR `scratchpad`'s REASON: a keymap setting is joined by an EDITOR,
+      // and no fixture in this file builds one.
+      keymap: {} as KeymapSetting,
       linkWiring: () => ({}) as unknown as LinkWiring,
       notify: () => undefined,
       onBuffersChanged: () => undefined,

@@ -3,9 +3,12 @@
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml), so the local and CI gates cannot drift.
 # The pre-commit hooks deliberately do NOT run it — they stay fast: fmt and clippy on a Rust change,
-# biome and tsc on a web/ one, the Lua/parser check on a grammar one, plus four `always_run` tree-wide
-# gates (control bytes, `file:line` citations, documented figures, shared doc regions) on every commit.
-# Nine hooks; this is the before-a-merge check.
+# biome and tsc on a web/ one, the Lua/parser check on a grammar one, plus seven `always_run` tree-wide
+# gates (control bytes, `file:line` citations, symbol-citation attributions, documented figures, shared
+# doc regions, colour literals, grammar `.wasm`) on every commit. **This comment read "four" and named
+# only the first four** — check-colours and check-grammar-wasm were added later and never counted here;
+# recount is `.pre-commit-config.yaml`'s `always_run: true` entries, not this comment.
+# Twelve hooks; this is the before-a-merge check.
 #
 #   scripts/check-all.sh                  # everything: base, LLVM and browser configs
 #   scripts/check-all.sh --no-llvm        # skip LLVM (no toolchain installed)
@@ -142,6 +145,7 @@ esac
 LEGS=(
   "both|fmt|"
   "base|grammar|"
+  "base|grammarwasm|"
   "base|wasmprobe|"
   "base|clippy|--workspace --all-targets"
   "base|test|--workspace"
@@ -202,7 +206,7 @@ check_legs() {
       *) echo "error: leg tagged with unknown tier '$tier': $row" >&2; exit 1 ;;
     esac
     case "$kind" in
-      fmt|clippy|build|test|probe|wasmprobe|wasm|browserprobe|browser|grammar) ;;
+      fmt|clippy|build|test|probe|wasmprobe|wasm|browserprobe|browser|grammar|grammarwasm) ;;
       *) echo "error: leg tagged with unknown kind '$kind': $row" >&2; exit 1 ;;
     esac
   done
@@ -646,6 +650,10 @@ do_leg() {
     # `src/parser.c` is a build artifact checked into git and nothing else can tell whether it was
     # built from the `grammar.js` beside it.
     grammar) ensure_treesitter; check_grammars ;;
+    # NOT a `cargo` leg, and unlike `grammar)` above it needs no tree-sitter CLI: it hashes four
+    # `parser.c` and four `.wasm` and compares them to a manifest. Cheap enough to sit beside the
+    # other grammar leg at the top of the tier.
+    grammarwasm) run scripts/check-grammar-wasm.sh --self-test && run scripts/check-grammar-wasm.sh ;;
     browserprobe) ensure_browser ;;
     # NOT a `cargo` leg, and the only row in this table that is not: `wasm-pack test` takes a crate
     # DIRECTORY, not cargo arguments, so the row supplies `crates/redextape-wasm` rather than a `-p`

@@ -100,6 +100,28 @@
 #      rather than a present tense. It had drifted by 315 tests and lost three crates from its
 #      breakdown before anyone noticed. A gate that cannot be cheap should not exist; a claim that
 #      cannot be gated should not be written in the present tense.
+# **ONE ROW'S DOCUMENT IS A SOURCE FILE, NOT A README, AND THAT IS A DELIBERATE WIDENING.**
+# `crates/redextape-wasm/src/lib.rs` calls `tapeNames()` "The NINTH export" in a doc comment, and
+# `README.md` states the same fact twice more — "nine exports" and "the ninth, `tapeNames()`". An
+# ORDINAL that moves whenever any export is added, with no gate behind it, is the exact shape this
+# repository keeps retracting; `.pre-commit-config.yaml`'s hook comments and the `linear-history` CI
+# header each carry their own retraction of one. All three went false inside a single branch when Plan
+# 7 part 3b added `captureClasses` and deleted `classifySource`, and nothing noticed, because the
+# derivation did not exist. The scan reads any path it is given — `normalize` just flattens a file — so
+# the widening costs one row and no machinery.
+#
+# **THE ORDINAL IS DERIVED AS A POSITION, NOT AS THE COUNT.** `wasm_exports` and
+# `wasm_tapenames_ordinal` are two derivations, and the second walks to `tapeNames` rather than
+# assuming it is last. They are equal today and that is a fact about the file, not a definition:
+# deleting one export and appending another leaves the COUNT unchanged while moving the position, and a
+# single count-shaped derivation would report green through exactly that edit.
+#
+# **BOTH RETURN 9 AGAINST THE REAL TREE TODAY, SO THE REAL TREE CANNOT TELL THE TWO DERIVATIONS APART**
+# — a position-shaped implementation that quietly became a count would still pass every check that
+# only ever runs against `wasm_export_names()`'s real output, because `tapeNames` happens to be last.
+# `--self-test` closes that hole with a SYNTHETIC export list carrying a name AFTER `tapeNames`, so the
+# count (4) and the position (3) disagree there and a count masquerading as a position fails.
+#
 #   6. A FIGURE WITH NO ROW HERE. Adding a claim to a README does not add it to this table. The
 #      gate covers what it lists and reports that count on success, rather than implying the prose
 #      is checked. Deleting a claimed figure, by contrast, fails loudly.
@@ -119,18 +141,75 @@ readonly G_ASM="grammars/tree-sitter-redextape-asm"
 # broken scan — the shape `check-text-bytes.sh` uses for the same reason.
 # ---------------------------------------------------------------------------
 
-# The `CAPTURE_CLASSES` table for a grammar lives in the checker crate, one module per grammar.
+# THIS COMMENT WAS WRONG ONCE. It used to say the table "lives in the checker crate, one module per
+# grammar" — true when this script was written, false since the tables moved to
+# `redextape-core::capture_map`. They moved because the web app needs them to colour an editor and
+# cannot depend on `redextape-grammar-check`, which links four generated `parser.c` files through a
+# `cc` build script that nothing shipped can carry. All four tables now live in that one file, as
+# four separate `pub const` items rather than four modules each named `CAPTURE_CLASSES`.
 map_src() {
   case "$1" in
-    "$G_MINI") echo "crates/redextape-grammar-check/src/mini.rs" ;;
-    "$G_LAM")  echo "crates/redextape-grammar-check/src/lambda.rs" ;;
-    "$G_TM")   echo "crates/redextape-grammar-check/src/tm.rs" ;;
-    "$G_ASM")  echo "crates/redextape-grammar-check/src/asm.rs" ;;
+    "$G_MINI"|"$G_LAM"|"$G_TM"|"$G_ASM") echo "crates/redextape-core/src/capture_map.rs" ;;
     *) echo "check-doc-figures: no capture-map module for $1" >&2; return 1 ;;
   esac
 }
 
-map_rows_raw() { awk '/pub const CAPTURE_CLASSES/,/^\];/' "$(map_src "$1")" | grep '^    ("'; }
+# The `pub const` name a grammar's table is bound to, now that a shared filename can no longer tell
+# the four apart. `map_rows_raw` keys its `awk` range on this instead of the old `CAPTURE_CLASSES`
+# literal, which one file cannot use for four tables at once.
+map_const() {
+  case "$1" in
+    "$G_MINI") echo "REDEXTAPE" ;;
+    "$G_LAM")  echo "REDEXTAPE_LAMBDA" ;;
+    "$G_TM")   echo "REDEXTAPE_TM" ;;
+    "$G_ASM")  echo "REDEXTAPE_ASM" ;;
+    *) echo "check-doc-figures: no capture-map const for $1" >&2; return 1 ;;
+  esac
+}
+
+map_rows_raw() { awk "/pub const $(map_const "$1"):/,/^\];/" "$(map_src "$1")" | grep '^    ("'; }
+
+# The FREE `#[wasm_bindgen]` functions of `redextape-wasm`, in declaration order, under the names
+# JavaScript sees. The two `wasm_*` keys below both read this, so the count and the ordinal cannot
+# disagree about what an export is.
+#
+# **A TOP-LEVEL `pub fn` ON THE NEXT LINE IS THE WHOLE TEST, AND A BARE `grep -c` IS NOT A SUBSTITUTE.**
+# `#[wasm_bindgen]` also annotates four `pub struct` declarations and four `impl` blocks in that file,
+# so counting the attribute alone reads 18 — those eight, plus `init`, plus the nine functions a caller
+# can reach — against the nine. A method inside an `impl` carries the attribute too and is indented,
+# which is what `^pub fn` excludes.
+#
+# THOSE THREE FIGURES WERE WRONG THE DAY THIS COMMENT WAS WRITTEN, NOT LEFT BEHIND BY A LATER EDIT.
+# It said five structs, three impls and 19; the file has never held those. At `79b0f14`, before this
+# branch touched the crate, it was already four, four and 18, exactly as it is now. A paragraph
+# arguing that a bare count misleads is the last place to put a count nobody ran.
+#
+# `#[wasm_bindgen(start)]` IS EXCLUDED, and the prose it gates says so: `init` runs on module
+# instantiation and is not something a caller counts among the module's functions.
+WASM_LIB="crates/redextape-wasm/src/lib.rs"
+
+wasm_export_names() {
+  awk '
+    /^#\[wasm_bindgen/ { attr = $0; pending = 1; next }
+    pending && /^pub fn / {
+      if (attr !~ /\(start\)/) {
+        if (attr ~ /js_name/) { n = attr; sub(/.*js_name[ ]*=[ ]*/, "", n); sub(/[^A-Za-z0-9_].*/, "", n) }
+        else { n = $0; sub(/^pub fn /, "", n); sub(/[^A-Za-z0-9_].*/, "", n) }
+        print n
+      }
+    }
+    { pending = 0 }
+  ' "$WASM_LIB"
+}
+
+# 1-based line number of `$1` in the newline-separated list piped in on stdin, or empty if absent.
+# Factored out of `derive`'s `wasm_tapenames_ordinal` case below so `--self-test` can run this EXACT
+# logic over a synthetic list where a position and a count disagree, rather than over a paraphrase of
+# it that could drift into agreeing with a broken derivation — the same reason `wasm_export_names`
+# above is one function the two `wasm_*` keys both call instead of two copies of one awk script.
+list_position() {
+  grep -n "^$1\$" | cut -d: -f1 | head -1
+}
 
 # derive <grammar-dir> <key> -> the true value, as a bare integer.
 derive() {
@@ -161,6 +240,11 @@ derive() {
     grammar_count)      n=$(find grammars -mindepth 2 -maxdepth 2 -name tree-sitter.json | wc -l) ;;
     precommit_hooks)    n=$(grep -c '^      - id: ' .pre-commit-config.yaml) ;;
     wasm_browser_tests) n=$(grep -c '#\[wasm_bindgen_test\]' crates/redextape-wasm/tests/browser.rs) ;;
+    wasm_exports)       n=$(wasm_export_names | wc -l) ;;
+    # 1-based, and 0 if `tapeNames` is not an export at all — which fails the comparison loudly rather
+    # than passing as "no position". `list_position` is the same logic `--self-test` runs over a
+    # synthetic list below, so a position derivation that quietly became a count fails there too.
+    wasm_tapenames_ordinal) n=$(wasm_export_names | list_position tapeNames) ;;
     *) echo "check-doc-figures: unknown key '$key'" >&2; return 1 ;;
   esac
   echo "$((n))"
@@ -169,22 +253,26 @@ derive() {
 # The command a reader can run to reproduce a derivation, printed on failure so the error names its
 # own fix rather than only its own unhappiness.
 derive_cmd() {
-  local dir="$1" key="$2" src
-  # Guarded: a REPO-LEVEL scope (`.`) has no capture-map module, and `map_src` returns non-zero for
-  # it. Unguarded under `set -e` that aborts the whole run while merely composing an error message.
+  local dir="$1" key="$2" src const
+  # Guarded: a REPO-LEVEL scope (`.`) has no capture-map module, and `map_src`/`map_const` return
+  # non-zero for it. Unguarded under `set -e` that aborts the whole run while merely composing an
+  # error message.
   src="$(map_src "$dir" 2>/dev/null || echo '<no capture-map module>')"
+  const="$(map_const "$dir" 2>/dev/null || echo '<no capture-map const>')"
   case "$key" in
     grammar_js_lines) echo "wc -l < $dir/grammar.js" ;;
     parser_c_bytes)   echo "wc -c < $dir/src/parser.c" ;;
     query_patterns)   echo "grep -v '^;' $dir/queries/highlights.scm | grep -oE '@[a-z._]+' | wc -l" ;;
     capture_names)    echo "grep -v '^;' $dir/queries/highlights.scm | grep -oE '@[a-z._]+' | sort -u | wc -l" ;;
-    map_rows)         echo "awk '/pub const CAPTURE_CLASSES/,/^\\];/' $src | grep -c '^    (\"'" ;;
-    map_classes)      echo "awk '/pub const CAPTURE_CLASSES/,/^\\];/' $src | grep '^    (\"' | sed -E 's/.*,[[:space:]]*(TokenClass::[A-Za-z]+).*/\\1/' | sort -u | wc -l" ;;
+    map_rows)         echo "awk '/pub const ${const}:/,/^\\];/' $src | grep -c '^    (\"'" ;;
+    map_classes)      echo "awk '/pub const ${const}:/,/^\\];/' $src | grep '^    (\"' | sed -E 's/.*,[[:space:]]*(TokenClass::[A-Za-z]+).*/\\1/' | sort -u | wc -l" ;;
     corpus_cases)     echo "cat $dir/test/corpus/* | grep -c '^===*\$'  # halved" ;;
     workspace_crates)   echo "find crates -mindepth 1 -maxdepth 1 -type d | wc -l" ;;
     grammar_count)      echo "find grammars -mindepth 2 -maxdepth 2 -name tree-sitter.json | wc -l" ;;
     precommit_hooks)    echo "grep -c '^      - id: ' .pre-commit-config.yaml" ;;
     wasm_browser_tests) echo "grep -c '#\[wasm_bindgen_test\]' crates/redextape-wasm/tests/browser.rs" ;;
+    wasm_exports)       echo "scripts/check-doc-figures.sh's wasm_export_names | wc -l  # over $WASM_LIB" ;;
+    wasm_tapenames_ordinal) echo "scripts/check-doc-figures.sh's wasm_export_names | grep -n '^tapeNames\$'  # over $WASM_LIB" ;;
   esac
 }
 
@@ -196,6 +284,11 @@ derive_cmd() {
 # capitalised one. Input is lowercased before lookup. Anything unrecognised falls through with
 # commas stripped, so `42,220` becomes 42220 and a non-numeric match stays non-numeric and fails the
 # comparison loudly rather than silently reading as zero.
+#
+# **ORDINALS ARE HERE FOR THE `tapeNames()` ROWS, AND THEY READ AS THE POSITION THEY NAME.** Two
+# documents call that export "the ninth" and one of them capitalises it; there is no sentence in this
+# tree where an ordinal word means anything but its own number, so they share the table rather than
+# getting a second one. The row that uses them derives a POSITION — see this file's header.
 to_number() {
   local w="${1,,}"
   case "$w" in
@@ -204,6 +297,11 @@ to_number() {
     ten) echo 10 ;;  eleven) echo 11 ;; twelve) echo 12 ;; thirteen) echo 13 ;;
     fourteen) echo 14 ;; fifteen) echo 15 ;; sixteen) echo 16 ;; seventeen) echo 17 ;;
     eighteen) echo 18 ;; nineteen) echo 19 ;; twenty) echo 20 ;;
+    first) echo 1 ;;  second) echo 2 ;;   third) echo 3 ;;    fourth) echo 4 ;;  fifth) echo 5 ;;
+    sixth) echo 6 ;;  seventh) echo 7 ;;  eighth) echo 8 ;;   ninth) echo 9 ;;   tenth) echo 10 ;;
+    eleventh) echo 11 ;; twelfth) echo 12 ;; thirteenth) echo 13 ;; fourteenth) echo 14 ;;
+    fifteenth) echo 15 ;; sixteenth) echo 16 ;; seventeenth) echo 17 ;; eighteenth) echo 18 ;;
+    nineteenth) echo 19 ;; twentieth) echo 20 ;;
     *) echo "${1//,/}" ;;
   esac
 }
@@ -237,6 +335,9 @@ README.md|.|workspace_crates|workspace crates under crates/|([0-9,]+|[A-Za-z]+) 
 README.md|.|precommit_hooks|pre-commit hooks (1 of 2: "There are N")|There are \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} pre-commit hooks
 README.md|.|precommit_hooks|pre-commit hooks (2 of 2: "All N are fast enough")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} are fast enough
 README.md|.|wasm_browser_tests|wasm browser tests|has \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} browser tests
+README.md|.|wasm_exports|redextape-wasm free exports|to WASM through \*{0,2}([0-9,]+|[A-Za-z]+) exports
+README.md|.|wasm_tapenames_ordinal|tapeNames' position among them (1 of 2: the README)|exports\*{0,2} — the ([0-9,]+|[A-Za-z]+), `tapeNames\(\)`
+crates/redextape-wasm/src/lib.rs|.|wasm_tapenames_ordinal|tapeNames' position among them (2 of 2: its own doc comment)|in tape order\. The ([0-9,]+|[A-Za-z]+) export\.
 grammars/tree-sitter-redextape/README.md|grammars/tree-sitter-redextape|grammar_js_lines|mini grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
 grammars/tree-sitter-redextape-lambda/README.md|grammars/tree-sitter-redextape-lambda|grammar_js_lines|lambda grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
 grammars/tree-sitter-redextape-lambda/README.md|grammars/tree-sitter-redextape|grammar_js_lines|mini grammar.js lines (CROSS-REF from lambda)|under half the mini-language's \*{0,2}([0-9,]+|[A-Za-z]+)
@@ -346,6 +447,9 @@ self_test() {
   local cap_re='over \*{0,2}([0-9,]+|[A-Za-z]+) capture names'
   local cls_re='capture names for \*{0,2}([0-9,]+|[A-Za-z]+) classes'
   local xref_re="under half the mini-language's \\*{0,2}([0-9,]+|[A-Za-z]+)"
+  local exports_re='to WASM through \*{0,2}([0-9,]+|[A-Za-z]+) exports'
+  local ordinal_re='exports\*{0,2} — the ([0-9,]+|[A-Za-z]+), `tapeNames\(\)`'
+  local rust_ordinal_re='in tape order\. The ([0-9,]+|[A-Za-z]+) export\.'
 
   echo "detector:"
   check "digits are read" 147 \
@@ -360,6 +464,10 @@ self_test() {
     "$(find_claim "$(printf 'holds **13 patterns** over **11\ncapture names**, and' | tr '\n' ' ')" "$cap_re")"
   check "a cross-reference is read" 171 \
     "$(find_claim "under half the mini-language's 171, which is" "$xref_re")"
+  check "an ORDINAL word is read as its own number" 9 \
+    "$(find_claim 'to WASM through **nine exports** — the ninth, `tapeNames()`, labels' "$ordinal_re")"
+  check "a CAPITALISED ordinal is read (the Rust doc comment shouts it)" 9 \
+    "$(find_claim "in tape order. The NINTH export. EXPORTED RATHER THAN" "$rust_ordinal_re")"
 
   echo "refusals:"
   check "a MISSING claim returns empty, so the scan fails rather than skipping" "" \
@@ -372,6 +480,12 @@ self_test() {
   # it: `mini-language's (...)` matched four different clauses in the λ README.
   check "an UNANCHORED cross-reference is refused rather than reading the wrong clause" "AMBIGUOUS:2" \
     "$(find_claim "the mini-language's lexer and the mini-language's 171 lines" "mini-language's \\*{0,2}([0-9,]+|[A-Za-z]+)")"
+  # The export count and the ordinal share one sentence, so each locator has to refuse the other's
+  # number rather than reading whichever comes first.
+  check "the export COUNT locator does not read the ordinal beside it" 9 \
+    "$(find_claim 'to WASM through **nine exports** — the ninth, `tapeNames()`, labels' "$exports_re")"
+  check "a reworded export claim returns empty rather than passing" "" \
+    "$(find_claim 'compiles to WASM and exports nine functions' "$exports_re")"
   # The two historical figures that live inside present-tense READMEs today.
   check "the mini README's historical '156 until PR 3' is NOT captured" 171 \
     "$(find_claim '`grammar.js` is 171 lines (156 until PR 3 replaced extras)' "$lines_re")"
@@ -388,6 +502,47 @@ self_test() {
       echo "  FAIL derive($k) returned '$v'" >&2; fails=$((fails + 1))
     fi
   done
+  for k in wasm_exports wasm_tapenames_ordinal; do
+    v="$(derive "." "$k")"
+    if [ "$v" -gt 0 ] 2>/dev/null; then
+      echo "  ok   derive($k) = $v"
+    else
+      echo "  FAIL derive($k) returned '$v'" >&2; fails=$((fails + 1))
+    fi
+  done
+
+  # **THE EXPORT LIST IS CHECKED BY NAME, NOT ONLY BY LENGTH**, because the two ways this derivation
+  # can be wrong are both silent in a count. `init` is `#[wasm_bindgen(start)]` and must be absent; a
+  # method on an `impl` block carries the same attribute and must be absent too; and a plain
+  # `#[wasm_bindgen]` on a free function has no `js_name` to read, so its Rust name is what a caller
+  # sees. One name from each class is asserted rather than the whole list, which would restate the
+  # file.
+  echo "the wasm export list is the free functions, and only those:"
+  local names
+  names="$(wasm_export_names)"
+  check "a plain #[wasm_bindgen] free function is listed under its Rust name" "yes" \
+    "$(printf '%s\n' "$names" | grep -qx 'compile' && echo yes || echo no)"
+  check "a js_name is listed as JavaScript sees it, not as Rust spells it" "yes" \
+    "$(printf '%s\n' "$names" | grep -qx 'tapeNames' && echo yes || echo no)"
+  check "#[wasm_bindgen(start)] is NOT an export" "no" \
+    "$(printf '%s\n' "$names" | grep -qx 'init' && echo yes || echo no)"
+  check "a method on an #[wasm_bindgen] impl is NOT an export" "no" \
+    "$(printf '%s\n' "$names" | grep -qx 'lambdaStatus' && echo yes || echo no)"
+
+  # THE ORDINAL VS. THE COUNT, ON A LIST WHERE THEY DISAGREE. Against the real tree today
+  # `wasm_exports` (a count) and `wasm_tapenames_ordinal` (a position) both read 9, because
+  # `tapeNames` happens to be the last export — so neither the scan above nor the checks above it can
+  # tell a position derivation from a count-shaped one that coincidentally returns the right number.
+  # A synthetic list with a name AFTER `tapeNames` breaks the coincidence on purpose: the count grows
+  # to 4 while `tapeNames`'s position stays 3, so this only passes if `list_position` genuinely walks
+  # to the name rather than counting the list.
+  echo "the ordinal is a position, not a count — a synthetic list where they diverge:"
+  local synthetic
+  synthetic=$'compile\nanalyze\ntapeNames\nzzzExportAfterTapeNames'
+  check "the synthetic list's export COUNT is 4" 4 \
+    "$(printf '%s\n' "$synthetic" | wc -l)"
+  check "the same list's tapeNames ORDINAL is 3, not the count 4" 3 \
+    "$(printf '%s\n' "$synthetic" | list_position tapeNames)"
 
   echo ""
   if [ "$fails" -gt 0 ]; then

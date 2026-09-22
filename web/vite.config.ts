@@ -72,6 +72,42 @@ const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : 
 export default defineConfig({
   server: { fs: { allow: [REPO_ROOT] } },
   worker: { format: 'es' },
+  // `assetsInlineLimit` — WITHOUT THIS, ONE OF FOUR GRAMMAR `.wasm` FILES INLINES AND THE OTHER
+  // THREE DO NOT, FOR A REASON THAT HAS NOTHING TO DO WITH THE GRAMMARS THEMSELVES.
+  //
+  // `colour.ts` imports all four tree-sitter grammar `.wasm` with Vite's `?url` suffix. Three of
+  // them (`tree-sitter-redextape`, `tree-sitter-redextape-asm`, `tree-sitter-redextape-tm`, each
+  // 8-17 KiB) land as hashed files under `dist/assets/`. MEASURED: `tree-sitter-redextape-lambda
+  // .wasm` is 2,514 bytes — under Vite's default `assetsInlineLimit` of 4096 — so it alone is
+  // inlined into the JS bundle as a `data:application/wasm;base64,...` URI instead of being
+  // emitted. Confirmed in a scratch build: TM came out as `dist/assets/tree-sitter-redextape-tm-
+  // *.wasm`; λ never appeared as a file, and `data:application/wasm;base64,AGFzbQEAAAAAEAhkeWxpbmsu`
+  // showed up in the bundle in its place.
+  //
+  // THE INLINED FORM WAS MEASURED WORKING, NOT SUSPECTED BROKEN — a previous agent watched the
+  // data URI get fetched and `compileStreaming`'d correctly in real Chromium. This entry is not a
+  // bugfix; it removes an inconsistency the size threshold introduced by accident, for three
+  // reasons:
+  //
+  // 1. LOAD-BEARING: THE THRESHOLD FLIPS BEHAVIOUR SILENTLY. If this grammar ever grows past 4096
+  //    bytes it becomes an emitted asset with no signal anywhere that its production loading path
+  //    just changed underneath a file nobody touched — an unchecked threshold that changes
+  //    behaviour is exactly the shape this repository removes on sight.
+  // 2. The design (see `colour.ts`) has each grammar load independently, so a grammar that fails
+  //    to load leaves only its language uncoloured, with one notice. An inlined grammar cannot
+  //    fail that way — it is already in the bundle — so λ alone has a different failure surface
+  //    from its three siblings.
+  // 3. Dev and production already differ for λ alone (dev never inlines), which makes a
+  //    λ-specific loading bug reproducible in only one of the two environments.
+  //
+  // A FUNCTION, NOT A BARE NUMBER, AND `false`/`undefined`, NOT `true`/`false`. Returning `false`
+  // means "never inline this file"; returning `undefined` means "fall through to Vite's own
+  // default rule" — omitting the fallthrough (returning `true`, or passing a bare number) would
+  // change behaviour for every other asset type this file ships (fonts, icons) rather than only
+  // `.wasm`.
+  build: {
+    assetsInlineLimit: (filePath) => (filePath.endsWith('.wasm') ? false : undefined),
+  },
   test: {
     // No `passWithNoTests`. It was set while the scaffold had no tests yet; now that both projects
     // have them, a project reporting no test files means a broken `include` glob, and that should

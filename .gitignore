@@ -11,6 +11,16 @@
 /pkg-lsp/
 **/pkg/
 *.wasm
+# ...except the four committed grammar parsers, which the web app loads through `web-tree-sitter` and
+# which CI must not have to build: `tree-sitter build --wasm` needs emscripten or docker and the
+# runner has neither. `scripts/check-grammar-wasm.sh` holds each one to the `src/parser.c` beside it
+# and to its own recorded bytes. Negated one path at a time rather than by a directory glob, which
+# would also admit a stray build output; the file's other negation, `!.env.example`, sits adjacent to
+# what it negates and these cannot, which is why they carry this comment.
+!grammars/tree-sitter-redextape/tree-sitter-redextape.wasm
+!grammars/tree-sitter-redextape-lambda/tree-sitter-redextape-lambda.wasm
+!grammars/tree-sitter-redextape-tm/tree-sitter-redextape-tm.wasm
+!grammars/tree-sitter-redextape-asm/tree-sitter-redextape-asm.wasm
 
 # Generated TypeScript for the wasm boundary's wire types (ts-rs, via `pnpm run build:bindings`).
 # Stands to `web/src` as `/pkg/` above does — generated from the Rust declarations rather than

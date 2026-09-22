@@ -69,6 +69,10 @@ export class TmPane implements EditablePane {
   #onEdit: ((src: string) => void) | undefined
   /** Resolves this pane's current binding to an LSP document — see `PaneEvents.lspDocument`. */
   #lspDocument: (() => ScratchEditorConfig['document']) | undefined
+  /** Resolves this pane's language to its colourer — see `PaneEvents.colour`. */
+  #colour: (() => ScratchEditorConfig['colour']) | undefined
+  /** The page's keymap setting, which this pane's editor joins — see `PaneEvents.keymap`. */
+  #keymap: ScratchEditorConfig['keymap']
   /**
    * The pane's own body — everything below the heading row, wrapped in one element for `host.replaceChildren`
    * below.
@@ -219,6 +223,8 @@ export class TmPane implements EditablePane {
     this.#editorHost.className = ''
     this.#onEdit = on.editScratch
     this.#lspDocument = on.lspDocument
+    this.#colour = on.colour
+    this.#keymap = on.keymap
     this.#tapes = document.createElement('div')
     this.#tapes.className = 'tapes'
     this.#steps = stepControls(on)
@@ -546,6 +552,8 @@ export class TmPane implements EditablePane {
         // RESOLVED HERE, NOT AT CONSTRUCTION — the binding this pane shows now is the buffer
         // the editor being built belongs to.
         document: this.#lspDocument?.(),
+        colour: this.#colour?.(),
+        keymap: this.#keymap,
       })
       this.#collapse.update(true, collapsed)
       this.#syncEditorControls()

@@ -9,15 +9,26 @@
 //! arguments is the path a renderer actually takes, so it is the path under test.
 //!
 //! **WITH ONE EXCEPTION, AND IT IS NOT AN OVERSIGHT: THE FREE EXPORTS.** `the_free_exports_need_no
-//! _session` calls `classify_source`/`analyze` as plain Rust, because there is nothing to look them up
+//! _session` calls `analyze`/`captureClasses` as plain Rust, because there is nothing to look them up
 //! ON — they are module-level functions rather than methods on a returned object, and
 //! `wasm-bindgen-test` hands a test no handle on the generated module's own export table. What those
-//! two calls still prove is the half that is reachable from here: that the functions link and run under
+//! calls still prove is the half that is reachable from here: that the functions link and run under
 //! wasm, and that `to_value` marshals their results. That their JS NAMES exist and are camelCase is
 //! closed from the other side instead: `wasm-pack build` emits `pkg/redextape_wasm.d.ts` — the file a
-//! renderer actually imports — and it declares every export this crate has, `classifySource` and
-//! `analyze` among them, as module-level functions under exactly those camelCase names. A missing or
-//! misspelled `js_name` cannot survive that; it simply is not something a test in this file can see.
+//! renderer actually imports — and it declares every export this crate has, `analyze` and
+//! `captureClasses` among them, as module-level functions under exactly those camelCase names. A
+//! missing or misspelled `js_name` cannot survive that; it simply is not something a test in this file
+//! can see.
+//!
+//! **THIS PARAGRAPH NAMED `classify_source`/`classifySource` UNTIL PLAN 7 PART 3b, WHICH DELETED THAT
+//! EXPORT AND MADE IT FALSE.** The web tier colours its editors from tree-sitter grammars now
+//! (`web/src/colour.ts`), so the export had no JS caller left and this crate's own tests were its
+//! last one; see `the_free_exports_need_no_session`'s own doc for what the deletion took with it. The
+//! stale sentence kept reading true locally because `pkg/redextape_wasm.d.ts` is a gitignored build
+//! artefact `build:wasm` had not been re-run to regenerate, so it still listed `classifySource` —
+//! that is not evidence the export still exists, only that nothing had rebuilt the file this
+//! paragraph cites.
+//!
 //! THE EXPECTED VALUES ARE PINNED IN `session.rs`'s NATIVE TESTS TOO, deliberately: "the values that
 //! come back are the ones a native run produces" is only a claim if both sides name the same numbers.
 //! `let x = 40; x + 2` reduces in 7 β-steps to Church 42 and runs 2,870 δ-steps on a 5-tape machine of
@@ -790,24 +801,49 @@ fn v8_native_limits_on_a_nested_plain_js_object() {
     );
 }
 
-/// The two free exports, which take no session and must therefore be reachable as module-level
-/// functions rather than as prototype methods.
+/// `analyze` and `captureClasses`, both reachable as module-level functions rather than as prototype
+/// methods, because there is nothing to look either of them up on.
+///
+/// **IT COVERED `classifySource` TOO UNTIL PLAN 7 PART 3b, WHICH DELETED THAT EXPORT.** The web tier
+/// colours its editors from tree-sitter grammars now (`web/src/colour.ts`), so the export had no JS
+/// caller left and this was its last Rust one. What the deleted half asserted was that a file which
+/// does NOT analyze still classifies.
+///
+/// **NOTHING IN `redextape_core::analysis` HELD THAT PROPERTY WHEN THE ASSERTION WENT.**
+/// `classify_source_is_total_on_malformed_input` discarded `classify_source`'s return value
+/// (`let _ = classify_source(...)`), so it asserted only that classification does not panic — nothing
+/// there checked a malformed file still yields spans, and the assertion deleted from this test —
+/// `a file that does not analyze still has tokens` — was the whole of it.
+/// That test now asserts the property directly: a parse error still leaves tokens to classify, and the
+/// empty string classifies to nothing. That is where it lives.
+///
+/// **PLURAL AGAIN, DELIBERATELY.** Plan 7 part 3b's deletion of `classifySource` left this test
+/// exercising exactly one free export, which the name above says it does not do. `captureClasses` —
+/// new in this same branch (Task 2) and, until now, untested at the wasm boundary at all — closes it
+/// back up to two.
 #[wasm_bindgen_test]
 fn the_free_exports_need_no_session() {
-    let spans: Array = redextape_wasm::classify_source("let x = 40; x + 2").expect("marshals").unchecked_into();
-    assert!(spans.length() > 0, "a clean program has tokens to highlight");
-    let first: Array = spans.get(0).unchecked_into();
-    assert_eq!(first.length(), 2, "each entry is a (Span, TokenClass) pair");
-
-    // Highlighting a broken file is when highlighting matters most.
-    let broken: Array = redextape_wasm::classify_source("let x = ;").expect("marshals").unchecked_into();
-    assert!(broken.length() > 0, "a file that does not analyze still has tokens");
-
     let clean: Array = redextape_wasm::analyze("let x = 40; x + 2").expect("marshals").unchecked_into();
     assert_eq!(clean.length(), 0, "a clean program has no diagnostics");
     let errs: Array = redextape_wasm::analyze("let x = ;").expect("marshals").unchecked_into();
     assert!(errs.length() > 0, "a parse error is reported");
     assert_eq!(get(&errs.get(0), "severity").as_string().as_deref(), Some("Error"));
+
+    // `captureClasses()` -> `[languageId, [captureName, TokenClassName][]][]`, also reachable with no
+    // session — the shape `web/src/colour.ts`'s `CaptureTable` reads.
+    let tables: Array = redextape_wasm::capture_classes().expect("marshals").unchecked_into();
+    assert_eq!(tables.length(), 4, "four languages share one capture-class vocabulary");
+    for i in 0..tables.length() {
+        let entry: Array = tables.get(i).unchecked_into();
+        assert_eq!(entry.length(), 2, "each entry is a [languageId, rows] pair");
+        assert!(entry.get(0).as_string().is_some(), "languageId marshals as a string");
+        let rows: Array = entry.get(1).unchecked_into();
+        assert!(rows.length() > 0, "language {i} has at least one capture row");
+        let row: Array = rows.get(0).unchecked_into();
+        assert_eq!(row.length(), 2, "each row is a [captureName, TokenClassName] pair");
+        assert!(row.get(0).as_string().is_some(), "captureName marshals as a string");
+        assert!(row.get(1).as_string().is_some(), "TokenClassName marshals as its variant name");
+    }
 }
 
 /// All three legs, through the glue, agreeing. `Decoded` is an externally tagged enum with struct

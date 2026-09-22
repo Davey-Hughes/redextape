@@ -82,10 +82,23 @@ describe('the app, end to end', () => {
     view = await (await import('../../src/main')).ready
   })
 
-  it('highlights keywords synchronously and reports both legs', async () => {
+  /**
+   * **THE SYNCHRONY WAS REAL, AND IT WAS GIVEN UP DELIBERATELY.** This test was named `highlights
+   * keywords synchronously` and asserted `.tok-keyword` in the same dispatch as the document, which
+   * held: `classifySource` ran on the main thread inside the update listener, so the colour landed in
+   * the keystroke's own frame. Plan 7 part 3b replaced it with `colour.ts`'s tree-sitter `ViewPlugin`,
+   * whose grammar arrives over a fetch — one mechanism serving four languages instead of one Rust
+   * function serving one, at the cost of the first frame after a mount. A test named for synchrony
+   * that awaits is a test whose name lies, so the name went with the contract.
+   *
+   * `tests/browser/colour.test.ts` is where the colouring itself is asserted, for all three editors.
+   * What this line keeps is the pairing: the same program that colours is the one that reports both
+   * legs, which is the end-to-end claim this test has always been about.
+   */
+  it('colours keywords once the grammar lands, and reports both legs', async () => {
     retype('let x = 40; x + 2')
 
-    // Highlighting does not wait for the worker — it is applied in the same dispatch as the document.
+    await until(() => document.querySelector('.tok-keyword') !== null, 'the source editor to colour `let`')
     expect(document.querySelector('.tok-keyword')?.textContent).toBe('let')
 
     await until(() => resultsText().includes('reductions'))

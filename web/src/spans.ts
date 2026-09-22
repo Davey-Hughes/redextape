@@ -7,11 +7,11 @@ export type DecorationRange = { from: number; to: number; className: string }
  * A byte offset into `text` (as Rust's `str` positions it) mapped to the UTF-16 index CodeMirror and
  * JavaScript strings use.
  *
- * `Span` IS A BYTE RANGE AND JAVASCRIPT STRINGS ARE NOT BYTES. `print_lambda_capped` and
- * `classify_source` both write offsets from Rust's `str` position, where `λ` is 2 bytes and one
- * UTF-16 code unit — so slicing a JS string by a byte offset silently mis-colours every term that
- * contains a binder, and clamps the tail span away. `decorationRanges` converts through this map
- * rather than trusting `span.start`/`span.end` as JS indices directly.
+ * `Span` IS A BYTE RANGE AND JAVASCRIPT STRINGS ARE NOT BYTES. `print_lambda_capped` and `sourceSpan`
+ * write offsets from Rust's `str` position, where `λ` is 2 bytes and one UTF-16 code unit — so slicing
+ * a JS string by a byte offset silently mis-colours every term that contains a binder, and clamps the
+ * tail span away. `decorationRanges` converts through this map rather than trusting
+ * `span.start`/`span.end` as JS indices directly.
  *
  * `map[b]` is the UTF-16 index at byte offset `b`, for every `b` in `0..=byteLength` — including a
  * `b` that lands mid-character (the character's own starting index, so a stale or malformed span
@@ -50,8 +50,14 @@ export function byteIndexAt(map: Uint32Array, byteOffset: number): number {
 }
 
 /**
- * `classify_source`'s (or `print_lambda_capped`'s) output as ordered, in-bounds decoration ranges,
- * converted from byte offsets to the UTF-16 indices CodeMirror and JS strings need.
+ * `print_lambda_capped`'s output as ordered, in-bounds decoration ranges, converted from byte offsets
+ * to the UTF-16 indices CodeMirror and JS strings need.
+ *
+ * **THE λ PANE'S RENDERED FRAME IS THE CALLER, AND SINCE PLAN 7 PART 3b IT IS THE ONLY ONE.** This used
+ * to colour the SOURCE EDITOR too, from `classify_source`'s spans, through a state field that no longer
+ * exists in `highlight.ts`; both are gone — the three editors take `colour.ts`'s `treeSitterColour`,
+ * whose offsets are already UTF-16 code units and must NOT come through here. What is left is the
+ * pane's `<pre>`, whose spans the worker computes per frame from a term it holds, in bytes.
  *
  * TWO RULES THAT LOOK LIKE PARANOIA AND ARE NOT. `RangeSetBuilder` throws on an out-of-order add, and
  * the lexer's ordering is an assumption this module cannot verify — so it sorts. And the document the

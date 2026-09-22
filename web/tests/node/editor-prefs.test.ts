@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_FORMAT_ON_BLUR, FORMAT_ON_BLUR_KEY, readFormatOnBlur, writeFormatOnBlur } from '../../src/editor-prefs'
+import {
+  DEFAULT_FORMAT_ON_BLUR,
+  DEFAULT_KEYMAP,
+  FORMAT_ON_BLUR_KEY,
+  KEYMAP_KEY,
+  readFormatOnBlur,
+  readKeymap,
+  writeFormatOnBlur,
+  writeKeymap,
+} from '../../src/editor-prefs'
 
 /** A `Storage` with nothing behind it but a map. */
 function memoryStorage(seed: Record<string, string> = {}): Storage {
@@ -80,5 +89,46 @@ describe('format on blur, stored', () => {
     expect(() => readFormatOnBlur(hostileStorage())).not.toThrow()
     expect(readFormatOnBlur(hostileStorage())).toBe(DEFAULT_FORMAT_ON_BLUR)
     expect(() => writeFormatOnBlur(true, hostileStorage())).not.toThrow()
+  })
+})
+
+/**
+ * **THE SAME SABOTAGE, AIMED AT THE SAME PLACE ONE SETTING LATER.** `vim-keymap.test.ts` drives the
+ * keymap through the app and seeds storage before its one mount, so it does read this path back — but
+ * it reads it once, through a whole page. These are the cases that page cannot reach: a value stored
+ * by some other version of this app, and a storage that refuses.
+ */
+describe('the keymap, stored', () => {
+  it("is CodeMirror's own bindings when nothing has been stored", () => {
+    expect(readKeymap(memoryStorage())).toBe(DEFAULT_KEYMAP)
+    expect(DEFAULT_KEYMAP).toBe('default')
+  })
+
+  it('round-trips vim, which is what carries the setting across a page load', () => {
+    const store = memoryStorage()
+    writeKeymap('vim', store)
+    expect(store.getItem(KEYMAP_KEY)).toBe('vim')
+    expect(readKeymap(store)).toBe('vim')
+  })
+
+  it('round-trips back to the default', () => {
+    const store = memoryStorage({ [KEYMAP_KEY]: 'vim' })
+    expect(readKeymap(store)).toBe('vim')
+    writeKeymap('default', store)
+    expect(readKeymap(store)).toBe('default')
+  })
+
+  it('reads anything that is not exactly `vim` as the default', () => {
+    // A mode a later version added, or a word a user typed into devtools, must not install a keymap
+    // this version has no extension for — `readKeymap`'s own doc has the argument against a cast.
+    for (const v of ['VIM', 'Vim', 'emacs', '', 'vi']) {
+      expect(readKeymap(memoryStorage({ [KEYMAP_KEY]: v })), v).toBe(DEFAULT_KEYMAP)
+    }
+  })
+
+  it('survives a storage that throws, in both directions', () => {
+    expect(() => readKeymap(hostileStorage())).not.toThrow()
+    expect(readKeymap(hostileStorage())).toBe(DEFAULT_KEYMAP)
+    expect(() => writeKeymap('vim', hostileStorage())).not.toThrow()
   })
 })

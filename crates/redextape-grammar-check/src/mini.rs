@@ -2,7 +2,6 @@
 //! the thin wrappers over `analysis::classify_source` that make it the mini-language's authority.
 
 use crate::grammar::{Grammar, compare_classified};
-use redextape_core::analysis::TokenClass;
 use tree_sitter_language::LanguageFn;
 
 unsafe extern "C" {
@@ -31,34 +30,14 @@ pub const CORPUS: &[(&str, &str)] = &[
 /// cannot read a stale copy out of a build directory.
 pub const HIGHLIGHTS: &str = include_str!("../../../grammars/tree-sitter-redextape/queries/highlights.scm");
 
-/// Where the two vocabularies meet, FOR THE MINI-LANGUAGE. λ has its own table in `lambda.rs` now
-/// that its grammar has landed; TM will get one when its grammar lands. Design §5.1 records why one
-/// shared table was wrong — `@variable.parameter` is an
-/// `Ident` here, where `class_of` calls a parameter an identifier, and a `Binder` in λ, where
-/// `print_lambda_mapped` folds the bound name into the binder. Both are right for their own language.
+/// Where the two vocabularies meet, for this language.
 ///
-/// Standard tree-sitter capture names on the left, because editors' themes are written against them;
-/// `TokenClass` on the right, because that is what the hand-written front end produces. The table is
-/// a function — `the_capture_map_has_no_duplicate_keys` pins that — total over every capture the
-/// queries emit (`the_capture_map_is_total_over_the_queries`), and carries no row no query uses
-/// (`every_map_row_is_used_by_a_query`).
-///
-/// The extra granularity on the left is DELIBERATELY UNCHECKED: `@function.call` and `@variable` both
-/// project to `Ident`, so a grammar capturing every identifier as a call would pass the differential.
-/// Design §6.1 prices the two alternatives and says why neither was taken.
-pub const CAPTURE_CLASSES: &[(&str, TokenClass)] = &[
-    ("keyword", TokenClass::Keyword),
-    ("boolean", TokenClass::Bool),
-    ("number", TokenClass::Nat),
-    ("comment", TokenClass::Comment),
-    ("operator", TokenClass::Operator),
-    ("punctuation.bracket", TokenClass::Punct),
-    ("punctuation.delimiter", TokenClass::Punct),
-    ("function", TokenClass::Ident),
-    ("function.call", TokenClass::Ident),
-    ("variable", TokenClass::Ident),
-    ("variable.parameter", TokenClass::Ident),
-];
+/// **THE TABLE MOVED TO `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It moved
+/// because the web app needs it and cannot link this crate: `build.rs` compiles four generated
+/// `parser.c` into this one, so there is no wasm build of it. What stays here is everything that ties
+/// the table to a query — totality over `HIGHLIGHTS`, and the no-unused-row rule — because those are
+/// tests about a grammar rather than facts about a naming map.
+pub use redextape_core::capture_map::REDEXTAPE as CAPTURE_CLASSES;
 
 /// The mini-language grammar: its generated parser, its highlight queries and its capture table
 /// together as one `Grammar` value.

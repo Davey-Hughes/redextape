@@ -18711,3 +18711,232 @@ $ gzip -c pkg-lsp/redextape_lsp_wasm_bg.wasm | wc -c
 283076
 ```
 
+
+#### PLAN 7 PART 3b, COLOUR AND VIM: FOUR COMMITTED GRAMMARS COLOUR EVERY EDITOR THROUGH `web-tree-sitter`, THE CAPTURE TABLES MOVE TO CORE SO THE WEB HOLDS NO COPY, AND A VIM KEYMAP LANDS IN THE APP'S FIRST `Compartment` — AND THE DEFECT THAT MATTERED WAS AN API ASYMMETRY THAT HAD SILENTLY HALVED EVERY MEASUREMENT THE DESIGN RESTED ON (2026-09-21 to 2026-09-22, branch `plan7-part3b-colour-and-vim`, `79b0f14..HEAD`, 32 commits, 63 files, +6,189/−379)
+
+**Part 3b of Plan 7** ([design](../specs/2026-09-20-plan7-part3-editor-intelligence-design.md),
+[plan](2026-09-21-plan7-part3b-colour-and-vim.md)). It is PR 2 of 3: **hover became its own PR** during
+this branch's pre-flight, which is the first thing worth recording.
+
+##### WHAT PART 3b BUILT
+
+- **Colour in every editor, from four committed grammars.** `web/src/colour.ts` is one CodeMirror
+  `ViewPlugin` per editor. The synchronous `classifySource` decoration path is deleted from `web/`,
+  along with the wasm export that fed it; the function itself stays in `redextape-core`, because it is
+  the authority `redextape-grammar-check` holds the grammars to.
+- **The four `.wasm` are tracked artefacts**, gated by `grammars/wasm-manifest.json` on the SHA-256 of
+  both `src/parser.c` **and** the artefact's own bytes, with a `--self-test` that proves each refusal
+  and a `--rebuild` for developers with docker. Wired into `check-all.sh`, an eighth hygiene pair in
+  CI's `linear-history`, and a twelfth pre-commit hook.
+- **The four capture tables moved to `redextape_core::capture_map`** and cross the existing `pkg/`
+  boundary as `captureClasses()`, so `web/` holds no copy of a map that **disagrees per language on
+  three names** — `@function` is `Ident` in the mini-language and `Mnemonic` in asm,
+  `@variable.parameter` is `Ident` in one and `Binder` in λ, `@label.reference` is `StateName` in TM
+  and `Label` in asm. A merged table would colour an asm mnemonic as an identifier.
+- **A differential that crosses the language boundary.** `redextape-grammar-check` compiles four
+  generated `parser.c` into itself through `cc` and cannot run in a browser, so a Rust test emits and
+  verifies `grammars/capture-golden.json` and a browser test recomputes it from the committed `.wasm`.
+  Both halves have been seen to fail.
+- **A vim keymap** in the app's first `Compartment`, switched by a *keymap* setting.
+- **`tok-binder` as a palette token**, because the visual check found λ rendering in two tones.
+
+##### THE DEFECT THAT MATTERED, AND WHY NO TEST COULD HAVE CAUGHT IT
+
+**`QueryOptions.startIndex` and `endIndex` in `web-tree-sitter` 0.27.0 are 2 × UTF-16 code units, while
+`node.startIndex` on the captures those options return is plain code units.** An asymmetry inside one
+API, with nothing in its types to distinguish them.
+
+Every pre-flight probe passed a code-unit count straight through. So **every viewport figure in the
+design measured half the window it was labelled with** — the "60-line viewport, 420 captures" figure in
+fact spanned to line 35 — and the colourer written from those figures queried half a viewport. Shipped,
+the lower half of every screen would have rendered bare, and a scrolled viewport's decorations would
+have landed off-screen while the visible text stayed uncoloured.
+
+It was found by a code review, not by a test, and the regression test that now exists was written
+afterwards. Reverting the doubling reddens four of nine tests in `web/tests/node/colour.test.ts`.
+
+**Two things make the correction trustworthy rather than merely applied.** It was pinned on pure ASCII,
+where nothing else can explain it — a 9-unit document `(ab) (cd)` yields 3 of its 6 captures at
+`endIndex: 9` and all 6 at `endIndex: 18`, the latter identical to passing no range. And **the
+whole-document counts never moved**: 82,464 and 292,547 reproduce exactly across every environment,
+because they pass no range at all. A correction that changes one column and leaves its neighbours
+bit-identical is one you can check.
+
+The figures, re-measured in one session rather than carried over:
+
+| TM document | parse | whole-document query | 60-line viewport |
+|---|---|---|---|
+| 229,181 units | 37.1 ms | 67.5 ms, 82,464 captures | 0.65 ms, **897** (was 420) |
+| 814,207 units | 130.0 ms | 221.8 ms, 292,547 captures | 0.56 ms, **773** (was 340) |
+
+**The design's conclusion is unchanged, which is why this is a figure correction and not a redesign.**
+897 against 82,464 is still ninety-two times less work.
+
+##### AND THE FIGURE THAT MATTERS WAS FINALLY TAKEN WHERE THE CLAIM HAS TO HOLD
+
+Every number above is from Node. The design's central claim — that viewport scoping is a requirement —
+is about a browser. So it was measured in one: a browser test mounted the app in Chromium, forked a TM
+pane, pasted the 229,181-byte fixture, and read the editor's **real** `visibleRanges`, which are
+`[0, 1208]` because `.term-editor` carries `max-height: 8lh` rather than any synthetic 60-line window.
+**One real viewport queries 416 captures against the whole document's 82,464 — a factor of 198.** The
+whole-document count reproduces the Node probe exactly, which is what says the grammar behaves
+identically in both environments.
+
+##### A HOOK THAT WAS DECLARED, INVOKED, AND PASSED BY NOBODY — WHICH COVERAGE SCORED AS COVERED
+
+`ColourOptions.onCeiling` existed, was called under a `#ceilingReported` guard, and **no call site
+supplied it.** A document over the 6,100,000-unit ceiling went silently uncoloured; §10's promised
+notice did not exist.
+
+**The reason it survived five task-level reviews and a coverage gate is the part worth keeping.** (Five:
+the hook existed from Task 3, and Task 3's review, its re-review, and Tasks 4, 5 and 6's reviews all
+passed over it. **This sentence read "eleven" in a draft, which is 3a's number** — the entry directly
+above this one says its whole-branch review "found what ELEVEN TASK-LEVEL PASSES did not", and the
+figure was carried across rather than counted. A number copied from the neighbouring entry is a new way
+to get one wrong, and it belongs in the list below.) The
+node test executes `opts.onCeiling?.(…)` as an optional call on `undefined`, so v8 recorded the line as
+covered while the behaviour never ran. **Coverage measures execution, not effect**, and an optional
+call on an absent callback is the purest case of the difference.
+
+The fix makes it structural rather than local: `onCeiling` is now **required** on `ColourOptions`, and
+the two `treeSitterColour` construction sites collapsed into one `colourFor(...)` so a third cannot
+drift. The same wave found `§10`'s "one notice" breaks when the *runtime* wasm fails — the shared
+`Parser.init` promise rejects once per language — and that `Parser.init` memoises internally
+(`Module3 ??=`), so the seam originally identified **could not fail twice in a process at all** and a
+test written against that description would have passed against a broken design.
+
+##### THE STALE-CLAIM COUNT, AND THE SHAPE THEY SHARE
+
+This branch corrected **at least eighteen** separate instances of one failure: a number or a claim,
+true when written, left standing in a file nobody re-read when the thing it described moved. Eleven
+came from the whole-branch review across two passes; two more from grepping for twins of that review's
+own fixes; five more from the sweep that accompanied the last two measurements, in §5.1, §5.1.1,
+`lsp-worker.ts`, `main.ts` and `colour-ceiling.test.ts`. **Several were created by a sweep that fixed
+one copy and missed its twin.**
+
+*At least*, and the hedge earned itself out within the hour. **This sentence read "at least thirteen"
+when the entry was written, and was wrong before the branch was merged** — the next measurement pass
+swept again and found five more copies of claims already corrected elsewhere. A count in prose with no
+gate behind it, going stale inside a paragraph about counts in prose with no gate behind them, is the
+cleanest demonstration of the defect this section reports, so the old number is left visible rather
+than overwritten. The enumeration below is checkable; the total is not, and any reader who needs it
+exact should count rather than trust this line.
+
+The two that illustrate the shape best:
+
+- **`web/src/highlight.ts` contradicted itself three lines apart, and this branch edited both halves.**
+  Its new header correctly said "the three fields below"; `linkMark` still opened "A THIRD FIELD" and
+  `focusMark` "A FOURTH FIELD … not folded into any of the three". The branch reworded both of those
+  sentences — changing `highlighting` to "the colourer" — and left the ordinals counting the field it
+  had just deleted. It touched the line and missed the number on it.
+- **Three wrong figures inside `scripts/check-doc-figures.sh`**, the gate whose entire purpose is
+  numbers nothing checks. It claimed 19 `#[wasm_bindgen]` attributes over five structs and three
+  impls; the file has 18, over four and four. Wrong when written, not gone stale.
+
+Also: a test doc asserting a property no test held; `captureClasses`' new doc citing in the present
+tense the export the same commit deleted; `lsp-worker.ts` quoting verbatim a sentence `session-worker.ts`
+now disavows; a design section pricing artefacts but not the engine; "four fixtures" three times where
+there are five; and a controls-gate comment enumerating five of six selects **for the second time in
+the same sentence**. Eleven were found by the whole-branch review across two passes; two more by
+grepping for twins of its own fixes.
+
+##### THREE SABOTAGES THAT DID NOT FIRE, AND ONE OF THEM WAS MINE
+
+- **The ceiling test's first draft could not reach its bug.** A whole-document replace invalidates the
+  stale tree anyway. The gesture that reaches it is select-all-paste past the ceiling followed by a
+  **tail** delete; measured, the stale parse yields a `let_statement` over a document of `z`s where a
+  fresh one yields a single identifier.
+- **The vim placement sabotage could not tell the two placements apart** using `Escape`. `Enter` and
+  `Backspace` can, because in normal mode they insert or delete when the extension sits below the
+  default keymap. The test was rewritten on the measured discriminator.
+- **A sort added for an ordering hazard reddened nothing when removed**, because `Map` preserves
+  first-insertion order and the collapse already yielded ascending starts. Kept for the differential's
+  contract, with an assertion added that genuinely reaches it.
+- **And the controller's own**, verifying the new palette gate: the sabotage set *paper*-dark's binder
+  to *terminal*-dark's neutral — different variants, no collision — so the gate correctly passed and
+  was briefly read as failing to fire. Worse, the restoring `sed` converted three unrelated lines that
+  legitimately held the sabotage value. A global substitution of a hex string, in a file whose whole
+  purpose is shared hex strings.
+
+##### WHAT THE VISUAL CHECK FOUND, WHICH NO GATE COULD
+
+§11.5 forbids pixel baselines — across three styles and six palettes they break on every token change —
+so a manual check is the only evidence for how this feature looks. All six preset × appearance
+combinations pass, three editors coloured in each, zero console errors, minimum contrast 5.22.
+
+**But λ was rendering in two tones.** `tok-punct` and `tok-neutral` are the *same hex* in terminal-dark
+and instrument-dark; `tok-ident` equals `--fg` in all six; and Binder, Comment, StateName, TapeSymbol,
+Label and Move all draw `--tok-neutral`. λ's table reaches exactly three classes, so `λf` and `(` were
+literally the same pixel. Fixed here rather than deferred: **`tok-binder` is now its own palette
+token**, six values, contrast 6.08–8.68 against each variant's background, separated from its
+neighbours by 13.9–22.4 ΔOKLab against a palette whose closest *intentional* pair is 10.1–13.1. The
+tree's `tok-*` contrast floor is unchanged at 5.22. `palettes.test.ts` now holds the new token apart
+from every other one in every variant, so the collapse cannot return.
+
+One methodological note from that check, worth more than the finding: the computed-style verification
+was specified as "confirm a token's colour differs from default text", and **`.tok-ident` would have
+passed it trivially and wrongly**, because that class *is* default text. The check used `.tok-keyword`
+and said why the other choice would have proved nothing.
+
+##### WHAT IT COSTS, INCLUDING THE COST THE DESIGN DID NOT PRICE
+
+The image ships **seven** `.wasm`, not the six the plan counted. §7 priced the four grammars at 44,358
+bytes and called them cheap — a claim about the repository, not about the download, because it never
+priced the engine that runs them.
+
+**The wire figures are what the running server sends, and getting them took four wrong answers first.**
+"The grammars, gzipped" came out as 12,903, 13,997, 14,175 or 14,211 depending on whether the files
+were concatenated and which `gzip` flags were used — and none of those is what a user pays, because
+`deploy/nginx.conf` compresses `application/wasm` at its own level. Measured against the built image
+with `curl -H 'Accept-Encoding: gzip'`:
+
+| | raw | what nginx sends |
+|---|---|---|
+| the four grammars | 44,358 | 15,052 |
+| the `web-tree-sitter` runtime | 209,613 | **94,777** |
+| colour, total | 253,971 | **109,829** |
+
+The runtime is **6.3 times the four grammars on the wire**, and a `gzip -9` figure for it reads 82,848
+— twelve thousand bytes under what is served, flattering in the direction that matters. The lesson is
+the one this branch kept relearning: compute a number and you get a number; measure the thing and you
+get the answer.
+
+The vim keymap adds **51,137 bytes on the wire to every visit, including every visit that never uses
+vim** — nginx serves the main chunk as 245,583 with `vim()` and 194,446 with it stubbed, both images
+built from this tree. That is 5.1% of the 1,008,253 bytes of app assets a cold load pulls, of which
+646,564 is the two Rust `.wasm`. This paragraph read 43,428, from 205,915 and 162,487: the build's own
+`gzip` rather than nginx's level 1, a sound comparison of a quantity nobody is served. It is loaded
+eagerly because the `Compartment` switches a statically imported extension. A dynamic `import()` behind
+the setting would recover it, and is a candidate follow-up rather than something this branch took.
+
+##### WHAT IS NOT BUILT, STATED BECAUSE §10 READS AS THOUGH IT IS
+
+Row by row: a dead LSP worker, a failed LSP wasm fetch and `format` on an unparseable buffer are built
+and tested. A grammar that fails to load is built and now tested. **A document over the ceiling gets
+the colour half only, and that is now the design's position rather than a hole in it**: `didChange` →
+`publishDiagnostics` just past the ceiling was measured at 135.2 ms, in the LSP worker, of which
+0.238 ms is the main thread's — a lag, not a freeze — so §10's row says colour is capped and
+diagnostics deliberately are not. Colour is capped because it parses on the main thread. And **row 6
+was already stale
+before this branch touched it**: part 3a removed the "target is not open" notice as unreachable and §10
+was never updated.
+
+##### VERIFICATION
+
+```
+$ bash scripts/check-all.sh
+all configs green — base, LLVM and browser
+
+$ cd web && pnpm run test:coverage       # floors 95 / 89 / 97 / 97
+Statements   : 96.43% ( 3844/3986 )
+Branches     : 90.29% ( 1860/2060 )
+Functions    : 97.37% ( 742/762 )
+Lines        : 98.53% ( 3359/3409 )
+
+$ bash scripts/check-grammar-wasm.sh --self-test && bash scripts/check-grammar-wasm.sh
+self-test passed: a stale .wasm, a tampered .wasm, a missing .wasm and an unlisted grammar are each refused, and a matching pair is not
+check-grammar-wasm: 4 grammar .wasm match their parser.c and their recorded bytes.
+
+$ docker build -t redextape:3b . && docker run --rm -d -p 8080:80 --name rxt3b redextape:3b
+healthy, HTTP 200, 7 .wasm under /usr/share/nginx/html/assets/
+```

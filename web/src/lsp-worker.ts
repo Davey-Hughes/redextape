@@ -6,11 +6,15 @@
  * thread owns it and answers questions about it rather than handing it over.
  *
  * **IT IS A DIFFERENT THREAD FROM THE SESSION'S, AND THAT IS WHAT MAKES THE WHOLE PART VIABLE.**
- * `session-worker.ts` records why `analyze` was NOT put in a worker: "they are what the editor calls
- * on every keystroke, and a round trip per keystroke is exactly the lag this split exists to avoid."
- * That reasoning is about a thread busy running reductions. This one owns a `Server` and is idle
- * between keystrokes, and the design measured what it costs: 0.15 ms for a source document,
- * 14.58 ms for an 814 KB TM, against the 100 ms debounce `@codemirror/lint` already imposes.
+ * `session-worker.ts` states the rule for what earns a thread of its own: the thread has to have
+ * something to own. A free function takes no handle, so a round trip to reach one is lag bought for
+ * nothing, which is why that worker holds none of them. `LspServer` is exactly such a handle, and
+ * this thread is idle between keystrokes rather than busy running reductions, so the round trip moves
+ * work off the main thread instead of adding to it. The design measured what it costs: 0.15 ms for a
+ * source document, 14.58 ms for an 814 KB TM, and 135.2 ms just past the 6,100,000-unit ceiling.
+ * **THE 100 ms `@codemirror/lint` DEBOUNCE THIS ONCE CITED WENT WITH `lint.ts`** — the source editor
+ * sends a `didChange` per keystroke now and the scratch editors send on the recompile's 300 ms — and
+ * it changes nothing here, because every one of those figures is paid off the main thread.
  *
  * **EVERY DECISION LIVES IN `lsp-client.ts`, NOT HERE, AND THE REASON IS TESTABILITY.** Policy in a
  * worker can only be exercised by standing up a thread; the same policy behind `LspPort` is

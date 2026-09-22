@@ -7,7 +7,6 @@
 
 use std::rc::Rc;
 
-use redextape_core::analysis::Classified;
 use redextape_core::core::NodeId;
 use redextape_core::lambda::{self, LambdaTerm, LowerError};
 use redextape_core::sourcemap::SourceMap;
@@ -285,20 +284,6 @@ pub struct TmStatus {
 pub struct Compiled {
     pub diagnostics: Vec<Diagnostic>,
     pub session: Option<Session>,
-}
-
-/// Token spans for highlighting, with no session and no backend.
-///
-/// A THIN WRAPPER ON PURPOSE, and it earns its place by existing at all: `analysis::classify_source`
-/// is `pub` in core and had no boundary, so §6.2's "CodeMirror's headline feature is already
-/// delivered, in Rust" was true of the function and false of anything JavaScript could call.
-// `CodeMirror` is deliberately NOT backticked above: the sentence quotes
-// docs/superpowers/specs/2026-08-06-wasm-boundary-completion-design.md §6.2 verbatim, and that
-// source has no backtick. `clippy --fix` added one and it was reverted — a quotation has to match
-// what it cites. The allow keeps `doc_markdown` from re-adding it.
-#[allow(clippy::doc_markdown)]
-pub fn classify_source(src: &str) -> Classified {
-    redextape_core::analysis::classify_source(src)
 }
 
 /// Static diagnostics — parse and typecheck — with no backend and no session.
@@ -2118,18 +2103,6 @@ mod tests {
         assert!(!s.lambda_status().available, "2048 is above the λ lowering guard too");
         assert_eq!(s.step_lambda(), Err(SessionError::LambdaAbsent));
         assert_eq!(s.raise_lambda_cap(1), Err(SessionError::LambdaAbsent));
-    }
-
-    /// `classify_source` must reach the boundary WITHOUT a session, and must classify a file that does
-    /// not analyze. Highlighting a broken file is when highlighting matters most, which is why
-    /// `analysis::classify_source` discards the lexer's diagnostics — they come back through `analyze`.
-    #[test]
-    fn classify_source_works_on_a_program_that_does_not_analyze() {
-        let spans = classify_source("let x = ;");
-        assert!(!spans.is_empty(), "a file with a parse error still has tokens to highlight");
-        let (span, _) = spans[0];
-        assert!(span.end > span.start, "spans are well-formed ranges");
-        assert_eq!(spans, redextape_core::analysis::classify_source("let x = ;"), "the boundary adds nothing");
     }
 
     /// `analyze` is the CHEAP diagnostics path, and its separation from `compile` is the whole point:

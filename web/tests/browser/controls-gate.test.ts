@@ -40,14 +40,21 @@ function nameOf(el: HTMLElement): string {
  * too, so `expect([visible, title]).toContain(name)` compared a value with itself and an `aria-label`
  * disagreeing with the words printed next to the control could not fail.
  *
- * **FOUR OF THE FIVE SELECTS ARE WRAPPED IN A LABEL, AND THIS PARAGRAPH USED TO SAY ALL OF THEM WERE —
- * whole-branch review, M6.** `encoding`, `style`, `palette` and `appearance` are wrapped, and the label
- * is where each one's name comes from when nothing overrides it, so for those four the comparison is
- * between two different sources again. The fifth is `step-controls.ts`'s SPEED select, which carries an
- * `aria-label` and no wrapping label at all; it falls through to the `el.title` branch below, so its
- * name (`aria-label`) and the text it is checked against (`title`) are still two different sources and
- * the check is still honest for it — but the enumeration was wrong, and a reader told every select was
- * label-wrapped would not know which branch that one takes.
+ * **EVERY SELECT BUT SPEED IS WRAPPED IN A LABEL, AND THIS PARAGRAPH HAS ALREADY BEEN WRONG TWICE FOR
+ * SAYING OTHERWISE — whole-branch review M6, and again when Plan 7 part 3b task 6 added a sixth select
+ * without updating the count this comment named.** `encoding`, `style`, `palette`, `appearance` and
+ * `keymap` are wrapped, and the label is where each one's name comes from when nothing overrides it, so
+ * for those five the comparison is between two different sources again. `step-controls.ts`'s SPEED
+ * select carries an `aria-label` and no wrapping label at all; it falls through to the `el.title` branch
+ * below, so its name (`aria-label`) and the text it is checked against (`title`) are still two different
+ * sources and the check is still honest for it too.
+ *
+ * **THIS IS AN ENUMERATION NOTHING HERE CHECKS.** `check()` walks whatever selects the DOM holds; it
+ * never reads this paragraph or counts them against it. Naming the wrapped ones by convention ("every
+ * select but SPEED") survives a select being added without an edit here, but a select that broke the
+ * convention — wrapped where SPEED-like, or bare where the others are — would still pass silently. The
+ * next person to add a select to this app should update this paragraph and should not expect a red test
+ * to remind them.
  */
 function selectLabel(el: HTMLElement): string {
   const label = el.closest('label')

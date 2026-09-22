@@ -1,0 +1,20 @@
+{
+  "grammars": {
+    "tree-sitter-redextape": {
+      "parser_c_sha256": "2a3590f2c4c30029753bbd03a961e2771f29372cef504e1f8bd45fcfcd74656e",
+      "wasm_sha256": "33d9a74347ba77afbdd854a7f05c5a96a08c9dec4cb5fa19f4db09f1671eb35d"
+    },
+    "tree-sitter-redextape-asm": {
+      "parser_c_sha256": "12f42149693bf1ab9759b36e6ac58810089f06b127c6a4bc3564c54afc89fa62",
+      "wasm_sha256": "bbd7274efa0ef3de562543bcc9de3ecaae39c78449982c2f54cf7739c4b93133"
+    },
+    "tree-sitter-redextape-lambda": {
+      "parser_c_sha256": "a216f9f875f93b0594621cf8d7ab98cfeb86874723158f13b8a898f50b5aabcb",
+      "wasm_sha256": "4c9ae619321d8f598139a084a249da5afeed1752f2f1b05a2cced38e6ac205a8"
+    },
+    "tree-sitter-redextape-tm": {
+      "parser_c_sha256": "519ccda70eb5d93f20430daa800be1b8a8327261526016b17146e8433ed3caea",
+      "wasm_sha256": "b2f3d1f58c21150d4298283d92c724ddfab2457730009dff584c46930ae9ab87"
+    }
+  }
+}

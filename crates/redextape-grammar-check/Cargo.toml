@@ -24,6 +24,11 @@ redextape-core = { path = "../redextape-core" }
 [dev-dependencies]
 redextape-test-support = { path = "../redextape-test-support" }
 proptest = "1"
+# `tests/golden.rs` READS the committed `grammars/capture-golden.json` as well as writing it, and the
+# reading half is the gate: a stale fixture must fail CI rather than be rewritten by it. Writing needs
+# only string escaping, but verifying needs a parser that can say which language, which fixture and
+# which span differ. A dev-dependency because nothing in `src/` touches JSON.
+serde_json = "1"
 
 [build-dependencies]
 cc = "1"

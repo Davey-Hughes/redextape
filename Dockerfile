@@ -39,6 +39,13 @@ COPY web/ ./
 # The WASM packages produced above, imported by the web app as `../pkg` and `../../pkg-lsp`.
 COPY --from=wasm /app/pkg /app/pkg
 COPY --from=wasm /app/pkg-lsp /app/pkg-lsp
+# **THE COMMITTED GRAMMAR `.wasm`, AND NOTHING IN CI CATCHES THEIR ABSENCE.** `web/src/colour.ts`
+# imports them as `../../grammars/<g>/<g>.wasm?url`, so `build:app` below cannot resolve them without
+# this line — and the `docker` job never runs on a PR, exactly as the note in stage 1 says of
+# `pkg-lsp`. `/app/grammars` beside `/app/web` is what makes the relative import resolve, the same
+# placement `/app/pkg` and `/app/pkg-lsp` already use. Stage 1 does not change: these are committed
+# artefacts, not built ones.
+COPY grammars/ /app/grammars/
 ARG COMMIT_HASH
 ENV COMMIT_HASH=$COMMIT_HASH
 # `build:app`, not `build`: this stage has no Rust toolchain — stage 1 already produced both

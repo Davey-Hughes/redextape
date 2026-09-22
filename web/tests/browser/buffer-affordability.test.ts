@@ -50,7 +50,7 @@ import type { LambdaState } from '../../src/types'
  * 1. **CRITICAL 1 — a fifth intercept component: the main thread's OWN wasm module.** Fix round 1's
  *    "four separate components" counted the source worker's module (`sourceFixedCost`) and each
  *    buffer's module (inside `marginal`), but never the main thread's — `main.ts` calls its own
- *    `await init()` and uses `analyze`/`classifySource`/`encodings`/`tokenClasses` from it, a full
+ *    `await init()` and uses `captureClasses`/`encodings`/`tokenClasses` from it, a full
  *    module instance at the same 8,454,144-byte baseline as every other thread's, and `heapNow()`
  *    cannot see it: `usedJSHeapSize` is JS/DOM heap, not wasm linear memory, and
  *    `session-memory.test.ts`'s three-sessions test proves the gap directly (its own `init()` moved that file's page
@@ -373,7 +373,7 @@ const SOURCE_SESSION_ARENA_BYTES = 3_538_944
 /**
  * THE FIFTH INTERCEPT COMPONENT — CRITICAL 1, FIX ROUND 2. The main thread's OWN wasm module
  * instance, paid once per PAGE rather than once per worker thread: `main.ts` calls its own
- * `await init()` on the main thread and uses `analyze`/`classifySource`/`encodings`/`tokenClasses`
+ * `await init()` on the main thread and uses `captureClasses`/`encodings`/`tokenClasses`
  * from that instance — a full module, distinct from the source worker's and every buffer worker's own
  * instances, each of which already pays this same baseline (the source worker's is folded into
  * `sourceFixedCost` above; a buffer's is inside `marginal`, one per buffer). Same wasm binary, same

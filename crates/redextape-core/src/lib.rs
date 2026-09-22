@@ -16,6 +16,7 @@
 pub mod analysis;
 pub mod ast;
 pub mod binder;
+pub mod capture_map;
 pub mod core;
 pub mod counter;
 pub mod desugar;

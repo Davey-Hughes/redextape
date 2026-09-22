@@ -1,9 +1,13 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import type { Diagnostic as CmDiagnostic } from '@codemirror/lint'
 import { lintGutter, setDiagnostics as setCmDiagnostics } from '@codemirror/lint'
+import type { Extension } from '@codemirror/state'
 import { EditorState } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { lspLintRanges } from './diagnostics'
+import type { KeymapSetting } from './editor-keymap'
+import { keymapSlot } from './editor-keymap'
+import { DEFAULT_KEYMAP } from './editor-prefs'
 import type { LspClient } from './lsp-client'
 import { navKeymap } from './lsp-nav'
 import type { LanguageId, LspDiagnostic, LspRange } from './lsp-protocol'
@@ -19,6 +23,31 @@ export type ScratchEditorConfig = {
   /** `compile.ts`'s `DEBOUNCE_MS`, passed in rather than imported — see the class doc. */
   debounceMs: number
   onEdit: (src: string) => void
+  /**
+   * The colourer for this editor's language — `colour.ts`'s `treeSitterColour`, already built.
+   *
+   * **PASSED IN RATHER THAN BUILT HERE, BECAUSE THE GRAMMAR REGISTRY BELONGS TO THE APP.** One registry
+   * loads each grammar once for the whole page (`colour.ts`'s `createGrammarRegistry`); a
+   * `ScratchEditor` reaching for a module-level singleton would make every test that mounts one fetch
+   * four `.wasm` files, and would put the app's failure policy — which notice, on which surface —
+   * inside a widget. The same argument `document.client` above is a config field for.
+   *
+   * Optional, and the callers that omit it are tests with no colouring to exercise.
+   */
+  colour?: Extension | undefined
+  /**
+   * The page's keymap setting — `editor-keymap.ts`'s `KeymapSetting`, which this editor joins.
+   *
+   * **PASSED IN FOR THE REASON `colour` ABOVE IS, AND THE CONSEQUENCE IS DIFFERENT.** One setting
+   * serves the whole page, and an editor reaching for a module-level one would put the app's state
+   * inside a widget. What this one also buys is the reverse direction: joining is how the setting
+   * learns this editor exists, so a change made in the menu reaches an editor that was built before
+   * the menu was touched.
+   *
+   * Optional, and the callers that omit it are tests with no keymap to exercise; such an editor starts
+   * in — and stays in — CodeMirror's own bindings.
+   */
+  keymap?: KeymapSetting | undefined
   /**
    * The server has published for this document — one per settled edit.
    *
@@ -84,13 +113,22 @@ export type ScratchEditorConfig = {
  * into it would put it past 450 and put three concerns behind one name. It is also where the coverage
  * gate can see it, which `session-worker.ts` is not.
  *
- * **NO SYNTAX HIGHLIGHTING, AND THAT IS NOT AN OVERSIGHT.** The pane's `<pre>` colours tokens from
- * `spans`, which the worker computes per frame from a term it holds. An editor's buffer is text the
- * user is halfway through typing — there is no frame for it and `analyze` is the SOURCE language's
- * parser, not λ's. Colouring it would need a λ `linter`-shaped path this slice does not have, and a
- * stale colouring on a buffer being typed into is worse than none. The same argument is why `.tm` text
- * stays uncoloured here too: `print_tm_mapped` exists in `redextape-core` but is not exported to wasm,
- * because a colouring computed from a printed machine is stale the instant the user types.
+ * **TWO COLOURING PATHS ON ONE PANE, ON DIFFERENT CLOCKS, AND THE OLDER ARGUMENT IS STILL HALF TRUE.**
+ * The pane's `<pre>` colours tokens from `spans`, which the worker computes per frame from a term it
+ * holds, and **that path is unchanged** — its frame is a printed term, so its colouring is a fact about
+ * what the worker last sent. What this class used to carry was the conclusion drawn from that: an
+ * editor's buffer is text the user is halfway through typing, there is no frame for it, and a colouring
+ * computed from printed output is stale the instant the user types. That half still holds, and it is
+ * exactly why the frame's spans are not reused here.
+ *
+ * **THE OTHER HALF WAS "λ HAS NO PARSER FOR BUFFER TEXT", AND TREE-SITTER IS THE ANSWER TO IT.** The
+ * argument ran that `analyze` is the SOURCE language's parser rather than λ's, that colouring a buffer
+ * would need a λ `linter`-shaped path the slice did not have, and — for `.tm` — that `print_tm_mapped`
+ * exists in `redextape-core` but is not exported to wasm. There are four committed grammars now
+ * (`grammars/`), one per language, and `colour.ts` parses the BUFFER rather than printed output: the
+ * `colour` config field above is that parser, arriving per editor for whichever language this one
+ * holds. So this class colours from a tree over the text on screen, while the pane beside it colours a
+ * frame from the term the worker holds, and neither is derived from the other.
  *
  * **`debounceMs` IS INJECTED RATHER THAN IMPORTED FROM `main.ts`.** It is `DEBOUNCE_MS` (300), the
  * source pane's own constant, because it is the same gesture at the same speed — but importing from
@@ -115,18 +153,23 @@ export class ScratchEditor {
   /** Set by `destroy()`, so an in-flight format cannot recompile a buffer that is gone. */
   #destroyed = false
   #onServerUpdate: (() => void) | undefined
+  #keymap: KeymapSetting | undefined
 
   constructor(config: ScratchEditorConfig) {
     this.#ms = config.debounceMs
     this.#onEdit = config.onEdit
     this.#document = config.document
     this.#onServerUpdate = config.onServerUpdate
+    this.#keymap = config.keymap
     this.#view = new EditorView({
       parent: config.host,
       state: EditorState.create({
         doc: config.initial,
         extensions: [
           history(),
+          // ABOVE BOTH KEYMAPS BELOW, NOT BETWEEN THEM — `editor-keymap.ts`'s `keymapSlot` has the
+          // mechanism, which is about DOM event handlers rather than about key bindings.
+          keymapSlot(config.keymap?.mode ?? DEFAULT_KEYMAP),
           // BEFORE the default keymap, so a binding here wins — neither key is in it (74 bindings
           // scanned, no F-keys), so today this is order for its own sake rather than a conflict.
           keymap.of(
@@ -139,6 +182,9 @@ export class ScratchEditor {
           ),
           keymap.of([...defaultKeymap, ...historyKeymap]),
           lintGutter(),
+          // SPREAD RATHER THAN PASSED AS A POSSIBLY-`undefined` ENTRY: CodeMirror's `Extension` union
+          // does not include `undefined`, so an absent colourer has to contribute no element at all.
+          ...(config.colour ? [config.colour] : []),
           // The name goes on the element CodeMirror gives the `textbox` role to, which is the one
           // a screen reader lands on — not on the wrapper.
           EditorView.contentAttributes.of({ 'aria-label': `${config.document?.label ?? 'text'} editor` }),
@@ -159,6 +205,10 @@ export class ScratchEditor {
         ],
       }),
     })
+    // JOINED AFTER CONSTRUCTION, because `follow` takes the view and the view is what is being built
+    // on the line above. The slot it filled already holds this mode; joining is what keeps it in step
+    // with a LATER change, and `destroy()` is where it leaves.
+    this.#keymap?.follow(this.#view)
     // OPENED WITH THE TEXT THE EDITOR WAS SEEDED WITH, not with whatever the buffer held a moment
     // ago: the server's copy and the editor's must agree from the first message, and this is the
     // only point where both are known to.
@@ -338,6 +388,9 @@ export class ScratchEditor {
     // new editor, which opens the document again. Leaving it open would keep publishing
     // diagnostics to a sink whose editor is gone.
     this.#document?.client.closeDocument(this.#document.uri)
+    // LEFT BEFORE THE VIEW GOES, so a keymap change made after this retirement does not dispatch a
+    // reconfiguration into a destroyed view — and so the setting does not hold this editor alive.
+    this.#keymap?.unfollow(this.#view)
     this.#view.destroy()
   }
 }

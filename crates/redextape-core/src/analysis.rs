@@ -236,9 +236,16 @@ mod tests {
 
     #[test]
     fn classify_source_is_total_on_malformed_input() {
-        // Lexing a program with an illegal character must not panic; whatever tokens survive classify.
-        let _ = classify_source("let x = @@@;");
-        let _ = classify_source("");
+        // Lexing a program with an illegal character must not panic, AND a file with a parse error
+        // still has tokens to highlight -- highlighting a file with errors is exactly when it matters
+        // most (see `classify_source`'s own doc). This second half was held ONLY by the wasm crate's
+        // `the_free_exports_need_no_session` browser test, and went with it when Plan 7 part 3b
+        // deleted the `classifySource` export. This test did not hold it: it discarded its own result
+        // (`let _ = classify_source(...)`), which asserts no-panic and nothing about the tokens
+        // surviving. Restored here, which is where the property belongs.
+        let malformed = classify_source("let x = @@@;");
+        assert!(!malformed.is_empty(), "a parse error still leaves tokens to classify and highlight");
+        assert!(classify_source("").is_empty(), "an empty file has no tokens and no spans");
     }
 
     #[test]

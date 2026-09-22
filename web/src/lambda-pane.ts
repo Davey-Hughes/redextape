@@ -92,6 +92,10 @@ export class LambdaPane implements EditablePane {
   #onEdit: ((src: string) => void) | undefined
   /** Resolves this pane's current binding to an LSP document — see `PaneEvents.lspDocument`. */
   #lspDocument: (() => ScratchEditorConfig['document']) | undefined
+  /** Resolves this pane's language to its colourer — see `PaneEvents.colour`. */
+  #colour: (() => ScratchEditorConfig['colour']) | undefined
+  /** The page's keymap setting, which this pane's editor joins — see `PaneEvents.keymap`. */
+  #keymap: ScratchEditorConfig['keymap']
   /**
    * Whether the session this pane is bound to is outside the source correspondence — §4.5's fact,
    * kept because the fork control needs it and `setDetached` is not the only thing that moves it.
@@ -173,6 +177,8 @@ export class LambdaPane implements EditablePane {
     this.#editorHost = document.createElement('div')
     this.#onEdit = on.editScratch
     this.#lspDocument = on.lspDocument
+    this.#colour = on.colour
+    this.#keymap = on.keymap
     // THE TEXT PANEL WRAPS THE EDITOR HOST and hides it itself; this callback only REPORTS the gesture —
     // see `PaneEvents.collapse`'s own doc for why the app needs telling (the state is recorded against
     // the buffer, not the pane).
@@ -272,6 +278,8 @@ export class LambdaPane implements EditablePane {
         // RESOLVED HERE, NOT AT CONSTRUCTION — the binding this pane shows now is the buffer
         // the editor being built belongs to.
         document: this.#lspDocument?.(),
+        colour: this.#colour?.(),
+        keymap: this.#keymap,
       })
       this.#collapse.update(true, collapsed)
       this.#refreshClaim()

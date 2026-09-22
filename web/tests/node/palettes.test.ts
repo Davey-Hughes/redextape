@@ -65,6 +65,32 @@ describe('palettes', () => {
     expect(failures).toEqual([])
   })
 
+  // `tok-binder` exists ONLY to be a different colour from the two other classes a λ editor can show,
+  // so a value that drifted back onto a neighbour would leave the token in place and the defect intact.
+  //
+  // NOT A PERCEPTUAL GATE, AND NOT PRETENDING TO BE ONE. Whether two colours read apart is a judgement
+  // made by eye, against a rendered editor; 24 in some channel is far below what the eye needs and far
+  // above what `tok-punct` against `tok-neutral` scores in any variant. What it catches is the failure
+  // that put this token here — a class drawing a neighbour's exact value — not a poor choice of hue.
+  //
+  // SCOPED TO `tok-binder` rather than run over every pair, because two pairs are deliberately equal or
+  // all but: `tok-nat` and `tok-bool` are one colour on purpose, and `tok-punct` sits on `tok-neutral`
+  // in the dark variants. Widening this to all pairs is a palette change, not a test change.
+  it('keeps tok-binder apart from every other token', () => {
+    const channels = (hex: string): number[] => [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16))
+    const failures: string[] = []
+    for (const [name, v] of VARIANTS) {
+      const binder = channels(v['tok-binder'])
+      for (const t of COLOUR_TOKENS) {
+        if (t === 'tok-binder') continue
+        const other = channels(v[t])
+        const apart = Math.max(...binder.map((c, i) => Math.abs(c - (other[i] ?? 0))))
+        if (apart < 24) failures.push(`${name}: tok-binder ${v['tok-binder']} is ${apart} from ${t} ${v[t]}`)
+      }
+    }
+    expect(failures).toEqual([])
+  })
+
   it('declares every token once, as a light-dark pair', () => {
     const css = paletteDeclarations(PALETTES.paper)
     for (const t of COLOUR_TOKENS) {

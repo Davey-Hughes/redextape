@@ -44,23 +44,14 @@ pub const CORPUS: &[(&str, &str)] = &[
 /// stale copy out of a build directory.
 pub const HIGHLIGHTS: &str = include_str!("../../../grammars/tree-sitter-redextape-lambda/queries/highlights.scm");
 
-/// Where the two vocabularies meet, FOR λ. The mini-language gets its own table in `mini.rs`; design
-/// §5.1 records why one shared table was wrong — `@variable.parameter` is `Binder` here, where
-/// `print_lambda_mapped` folds the bound name into the binder's own span, and `Ident` in the
-/// mini-language, where `class_of` calls a parameter an identifier. Both are right for their own
-/// language.
+/// Where the two vocabularies meet, for this language.
 ///
-/// Standard tree-sitter capture names on the left, because editors' themes are written against them;
-/// `TokenClass` on the right, because that is what `print_lambda_mapped` produces. Total over every
-/// capture the queries emit (`the_capture_map_is_total_over_the_queries`), and carries no row no
-/// query uses (`every_map_row_is_used_by_a_query`) — see `tests/lambda.rs`.
-pub const CAPTURE_CLASSES: &[(&str, TokenClass)] = &[
-    ("keyword.function", TokenClass::Binder),
-    ("variable.parameter", TokenClass::Binder),
-    ("variable", TokenClass::Ident),
-    ("punctuation.delimiter", TokenClass::Punct),
-    ("punctuation.bracket", TokenClass::Punct),
-];
+/// **THE TABLE MOVED TO `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It moved
+/// because the web app needs it and cannot link this crate: `build.rs` compiles four generated
+/// `parser.c` into this one, so there is no wasm build of it. What stays here is everything that ties
+/// the table to a query — totality over `HIGHLIGHTS`, and the no-unused-row rule — because those are
+/// tests about a grammar rather than facts about a naming map.
+pub use redextape_core::capture_map::REDEXTAPE_LAMBDA as CAPTURE_CLASSES;
 
 /// λ's grammar: its generated parser, its highlight queries and its capture table together as one
 /// `Grammar` value.

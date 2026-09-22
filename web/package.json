@@ -25,10 +25,13 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
     "@codemirror/commands": "6.10.4",
+    "@codemirror/language": "6.12.4",
     "@codemirror/lint": "6.9.7",
+    "@codemirror/search": "6.7.2",
     "@codemirror/state": "6.7.1",
     "@codemirror/view": "6.43.8",
     "@fontsource/inter": "5.3.0",
+    "@replit/codemirror-vim": "6.4.0",
     "@types/node": "26.1.2",
     "@vitest/browser": "4.1.10",
     "@vitest/browser-playwright": "4.1.10",
@@ -38,6 +41,7 @@
     "playwright": "1.62.1",
     "typescript": "7.0.2",
     "vite": "8.2.1",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "web-tree-sitter": "0.27.0"
   }
 }
