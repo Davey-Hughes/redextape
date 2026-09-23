@@ -56,7 +56,14 @@ export function createTransport(deps: {
    */
   lspClient: () => Pick<
     LspClient,
-    'openDocument' | 'changeDocument' | 'closeDocument' | 'format' | 'documentSymbols' | 'definition' | 'references'
+    | 'openDocument'
+    | 'changeDocument'
+    | 'closeDocument'
+    | 'format'
+    | 'documentSymbols'
+    | 'definition'
+    | 'references'
+    | 'hover'
   >
   /** Whether an editor losing focus should reformat — the settings menu's `format on blur`. */
   formatOnBlur: () => boolean

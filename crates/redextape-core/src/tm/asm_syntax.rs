@@ -81,6 +81,161 @@ pub(super) fn shape_of(mnemonic: &str) -> Option<Shape> {
     MNEMONICS.iter().find(|(m, _)| *m == mnemonic).map(|(_, s)| *s)
 }
 
+/// One mnemonic's hover text.
+#[derive(Clone, Copy, Debug)]
+pub struct MnemonicDoc {
+    pub mnemonic: &'static str,
+    pub summary: &'static str,
+    /// One role name per operand, in order. The COUNT is checked against `Shape`; the names are
+    /// this table's, because `Shape` knows kinds and not roles.
+    pub operands: &'static [&'static str],
+}
+
+/// What each of the 24 spellings does.
+///
+/// **24 ROWS AGAINST 16 `Instr` VARIANTS, AND THE NINE ARE WHY THIS IS AUTHORED.** `Instr::Bin`
+/// prints as one of nine and carries one doc comment — `rd <- ra op rb` — for all of them, so the
+/// arithmetic and comparison spellings cannot be transcribed from it. Held to `MNEMONICS` by
+/// `every_mnemonic_has_a_doc_row_and_every_row_a_mnemonic`, and to `Shape` by its sibling.
+pub(super) const MNEMONIC_DOCS: &[MnemonicDoc] = &[
+    MnemonicDoc {
+        mnemonic: "li",
+        summary: "Loads an immediate into a register.",
+        operands: &["destination", "immediate"],
+    },
+    MnemonicDoc { mnemonic: "mov", summary: "Copies one register into another.", operands: &["destination", "source"] },
+    MnemonicDoc {
+        mnemonic: "add",
+        summary: "Adds two registers, yielding a Nat.",
+        operands: &["destination", "left", "right"],
+    },
+    MnemonicDoc {
+        mnemonic: "sub",
+        summary: "Subtracts the right register from the left, yielding a Nat.",
+        operands: &["destination", "left", "right"],
+    },
+    MnemonicDoc {
+        mnemonic: "mul",
+        summary: "Multiplies two registers, yielding a Nat.",
+        operands: &["destination", "left", "right"],
+    },
+    MnemonicDoc {
+        mnemonic: "cmpeq",
+        summary: "Sets the destination to 1 when the two registers are equal, else 0.",
+        operands: &["destination", "left", "right"],
+    },
+    MnemonicDoc {
+        mnemonic: "cmpne",
+        summary: "Sets the destination to 1 when the two registers differ, else 0.",
+        operands: &["destination", "left", "right"],
+    },
+    MnemonicDoc {
+        mnemonic: "cmplt",
+        summary: "Sets the destination to 1 when the left register is less than the right, else 0.",
+        operands: &["destination", "left", "right"],
+    },
+    MnemonicDoc {
+        mnemonic: "cmple",
+        summary: "Sets the destination to 1 when the left register is at most the right, else 0.",
+        operands: &["destination", "left", "right"],
+    },
+    MnemonicDoc {
+        mnemonic: "cmpgt",
+        summary: "Sets the destination to 1 when the left register is greater than the right, else 0.",
+        operands: &["destination", "left", "right"],
+    },
+    MnemonicDoc {
+        mnemonic: "cmpge",
+        summary: "Sets the destination to 1 when the left register is at least the right, else 0.",
+        operands: &["destination", "left", "right"],
+    },
+    MnemonicDoc {
+        mnemonic: "jz",
+        summary: "Jumps to the label when the register is zero.",
+        operands: &["tested register", "label"],
+    },
+    MnemonicDoc { mnemonic: "jmp", summary: "Jumps to the label unconditionally.", operands: &["label"] },
+    MnemonicDoc {
+        mnemonic: "call",
+        summary: "Calls the subroutine at the label, saving the local frame; the result returns in the result register.",
+        operands: &["label"],
+    },
+    MnemonicDoc { mnemonic: "ret", summary: "Returns to the caller, restoring its local frame.", operands: &[] },
+    MnemonicDoc {
+        mnemonic: "halt",
+        summary: "Stops the program; the top-level result is in the result register.",
+        operands: &[],
+    },
+    MnemonicDoc { mnemonic: "nil", summary: "Loads the null list pointer.", operands: &["destination"] },
+    MnemonicDoc {
+        mnemonic: "cons",
+        summary: "Allocates a heap cell from a head and a tail, yielding its pointer.",
+        operands: &["destination", "head", "tail"],
+    },
+    MnemonicDoc {
+        mnemonic: "head",
+        summary: "Reads a list cell's head. Faults when the list is nil.",
+        operands: &["destination", "list"],
+    },
+    MnemonicDoc {
+        mnemonic: "tail",
+        summary: "Reads a list cell's tail. Faults when the list is nil.",
+        operands: &["destination", "list"],
+    },
+    MnemonicDoc {
+        mnemonic: "isempty",
+        summary: "Sets the destination to 1 when the list is nil, else 0.",
+        operands: &["destination", "list"],
+    },
+    MnemonicDoc {
+        mnemonic: "box",
+        summary: "Allocates a fresh mutable box holding the value, yielding its 1-based pointer.",
+        operands: &["destination", "value"],
+    },
+    MnemonicDoc {
+        mnemonic: "box_get",
+        summary: "Reads a box. Faults when the pointer is null or dangling.",
+        operands: &["destination", "box"],
+    },
+    MnemonicDoc {
+        mnemonic: "box_set",
+        summary: "Overwrites a box in place. Faults when the pointer is null or dangling.",
+        operands: &["box", "value"],
+    },
+];
+
+/// The mnemonic on the line containing `offset`, with its doc row.
+///
+/// Line-oriented for `rule_at`'s reason: `Program` carries no spans, so there is nothing to resolve
+/// a position against, and re-reading the line keeps the answer alive on a file that does not parse.
+///
+/// **NO `offset >= span.start` GUARD, AND THAT IS ACCEPTED, NOT AN OVERSIGHT.** A cursor sitting in
+/// an instruction line's leading whitespace still answers that instruction — there is nothing else
+/// on the line it could mean, and `rule_at` is generous the same way over a whole TM rule line.
+#[must_use]
+pub fn instr_at(src: &str, offset: usize) -> Option<(Span, &'static MnemonicDoc)> {
+    let mut start = 0usize;
+    for raw_line in src.split_inclusive('\n') {
+        let end = start + raw_line.len();
+        if offset < end || end == src.len() {
+            let content = raw_line.trim_end_matches(['\r', '\n']);
+            // `split_trailing(..).0`, NOT `content_before_comment` — the latter is `.trim()`ed, so
+            // feeding it to `trimmed_at` makes the pad structurally zero and reports every indented
+            // mnemonic one line's worth of leading whitespace too early. `trimmed_at`'s own doc
+            // records this exact mistake at the TM `start`/`state` sites it was first written for.
+            let content = comments::split_trailing(content).0;
+            let (trimmed, pad) = trimmed_at(content);
+            // A label line is `name:` and carries no mnemonic; the label row answers it instead.
+            let word = trimmed.split(|c: char| c.is_whitespace() || c == ',').next().unwrap_or("");
+            let doc = MNEMONIC_DOCS.iter().find(|d| d.mnemonic == word)?;
+            let span = Span { start: start + pad, end: start + pad + word.len() };
+            return (offset <= span.end).then_some((span, doc));
+        }
+        start = end;
+    }
+    None
+}
+
 /// The inverse of `bin_mnemonic`. `None` for a mnemonic that is not one of the nine.
 ///
 /// Spelled out rather than derived: this is the one fold in the form where a wrong answer is a
@@ -980,5 +1135,39 @@ mod tests {
             checked += 1;
         }
         assert_eq!(checked, 3, "MNEMONICS has three label-taking entries today: jz, jmp, call");
+    }
+
+    #[test]
+    fn every_mnemonic_has_a_doc_row_and_every_row_a_mnemonic() {
+        // The pattern `table_agrees_with_the_printer` established, applied to the second table.
+        // `MNEMONICS` is the authority for WHICH spellings exist; this table must cover it exactly.
+        for (mnemonic, _) in MNEMONICS {
+            assert!(MNEMONIC_DOCS.iter().any(|d| d.mnemonic == *mnemonic), "no hover row for mnemonic `{mnemonic}`");
+        }
+        for doc in MNEMONIC_DOCS {
+            assert!(
+                MNEMONICS.iter().any(|(m, _)| *m == doc.mnemonic),
+                "hover row `{}` names no mnemonic the printer emits",
+                doc.mnemonic
+            );
+        }
+        assert_eq!(MNEMONIC_DOCS.len(), MNEMONICS.len());
+    }
+
+    #[test]
+    fn every_doc_rows_operand_roles_match_its_shape() {
+        // The arity is DERIVED, not authored: a row that names three roles for a two-operand
+        // mnemonic is a failure here rather than a wrong tooltip.
+        for doc in MNEMONIC_DOCS {
+            let shape = shape_of(doc.mnemonic).expect("the test above pins every row to a mnemonic");
+            assert_eq!(
+                doc.operands.len(),
+                shape.kinds().len(),
+                "`{}` names {} operand roles for a shape taking {}",
+                doc.mnemonic,
+                doc.operands.len(),
+                shape.kinds().len()
+            );
+        }
     }
 }

@@ -455,6 +455,45 @@ body {
   outline-offset: -2px;
 }
 
+/* THE HOVER TOOLTIP'S CONTENT — `lsp-hover.ts`'s `lspHover`, for `textDocument/hover`'s answer.
+   Reached by the pointer and by `F2` alike (`lsp-nav.ts`'s `navKeymap`), so one rule serves both.
+   `white-space: pre-line` is what renders the answer's own line breaks — `HoverAnswer`'s title and
+   its detail lines arrive already joined by `\n`, and the default `normal` would collapse every one
+   of them to a single run. Monospace for the same reason the editors themselves are: an answer's
+   lines quote mnemonics, hex and register names, which a proportional face would set no differently
+   from prose. */
+.cm-hover-answer {
+  background: var(--bg-raised);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  padding: var(--space-1) var(--space-2);
+  white-space: pre-line;
+}
+
+/* THE TOOLTIP'S OWN WRAPPER, NOT `.cm-hover-answer` — CodeMirror's base theme puts a hardcoded
+   `1px solid #bbb` border and `#f5f5f5` background on every `.cm-tooltip`, gated on its OWN
+   `&light`/`&dark` theme classes rather than on this page's `data-theme`; this app never sets
+   `EditorView.darkTheme`, so CodeMirror's light-mode values are the only ones that ever apply,
+   whatever palette or theme is chosen here. `.cm-hover-answer`'s own `background`/`color` cover the
+   text, but the ring around it stays a fixed light grey on every dark preset.
+
+   `.cm-tooltip` IS A BARE SELECTOR, NOT ONE SCOPED UNDER `.cm-editor` LIKE THE REST OF THIS SECTION
+   — checked against `tooltips()`'s own config rather than assumed: its `parent` option defaults to
+   `null`, and without one `TooltipViewManager`'s container is `view.dom` itself, so nesting is not
+   something a selector here could rely on even if it wanted to; nothing in this app passes `parent`.
+
+   THE CLASS IS TRIPLED, ON THE SAME REASONING AS `.cm-editor.cm-editor.cm-focused` ABOVE, AND FOR
+   THE SAME KIND OF OPPONENT. CodeMirror's own border/background rule is not `.cm-tooltip` alone —
+   it is scoped to the theme class every editor carries (`&light .cm-tooltip`, compiled to a
+   two-class descendant selector), which beats a bare one-class `.cm-tooltip` on specificity
+   regardless of which stylesheet loads second. Three class selectors outrank that two-class one
+   outright, rather than tying it and hoping cascade order breaks the tie our way. */
+.cm-tooltip.cm-tooltip.cm-tooltip {
+  border-color: var(--rule);
+  background: var(--bg-raised);
+}
+
 /* §6.1's original arrangement — source and λ side by side, the TM across the bottom — used to live
    here as a two-column grid with `.pane.wide` spanning the TM/results row. Both are artefacts of the
    fixed four-section layout the layout tree (T12, 5d-ii-a) replaced: the tree supplies its own nested

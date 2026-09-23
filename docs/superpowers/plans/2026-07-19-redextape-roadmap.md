@@ -18940,3 +18940,279 @@ check-grammar-wasm: 4 grammar .wasm match their parser.c and their recorded byte
 $ docker build -t redextape:3b . && docker run --rm -d -p 8080:80 --name rxt3b redextape:3b
 healthy, HTTP 200, 7 .wasm under /usr/share/nginx/html/assets/
 ```
+
+#### PLAN 7 PART 3C, HOVER: SEVEN ANSWERS ACROSS THREE LANGUAGES LAND IN `redextape-core`, NOT IN THE LSP CRATE, AND λ ANSWERS NOTHING BY DESIGN — AND ITS OWN CRITICAL DEFECT WAS A FOURTH ARGUMENT NOBODY PASSED: `activateHover` WITH NO `until` LOCKED THE TOOLTIP PERMANENTLY, FOUND BY A REVIEWER READING `dist/index.js` RATHER THAN THE TYPES, AND A LATER SABOTAGE CAUGHT ITS OWN POINTER HALF UNABLE TO FAIL AT ALL (2026-09-22, branch `plan7-part3c-hover`, `0bd07c5..8a3ce12`, 24 commits — two drafts of this entry among them, at `cd6c4a1` and `45f6f69`, because fix rounds kept landing after each — 24 files, +4,212/−130)
+
+**Part 3c of Plan 7** ([design](../specs/2026-09-20-plan7-part3-editor-intelligence-design.md) §8,
+[plan](2026-09-22-plan7-part3c-hover.md)). It is PR 3 of 3, closing Plan 7 part 3: 3a put the LSP in a
+worker, 3b coloured every editor and added vim, this part adds `textDocument/hover`.
+
+##### WHAT PART 3c BUILT
+
+- **Seven answers, three languages, one designed silence.** Source: a function name's name and arity;
+  a builtin's signature and one authored fault line; a `Nat` literal's value in its other two bases; a
+  `Bool`'s lowering to `1`/`0`. TM: a state name's rule count; a rule's own words — what it reads,
+  writes, which way it moves, where it goes. asm: a label's definition site; an instruction's meaning
+  and its operand roles. **λ answers nothing**, because `LambdaTerm`'s de Bruijn `Node` carries no span
+  anywhere in the tree — the only provenance is an `Option<NodeId>` pointing into the Core AST, not into
+  `.rxlambda` text — and `language.rs` already records the same fact for navigation.
+- **A 24-row `MNEMONIC_DOCS` table beside `asm_syntax.rs`'s `MNEMONICS`**, one authored row per
+  spelling, with a drift test asserting one row per `MNEMONICS` entry and back, and that each row's
+  operand-role count equals `shape_of(mnemonic).kinds().len()`.
+- **A tooltip by pointer and a tooltip by `F2`**, both from `@codemirror/view` 6.43.8, already a
+  dependency — `hoverTooltip` serves the pointer, one binding in `lsp-nav.ts`'s `navKeymap` calls
+  `activateHover` at the caret for the keyboard. Hover adds **no new package** to `web/`, where the vim
+  keymap the branch before it added three.
+- **The markup kind is negotiated once.** `initialize` reads `capabilities.textDocument.hover.
+  contentFormat`; the web client advertises `['plaintext']`, so `web/` holds no markdown renderer and
+  no hand-rolled subset of one, while a client advertising markdown gets a fenced signature from the
+  same `HoverAnswer`.
+
+##### WHERE HOVER'S KNOWLEDGE LIVES, AND WHAT THAT DECISION COST
+
+Design §8.2 puts both the resolvers and the words in `redextape-core`; `redextape-lsp` only marshals
+`HoverAnswer` and attaches the range. The alternative — core exposing spans, the LSP crate writing the
+sentences — lost to the drift test: `MNEMONICS` is **private to `asm_syntax`**, not `pub(super)` as an
+earlier draft of §8.1/§8.2 both said (corrected at `1261f2d`, caught by Task 1's reviewer checking a
+forward-looking doc claim against the tree), so a 24-row table living in `redextape-lsp` could only be
+held to it by widening a parser internal across a crate boundary — weaker than the sibling it would
+copy, `asm_syntax.rs`'s own `table_agrees_with_the_printer`, which sits beside what it checks. Keeping
+the table in core costs **zero** visibility widenings; writing hover in the LSP crate would have cost
+four (`parse_for_nav`, `MNEMONICS`, `Shape`, `instr_parts`).
+
+**TM hover never reads the machine (§8.3).** `TmDocument::machine` is `None` on any file carrying an
+error diagnostic, so a hover built on it would go quiet on broken input where `definition` deliberately
+does not. `syntax.rs`'s `parse_rule_line` already reads a rule's symbols, move and goto target out of
+one line's own text with no `Machine` consulted — `rule_at` wraps it, and the state-name row's rule
+count is the same kind of line scan. One TM code path, not a clean one and a broken one: a rule hover
+survives a broken file the same way `definition` does, and a rule line that is itself malformed answers
+nothing, correctly — there is no rule there to describe.
+
+**The nine arithmetic/comparison mnemonics could not be derived from `Instr`'s doc comments.** 24
+spellings fold into 16 `Instr` variants because `Instr::Bin` prints as one of nine, and its one doc
+comment reads `rd <- ra op rb` for all of them — `add`, `sub`, `mul`, `cmpeq`, `cmpne`, `cmplt`, `cmple`,
+`cmpgt`, `cmpge` therefore needed nine authored sentences, not one, which is the sharpest reason §8.4's
+table is hand-written rather than generated.
+
+##### THE CRITICAL DEFECT: ONE F2 PRESS KILLED ALL HOVER, PERMANENTLY, ON THAT EDITOR
+
+`activateHover(view, head, 1)` was called with no fourth argument. CodeMirror's exported `activateHover`
+defaults a missing `until` to `() => false` — still a *function*, not "no lock" — so `HoverPlugin`'s
+`done()` locked the tooltip unconditionally. A locked tooltip is invisible to `mousemove`'s and
+`mouseleave`'s own auto-close, both of which check `!this.locked.has(active)`, and `checkHover()` opens
+with `if (this.active.length) return;` — so **one `F2` press permanently killed pointer hover as well as
+keyboard hover on that editor, for the rest of the page's life**, until reload. The vendored `.d.ts`
+only says a tooltip "doesn't close automatically", which understates it badly enough that reading the
+declared types would not have found this; **the reviewer went into `dist/index.js`** rather than trust
+the comment, and traced which return value of `until` actually empties the tooltip field before naming
+the fix. The implementer had flagged the missing argument as probably later work; the reviewer declined
+the deferral once the mechanism was traced, which was the right call — this is user-visible breakage,
+not a test gap. Fixed at `f570d4f` with `until: (tr) => tr.docChanged || tr.selection !== undefined`,
+its polarity read off the vendored source rather than guessed, and verified by a sabotage that timed
+out 3/3 on revert (the tooltip opened but never released) against 11/11 clean on the fix.
+
+##### THE SCORECARD: EVERY DEFECT WAS FOUND BY CHECKING A CLAIM AGAINST THE TREE; NONE BY A RED TEST
+
+Before Task 1 existed, reading the plan's own draft code against the tree it would run in found **four**
+defects and fixed all of them in the plan itself: the AST walk visited 3 of `Stmt`'s 6 variants (a
+literal in a bare expression statement — the commonest shape — would never have hovered); `Expr::Method`
+was unwalked; `Role::Reference` is a struct variant, so the asm match as drafted would not compile; and
+arity was looked up by name, wrong under shadowing, now keyed on the definition's `name_span`. None of
+those four reached a task brief at all.
+
+What did reach the branch, found once tasks were in flight:
+
+- **In the plan's shipped code, three.** `line_containing`'s boundary check compared an offset to a
+  line's *content* end rather than its raw end, so any offset inside a `\r\n` returned `None` and
+  aborted the hover search — a `.tm` file written on Windows would hover `null` at every line ending,
+  fixed with the guard read off the raw line. `instr_at` fed an already-`.trim()`ed slice into its pad
+  calculation, so every indented mnemonic's span would start at the line start instead of at the
+  mnemonic. And the CRITICAL one above.
+- **In the spec's own figures, one.** §14.4's pre-flight measured `parse_for_nav` alone at 3.55 ms and
+  the plan built `hover::rxt` to call it *twice* for a name (`parse_for_nav` for the AST walk, then
+  `binder::nav_rxt`, which runs `parse_for_nav` again internally) — so the figure was right for a
+  literal hover and 2.5x low for a name hover. Corrected at `6e2e764` to 3.67 ms (literal, one parse,
+  reproducing the original number) and 9.12 ms (name, two parses). The decision the figure supported —
+  no AST cache — did not change; this is a corrected figure, not a defect.
+- **In my own task briefs, three.** Reusing `lsp-client.test.ts`'s fake-port harness by import re-runs
+  its `describe` blocks as a load side effect (verified experimentally, then extracted to
+  `web/tests/node/lsp-fake-port.ts`). `λx. 42` as the λ sabotage fixture cannot fire at all — `rxt`'s
+  parser cannot lex a leading `λ`, so the literal after it is never reached, verified with a throwaway
+  Rust probe. And `.tok-nat` does not exist in a λ editor — `capture_map.rs`'s lambda table reaches only
+  `Binder`, `Ident` and `Punct`, with no number rule at all, so a bare digit run is unclassed text there.
+- **In the plan's snippets against a gate, four**, one per Rust task in a row: rustfmt's 120-column
+  width (Task 1), `clippy::items_after_test_module` (Task 2), `clippy::collapsible_if` (Task 3), and
+  `check-attributions`' declaration rule, which rejected a citation of `` `lsp-client.ts`'s `initialize`
+  `` because `initialize` is a JSON-RPC method string, not a symbol that file declares — rewritten as
+  `` `LspClient`'s `initialize` `` (Task 7). None was an implementer error; the plan's own self-review
+  had already said its snippets were "still unverified by compilation".
+
+##### THE λ SABOTAGE THAT HALF-FIRED
+
+Task 9's sabotage — redirecting `Language::Lambda`'s hover arm to `hover::rxt` — fired 3/3 and was
+recorded as proof that λ's silence can fail. It could only ever fail on one of its two assertions. The
+case hovers λ two ways, by pointer on the binder `y` in `λy. y` and by `F2` on the `Nat` literal in a
+preceding `let`, and asserts null both times; the reviewer inferred from the report's own probe data
+that the pointer half could not be load-bearing and asked for a confirming probe rather than asserting
+it. Confirmed: with the fixture `let x = 42;\nλy. y\n`, the sabotaged fallback answers `Some("Nat")` only
+at the two offsets the `42` occupies, and the binder `y` sits at byte 14 — outside that range — so the
+pointer sub-case passed whether or not the sabotage was applied. **Exactly one assertion in the whole
+case had ever been able to fail.**
+
+The first proposed fix — hover `.tok-nat` in the λ pane — named a span that doesn't exist there (above).
+Fixed instead at `a61798d` with `contentCoordsAt`, a helper built on `EditorView.coordsAtPos` that hands
+`userEvent.hover` a pixel position rather than a CSS class to query, landing the pointer gesture directly
+on the `42` at the same offset the keyboard half already targets. Re-run against the real sabotage:
+**both halves now fail** on the real answer (`"Nat\n42 · 0x2a · 0b101010"`) rather than null — the
+pointer sub-case on three consecutive runs, the keyboard sub-case in an isolation run with the pointer
+sub-case gated off. Reverted, wasm rebuilt clean, `language.rs` carries no diff, and the suite passes
+three more times (`pnpm test:browser`: 84 files, 510 tests at that commit; `pnpm test:node`: 44 files, 602 tests).
+
+##### THE "ONE F2 PRESS IN FIVE FAILS TO OPEN" FIGURE IS WITHDRAWN
+
+Task 8's fix round, while writing the CRITICAL defect's regression test, reported a separate pre-existing
+CodeMirror race — `HoverPlugin.update` discards an in-flight `activateHover` promise on any view update,
+including a zero-transaction geometry-only one — and estimated it failed roughly one `F2` press in five.
+That figure was never measured; it was an impression formed while debugging a flaky test, and it was
+carried, unmeasured, into the ledger, into Task 9's dispatch and into Task 10a's verification brief three
+times before anyone ran a probe against it.
+
+A dedicated measurement does not reproduce it: **25/25
+clean on a fresh, idle editor**, and **100/100 combined** across three separate strategies for injecting
+a genuine, non-synthetic DOM reflow after the press (0ms `requestAnimationFrame`-chained, ~15–30ms
+deferred, and a main-thread-blocking forced-layout variant) — the local hover round trip measures ~2.2 ms,
+under a seventh of one animation frame, so the update race's window essentially never opens on this
+hardware. **What is reproducible, deterministically, is a different path in the same vendored file**:
+`HoverPlugin.mousemove` nulls a pending hover synchronously whenever the pointer moves to a different
+position while a request is in flight — **0/20 opened** when a real `mousemove` is dispatched during the
+pending window. The class of bug is real; the "one in five" rate was not, and is not restated here.
+
+##### VERIFICATION
+
+All figures below are measured at `8a3ce12`, this branch's last code commit. **This block has been re-anchored twice, and the second time caught the first one overclaiming.** It first read `a61798d`; a re-anchor to `d528081` re-ran `check-all`, coverage, typecheck and biome but left the Docker and visual-check figures standing, still carrying `a61798d`'s provenance under a sentence that now claimed `d528081`'s. Both were re-run from scratch at `8a3ce12` before this sentence was written. A verification block is only as good as the commit its slowest figure was taken at, and re-anchoring the prose is not the same as re-taking the measurement.
+
+```
+$ bash scripts/check-all.sh
+all configs green — base, LLVM and browser   (5,110-line log, zero FAIL lines)
+
+$ bash scripts/check-slow.sh                 # backgrounded at Task 10a handback, checked to completion afterward
+slow tier green
+
+$ cargo llvm-cov nextest --workspace --fail-under-lines 90 --summary-only
+TOTAL   70557 lines / 3329 missed -> 95.28%   3683 functions / 197 missed -> 94.65%   30867 regions / 1326 missed -> 95.70%
+  hover.rs alone:  752 lines / 65 missed -> 91.36%   33 functions / 3 missed -> 90.91%   321 regions / 13 missed -> 95.95%
+
+$ (cd web && pnpm test)
+Test Files  128 passed (128)      Tests  1113 passed (1113)      # 84 browser files / 511 tests, 44 node files / 602
+
+$ (cd web && pnpm typecheck)      # build:bindings && tsc --noEmit, exit 0
+$ (cd web && pnpm exec biome ci src tests)
+Checked 204 files in 52ms. No fixes applied.
+
+$ docker build -t redextape:3c . && docker run --rm -d -p 8099:80 --name rxt3c redextape:3c
+image 98.5 MB disk / 27.9 MB content
+$ curl -sI http://localhost:8099/                           -> HTTP/1.1 200, 4985 bytes
+$ curl -sI http://localhost:8099/assets/index-<hash>.js      -> HTTP/1.1 200, 686698 bytes
+$ curl -sI http://localhost:8099/assets/index-CbGJwkoN.css  -> HTTP/1.1 200, 23052 bytes
+$ docker inspect --format='{{.State.Health.Status}}' rxt3c
+healthy   (FailingStreak 0, held for the whole ~19-minute verification session — no CI job builds this image)
+```
+
+**The six-combination visual check** — 3 style presets (`instrument`, `paper`, `terminal`) × 2 colour
+schemes, driven against the real Docker build in Chrome, tooltip opened by `F2` on the `40` in
+`let x = 40; x + 2` — asserted the tooltip's computed `background-color`, text `color` and
+`border-top-color` against each style's specific token RGB, not "differs from default text" (`.cm-
+hover-answer`'s colour *is* `var(--fg)`, so that comparison would be vacuous). All six passed. **Minimum
+contrast 13.01:1, at instrument/dark** — every combination clears WCAG AAA (7:1) by at least 1.86x, and
+none of the three dark variants' tooltip borders reads CodeMirror's hardcoded `rgb(187, 187, 187)`,
+confirming Task 8's Finding 3 (the `.cm-tooltip` theming fix) holds in all three.
+
+##### THE WHOLE-BRANCH REVIEW FOUND TWO IMPORTANT DEFECTS, AND BOTH WERE PROSE THIS BRANCH WROTE ABOUT ITS OWN CODE
+
+Eleven task reviews had come back clean. The whole-branch review at `cd6c4a1` found what none of them
+could see, because each had seen one diff.
+
+**Hover re-parsed the whole document per request, and the doc comment justifying that gave a reason that
+is false.** `hover::tm` and `hover::asm` each rebuilt a `NameIndex` per hover, and `hover::rxt` ran a
+second parse through `binder::nav_rxt` — all three bypassing the `Document::nav` cache that exists
+because this repository measured **33.25 ms** per rebuild against `LineIndex::new`'s 0.26 ms and wrote
+that "every navigation request paid it". `fn hover`'s doc claimed going through `locate` "would make
+hover silent wherever a form has no index, including a `.rxt` above `MAX_TOKENS`". It would not:
+`Language::nav` is unconditionally `Some` for `Tm` and `Asm`, and the one `.rxt` case where it is `None`
+is the case `hover::rxt` already declines through its own `parse_for_nav`. **Routing hover through the
+cache changes no answer on any document** — which is what made it a defect rather than a trade-off.
+Fixed at `8ee2e3a`: `Language::hover` takes `Option<&NameIndex>` and `lib.rs` passes `doc.nav.as_ref()`.
+§14.5 had priced the `.rxt` second parse at 9.12 ms against 3.67 ms and declined to act; that section was
+right about what it measured and never compared either figure against a cache one crate up. §14.6 records
+the corrected reasoning.
+
+**A count in the same doc comment read "five of hover's seven answers are not about a name at all". It is
+three**, and the sentence's own next clause enumerates exactly three. The `5` was lifted from §8.1's
+different predicate — "five need something `NameIndex` does not hold" — which is correct for itself.
+Task 1 wrote both sentences forward-looking, before any answer existed; Tasks 2-5 made the first true and
+could not have made the second true. The review was asked to **count** the forward-looking claims rather
+than confirm them, which is the only reason this surfaced.
+
+**The client discarded the `Hover.range` the server computed and sent.** Vendored
+`HoverPlugin.mousemove` defaults a missing `end` to `pos` and takes its `pos == end` branch, closing the
+tooltip the instant `posAtCoords` reads any other offset — including a pointer move that never leaves the
+token being described. Fixed at `d528081` by mapping the range to `{ pos, end }`, which routes it through
+`isOverRange` instead. The regression test uses a two-character literal, because a one-character token
+offers nowhere to move within; its assertion is checked once rather than polled, since polling would let a
+tooltip that closed and reopened pass as one that never closed. Dropping the `end` fails exactly that line
+and no other test in the file.
+
+Three Minor findings were fixed in the same round and two accepted with the decision recorded: `instr_at`
+answers for the leading whitespace of an indented instruction (generous, never wrong, and `rule_at` is
+deliberately generous the same way), and the wasm-boundary test duplicates `NAV_ASM`'s literal because
+that fixture is private to core's test module (byte-identical today, and both sides assert their own parse
+precondition, so a drift surfaces as a failed precondition rather than a silent pass).
+
+##### THE BROWSER SUITE WAS GREEN AGAINST A WASM BUILT BEFORE THE CODE IT WAS MEANT TO EXERCISE
+
+`pkg-lsp/redextape_lsp_wasm_bg.wasm` carried a modification time of 09:39:57. `8ee2e3a`, the Rust fix
+the browser suite was supposed to be checking, was committed at 10:42:27. The suite ran at 10:56, came
+back **84 files / 511 tests green**, and had not executed one line of the change. `cargo test` was
+unaffected — it compiles natively — so nothing else on the branch noticed.
+
+Rebuilding the artefact turned that green into **one failure**, and the failure was real: the
+regression test added with the tooltip-range fix flaked at **6 passes to 2 failures over 8 runs**. It
+had been written and validated against the same stale build, so it had only ever been judged against
+the previous server.
+
+**The flake's cause is a third reading of `HoverPlugin.mousemove`, and the first two were wrong.** That
+handler guards with `(… && …) || this.pending`, so a pointer move enters the cancelling branch whenever
+a hover request is in flight — and the `end` it reads there is `active[0]?.end ?? pos`, which falls back
+to `pos` while `active` is still empty. A move racing a pending request therefore takes the `pos == end`
+branch and cancels the tooltip **whatever range the server sent**, which is precisely the property the
+test exists to hold, decided by timing rather than by code. Moving as soon as the tooltip appeared is
+what flaked; retrying the whole open-and-move gesture six times instead blew the 15-second test timeout,
+and **the failure mode changing from an assertion to a timeout is what said the second draft had not
+found the cause either**. Waiting for sustained stability — the same text twice, across more than the
+300 ms `hoverTime` that would start another request — holds at **8 passes in 8 runs**, and still fails
+**3 runs out of 3** with the `end` mapping dropped, so the wait did not buy its stability by going
+vacuous.
+
+**A second instrument lied in the same session, in the opposite direction.** `check-slow.sh` was
+reported "still running" three times while its log had said `slow tier green` since 11:06. The check was
+`pgrep -f 'scripts/check-slow'`, and the shell running that `pgrep` has `scripts/check-slow` in its own
+command line, so the pattern matched the checker rather than the checked. A background watcher armed on
+the same predicate would have waited for itself forever.
+
+Both are the same shape as the branch's other defects and the reason its scorecard reads the way it
+does: the artefact under test and the instrument reporting on it are each things that have to be
+checked, and neither announces when it has gone stale or started answering about itself.
+
+##### KNOWN LIMITATIONS THAT SURVIVE THE BRANCH
+
+- **The CodeMirror cancellation path is real and unfixed here.** `HoverPlugin.mousemove` deterministically
+  discards a pending hover request on an unrelated pointer move (0/20, above); `HoverPlugin.update`'s
+  geometry-race sibling is real but did not manifest under measurement. Both are vendored
+  `@codemirror/view` internals, out of scope for this branch, and a real user can hit the deterministic
+  one by moving the pointer while a hover is resolving.
+- **asm's two hover rows are served and tested at the server and the wasm boundary, but unreachable in
+  the app** — there is no asm editor yet (§5.1's reason); part 5 inherits a proven language instead of an
+  untested one.
+- **λ hover is permanently `None`, by design, not by omission** — there is no position→text provenance
+  anywhere in `LambdaTerm` to resolve against, and the branch's own sabotage now proves that absence
+  rather than merely asserting it.

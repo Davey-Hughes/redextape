@@ -2,6 +2,7 @@ import type {
   LanguageId,
   LspDiagnostic,
   LspDocumentSymbol,
+  LspHover,
   LspLocation,
   LspOutgoing,
   LspPosition,
@@ -171,7 +172,12 @@ export class LspClient {
       rootUri: null,
       capabilities: {
         general: { positionEncodings: ['utf-16'] },
-        textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } },
+        textDocument: {
+          documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+          // PLAINTEXT ONLY, DELIBERATELY. The server renders markdown for a client that asks; asking
+          // for it here would put a markdown renderer in this app for one tooltip.
+          hover: { contentFormat: ['plaintext'] },
+        },
       },
     }).catch(() => {
       // **SWALLOWED, AND NOT BECAUSE THE FAILURE DOES NOT MATTER.** This is the client's own
@@ -367,6 +373,17 @@ export class LspClient {
   async documentSymbols(uri: string): Promise<LspDocumentSymbol[]> {
     const result = await this.#request('textDocument/documentSymbol', { textDocument: { uri } })
     return (result ?? []) as LspDocumentSymbol[]
+  }
+
+  /**
+   * What the construct under `position` means, or `null`.
+   *
+   * `null` is the ordinary answer for a cursor on whitespace or a keyword, and for every position in
+   * a `.rxlambda` document — λ carries no source spans, so there is nothing to resolve against.
+   */
+  async hover(uri: string, position: LspPosition): Promise<LspHover | null> {
+    const result = await this.#request('textDocument/hover', { textDocument: { uri }, position })
+    return (result ?? null) as LspHover | null
   }
 
   /**

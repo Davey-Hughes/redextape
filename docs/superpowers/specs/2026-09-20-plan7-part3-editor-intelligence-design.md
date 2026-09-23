@@ -18,6 +18,16 @@ understated. It also withdraws two claims this document made that are false agai
 description of the `*.wasm` rule's comment, and §8's "its value in the other encodings" for a language
 with no char literal. Every figure it adds is in §14.1, with the command behind it.
 
+**Amended 2026-09-22, at `0bd07c5` (#104, 3b's squash merge), while designing 3c.** §8 named four
+decisions it left to 3c's plan and stated a fifth as open. This amendment settles all five and adds a
+sixth the design of the client raised, rewrites §8 around them, and adds the rows they produce to §13.
+Two of the six are reversals of what §8 assumed: TM hover **never reads the machine**, so both TM rows
+survive a broken file rather than only one; and hover's words live in **`redextape-core`**, not in
+`redextape-lsp`, which leaves the LSP crate marshalling-only for hover as it is for everything else.
+The amendment also records two things in the tree that §8 did not mention and that 3c must change:
+the two tests that pin hover's absence, and the comment `prelude.rs` carries about its own constant.
+Every figure it adds is in §14.4, with the command behind it.
+
 ## §1 Scope, and the three PRs
 
 One design, three PRs, each with its own plan and roadmap entry. 3a is designed knowing what 3b and 3c
@@ -34,12 +44,15 @@ path in `web/` is deleted in the same change — the function itself stays, beca
 `redextape-grammar-check` holds the grammars to (§11.3).
 
 **3c — hover.** In: `textDocument/hover` in the server and a client for it (§8), for source, TM and asm.
+The behaviour lands in `redextape-core` and the LSP crate marshals it, which §8.2 decides and argues.
 
 **3a's split from the rest is "served today" against "new work".** Every feature in 3a was proven to run
 in wasm unmodified before this spec was written (§2.3), so 3a carries no new Rust behaviour at all. 3b
 carries no new Rust behaviour either — it is two new dependencies (`web-tree-sitter`,
-`@replit/codemirror-vim`) and a gate. 3c is the only part of the whole of part 3 that adds behaviour to
-`redextape-lsp`.
+`@replit/codemirror-vim`) and a gate. 3c is the only part of the whole of part 3 that adds new Rust
+behaviour at all. **An earlier draft of this sentence put that behaviour in `redextape-lsp`; §8.2 puts
+it in `redextape-core`**, leaving the LSP crate marshalling-only for hover exactly as it is for the five
+features 3a shipped.
 
 **Hover was 3b's until a pre-flight priced it, and this is the correction.** An earlier draft of this
 section shipped hover inside 3b on the strength of §8's own sentence that it "can be deferred out of 3b
@@ -550,7 +563,8 @@ they are negated and committed, it can.
 
 ## §8 Hover — PR 3c
 
-New server work — the only new Rust behaviour in the whole of part 3 — plus a client. `initialize` gains
+New Rust behaviour — the only new Rust behaviour in the whole of part 3, and it lands in
+`redextape-core` rather than in the LSP crate (§8.2) — plus a client. `initialize` gains
 `hoverProvider: true` and `handle` gains a `textDocument/hover` arm, shaped exactly like the `definition`
 arm beside it: `HoverParams` flattens the same `TextDocumentPositionParams`, and `HoverRequest`'s result
 type is `Option<Hover>`, so "nothing to say" is a well-typed `null` rather than a new type.
@@ -559,16 +573,23 @@ type is `Option<Hover>`, so "nothing to say" is a well-typed `null` rather than 
 
 | Language | What hover says | Resolves a position how |
 |---|---|---|
-| source | for a function name, its name and arity | `NameIndex` |
-| source | for a builtin, its one-line description | `NameIndex` |
-| source | for a `Nat` or `Bool` literal, its value in the other bases | **new** |
-| TM | on a state name, how many rules it has | `NameIndex` |
-| TM | on a rule, what it does in words — what it reads, writes, which way it moves and where it goes | **new** |
+| source | for a function name, its name and arity | `NameIndex` + the AST walk |
+| source | for a builtin, its signature and one authored line | `NameIndex` + `prelude::type_env` |
+| source | for a `Nat` literal, its value in the other bases; for a `Bool`, what it lowers to | the AST walk |
+| TM | on a state name, how many rules it has | `NameIndex` + a line scan |
+| TM | on a rule, what it does in words — what it reads, writes, which way it moves and where it goes | `rule_at`, a line re-parse |
 | asm | on a label, where it is defined | `NameIndex` |
-| asm | on an instruction, what it does and its operand roles | **new** |
+| asm | on an instruction, what it does and its operand roles | `instr_at` + `MNEMONIC_DOCS` |
 | λ | nothing | — |
 
-**Four of those seven answers are nearly free and three are not, which is why hover is its own PR.**
+### §8.1 Why hover is its own PR
+
+**Two of the seven answers are `NameIndex` alone; five need something it does not hold.** An earlier
+draft of this section said four were nearly free and three were not, and its own bullets already
+contradicted it: the bullet below puts arity outside `NameIndex`, and §8.3 puts a state's rule count
+there too. The count is corrected rather than restated — what carries the argument is the list, not
+the number in front of it.
+
 `NameIndex` is the position→name resolver `definition` and `references` already share, it is cached per
 document version, and a cursor one past the last byte of a name still resolves to that name. It indexes
 name occurrences and nothing else. So:
@@ -584,21 +605,146 @@ name occurrences and nothing else. So:
   char literal at all, so the row now says *bases* and means it. `redextape_core::tm::Encoding` is a
   different sense of the word — a trait for laying arithmetic onto tape cells — and is not this.
 - **No asm instruction description or operand-role table exists**, and the pieces that come closest are
-  all `pub(super)` inside `redextape_core::tm`: `asm_syntax.rs`'s `MNEMONICS` (24 spellings, the
-  authoritative list), its `Shape`, and `asm.rs`'s `instr_parts`. The prose to transcribe is the doc
+  unreachable from outside `redextape_core::tm`: `asm_syntax.rs`'s `MNEMONICS` (24 spellings, the
+  authoritative list) is a **bare `const`, private to `asm_syntax`**, while its `Shape` and `shape_of`
+  and `asm.rs`'s `instr_parts` are `pub(super)`. An earlier draft of this sentence called all four
+  `pub(super)`; `MNEMONICS`, the one the argument in §8.2 turns on, is the one that is not.
+  The prose to transcribe is the doc
   comments on `asm.rs`'s `Instr` variants, which say what each instruction does but are compile-time
-  comments with no runtime representation. 3c authors the table; whether it lives in `redextape-lsp` or
-  beside `MNEMONICS` in core with a drift test is 3c's plan's decision, and `asm_syntax.rs`'s own
-  `table_agrees_with_the_printer` is the pattern for the latter.
+  comments with no runtime representation. §8.4 decides where the table lives and how much of it is
+  authored.
 - **Arity is not in `NameIndex` either.** `DefKind::Fn` is a bare discriminant. Arity is `params.len()` on
-  `ast.rs`'s `Stmt::Fn`, so even the cheapest row needs the LSP crate to reach the AST — and
-  `parser.rs`'s `parse_for_nav`, the entry point `nav_rxt` uses, is `pub(crate)`.
+  `ast.rs`'s `Stmt::Fn`, so even the cheapest row needs the AST.
 
-**One behavioural decision 3c must make rather than inherit.** `TmDocument::machine` is `None` whenever
-the file carries an error diagnostic, so a TM hover built on the machine goes quiet on broken input —
-where `definition` deliberately still answers, because `NameIndex` survives a failed parse by design and
-`definition_in_a_broken_file_still_answers` holds it to that. Hover on a state name can keep that
-property; hover on a rule cannot, without a second source for the rule's contents.
+**Three mechanisms, not three paths, and the reduction is §8.2's first consequence.** The source rows for
+arity and for a literal are answered by ONE walk of the same AST, so the seven answers need an AST walk,
+a TM line re-parse and an asm line re-parse — three mechanisms serving five rows that `NameIndex` alone
+cannot reach.
+
+### §8.2 Where hover's knowledge lives: `redextape-core`
+
+**The resolvers AND the words are core's; `redextape-lsp` only marshals them.** `Language::hover` becomes
+the fourth one-call-into-core in `language.rs`, beside `diagnostics`, `format` and `nav`, and is a
+four-arm match answering `None` for λ. Core returns a structured `HoverAnswer` — a title and lines,
+carrying no markup — and the LSP crate renders it and attaches the range.
+
+```
+redextape-core                                  the new behaviour
+  hover.rs            HoverAnswer, and the words, per language
+  tm/syntax.rs        rule_at(src, offset)     — a public wrapper on parse_rule_line
+  tm/asm_syntax.rs    MNEMONIC_DOCS[24] and its drift test; instr_at(src, offset)
+redextape-lsp                                   marshalling only, as everywhere else
+  language.rs         Language::hover
+  lib.rs              the hover arm; hoverProvider; the negotiated markup kind
+```
+
+**The alternative was core exposing spans and `redextape-lsp` writing the sentences, and the drift test
+is what decided it.** `MNEMONICS` is private to `asm_syntax`, so a 24-row table living in
+`redextape-lsp` could only be held to it by widening that constant to `pub` and asserting across a
+crate boundary — a weaker claim than
+the sibling it copies, `asm_syntax.rs`'s own `table_agrees_with_the_printer`, which sits beside what it
+checks. Two objections to prose in core do not survive the tree: **core already owns user-facing English**
+— every `Diagnostic::message` is core's, `"bad move (expected L/R/S)"` among them — and the seam this
+draws is exactly the protocol's, with core answering *what is here and what it means* and the LSP crate
+answering *how LSP spells that*.
+
+**It also costs one visibility change fewer than the alternative.** `parser.rs`'s `parse_for_nav` is
+`pub(crate)`, and `hover.rs` is inside core, so the AST walk reaches it with no change at all. A hover
+written in `redextape-lsp` would have needed `parse_for_nav`, `MNEMONICS`, `Shape` and `instr_parts` all
+made `pub` — four widenings of core's surface, each one a parser internal.
+
+### §8.3 TM hover never reads the machine
+
+**Both TM rows resolve from text, so both survive a broken file.** §8 stated this as an open behavioural
+decision and assumed the answer was no: `TmDocument::machine` is `None` whenever the file carries an
+error diagnostic, so a TM hover built on the machine goes quiet on broken input — where `definition`
+deliberately still answers, because `NameIndex` survives a failed parse by design and
+`definition_in_a_broken_file_still_answers` holds it to that. That section said hover on a rule "cannot
+[keep that property], without a second source for the rule's contents".
+
+**That second source already exists and is one line of visibility away.** `syntax.rs`'s `parse_rule_line`
+takes a line and a span, reads the rule's symbols, moves and goto target out of that line's own text, and
+consults no `Machine` — it is what `parse_tm_nav`'s loop calls per line before any machine is assembled.
+`rule_at` wraps it: take `enclosing_line`'s span for the offset, hand the line to `parse_rule_line`, and
+describe what comes back. The state-name row is line-oriented for the same reason — a state's rule count
+is the number of rule lines between its `state` line and the next one, which is a scan rather than a
+lookup into `Machine::states`.
+
+So there is **one** TM code path rather than a clean one and a broken one, `TmDocument::machine` appears
+nowhere in hover, and the property `definition` has gets a hover sibling in §11.2. The residue is stated
+rather than hidden: a rule line that is itself malformed answers nothing, which is correct — there is no
+rule there to describe.
+
+### §8.4 The 24-mnemonic table
+
+**24 authored rows beside `MNEMONICS`, one per spelling, with the arity derived rather than authored.**
+Each row carries a one-line description and its operand role names; the drift test asserts one row per
+`MNEMONICS` spelling and back, and that each row's operand count equals `shape_of(mnemonic).kinds().len()`
+— so a mnemonic added to one table and not the other is a failure, and a row whose roles disagree with
+its `Shape` is a failure.
+
+**The 9 arithmetic and comparison spellings must be authored individually, and `Instr`'s doc comments
+cannot supply them.** 24 spellings fold into 16 `Instr` variants because `Instr::Bin` prints as one of
+nine, and its single doc comment reads `rd <- ra op rb` for all nine of them. `add`, `sub`, `mul`,
+`cmpeq`, `cmpne`, `cmplt`, `cmple`, `cmpgt` and `cmpge` therefore get nine sentences, not one — which is
+the sharpest reason this table is authored rather than derived from the doc comments wholesale.
+
+### §8.5 The source rows
+
+**`Nat`: the three bases. `Bool`: what it lowers to.** The source language's numeric literals are
+**decimal only** — `lexer.rs` reads digits with `is_ascii_digit` and there is no radix prefix in the
+grammar — so the hex and binary renderings are informational and cannot be typed back. That is the row's
+value rather than an objection to it: this app puts a source view and an asm or TM view side by side, and
+the base a literal is written in is not the base the other two show it in.
+
+A `Bool` has no bases, which is why §8's original row named it and then had nothing to give it. The fact
+that belongs there is the crossing: `lower_asm.rs` lowers `Core::Bool(_, b)` to `Li(dst, u64::from(*b))`,
+so `true` is **1** and `false` is **0** in a register. The hover says that and cites it.
+
+**The builtin row is computed where it can be and authored where it cannot.** A builtin's signature comes
+from `ty::show` over its scheme in `prelude::type_env` — the same table the typechecker reads, so the
+signature cannot drift from what the builtin is, and `ty.rs` already round-trips `show` against
+`parse_ty`. What a type cannot say is that `head` and `tail` fault on nil, so each of the five carries one
+authored line beside its signature.
+
+**The lookup goes through `type_env`, not through `BUILTIN_NAMES`, and that is deliberate.**
+`prelude.rs`'s own comment records that "nothing in this workspace reads `BUILTIN_NAMES`" and rests a
+paragraph about `$`-prefixed aliases on that. One lookup in `type_env` answers both *is this a builtin*
+and *what is its scheme*, so the constant stays unread and the comment stays true. A hover that read
+`BUILTIN_NAMES` would have to correct that comment in the same commit.
+
+### §8.6 The client
+
+`web/src/lsp-hover.ts`, wired at the two editor construction sites §9 names — `scratch-editor.ts` and
+`main.ts`. **No new dependency:** `@codemirror/view` 6.43.8 is already in `web/package.json` and exports
+both `hoverTooltip` and `activateHover`.
+
+**Pointer and keyboard, because §12 claims part 3 adds no accessibility item.** `hoverTooltip` serves the
+pointer; one F-key binding in `lsp-nav.ts`'s `navKeymap` calls `activateHover` at the caret and serves the
+keyboard. A pointer-only language feature would be the item §12 says part 3 does not add, so this is the
+cheapest way to keep that section true rather than amend it. The key is chosen under `navKeymap`'s own
+rule — an F-key, which vim's normal mode does not bind — and the plan verifies the specific key is
+reachable in Chromium before taking it (§14.4).
+
+**The markup kind is negotiated, and the answer is authored once.** `initialize` reads
+`capabilities.textDocument.hover.contentFormat` into a flag on `Server`, exactly as it already reads
+`hierarchicalDocumentSymbolSupport` and `positionEncodings`; the LSP crate renders core's structured
+`HoverAnswer` to markdown or to plaintext from that flag. The web client advertises plaintext, so `web/`
+needs no markdown renderer for a tooltip and no hand-rolled subset of one; Neovim advertises markdown and
+gets a fenced signature. Neither rendering is a second copy of the words.
+
+`Hover.range` carries the resolved construct's span, converted through `doc.index.range` as
+`documentSymbol` already converts its own.
+
+### §8.7 Two tests in the tree pin hover's absence
+
+Both must change, and the second is not a changed assertion:
+
+- `initialize_advertises_full_sync_and_formatting` asserts `caps.hover_provider == None`.
+- `an_unhandled_request_gets_method_not_found_and_an_unhandled_notification_gets_silence` uses
+  `textDocument/hover` **as its example** of a method this server does not handle. It needs a different
+  method — the test is about the `(_, Some(id))` arm, not about hover, and swapping the assertion would
+  delete its subject.
 
 **asm's rows are served but not reachable in the app until part 5**, for §5.1's reason: there is no asm
 editor to hover in. They are written and tested at the server (§11.2) so part 5 inherits a proven language
@@ -745,7 +891,12 @@ from a feature is a visible hole in a table rather than an absent file:
 - **colour** — each of the three editors carries `.tok-*` classes from its own grammar, and the computed
   colour on one of them is the palette's, not a default (3b). Asserting the class alone would pass on a
   class no stylesheet styles.
-- **hover** — source and TM answer, λ answers empty (3c).
+- **hover** — source and TM answer, λ answers empty (3c). Two rows carry more than the feature: a **TM
+  rule in a file carrying an error diagnostic still hovers**, which is §8.3's property and the hover
+  sibling of `definition_in_a_broken_file_still_answers`; and λ's empty answer is **sabotage-verified**,
+  per §8.7. The keyboard path gets its **own** row rather than leaning on §11.1: that gate walks buttons,
+  and a keybinding is not one — `lsp-navigation.test.ts` presses `F12` itself, and the hover key follows
+  that file's precedent rather than the class-level test's.
 
 **asm is tested at the server, not in the app**, because it has no editor until part 5. A node test
 drives `LspServer.handle` over asm text for diagnostics, format and hover, so part 5 inherits a proven
@@ -812,6 +963,13 @@ is what §9 of the umbrella means by parts 1–6 stopping the list from growing.
 | Query scope | viewport ranges only | whole document; parsing only the viewport |
 | Over the ceiling | uncoloured and undiagnosed, with one notice | parse in a worker; no ceiling |
 | Hover | source, TM, asm; λ empty by design | source only; all four via printed-form spans; defer hover entirely |
+| Where hover's knowledge lives | resolvers **and** words in `redextape-core`; `redextape-lsp` marshals | core exposes spans and the LSP crate writes the sentences; the asm table in core and the rest in the LSP crate |
+| TM hover on a broken file | **never reads `TmDocument::machine`** — a rule re-parses its own line, a state counts its rule lines, so both rows answer | rule hover silent when the machine is `None`; machine first with a line fallback |
+| The 24 mnemonics | authored rows beside `MNEMONICS`, arity derived from `Shape` | the table in `redextape-lsp` with `MNEMONICS` made `pub`; deriving all 24 from `Instr`'s doc comments, which give one sentence for nine spellings |
+| A `Bool` literal's hover | its type and the `1`/`0` it lowers to | its type alone; dropping `Bool` from the row |
+| A builtin's hover | signature computed from `type_env` via `ty::show`, plus one authored line | signature alone, which cannot say `head` faults on nil; authored prose alone, which leaves arity implicit |
+| Hover's reach in the app | pointer **and** an F-key calling `activateHover` | pointer only, which would add the accessibility item §12 says part 3 does not |
+| Hover markup | negotiate `contentFormat`, render one structured answer both ways | plaintext always; markdown always with a hand-rolled renderer in `web/` |
 | vim keys | vim owns keys inside a focused editor | app shortcuts always win; `Esc` escapes the editor in normal mode |
 | LSP boundary types | JSON strings, client hand-writes the subset it uses | `serde-wasm-bindgen`; `ts-rs` generation over `gen-lsp-types` |
 
@@ -922,3 +1080,109 @@ the same image and served by the same nginx, so the difference is the stub's and
 | 646,564 | the two Rust `.wasm` inside that, served | the same per-asset `curl` — `redextape_wasm_bg` at 318,119 and `redextape_lsp_wasm_bg` at 328,445 |
 | 245,583 and 94,777 | the browser's own `encodedBodySize` for the main chunk and for `web-tree-sitter.wasm` | the same `performance.getEntriesByType('resource')` call. **The instrument check**: the first reproduces this table's `curl` to the byte, and the second reproduces §7's 94,777 to the byte |
 | 153 | wire bytes by which the image `redextape:3b` differs from this tree's main chunk | that image serves 245,430; `2d9a710` changed `palettes.ts` after it was built. Both sides above were re-taken from this tree rather than reusing that number, which is why neither is 245,430 |
+
+### §14.4 Figures read while designing 3c — 2026-09-22
+
+Read at `0bd07c5` (#104, 3b's squash merge). These are counts and facts about the tree, not timings:
+nothing in 3c's design rests on a measurement yet, and the two that it will are named at the foot of
+this table as the plan's to take.
+
+| Value | What | Produced by |
+|---|---|---|
+| 24 / 9 / 16 | `MNEMONICS` rows, those marked `// Bin`, and `Instr` variants | `grep -c '^    ("' crates/redextape-core/src/tm/asm_syntax.rs`; `grep -c '// Bin$'` on the same file; the variant count in `asm.rs`'s `pub enum Instr`. **The nine are why §8.4's table is authored per spelling**: `Instr::Bin`'s one doc comment reads `rd <- ra op rb` for all nine |
+| decimal only | the radix a source `Nat` literal can be written in | `lexer.rs` takes digits with `is_ascii_digit` and nothing else; `grep -n 'from_str_radix\|radix' crates/redextape-core/src/lexer.rs` is empty. So §8.5's hex and binary renderings are informational and cannot be typed back |
+| `1` / `0` | what `true` and `false` become in a register | `Core::Bool(_, b) => ctx.emit(Instr::Li(dst, u64::from(*b)))` in `crates/redextape-core/src/tm/lower_asm.rs`. Read rather than assumed — the `Bool` row had nothing to say until this was looked up |
+| `ty::show`, public | how a builtin's signature renders, with no new code | `crates/redextape-core/src/ty.rs`; `show` is `pub` and its own test round-trips it against `parse_ty`, so §8.5's signatures are held to the typechecker's table rather than to a copy |
+| 0 | readers of `BUILTIN_NAMES` anywhere in `crates/` | `grep -rn 'BUILTIN_NAMES' crates/ --include='*.rs'` — four hits, all inside `prelude.rs` itself, three of them in a comment. §8.5 keeps it at zero by looking builtins up in `type_env` |
+| private, not `pub(super)` | `MNEMONICS`'s actual visibility | `grep -n 'enum Shape\|^const MNEMONICS\|fn shape_of' crates/redextape-core/src/tm/asm_syntax.rs` — `Shape` and `shape_of` carry `pub(super)`, `MNEMONICS` carries no modifier at all. **§8.1 and §8.2 both said `pub(super)` and both were wrong**, caught by Task 1's reviewer checking a forward-looking doc claim against the tree. §8.2's argument is unaffected and slightly stronger: a private const is less reachable than a `pub(super)` one, so the table's placement is decided the same way |
+| `pub(crate)` | `parse_for_nav`'s visibility, unchanged by 3c | `crates/redextape-core/src/parser.rs`. §8.2's placement is what makes this a non-change: a hover written in `redextape-lsp` would have needed this plus `MNEMONICS`, `Shape` and `instr_parts` made `pub` |
+| private, machine-free | `parse_rule_line`'s visibility and what it reads | `crates/redextape-core/src/tm/syntax.rs` — it takes `(line, span)`, returns a `RawRule`, and names no `Machine`. This is §8.3's "second source", and it existed before §8 said there was none |
+| 2 | tests that pin hover's absence and must change | `grep -rn hover crates/redextape-lsp/src/` — `initialize_advertises_full_sync_and_formatting`'s `hover_provider == None`, and `an_unhandled_request_gets_method_not_found_and_an_unhandled_notification_gets_silence`, which uses `textDocument/hover` **as its example** and so needs a different method rather than a different assertion (§8.7) |
+| `hoverTooltip`, `activateHover` | both exported by `@codemirror/view` 6.43.8, already a dependency | the export list in `web/node_modules/@codemirror/view/dist/index.d.ts`, against `web/package.json`. **Hover adds no package to `web/`**, where §9 found the keymap added four |
+| 2 | browser test files that press `F12` themselves | `grep -rln 'F12' web/tests/` — `lsp-navigation.test.ts` and `lsp-copy-diagnostics.test.ts`. §11.2 first said the hover key was covered by §11.1's class-level control gate; **that gate walks buttons, and a keybinding is not one**, so the row was corrected to follow these two files instead |
+
+**Both figures §14.4 left open were taken before any code was written, and one of them was then
+taken again against the code.** The plan's pre-flight measured the `.rxt` parse at 3.55 ms and chose
+no cache; §14.5 re-measures the function that actually shipped and corrects what that figure covers.
+The F-key probe pressed F1, F2, F4, F8 and F9 through `userEvent` and all five reached the editor,
+with a positive control (`ArrowDown`) and a negative one (`F7`, never sent); `F2` was chosen because
+Chromium binds nothing to it. **What that probe cannot show is written into the binding's own comment
+rather than left implicit**: Playwright injects keys through CDP at the renderer, so browser-chrome
+bindings never apply in a test, and the choice of key is what covers that half rather than the check.
+`Document::nav`'s 33.25 ms — the figure that motivated caching it — was measured on a `.tm` and is the
+reason that cache exists, not a number 3c reuses.
+
+### §14.5 What `rxt` actually costs, measured against the code rather than modelled — 2026-09-22
+
+§14.4 left the `.rxt` parse for the plan to measure, the plan measured `parse_for_nav` alone at
+3.55 ms, and **that figure is right for one of hover's two source paths and 2.5x low for the other.**
+Task 3's reviewer found the reason: `hover::rxt` calls `parse_for_nav` for its AST walk and then
+`binder::nav_rxt`, which runs `parse_for_nav` a second time internally. A literal hover returns before
+that second parse; a name hover pays both.
+
+| Value | What | Produced by |
+|---|---|---|
+| 3.67 ms | `hover::rxt` at a LITERAL — one parse, returns before `nav_rxt` | a temporary `#[test]` in `hover.rs`, 8,500 `fn`s / 185,896 bytes, median of 9, release. **This is the instrument check**: §14.4's 3.55 ms for `parse_for_nav` alone reproduces here, which is what says the probe and the earlier one measure the same thing |
+| 9.12 ms | `hover::rxt` at a NAME — `parse_for_nav`, then `nav_rxt`, which parses again | the same probe, at a call site in the same fixture. Both probe points assert `is_some()` first, so neither timing is the cost of returning `None` |
+
+**The decision §14.4 recorded does not change, and that is the only reason this is a corrected figure
+rather than a defect.** 9.12 ms native for a pointer-rest tooltip is imperceptible, and no cache is
+warranted at either figure. What changes is what the design may claim: "the parse a hover adds" is
+one parse for a literal and two for a name.
+
+**The mechanism is worth recording because this project keeps meeting it.** The 3.55 ms probe measured
+`parse_for_nav`, standing in for a `hover::rxt` that did not exist yet — an instrument modelling the
+function it measures cannot notice that the function does something else. It took a reviewer reading
+the shipped code to see the second parse, and a re-measurement of the real function to price it.
+
+**A single-parse `rxt` is available and is NOT taken here.** `nav_rxt` is four lines over
+`parse_for_nav` plus a `Binder` walk, so a `nav_from_program(&Program)` extraction would let `rxt`
+parse once and would halve the name row. It is declined for the reason §14.4 declined the cache:
+there is no user-facing problem at 9.12 ms, and an optimisation with no symptom is one this part does
+not need. Recorded so the next reader does not have to re-derive it.
+
+### §14.6 The second parse was priced against the wrong baseline — corrected at whole-branch review, 2026-09-22
+
+**§14.5 priced the second parse against a single parse and never against a cache that already
+existed one crate up, and that is what the whole-branch review corrected — not the 3.67 ms / 9.12 ms
+figures themselves, which are right for what they measured.** Both numbers come from calling
+`hover::rxt` directly, with nothing behind it: 3.67 ms for one `parse_for_nav` at a literal, 9.12 ms
+for that same parse plus `nav_rxt`'s own internal second one at a name. §14.5's "no cache is
+warranted at either figure" weighed that against the cost of adding a NEW cache. It did not weigh it
+against the cache `redextape-lsp` already has: `document.rs`'s `Document::nav` — the index
+`definition`, `references` and `document_symbol` all reach through `locate` — caches the identical
+`NameIndex` `nav_rxt`/`parse_tm_nav`/`parse_asm_nav` build, once per document VERSION rather than
+once per REQUEST, for a reason its own doc comment prices at 33.25 ms to rebuild against
+`LineIndex::new`'s 0.26 ms on a real emitted machine. `hover::rxt`'s second parse was paying a
+smaller version of exactly that cost, on every keystroke's worth of hover requests, for a document
+that had already built the answer.
+
+**The fix threads that cache through instead of adding a second one.** `Language::hover` gains a
+third parameter, `nav: Option<&NameIndex>`; `lib.rs`'s `hover` passes `doc.nav.as_ref()` — the same
+field `locate` reads — and `hover::rxt`, `hover::tm` and `hover::asm` all take the same parameter and
+use it in place of calling `nav_rxt`, `parse_tm_nav` or `parse_asm_nav` themselves. `hover::rxt`
+keeps its own `parse_for_nav` call: the literal and arity rows walk the AST directly (§8.1), and
+`Document` caches no parsed `Program`, only the index built from one. What the fix removes is only
+the parse `nav_rxt` was repeating on top of that.
+
+**No answer changes, on any document this server ever had open — a claim checked rather than
+assumed.** `locate` returns `None` exactly when `Document::nav` is `None`. `Language::nav` answers
+`Some` unconditionally for `Tm` and `Asm`; it answers `None` only for `Lambda` (whose `Language::hover`
+arm is already a hard-coded `None`, never reaching core) and for a `.rxt` document over `MAX_TOKENS`
+(where `hover::rxt`'s own `parse_for_nav` call already hits `Completeness::Refused` and returns
+`None` before the passed-in `nav` is ever read). So the cases where `nav` arrives as `None` are
+exactly the cases hover already answered `None` in.
+
+**What the fix removes, once a document is open and its cache is warm:**
+
+| Form | Before, per hover request | After |
+|---|---|---|
+| `.tm` / `.asm`, name row | a full `parse_tm_nav`/`parse_asm_nav` — the same rebuild `Document::nav` prices at 33.25 ms on a large file | zero; `doc.nav` is read, not rebuilt |
+| `.rxt`, name row | two parses of `src` — `hover::rxt`'s own, then `nav_rxt`'s internal one; 9.12 ms at §14.5's fixture | one parse — the same one the literal row always paid |
+| `.rxt`, literal row | one parse | unchanged; this row never called `nav_rxt` |
+
+§14.5's decision not to extract a single-parse `nav_from_program` stands: that was about collapsing
+`hover::rxt`'s OWN two parses into one, which reuse makes unnecessary from a different direction —
+the second parse is now a cache read, on every document this server tracks, not a rarer win for a
+`.rxt` file specifically.
+

@@ -9,6 +9,7 @@ import type { KeymapSetting } from './editor-keymap'
 import { keymapSlot } from './editor-keymap'
 import { DEFAULT_KEYMAP } from './editor-prefs'
 import type { LspClient } from './lsp-client'
+import { lspHover } from './lsp-hover'
 import { navKeymap } from './lsp-nav'
 import type { LanguageId, LspDiagnostic, LspRange } from './lsp-protocol'
 import { applyEdits, revealRange } from './lsp-text'
@@ -80,6 +81,7 @@ export type ScratchEditorConfig = {
           | 'documentSymbols'
           | 'definition'
           | 'references'
+          | 'hover'
         >
         /** Whether losing focus should reformat — read at blur, so the setting takes effect at once. */
         formatOnBlur: () => boolean
@@ -182,6 +184,7 @@ export class ScratchEditor {
           ),
           keymap.of([...defaultKeymap, ...historyKeymap]),
           lintGutter(),
+          lspHover({ uri: () => this.#document?.uri, client: () => this.#document?.client }),
           // SPREAD RATHER THAN PASSED AS A POSSIBLY-`undefined` ENTRY: CodeMirror's `Extension` union
           // does not include `undefined`, so an absent colourer has to contribute no element at all.
           ...(config.colour ? [config.colour] : []),

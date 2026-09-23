@@ -79,6 +79,32 @@ impl Language {
         }
     }
 
+    /// What hover says at `offset`, or `None` when this form has nothing to say there.
+    ///
+    /// **THE FOURTH ONE-CALL-INTO-CORE, AND IT DECIDES AS LITTLE AS THE OTHER THREE.** `.rxlambda`
+    /// answers `None` for the reason `nav` does and one more: `LambdaTerm` carries no span on any
+    /// variant, so there is nothing to resolve a document position against. That is a designed gap,
+    /// asserted by a test rather than left as an omission.
+    ///
+    /// **`nav` IS `doc.nav`, PASSED THROUGH RATHER THAN REBUILT.** Core's three functions used to
+    /// call `parse_tm_nav`/`parse_asm_nav`/`nav_rxt` themselves — a full re-parse on every hover
+    /// request, on top of the one `Document::nav` already pays and caches per version. `lib.rs`'s
+    /// `hover` passes `doc.nav.as_ref()` straight through; core uses it instead of building its own.
+    #[must_use]
+    pub fn hover(
+        self,
+        src: &str,
+        offset: usize,
+        nav: Option<&NameIndex>,
+    ) -> Option<redextape_core::hover::HoverAnswer> {
+        match self {
+            Language::Redextape => redextape_core::hover::rxt(src, offset, nav),
+            Language::Tm => redextape_core::hover::tm(src, offset, nav),
+            Language::Asm => redextape_core::hover::asm(src, offset, nav),
+            Language::Lambda => None,
+        }
+    }
+
     /// The name-span index for this form, or `None` for a form that has none.
     ///
     /// **`None` IS NOT AN EMPTY INDEX.** An empty index says "this document contains no names",
@@ -253,6 +279,52 @@ f: ; the entry
         // `.rxlambda` waits on a term type that carries no source positions at all. `None` is the
         // answer and not an empty index: an empty index would claim the file has no names in it.
         assert!(Language::Lambda.nav("λx. x").is_none());
+    }
+
+    #[test]
+    fn hover_reaches_core_for_every_dispatching_form_and_lambda_never_calls_in() {
+        // Originally (Task 1) `hover::rxt`, `hover::tm` and `hover::asm` were all unconditional
+        // `None` stubs, so this test alone could not prove WHICH stub a given `Language` arm
+        // called — a mis-wiring that swapped `Tm`'s and `Asm`'s dispatch would have been
+        // byte-identical to this assertion passing. What it proves, and has always proved, is that
+        // `Language::hover`'s match has a LIVE arm for each of the three non-Lambda forms that
+        // reaches `redextape_core::hover` at all, rather than a `Lambda`-only path with the other
+        // three silently falling through to the same hard-coded `None`.
+        // `hover_answers_content_only_through_the_matching_form` below is what proves WHICH arm,
+        // now that `hover::rxt`, `hover::tm` and `hover::asm` all have real content to disagree
+        // over — this test's own job stays narrower: only that the call reaches core at all.
+        //
+        // None of the three stubs remain, so each fixture below is instead a position its own live
+        // handler genuinely has nothing to say about — a directive or declaration KEYWORD, never an
+        // occurrence or a construct with content — so a `None` answer here means "the arm ran and
+        // had nothing to add", not "the arm never ran".
+        assert_eq!(Language::Redextape.hover("let x = 1;\nx", 0, None), None);
+        assert_eq!(Language::Tm.hover("tapes 1\nstart q0\nstate q0: accept\n", 0, None), None);
+        // On the `result` directive keyword — asm's own analogue of `.rxt`'s `let` and `.tm`'s
+        // `tapes` above: a header line names no mnemonic and no label, so neither `instr_at` nor the
+        // navigation index has anything here, unlike `"f:\n\tret\n"` (the fixture this used before
+        // `hover::asm` had content), whose `f:` and `ret` now both answer.
+        assert_eq!(Language::Asm.hover("result Nat\n", 0, None), None);
+        // `.rxlambda` is the one arm that is deliberately hard-coded rather than dispatched — it
+        // never reaches `redextape_core::hover` at all, which is the designed gap `Language::hover`'s
+        // own doc comment names.
+        assert_eq!(Language::Lambda.hover("λx. x", 0, None), None);
+    }
+
+    #[test]
+    fn hover_answers_content_only_through_the_matching_form() {
+        // Task 1 could not write this: with all three of `hover::rxt`, `hover::tm` and `hover::asm`
+        // returning `None` unconditionally, a `Language::hover` match with `Redextape` and `Tm`
+        // swapped was byte-identical to a correct one — there was no input for which the two
+        // disagreed. `hover::rxt` now answers content for a literal, which is exactly the
+        // disagreement that swap needs: feeding this `.rxt` source through `Language::Redextape`
+        // must answer something, and the SAME text through `Language::Tm` or `Language::Asm` must
+        // still answer `None`, a pair no crossed arm could satisfy.
+        let src = "let x = 42;\nx\n";
+        let at = src.find("42").expect("fixture holds it");
+        assert!(Language::Redextape.hover(src, at, None).is_some(), "a literal must hover through Redextape");
+        assert_eq!(Language::Tm.hover(src, at, None), None);
+        assert_eq!(Language::Asm.hover(src, at, None), None);
     }
 
     #[test]

@@ -322,4 +322,88 @@ mod tests {
         assert_eq!(out[0]["id"], serde_json::json!(9));
         assert!(out[0]["error"].is_object(), "an unserved request must answer an error: {:?}", out[0]);
     }
+
+    /// **ASM HAS NO EDITOR UNTIL PART 5, WHICH IS WHY THIS RUNS HERE.** There is nowhere in the app
+    /// yet to place a cursor in an `.asm` document, so its hover answers cannot be proven by driving
+    /// the UI — this test drives `handle`'s JSON instead, exactly as a worker would, so that once
+    /// part 5 mounts an asm editor it inherits a language already proven at the boundary rather than
+    /// an untested one.
+    ///
+    /// **THE REFERENCE ARM HAD ZERO COVERAGE.** `hover::asm`'s `Role::Reference` branch
+    /// (`"A jump or call target."`) was never exercised anywhere in the tree — Task 5's fixtures only
+    /// ever hovered a label DEFINITION (`f:`). A bug that swapped the two arms' messages would have
+    /// passed every existing test. The fixture below carries a label defined once and referenced
+    /// twice, so both roles get hovered and their answers are checked to actually differ.
+    #[test]
+    fn asm_answers_hover_at_the_boundary_though_no_editor_mounts_it() {
+        // The same fixture `asm_syntax.rs`'s `NAV_ASM` uses, whose own doc comment records it as
+        // parsing clean: `g` is defined once (`g:`) and referenced twice (`jz`'s second operand,
+        // `jmp`'s first).
+        const ASM: &str = "result Nat\nf:\n\tli\tr0, #1\n\tjz\tr0, g\n\tjmp\tg\ng:\n\tret\n";
+
+        let mut s = initialized();
+        let opened = call(
+            &mut s,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": { "textDocument": {
+                    "uri": "redextape:///view/a.asm", "languageId": "redextape_asm", "version": 1, "text": ASM,
+                } },
+            }),
+        );
+        // A hover over a broken document answers nothing, which could look like a passing test for
+        // the wrong reason, so the fixture's cleanliness is asserted rather than assumed.
+        assert_eq!(opened[0]["params"]["diagnostics"], serde_json::json!([]), "the fixture must parse clean");
+
+        let hover = |s: &mut LspServer, line: u64, character: u64| {
+            call(
+                s,
+                &serde_json::json!({
+                    "jsonrpc": "2.0", "id": 2, "method": "textDocument/hover",
+                    "params": { "textDocument": { "uri": "redextape:///view/a.asm" },
+                                "position": { "line": line, "character": character } },
+                }),
+            )[0]["result"]
+                .clone()
+        };
+
+        // 1. An instruction answers: `li` on line 2, the tab padding one column before it.
+        let instr = hover(&mut s, 2, 1);
+        assert!(
+            instr["contents"]["value"].as_str().is_some_and(|v| v.contains("immediate")),
+            "hovering `li` should describe it: {instr}"
+        );
+        // `initialized()` advertises no `contentFormat`, so the answer must come back plaintext.
+        assert_eq!(instr["contents"]["kind"], serde_json::json!("plaintext"));
+
+        // 2. The label REFERENCE: `jmp`'s operand `g`, line 4 character 5.
+        let reference = hover(&mut s, 4, 5);
+        let reference_text = reference["contents"]["value"].as_str().expect("a hover answer");
+        assert!(
+            reference_text.contains("A jump or call target."),
+            "a jmp target should read as a reference: {reference_text}"
+        );
+        assert!(
+            !reference_text.contains("Defined here."),
+            "a reference must not read as a definition: {reference_text}"
+        );
+
+        // 3. The label DEFINITION: `g:`, line 5 character 0.
+        let definition = hover(&mut s, 5, 0);
+        let definition_text = definition["contents"]["value"].as_str().expect("a hover answer");
+        assert!(
+            definition_text.contains("Defined here."),
+            "a label line should read as a definition: {definition_text}"
+        );
+        assert!(
+            !definition_text.contains("A jump or call target."),
+            "a definition must not read as a reference: {definition_text}"
+        );
+
+        // This is the gap the task closes: a swap of the two arms' messages would leave every other
+        // assertion in this file untouched, so the two answers must be checked against each other,
+        // not just against their own expected substring.
+        assert_ne!(reference_text, definition_text, "a reference and a definition must say different things");
+    }
 }

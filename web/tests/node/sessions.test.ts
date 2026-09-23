@@ -152,6 +152,7 @@ const LSP_STUB = {
   documentSymbols: async () => [],
   definition: async () => null,
   references: async () => [],
+  hover: async () => null,
 }
 
 describe('SessionRegistry', () => {

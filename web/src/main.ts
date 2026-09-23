@@ -29,6 +29,7 @@ import type { LambdaPane } from './lambda-pane'
 import { closeLeaf, defaultLayout, LAYOUT_STORAGE_KEY, type LayoutNode, leaves, SOURCE_LEAF } from './layout'
 import { createLinkWiring, type LinkWiring } from './link-wiring'
 import { LspClient } from './lsp-client'
+import { lspHover } from './lsp-hover'
 import { navKeymap } from './lsp-nav'
 import type { LanguageId } from './lsp-protocol'
 import { documentUri, LANGUAGE_LABEL } from './lsp-protocol'
@@ -1845,6 +1846,7 @@ async function main(): Promise<EditorView> {
         // `colourFor`, NOT A SECOND `treeSitterColour` CALL SPELLING THE SAME FIELDS OUT. The two used
         // to be written separately and the ceiling notice reached neither; see `colourFor`'s doc.
         colourFor('redextape'),
+        lspHover({ uri: () => SOURCE_URI, client: () => lspClient }),
         declineMark,
         linkMark,
         focusMark,

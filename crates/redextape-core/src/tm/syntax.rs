@@ -309,6 +309,79 @@ fn parse_rule_line(line: &str, span: Span) -> Result<RawRule, Diagnostic> {
     Ok(RawRule { read, write, moves, goto: goto.to_string(), span, goto_at })
 }
 
+/// What one rule line says, read out of that line alone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuleFacts {
+    pub reads: Vec<Option<Symbol>>,
+    pub writes: Vec<Option<Symbol>>,
+    pub moves: Vec<Move>,
+    pub goto: String,
+}
+
+/// The rule on the line containing `offset`, read from that line's own text.
+///
+/// **THIS NEVER TOUCHES A `Machine`, AND THAT IS THE WHOLE REASON IT EXISTS.** `TmDocument::machine`
+/// is `None` whenever the file carries an error diagnostic, so an answer built on it goes quiet on
+/// exactly the mid-edit file navigation is worth most on — where `definition` deliberately still
+/// answers. `parse_rule_line` already reads a rule out of one line, so a hover that reads lines has
+/// one code path rather than a clean one and a broken one.
+///
+/// `None` for a line that is not a rule, which includes a rule line that is itself malformed: there
+/// is no rule there to describe.
+#[must_use]
+pub fn rule_at(src: &str, offset: usize) -> Option<(Span, RuleFacts)> {
+    let (line_span, line) = line_containing(src, offset)?;
+    let trimmed = line.trim_start();
+    let raw = parse_rule_line(trimmed, line_span).ok()?;
+    Some((line_span, RuleFacts { reads: raw.read, writes: raw.write, moves: raw.moves, goto: raw.goto }))
+}
+
+/// How many rule lines follow the `state` line that `state_span` sits on, before the next one.
+///
+/// Line-oriented for `rule_at`'s reason: counting `Machine::states` would make this row go quiet on a
+/// file the other row answers for.
+#[must_use]
+pub fn state_rule_count(src: &str, state_span: Span) -> usize {
+    let Some((line_span, _)) = line_containing(src, state_span.start) else { return 0 };
+    let mut count = 0;
+    for raw_line in src.get(line_span.end..).unwrap_or("").split_inclusive('\n').skip(1) {
+        let trimmed = raw_line.trim_end_matches(['\r', '\n']).trim_start();
+        if trimmed.starts_with("state ") {
+            break;
+        }
+        if parse_rule_line(trimmed, Span { start: 0, end: 0 }).is_ok() {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// The span and text of the line `offset` sits on, terminator excluded.
+///
+/// The same walk `parse_tm_nav` does — `split_inclusive('\n')` with a running offset — so a line's
+/// span means the same thing in both.
+///
+/// **AN OFFSET INSIDE THE LINE'S OWN TERMINATOR (`\n`, OR EITHER BYTE OF A CRLF `\r\n`) STILL
+/// RESOLVES TO THAT LINE**, even though the returned span's `end` stops before the terminator: the
+/// guard below checks against the RAW line's end, not the trimmed span's. Checking the trimmed span
+/// instead is exactly wrong on a CRLF file — the `\r` sits past `span.end` with a byte still after
+/// it, and an offset landing on that `\n` byte would fall through the whole loop to `None` rather
+/// than resolve to the line whose terminator it is. `offset == src.len()` (the very end of the
+/// file) also resolves, to the last line; only `offset > src.len()` answers `None`.
+fn line_containing(src: &str, offset: usize) -> Option<(Span, &str)> {
+    let mut start = 0usize;
+    for raw_line in src.split_inclusive('\n') {
+        let end = start + raw_line.len();
+        let content = raw_line.trim_end_matches(['\r', '\n']);
+        if offset < end || end == src.len() {
+            let span = Span { start, end: start + content.len() };
+            return (offset <= end).then_some((span, content));
+        }
+        start = end;
+    }
+    None
+}
+
 /// Reject a header directive that appears AFTER the first `state`.
 ///
 /// The grammar has always said directives "must precede the first `state`", and the parser has always
@@ -1704,5 +1777,44 @@ state s: accept
         for src in [NAV_TM, "tapes 1\nstate q0:\n", "", "tapes\n"] {
             assert_eq!(parse_tm_full(src), parse_tm_nav(src).0, "disagreement on {src:?}");
         }
+    }
+
+    /// **`line_containing` MUST RESOLVE AN OFFSET SITTING INSIDE A LINE'S TERMINATOR, CRLF
+    /// INCLUDED.** `rule_at` and `state_rule_count` are `pub`-reachable and read files that may be
+    /// CRLF, and both are keyed on this private helper — a hole here answers `null` at the end of
+    /// every CRLF line. Every offset in `0..=src.len()` is covered for both an LF and a CRLF
+    /// document, plus one offset past `src.len()` for each.
+    #[test]
+    fn line_containing_resolves_every_offset_including_inside_a_crlf_terminator() {
+        let lf = "abc\ndef\n";
+        // LF has nothing to expose: a one-byte terminator has no second byte to fall through on, so
+        // every offset up to and including `src.len()` already lands on the line it terminates.
+        let want_lf = ["abc", "abc", "abc", "abc", "def", "def", "def", "def", "def"];
+        for (offset, want) in want_lf.iter().enumerate() {
+            let (_, line) = line_containing(lf, offset).unwrap_or_else(|| panic!("offset {offset} answered None"));
+            assert_eq!(line, *want, "offset {offset}");
+        }
+        assert_eq!(line_containing(lf, lf.len() + 1), None, "past end of file");
+
+        let crlf = "abc\r\ndef\r\n";
+        // CRLF: offsets 4 and 9 sit ON the terminator's `\n` byte (`\r` is at 3 and 8) — exactly the
+        // holes Finding 1 reports, where the old guard compared against the trimmed span's end and
+        // returned `None` outright instead of resolving to the line the terminator belongs to.
+        // Offset 10 is end-of-file (`== crlf.len()`) and still resolves; offset 11 is genuinely past
+        // it and must not.
+        let want_crlf = ["abc", "abc", "abc", "abc", "abc", "def", "def", "def", "def", "def", "def"];
+        for (offset, want) in want_crlf.iter().enumerate() {
+            let (_, line) = line_containing(crlf, offset)
+                .unwrap_or_else(|| panic!("offset {offset} (inside a CRLF terminator, or at EOF) answered None"));
+            assert_eq!(line, *want, "offset {offset}");
+        }
+        assert_eq!(line_containing(crlf, crlf.len() + 1), None, "past end of file");
+
+        // Named individually too, so the boundary each covers is legible without counting indices.
+        assert_eq!(line_containing(crlf, 4).map(|(_, l)| l), Some("abc"), "inside the FIRST line's CRLF terminator");
+        assert_eq!(line_containing(crlf, 9).map(|(_, l)| l), Some("def"), "inside the LAST line's CRLF terminator");
+        assert_eq!(line_containing(crlf, 3).map(|(_, l)| l), Some("abc"), "end-of-line, right before the terminator");
+        assert_eq!(line_containing(crlf, crlf.len()).map(|(_, l)| l), Some("def"), "end-of-file");
+        assert_eq!(line_containing(crlf, crlf.len() + 1), None, "past end-of-file");
     }
 }

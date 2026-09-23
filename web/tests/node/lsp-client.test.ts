@@ -1,93 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { LspClient, type LspPort, LspUnavailable } from '../../src/lsp-client'
-import type { LspDiagnostic, LspOutgoing, LspReplyMessage, LspRequestMessage } from '../../src/lsp-protocol'
-
-/**
- * A worker that records rather than runs — the whole reason `LspPort` is an interface and not
- * `Worker`. Every rule in `lsp-client.ts` is logic, and none of it needs a thread or wasm.
- */
-class FakePort implements LspPort {
-  sent: LspRequestMessage[] = []
-  terminated = false
-  #onMessage: ((e: { data?: LspReplyMessage }) => void)[] = []
-  #onError: (() => void)[] = []
-
-  postMessage(m: LspRequestMessage): void {
-    this.sent.push(m)
-  }
-
-  addEventListener(type: 'message' | 'error', handler: (e: { data?: LspReplyMessage }) => void): void {
-    if (type === 'message') this.#onMessage.push(handler)
-    else this.#onError.push(handler as unknown as () => void)
-  }
-
-  terminate(): void {
-    this.terminated = true
-  }
-
-  /** Drive a reply in from the worker side. */
-  reply(m: LspReplyMessage): void {
-    for (const h of this.#onMessage) h({ data: m })
-  }
-
-  /** Fire the worker's `error` event — an uncaught throw on that thread. */
-  crash(): void {
-    for (const h of this.#onError) h()
-  }
-
-  /** Every message sent so far, parsed. */
-  parsed(): { method?: string; id?: number; params: Record<string, unknown> }[] {
-    return this.sent.map((m) => JSON.parse(m.json))
-  }
-
-  /** The one message with `method`, or a throw naming what was actually sent. */
-  sentMessage(method: string): { method?: string; id?: number; params: Record<string, unknown> } {
-    const m = this.parsed().find((x) => x.method === method)
-    if (m === undefined) throw new Error(`no ${method} was sent; sent: ${this.methods().join(', ')}`)
-    return m
-  }
-
-  /** The nth message sent, or a throw. */
-  at(i: number): { method?: string; id?: number; params: Record<string, unknown> } {
-    const m = this.parsed()[i]
-    if (m === undefined) throw new Error(`no message at ${i}; sent ${this.sent.length}`)
-    return m
-  }
-
-  methods(): string[] {
-    return this.parsed().map((m) => m.method ?? '(response)')
-  }
-}
-
-/** Build a client over a fresh port, and hand back both plus the sinks' recordings. */
-function harness() {
-  const ports: FakePort[] = []
-  /** Every diagnostic set any document received, tagged with the URI whose sink took it. */
-  const diagnostics: [string, LspDiagnostic[]][] = []
-  const notices: string[] = []
-  const client = new LspClient(
-    () => {
-      const p = new FakePort()
-      ports.push(p)
-      return p
-    },
-    (t) => notices.push(t),
-  )
-  /** Open a document whose sink records under its own URI, so misrouting is visible. */
-  const open = (uri: string, languageId: Parameters<typeof client.openDocument>[1], text: string): void => {
-    client.openDocument(uri, languageId, text, { diagnostics: (ds) => diagnostics.push([uri, ds]) })
-  }
-  // `noUncheckedIndexedAccess` is on, and a test that silently reads `undefined` here would assert
-  // against nothing. Throwing names the mistake at the line that made it.
-  const port = (): FakePort => {
-    const p = ports[ports.length - 1]
-    if (p === undefined) throw new Error('no port has been spawned — call client.start() first')
-    return p
-  }
-  return { client, ports, diagnostics, notices, port, open }
-}
-
-const OUT = (messages: LspOutgoing[]): LspReplyMessage => ({ kind: 'out', messages })
+import { LspUnavailable } from '../../src/lsp-client'
+import type { LspDiagnostic } from '../../src/lsp-protocol'
+import { harness, OUT } from './lsp-fake-port'
 
 describe('starting up', () => {
   it('declares hierarchicalDocumentSymbolSupport, which the outline tree depends on', () => {
@@ -101,6 +15,23 @@ describe('starting up', () => {
     }
     expect(caps.textDocument.documentSymbol.hierarchicalDocumentSymbolSupport).toBe(true)
     // Without this the server answers the flat SymbolInformation[], which has no `children`.
+  })
+
+  /**
+   * **THE WHOLE REASON `web/` HOLDS NO MARKDOWN RENDERER FOR A TOOLTIP.** The server renders
+   * markdown only for a client that asks (`LspClient`'s own `initialize` comment states this), so
+   * dropping this capability, misspelling `contentFormat`, or asking for `['markdown']` all silently
+   * change what the wire carries with nothing here to catch it — the three `hover()` tests in
+   * `lsp-hover.test.ts` only exercise `hover()` after startup and never read `initialize`'s params.
+   */
+  it('advertises plaintext-only hover, which is why no markdown renderer lives here', () => {
+    const h = harness()
+    h.client.start()
+    h.port().reply({ kind: 'ready' })
+    const init = h.port().at(0)
+    expect(init.method).toBe('initialize')
+    const caps = init.params.capabilities as { textDocument: { hover: { contentFormat: string[] } } }
+    expect(caps.textDocument.hover.contentFormat).toEqual(['plaintext'])
   })
 
   it('queues messages until the worker says it is ready, rather than dropping them', () => {

@@ -46,6 +46,14 @@ export type LspTextEdit = { range: LspRange; newText: string }
 export type LspLocation = { uri: string; range: LspRange }
 
 /**
+ * What the server advertises it can render. The client asks for `plaintext` only, which is what
+ * lets this app hold no markdown renderer for a tooltip — see `LspClient`'s `initialize`.
+ */
+export type LspMarkupContent = { kind: 'plaintext' | 'markdown'; value: string }
+
+export type LspHover = { contents: LspMarkupContent; range?: LspRange }
+
+/**
  * One outline entry. `children` is what makes it the hierarchical shape rather than the flat
  * `SymbolInformation[]`, and the server only sends this shape when the client has declared
  * `hierarchicalDocumentSymbolSupport` — see `LspClient`'s `initialize`.

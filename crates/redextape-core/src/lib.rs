@@ -21,6 +21,7 @@ pub mod core;
 pub mod counter;
 pub mod desugar;
 pub mod diagnostic;
+pub mod hover;
 pub mod interp;
 pub mod lambda;
 pub mod lexer;

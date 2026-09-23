@@ -22,14 +22,14 @@ pub mod position;
 
 use gen_lsp_types::json_rpc::{Error, Id, RequestObject, ResponseObject};
 use gen_lsp_types::{
-    BaseSymbolInformation, Definition, DefinitionParams, DefinitionProvider, DefinitionRequest, DefinitionResponse,
-    DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentFormattingParams, DocumentFormattingProvider, DocumentFormattingRequest, DocumentSymbol,
-    DocumentSymbolParams, DocumentSymbolProvider, DocumentSymbolRequest, DocumentSymbolResponse, ErrorCodes,
-    InitializeParams, InitializeRequest, InitializeResult, Location, Position, PublishDiagnosticsNotification,
-    PublishDiagnosticsParams, Range, ReferenceParams, ReferencesProvider, ReferencesRequest, ServerCapabilities,
-    ServerInfo, ShutdownRequest, SymbolInformation, TextDocumentContentChangeEvent, TextDocumentSync,
-    TextDocumentSyncKind, TextEdit,
+    BaseSymbolInformation, Contents, Definition, DefinitionParams, DefinitionProvider, DefinitionRequest,
+    DefinitionResponse, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentFormattingParams, DocumentFormattingProvider, DocumentFormattingRequest,
+    DocumentSymbol, DocumentSymbolParams, DocumentSymbolProvider, DocumentSymbolRequest, DocumentSymbolResponse,
+    ErrorCodes, Hover, HoverParams, HoverProvider, HoverRequest, InitializeParams, InitializeRequest, InitializeResult,
+    Location, MarkupContent, MarkupKind, Position, PublishDiagnosticsNotification, PublishDiagnosticsParams, Range,
+    ReferenceParams, ReferencesProvider, ReferencesRequest, ServerCapabilities, ServerInfo, ShutdownRequest,
+    SymbolInformation, TextDocumentContentChangeEvent, TextDocumentSync, TextDocumentSyncKind, TextEdit,
 };
 use redextape_core::nav::NameIndex;
 
@@ -65,6 +65,12 @@ pub struct Server {
     /// right answer for the window in which nothing has been negotiated — the same rule
     /// `encoding` follows.
     hierarchical_symbols: bool,
+    /// Whether the client listed `markdown` in `textDocument.hover.contentFormat`.
+    ///
+    /// Negotiated exactly as `hierarchical_symbols` is, and for the same reason: the client says what
+    /// it can render and the server renders that, rather than both guessing. The web client advertises
+    /// plaintext, which is what lets `web/` hold no markdown renderer for a tooltip.
+    hover_markdown: bool,
     /// Settled by `initialize`. `Utf16` until then, which is the protocol's default and the right
     /// answer for the window in which no negotiation has happened.
     encoding: Encoding,
@@ -79,7 +85,12 @@ impl Default for Server {
 impl Server {
     #[must_use]
     pub fn new() -> Self {
-        Server { documents: Documents::default(), hierarchical_symbols: false, encoding: Encoding::Utf16 }
+        Server {
+            documents: Documents::default(),
+            hierarchical_symbols: false,
+            hover_markdown: false,
+            encoding: Encoding::Utf16,
+        }
     }
 
     /// The encoding settled by `initialize`.
@@ -112,6 +123,7 @@ impl Server {
             ("textDocument/didClose", None) => self.did_close(params),
             ("textDocument/formatting", Some(id)) => vec![self.formatting(id, params)],
             ("textDocument/definition", Some(id)) => vec![self.definition(id, params)],
+            ("textDocument/hover", Some(id)) => vec![self.hover(id, params)],
             ("textDocument/references", Some(id)) => vec![self.references(id, params)],
             ("textDocument/documentSymbol", Some(id)) => vec![self.document_symbol(id, params)],
             (_, Some(id)) => vec![Outgoing::Response(ResponseObject::from_error(
@@ -143,6 +155,17 @@ impl Server {
             .and_then(|t| t.document_symbol.as_ref())
             .and_then(|d| d.hierarchical_document_symbol_support)
             .unwrap_or(false);
+        // `as_deref` rather than `as_ref`, for the same reason the `position_encodings` line above
+        // uses it: `content_format` is `Option<Vec<MarkupKind>>`, and a `&[MarkupKind]` is what can
+        // be tested without moving out of a borrow. `MarkupKind` is not `Copy` — it carries a
+        // `Custom(Cow<'static, str>)` variant — so this compares by reference.
+        self.hover_markdown = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|t| t.hover.as_ref())
+            .and_then(|h| h.content_format.as_deref())
+            .is_some_and(|formats| formats.contains(&MarkupKind::Markdown));
 
         let capabilities = ServerCapabilities {
             position_encoding: Some(self.encoding.kind()),
@@ -151,6 +174,7 @@ impl Server {
             text_document_sync: Some(TextDocumentSync::Kind(TextDocumentSyncKind::Full)),
             document_formatting_provider: Some(DocumentFormattingProvider::Bool(true)),
             definition_provider: Some(DefinitionProvider::Bool(true)),
+            hover_provider: Some(HoverProvider::Bool(true)),
             references_provider: Some(ReferencesProvider::Bool(true)),
             document_symbol_provider: Some(DocumentSymbolProvider::Bool(true)),
             // Everything else stays `None`. Diagnostics are PUSHED, via `publishDiagnostics`, which
@@ -265,6 +289,50 @@ impl Server {
             ))))
         });
         Outgoing::Response(ResponseObject::from_success::<DefinitionRequest>(id, found))
+    }
+
+    /// What the construct under the cursor means.
+    ///
+    /// **THIS DOES NOT GO THROUGH `locate`, THOUGH IT SHARES WHAT `locate` CACHES.** That helper
+    /// answers "the name under the cursor", and three of hover's seven answers are not about a name
+    /// at all — a TM rule, an asm instruction and a `.rxt` literal are resolved from the text itself,
+    /// not from an occurrence `NameIndex` records — so `locate`'s question is the wrong one for
+    /// those three, and hover does not ask it. But the *index* `locate` reaches into `doc.nav` for is
+    /// exactly what the other four rows want, and re-parsing it per request was never necessary:
+    /// `doc.nav.as_ref()` is passed straight through to `Language::hover`, which is why hover takes a
+    /// third argument now, and the four name-based rows read the same cache `definition` does.
+    ///
+    /// `null` for every case with no answer, which is what LSP says "nothing to show" is.
+    fn hover(&self, id: Id, params: serde_json::Value) -> Outgoing {
+        let params = match serde_json::from_value::<HoverParams>(params) {
+            Ok(p) => p,
+            Err(e) => return invalid_params(id, "textDocument/hover", &e),
+        };
+        let found = Some(params).and_then(|p| {
+            let pos = p.text_document_position_params;
+            let doc = self.documents.get(pos.text_document.uri.as_ref())?;
+            let offset = doc.index.offset(&doc.text, pos.position, self.encoding);
+            let answer = doc.language?.hover(&doc.text, offset, doc.nav.as_ref())?;
+            Some(Hover {
+                contents: Contents::MarkupContent(self.markup(&answer)),
+                range: Some(doc.index.range(&doc.text, answer.span, self.encoding)),
+            })
+        });
+        Outgoing::Response(ResponseObject::from_success::<HoverRequest>(id, found))
+    }
+
+    /// One answer, rendered as whatever the client said it could read.
+    ///
+    /// The answer is authored once and rendered twice; neither arm is a second copy of the words.
+    fn markup(&self, answer: &redextape_core::hover::HoverAnswer) -> MarkupContent {
+        let (kind, title) = if self.hover_markdown {
+            (MarkupKind::Markdown, format!("```\n{}\n```", answer.title))
+        } else {
+            (MarkupKind::PlainText, answer.title.clone())
+        };
+        let separator = if self.hover_markdown { "\n\n" } else { "\n" };
+        let value = std::iter::once(title).chain(answer.lines.iter().cloned()).collect::<Vec<_>>().join(separator);
+        MarkupContent { kind, value }
     }
 
     /// Every mention of the name under the cursor, in this document.
@@ -633,7 +701,7 @@ state q1: accept
         // in the target editor, so the server would be a second, competing answer to a solved
         // question. Asserted so that adding one is a deliberate edit to this line.
         assert_eq!(caps.semantic_tokens_provider, None);
-        assert_eq!(caps.hover_provider, None);
+        assert_eq!(caps.hover_provider, Some(HoverProvider::Bool(true)));
         // Slice 2 serves definition. The two assertions above it stay: they are what keeps a
         // capability this server does not serve from appearing without a decision.
         assert_eq!(caps.definition_provider, Some(DefinitionProvider::Bool(true)));
@@ -679,7 +747,10 @@ state q1: accept
         // A request MUST be answered or the client waits forever; a notification MUST NOT be,
         // because there is no id to answer to. The two halves are why this is one test.
         let mut server = Server::new();
-        let out = server.handle(request(3, "textDocument/hover", &json!({})));
+        // `textDocument/rename` rather than `textDocument/hover`: this test is about the arm that
+        // answers a method this server does not serve, and hover — which it used to name — is served
+        // as of part 3c. Swapping the assertion would have deleted the test's subject.
+        let out = server.handle(request(3, "textDocument/rename", &json!({})));
         let [Outgoing::Response(r)] = out.as_slice() else { panic!("expected one response") };
         assert_eq!(r.error().map(|e| e.code), Some(ErrorCodes::MethodNotFound));
 
@@ -1538,5 +1609,115 @@ state q1: accept
             vec![(Some(2), Some(0))],
             "the SECOND let's only reference is line 3's bare x, not line 2's own right-hand x"
         );
+    }
+
+    #[test]
+    fn hover_off_anything_this_server_can_say_nothing_about_is_null() {
+        let mut server = Server::new();
+        init_hierarchical(&mut server);
+        did_open(&mut server, "file:///a.rxlambda", "redextape_lambda", "λx. x");
+        let out = server.handle(request(
+            7,
+            "textDocument/hover",
+            &json!({ "textDocument": { "uri": "file:///a.rxlambda" }, "position": { "line": 0, "character": 3 } }),
+        ));
+        assert_eq!(success_value(&out), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn hover_over_the_three_text_forms_that_dispatch_answers_each_documents_own_content() {
+        // `hover_off_anything_this_server_can_say_nothing_about_is_null` above only ever opens a
+        // `.rxlambda` document, and `Language::hover`'s `Lambda` arm is a hard-coded `None` that
+        // never calls into `redextape_core::hover`, never looks up the document, and never computes
+        // an offset. So that test alone never proves the document lookup or the offset computation
+        // run for the three forms that DO dispatch.
+        //
+        // **THIS USED TO DRIVE THE SAME REQUEST THROUGH ALL THREE AT POSITIONS CHOSEN TO HAVE
+        // NOTHING TO SAY, BECAUSE `hover::asm` WAS AN UNCONDITIONAL STUB AND "STILL NULL" WAS THE
+        // ONLY THING THERE WAS TO ASSERT.** All three forms now answer real content, and three
+        // `null`s prove far less than three distinct sentences would: a crossed dispatch — `.tm`'s
+        // request reaching `hover::asm`, or `self.documents` handing back the wrong document for a
+        // URI — usually ALSO answers `null`, because a `.tm` rule grammar has nothing to say about
+        // `.rxt` source and vice versa (checked by hand for every pairing this test exercises). A
+        // null-only assertion cannot tell "wired correctly, nothing here" from "wired backward,
+        // nothing there either"; requiring each answer to be that document's OWN content needs BOTH
+        // the right document AND the right language handler to line up, so a crossed dispatch shows
+        // up as the wrong text (or nothing) instead of passing by coincidence.
+        //
+        // No null case here: `redextape_core::hover`'s own test modules already cover the null rule
+        // at the logic level (`rxt`'s `a_cursor_on_nothing_answers_nothing`, `tm`'s
+        // `a_malformed_rule_line_answers_nothing`), so this test's job is the dispatch plumbing
+        // around them, not re-proving that a position with nothing to say answers nothing.
+        let mut server = Server::new();
+        init_hierarchical(&mut server);
+        did_open(&mut server, "file:///a.rxt", "redextape", "let x = 1;\nx");
+        did_open(&mut server, "file:///a.tm", "redextape_tm", NAV_TM);
+        did_open(&mut server, "file:///a.asm", "redextape_asm", "result Nat\nf:\n\tret\n");
+
+        // rxt: the literal `1` on line 0 — its own "Nat" row. tm: the DEFINITION of state `scan` on
+        // line 2, character 6 (`state scan:` — the keyword itself has nothing to say, which is why
+        // the old null-answering version of this test sat there instead) — its own rule count,
+        // asserted by the word "rule" rather than by the name `scan`, since a crossed dispatch into
+        // `hover::asm`'s label fallback would answer "label state scan" for this position (`.asm`'s
+        // label grammar reads any colon-terminated line as a label, `state scan` included) and a
+        // `scan`-only assertion would not catch that. asm: the `r` of `ret` on line 2, character 1 —
+        // UNCHANGED from the position this test used when `.asm` was a stub, now answering `ret`'s
+        // hover row instead of `null`.
+        for (uri, line, character, own_content) in
+            [("file:///a.rxt", 0, 8, "Nat"), ("file:///a.tm", 2, 6, "rule"), ("file:///a.asm", 2, 1, "ret")]
+        {
+            let out = server.handle(request(
+                7,
+                "textDocument/hover",
+                &json!({ "textDocument": { "uri": uri }, "position": { "line": line, "character": character } }),
+            ));
+            let value = success_value(&out);
+            let text = value["contents"]["value"].as_str();
+            assert_eq!(
+                text.map(|t| t.contains(own_content)),
+                Some(true),
+                "hover over {uri} should answer its own content (containing `{own_content}`), got {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_hover_request_this_server_cannot_read_is_an_error_not_a_null() {
+        // The same rule `invalid_params` states for the other four handlers: a request that did not
+        // PARSE is not a question with no answer.
+        let mut server = Server::new();
+        let out =
+            server.handle(request(8, "textDocument/hover", &json!({ "textDocument": { "uri": "file:///a.tm" } })));
+        assert_eq!(error_of(&out).code, ErrorCodes::InvalidParams);
+    }
+
+    #[test]
+    fn the_markup_kind_is_the_one_the_client_advertised() {
+        // Two servers, two handshakes, one answer type. A client that lists neither format gets
+        // plaintext, which is the conservative default and what a client omitting the field means.
+        let answer = redextape_core::hover::HoverAnswer {
+            title: "t".to_string(),
+            lines: vec!["l".to_string()],
+            span: redextape_core::Span { start: 0, end: 1 },
+        };
+
+        let mut plain = Server::new();
+        plain.handle(request(1, "initialize", &json!({ "capabilities": {} })));
+        assert_eq!(plain.markup(&answer).kind, MarkupKind::PlainText);
+        assert_eq!(plain.markup(&answer).value, "t\nl");
+
+        let mut md = Server::new();
+        md.handle(request(
+            1,
+            "initialize",
+            &json!({ "capabilities": { "textDocument": { "hover": { "contentFormat": ["markdown", "plaintext"] } } } }),
+        ));
+        assert_eq!(md.markup(&answer).kind, MarkupKind::Markdown);
+        // Full equality, not `starts_with`: the markdown branch joins with `"\n\n"` while the
+        // plaintext branch above joins with `"\n"`. A `starts_with("```\nt\n```")` check is
+        // satisfied by EITHER separator — `"```\nt\n```\nl"` (the plaintext separator, copy-pasted
+        // into this branch by mistake) still starts with that prefix — so only a full-value
+        // assertion can catch the separator itself going wrong.
+        assert_eq!(md.markup(&answer).value, "```\nt\n```\n\nl");
     }
 }

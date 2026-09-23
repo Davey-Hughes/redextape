@@ -1,5 +1,5 @@
 import type { EditorState } from '@codemirror/state'
-import type { KeyBinding } from '@codemirror/view'
+import { activateHover, type KeyBinding } from '@codemirror/view'
 import type { LspClient } from './lsp-client'
 import type { LspLocation, LspPosition, LspRange } from './lsp-protocol'
 import { offsetOf } from './lsp-text'
@@ -111,12 +111,17 @@ function keyOf(l: LspLocation): number {
 }
 
 /**
- * The two navigation keys, for an editor that has a document.
+ * The three navigation keys, for an editor that has a document.
  *
  * **`F12` AND `Shift-F12`, AND THE CHOICE WAS CHECKED RATHER THAN ASSUMED.** They are what every
  * other editor binds these to, and a scan of `defaultKeymap` and `historyKeymap` — 74 bindings —
  * found no F-key among them, so neither shadows anything CodeMirror already does. They also take no
  * modifier that vim's normal mode uses, which is the constraint part 3b inherits.
+ *
+ * **`F2` IS THE THIRD, AND IT LIVES HERE RATHER THAN BESIDE THE POINTER TOOLTIP IN `lsp-hover.ts`
+ * SO ONE EDIT REACHES BOTH EDITORS.** Both editor construction sites already call this function to
+ * build their keymap, so a binding added here is the only kind of edit that reaches both without a
+ * second one somewhere else. See the binding itself for why `F2` is the key chosen.
  */
 export function navKeymap(deps: {
   readonly uri: () => string | undefined
@@ -147,6 +152,43 @@ export function navKeymap(deps: {
         const ctx = contextFor(view.state)
         if (ctx === null) return false
         void goToNextReference(ctx)
+        return true
+      },
+    },
+    {
+      // F2, and the choice was measured on both halves it has. Nothing in the app, CodeMirror or
+      // vim swallows it — a probe pressed F1/F2/F4/F8/F9 through `userEvent` and all five reached
+      // the editor. The other half a probe CANNOT show: Playwright injects keys through CDP at the
+      // renderer, so browser-chrome bindings never apply in a test. F2 is chosen because Chromium
+      // binds nothing to it, unlike F1, F3, F5, F6, F7, F10, F11 and F12.
+      //
+      // **THE FOURTH ARGUMENT IS NOT OPTIONAL, EVEN THOUGH ITS TYPE SAYS IT IS.** Calling
+      // `activateHover` with none — as an earlier version of this binding did — does not mean "no
+      // lock": CodeMirror's exported `activateHover` defaults a missing `until` to `() => false`,
+      // and `() => false` is still a function, so `HoverPlugin.activateHover`'s `done()` locks the
+      // tooltip unconditionally (it only skips the lock when `until` itself is falsy). A locked
+      // tooltip is invisible to `mousemove`'s and `mouseleave`'s own auto-close, which both check
+      // `!this.locked.has(active)` before doing anything, and `checkHover` refuses to run at all
+      // while `this.active.length` is nonzero — so the omission does not just leave the F2 tooltip
+      // open, it also stops the pointer tooltip from ever opening again in this editor. Measured by
+      // pressing F2 once and then hovering: neither closes, for the rest of the page's life.
+      //
+      // **THE POLARITY BELOW WAS READ OFF THE VENDORED SOURCE, NOT GUESSED.** The state field
+      // `hoverTooltip` builds reads `lock = locked.get(value)` and, whenever it has an active
+      // tooltip, does `else if (lock && lock(tr)) value = []` — so `until` returning `true` is what
+      // EMPTIES the field, i.e. `true` means "done, close it" and `false` means "still needed".
+      // Reading it backwards closes the tooltip on the next transaction, which looks fixed in a
+      // screenshot and fails the same way a moment later.
+      //
+      // The dismissing condition is any caret move or edit: `tr.selection !== undefined` covers a
+      // click elsewhere or an arrow key, `tr.docChanged` covers typing. Emptying the field this way
+      // is also what hands the pointer path (`lsp-hover.ts`'s `lspHover`) its ordinary hover loop
+      // back — `tests/browser/lsp-hover.test.ts` proves the half reading the source cannot: that
+      // pointer hover still runs after the dismissal.
+      key: 'F2',
+      run: (view) => {
+        const head = view.state.selection.main.head
+        activateHover(view, head, 1, { until: (tr) => tr.docChanged || tr.selection !== undefined })
         return true
       },
     },
