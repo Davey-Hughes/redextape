@@ -4,12 +4,11 @@ import type { PaneEvents } from '../../src/pane-chrome'
 import type { LambdaState } from '../../src/types'
 
 /**
- * Design §4.2's split body: the editor mounted (or not) above the existing frame renderer, and §4.1's
- * new refusal — a pane showing a link window must not offer a fork, now that `detach` carries a step
- * rather than the pane's own body text (`lambda-pane.ts`'s `#refreshDetach` doc).
+ * Design §4.2's split body: the editor mounted (or not) above the existing frame renderer, and when
+ * the fork control is offered (`lambda-pane.ts`'s `#refreshDetach` doc).
  *
  * PANES ARE CONSTRUCTED DIRECTLY, matching `view-status.test.ts`'s idiom: this is chrome and body
- * wiring built in the constructor and moved by `setEditor`/`render`/`renderLink` directly, with
+ * wiring built in the constructor and moved by `setEditor`/`render` directly, with
  * nothing on the path to it that needs `main()`.
  */
 const host = (): HTMLElement => {
@@ -101,20 +100,13 @@ describe('LambdaPane editor region', () => {
     expect(el.querySelector('[data-panel="text"] .panel-toggle')?.getAttribute('aria-expanded')).toBe('true')
   })
 
-  it('offers no fork while a link window is showing', () => {
-    // The guard that used to hold for free, before `detach` carried a step (T5).
+  // THE REFUSAL THIS FILE USED TO PIN IS GONE WITH THE LINK WINDOW (Plan 7 part 4a): the view shows the
+  // frame's own step, as a tree or as text, and there is no second body a fork could be taken from.
+  it('offers a fork once a frame is on screen, and not before', () => {
     const el = host()
     const pane = new LambdaPane(el, events())
+    expect(el.querySelector('button.detach')).toBeNull()
     pane.render(lambdaState(), CONTROLS)
     expect(el.querySelector('button.detach')).not.toBeNull()
-    pane.renderLink({
-      text: '\\x. x',
-      spans: [],
-      target: { start: 0, end: 1 },
-      origin: 0,
-      clippedHead: false,
-      clippedTail: false,
-    })
-    expect(el.querySelector('button.detach')).toBeNull()
   })
 })

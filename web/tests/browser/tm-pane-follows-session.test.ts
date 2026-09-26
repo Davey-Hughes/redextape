@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import FIXTURE from '../../../crates/redextape-core/tests/fixtures/five_minus_three_single_tape.tm?raw'
+import { LambdaTrees } from '../../src/lambda-trees'
 import type { LinkWiring } from '../../src/link-wiring'
 import type { PaneEvents } from '../../src/pane-chrome'
 import { PaneCollection } from '../../src/panes'
@@ -96,6 +97,7 @@ describe('a TM buffer whose worker died', () => {
     if (held === undefined || split === undefined) throw new Error('two panes were not made')
     const replies = createReplies({
       setProgram: () => undefined,
+      trees: new LambdaTrees(() => undefined),
       sessions: reg,
       scratchpad: buffers,
       results: document.createElement('section'),

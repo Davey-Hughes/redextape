@@ -12,28 +12,24 @@ describe('linkStatus', () => {
     )
   })
 
-  it('distinguishes the four reasons the lambda pane shows no link', () => {
-    expect(linkStatus({ state: 'linked', tm: true, lambda: 'truncated', focus: false })).toBe(
-      'the λ term is truncated before this construct',
+  it('distinguishes the reasons the λ view shows no link', () => {
+    expect(linkStatus({ state: 'linked', tm: true, lambda: 'none-here', focus: false })).toBe(
+      'this construct has no node in the λ term at this step',
     )
-    // `'unmapped'` IS WORDED DIFFERENTLY FROM `'truncated'` ON PURPOSE — see `LambdaLinkState`'s own
-    // doc. Reporting a truncation frontier that is not there ("truncated before this construct") when
-    // the real cause is that the node was never mapped at all would be checkably false.
-    expect(linkStatus({ state: 'linked', tm: true, lambda: 'unmapped', focus: false })).toBe(
-      'this construct has no recorded position in the λ term',
+    expect(linkStatus({ state: 'linked', tm: true, lambda: 'too-large', focus: false })).toBe(
+      'the λ term at this step is too large to lay out',
     )
-    expect(linkStatus({ state: 'linked', tm: true, lambda: 'not-step-0', focus: false })).toBe(
-      'the λ link is only defined at step 0 — restart the λ view to see it',
-    )
+    // `'waiting'` SAYS NOTHING: a tree one round trip away is a moment, not a state to explain.
+    expect(linkStatus({ state: 'linked', tm: true, lambda: 'waiting', focus: false })).toBe('')
     expect(linkStatus({ state: 'linked', tm: true, lambda: 'declined', focus: false })).toBe(
       'this program has no λ lowering, so no construct has a λ link',
     )
   })
 
-  // `'absent'` IS THE ONE MEMBER THAT SAYS NOTHING, and it is checked against the case where every
-  // other member would have spoken: a fully resolved TM leg and a λ state that is not `'shown'` would
-  // normally contribute a clause. There is no λ pane on screen to contribute one about — see
-  // `LambdaLinkState`'s own doc for why that suppresses `'declined'` along with the rest.
+  // `'absent'` SAYS NOTHING ABOUT λ, AS `'shown'` AND `'waiting'` DO, BUT FOR ITS OWN REASON: there is no
+  // λ pane on screen to say anything about — see `LambdaLinkState`'s own doc for why that suppresses
+  // `'declined'` along with the rest. Checked against both TM answers, so it is seen to drop the λ clause
+  // alone: the TM leg's absence still speaks.
   it('says nothing about λ when there is no λ pane to say it about', () => {
     expect(linkStatus({ state: 'linked', tm: true, lambda: 'absent', focus: false })).toBe('')
     expect(linkStatus({ state: 'linked', tm: false, lambda: 'absent', focus: false })).toBe(
@@ -117,9 +113,9 @@ describe('linkStatus · detachment', () => {
     )
   })
 
-  // ORDERED MOST-GLOBAL FIRST, the rule `link-wiring.ts`'s `lambdaLinkState` states for its own three-way
-  // choice: a pane being outside the correspondence entirely is a bigger fact than anything about
-  // what resolved inside it, and every clause after it is about the panes still inside.
+  // ORDERED MOST-GLOBAL FIRST, the rule `draw.ts`'s `createDraw` follows for the λ state: a pane being
+  // outside the correspondence entirely is a bigger fact than anything about what resolved inside it, and
+  // every clause after it is about the panes still inside.
   it('reports detachment ahead of the pin narration', () => {
     expect(linkStatus({ state: 'stale', detached: { lambda: true, tm: false } })).toBe(
       'λ view shows a copy — not linked to the program · linking resumes when this compiles',
@@ -128,14 +124,14 @@ describe('linkStatus · detachment', () => {
 
   // §4.5's standard, applied to the clauses themselves: "a thing that provably cannot work should not
   // be presented as though it might". A detached λ pane is showing a scratch term, so
-  // `LAMBDA_TEXT['truncated']` would describe a truncation in a term that is not on screen — while
+  // `LAMBDA_TEXT['none-here']` would describe a term that is not on screen — while
   // the TM clause, whose pane is still bound to the source session, stays.
   it('suppresses the λ clause for a detached λ pane and keeps the TM one', () => {
     expect(
       linkStatus({
         state: 'linked',
         tm: false,
-        lambda: 'truncated',
+        lambda: 'none-here',
         focus: false,
         detached: { lambda: true, tm: false },
       }),
@@ -150,11 +146,11 @@ describe('linkStatus · detachment', () => {
       linkStatus({
         state: 'linked',
         tm: false,
-        lambda: 'truncated',
+        lambda: 'none-here',
         focus: true,
         detached: { lambda: false, tm: true },
       }),
-    ).toBe('TM view shows a copy — not linked to the program · the λ term is truncated before this construct')
+    ).toBe('TM view shows a copy — not linked to the program · this construct has no node in the λ term at this step')
   })
 
   it('leaves only the detachment clause when both panes are detached', () => {

@@ -66,6 +66,7 @@ const PROBE_FILES = [
   'tests/browser/tm-fork-cost.test.ts',
   'tests/browser/pane-floor.test.ts',
   'tests/browser/tm-buffer-cost.test.ts',
+  'tests/browser/lambda-tree-cost.test.ts',
 ]
 const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : []
 

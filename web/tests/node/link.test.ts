@@ -66,15 +66,6 @@ describe('LinkIndex.nodeAtSource', () => {
   })
 })
 
-describe('LinkIndex.nodeAtLambda', () => {
-  it('the innermost containing span wins', () => {
-    const ix = new LinkIndex(wire())
-    expect(ix.nodeAtLambda(6)).toBe(102)
-    expect(ix.nodeAtLambda(2)).toBe(101)
-    expect(ix.nodeAtLambda(9)).toBe(100)
-  })
-})
-
 describe('LinkIndex.nodeForState', () => {
   it('resolves an owner and reports -1 as null', () => {
     const ix = new LinkIndex(wire())
@@ -91,11 +82,10 @@ describe('LinkIndex.nodeForState', () => {
 })
 
 describe('LinkIndex.linkFor', () => {
-  it('gathers all three legs, and states are ascending', () => {
+  it('gathers both legs, and states are ascending', () => {
     const ix = new LinkIndex(wire())
     expect(ix.linkFor(100)).toEqual({
       source: { start: 0, end: 17 },
-      lambda: { start: 0, end: 10 },
       states: [1, 3],
     })
   })
@@ -106,38 +96,7 @@ describe('LinkIndex.linkFor', () => {
     expect(ix.linkFor(102).states).toEqual([])
     expect(ix.linkFor(102).source).toEqual({ start: 12, end: 17 })
     // A node nobody has heard of.
-    expect(ix.linkFor(999)).toEqual({ source: null, lambda: null, states: [] })
-  })
-
-  it('a node whose lambda subterm fell past the cut has a source span and no lambda span', () => {
-    const ix = new LinkIndex(
-      wire({
-        lambdaCut: 'Bytes',
-        lambdaNodeStart: new Uint32Array([0]),
-        lambdaNodeEnd: new Uint32Array([10]),
-        lambdaNodeId: new Uint32Array([100]),
-      }),
-    )
-    expect(ix.linkFor(101).lambda).toBeNull()
-    expect(ix.linkFor(101).source).toEqual({ start: 4, end: 5 })
-  })
-})
-
-describe('LinkIndex.lambdaSpans', () => {
-  it('rehydrates class discriminants into TokenClass names', () => {
-    const ix = new LinkIndex(wire())
-    expect(ix.lambdaSpans[0]).toEqual([{ start: 0, end: 1 }, 'Punct'])
-    expect(ix.lambdaSpans[1]).toEqual([{ start: 1, end: 3 }, 'Binder'])
-    expect(ix.lambdaSpans[3]).toEqual([{ start: 5, end: 6 }, 'Ident'])
-  })
-
-  // LAZY AND CACHED, NOT REBUILT ON EVERY READ. A getter that rehydrated the wire on every access would
-  // still pass the test above but would reintroduce the per-read allocation the laziness exists to
-  // avoid; reference equality across two reads is what distinguishes "built once, cached" from "built
-  // fresh every time this property is read".
-  it('caches the rehydrated array rather than rebuilding it on every read', () => {
-    const ix = new LinkIndex(wire())
-    expect(ix.lambdaSpans).toBe(ix.lambdaSpans)
+    expect(ix.linkFor(999)).toEqual({ source: null, states: [] })
   })
 })
 

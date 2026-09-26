@@ -40,6 +40,11 @@ pub enum StepEvent {
 /// Lazy β-reduction. Holds one term, never a history — O(1) in the number of steps, where
 /// `lambda::reduce_trace` is O(steps) by contract. `reduce_trace` is written over this cursor, so the
 /// β-stepping loop exists once in the crate rather than twice.
+///
+/// **`Clone` IS A CHECKPOINT.** Every field is an `Rc`-backed term or a few words, so a clone costs a
+/// refcount bump and shares the whole term with the original; `LambdaCheckpoints` keeps one per
+/// interval and replays from it.
+#[derive(Clone)]
 pub struct LambdaCursor {
     current: LambdaTerm,
     steps: u64,
@@ -176,6 +181,64 @@ impl Iterator for LambdaCursor {
             self.status = Some(Status::Normalized);
             None
         }
+    }
+}
+
+/// Enough of a λ run's past to rebuild the cursor at any step it has reached, by replaying at most
+/// `every - 1` steps from the nearest saved one.
+///
+/// **A CLONE PER INTERVAL, NOT A TERM PER STEP.** Recording every step's term is what the frame ring
+/// cannot afford (a whole-term print of every `fact(4)` step is 99 MB); a cursor clone shares its term
+/// with every other, so memory grows with steps ÷ `every` and with the nodes reduction actually
+/// allocates, not with the size of each term.
+///
+/// THE INTERVAL IS THE CALLER'S. This module picks no renderer policy, the same rule `viewmodel.rs`
+/// states for budgets.
+pub struct LambdaCheckpoints {
+    every: u64,
+    /// Ascending by `steps_taken()`, starting with the cursor `new` was handed.
+    saved: Vec<LambdaCursor>,
+}
+
+impl LambdaCheckpoints {
+    /// Start from `start`, which is saved as the first checkpoint. An `every` of 0 is taken as 1.
+    #[must_use]
+    pub fn new(start: &LambdaCursor, every: u64) -> Self {
+        LambdaCheckpoints { every: every.max(1), saved: vec![start.clone()] }
+    }
+
+    /// Save `c` if it sits on an interval boundary past the last checkpoint. Call it after each step;
+    /// a step it misses costs replay, never correctness.
+    pub fn observe(&mut self, c: &LambdaCursor) {
+        let step = c.steps_taken();
+        let last = self.saved.last().map_or(0, LambdaCursor::steps_taken);
+        if step.is_multiple_of(self.every) && step > last {
+            self.saved.push(c.clone());
+        }
+    }
+
+    /// The steps a checkpoint sits at, ascending. A missed checkpoint costs replay and never changes
+    /// an answer, so no test that compares answers can see one; this is what a test reads instead.
+    #[must_use]
+    pub fn saved_steps(&self) -> Vec<u64> {
+        self.saved.iter().map(LambdaCursor::steps_taken).collect()
+    }
+
+    /// A cursor at exactly `step`, or `None` when the run ends before it. The caller clamps `step` to
+    /// its live cursor's position first; a step no run has reached is not a step to rebuild.
+    #[must_use]
+    pub fn at(&self, step: u64) -> Option<LambdaCursor> {
+        let i = self.saved.partition_point(|c| c.steps_taken() <= step).checked_sub(1)?;
+        let mut c = self.saved.get(i)?.clone();
+        // THE CLONE'S CAP IS LIFTED, because it is the cap the run had when the checkpoint was taken.
+        // A cap raised since then would otherwise strand every checkpoint below it, and the caller has
+        // already clamped `step` to a position its live cursor reached, so no cap has anything left to
+        // say about this replay. `raise_cap` leaves a depth-refused cursor latched, as it should.
+        c.raise_cap(u64::MAX);
+        while c.steps_taken() < step {
+            c.next()?;
+        }
+        Some(c)
     }
 }
 

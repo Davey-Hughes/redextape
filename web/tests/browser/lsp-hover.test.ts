@@ -152,6 +152,27 @@ function contentCoordsAt(v: EditorView, pos: number): { x: number; y: number } {
 }
 
 /**
+ * Move the pointer onto the character at `pos` in `v`, through `.cm-content` and `contentCoordsAt`.
+ *
+ * **IT TARGETS `.cm-content`, NOT A TOKEN'S OWN SPAN.** `userEvent.hover`'s `position` is relative to the
+ * target element's own bounding box, and `contentCoordsAt` measures from `.cm-content`; paired with a
+ * small `.tok-*` span instead, it lands the pointer somewhere else on the page entirely.
+ *
+ * **A NEW `position` FOR EVERY GESTURE, BECAUSE `userEvent.hover` SCALES THE ONE IT IS GIVEN IN PLACE.**
+ * `@vitest/browser-playwright`'s `processPlaywrightPosition` multiplies the caller's own object by the
+ * tester iframe's scale before handing it to Playwright — 0.80 in this suite's runs, measured by logging
+ * the object after each call. A position kept and passed again lands at 0.80 of its offset from
+ * `.cm-content`'s corner, then 0.64, and so on: the move case below used to keep one for its retries, so
+ * once its first attempt missed, every retry aimed further from the `4` and the case could only time out.
+ * Every pointer gesture at an offset in this file goes through here, so none can keep one.
+ */
+async function hoverOver(v: EditorView, pos: number): Promise<void> {
+  const content = v.dom.querySelector<HTMLElement>('.cm-content')
+  if (content === null) throw new Error('no .cm-content to hover over')
+  await userEvent.hover(content, { position: contentCoordsAt(v, pos) })
+}
+
+/**
  * Repeat `gesture` on `v` until `tooltipTextOf(v)` is non-null, or give up after roughly nine seconds
  * and let `until`'s own message describe the final attempt.
  *
@@ -346,7 +367,7 @@ describe('hover, through the app', () => {
     if (content === null) throw new Error('no .cm-content to hover over')
     await assertNeverOpens(editor, async () => {
       await userEvent.unhover(content)
-      await userEvent.hover(content, { position: contentCoordsAt(editor, LAMBDA_NAT_OFFSET) })
+      await hoverOver(editor, LAMBDA_NAT_OFFSET)
     })
 
     // POINTER, over an ordinary token elsewhere in the document — a SMOKE CHECK, not a discriminating
@@ -378,18 +399,13 @@ describe('hover, through the app', () => {
     const natSpan = view.dom.querySelector<HTMLElement>('.tok-nat')
     if (natSpan === null) throw new Error('no .tok-nat span to hover over — the program did not highlight')
 
-    // TARGETS `.cm-content`, LIKE THE λ CASE'S PIXEL SUB-CASE ABOVE, NOT `natSpan` ITSELF —
-    // `userEvent.hover`'s `position` is relative to the TARGET ELEMENT's own bounding box, and
-    // `contentCoordsAt` computes offsets relative to `.cm-content`; pairing it with the small
-    // `.tok-nat` span instead lands the pointer somewhere else on the page entirely.
     const content = view.dom.querySelector<HTMLElement>('.cm-content')
     if (content === null) throw new Error('no .cm-content to hover over')
 
-    // `42` is two characters. Landing on the `4` and then the `2` moves the pointer without ever
-    // leaving the literal — the case a one-character token (`PROGRAM`'s `1`, above) cannot pose.
-    const onTheFour = contentCoordsAt(view, RANGE_NAT_START)
-    const onTheTwo = contentCoordsAt(view, RANGE_NAT_START + 1)
-
+    // `42` is two characters. Landing on the `4` (`RANGE_NAT_START`) and then the `2` moves the pointer
+    // without ever leaving the literal — the case a one-character token (`PROGRAM`'s `1`, above) cannot
+    // pose. Both go through `hoverOver`, which builds each gesture's position afresh.
+    //
     // **THE WHOLE OPEN-AND-MOVE GESTURE IS RETRIED, AND THE CLAIM IS THAT ONE ATTEMPT SURVIVES IT —
     // NOT THAT EVERY ATTEMPT DOES.** An earlier draft opened once, moved once and read once, and
     // flaked at roughly one run in four: 6 passes and 2 failures over 8 runs of this file, always on
@@ -403,9 +419,12 @@ describe('hover, through the app', () => {
     // retries ever finds a survivor, so this still fails. The race closes it on SOME attempts. A
     // single survivor is therefore only reachable when the range is actually being honoured, which is
     // the property this case exists to hold.
+    //
+    // **THE FIRST ATTEMPT CAN ALSO MISS BECAUSE THE EDITOR MOVED**, when the notice the λ copy case put
+    // up expires during it — the next case has the measurement and makes that miss happen on purpose.
     await retryUntilTooltipOpens(view, async () => {
       await userEvent.unhover(content)
-      await userEvent.hover(content, { position: onTheFour })
+      await hoverOver(view, RANGE_NAT_START)
     })
     expect(tooltipTextOf(view)).toContain('0x')
 
@@ -428,10 +447,53 @@ describe('hover, through the app', () => {
 
     // Read once, never polled: polling would let a tooltip that closed and reopened on a later frame
     // pass as one that never closed, which is exactly the defect being ruled out.
-    await userEvent.hover(content, { position: onTheTwo })
+    await hoverOver(view, RANGE_NAT_START + 1)
     const afterTheMove = tooltipTextOf(view)
     expect(afterTheMove, 'a move that stayed within the same token should not have closed the tooltip').not.toBeNull()
     expect(afterTheMove).toContain('0x')
+
+    await userEvent.unhover(content)
+    await until(() => tooltipTextOf(view) === null, 'the pointer tooltip to close')
+  })
+
+  /**
+   * **A RETRIED HOVER AIMS WHERE THE FIRST ATTEMPT AIMED, AFTER THE EDITOR HAS MOVED UNDER THE POINTER.**
+   * The move case above used to time out at 15 s under full-suite load. The notice the λ copy case puts
+   * up lasts `NOTICE_MS`, eight seconds, and in runs of this file alone it expired only 7-43 ms after the
+   * move case's tooltip opened, so a little load moved the expiry into that case's first attempt. The
+   * notice line collapsing lifted the editor 28.5 px under a pointer that had not moved, so
+   * `HoverPlugin.startHover` found no character under `lastMove` when its 300 ms `hoverTime` ran out, and
+   * asked nothing. That miss is what `retryUntilTooltipOpens` is for, but every retry missed as well, for
+   * the reason in `hoverOver`'s doc.
+   *
+   * Here a line above the editor collapses 100 ms after the first attempt's pointer arrives, ahead of the
+   * 300 ms timer that attempt waits on, so the first attempt misses every time. The tooltip must still
+   * open on the `42` on a later attempt. `attempts > 1` is the check that the collapse did its job, since
+   * a pass on the first attempt would have tested nothing.
+   */
+  it('a retried pointer hover lands on the character it aimed at after the editor moves under it', async () => {
+    const content = view.dom.querySelector<HTMLElement>('.cm-content')
+    if (content === null) throw new Error('no .cm-content to hover over')
+    const main = document.querySelector('main')
+    if (main === null) throw new Error('no <main> to put a line above')
+    const line = document.createElement('div')
+    line.style.height = '30px'
+    main.before(line)
+    const collapseSoon = () => setTimeout(() => line.remove(), 100)
+
+    let attempts = 0
+    try {
+      await retryUntilTooltipOpens(view, async () => {
+        attempts++
+        await userEvent.unhover(content)
+        if (attempts === 1) view.dom.addEventListener('mousemove', collapseSoon, { once: true })
+        await hoverOver(view, RANGE_NAT_START)
+      })
+    } finally {
+      line.remove()
+    }
+    expect(attempts, 'the collapsing line should have made the first attempt miss').toBeGreaterThan(1)
+    expect(tooltipTextOf(view)).toContain('0x')
 
     await userEvent.unhover(content)
     await until(() => tooltipTextOf(view) === null, 'the pointer tooltip to close')

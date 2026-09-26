@@ -4,6 +4,7 @@ import { defaultLayout, LAYOUT_STORAGE_KEY, leaves } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
 import { parseWorkspace } from '../../src/workspace'
 import { SHELL, until } from './harness'
+import { lambdaSettled } from './lambda-text'
 
 /**
  * TWO λ PANES ON TWO λ SESSIONS, THROUGH THE APP — the claim 5d-i could assert only with hand-built
@@ -354,14 +355,16 @@ describe('two λ panes on two λ sessions', () => {
     // reproduces the identical failure message on any machine. The scratch pane reads empty straight after the
     // fork click and holds its full term once settled.
     //
-    // Each conjunct is the only false one in some state. The texts DIFFERING is the only false one just after
-    // the split, when both panes still show the scratch term. The scratch pane being non-empty is the only
-    // false one in the race above. The split pane being non-empty keeps a mid-rebind empty render from passing,
+    // Each conjunct is the only false one in some state. The scratch pane being non-empty is the only false
+    // one in the race above. The split pane being non-empty keeps a mid-rebind empty render from passing,
     // which would race the source-pane assertion below the same way. Text rather than the fork control the
     // other rebinds in this file wait for, because what the snapshot needs settled is the TERM.
-    await until(
-      () => textOf(first ?? '') !== '' && textOf(second ?? '') !== '' && textOf(second ?? '') !== textOf(first ?? ''),
-    )
+    // BOTH NON-EMPTY, AND NOT YET DIFFERENT. The copy is forked from the program's frontier, so before the edit
+    // both views show one term — and since Plan 7 part 4a both draw it the same way, as the chip `42`, where
+    // the flat views used to differ. The edit below is what makes the two sessions' terms differ.
+    await lambdaSettled(first ?? '')
+    await lambdaSettled(second ?? '')
+    await until(() => textOf(first ?? '') !== '' && textOf(second ?? '') !== '')
 
     // 4. Edit the scratch so the two sessions genuinely differ — `typeInto`, a REAL CodeMirror
     // transaction through `EditorView.findFromDOM`. Its own doc carries the argument this comment

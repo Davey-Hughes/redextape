@@ -33,7 +33,9 @@ export class SessionClient {
         // repaint reading the flag while it was still set would paint the withdrawal one frame after
         // the window it describes had already closed. Idempotent after the first reply of a
         // generation, which is why it is unconditional rather than guarded.
-        this.#awaitingRun = false
+        // A TREE IS NOT A RUN'S ANSWER. It arrives between record chunks, often while the run is still
+        // in flight, and letting it clear the flag would end "running…" before the run said anything.
+        if (e.data.kind !== 'lambda-tree') this.#awaitingRun = false
         onReply(e.data)
       }
     })
@@ -139,6 +141,19 @@ export class SessionClient {
   extend(leg: Leg): void {
     if (this.#gen === 0) return
     this.#port.postMessage({ kind: 'extend', gen: this.#gen, leg })
+  }
+  /** This client's generation — the one a `lambda-tree` request must carry to be answered. */
+  get gen(): number {
+    return this.#gen
+  }
+
+  /**
+   * Ask for the λ tree at `step` (spec §4.1). Not a supersede: it names the live generation and builds
+   * nothing, so it is posted as `extend` is, and never before the first build.
+   */
+  tree(step: number, budget: number): void {
+    if (this.#gen === 0) return
+    this.#port.postMessage({ kind: 'lambda-tree', gen: this.#gen, step, budget })
   }
 }
 

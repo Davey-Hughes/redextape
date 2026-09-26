@@ -60,10 +60,9 @@ fn generated() -> Vec<(&'static str, String)> {
 /// would tell the next reader not to check.
 ///
 /// THE SCAN SKIPS JSDOC. `export_to_string` reproduces Rust doc comments verbatim, so a doc comment
-/// that merely discusses `bigint` in prose — as `viewmodel::TermNode`'s already does, for a type this
-/// gate does not cover — would otherwise fail this test for a documentation reason having nothing to
-/// do with the generated type. `without_doc_comments` removes exactly the JSDoc ts-rs emits before the
-/// scan runs.
+/// that merely discusses `bigint` in prose would otherwise fail this test for a documentation reason
+/// having nothing to do with the generated type. `without_doc_comments` removes exactly the JSDoc ts-rs
+/// emits before the scan runs.
 #[test]
 fn no_generated_type_carries_bigint() {
     for (name, ts) in generated() {

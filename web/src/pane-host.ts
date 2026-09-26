@@ -14,11 +14,13 @@ import {
 import { renderLayout, renderStage, syncSizes } from './layout-view'
 import type { PaneChoice, PaneEvents } from './pane-chrome'
 import type { LeafId, PaneCollection, PaneKind } from './panes'
-import { type Leg, ruleCount } from './protocol'
+import type { Leg } from './protocol'
 import type { Detachable } from './scratch'
 import type { SessionId } from './session-client'
 import { type Binding, PaneSlot, type TmCompiled, type TmScratchReading } from './sessions'
 import { TmPane } from './tm-pane'
+import { seedTm } from './tm-seed'
+import { DEFAULT_DISPLAY, type LambdaDisplay } from './workspace'
 
 /**
  * THE PANE LIFECYCLE — which panes exist, what element each one lives in, and what its controls do —
@@ -180,7 +182,10 @@ export function createPaneHost(deps: {
   focusedLeaf(): LeafId
   /** A view's title, in the title-selector's own spelling — a Stage tab's label (spec §5, §7). */
   viewTitle(id: LeafId): string
-  /** Write the whole workspace — tree, switches, speed, focus, panels — to storage (`main.ts`'s `persistWorkspace`). */
+  /**
+   * Write the whole workspace to storage — every field of `Workspace`, each λ view's display among them
+   * (`main.ts`'s `persistWorkspace`).
+   */
   persist(): void
   /** Record that `id` is the view the user is in. */
   setFocused(id: LeafId): void
@@ -188,6 +193,10 @@ export function createPaneHost(deps: {
   panelOpen(leaf: LeafId, name: string): boolean | undefined
   /** Record a view's panel state; `persist` is the caller's to make. */
   setPanel(leaf: LeafId, name: string, open: boolean): void
+  /** A λ view's stored display settings, or `undefined` for none (Plan 7 part 4a). */
+  displayOf(leaf: LeafId): LambdaDisplay | undefined
+  /** Record a λ view's display settings; `persist` is the caller's to make. */
+  setDisplay(leaf: LeafId, d: LambdaDisplay): void
   /** A view was added, closed, or switched to show something else — `main.ts` says it as a notice (spec §11). */
   layoutChanged(e: LayoutEvent): void
   draw(): void
@@ -251,6 +260,8 @@ export function createPaneHost(deps: {
     setFocused,
     panelOpen,
     setPanel,
+    displayOf,
+    setDisplay,
     layoutChanged,
     draw,
     tmProgramOf,
@@ -341,12 +352,7 @@ export function createPaneHost(deps: {
    * also has `tmText: null`, and that is a question this module does not ask of a session.
    */
   const seedTmPane = (pane: TmPane, session: SessionId): void => {
-    const compiled = tmProgramOf(session)
-    pane.setProgram(compiled?.program ?? null, compiled?.tapeNames ?? [])
-    pane.setForkAvailable(compiled?.tmText ?? null, compiled === null ? 0 : ruleCount(compiled.program))
-    const reading = tmScratchOf(session)
-    pane.setScratchStatus(reading?.status ?? null)
-    pane.setScratchValue(reading?.value ?? null)
+    seedTm(pane, tmProgramOf(session), tmScratchOf(session))
   }
 
   /**
@@ -781,6 +787,10 @@ export function createPaneHost(deps: {
         setPanel(id, name, open)
         persist()
       },
+      display: (d: LambdaDisplay) => {
+        setDisplay(id, d)
+        persist()
+      },
     }
   }
 
@@ -1009,7 +1019,12 @@ export function createPaneHost(deps: {
       pendingBinding.delete(l.id)
       if (l.pane === 'lambda') {
         const slot = new PaneSlot('lambda', session)
-        const pane = new LambdaPane(host, paneEvents(l.id, slot))
+        // ITS DISPLAY IS READ BACK LIKE A TM VIEW'S PANELS BELOW — stored per leaf, defaulted when absent.
+        const map = panelOpen(l.id, 'map')
+        const pane = new LambdaPane(host, paneEvents(l.id, slot), {
+          display: displayOf(l.id) ?? DEFAULT_DISPLAY,
+          ...(map === undefined ? {} : { map }),
+        })
         // **A NEW λ PANE IS SEEDED FROM ITS SESSION FOR THE IDENTICAL REASON THE TM BRANCH BELOW IS**,
         // and this line is the λ half of a repair that shipped with only its TM half. `scratch-compiled`
         // is the reply that mounts a scratch editor and it fires once per build, so a pane created after

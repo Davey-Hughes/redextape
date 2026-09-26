@@ -5,6 +5,7 @@
 //! a browser while `cargo llvm-cov` instruments the native build, so any logic living in the shell is
 //! uncovered by construction and drags the workspace's 80% floor down with it.
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use redextape_core::core::NodeId;
@@ -12,8 +13,8 @@ use redextape_core::lambda::{self, LambdaTerm, LowerError};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::machine::Machine;
 use redextape_core::tm::{self, EncodingKind, Symbol, Tape, TmRun};
-use redextape_core::trace::{LambdaCursor, TmCursor};
-use redextape_core::viewmodel::{LambdaState, LinkIndex, TermTree, TmProgram, TmState};
+use redextape_core::trace::{LambdaCheckpoints, LambdaCursor, TmCursor};
+use redextape_core::viewmodel::{LambdaState, LambdaTree, LinkIndex, TmProgram, TmState, TreeAnswer};
 use redextape_core::{Diagnostic, Severity, Span, lints, parser, typeck};
 
 /// The deepest term any print through the session may walk — the two big-budget prints
@@ -305,7 +306,7 @@ pub struct Session {
     /// `decode_tape_ty(&tapes, &ty, enc)`. `compile` computes it for `run_tm_described` and passed
     /// it away; decoding is type-directed, so a session that discarded it could not decode anything.
     pub(crate) ty: redextape_core::ty::Ty,
-    pub(crate) lambda: Result<LambdaCursor, LowerError>,
+    pub(crate) lambda: Result<LambdaLeg, LowerError>,
     /// The INITIAL lowered term, kept so `link_index` can print step 0 after the cursor has moved.
     ///
     /// ONE `Rc` BUMP, NOT A COPY. `LambdaTerm` is `Rc`-backed and persistent, so retaining the root
@@ -422,6 +423,66 @@ fn tm_leg_at(
     (program, cursor)
 }
 
+/// How many β-steps apart the λ leg's checkpoints sit: a tree for any past step is rebuilt by replaying
+/// at most this many minus one. Spec §4.2: a whole `fact(4)` run re-reduces in about 13 ms natively,
+/// so 255 steps of it cost well under a millisecond.
+pub const LAMBDA_CHECKPOINT_EVERY: u64 = 256;
+
+/// A λ cursor and the checkpoints that let a past step be rebuilt, TRAVELLING TOGETHER, for the reason
+/// the `tm` field's doc gives for pairing a cursor with its program: a cursor that moved without its
+/// checkpoints seeing it would rebuild past steps from a history it never had. `step` is the one method
+/// that advances the cursor, and it shows every step to the checkpoints; `run_lambda_cursor` advances
+/// through it.
+///
+/// **THE TYPE DOES NOT ENFORCE THAT ALONE.** `cursor` is `pub(crate)` so the session can read it and
+/// raise its cap, which moves nothing, and a `next()` called on it directly would advance it unseen.
+/// Nothing in the crate makes that call; the pairing holds because every advance goes through `step`.
+pub(crate) struct LambdaLeg {
+    pub(crate) cursor: LambdaCursor,
+    marks: LambdaCheckpoints,
+}
+
+/// A tree for the step a caller asked for, and the step it actually is.
+///
+/// **`step` IS AN ANSWER, NOT AN ECHO.** A request past the live cursor is clamped to where the run
+/// has reached, and the reply says so, so a view never draws one step's tree under another's number.
+#[derive(Debug)]
+pub struct TreeAt {
+    pub step: u64,
+    pub answer: TreeAnswer,
+}
+
+impl LambdaLeg {
+    pub(crate) fn new(term: &LambdaTerm, cap: u64) -> LambdaLeg {
+        let cursor = LambdaCursor::new(term, cap);
+        let marks = LambdaCheckpoints::new(&cursor, LAMBDA_CHECKPOINT_EVERY);
+        LambdaLeg { cursor, marks }
+    }
+
+    /// Advance one β-step; `false` once the run has ended.
+    pub(crate) fn step(&mut self) -> bool {
+        let stepped = self.cursor.next().is_some();
+        if stepped {
+            self.marks.observe(&self.cursor);
+        }
+        stepped
+    }
+
+    /// The tree at `step`, clamped to the live cursor. `links` is consulted only at step 0, where
+    /// `node_to_lambda`'s paths are coordinates into the term being built (spec §4.3).
+    pub(crate) fn tree(&self, step: u64, node_budget: usize, links: &BTreeMap<NodeId, lambda::Path>) -> TreeAt {
+        let live = self.cursor.steps_taken();
+        let wanted = step.min(live);
+        // `at` rebuilds any step up to `live`, so its `None` is unreachable here; the live cursor is
+        // the honest fallback, because `TreeAt` reports the step it answers rather than the one asked.
+        let cursor = if wanted == live { None } else { self.marks.at(wanted) };
+        let c = cursor.as_ref().unwrap_or(&self.cursor);
+        let empty = BTreeMap::new();
+        let links = if c.steps_taken() == 0 { links } else { &empty };
+        TreeAt { step: c.steps_taken(), answer: LambdaTree::build(c.term(), c.last_redex(), links, node_budget) }
+    }
+}
+
 /// Where a λ cursor's run stands, as the four-state `RunStatus` a renderer switches on.
 ///
 /// **THE ONE PLACE THIS MAPPING LIVES**, because §3.3 puts the whole λ leg on `LambdaScratch`
@@ -441,22 +502,22 @@ fn lambda_run_status(c: &LambdaCursor) -> RunStatus {
     }
 }
 
-/// Advance `c` up to `budget` β-steps, then report where the run stands. The shared body of
+/// Advance `leg` up to `budget` β-steps, then report where the run stands. The shared body of
 /// `Session::run_lambda` and `LambdaScratch::run_lambda`; the two differ only in how they reach a
-/// cursor, and `Session::run_lambda`'s doc carries the argument for why this is chunked at all.
+/// leg, and `Session::run_lambda`'s doc carries the argument for why this is chunked at all.
 ///
 /// **A SPENT `budget` LEAVES THE RUN `Running`, AND THAT FALLS OUT OF THE LOOP RATHER THAN BEING
 /// ASSERTED.** Nothing here writes a status: the answer comes from `lambda_run_status` reading the
 /// cursor afterwards, and a cursor whose own cap is untouched reports `Running` however many chunks
 /// have been spent against it. Folding the two together is the defect `RunStatus` was introduced to
 /// prevent one layer in.
-fn run_lambda_cursor(c: &mut LambdaCursor, budget: u64) -> RunStatus {
+fn run_lambda_cursor(leg: &mut LambdaLeg, budget: u64) -> RunStatus {
     for _ in 0..budget {
-        if c.next().is_none() {
+        if !leg.step() {
             break;
         }
     }
-    lambda_run_status(c)
+    lambda_run_status(&leg.cursor)
 }
 
 /// A `Value` already in hand — decoded or freshly evaluated — printed through the CAPPED printer.
@@ -571,7 +632,7 @@ impl Session {
         let (core, map) = SourceMap::build_from_program(&program, &*enc);
 
         let (lambda, initial_lambda) = match lambda::lower(&core) {
-            Ok(t) => (Ok(LambdaCursor::new(&t, lambda::MAX_REDUCTION_STEPS)), Some(t)),
+            Ok(t) => (Ok(LambdaLeg::new(&t, lambda::MAX_REDUCTION_STEPS)), Some(t)),
             Err(e) => (Err(e), None),
         };
 
@@ -633,9 +694,12 @@ impl Session {
 
     pub fn lambda_status(&self) -> LambdaStatus {
         match &self.lambda {
-            Ok(c) => {
-                LambdaStatus { available: true, reason: String::new(), node: None, run: Some(lambda_run_status(c)) }
-            }
+            Ok(leg) => LambdaStatus {
+                available: true,
+                reason: String::new(),
+                node: None,
+                run: Some(lambda_run_status(&leg.cursor)),
+            },
             Err(e) => {
                 let (reason, node) = match e {
                     LowerError::StatefulClosure { node } => {
@@ -657,8 +721,8 @@ impl Session {
     /// **`false` DOES NOT SAY WHICH; `lambda_status().run` DOES.** Deciding whether to offer a
     /// "continue" affordance means telling `Capped` from the other two, and this return value cannot.
     pub fn step_lambda(&mut self) -> Result<bool, SessionError> {
-        let c = self.lambda.as_mut().map_err(|_| SessionError::LambdaAbsent)?;
-        Ok(c.next().is_some())
+        let leg = self.lambda.as_mut().map_err(|_| SessionError::LambdaAbsent)?;
+        Ok(leg.step())
     }
 
     /// Advance up to `budget` β-steps, then report how the run stands.
@@ -683,8 +747,8 @@ impl Session {
     /// was handed, so there is no `Option` to unwrap and no unreachable arm to justify. Same values,
     /// one fewer state spellable — the shape argument the `tm` field's own doc makes.
     pub fn run_lambda(&mut self, budget: u64) -> Result<RunStatus, SessionError> {
-        let c = self.lambda.as_mut().map_err(|_| SessionError::LambdaAbsent)?;
-        Ok(run_lambda_cursor(c, budget))
+        let leg = self.lambda.as_mut().map_err(|_| SessionError::LambdaAbsent)?;
+        Ok(run_lambda_cursor(leg, budget))
     }
 
     /// `LambdaState::render(cursor, byte_budget, depth_cap)` and nothing else — PR 2 removed the map and redex
@@ -692,25 +756,23 @@ impl Session {
     /// `redex`/`redex_span`/`owner` fields 5c added to the returned `LambdaState` are all read off the cursor
     /// inside `render`, so nothing had to come back in here.
     pub fn lambda_state(&self, byte_budget: usize) -> Result<LambdaState, SessionError> {
-        let c = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
-        Ok(LambdaState::render(c, byte_budget, MAX_PRINT_DEPTH))
+        let leg = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
+        Ok(LambdaState::render(&leg.cursor, byte_budget, MAX_PRINT_DEPTH))
     }
 
-    /// The term as a flat tree, or `None` when it exceeds `node_budget` — `None` rather than a partial
-    /// tree, because a truncated AST is a lie about the term's shape.
-    ///
-    /// The payload is an ARENA (`TermTree`), not a tree of boxes, so neither serializing it across the
-    /// boundary nor dropping it afterwards recurses. See `viewmodel::TermTree`.
-    pub fn lambda_ast(&self, node_budget: usize) -> Result<Option<TermTree>, SessionError> {
-        let c = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
-        Ok(LambdaState::ast(c, node_budget))
+    /// The term at `step` as a `LambdaTree`, or the term's size when it exceeds `node_budget` (spec
+    /// §4). At step 0 it carries `node_to_lambda`'s links, so every construct the map places is
+    /// reachable; at a later step, the owner tags.
+    pub fn lambda_tree(&self, step: u64, node_budget: usize) -> Result<TreeAt, SessionError> {
+        let leg = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
+        Ok(leg.tree(step, node_budget, &self.map.node_to_lambda))
     }
 
     /// Extend a capped run's budget. Additive and saturating; clears `HitCap` only when the STEP CAP
     /// produced it, never the depth guard — extending a budget cannot make a term shallower.
     pub fn raise_lambda_cap(&mut self, extra: u64) -> Result<(), SessionError> {
-        let c = self.lambda.as_mut().map_err(|_| SessionError::LambdaAbsent)?;
-        c.raise_cap(extra);
+        let leg = self.lambda.as_mut().map_err(|_| SessionError::LambdaAbsent)?;
+        leg.cursor.raise_cap(extra);
         Ok(())
     }
 
@@ -729,11 +791,11 @@ impl Session {
     /// `Some(v)` — the decode succeeded — and only `decoded_value`'s capped print refused, because
     /// `v`'s logical size exceeds `MAX_PRINT_NODES`. See `Decoded`'s own doc.
     pub fn lambda_value(&self) -> Result<Decoded, SessionError> {
-        let c = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
+        let leg = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
         if self.lambda_status().run != Some(RunStatus::Ended) {
             return Ok(Decoded::Unfinished);
         }
-        Ok(decoded_or_undecodable(lambda::decode_lambda_ty(c.term(), &self.ty)))
+        Ok(decoded_or_undecodable(lambda::decode_lambda_ty(leg.cursor.term(), &self.ty)))
     }
 
     /// Rebuild the λ cursor with a small cap, so a test has something to raise from. TEST-ONLY: there
@@ -742,9 +804,9 @@ impl Session {
     /// silently discard progress on any other.
     #[cfg(test)]
     fn cap_lambda_at(&mut self, cap: u64) {
-        if let Ok(c) = &mut self.lambda {
-            let fresh = LambdaCursor::new(c.term(), cap);
-            *c = fresh;
+        if let Ok(leg) = &mut self.lambda {
+            let fresh = LambdaLeg::new(leg.cursor.term(), cap);
+            *leg = fresh;
         }
     }
 
@@ -943,7 +1005,7 @@ impl Session {
         self.map.source_span(node)
     }
 
-    /// Everything a renderer needs to link one construct across three panes, for THIS compile.
+    /// The step-0 link index for THIS compile — `LinkIndex`'s doc says which half the web app still reads.
     ///
     /// BUILT ON DEMAND RATHER THAN CACHED, and called once per compile by the worker. Caching it
     /// would pay the print for every program including the ones nobody clicks into, and the caller
@@ -996,7 +1058,7 @@ pub struct Scratched<T> {
 /// linking affordances 5b and 5c built, and neither exists here — see §4.5 for why that has to be said
 /// out loud in the UI rather than merely being true.
 pub struct LambdaScratch {
-    lambda: LambdaCursor,
+    lambda: LambdaLeg,
 }
 
 /// Build a λ scratchpad from λ TEXT — not from source, and not from a `Session`.
@@ -1013,7 +1075,7 @@ pub struct LambdaScratch {
 /// by a diagnostic, so this cannot produce a silent empty answer.
 pub fn lambda_scratch(src: &str) -> Scratched<LambdaScratch> {
     let (term, diagnostics) = lambda::parse_lambda(src);
-    let scratch = term.map(|t| LambdaScratch { lambda: LambdaCursor::new(&t, lambda::MAX_REDUCTION_STEPS) });
+    let scratch = term.map(|t| LambdaScratch { lambda: LambdaLeg::new(&t, lambda::MAX_REDUCTION_STEPS) });
     Scratched { diagnostics, scratch }
 }
 
@@ -1094,7 +1156,12 @@ impl LambdaScratch {
     /// The struct is shared with `Session` rather than narrowed so one renderer can read either kind of
     /// session's λ leg through one shape; `run` is the field it actually switches on.
     pub fn lambda_status(&self) -> LambdaStatus {
-        LambdaStatus { available: true, reason: String::new(), node: None, run: Some(lambda_run_status(&self.lambda)) }
+        LambdaStatus {
+            available: true,
+            reason: String::new(),
+            node: None,
+            run: Some(lambda_run_status(&self.lambda.cursor)),
+        }
     }
 
     /// Advance one β-step. `false` once the run has ended — `lambda_status().run` says which.
@@ -1106,7 +1173,7 @@ impl LambdaScratch {
     /// type is unchanged either way (`Result<bool, JsValue>` and `bool` both cross as `boolean`), so
     /// nothing on the TypeScript side pays for this.
     pub fn step_lambda(&mut self) -> bool {
-        self.lambda.next().is_some()
+        self.lambda.step()
     }
 
     /// Advance up to `budget` β-steps, then report how the run stands. Chunked for the reason
@@ -1122,18 +1189,19 @@ impl LambdaScratch {
     /// (see `MAX_PRINT_DEPTH`), and a scratch prints through the same worker; a scratch that printed
     /// deeper would poison the module the same way.
     pub fn lambda_state(&self, byte_budget: usize) -> LambdaState {
-        LambdaState::render(&self.lambda, byte_budget, MAX_PRINT_DEPTH)
+        LambdaState::render(&self.lambda.cursor, byte_budget, MAX_PRINT_DEPTH)
     }
 
-    /// The term as a flat arena, or `None` over `node_budget` — never a partial tree.
-    pub fn lambda_ast(&self, node_budget: usize) -> Option<TermTree> {
-        LambdaState::ast(&self.lambda, node_budget)
+    /// The term at `step` as a `LambdaTree`. A scratch has no `SourceMap`, so its trees carry owner
+    /// tags only — and a scratch's term was parsed from text, so it has none of those either.
+    pub fn lambda_tree(&self, step: u64, node_budget: usize) -> TreeAt {
+        self.lambda.tree(step, node_budget, &BTreeMap::new())
     }
 
     /// Extend a capped run's budget. Additive and saturating; clears `HitCap` only when the STEP CAP
     /// produced it, never the depth guard.
     pub fn raise_lambda_cap(&mut self, extra: u64) {
-        self.lambda.raise_cap(extra);
+        self.lambda.cursor.raise_cap(extra);
     }
 
     /// Rebuild the cursor with a small cap, so a test has something to raise from. TEST-ONLY, for the
@@ -1142,7 +1210,7 @@ impl LambdaScratch {
     /// five million β-steps on a divergent term.
     #[cfg(test)]
     fn cap_lambda_at(&mut self, cap: u64) {
-        self.lambda = LambdaCursor::new(self.lambda.term(), cap);
+        self.lambda = LambdaLeg::new(self.lambda.cursor.term(), cap);
     }
 }
 
@@ -1603,7 +1671,7 @@ mod tests {
         assert!(!s.lambda_status().reason.is_empty(), "the reason is the payload the UI needs");
         assert!(s.lambda_status().node.is_some(), "the refusal names a Core node for the source pane");
         assert_eq!(s.lambda_state(usize::MAX), Err(SessionError::LambdaAbsent), "no state without a leg");
-        assert_eq!(s.lambda_ast(usize::MAX), Err(SessionError::LambdaAbsent));
+        assert_eq!(s.lambda_tree(0, usize::MAX).err(), Some(SessionError::LambdaAbsent));
     }
 
     /// `step_lambda() == false` is the SAME answer for three different endings, and only one of them
@@ -1843,11 +1911,127 @@ mod tests {
         assert_eq!(s.run_lambda(10), Err(SessionError::LambdaAbsent));
     }
 
+    const FACT3: &str = "fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact(3)";
+
+    fn tree(at: &TreeAt) -> &LambdaTree {
+        match &at.answer {
+            TreeAnswer::Tree(t) => t,
+            TreeAnswer::Refused { nodes } => panic!("refused a {nodes}-node term"),
+        }
+    }
+
+    /// A past step is rebuilt, not approximated: stepping 600 then asking for 300 answers exactly the
+    /// tree a session stepped straight to 300 answers — across a checkpoint boundary, so by replay.
     #[test]
-    fn the_lambda_ast_refuses_a_budget_it_cannot_meet_and_answers_one_it_can() {
-        let s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
-        assert!(s.lambda_ast(1).expect("λ available").is_none(), "a 1-node budget must refuse, not truncate");
-        assert!(s.lambda_ast(usize::MAX).expect("λ available").is_some());
+    fn a_tree_for_a_past_step_is_the_tree_that_step_had() {
+        let mut far = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
+        for _ in 0..600 {
+            assert!(far.step_lambda().expect("λ available"));
+        }
+        let mut near = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
+        for _ in 0..300 {
+            assert!(near.step_lambda().expect("λ available"));
+        }
+        let past = far.lambda_tree(300, usize::MAX).expect("λ available");
+        let live = near.lambda_tree(300, usize::MAX).expect("λ available");
+        assert_eq!((past.step, &past.answer), (300, &live.answer));
+    }
+
+    /// `run_lambda` advances through the same checkpointed step as `step_lambda`, so a run driven in
+    /// chunks rebuilds its past steps too.
+    #[test]
+    fn a_chunked_run_rebuilds_its_past_steps_too() {
+        let mut chunked = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
+        assert_eq!(chunked.run_lambda(700).expect("λ available"), RunStatus::Running);
+        let mut stepped = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
+        for _ in 0..513 {
+            assert!(stepped.step_lambda().expect("λ available"));
+        }
+        assert_eq!(
+            chunked.lambda_tree(513, usize::MAX).expect("λ available").answer,
+            stepped.lambda_tree(513, usize::MAX).expect("λ available").answer
+        );
+    }
+
+    /// Both ways a λ leg advances take checkpoints — `step_lambda` one step at a time and `run_lambda`
+    /// in chunks — which no answer-comparing test can see, because a missed checkpoint only costs replay.
+    #[test]
+    fn both_advance_paths_take_checkpoints() {
+        let mut s = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
+        assert_eq!(s.run_lambda(300).expect("λ available"), RunStatus::Running);
+        for _ in 0..300 {
+            assert!(s.step_lambda().expect("λ available"));
+        }
+        let leg = s.lambda.as_ref().expect("λ available");
+        assert_eq!(leg.marks.saved_steps(), vec![0, 256, 512]);
+    }
+
+    /// A step the run has not reached is clamped to where it has, and the answer says which step it is.
+    #[test]
+    fn a_tree_past_the_live_step_answers_the_live_step() {
+        let mut s = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
+        for _ in 0..10 {
+            assert!(s.step_lambda().expect("λ available"));
+        }
+        assert_eq!(
+            s.lambda_tree(20, usize::MAX).expect("λ available").step,
+            10,
+            "a step inside the run, not yet reached"
+        );
+        assert_eq!(s.lambda_tree(1_000_000, usize::MAX).expect("λ available").step, 10, "a step past the run's end");
+    }
+
+    /// Step 0 carries `node_to_lambda`'s links; every later step carries exactly its owner tags — the tree
+    /// built with no links at all. Checked at every step of the run, because a step-0 path stops resolving
+    /// once the root redex is contracted, and a sabotage that leaked the links past step 0 shows only
+    /// at a step where some path still lands.
+    #[test]
+    fn only_step_zero_carries_the_path_links() {
+        let mut s = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
+        let zero = s.lambda_tree(0, usize::MAX).expect("λ available");
+        let placed: std::collections::BTreeSet<_> = s.map.node_to_lambda.keys().copied().collect();
+        let linked: std::collections::BTreeSet<_> = tree(&zero).link.iter().copied().collect();
+        assert!(placed.iter().all(|id| linked.contains(id)), "every construct the map places links at step 0");
+        let mut k = 0;
+        while s.step_lambda().expect("λ available") {
+            k += 1;
+            let leg = s.lambda.as_ref().expect("λ available");
+            let tags_only = LambdaTree::build(leg.cursor.term(), leg.cursor.last_redex(), &BTreeMap::new(), usize::MAX);
+            assert_eq!(s.lambda_tree(k, usize::MAX).expect("λ available").answer, tags_only, "step {k}");
+        }
+    }
+
+    /// A cap raised after a checkpoint was taken does not strand it: the replay lifts the clone's cap.
+    #[test]
+    fn a_raised_cap_does_not_strand_a_checkpoint() {
+        let mut s = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
+        s.cap_lambda_at(3);
+        while s.step_lambda().expect("λ available") {}
+        s.raise_lambda_cap(1_000_000).expect("λ available");
+        for _ in 0..20 {
+            assert!(s.step_lambda().expect("λ available"));
+        }
+        assert_eq!(s.lambda_tree(15, usize::MAX).expect("λ available").step, 15);
+    }
+
+    #[test]
+    fn a_tree_over_budget_is_refused_with_its_size() {
+        let s = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
+        let at = s.lambda_tree(0, 1).expect("λ available");
+        assert!(matches!(at.answer, TreeAnswer::Refused { nodes } if nodes > 1), "{:?}", at.answer);
+        assert_eq!(
+            Session::compile(LAMBDA_DECLINES, EncodingKind::Unary).session.expect("TM").lambda_tree(0, 1).err(),
+            Some(SessionError::LambdaAbsent)
+        );
+    }
+
+    #[test]
+    fn a_scratch_tree_clamps_and_carries_no_links() {
+        let mut sc = lambda_scratch("(\\x. x x) ((\\y. y) (\\z. z))").scratch.expect("parses");
+        assert!(sc.step_lambda());
+        let at = sc.lambda_tree(99, usize::MAX);
+        assert_eq!(at.step, 1);
+        assert!(tree(&at).link.iter().all(|&l| l == redextape_core::viewmodel::tree::NO_LINK));
     }
 
     // --- the λ scratchpad ------------------------------------------------------------------------
@@ -1941,10 +2125,10 @@ mod tests {
     }
 
     #[test]
-    fn the_lambda_ast_on_a_scratch_refuses_a_budget_it_cannot_meet() {
+    fn the_lambda_tree_on_a_scratch_refuses_a_budget_it_cannot_meet() {
         let sc = lambda_scratch("(\\x. x) (\\y. y)").scratch.expect("parses");
-        assert!(sc.lambda_ast(1).is_none(), "a 1-node budget must refuse, not truncate");
-        assert!(sc.lambda_ast(usize::MAX).is_some());
+        assert!(matches!(sc.lambda_tree(0, 1).answer, TreeAnswer::Refused { .. }), "a 1-node budget must refuse");
+        assert!(matches!(sc.lambda_tree(0, usize::MAX).answer, TreeAnswer::Tree(_)));
     }
 
     // --- the fork -------------------------------------------------------------------------------

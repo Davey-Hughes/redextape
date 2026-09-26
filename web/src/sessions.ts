@@ -674,8 +674,8 @@ export class PaneSlot<K extends Leg> {
    * binding and of the registry, and the registry changes under a slot that did not move — a session
    * added or retired elsewhere changes what this pane may be pointed at. Driving them from the one
    * per-frame call means there is no second path that could leave a selector listing a session that no
-   * longer exists; both setters are no-ops when nothing changed, which is the same guard
-   * `LambdaPane.renderLink` and `viewHeader`'s setters already state for the same path.
+   * longer exists; both setters are no-ops when nothing changed, which is the same guard `viewHeader`'s
+   * setters already state for the same path.
    */
   render(reg: SessionRegistry, pane: PaneView<LegFrame[K]>, leg: LegState<LegFrame[K]>): void {
     const b = this.#binding

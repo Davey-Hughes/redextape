@@ -9,8 +9,8 @@
 // eight programs was 29.4% — nowhere close. One program crossing is not "more than one", so
 // the gate did not trip: `WITHIN` RENDERS AS A HIGHLIGHT, same as `Exact`, just visibly weaker — see
 // `main.ts`'s `draw()` for the wiring and `style.css`'s `.is-focus-within` for the weaker treatment.
-import type { Classified, Cut, Owner, Span } from './types'
-import { ownerNode, TOKEN_CLASSES } from './types'
+import type { Cut, Owner, Span } from './types'
+import { ownerNode } from './types'
 
 /**
  * `linkIndex(byteBudget)`'s wire shape: one string, one nullable cut, and ten typed arrays.
@@ -34,8 +34,12 @@ export type LinkIndexWire = {
   tmOwner: Int32Array
 }
 
-/** Where one Core node shows up in each pane. Any leg may be absent, and each for its own reason. */
-export type Link = { source: Span | null; lambda: Span | null; states: number[] }
+/**
+ * Where one Core node shows up: its source span and its machine states. Either may be absent, each for its
+ * own reason. **NO λ LEG SINCE PLAN 7 PART 4A** — the λ view finds a construct's nodes in the tree it draws
+ * (`Tree.nodesLinkedTo`), at whatever step is on screen, where this index knew only step 0's text.
+ */
+export type Link = { source: Span | null; states: number[] }
 
 /**
  * The smallest span containing `byteOffset`, as an index into the three parallel arrays, or `-1`.
@@ -67,26 +71,30 @@ function innermost(start: Uint32Array, end: Uint32Array, byteOffset: number): nu
 }
 
 /**
- * One compile's link index, and the four questions a click asks of it.
+ * One compile's link index, and the three questions a click asks of it.
  *
  * EVERYTHING HERE IS SYNCHRONOUS AND ALLOCATION-LIGHT, which is the reason the index is shipped whole
  * rather than queried across the worker. The worker is measurably starved for seconds while recording
  * frames — 5a-ii timed a 4,679 ms gap — and recording begins the instant a compile lands, which is
  * exactly when a user reads the result and clicks.
  *
- * IT IS STEP-0 ONLY on the lambda leg. `lambdaNode*` indexes `lambdaText`, which is the INITIAL term;
- * reduction rewrites the tree those coordinates describe. A caller must gate the lambda highlight on
- * the lambda leg's play head being at step 0 — see `viewmodel.rs`'s `LinkIndex` doc.
+ * **NOTHING HERE LINKS INTO THE λ VIEW (Plan 7 part 4a).** The view finds a construct's nodes in the tree
+ * it draws, at whatever step it shows, so no caller gates a λ highlight on the play head. What this keeps
+ * of the λ leg is step 0's text: `lambdaText`, the INITIAL term, which seeds a copy and is `''` when the
+ * λ backend declined the program.
  */
 export class LinkIndex {
   readonly lambdaText: string
+  /**
+   * Which limit cut `lambdaText`, or `null`. **NO READER IN THE APP SINCE PLAN 7 PART 4A**: the λ link
+   * status's *truncated* read it, and that state went with the step-0 link window (spec §5.4). It and the
+   * wire field behind it are left in place, an open item rather than a decision.
+   */
   readonly lambdaCut: Cut | null
 
   #w: LinkIndexWire
   /** `node -> its ascending state ids`, derived on first ask and cached. */
   #states = new Map<number, number[]>()
-  /** `lambdaSpans`'s cache — `undefined` until first asked, then never recomputed. See its getter's doc. */
-  #lambdaSpans: Classified | undefined
 
   constructor(wire: LinkIndexWire) {
     this.#w = wire
@@ -94,42 +102,10 @@ export class LinkIndex {
     this.lambdaCut = wire.lambdaCut
   }
 
-  /**
-   * The λ text's token spans, rehydrated from the wire's columnar arrays into `Classified`'s
-   * array-of-pairs shape.
-   *
-   * LAZY AND CACHED, NOT BUILT IN THE CONSTRUCTOR. `LinkIndex` is rebuilt on every 300 ms typing
-   * pause, and `lambdaSpans` has exactly one reader (`lambdaLinkWindow`, only when a link is active at
-   * step 0) — so an eager build paid the allocation on every compile whether or not anything was ever
-   * linked. `prog200` is 48,332 spans; rehydrating that on the main thread on every keystroke pause is
-   * the same columnar-vs-object-array cost `LinkIndexWire`'s own doc measures, paid for free on the
-   * common case of nobody clicking. Built once, on first ask, and kept for the life of this index —
-   * `#w`'s arrays never change underneath it.
-   */
-  get lambdaSpans(): Classified {
-    if (this.#lambdaSpans !== undefined) return this.#lambdaSpans
-    const spans: Classified = []
-    for (let i = 0; i < this.#w.lambdaSpanStart.length; i += 1) {
-      // A discriminant out of range would be a Rust/TypeScript drift, which `assertTokenClasses`
-      // fails at startup — so this cannot be reached in a running app. Falling back to `Ident` rather
-      // than throwing keeps a renderer alive if it ever is: an unstyled span beats a blank pane.
-      const cls = TOKEN_CLASSES[this.#w.lambdaSpanClass[i] as number] ?? 'Ident'
-      spans.push([{ start: this.#w.lambdaSpanStart[i] as number, end: this.#w.lambdaSpanEnd[i] as number }, cls])
-    }
-    this.#lambdaSpans = spans
-    return spans
-  }
-
   /** The innermost source construct containing `byteOffset`, or `null`. No outward walk — see `linkFor`. */
   nodeAtSource(byteOffset: number): number | null {
     const i = innermost(this.#w.sourceNodeStart, this.#w.sourceNodeEnd, byteOffset)
     return i < 0 ? null : (this.#w.sourceNodeId[i] as number)
-  }
-
-  /** The innermost lambda subterm containing `byteOffset` in `lambdaText`, or `null`. */
-  nodeAtLambda(byteOffset: number): number | null {
-    const i = innermost(this.#w.lambdaNodeStart, this.#w.lambdaNodeEnd, byteOffset)
-    return i < 0 ? null : (this.#w.lambdaNodeId[i] as number)
   }
 
   /** The Core node that produced state `stateId`, or `null` for scaffolding and out-of-range ids. */
@@ -140,7 +116,7 @@ export class LinkIndex {
   }
 
   /**
-   * Where `node` shows up in each pane.
+   * Where `node` shows up on the index's two legs: its source span and its machine states.
    *
    * NO OUTWARD WALK WHEN A LEG IS ABSENT. `sourcemap.rs` refuses to fall back to a surrounding block
    * and so does this: the walk from a transparent `let` goes Let -> Seq -> root, so "nearest enclosing
@@ -149,13 +125,13 @@ export class LinkIndex {
    * must say so rather than show nothing.
    */
   linkFor(node: number): Link {
-    return { source: this.#spanOf('source', node), lambda: this.#spanOf('lambda', node), states: this.#statesOf(node) }
+    return { source: this.#spanOf(node), states: this.#statesOf(node) }
   }
 
-  #spanOf(leg: 'source' | 'lambda', node: number): Span | null {
-    const ids = leg === 'source' ? this.#w.sourceNodeId : this.#w.lambdaNodeId
-    const start = leg === 'source' ? this.#w.sourceNodeStart : this.#w.lambdaNodeStart
-    const end = leg === 'source' ? this.#w.sourceNodeEnd : this.#w.lambdaNodeEnd
+  #spanOf(node: number): Span | null {
+    const ids = this.#w.sourceNodeId
+    const start = this.#w.sourceNodeStart
+    const end = this.#w.sourceNodeEnd
     for (let i = 0; i < ids.length; i += 1) {
       if (ids[i] === node) return { start: start[i] as number, end: end[i] as number }
     }

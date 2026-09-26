@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { LambdaLeg, RunReply, RunRequest, TmLeg } from '../../src/protocol'
+import type { LambdaLeg, LambdaTreeWire, RunReply, RunRequest, TmLeg } from '../../src/protocol'
 import type { ClientPort } from '../../src/session-client'
 import { SessionClient } from '../../src/session-client'
 import type { LambdaStatus, TmStatus } from '../../src/types'
@@ -18,7 +18,43 @@ function fakePort() {
 
 const reply = (gen: number): RunReply => ({ kind: 'no-session', gen, diagnostics: [] })
 
+/** A one-node `LambdaTreeWire` — what a `lambda-tree` reply carries. */
+const TREE: LambdaTreeWire = {
+  step: 0,
+  refused: null,
+  kind: new Uint8Array([0]),
+  left: new Uint32Array([0]),
+  right: new Uint32Array([0]),
+  name: new Uint32Array([0]),
+  hint: new Uint32Array([0]),
+  link: new Uint32Array([0xffff_ffff]),
+  names: ['x'],
+  nextRedex: null,
+  contractum: null,
+}
+
 describe('SessionClient', () => {
+  it('a tree reply does not end the wait for a run', () => {
+    const { port, deliver } = fakePort()
+    const c = new SessionClient(port, () => {})
+    const gen = c.supersede()
+    deliver({ kind: 'lambda-tree', gen, tree: TREE })
+    expect(c.awaitingRun).toBe(true)
+    deliver(reply(gen))
+    expect(c.awaitingRun).toBe(false)
+  })
+
+  it('asks for a tree at the live generation, and not before the first build', () => {
+    const { port, sent } = fakePort()
+    const c = new SessionClient(port, () => {})
+    c.tree(3, 100)
+    expect(sent).toEqual([])
+    const gen = c.supersede()
+    c.tree(3, 100)
+    expect(sent).toEqual([{ kind: 'lambda-tree', gen, step: 3, budget: 100 }])
+    expect(c.gen).toBe(gen)
+  })
+
   it('stamps each request with a fresh generation', () => {
     const { port, sent } = fakePort()
     const c = new SessionClient(port, () => {})

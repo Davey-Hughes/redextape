@@ -19216,3 +19216,372 @@ checked, and neither announces when it has gone stale or started answering about
 - **λ hover is permanently `None`, by design, not by omission** — there is no position→text provenance
   anywhere in `LambdaTerm` to resolve against, and the branch's own sabotage now proves that absence
   rather than merely asserting it.
+
+#### PLAN 7 PART 4a, THE λ VIEW: THE SESSION WORKER SERVES A TREE FOR THE DISPLAYED STEP AND THE VIEW LAYS IT OUT IN TWO LAYOUTS, WITH FOLDS, CHIPS, LINKING AT EVERY STEP AND A TERM MAP — AND A PLAN WHOSE CODE WAS BUILT, GATED AND SABOTAGED BEFORE ANY TASK BEGAN STILL CARRIED DEFECTS INTO SIX TASKS, A LEGAL PROGRAM COULD WEDGE THE VIEW UNTIL RELOAD PAST EVERY TASK REVIEW, AND THE FLAKE THE BRANCH SEEMED TO CAUSE WAS A TEST HANDING VITEST ONE OBJECT TO SCALE IN PLACE ON EVERY RETRY (2026-09-23 to 2026-09-25, branch `plan7-part4-views`, `c9b6876..2bb8fb3`, 84 commits, plus this entry)
+
+**Part 4a of Plan 7** ([design](../specs/2026-09-23-plan7-part4-views-design.md),
+[plan](2026-09-23-plan7-part4a-lambda-view.md)), the first of part 4's two PRs. It replaces the λ view's flat
+print of each recorded frame with a laid-out, foldable term built from a tree the session worker serves for
+the step on screen, and adds a map of the whole term. 4b, the TM view's rule table and state diagram, gets a
+plan of its own. The spec carries seven amendments: three written before any code, two from the prototype, one
+from a task review and one from the final review. Seven of the 84 commits touch only `docs/` — the spec, its
+amendments and the plan, which alone is 9,189 of the branch's 16,867 added lines.
+
+##### WHAT PART 4a BUILT
+
+- **A tree for any recorded step, served on demand.** `redextape-core`'s `LambdaTree` lays a term out as a
+  pre-order columnar arena — kinds, children, the printer's names and the binders' hints, a link per node, the
+  next redex and the contractum — in one iterative walk. A node links to a construct through
+  `node_to_lambda`'s path at step 0 and through an application's owner tag at every step (amendment 1).
+  `LambdaCheckpoints` keeps a cursor clone every 256 steps, and a past step is rebuilt by replay from the
+  nearest one. The wasm session answers `lambdaTree(step, nodeBudget)` as typed arrays, the worker answers a
+  `lambda-tree` request between record chunks, and a main-thread `LambdaTrees` cache asks for the displayed
+  step's tree with one request in flight per session. A term over 20,000 nodes is refused and drawn as its
+  frame's text with a note. `lambdaAst` and `TermTree`, which the tree supersedes, are gone; recorded frames,
+  the history ring and scrubbing are unchanged.
+- **Two layouts, both trees.** *Code* breaks a term that does not fit into its head and one indented argument
+  per line, and an abstraction into its binders and its body; *outline* gives a subterm its own row a level
+  under its parent's unless it is narrow enough to write inline, and a spine an `apply` row. Both are
+  `role="tree"` with levelled `treeitem` rows (amendment 6). Variables read as names or as de Bruijn indices.
+  Each view's two choices are radio groups in its `⋯` menu, kept per view in the workspace.
+- **Folds and chips.** The automatic policy opens the root, everything holding the next redex and any subterm
+  of at most 200 nodes, and folds the rest to `… N nodes`. It closes every chip, the root included: a Church
+  numeral reads as its value and a Church boolean as `true` or `false`, recognised by shape and by the
+  binders' hints with trailing digits ignored (amendment 4), so a finished numeric run reads as its number.
+  The user's overrides are keyed by path; stepping by one drops only those under the step's contractum, and
+  all of them start over on *reset folds*, on a rebind to another session and on a new build (amendment 5).
+  `▸`/`▾`, → and ← open and fold; Enter opens what → opens, and links where nothing on the row is closed.
+- **Marks and following.** The next redex has a dashed outline and the contractum an underline, with their
+  screen-reader words as generated content rather than text. The view follows the next redex while a run
+  plays; a user scroll, a key that scrolls, a map pick or a pin's first scroll detaches it, and a *follow
+  redex* header action re-attaches it. A tree for a step the view has already left is shown dimmed as stale,
+  with `aria-busy`, until the right one arrives (amendment 7).
+- **Linking at every step.** A source click marks every node that carries the construct at the displayed step
+  — both copies, where normal-order reduction has duplicated it — and a click or Enter in the λ view links
+  from the nearest node at or above it that carries a construct. The step-0 link window is gone.
+- **The term map.** A canvas panel draws the whole term as an icicle, nodes by depth, or as a minimap at 2 px
+  per line that scrolls like an editor's to keep the view's window in sight, in the palette's colours, with
+  the next redex, the contractum and the linked nodes marked. An icicle pick opens every fold on the path to
+  its node and scrolls the row into view; a minimap pick scrolls to its line. Whether the panel is open, and
+  its mode, are kept in the workspace.
+- **Views off the page cost nothing.** A λ view off the page asks the worker for no tree, and a TM view off
+  the page is handed no compile's machine; it is seeded when its tab is shown, and the current pin is
+  re-applied (§5.5).
+- **`pnpm test:probe:lambda-tree`**, a probe outside the default run, times a tree end to end on two clocks
+  inside the app: the round trip from `SessionClient.tree` to `LambdaTrees.store`, and the first `renderTree`
+  to receive it.
+
+##### THE PLAN'S CODE WAS BUILT BEFORE IT WAS HANDED OUT, AND THAT BUILD FOUND EIGHT DEFECTS
+
+Every task was built, gated and sabotaged in a prototype at `edcb6e8` before the plan was written, and the
+plan was then rebuilt from its own blocks, staged as each commit would stage it, to a tree byte-identical to
+the prototype's. 55 sabotages ran against the finished prototype and 54 fired; the one that cannot fire is
+Task 1's, recorded under what this did not close. What the pass found, all fixed in the plan's code before any
+task began:
+
+1. **A tree asked for during the compile debounce was never answered.** `supersede()` moves the generation
+   before the worker hears of it, so the worker dropped the request and the view stayed on flat text for good.
+   `LambdaTrees` asks nothing while the client awaits a run.
+2. **Chrome polluted `.term`'s text.** A width-measuring span, the gutter glyphs, the indentation and the mark
+   words were all text nodes, so every test reading the term read them too. Width is measured on a canvas,
+   glyphs and mark words are CSS generated content, and indentation is padding.
+3. **A finished numeric run drew `λf x. f (f (f …` instead of its value**, because the root was asked about
+   before the chip. The chip test comes first.
+4. **A copy never showed a chip.** A copy re-parses printed text, so its hints are the printer's freshened
+   names (`x0`) — amendment 4.
+5. **Folds leaked across a rebind and across a new compile.** No test caught the first until a sabotage showed
+   none could; the second, which the spec had already ruled out, had not been fixed at all — amendment 5.
+6. **A shrinking term's scroll clamp read as the user scrolling away**, so the view stopped following.
+7. **The cost probe's first draft timed the harness's own poll**, not the app. It now reads two clocks inside
+   the app, and a stall injected into the worker moved its round trip by the stall's length.
+8. **34 stale references**: 30 found by sweeping every symbol the prototype deleted against the tree it left,
+   and 4 more by reading what its changes made untrue.
+
+##### SIX TASKS' REVIEWS STILL FOUND DEFECTS IN THE PLAN'S OWN CODE
+
+Passing its own gates and sabotages did not make the plan's code right. Tasks 6, 8, 9, 10, 11 and 12 came back
+from review with defects in code the plan supplied verbatim, several reproduced in a browser by their
+reviewers before anything was fixed. The user's decisions are named where they were made.
+
+- **Task 6, the layouts.** The outline inlined a spine's head whenever the head alone was narrow, without
+  checking the row it sat in against the view's width, so an `apply` row could run past the view's edge. **The
+  user decided to fix it (2026-09-24).**
+- **Task 8, the view drawing the tree, in four fix rounds.** Five Important defects: a flat interlude between
+  two trees detached following; keys did nothing while following, and the active row was not drawn; the gutter
+  read an open application as closed when its folded head shared its row; a chip could not be opened from the
+  keyboard; and the truncated-frame fork test no longer asserted that the frame was cut. **The user decided
+  (2026-09-24) to fix all five, to add §5.3's *follow redex* header action, which the plan had left out, and
+  to make the code layout a tree as well (amendment 6).** Each later round found another case of one class, a
+  row whose fold controls disagree with what it opens: a chip not first on its row could be opened and never
+  closed, an opened λ head on its application's row could not be folded back, and a broken chip's closing `)`
+  made a later row claim the chip. The third round made the class search a test: `lambda-fold-routes.test.ts`
+  takes every route that opens a node, on every row of every row shape, in both layouts, and holds that ←
+  folds it back. The pointer gaps it pins are rows the layout gives to an outer node, where ← still works.
+- **Task 9, linking at every step.** In Stage the λ half of the link status could describe a λ view off the
+  page, answering for the pin it last drew, and a click or Enter in the λ view scrolled that view away from
+  the row just clicked; both were reproduced with the reviewer's own numbers. **The user decided (2026-09-24)
+  to fix both.** A fix round then widened the rule to every reader that might consult a view off the page, and
+  **the user decided (2026-09-24) that Stage with the source tab shown keeps part 2's §8**: the step bar
+  drives the last view that could step, and the running focuses keep following it. Round 1c reverted the
+  widening and kept only the λ link and λ copy clauses on the view on the page. The rounds also made a stale
+  tree say it is waiting instead of answering for another step, and added the test the plan's "every node that
+  carries it" had lacked.
+- **Task 10, display settings.** **The user decided (2026-09-24) that the layout and variable choices are
+  radio groups**, as spec §5.1 describes, one tab stop per group, and that the term map's mode switch follows
+  the same pattern. The review also found the settings and `⋯` missing from the header of a view whose other
+  menu items never changed, the checked choice told apart only by colour, and a *reset folds* test that passed
+  with a reset that opened everything. Fixing the serializer's dead-leaf filter then turned up a closed view's
+  display surviving in memory, so *reset preset* gave the re-minted `lambda-0` the closed view's settings
+  until a reload.
+- **Task 11, the term map.** A Critical: **the whole map drew in black**, because the plan read each colour
+  token's text and a canvas refuses the palette's `light-dark()` values. Each token is now resolved through
+  the canvas's own computed `color`, and the colours join the draw signature so a theme change is not skipped
+  as unchanged. Also a pick undone by the next repaint while following, a map still showing the previous term
+  after the view fell back to flat text, no contractum on the minimap, and a pick test that proved neither the
+  node nor the fold. **The user decided (2026-09-24) to fix all five, and that the minimap draws each line 2
+  px tall and scrolls like an editor's, as §6 is written.**
+- **Task 12, views off the page.** A TM view hidden across a compile and a link came back with the link's rows
+  erased: it kept its old index, the link fan-out resolved the new compile's states against it, and the seed
+  on show reset the link with nothing to re-apply it. The first fix also skipped hidden views in the fan-out,
+  and its re-review found that wrong too — a view that saw the compile and missed only the gesture then never
+  heard the pin at all. The fan-out reaches every TM view again, and a reseeded view re-applies the current
+  pin.
+
+##### WHAT THE WHOLE-BRANCH REVIEW FOUND
+
+Every task review had come back clean when the whole-branch review read `c9b6876..6b5038b`. It returned "ready
+with fixes" — one Critical, three Important and six Minors to fix before merge — and all of them were fixed on
+the branch in three rounds, `6b5038b..41f9fc3`, 22 commits. The re-review found no Critical or Important left,
+and the final check called the branch ready to merge.
+
+- **Critical: a legal program wedged the λ view until reload.** Both layouts, as the plan wrote them, recursed
+  once per open level, and `MAX_TERM_DEPTH` (3,000) admits terms whose next-redex path — which the automatic
+  policy keeps open — runs thousands of levels deep, well inside the node budget. Compiling `2990 + 0` and
+  pressing ◀ once threw `RangeError: Maximum call stack size exceeded` from the code layout; the outline, laid
+  out directly, threw on `2900 + 0`'s step-4 tree, whose redex sits 2,903 levels down. It wedged rather than
+  failed: `renderTree` stored the tree before the layout threw, so every later `draw()` laid the same tree out
+  again and threw first, and even a recompile did not recover — against §10, where every failure leaves a
+  working view. The plan's depth tripwire looked only at the frontier, where the deep tail is folded, so it
+  was green and blind. Fixed in four commits: both layouts walk an explicit stack, held line for line equal to
+  the recursive ones by a differential check over 96,000 comparisons; `#redraw` shows the frame's text with
+  one note on any throw and does not try that tree again until the display or the folds change (§10's new
+  failure, amendment 7); `Tree.key` extends its nearest keyed ancestor's key by one letter instead of walking
+  to the root, 636.0 ms down to 0.7 ms for the keys on a 9,997-deep path; and the tripwire steps a 600-element
+  list back from its normal form. The node test at 9,997 levels is the deterministic check. In the app the
+  recursive outline held at every step of `2990 + 0`, so a browser test can catch that recursion only on a
+  stack margin.
+- **Important: the arena's naming was roughly cubic in nested binders.** `LambdaTree::build` rebuilt the names
+  in scope for every abstraction, and the printer's `fresh()` scanned them for every candidate. The review
+  timed one `lambdaTree` call at `list699`'s live step at 206.7 to 220.1 ms, against 0.1 ms for
+  `lambdaState(512)`. The builder now keeps a count per interned name and makes one lookup per candidate
+  through a shared `fresh_by`. The oracle that pins the arena's names to the printer's stayed green, and fails
+  when the count is not decremented. The committed probe's `list699` round-trip median went from 205.20 ms
+  before the change to 53.90 ms at `2bb8fb3`. **The user decided (2026-09-25) that the probe stays a probe,
+  with the list programs added.**
+- **Important: a doc comment on the wrong item, and then a second.** Task 2's patch inserted
+  `LAMBDA_CHECKPOINT_EVERY`, `LambdaLeg` and `TreeAt` between `lambda_run_status`'s doc and the function, so a
+  public constant carried "THE ONE PLACE THIS MAPPING LIVES" and the function carried nothing. The re-review
+  then found that the fix round's own Enter change had done the same to `chipsOn`; a sweep of the web files
+  the branch touched found no third made by the branch.
+- **Important: amendment 7.** The spec said a hidden view paints no reply, the view asks for one tree per
+  animation frame, a reply for a step it has left is dropped, and only a user scroll detaches following. The
+  build keeps one request in flight per session and shows a late reply dimmed as stale, three text-only
+  replies still reach a hidden TM view, and keys, map picks and pin reveals detach following too. Amendment 7
+  records where the build differs from the text; the re-review widened it with §10's new failure, a tree the
+  view cannot lay out.
+- **The review's other user decisions (2026-09-25).** The λ copy clause in Stage names a λ copy off the page,
+  as the TM clause does — `shown ?? active`, which undoes round 1c's choice for that one clause. Enter opens a
+  closed fold or chip on its row, as §5.2 says, and links only where nothing on the row is closed. And a chip
+  opened by hand gets **no** exemption from binder merging: §5.1 stands.
+- **The Minors, fixed before merge:** stale claims about what the tree and `LinkIndex` do; comment lines past
+  the line width; a click that set the active row without painting it; the gutter's missing tooltip; a pin
+  test that could pass vacuously; and a measurement quoted in shipped code with no command behind it. The
+  re-review's four Minors, the `chipsOn` doc among them, were fixed in a second round, and a third moved the
+  deep-term browser tests off the edge described two sections below.
+
+##### THE `lsp-hover` FLAKE WAS THE TEST, AND THE FIRST EXPLANATION FOR IT WAS WRONG
+
+`lsp-hover.test.ts`'s "pointer hover survives a move that stays within the same token" had timed out at 15 s
+in the prototype's full-suite runs and in several task rounds' full-suite runs, and passed every time alone.
+Task 14 ran the full suite ten times, alternating, at `41f9fc3` and in a worktree at `c9b6876`: **the branch
+failed the case 2 times in 5, main 0 in 5.** The plan's rule for that result was to find the mechanism and fix
+it before the PR.
+
+**The lead was a cause the branch itself adds, and it was wrong.** The λ view's layout can now change after a
+compile settles, when its tree arrives; the plan named that, and the whole-branch review pointed the same way.
+A trace of the failing case ruled it out: no tree request and no `lambda-tree` reply in any traced run — by
+then the λ view showed the previous case's λ copy, whose tree was cached — and every `draw()`, each with its
+`setFocus` dispatch to the source editor, came before the run went idle. In the vendored `@codemirror/view` a
+`setFocus` cannot close a tooltip, and a transaction during a request makes `HoverPlugin` ask again rather
+than miss. And 2 in 5 against 0 in 5 was weak evidence to begin with: a two-sided Fisher exact p of 0.44.
+
+**The mechanism has two halves, and both are in the test.** The previous case posts a notice that lasts
+`NOTICE_MS`, 8,000 ms, and it expires within tens of milliseconds of the move case's first hover — 7 to 43 ms
+after the tooltip opened, in ten timed runs on both sides. When it expires first, the notice line collapses
+and lifts the editor 28.5 px under a pointer that has not moved, so CodeMirror finds no character under the
+pointer when `hoverTime` runs out and sends no request. `retryUntilTooltipOpens` should absorb that miss and
+could not: `@vitest/browser-playwright`'s `processPlaywrightPosition` scales the caller's own `position`
+object in place, and the case reused one object for every retry, so each retry landed at 0.80 of the previous
+offset from `.cm-content`'s corner and none landed on the `4` again. One missed first attempt could only end
+in the 15 s timeout. Forced on demand, by removing a line above the editor just after the first attempt's
+pointer arrived, the unfixed case timed out on the branch and on main alike.
+
+**The fix is test-side, at `2bb8fb3`.** A new `hoverOver` builds a fresh position for every gesture, and every
+pointer-at-offset gesture in the file goes through it; a sibling search over `web/tests/browser/` found no
+other. A new case collapses a line under the first attempt and asserts both that the attempt missed and that a
+retry still opens the tooltip. With the object reused within each case, it is the only case that fails — the
+move case's own first attempt happened to hit. No product code changed: the notice collapsing is designed
+behaviour, identical on main.
+
+**Re-measured the same way at `2bb8fb3` and `c9b6876`: 0 in 5 on the branch, 0 in 5 on main**, and the new
+case 0 in 5. That tally alone would not prove the fix — at the old rate, 0 in 5 happens by chance about 8% of
+the time — which is why the forced runs and the sabotage are the evidence.
+
+##### THE WORKER'S STACK DOES NOT REACH `MAX_TERM_DEPTH`, ON MAIN AS ON THE BRANCH
+
+After the Critical's fix, one full-suite run in three failed the deep outline test before any layout ran: the
+session worker reported "redextape hit a problem and recovered: Maximum call stack size exceeded" while
+`2990 + 0` compiled and recorded. A scratch probe compiling `N + 0` for a list of N found the edge only with
+optimised wasm forced (`--js-flags=--no-liftoff`): N held at 2,520 and overflowed from 2,540, in two runs on
+the branch, and identically in worktrees at `c9b6876` and `41f9fc3` side by side. The default browser held
+every N probed up to 2,990, baseline wasm (`--liftoff-only`) did not reproduce the failure, and `--stack-size`
+does not reach the worker. So the reducer's guard of 3,000 sits above what an optimised worker can reduce —
+**a margin this branch did not create and does not fix**. Its deep browser tests compile `2000 + 0` because of
+it (`41f9fc3`), and the node test holds the layouts at 9,997 levels. That the failing full-suite worker was
+running optimised code is likely but not shown.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`LinkIndex`'s λ columns have no reader in the web.** The core still builds `lambda_spans` and
+  `lambda_nodes`, and the worker still transfers them, but since Task 9 nothing in `web/src` reads them;
+  `viewmodel_contract.rs` and `examples/link_index_probe.rs` are their only readers. `LinkIndex.lambdaCut` has
+  no reader either, and its doc says so. `lambda_text` is still read, by `draw()`'s check for a declined leg
+  and by the fork.
+- **`assertTokenClasses` now guards no reader** — nothing turns a discriminant into a class name since the
+  link window went. `types.ts` says why it stays.
+- **The `'too-large'` λ link state is not covered end to end.** `app.test.ts` records why, and why its
+  predecessor `'truncated'` was not either.
+- **The worker's declined-leg guard in `onLambdaTree` is unreachable through the view**, which never asks for
+  a declined leg's tree, so no test drives it.
+- **The owner-tag against path-link order cannot be observed on the corpus.** Task 1's sabotage swapped the
+  two and every test passed: on all seven corpus programs, every tagged application's step-0 path resolves to
+  the same construct as its tag.
+- **The λ leg's checkpoints are never pruned.** `LambdaCheckpoints` only appends — one cursor clone per 256
+  steps for as long as the leg runs, across *continue* too.
+- **The term map repaints whole on every scroll.** The window box is in its draw signature, so a scroll
+  redraws every node or line. The review timed it at 23,138 nodes: the icicle at a 6.60 ms median with every
+  node open and 8.50 ms under the automatic policy, the minimap at 2.00 and 0.10 ms. Drawing the term once
+  off-screen and repainting only the box would fix it. Two smaller costs sit beside it: the map resolves its
+  six colour tokens — a style write and a computed-style read each — before the signature check that would
+  skip the draw, and each λ view on the page runs `#redraw` twice per `draw()`, once from `render` and once
+  from `renderTree`.
+- **`aria-setsize` and `aria-posinset` count every row in the term**, not a row's siblings at its level, in
+  both layouts.
+- **A theme or palette change repaints an open, paused term map only at its next draw**, and an OS scheme
+  change under the "system" theme reaches no handler at all, since nothing listens with `matchMedia`. Calling
+  `draw()` from `main.ts`'s appearance and palette handlers is the cleaner fix.
+- **The arena's naming is still super-linear**, now roughly quadratic in same-hint nesting: a binder whose
+  hint is already shadowed many times walks that many candidates. The re-review timed one `lambdaTree` call at
+  the live step at 1.7, 3.0, 12.5, 29.1 and 41.2 ms for `list100`, `list200`, `list400`, `list600` and
+  `list699`; the committed probe's round-trip medians at `2bb8fb3` are 4.60, 18.50 and 53.90 ms for `list200`,
+  `list400` and `list699`.
+- **Fold-key memory grows with the square of the depth.** A key is its node's path, one letter per edge, and
+  every node on an open path keeps its own, so a path D deep holds keys of every length from 1 to D. The
+  incremental key fixed the time and not the memory.
+- **The worker's stack margin under `MAX_TERM_DEPTH`**, the section above: the reducer admits 3,000 levels and
+  an optimised worker overflowed on `N + 0` from N = 2,540, on main as on the branch.
+- **`draw()`'s per-frame `setFocus` dispatch may stop pointer hover from opening while a run plays.** Each
+  dispatch nulls an in-flight hover request and CodeMirror asks again shortly after; if frames arrive faster
+  than the LSP answers, the tooltip may never open. That follows from the vendored source and was not
+  measured; main dispatches the same way.
+- **The notice line moves the whole workspace 28.5 px as it comes and goes**, under a still pointer or a click
+  in progress — by design, and identical on main. The `lsp-hover` move case still depends on the previous
+  case's notice timing; a collapse now costs it one retry instead of the test. `retryUntilTooltipOpens`' doc
+  still leaves out CodeMirror's restart after an update.
+- **§5.5's three text-only reply arms** — `tm-value`, a copy's `no-session` and `worker-error` — still write
+  into a TM view off the page. Amendment 7 records it rather than closing it.
+- **`unseen` is optional in `createReplies`** and defaults to a set nothing reads, so a future caller that
+  omits it leaves hidden TM views stale with nothing failing; `draw` already requires it. A view seeded
+  directly while hidden stays in `unseen` and is seeded twice, harmlessly.
+- **Smaller things the task reviews recorded and left.** Nothing uses a `ResizeObserver`, so a width or zoom
+  change leaves the map's canvas stretched until the next scroll or frame. On the map the redex and linked
+  columns differ only by hue, and a clickable `role="img"` does not say it can be clicked. With flat text
+  showing, the layout, variables and *reset folds* stay enabled with no reason given (umbrella rule 4). `⋯`
+  advertises `aria-haspopup="menu"` over a popover that is not a menu, from part 2. Switching layout keeps the
+  active row by line index, so the cursor lands on a different node. And a pointer cannot re-chip a chip
+  opened at an application's head, where ← and *reset folds* can, as the code documents.
+- **The nested-box layout** the spec records for later, not built.
+- **4b, the TM view** — the rule table and the state diagram — which needs its own plan.
+
+##### VERIFICATION
+
+The figures taken for this entry and for Task 14 were run on 2026-09-25. **At `2bb8fb3`, for this entry:** the
+node tier, the full suite, the cost probe (alone, with nothing else running), `--test lambda_tree`, the six
+hygiene scans (each `--self-test`, then alone) and the Rust coverage floor. **At `41f9fc3`, earlier the same
+day:** `check-all.sh`, `check-slow.sh`, the web CI sequence and the Docker image. Nothing after `41f9fc3`
+changes but `web/tests/browser/lsp-hover.test.ts`. The web CI sequence's first two attempts each failed the
+`lsp-hover` move case while another job ran on the host, before `2bb8fb3` fixed it; the third, with nothing
+else running, exited 0. The by-hand check was also done at `41f9fc3`, against the dev server: `fact(3)` in all
+three presets, light and dark, with both redex marks, a fold and a chip opened by hand, the outline and de
+Bruijn variables, both map modes picking and scrolling, and a source click marking a construct at a later step
+— six screenshots, kept outside the tree.
+
+The cost probe at `2bb8fb3`, its six lines verbatim:
+
+```
+lambda-tree-cost fact3: round trip n=300 median=0.80ms p90=2.30ms max=4.00ms; draw n=300 median=1.90ms p90=2.20ms max=3.30ms
+lambda-tree-cost fact4: round trip n=300 median=1.00ms p90=2.50ms max=5.80ms; draw n=300 median=2.00ms p90=2.20ms max=3.10ms
+lambda-tree-cost while4: round trip n=300 median=0.80ms p90=2.10ms max=2.90ms; draw n=300 median=1.70ms p90=2.30ms max=2.60ms
+lambda-tree-cost list200: round trip n=300 median=4.60ms p90=6.70ms max=20.20ms; draw n=300 median=2.30ms p90=11.50ms max=16.30ms
+lambda-tree-cost list400: round trip n=300 median=18.50ms p90=24.90ms max=27.30ms; draw n=300 median=3.50ms p90=4.20ms max=5.80ms
+lambda-tree-cost list699: round trip n=300 median=53.90ms p90=61.80ms max=132.90ms; draw n=300 median=6.40ms p90=6.90ms max=8.30ms
+```
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 84 | commits before this entry | `git log --oneline c9b6876..2bb8fb3 \| wc -l` |
+| 7 | of them touching only `docs/`: the spec, five amendment commits and the plan | `git log --oneline c9b6876..2bb8fb3 -- docs \| wc -l`, each checked with `git show --name-only` |
+| 91 files, +16,867 / −1,749 | the branch against main | `git diff --shortstat c9b6876..2bb8fb3` |
+| 9,189 | lines of the plan | `git show --stat ca547de` |
+| seven; three, two, one, one | spec amendments, by where they came from | the two "Amended" blocks at the head of the spec |
+| 256; 20,000; 200; 2 px | the checkpoint interval, the tree's node budget, the automatic fold size, the minimap's line pitch | `git grep -nE 'LAMBDA_CHECKPOINT_EVERY: u64 =\|LAMBDA_TREE_NODES =\|AUTO_FOLD_NODES =\|MINIMAP_LINE =' -- crates web/src` |
+| 3,000 | `MAX_TERM_DEPTH` | `git grep -n 'pub const MAX_TERM_DEPTH' crates` |
+| 8,000 ms | `NOTICE_MS` | `git grep -n 'NOTICE_MS = ' web/src` |
+| six | colour tokens the map resolves per draw | `git grep -n 'const TOKENS' web/src/term-map.ts` |
+| 55, 54; eight; 34 = 30 + 4 | the prototype's sabotages and how many fired; its defects; its stale references | the plan's Pre-flight status |
+| seven | corpus programs on which tag and path agree | the Task 1 report (`.superpowers/sdd/`, not tracked) |
+| six tasks; five Important and four rounds in Task 8 | the task reviews' findings in the plan's code | the Task 6 and 8-12 reports, same place |
+| 1 Critical, 3 Important, 6 Minors; 4 more Minors | the whole-branch review's findings, and its re-review's | the review's C1, I2-I4 and M1-M6, and the re-review |
+| 22; four | commits fixing them, in three rounds; commits fixing the Critical | `git log --oneline 6b5038b..41f9fc3 \| wc -l`; `997e568`, `fd30a93`, `d383a91`, `8d023e9` |
+| `2990 + 0`; `2900 + 0` step 4, 2,903 levels | the Critical's two reproductions | the review's reproduction in a browser, and its scratch probe laying each step out directly, at the line `lit2900 … redexDepth 2903 … outline THREW RangeError` |
+| 96,000 | differential comparisons, 1,500 random terms × 8 widths × 2 variable modes × 4 fold predicates | a scratch node test against the recursive layouts, deleted after |
+| 636.0 → 0.7 ms | keying every non-leaf node on a 9,997-deep path top down, median of 5 | a scratch node harness, before and after `d383a91` |
+| 9,997; 600 | levels the node depth test lays out; elements in the tripwire's list | `lambda-layout.test.ts` "the layouts at depth"; `lambda-tree-app.test.ts` |
+| 206.7 to 220.1 ms; 0.1 ms | three `lambdaTree` calls at `list699`'s live step before the naming fix; `lambdaState(512)` | the review's scratch probe at `6b5038b` |
+| 205.20 → 53.90 ms | `list699`'s probe round-trip median, before `24fdf2f` and at `2bb8fb3` | `PATH=/usr/sbin:$PATH systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 pnpm test:probe:lambda-tree` — the first in the fix round's own run, the second above |
+| 1.7, 3.0, 12.5, 29.1, 41.2 ms | one `lambdaTree` call at the live step, `list100` to `list699`, after the naming fix | the re-review's scratch probe at `1e6bcf5` |
+| 4.60, 18.50, 53.90 ms | the probe's round-trip medians for `list200`, `list400`, `list699` | the probe block above |
+| 23,138; 6.60, 8.50; 2.00, 0.10 ms | nodes; icicle redraw medians all open and under the policy; the minimap's | the review's scratch probe drawing the map directly, at `6b5038b` |
+| 15 s | the test timeout the move case hit | its failure, `Test timed out in 15000ms` |
+| 2 in 5; 0 in 5 | Task 14's ten runs, branch at `41f9fc3` and main at `c9b6876`, alternating, 16:34 to 16:41 | `PATH=/usr/sbin:$PATH systemd-run --user --scope -q -p MemoryMax=20G -p MemorySwapMax=0 ./node_modules/.bin/vitest run` from each checkout's `web/` |
+| 0.44 | two-sided Fisher exact p for those ten | `python3 -c "from math import comb; print(2*comb(5,2)/comb(10,2))"` → 0.444 |
+| 7 to 43 ms; ten | the notice's expiry after the tooltip opened; runs timed, five per side | temporary timestamps in the test (a `MutationObserver` on `#notice` and the case's own events), reverted |
+| 28.5 px | the editor's rise when the notice line collapses | a per-frame geometry trace of the failing case, reverted |
+| 0.80 | each retry's scale on the reused position (0.803571, which is 720/896) | a probe logging the object after each call, reverted; `processPlaywrightPosition` in `@vitest/browser-playwright` 4.1.10's `dist/locators.js` |
+| 0 in 5; 0 in 5; 0 in 5 | the re-measure, 17:48 to 17:54: the move case at `2bb8fb3` and at `c9b6876`, and the new case | the same command |
+| about 8% | 0 in 5 by chance at a rate of 2 in 5 | `python3 -c "print((3/5)**5)"` → 0.078 |
+| 1 in 3 | full-suite runs in which `2990 + 0` overflowed the worker | the final fix round's full runs, rounds 1 and 2 |
+| 2,520; 2,540; 2,990 | the last N held and the first overflowed under `--no-liftoff`; the highest N probed with default flags | a scratch probe compiling `N + 0` for a list of N in one app, flags in a temporary `vite.config.ts`: default flags on the branch at 16:19, `--no-liftoff` on the branch at 16:22 twice, then in worktrees at `c9b6876` and `41f9fc3` at 16:30 |
+| 2,000 | the deep browser tests' N | `lambda-deep.ts`'s `N` |
+| 640 in 48 files | the node tier at `2bb8fb3` | `pnpm exec vitest run --project node` |
+| 1,237 in 143 files | the full suite at `2bb8fb3`, all passed; 1,236 at `41f9fc3`, before the new hover case | `PATH=/usr/sbin:$PATH systemd-run --user --scope -q -p MemoryMax=20G -p MemorySwapMax=0 ./node_modules/.bin/vitest run` |
+| 8 | `--test lambda_tree` at `2bb8fb3`, all passed | `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 cargo test -p redextape-core --test lambda_tree` |
+| 12 of 12 exit 0; 599 files; 569 sites; 46 figures; 12 regions in 4 files | the hygiene scans at `2bb8fb3` | `scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua}.sh`, each `--self-test` then alone |
+| 95.63% (31,075 lines, 1,357 missed); 1,821 run, 33 skipped | Rust line coverage and tests at `2bb8fb3`, floor 90; the line figures read the same at `41f9fc3` | `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 cargo llvm-cov nextest --workspace --fail-under-lines 90` |
+| exit 0 | `all configs green — base, LLVM and browser`, at `41f9fc3` | `scripts/check-all.sh` |
+| exit 0 | `slow tier green`, at `41f9fc3` | `scripts/check-slow.sh` |
+| 143 files, 1,236 tests; 96.72, 90.94, 97.59, 98.58 against 95, 89, 97, 97 | the web CI sequence at `41f9fc3`: statements, branches, functions and lines against their floors | `pnpm run build:wasm && pnpm exec biome ci --error-on-warnings && pnpm run typecheck && pnpm run test:coverage && pnpm run build:app` |
+| 200; healthy; 7 | the image at `41f9fc3`: its status, its health, and its wasm assets (both crates, four grammars, the tree-sitter runtime) | `docker build`, `docker run -d -p 8099:80`, `curl -w '%{http_code}'`, `docker inspect --format '{{.State.Health.Status}}'`, `docker exec … ls /usr/share/nginx/html/assets/ \| grep wasm` |
+| six | screenshots of the by-hand check | three presets × two themes |

@@ -211,8 +211,10 @@ export const SPAN_BYTES = 80
  * redex at all, and a redex past the truncation cut records no span (see `LambdaState.redex_span`).
  *
  * THE REDEX **PATH** IS NOT CHARGED AT ALL, because it is not on the wire — `LambdaState.redex` is
- * `serde(skip)`ped until the tree view reads it (see that field's own doc). A `PATH_ENTRY_BYTES` term
- * lived here and charged ~74 B/frame for an array the app never received; it comes back with the field.
+ * `serde(skip)`ped, and the tree view did not change that: it marks the contractum through
+ * `LambdaTree.contractum`, resolved from the path in the core (see that field's own doc). A
+ * `PATH_ENTRY_BYTES` term lived here and charged ~74 B/frame for an array the app never received; it
+ * would come back only if the field ever went on the wire.
  */
 export const REDEX_SPAN_BYTES = 40
 
@@ -331,6 +333,35 @@ export function forkable(p: TmProgram | null): p is TmProgram {
   return p !== null && ruleCount(p) <= MAX_FORK_RULES
 }
 
+/**
+ * The most λ nodes a view asks the session worker to lay out (spec §4.5). `while4`'s peak, the largest
+ * in the spec's measured corpus, is 9,763; a term past this is drawn as its recorded frame text, with a
+ * notice naming its size.
+ */
+export const LAMBDA_TREE_NODES = 20_000
+
+/**
+ * `lambdaTree(step, nodeBudget)`'s object. `redextape-wasm`'s `tree_to_js` builds it by hand, so it has
+ * no generated binding and this is its one TypeScript description.
+ *
+ * COLUMNS, ONE TYPED ARRAY EACH, indexed by node in PRE-ORDER: node 0 is the root and a node's subtree
+ * is one index range. `refused` is the term's node count when it exceeded the budget, and every column is
+ * then empty. `step` is the step answered, which the worker clamps to what the run has reached.
+ */
+export type LambdaTreeWire = {
+  readonly step: number
+  readonly refused: number | null
+  readonly kind: Uint8Array
+  readonly left: Uint32Array
+  readonly right: Uint32Array
+  readonly name: Uint32Array
+  readonly hint: Uint32Array
+  readonly link: Uint32Array
+  readonly names: readonly string[]
+  readonly nextRedex: number | null
+  readonly contractum: number | null
+}
+
 export type RunRequest =
   | { kind: 'run'; gen: number; src: string; encoding: string }
   /**
@@ -384,6 +415,11 @@ export type RunRequest =
    * simply allows another `HISTORY_BYTES` and resumes.
    */
   | { kind: 'extend'; gen: number; leg: Leg }
+  /**
+   * The λ tree at `step` for the live session (spec §4.1). NOT A BUILD: it claims no generation and
+   * supersedes nothing, and the worker drops a request whose generation is no longer live.
+   */
+  | { kind: 'lambda-tree'; gen: number; step: number; budget: number }
 
 /**
  * `declinedSpan` IS RESOLVED IN THE WORKER, not on the main thread, because `sourceSpan` is a
@@ -523,6 +559,8 @@ export type RunReply =
    * from PR 3c so that module needs no edit.
    */
   | { kind: 'result'; gen: number; lambda: LambdaLeg; tm: TmLeg }
+  /** The answer to `lambda-tree`; `tree.step` is the step it answers, clamped to the run. */
+  | { kind: 'lambda-tree'; gen: number; tree: LambdaTreeWire }
   /**
    * The worker threw. EVERY `Session` method and every free export is fallible at the `lib.rs` layer
    * — `to_value` can fail even where `session.rs` cannot — and a throw inside an `async` message

@@ -57,8 +57,16 @@ describe('spans mark what you pinned with a box and where the machine is with an
     expect(hasBottomEdge(s.boxShadow), s.boxShadow).toBe(false)
   })
 
+  it('outlines the next λ redex dashed, a shape neither the contractum nor a link uses', () => {
+    const next = getComputedStyle(
+      mount('<div class="term"><span class="is-next-redex">x</span></div>', '.is-next-redex'),
+    )
+    expect(next.outlineStyle).toBe('dashed')
+    expect(hasBottomEdge(next.boxShadow), next.boxShadow).toBe(false)
+  })
+
   it('boxes a linked λ span the same way', () => {
-    const s = getComputedStyle(mount('<pre class="term"><span class="is-linked">x</span></pre>', '.is-linked'))
+    const s = getComputedStyle(mount('<div class="term"><span class="is-linked">x</span></div>', '.is-linked'))
     expect(s.boxShadow).toContain('0px 0px 0px 1px inset')
   })
 
@@ -72,10 +80,12 @@ describe('spans mark what you pinned with a box and where the machine is with an
   })
 
   it('leaves the λ contractum as the one underlined mark in the λ view', () => {
-    const redex = getComputedStyle(mount('<pre class="term"><span class="is-redex">x</span></pre>', '.is-redex'))
+    const redex = getComputedStyle(
+      mount('<div class="term"><span class="is-contractum">x</span></div>', '.is-contractum'),
+    )
     expect(redex.boxShadow).toContain('0px -2px 0px 0px inset')
     expect(hasBottomEdge(redex.boxShadow), redex.boxShadow).toBe(true)
-    const linked = getComputedStyle(mount('<pre class="term"><span class="is-linked">x</span></pre>', '.is-linked'))
+    const linked = getComputedStyle(mount('<div class="term"><span class="is-linked">x</span></div>', '.is-linked'))
     expect(linked.textDecorationLine).not.toContain('underline')
     expect(hasBottomEdge(linked.boxShadow), linked.boxShadow).toBe(false)
   })

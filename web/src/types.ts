@@ -54,8 +54,9 @@ export type { Decoded, Owner, Span, TokenClass, ValueRun }
  * `(typeof TOKEN_CLASSES)[number]`, so a name missing from the array could not be used anywhere in the
  * app — the array was the source. `TokenClass` is now generated from the Rust enum
  * (`../bindings/TokenClass`), and this array is an independent runtime value: a generated *type*
- * cannot supply an array, and this one is read in `link.ts`'s `lambdaSpans` getter to turn a
- * `Uint8Array` discriminant into a class name. Written as a standalone array with a separately-sourced union
+ * cannot supply an array. Until Plan 7 part 4a this one turned the step-0 link window's `Uint8Array`
+ * discriminants into class names; nothing reads a discriminant that way now, and it stays for
+ * `assertTokenClasses` below. Written as a standalone array with a separately-sourced union
  * beside it, the two drift the moment a variant is added on the Rust side and not here — which is
  * exactly the shape the pin below exists to close, now that neither derives from the other.
  *
@@ -153,9 +154,10 @@ export function decodedText(d: Decoded): string {
  * THIS IS THE CHECK THAT CATCHES A REORDER, NOT THE PIN ABOVE. It joins both arrays into strings and
  * compares them (`ours !== theirs`, below), so it is sensitive to ORDER — unlike the compile-time pin
  * above `TOKEN_CLASSES`, which is set-based (`Exclude<...>`) and typechecks clean if two names swap
- * places. That matters more from Plan 5b on than it did before: `LinkIndex` ships span classes as a
- * `Uint8Array` of DISCRIMINANTS, so a reordering here mis-colours silently rather than producing an
- * unrecognised string, and this runtime check is what stands between that and shipping.
+ * places. It mattered from Plan 5b until Plan 7 part 4a, while the step-0 link window read `LinkIndex`'s
+ * span classes — a `Uint8Array` of DISCRIMINANTS — through this array, where a reordering mis-coloured
+ * silently. NOTHING READS A DISCRIMINANT THAT WAY NOW, so this check guards no reader today; it stays so
+ * the next one inherits it rather than rediscovering the drift.
  */
 export function assertTokenClasses(fromWasm: string[]): void {
   const ours = TOKEN_CLASSES.join(',')

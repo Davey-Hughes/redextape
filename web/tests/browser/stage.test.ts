@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { SHELL, until } from './harness'
+import { lambdaSettled } from './lambda-text'
 
 const pick = (sel: string): void => {
   document.querySelector<HTMLButtonElement>('#workspace')?.click()
@@ -204,6 +205,92 @@ describe('stage', () => {
       host.querySelector('.view-steps .controls'),
       'selecting the tab did not bring the view up to date',
     ).toBeNull()
+
+    pick('[data-preset="explorer"]')
+  })
+
+  /**
+   * THE λ HALF OF THE LINK STATUS COMES FROM THE VIEW THAT DREW THE TREE (spec §5.4), AND A VIEW OFF THE
+   * PAGE DREW NONE. `draw()` skips it, so its pin and its tree are whatever it last drew. Asked anyway, it
+   * answered for the construct pinned before: with `40` pinned while it was shown, a later `x + 2` read "no
+   * node", though the view marks `x + 2` at this step as soon as it is shown again.
+   *
+   * With no λ view on the page the λ clause says nothing. With two λ views the one the stage shows answers,
+   * not the one last clicked into: selecting a tab records the focused leaf and marks no pane active.
+   */
+  it('takes the λ half of the link status from the λ view on the page, and from none when none is', async () => {
+    const view: EditorView = await (await import('../../src/main')).ready
+    const src = view.state.doc.toString()
+    expect(src).toBe('let x = 40; x + 2')
+    const linkStatus = () => document.querySelector('#link-status')?.textContent ?? ''
+    const linkedSource = () => document.querySelector('.cm-editor .linked')?.textContent ?? ''
+    const linkAt = (pos: number): void => {
+      view.dispatch({ selection: { anchor: pos } })
+      view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: "'", ctrlKey: true, cancelable: true }))
+    }
+    const stepText = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''
+    const control = (label: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')]
+        .find((b) => b.textContent === label)
+        ?.click()
+    const NO_NODE = 'this construct has no node in the λ term at this step'
+
+    pick('[data-switch="views"][data-value="stage"]')
+    pick('[data-switch="steps"][data-value="view"]')
+    tab('lambda-0').click()
+    expect(mounted()).toEqual(['lambda-0'])
+    await until(() => stepText() !== '' && !stepText().includes('not run'), 'the λ leg to run')
+    control('↺')
+    control('▶')
+    expect(stepText()).toContain('step 1')
+    await lambdaSettled()
+
+    // `40` HAS NO NODE AT STEP 1, and the view on the page says so; off the page, nothing is said.
+    tab('source').click()
+    expect(mounted()).toEqual(['source'])
+    linkAt(src.indexOf('40'))
+    await until(() => linkedSource() === '40', '40 to be linked')
+    expect(linkStatus(), 'no λ view is on the page to say anything about').not.toContain('λ')
+    tab('lambda-0').click()
+    await lambdaSettled()
+    expect(linkStatus()).toContain(NO_NODE)
+
+    // `x + 2` HAS ONE, and the hidden view must not answer for the `40` it last drew.
+    tab('source').click()
+    linkAt(src.indexOf('+'))
+    await until(() => linkedSource() === 'x + 2', 'x + 2 to be linked')
+    expect(linkStatus(), 'the hidden λ view answered for the pin it last drew').not.toContain('λ')
+    tab('lambda-0').click()
+    await until(() => document.querySelector('[data-leaf="lambda-0"] .term .is-linked') !== null, 'x + 2 marked')
+    expect(linkStatus()).not.toContain('λ')
+
+    // TWO λ VIEWS: `+ view` shows the one it creates, and the focus moving into its term marks it active;
+    // then the stage goes back to `lambda-0`, and the active view is the one off the page.
+    const binding = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] button.view-title')?.dataset.binding
+    expect(binding, 'lambda-0 names no binding to duplicate').toBeDefined()
+    const before = tabs().map((t) => t.dataset.leaf)
+    document.querySelector<HTMLButtonElement>('#new-view')?.click()
+    const item = document.querySelector<HTMLButtonElement>(`#new-view-menu button[data-binding="${binding}"]`)
+    expect(item, '+ view offers no second view of the program’s λ leg').not.toBeNull()
+    item?.click()
+    const created = tabs()
+      .map((t) => t.dataset.leaf)
+      .find((id) => !before.includes(id))
+    expect(created, '+ view added no tab').toBeDefined()
+    expect(mounted()).toEqual([created])
+    document.querySelector<HTMLElement>(`[data-leaf="${created}"] .term`)?.focus()
+    expect(
+      document.querySelector(`[data-leaf="${created}"]:not([role="tab"])`)?.contains(document.activeElement),
+      'the focus is not in the created view, so nothing marked it active',
+    ).toBe(true)
+
+    tab('source').click()
+    linkAt(src.indexOf('40'))
+    await until(() => linkedSource() === '40', '40 to be linked again')
+    tab('lambda-0').click()
+    expect(mounted()).toEqual(['lambda-0'])
+    await lambdaSettled()
+    expect(linkStatus(), 'the λ view on the page did not answer').toContain(NO_NODE)
 
     pick('[data-preset="explorer"]')
   })

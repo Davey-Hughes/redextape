@@ -97,7 +97,7 @@ const paint = (reg: SessionRegistry, slot: PaneSlot<'lambda'>, pane: LambdaPane)
   slot.render(reg, pane, slot.resolve(reg))
 
 /** The term the pane is showing, read the way a user reads it. */
-const term = (pane: HTMLElement) => pane.querySelector('pre.term')?.textContent ?? ''
+const term = (pane: HTMLElement) => pane.querySelector('.term')?.textContent ?? ''
 
 /** The title-selector of the view in `pane` — the pair in force is its `data-binding`. */
 const titleOf = (pane: HTMLElement) => pane.querySelector<HTMLButtonElement>('button.view-title')

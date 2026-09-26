@@ -3,7 +3,7 @@ import type { Leg } from './protocol'
 import type { ScratchEditorConfig } from './scratch-editor'
 import type { SessionId } from './session-client'
 import type { Binding, PaneOption } from './sessions'
-import type { Speed } from './workspace'
+import type { LambdaDisplay, Speed } from './workspace'
 
 export type PaneEvents = {
   /**
@@ -62,7 +62,7 @@ export type PaneEvents = {
    *
    * REQUIRED, UNLIKE THE TWO OPTIONAL MEMBERS BELOW, and the difference is not stylistic. Those two
    * are absent on a pane that genuinely lacks the affordance — the λ pane has no δ-table to click, the
-   * TM pane has no λ window — whereas every pane occupies a slot and every slot has a binding
+   * TM pane has no λ term — whereas every pane occupies a slot and every slot has a binding
    * (design §3.2b, decision 1). A pane whose rebind did nothing would be a pane whose selector lies.
    *
    * **IT TAKES THE WHOLE `(leg, session)` PAIR, AND THAT REVERSES WHAT THIS COMMENT USED TO SAY.** It
@@ -110,11 +110,9 @@ export type PaneEvents = {
    * **THE HALF OF THE OLD RULE THAT SURVIVES IS THE IMPORTANT HALF:** the pane does not go looking for
    * a term. What changed is which fact is the small one.
    *
-   * **A PANE SHOWING A LINK WINDOW MUST STILL DECLINE TO FORK, AND THAT IS NOW A RULE RATHER THAN A
-   * CONSEQUENCE.** It used to hold for free — the pane passed its own body text, and `LambdaPane`'s
-   * handler chose the frame's text over the window's for the reason recorded there. A step carries no
-   * such distinction, so `LambdaPane.#refreshDetach` checks `#link` directly, and
-   * `lambda-pane-editor.test.ts`'s "offers no fork while a link window is showing" pins it.
+   * **THE LINK WINDOW'S REFUSAL WENT WITH THE WINDOW (Plan 7 part 4a).** A pane showing the step-0
+   * link window used to decline to fork, since its body was not the step's term. The view now shows only
+   * its own step, as a tree or as text, so there is no second body a fork could be taken from.
    */
   detach?: (step: number) => void
   /**
@@ -174,6 +172,8 @@ export type PaneEvents = {
    * and the text panel reports through `collapse` instead, because its state belongs to the copy.
    */
   panel?: (name: string, open: boolean) => void
+  /** A λ view's display settings changed — recorded per view, as `panel` is (Plan 7 part 4a). */
+  display?: (d: LambdaDisplay) => void
   /**
    * Fork this pane's MACHINE into a TM scratch buffer — 5d-iv design §4.3.
    *
@@ -190,8 +190,8 @@ export type PaneEvents = {
   detachMachine?(): void
   /** A state row was clicked. Absent on panes that have no table. */
   linkState?: (stateId: number) => void
-  /** A token in the λ link window was clicked, at this byte offset into the full `lambdaText`. */
-  linkLambda?: (byteOffset: number) => void
+  /** A token in the λ view was clicked; `node` is the construct its node belongs to (Plan 7 part 4a). */
+  linkLambda?: (node: number) => void
   /**
    * This pane's split and close gestures — 5d-ii-a.
    *

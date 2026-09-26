@@ -501,21 +501,34 @@ impl Printer<'_> {
     }
 }
 
-fn fresh(hint: &str, names: &[String]) -> String {
+/// The name a binder hinted `hint` is printed with, given the names already in scope: the hint itself
+/// (`v` for an empty one) when it is free, else the first of `hint0`, `hint1`, … that is.
+pub(crate) fn fresh<S: AsRef<str>>(hint: &str, names: &[S]) -> String {
+    fresh_by(hint, names.len(), |cand| names.iter().any(|n| n.as_ref() == cand))
+}
+
+/// `fresh`'s rule with the scope asked through `taken` rather than scanned: THE ONE PLACE THE RULE LIVES,
+/// for the printer and for `viewmodel::tree`, whose names must be the printer's (spec §4.3). `bound` is
+/// how many names are in scope, counting any repeat.
+///
+/// **THE TREE CANNOT AFFORD A SCAN.** It builds a whole term at once, and a list literal's term nests
+/// thousands of binders; scanning the scope for every candidate name made the build grow with roughly
+/// the cube of that depth. It keeps a count per name instead, so `taken` is a lookup.
+pub(crate) fn fresh_by(hint: &str, bound: usize, taken: impl Fn(&str) -> bool) -> String {
     let base = if hint.is_empty() { "v" } else { hint };
-    if !names.iter().any(|n| n == base) {
+    if !taken(base) {
         return base.to_string();
     }
     // PIGEONHOLE, which is what lets this be a bounded loop rather than `0..` with an `unreachable!()`
-    // tail: `names` holds at most `names.len()` strings, so among the `names.len() + 1` candidates
-    // `base0 ..= base{names.len()}` at least one is unused. The search cannot fall through.
+    // tail: at most `bound` distinct names are taken, so among the `bound + 1` candidates
+    // `base0 ..= base{bound}` at least one is unused. The search cannot fall through.
     //
     // The fallthrough therefore returns a value instead of panicking. It is unreachable by the argument
     // above, and a panic here would be a library-path abort in a printer — the one place a caller has
     // no way to recover — for a case that cannot arise.
-    for k in 0..=names.len() {
+    for k in 0..=bound {
         let cand = format!("{base}{k}");
-        if !names.contains(&cand) {
+        if !taken(&cand) {
             return cand;
         }
     }

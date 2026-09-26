@@ -12,6 +12,7 @@ import {
   type Switches,
   serializeWorkspace,
   WORKSPACE_VERSION,
+  withDisplay,
   withPanel,
 } from '../../src/workspace'
 
@@ -69,6 +70,7 @@ describe('parseWorkspace', () => {
       focused: 'pane-1',
       panels: { 'tm-0': { rules: false } },
       inspector: false,
+      display: { 'pane-1': { layout: 'outline' as const, vars: 'debruijn' as const, map: 'minimap' as const } },
     }
     const raw = serializeWorkspace(ws)
     expect(JSON.parse(raw).version).toBe(WORKSPACE_VERSION)
@@ -150,23 +152,53 @@ describe('parseWorkspace', () => {
     expect(parseWorkspace(JSON.stringify({ ...base, inspector: 'yes' }))).toBeNull()
   })
 
+  // **A FIELD 2b DID NOT WRITE IS NOT AN INVALID FIELD**, for `inspector`'s reason: a workspace stored
+  // before Plan 7 part 4a has no `display`, and refusing it would reset every upgrading user's layout.
+  it('defaults a missing display to none stored, and refuses a malformed one', () => {
+    const base = { version: 2, tree: SPLIT, switches: PRESETS.explorer, speed: 8, focused: 'lambda-0', panels: {} }
+    expect(parseWorkspace(JSON.stringify(base))?.display).toEqual({})
+    const good = { 'lambda-0': { layout: 'outline', vars: 'names', map: 'icicle' } }
+    expect(parseWorkspace(JSON.stringify({ ...base, display: good }))?.display).toEqual(good)
+    for (const bad of [
+      { 'lambda-0': { layout: 'boxes', vars: 'names', map: 'icicle' } },
+      { 'lambda-0': { layout: 'code', vars: 'names' } },
+      { 'nowhere-9': { layout: 'code', vars: 'names', map: 'icicle' } },
+      { 'lambda-0': { layout: 'code', vars: 'indices', map: 'icicle' } },
+      { 'lambda-0': null },
+      [],
+    ]) {
+      expect(parseWorkspace(JSON.stringify({ ...base, display: bad })), JSON.stringify(bad)).toBeNull()
+    }
+  })
+
   it('opens the inspector for a migrated version 1 layout', () => {
     expect(parseWorkspace(serializeLayout(SPLIT))?.inspector).toBe(true)
   })
 })
 
 describe('serializeWorkspace', () => {
-  it('drops the panel state of a leaf that has left the tree, and a focus on one', () => {
+  it('drops the panel state and the display of a leaf that has left the tree, and a focus on one', () => {
+    const outline = { layout: 'outline' as const, vars: 'names' as const, map: 'icicle' as const }
     const ws = {
       ...defaultWorkspace(),
       focused: 'pane-9',
       panels: { 'pane-9': { rules: false }, 'tm-0': { rules: false } },
+      display: { 'pane-9': outline, 'lambda-0': outline },
     }
     const back = JSON.parse(serializeWorkspace(ws))
     expect(back.panels).toEqual({ 'tm-0': { rules: false } })
+    expect(back.display).toEqual({ 'lambda-0': outline })
     expect(back.focused).toBe('lambda-0')
     expect(back.inspector).toBe(true)
     expect(JSON.parse(serializeWorkspace({ ...ws, inspector: false })).inspector).toBe(false)
+  })
+})
+
+describe('withDisplay', () => {
+  it('records one view’s display without touching the others', () => {
+    const a = { layout: 'code' as const, vars: 'names' as const, map: 'icicle' as const }
+    const b = { layout: 'outline' as const, vars: 'debruijn' as const, map: 'minimap' as const }
+    expect(withDisplay({ 'lambda-0': a }, 'pane-1', b)).toEqual({ 'lambda-0': a, 'pane-1': b })
   })
 })
 

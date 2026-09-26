@@ -340,13 +340,53 @@ fn err(e: session::SessionError) -> JsValue {
 ///
 /// `serde_wasm_bindgen`'s default renders `Option::None` as `undefined`, and §5.1's TypeScript writes
 /// every optional as `T | null` — a renderer testing `x === null` would get it wrong. Getting this
-/// right only for top-level returns (`lambdaAst`, `sourceSpan`) and leaving struct FIELDS on the
+/// right only for top-level returns (`sourceSpan`) and leaving struct FIELDS on the
 /// default was worse than either choice alone: `lambdaStatus().run` would have been `undefined` while
-/// `lambdaAst()` was `null`, so one boundary would need two rules in the renderer. One serializer,
+/// `sourceSpan()` was `null`, so one boundary would need two rules in the renderer. One serializer,
 /// one rule.
 fn to_value<T: Serialize>(v: &T) -> Result<JsValue, JsValue> {
     let s = serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true);
     Ok(v.serialize(&s)?)
+}
+
+/// A `TreeAt` as `{ step, refused, kind, left, right, name, hint, link, names, nextRedex, contractum }`.
+///
+/// **TYPED ARRAYS, BUILT BY HAND, FOR `linkIndex`'s REASON** (see that method's doc): a 20,000-node tree
+/// through `serde_wasm_bindgen` is 20,000 objects per column, where this is one buffer per column, and
+/// buffers transfer from the worker without a copy.
+///
+/// `refused` is the term's node count when it exceeded the budget, and every column is then empty;
+/// otherwise it is `null`. `nextRedex` and `contractum` are node indices or `null`.
+// `u64 as f64` IS EXACT HERE: a step count is bounded by `MAX_REDUCTION_STEPS` (5,000,000) and a
+// refusal's node count by what a budget can be compared against; both sit far below 2^53, where an
+// `f64` stops representing every integer.
+#[allow(clippy::cast_precision_loss)]
+fn tree_to_js(at: &session::TreeAt) -> Result<JsValue, JsValue> {
+    use redextape_core::viewmodel::{LambdaTree, TreeAnswer};
+    let empty = LambdaTree::default();
+    let (tree, refused) = match &at.answer {
+        TreeAnswer::Tree(t) => (t, JsValue::NULL),
+        TreeAnswer::Refused { nodes } => (&empty, JsValue::from_f64(*nodes as f64)),
+    };
+    let names = js_sys::Array::new();
+    for n in &tree.names {
+        names.push(&JsValue::from_str(n));
+    }
+    let index = |v: Option<u32>| v.map_or(JsValue::NULL, |n| JsValue::from_f64(f64::from(n)));
+    let out = js_sys::Object::new();
+    let set = |k: &str, v: &JsValue| js_sys::Reflect::set(&out, &JsValue::from_str(k), v);
+    set("step", &JsValue::from_f64(at.step as f64))?;
+    set("refused", &refused)?;
+    set("kind", &js_sys::Uint8Array::from(&tree.kind[..]))?;
+    set("left", &js_sys::Uint32Array::from(&tree.left[..]))?;
+    set("right", &js_sys::Uint32Array::from(&tree.right[..]))?;
+    set("name", &js_sys::Uint32Array::from(&tree.name[..]))?;
+    set("hint", &js_sys::Uint32Array::from(&tree.hint[..]))?;
+    set("link", &js_sys::Uint32Array::from(&tree.link[..]))?;
+    set("names", &names)?;
+    set("nextRedex", &index(tree.next_redex))?;
+    set("contractum", &index(tree.contractum))?;
+    Ok(out.into())
 }
 
 #[wasm_bindgen]
@@ -382,14 +422,16 @@ impl Session {
         to_value(&st)
     }
 
+    /// `lambdaTree(step, nodeBudget)` -> the term at `step` (clamped to the run) as typed arrays; see
+    /// `tree_to_js` for the shape. `u32` and widened, for `raiseLambdaCap`'s reason.
+    ///
     /// # Errors
     ///
-    /// Returns `Err` when this session's λ leg is absent — check `lambdaStatus().available` first. An
-    /// exhausted `node_budget` is NOT an error: the print refuses and the caller receives `null`
-    /// (`TermTree | null`), not a throw.
-    #[wasm_bindgen(js_name = lambdaAst)]
-    pub fn lambda_ast(&self, node_budget: usize) -> Result<JsValue, JsValue> {
-        to_value(&self.0.lambda_ast(node_budget).map_err(err)?)
+    /// Returns `Err` when this session's λ leg is absent, or if assembling the object fails. A term over
+    /// `nodeBudget` is NOT an error: it answers with `refused` set.
+    #[wasm_bindgen(js_name = lambdaTree)]
+    pub fn lambda_tree(&self, step: u32, node_budget: usize) -> Result<JsValue, JsValue> {
+        tree_to_js(&self.0.lambda_tree(u64::from(step), node_budget).map_err(err)?)
     }
 
     /// `u32` RATHER THAN THE `u64` THE CURSOR TAKES, widened here. wasm-bindgen maps `u64` to JS
@@ -655,7 +697,7 @@ impl Session {
 }
 
 /// **SIX METHODS, AND THE SEVENTH'S ABSENCE IS LOAD-BEARING.** §3.3's audit puts `lambdaStatus`,
-/// `stepLambda`, `lambdaState`, `lambdaAst`, `raiseLambdaCap` and `runLambda` on this type unchanged —
+/// `stepLambda`, `lambdaState`, `lambdaTree`, `raiseLambdaCap` and `runLambda` on this type unchanged —
 /// they read nothing but the cursor. `lambdaValue` reads `self.ty`, `sourceSpan` and `linkIndex` read
 /// `self.map`, and none of the three is declared below; `tests/browser.rs` pins that at compile time
 /// rather than in prose.
@@ -696,13 +738,14 @@ impl LambdaScratch {
         to_value(&self.0.lambda_state(byte_budget))
     }
 
+    /// `lambdaTree(step, nodeBudget)`, as on `Session`; a scratch's trees carry no links.
+    ///
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the arena; not expected for this crate's own
-    /// types. An exhausted `node_budget` is NOT an error: the caller receives `null`.
-    #[wasm_bindgen(js_name = lambdaAst)]
-    pub fn lambda_ast(&self, node_budget: usize) -> Result<JsValue, JsValue> {
-        to_value(&self.0.lambda_ast(node_budget))
+    /// Returns `Err` only if assembling the object fails.
+    #[wasm_bindgen(js_name = lambdaTree)]
+    pub fn lambda_tree(&self, step: u32, node_budget: usize) -> Result<JsValue, JsValue> {
+        tree_to_js(&self.0.lambda_tree(u64::from(step), node_budget))
     }
 
     /// `u32` and widened, for the reason `Session::raiseLambdaCap` records: wasm-bindgen maps `u64` to

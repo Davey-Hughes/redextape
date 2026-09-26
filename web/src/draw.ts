@@ -1,9 +1,11 @@
 import type { EditorView } from '@codemirror/view'
 import { setFocus } from './highlight'
 import type { LambdaPane } from './lambda-pane'
+import type { LambdaTrees } from './lambda-trees'
 import { isCoincident, type Link, runningFocus, sourceNodeOwner } from './link'
+import type { LambdaLinkState } from './link-status'
 import type { LinkWiring } from './link-wiring'
-import type { LeafId, PaneCollection } from './panes'
+import { type LeafId, onPage, type PaneCollection } from './panes'
 import {
   copyRows,
   type Lines,
@@ -18,6 +20,7 @@ import {
 import type { SessionId } from './session-client'
 import type { SessionRegistry } from './sessions'
 import type { TmPane } from './tm-pane'
+import { seedTm } from './tm-seed'
 
 /**
  * ONE FRAME, PAINTED ONCE — the per-frame pass that runs on every recorded frame during playback.
@@ -56,7 +59,7 @@ import type { TmPane } from './tm-pane'
  * `hasEditor: (session) => boolean` IS THE SAME SHAPE AGAIN, over the OTHER thing `main.ts` owns and
  * this module has no other route to: `editor-custody.ts`'s two maps. A λ pane cannot work out whether
  * its session has an editor anywhere — that is a fact about other panes and about the editors waiting
- * between them — so `LambdaPane.setEditorAvailable` is fed from here, per frame, alongside `renderLink`.
+ * between them — so `LambdaPane.setEditorAvailable` is fed from here, per frame, alongside `renderTree`.
  * A thunk for the same reason as its two siblings: custody moves under a `draw()` that did not cause it.
  */
 export function createDraw(deps: {
@@ -64,6 +67,10 @@ export function createDraw(deps: {
   sessions: SessionRegistry
   panes: PaneCollection
   links: LinkWiring
+  /** The λ trees the views draw — asked here for each connected view's displayed step (spec §4). */
+  trees: LambdaTrees
+  /** TM views a machine reached while they were off the page (`replies.ts`); each is seeded when next shown. */
+  unseen: WeakSet<TmPane>
   leaves: () => number
   sourceAvailable: () => boolean
   hasEditor: (session: SessionId) => boolean
@@ -90,6 +97,8 @@ export function createDraw(deps: {
     sessions,
     panes,
     links: linkWiring,
+    trees,
+    unseen,
     leaves,
     sourceAvailable,
     hasEditor,
@@ -119,10 +128,16 @@ export function createDraw(deps: {
     //
     // A LEG WITH NO PANE CONTRIBUTES NOTHING, RATHER THAN BEING FAKED WITH A DEFAULT. The scalar reads
     // below (`tmFocus`'s `tm.hist...`, the source editor's `lam.hist...`) feed the ONE shared status
-    // line and the ONE source editor's decoration, neither of which has a per-pane identity yet — which
-    // pane's state should win once a leg holds more than one is answered by `active` itself now, not
-    // here. What a leg with NO pane should contribute has an answer today, and it is `null` at both
-    // sites: there is no running focus on a leg nobody is looking at.
+    // line and the ONE source editor's decoration, neither of which has a per-pane identity yet. What a
+    // leg with NO pane should contribute has an answer today, and it is `null` at both sites.
+    //
+    // **WHICH PANE ANSWERS DEPENDS ON WHAT THE READER READS.** `lam` and `tm` ask `active` — the pane the
+    // user last focused on the leg, and in Stage possibly one off the page. They read the leg's own
+    // history through the pane's binding, which is live whether or not the pane is drawn, so a hidden pane
+    // still answers truly for its session; and part 2's spec §8 keeps the step bar on "the last view that
+    // could" step, so a hidden view's leg can still move. The λ link clause at the end of this function
+    // asks `shown` instead, because it reads a view's own pin and tree, which only a view on the page has
+    // fresh (`PaneCollection.shown`'s doc).
     const lam = panes.active('lambda')?.slot.resolve(sessions)
     const tm = panes.active('tm')?.slot.resolve(sessions)
     // THE TM LEG'S OWN RUNNING FOCUS — `TmState.source_node`, NOT `lam.hist.current?.owner` below.
@@ -174,8 +189,36 @@ export function createDraw(deps: {
       // only observer is the next `innerHTML` read. Selecting a tab re-attaches the host and ends in a
       // `draw()`, so nothing comes back stale.
       if (!p.host.isConnected) continue
+      // ONE LOCAL FOR THE ONE CAST THIS WHOLE PANE NEEDS — `p.pane` IS `PaneView<T>`, the narrow type
+      // `PaneSlot.render` requires (see that type's own doc), which does not carry `TmPane`'s own
+      // methods; `null` on a non-tm leg keeps every read below honest about which leg it is on.
+      const tmPane = p.slot.binding.leg === 'tm' ? (p.pane as TmPane) : null
+      if (tmPane !== null && unseen.has(tmPane)) {
+        const entry = sessions.entryOf(p.slot.binding.session)
+        seedTm(tmPane, entry.tmProgram, entry.tmScratch)
+        unseen.delete(tmPane)
+        // **A SEEDED VIEW STARTS WITH NO PIN, AND `seedTm`'S OWN `setProgram` JUST CLEARED ONE THAT MAY
+        // STILL APPLY.** This pane MISSED the compile, so `link-wiring.ts`'s `setLinkTo` fan-out may have
+        // written a link resolved against the OLD index it held before this seed — a wrong answer, since
+        // the states it fanned out name rows in the NEW index. Resolved against `linkWiring.index` HERE,
+        // NOT CARRIED FROM WHENEVER THE LINK WAS MADE, because that is the index this frame's pin is
+        // current against; a pane shown frames later still gets the right answer.
+        //
+        // `false` FOR `scrollTo`, NOT `origin !== 'tm'` AS THE FAN-OUT PASSES: there is no `origin` here,
+        // this is a seed rather than a gesture, and a scroll asked for here would not last — `setLink`'s
+        // one-shot `#pendingScroll` is consumed by its own `#drawTable` call, and `p.slot.render` below, in
+        // this same iteration, calls `#drawTable` again and re-targets the follow point `seedTm`'s
+        // `setProgram` just re-attached (`#follow.attach()`), overwriting it. A seeded view opens on its
+        // follow target, as it did before this pane was ever skipped a compile — the pin still paints, just
+        // without staking a scroll claim over it.
+        const pin =
+          linkWiring.linkable && linkWiring.link !== null && linkWiring.index !== null
+            ? linkWiring.index.linkFor(linkWiring.link.node).states
+            : []
+        tmPane.setLink(pin, false)
+      }
       const leg = p.slot.resolve(sessions)
-      if (p.slot.binding.leg === 'tm') (p.pane as TmPane).setFocus(tmFocusLink?.states ?? [])
+      if (tmPane !== null) tmPane.setFocus(tmFocusLink?.states ?? [])
       p.slot.render(sessions, p.pane, leg)
       // WHICH LAYOUT GESTURES THIS PANE OFFERS — T12's own addition, driven from here for the same
       // reason `setBindings` already is (`PaneSlot.render`'s doc): both are facts about something
@@ -206,21 +249,18 @@ export function createDraw(deps: {
       p.pane.setStepsShown(stepsInView())
     }
 
-    // RESOLVED ONCE, HERE, AND SHARED BY BOTH CONSUMERS BELOW. `draw()` runs on every recorded frame
-    // during playback, and `index.linkFor` walks `#spanOf`/`#statesOf` over the wire's parallel
-    // arrays — not free. `drawLink` wants `states.length > 0` and the λ span (to tell `truncated` from
-    // `shown`); `lambdaLinkWindow` wants only the λ span. A separate `index.linkFor(link.node)` call in
-    // each would resolve the SAME node twice on every tick.
+    // RESOLVED ONCE, HERE, FOR `drawLink` AT THE END. `draw()` runs on every recorded frame during
+    // playback, and `index.linkFor` walks `#spanOf`/`#statesOf` over the wire's parallel arrays — not
+    // free. The λ views need none of it: each marks the pinned construct's nodes in the tree it draws.
     const l: Link | null =
       linkWiring.linkable && linkWiring.link !== null && linkWiring.index !== null
         ? linkWiring.index.linkFor(linkWiring.link.node)
         : null
-    // PER-LEG, NOT PER-PANE — every λ pane follows the same link window, resolved once and fanned out.
-    // SAME REASON AS `drawLink()` BELOW, AND NOT ONLY IN `setLinkTo`: scrubbing the λ history must
-    // withdraw the window without a click, and every stepping control routes through `draw()` rather
-    // than through `setLinkTo`.
-    const lambdaWin = linkWiring.lambdaLinkWindow(l)
-    // THE λ-ONLY PER-FRAME PASS, AND IT CARRIES TWO FACTS NOW. `renderLink` is per-leg (one window,
+    // PER-LEG, NOT PER-PANE — every λ view marks the same pinned construct, read once and fanned out.
+    // SAME REASON AS `drawLink()` BELOW, AND NOT ONLY IN `setLinkTo`: each step's tree must be marked as
+    // it arrives, and every stepping control routes through `draw()` rather than through `setLinkTo`.
+    const pin = linkWiring.linkable && linkWiring.link !== null ? linkWiring.link.node : null
+    // THE λ-ONLY PER-FRAME PASS, AND IT CARRIES TWO FACTS NOW. The pin is per-leg (one construct,
     // fanned out); `setEditorAvailable` is PER PANE, because it is a question about each pane's own
     // binding — two λ panes on two different buffers get two different answers, and two on the SAME
     // buffer get the same one, which is exactly the state the control exists to resolve.
@@ -229,12 +269,22 @@ export function createDraw(deps: {
     // every way: that call is leg-agnostic (`PaneView`), and an editor-availability setter on `TmPane`
     // would be a method that could only ever be ignored. The loop above is the render pass for BOTH
     // legs; this one is already the place where "λ panes, and only λ panes" is said.
+    trees.prune((id) => sessions.has(id))
     for (const p of panes.of('lambda')) {
-      // THE SAME SKIP THE MAIN LOOP TAKES, for the same reason (spec §5).
+      // THE SAME SKIP THE MAIN LOOP TAKES, for the same reason (spec §5) — and a hidden view therefore asks
+      // the worker for no tree until its tab is next selected (part 4's spec §5.5).
       if (!p.host.isConnected) continue
       const pane = p.pane as LambdaPane
-      pane.renderLink(lambdaWin)
-      pane.setEditorAvailable(hasEditor(p.slot.binding.session))
+      const session = p.slot.binding.session
+      const leg = p.slot.resolve(sessions)
+      pane.setBuild(trees.buildOf(session))
+      // A COPY IS NOT LINKED (§4.5), so it marks nothing whatever is pinned.
+      const pinned = sessions.entryOf(session).detached ? null : pin
+      pane.renderTree(
+        leg.hist.current === undefined ? { kind: 'none' } : trees.want(session, leg.hist.currentStep),
+        pinned,
+      )
+      pane.setEditorAvailable(hasEditor(session))
     }
 
     // THE RUNNING FOCUS: a SECOND, INDEPENDENT layer from `l`/`link` above, computed here rather than
@@ -272,7 +322,21 @@ export function createDraw(deps: {
     // SECOND job needs `tmFocus` (resolved above the render loop) to answer whether it coincides with
     // the pin. Still "at the end" in the sense the original comment meant: everything above it is a
     // `history`/`index` read, nothing below reads `drawLink`'s output.
-    linkWiring.drawLink(l, isCoincident(linkWiring.link, tmFocus))
+    // THE λ HALF OF THE STATUS COMES FROM THE VIEW THAT DREW THE TREE (spec §5.4), after the loop above
+    // has handed it this frame's pin.
+    //
+    // **A VIEW OFF THE PAGE DREW NOTHING.** The loop above skipped it, so its pin and its tree are whatever
+    // it last drew, and asking it answered for an earlier pin. So the view is `shown`'s: the active one
+    // while it is on the page, else the one the stage shows. With no λ view on the page there is no term on
+    // screen to explain, which is `'absent'`.
+    const drewLambda = panes.shown('lambda', onPage)
+    const lambdaLink: LambdaLinkState =
+      drewLambda === undefined
+        ? 'absent'
+        : linkWiring.index === null || linkWiring.index.lambdaText === ''
+          ? 'declined'
+          : (drewLambda.pane as LambdaPane).linkState()
+    linkWiring.drawLink(l, isCoincident(linkWiring.link, tmFocus), lambdaLink)
 
     // THE READOUT (spec §9): the focused view's session. A focused source view has no pane entry
     // (`panes.get('source')` is `undefined`) and shows the program, as does any view bound to it.

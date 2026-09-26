@@ -231,6 +231,16 @@ describe('Follow', () => {
     expect(f.following).toBe(true)
   })
 
+  it('detaches on demand, and an echo still expected does not hold it', () => {
+    const f = new Follow()
+    f.onProgrammaticScroll(1000)
+    f.detach()
+    expect(f.following).toBe(false)
+    f.onScroll(1000)
+    expect(f.following).toBe(false)
+    expect(f.targetScrollTop(100, 24, 240, 10_000)).toBeNull()
+  })
+
   it('reattaches on demand', () => {
     const f = new Follow()
     f.onScroll(500)

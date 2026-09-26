@@ -3,10 +3,11 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { createEditorCustody } from '../../src/editor-custody'
 import { History } from '../../src/history'
 import { LambdaPane } from '../../src/lambda-pane'
+import { LambdaTrees } from '../../src/lambda-trees'
 import { createLinkWiring } from '../../src/link-wiring'
 import { PaneCollection } from '../../src/panes'
 import type { RunReply } from '../../src/protocol'
-import { HISTORY_BYTES, lambdaFrameBytes, tmFrameBytes } from '../../src/protocol'
+import { FRAME_BYTES, HISTORY_BYTES, lambdaFrameBytes, tmFrameBytes } from '../../src/protocol'
 import { createReplies } from '../../src/replies'
 import { ScratchBuffers } from '../../src/scratch'
 import type { PoolPort, SessionId } from '../../src/session-client'
@@ -15,6 +16,7 @@ import type { LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type { LambdaState, TmState } from '../../src/types'
 import { SHELL, until } from './harness'
+import { lambdaSettled } from './lambda-text'
 
 /**
  * **THE TWO CLAIMS PLAN T8 MAKES THAT A FAKE PORT CANNOT ANSWER** — design §4.3, over real
@@ -622,6 +624,7 @@ describe('the no-session report for a failed fork', () => {
       const notified: string[] = []
       const replies = createReplies({
         setProgram: () => undefined,
+        trees: new LambdaTrees(() => undefined),
         sessions: reg,
         scratchpad: pad,
         results,
@@ -783,7 +786,11 @@ describe('the fork control forks a truncated frame, through the app', () => {
     // THE CAPABILITY THIS SLICE EXISTS FOR. Before T8's fix to `#refreshDetach`, a frame this
     // truncated hid the fork control outright — `lambda-pane.ts`'s own module doc calls this shape
     // "most non-trivial terms".
-    expect(document.querySelector('[data-leaf="lambda-0"] .truncated')).not.toBeNull()
+    //
+    // **THE TRUNCATION IS ASSERTED ON THE SEED BELOW, NOT ON SCREEN.** This line read `.truncated` off the
+    // flat frame; the λ view now draws the step's tree (Plan 7 part 4a), which is the whole term, and shows
+    // the 512-byte frame only until the tree arrives, so reading the screen would race the tree.
+    await lambdaSettled()
     const fork = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')
     expect(fork).not.toBeNull()
 
@@ -797,6 +804,12 @@ describe('the fork control forks a truncated frame, through the app', () => {
     // and re-printed at `LAMBDA_BYTE_BUDGET`), a WHOLE, parseable term — `lambda/syntax.rs`'s
     // round-trip guarantee holds over it, which is not a promise `while4`'s 512-byte frame ever made.
     expect(editorText).not.toContain('…')
+    // AND THE FRAME THIS FORKED FROM WAS CUT. The seed is the whole step-2 term as the printer writes it, and
+    // it is longer than the frame's budget, so the frame's own print at `FRAME_BYTES` could not have held
+    // it. Read off CodeMirror's document, not the DOM's text, which carries only what the editor renders.
+    const host = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
+    const seed = host === null ? '' : (EditorView.findFromDOM(host)?.state.doc.toString() ?? '')
+    expect(new TextEncoder().encode(seed).length).toBeGreaterThan(FRAME_BYTES)
 
     // AND THE SOURCE SESSION IS STILL THE ONE THE PANE LEFT — the scratch is a second session, not a
     // mutation of the first (§4.3, and this file's first `describe` proves the mechanism directly).

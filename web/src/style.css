@@ -618,13 +618,103 @@ button.view-title[aria-expanded="true"] {
   border-color: var(--fg-dim);
 }
 
+/* THE λ VIEW'S BODY (Plan 7 part 4a): a laid-out term virtualized by line, or a frame's flat text.
+   `.pane` is not a flex column, so the body takes an explicit bound for the reason `.state-table` does:
+   unbounded, its spacer would grow to every line's height. */
 .term {
+  position: relative;
   font-family: var(--font-mono);
   font-size: var(--step--1);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
   margin: 0;
   min-height: 6lh;
+  max-height: 60vh;
+  overflow: auto;
+}
+.term-flat {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.term-spacer {
+  position: relative;
+}
+.term-rows {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+}
+/* `LINE_HEIGHT` in `lambda-body.ts` is this height; the virtual window's arithmetic assumes it. */
+.term-line {
+  height: 20px;
+  line-height: 20px;
+  white-space: pre;
+  padding-inline-start: 2ch;
+}
+/* THE GUTTER SITS IN THE LINE'S PADDING, pulled back by its own width, so indentation stays the line's
+   `padding-inline-start` and neither the glyph nor the indent is text a reader of `.term` would read. */
+.term-gutter {
+  display: inline-block;
+  width: 2ch;
+  margin-inline-start: -2ch;
+  color: var(--fg-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.term-gutter[data-open="true"]::before {
+  content: "▾";
+}
+.term-gutter[data-open="false"]::before {
+  content: "▸";
+}
+.term:focus-visible .term-line.is-active {
+  box-shadow: inset 2px 0 0 var(--focus-ring);
+}
+.term-chip,
+.term-fold {
+  cursor: pointer;
+}
+/* A Church numeral's bar, drawn by CSS rather than a combining character (Plan 7 part 1's spec). */
+.term-chip.tok-nat {
+  text-decoration: overline;
+}
+.term-fold {
+  color: var(--fg-dim);
+  font-style: italic;
+}
+/* A mark's words for a screen reader, where the mark starts: generated content, so they are read aloud
+   and are not part of `.term`'s text; clipped away, so they are not seen. `lambda-body.ts`'s `MARKS`. */
+.term [data-marks]::before {
+  content: attr(data-marks);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* A tree for another step, shown until this step's arrives — dimmed, and `aria-busy` says why. */
+.term[data-stale] .term-rows {
+  opacity: 0.7;
+}
+/* THE TERM MAP (spec §6): one canvas, as wide as the view and a fixed height; its colours come from the
+   palette tokens it reads at draw time (`term-map.ts`). The height is set here only: the map reads it. */
+.term-map {
+  display: block;
+  width: 100%;
+  height: 120px;
+  cursor: crosshair;
+}
+/* THE CHECKED CHOICE (`view-header.ts`'s `radioGroup`), DRAWN WITHOUT RELYING ON COLOUR — the same cue
+   `.view-menu-choice[aria-checked="true"]` uses: heavier than its sibling, plus a bar in `--accent`. A mode's
+   button is otherwise every panel action's (`.panel-actions button`), which outranks a rule on its class. */
+.map-mode[aria-checked="true"] {
+  font-weight: 600;
+  border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.term-note {
+  color: var(--fg-dim);
+  font-style: italic;
+  margin: var(--space-1) 0 0;
 }
 
 /* Design §4.2's upper region — the editor scrolls rather than pushing the term off the pane. */
@@ -883,6 +973,14 @@ button.view-title[aria-expanded="true"] {
   font-size: var(--step--2);
   color: var(--fg-dim);
 }
+/* A SETTING'S CHECKED CHOICE (`view-header.ts`'s `radioGroup`), DRAWN WITHOUT RELYING ON COLOUR: heavier
+   than its siblings, with a bar at its leading edge. The bar takes `--accent`, a palette token; the weight is
+   what still shows in a palette whose colours a reader cannot tell apart. `lambda-display.test.ts` compares
+   the computed weights of a checked and an unchecked choice. */
+.view-menu-choice[aria-checked="true"] {
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 
 /* THE HEADER'S BUFFER LIST, ON THE SAME TWO POSITIONING DECLARATIONS AS `.view-menu` ABOVE — and
    the argument for them is up there rather than restated here: without `position-area` this list opens
@@ -1136,7 +1234,7 @@ button.view-title[aria-expanded="true"] {
 
 /* The RUNNING FOCUS on the delta table: the state header `state-table.ts`'s `focusedRows` marks for
    whichever construct `TmState.source_node` names as the CURRENT δ-step's own (`main.ts`'s `draw()`).
-   SAME HUE AS `.is-focus-exact`/`.term .is-redex` (`--tok-operator`) — all three panes' "what the
+   SAME HUE AS `.is-focus-exact`/`.term .is-contractum` (`--tok-operator`) — all three panes' "what the
    current step is working on" read as one system rather than three independently invented ones.
 
    LAYERED BETWEEN `.is-linked` AND `.is-current`/`.is-firing` BELOW, same reasoning as the comment on
@@ -1241,7 +1339,7 @@ button.view-title[aria-expanded="true"] {
   padding: 0;
 }
 
-/* The linked subterm inside the λ window. Layered over the token colour rather than replacing it —
+/* A linked node's tokens in the λ view. Layered over the token colour rather than replacing it —
    the class is added alongside `.tok-*`, so the text keeps its syntax colour and gains a ground. */
 .term .is-linked {
   background: var(--link-bg);
@@ -1250,19 +1348,19 @@ button.view-title[aria-expanded="true"] {
   -webkit-box-decoration-break: clone;
 }
 
-/* The redex THIS FRAME'S OWN STEP CONTRACTED, in the λ pane's FRAME view (not the link window above,
-   which is a different coordinate system — see `lambda-pane.ts`'s `#redraw`). Same hue as `.is-focus-
-   exact` (`--tok-operator`): both are "what the current step just did", one in the source pane and one
-   here, and sharing a colour reads as one running-focus system across the two panes rather than two
-   independently-invented ones.
-
-   THE CLASS IS NAMED FOR THE REDEX AND THE TEXT UNDER IT IS THE CONTRACTUM. `redex_span` is the
-   REDEX'S path resolved against this frame's POST-step term (see `types.ts`'s field doc), and β
-   consumed the redex `App` — so what actually lights up here is the subterm the step PRODUCED. That is
-   why the hue matches `.is-focus-exact` rather than sitting apart: both say "what just changed". */
-.term .is-redex {
+/* THE TWO REDEX MARKS, ONE SHAPE EACH, so neither is carried by colour alone (Plan 7 part 1's rule).
+   The CONTRACTUM — what the step just produced, which the frame's `redex_span` has always marked — keeps
+   the wash and underline it had as `.is-redex`, in the same hue as `.is-focus-exact`: both say "what the
+   current step just did". The NEXT REDEX — what the next step contracts, which only the tree knows — is
+   a dashed outline: an `outline`, not a `box-shadow`, so it composes with the other two marks' shadows
+   instead of replacing them. */
+.term .is-contractum {
   background: color-mix(in oklab, var(--tok-operator) 22%, transparent);
   box-shadow: inset 0 -2px 0 var(--tok-operator);
+}
+.term .is-next-redex {
+  outline: 1px dashed var(--tok-operator);
+  outline-offset: -1px;
 }
 
 /* The layout tree's containers and dividers.

@@ -122,6 +122,11 @@ export class PaneCollection {
    * THE FALLBACK IS EXACTLY THE OLD `first`, so the single-pane case and the empty-leg case are
    * unchanged — including the `undefined`, which four modules once each answered privately with a
    * throw. A leg with no pane is a state, not a wiring bug.
+   *
+   * **THE λ LINK CLAUSE ASKS `shown` INSTEAD (Plan 7 part 4a)**, and the λ copy clause asks it first —
+   * this answer among the panes on the page, for a reason that holds only for them; `shown`'s own doc has
+   * it. The running focuses and the TM copy clause ask this, and so does the λ copy clause when no λ view
+   * is on the page.
    */
   active<K extends Leg>(leg: K): PaneEntry<K> | undefined {
     const marked = this.#activeByLeg.get(leg)
@@ -133,6 +138,31 @@ export class PaneCollection {
       if (e.slot.binding.leg === leg) return e as PaneEntry<K>
     }
     return undefined
+  }
+
+  /**
+   * `active(leg)` among the panes `onPage` says are on the page: the active pane if it is one of them,
+   * else the first of them, else `undefined`.
+   *
+   * **A READER OF A VIEW'S OWN STATE ASKS THIS, NOT `active`.** In Stage one host is on the page and the
+   * rest are off it, and selecting a tab records the focused leaf without marking a pane active, so
+   * `active(leg)` can name a hidden pane. `draw()` hands a pin and a tree only to views on the page, so a
+   * hidden λ view's `linkState` answered for an earlier pin: the λ link clause asks this, and so does the
+   * λ copy clause, which must name the same view because `linkStatus` suppresses a copy's own clauses.
+   * `undefined` is the link clause's honest absence: no λ view on screen, so no term to explain. The copy
+   * clause then falls back to `active`, as the TM copy clause does, since a copy off the page is still one.
+   *
+   * **A READER OF A LEG'S LIVE HISTORY ASKS `active`.** The running focuses read the session a pane is
+   * bound to, which is current whether or not the pane is drawn, and part 2's spec §8 keeps the step bar
+   * on "the last view that could" step — in Stage, a view off the page — so that leg can still move.
+   *
+   * `onPage` IS THE CALLER'S, which keeps the collection free of the DOM: the app passes the `onPage`
+   * below, and a node test passes its own.
+   */
+  shown<K extends Leg>(leg: K, onPage: (e: PaneEntry<K>) => boolean): PaneEntry<K> | undefined {
+    const active = this.active(leg)
+    if (active !== undefined && onPage(active)) return active
+    return this.of(leg).find(onPage)
   }
 
   /** Every pane rendering `leg` AND bound to `session` — the question a reply handler is asking. */
@@ -147,4 +177,13 @@ export class PaneCollection {
   all(): PaneEntry<Leg>[] {
     return [...this.#entries.values()]
   }
+}
+
+/**
+ * Whether a pane is on the page — `PaneCollection.shown`'s test as the app runs it. In Stage every host but
+ * the shown one is kept off the page (`pane-host.ts`). A free function rather than a method, so the
+ * collection itself never reads the DOM.
+ */
+export function onPage(e: { readonly host: HTMLElement }): boolean {
+  return e.host.isConnected
 }

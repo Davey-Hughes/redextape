@@ -210,6 +210,15 @@ export class Follow {
     this.#following = true
   }
 
+  /**
+   * Stop following now, for a move the user made whose own `scroll` event arrives too late — a frame after
+   * a redraw that, still following, would scroll straight back. The same as `onScroll`'s detach.
+   */
+  detach(): void {
+    this.#expected = null
+    this.#following = false
+  }
+
   /** Record a scrollTop this code is about to write, so its echo is not read as user intent. */
   onProgrammaticScroll(top: number): void {
     this.#expected = top

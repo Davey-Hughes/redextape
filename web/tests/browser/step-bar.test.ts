@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { SHELL, until } from './harness'
+import { lambdaSettled } from './lambda-text'
 
 const menu = (): HTMLElement => {
   document.querySelector<HTMLButtonElement>('#workspace')?.click()
@@ -59,14 +60,16 @@ describe('the step bar', () => {
   // frontier, where `▶` means "record one more" and the readout does not move. Stepping back from the
   // frontier is the unambiguous gesture, and it is still evidence the bar drives the view it names —
   // the readout it moves is the one the title belongs to.
-  it('steps the view it names', () => {
+  it('steps the view it names', async () => {
     focusView('lambda-0')
     const before = barStep()
     expect(before).toContain('step ')
+    await lambdaSettled('lambda-0', barStep)
     const termBefore = document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
     expect(termBefore, 'the λ view renders no term, so a change in it would prove nothing').not.toBe('')
     bar().querySelector<HTMLButtonElement>('button[aria-label="one step back"]')?.click()
     expect(barStep()).not.toBe(before)
+    await lambdaSettled('lambda-0', barStep)
     // **THE VIEW ITSELF MOVED, WHICH IS THE HALF THE BAR'S OWN READOUT CANNOT SHOW.** This line used to
     // assert the λ leaf merely exists, which every other case already relies on — it said nothing about
     // the bar driving the view its title names.

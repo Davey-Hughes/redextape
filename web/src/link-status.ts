@@ -9,32 +9,38 @@
  * statically-resolved callee `Var`s that `sourcemap.rs`'s module doc names — do not, and reporting
  * that absence has to be built as a first-class path rather than an edge case.
  *
- * `'absent'` IS OUTSIDE THAT COUNT AND IS DELIBERATELY THE ONE THAT SAYS NOTHING. The four above are
- * reasons a λ pane on screen shows no link; `'absent'` is the layout tree's own addition and means
- * there is no λ pane on screen to say anything about. Its own doc has the argument.
+ * `'absent'` IS OUTSIDE THAT COUNT, AND IT SAYS NOTHING DELIBERATELY. The four above are reasons a λ
+ * pane on screen shows no link; `'absent'` is the layout tree's own addition and means there is no λ
+ * pane on screen to say anything about. Its own doc has the argument.
+ *
+ * THREE MEMBERS SAY NOTHING, EACH FOR ITS OWN REASON: `'shown'` has no absence to explain, `'waiting'`
+ * is a moment rather than a state, and `'absent'` has no pane to explain one about. `LAMBDA_TEXT` below
+ * is where each member's words are.
  */
 export type LambdaLinkState =
-  /** Shown: the play head is at step 0, the term reaches this construct, and the backend lowered it. */
+  /** Shown: a node of the term on screen carries this construct. */
   | 'shown'
-  /** The λ text stopped before reaching this construct — either the byte budget or the depth cap fired first. */
-  | 'truncated'
   /**
-   * The construct has no recorded λ position at all — DIFFERENT FROM `'truncated'`, which is a
-   * definite frontier (a byte or depth cut the walk actually hit) this is not. `LinkIndex.lambdaCut`
-   * is what tells the two apart; before this variant existed, an absent span was ASSUMED to mean
-   * truncation regardless of that flag, which reported a frontier that was not there whenever the
-   * true cause was something else (e.g. `LinkIndex.lambda_nodes` dropped the containing subterm for a
-   * reason other than the cut).
+   * No node of the term at this step carries it (Plan 7 part 4a). At step 0 every construct the map
+   * places has a node; a later step keeps only the ones an `App` still carries as its owner, since
+   * reduction rewrites the rest away.
    */
-  | 'unmapped'
-  /** The λ leg's play head has moved off step 0, where the path coordinates stop meaning anything. */
-  | 'not-step-0'
+  | 'none-here'
+  /** The term at this step is past the tree's node budget, so the view shows its flat text and marks nothing. */
+  | 'too-large'
+  /**
+   * This step's tree has not come back yet, whether the view shows no tree meanwhile or another step's —
+   * a moment, not a state to explain.
+   */
+  | 'waiting'
   /** The λ backend declined this PROGRAM, so no construct has a λ link. */
   | 'declined'
   /**
    * THERE IS NO λ PANE ON SCREEN AT ALL — not an absence of a link, an absence of the surface every
    * other member describes. Reachable since the layout tree: `closeLeaf` refuses only the last leaf in
-   * the tree, so closing the one λ pane a fresh page ships is an ordinary gesture.
+   * the tree, so closing the one λ pane a fresh page ships is an ordinary gesture. And in Stage, whenever
+   * the view it shows is not a λ view: the others are off the page, and a view off the page drew no tree
+   * this frame (`draw.ts`'s `createDraw`).
    *
    * IT RENDERS AS NOTHING, and that is the same uniform-suppression rule `linkStatus` already applies
    * to a DETACHED λ pane rather than a new exception: every λ clause explains why a term on screen
@@ -135,9 +141,9 @@ export type LinkStatus = {
 
 const LAMBDA_TEXT: Record<LambdaLinkState, string> = {
   shown: '',
-  truncated: 'the λ term is truncated before this construct',
-  unmapped: 'this construct has no recorded position in the λ term',
-  'not-step-0': 'the λ link is only defined at step 0 — restart the λ view to see it',
+  'none-here': 'this construct has no node in the λ term at this step',
+  'too-large': 'the λ term at this step is too large to lay out',
+  waiting: '',
   declined: 'this program has no λ lowering, so no construct has a λ link',
   absent: '',
 }
@@ -172,13 +178,14 @@ function detachedText(d: DetachedPanes): string {
  * to speaking, which is exactly §4.5's obligation.
  *
  * DETACHMENT LEADS, ahead of the coincidence that used to lead. Ordered most-global first — the rule
- * `link-wiring.ts`'s `lambdaLinkState` states for its own three-way choice — because "this pane is not part
+ * `draw.ts`'s `createDraw` follows for the λ state (no view, then a declined program, then the view's own
+ * answer) — because "this pane is not part
  * of the correspondence" scopes every clause after it: those are about the panes still inside.
  *
  * A DETACHED PANE'S OWN CLAUSES ARE SUPPRESSED, NOT MERELY PRECEDED. §4.5's standard is the one that
  * deleted `node_to_lambda`: a thing that provably cannot work should not be presented as though it
- * might. A detached λ pane is showing a scratch term, so "the λ term is truncated before this
- * construct" describes a truncation in a term that is not on screen; a detached TM pane renders
+ * might. A detached λ pane is showing a scratch term, so "this construct has no node in the λ term
+ * at this step" describes a term that is not on screen; a detached TM pane renders
  * states whose `source_node` is `null` by construction (§3.1), so neither the coincidence nor the
  * emits-no-states absence is a claim about anything the user is looking at.
  *

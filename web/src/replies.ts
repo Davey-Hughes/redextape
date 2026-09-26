@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import type { EditablePane } from './editor-custody'
 import { setDecline, setLink } from './highlight'
+import type { LambdaTrees } from './lambda-trees'
 import { LinkIndex } from './link'
 import type { LinkWiring } from './link-wiring'
 import type { PaneCollection } from './panes'
@@ -75,6 +76,12 @@ export function createReplies(deps: {
   view: () => EditorView
   panes: PaneCollection
   links: LinkWiring
+  trees: LambdaTrees
+  /**
+   * TM views a machine reached while they were off the page — `draw()` seeds each when it is next shown. Optional:
+   * a caller that never hides a view (every direct test of this module) needs none, and gets a set nothing reads.
+   */
+  unseen?: WeakSet<TmPane>
   draw: () => void
   /**
    * The pane currently holding `session`'s editor, or `undefined` if none currently is — replaces a
@@ -123,6 +130,8 @@ export function createReplies(deps: {
     view,
     panes,
     links: linkWiring,
+    trees,
+    unseen = new WeakSet<TmPane>(),
     draw,
     editorHome,
     onBuffersPersist,
@@ -131,8 +140,9 @@ export function createReplies(deps: {
   } = deps
 
   /**
-   * Store `compiled` on `session`'s entry and fan `setProgram` out to every TM pane bound to it —
-   * the half `setTmProgram` and the `tm-scratch-compiled` arm below share, extracted so the second of
+   * Store `compiled` on `session`'s entry and fan `setProgram` out to every TM pane bound to it that is
+   * on the page — one off it goes in `unseen` instead, and `draw()` seeds it from the entry when it is
+   * shown. The half `setTmProgram` and the `tm-scratch-compiled` arm below share, extracted so the second of
    * those two stops re-implementing it — Minor fix, fix round on Task 9. Both callers need "the entry
    * agrees with what the panes were just told" (`setTmProgram`'s own doc has the argument for why that
    * has to be one call), and both callers need it on the SAME per-pane pass a second per-pane fact
@@ -152,14 +162,22 @@ export function createReplies(deps: {
     const rules = compiled === null ? 0 : ruleCount(compiled.program)
     for (const p of panes.ofSession('tm', session)) {
       const pane = p.pane as TmPane
+      // **A VIEW OFF THE PAGE IS NOT TOLD NOW** (Plan 7 part 4a, closing 2b's "`replies.ts` paints disconnected
+      // panes"): the session keeps what it was told, above, and `draw()` seeds the view from it when its tab
+      // is next shown. Building a hidden view's δ table on every compile is the cost this skips.
+      if (!p.host.isConnected) {
+        unseen.add(pane)
+        continue
+      }
       pane.setProgram(compiled?.program ?? null, compiled?.tapeNames ?? [])
       then?.(pane, rules)
     }
   }
 
   /**
-   * Tell every TM pane on `session` what machine it is showing AND whether it may be forked, leaving
-   * both on the session's entry — `storeAndSetProgram` above plus the one fact only THIS caller adds.
+   * Tell every TM pane on `session` that is on the page what machine it is showing AND whether it may be
+   * forked, leaving both on the session's entry — `storeAndSetProgram` above plus the one fact only THIS
+   * caller adds. A pane off the page hears both when it is shown, from `draw()`'s seed.
    *
    * **`setForkAvailable` RIDES THE SAME FAN-OUT, NOT A SECOND LOOP — 5d-iv Task 9.** A pane seeded with
    * a machine is exactly a pane that needs to be told whether that machine may be forked; splitting the
@@ -196,6 +214,10 @@ export function createReplies(deps: {
   const onReply = (session: SessionId, reply: RunReply): void => {
     const { legs } = sessions.entryOf(session)
     switch (reply.kind) {
+      case 'lambda-tree':
+        trees.store(session, reply.gen, reply.tree)
+        draw()
+        return
       case 'no-session':
         results.dataset.state = 'idle'
         setProgram({ kind: 'no-session', diagnostics: reply.diagnostics })
@@ -322,6 +344,10 @@ export function createReplies(deps: {
    */
   const onScratchReply = (session: SessionId, reply: RunReply): void => {
     switch (reply.kind) {
+      case 'lambda-tree':
+        trees.store(session, reply.gen, reply.tree)
+        draw()
+        return
       case 'scratch-compiled':
         // ONE STATUS, AND THE `null` IS NOT A FABRICATION. `resetLegs` drops a status for a leg the
         // session does not have rather than writing one so the record is square — its own doc, and

@@ -49,7 +49,7 @@ export type ViewHeader = {
   readonly el: HTMLElement
   /** Where the step controls mount — each view's own, while the `steps` switch is `view`. */
   readonly steps: HTMLElement
-  /** Where the view's actions mount: `⋯` and `✕`. */
+  /** Where the view's actions mount: its own first, then `⋯` and `✕` — the umbrella's header order. */
   readonly actions: HTMLElement
   /** The pairs on offer and the one in force. On the per-frame path: a repeat call changes nothing. */
   setBindings(options: readonly PaneOption[], current: Binding<Leg>): void
@@ -255,6 +255,81 @@ export type ViewMenu = {
   setFormattable(available: boolean): void
 }
 
+/** One group of mutually exclusive settings in a view's `⋯` menu — `layout: code | outline`. */
+export type DisplayGroup = {
+  readonly label: string
+  readonly choices: readonly { readonly value: string; readonly label: string }[]
+  readonly current: () => string
+  readonly pick: (value: string) => void
+}
+
+/**
+ * A λ view's display settings in its `⋯` menu (Plan 7 part 4a): its groups, and "reset folds".
+ *
+ * **EACH GROUP IS A `radiogroup` OF `radio`s, NOT `menuitemradio`s** (spec §5.1's "radio items"). This
+ * popover is not a `role="menu"` — none of its other items is a `menuitem` either — and a menu item
+ * outside a menu is not valid ARIA; a radio is valid anywhere. `radioGroup` builds each one.
+ */
+export type DisplayMenu = { readonly groups: readonly DisplayGroup[]; readonly reset: () => void }
+
+/**
+ * One setting's choices as a radio group: a `radiogroup` named by the setting, a `radio` per choice, and
+ * `aria-checked` on the one in force. The caller places `el` and gives it its class.
+ *
+ * **THE WAI-ARIA RADIO GROUP'S KEYS, BECAUSE THE ROLE PROMISES THEM TO A READER.** The group is one tab
+ * stop, on the checked choice (a roving `tabindex`), so Tab passes a setting rather than walking its
+ * choices; ←/→ and ↑/↓ move to the next or previous choice and check it, wrapping at either end. A click,
+ * Enter or Space checks the choice it lands on, as the button it is.
+ *
+ * `sync` puts the choices in step with `current()`. A choice made here syncs itself; a caller whose
+ * setting can change from elsewhere calls it before the group is next seen.
+ */
+export function radioGroup(
+  g: DisplayGroup,
+  choiceClass: string,
+): { readonly el: HTMLElement; readonly sync: () => void } {
+  const el = document.createElement('div')
+  el.setAttribute('role', 'radiogroup')
+  el.setAttribute('aria-label', g.label)
+  const radios = g.choices.map((c) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = choiceClass
+    b.setAttribute('role', 'radio')
+    b.dataset.value = c.value
+    b.textContent = c.label
+    return b
+  })
+  const sync = (): void => {
+    const now = g.current()
+    for (const b of radios) {
+      const on = b.dataset.value === now
+      b.setAttribute('aria-checked', String(on))
+      b.tabIndex = on ? 0 : -1
+    }
+  }
+  const choose = (b: HTMLButtonElement): void => {
+    g.pick(b.dataset.value ?? '')
+    sync()
+  }
+  for (const [i, b] of radios.entries()) {
+    b.addEventListener('click', () => choose(b))
+    b.addEventListener('keydown', (e) => {
+      if (e.altKey || e.ctrlKey || e.metaKey) return
+      const by =
+        e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+      const next = by === 0 ? undefined : radios[(i + by + radios.length) % radios.length]
+      if (next === undefined) return
+      e.preventDefault()
+      next.focus()
+      choose(next)
+    })
+  }
+  el.append(...radios)
+  sync()
+  return { el, sync }
+}
+
 export type ViewMenuOptions = {
   readonly split?: (dir: Dir, choice: PaneChoice) => void
   readonly close?: () => void
@@ -269,6 +344,8 @@ export type ViewMenuOptions = {
    * half-typed buffer does nothing visible. That is what makes *format on blur* safe to leave on.
    */
   readonly format?: () => void
+  /** A λ view's display settings — present only on a λ view (Plan 7 part 4a). */
+  readonly display?: DisplayMenu
   readonly choices?: () => SplitChoices
 }
 
@@ -320,7 +397,10 @@ function item(className: string, label: string, hint?: string, glyph?: IconName)
  *
  * **EVERY ITEM CLOSES THE MENU BEFORE IT RUNS**, so no item is left on screen describing a view the action
  * just changed, and focus returns to `⋯` — the popover's own behaviour on a light dismiss or a `hidePopover`
- * while focus is inside it.
+ * while focus is inside it. **A DISPLAY SETTING'S CHOICES ARE THE EXCEPTION:** a choice leaves the menu open
+ * and the focus on it, because a setting is picked and then looked at, and the group itself says which
+ * choice is now in force — the arrows would have nothing to move between in a menu that closed on each.
+ * "reset folds" is an action, and closes it like the rest.
  */
 export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu {
   const n = viewMenuSeq++
@@ -435,11 +515,42 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     })
   }
 
+  const displayItems: HTMLElement[] = []
+  const syncs: (() => void)[] = []
+  const syncChecked = (): void => {
+    for (const s of syncs) s()
+  }
+  if (opts.display !== undefined) {
+    const display = opts.display
+    for (const g of display.groups) {
+      const group = radioGroup(g, 'view-menu-choice')
+      group.el.className = 'view-menu-group'
+      const title = document.createElement('span')
+      title.className = 'view-menu-group-label'
+      title.setAttribute('aria-hidden', 'true')
+      title.textContent = g.label
+      group.el.prepend(title)
+      syncs.push(group.sync)
+      displayItems.push(group.el)
+    }
+    const reset = item('reset-folds', 'reset folds')
+    reset.addEventListener('click', () => {
+      shut()
+      display.reset()
+    })
+    displayItems.push(reset)
+  }
+
   menu.addEventListener('beforetoggle', (e) => {
     const open = e.newState === 'open'
     more.setAttribute('aria-expanded', String(open))
+    if (open) syncChecked()
     if (open) {
-      const first = main.querySelector<HTMLButtonElement>('button:not([disabled])')
+      // THE FIRST ITEM A TAB COULD REACH, which in a radio group is its checked choice and not its first.
+      // The last open's mark is cleared first: an unchecked choice is still focusable, and the popover
+      // focuses the first `autofocus` in tree order, so a stale one before the checked choice would win.
+      for (const b of main.querySelectorAll<HTMLButtonElement>('button[autofocus]')) b.autofocus = false
+      const first = main.querySelector<HTMLButtonElement>('button:not([disabled]):not([tabindex="-1"])')
       if (first !== null) first.autofocus = true
       return
     }
@@ -455,7 +566,7 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
   const what = opts.editCopy?.what ?? ''
 
   const sync = (): void => {
-    const wanted: HTMLButtonElement[] = []
+    const wanted: HTMLElement[] = []
     if (canSplit) wanted.push(...splitItems)
     if (edit !== null && copy !== null) {
       // THE HINT LINE AND THE NAME MOVE TOGETHER — see `item`'s own note on why the name is written down.
@@ -474,12 +585,13 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     }
     if (claim !== null && claimable) wanted.push(claim)
     if (fmt !== null && formattable) wanted.push(fmt)
+    wanted.push(...displayItems)
     // RECONCILED, NOT REPLACED, FOR `paint`'s REASON ONE LEVEL OUT: `replaceChildren` takes every item
     // out of the document, and an item holding the focus does not get it back. Reachable while the menu
     // is open and a frame changes what applies — a copy created elsewhere, a recording ending.
     const same = wanted.length === main.children.length && wanted.every((b, i) => main.children[i] === b)
     if (!same) {
-      const going = [...main.children].filter((child) => !wanted.includes(child as HTMLButtonElement))
+      const going = [...main.children].filter((child) => !wanted.includes(child as HTMLElement))
       // A CONTROL REMOVED BY A STATE CHANGE MUST NOT TAKE THE FOCUS WITH IT — spec §11's fourth rule, at
       // the instance the spec names by hand: the split items when Stage is chosen. It is reachable with
       // the menu OPEN, which is the only way a user can be standing on one of these when the state
@@ -499,7 +611,12 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
       }
     }
     const showMore = wanted.length > 0
-    if (showMore && more.parentNode === null) actions.prepend(more, menu)
+    // `⋯` GOES AFTER THE VIEW'S OWN ACTIONS AND BEFORE `✕`, the umbrella's order: before `✕` when it is there,
+    // at the end when it is not. Prepended, it passed whatever the view had mounted there (`follow redex`).
+    if (showMore && more.parentNode === null) {
+      if (close.parentNode === actions) close.before(more, menu)
+      else actions.append(more, menu)
+    }
     if (!showMore && more.parentNode !== null) {
       shut()
       more.remove()
@@ -508,6 +625,10 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     if (canClose && close.parentNode === null && opts.close !== undefined) actions.append(close)
     if (!canClose && close.parentNode !== null) close.remove()
   }
+  // THE DISPLAY SETTINGS APPLY FROM THE START, AND NO SETTER WOULD EVER MOUNT THEM: each setter syncs only
+  // on a change, so a view whose other state never left its first value had no `⋯`. Mounted here, `⋯` is
+  // in `actions` before the view appends anything of its own, so a view with settings prepends its actions.
+  if (displayItems.length > 0) sync()
 
   return {
     setLayout(nextClose: boolean, nextSplit: boolean): void {

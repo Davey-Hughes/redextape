@@ -2,6 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
+import { lambdaSettled } from './lambda-text'
 
 /**
  * **THE FORK, DRIVEN THROUGH THE APP** — design §4.3's detach, plan T8, from the control a user
@@ -163,9 +164,15 @@ function alphaCanonical(printedTerm: string): string {
   const scope: Frame[] = []
   let depth = 0
   let declaring = false
-  return printedTerm.replace(/λ|[a-zA-Z][a-zA-Z0-9]*|[()]/g, (tok) => {
+  return printedTerm.replace(/λ|[a-zA-Z][a-zA-Z0-9]*|[().]/g, (tok) => {
     if (tok === 'λ') {
       declaring = true
+      return tok
+    }
+    // THE `.` ENDS A BINDER LIST, NOT THE FIRST NAME AFTER `λ`: the λ view writes curried binders merged,
+    // `λa b c.` (Plan 7 part 4a), and every name in that list is a declaration.
+    if (tok === '.') {
+      declaring = false
       return tok
     }
     if (tok === '(') {
@@ -181,7 +188,6 @@ function alphaCanonical(printedTerm: string): string {
     }
     // An identifier: a fresh declaration right after `λ`, or a use to resolve against the scope stack.
     if (declaring) {
-      declaring = false
       const canon = `v${scope.length}`
       scope.push({ name: tok, canon, openDepth: depth })
       return canon
@@ -249,6 +255,7 @@ describe('the fork control, end to end', () => {
     clickLambda('↺')
     clickLambda('▶')
     clickLambda('▶')
+    await lambdaSettled()
     const seed = term()
     expect(step()).toContain('step 2 of')
     expect(seed).not.toBe('')
@@ -316,7 +323,10 @@ describe('the fork control, end to end', () => {
     // on.
     clickLambda('↺')
     expect(step()).toBe('step 0 of 5')
-    expect(alphaCanonical(term())).toBe(alphaCanonical(seed))
+    await lambdaSettled()
+    // WHITESPACE SQUEEZED OUT: the copy's names can be longer (`x0` where the program printed `x`), so the
+    // same term can break across lines where the program's did not, and a line break is not a space.
+    expect(alphaCanonical(term()).replace(/\s/g, '')).toBe(alphaCanonical(seed).replace(/\s/g, ''))
 
     // STAGE 4 — A RECOMPILE FROM SOURCE LEAVES THE BUFFER ALONE, AND THIS STAGE USED TO ASSERT THE
     // EXACT OPPOSITE. It read "recompile from source retires it. Synchronous on the keystroke", and

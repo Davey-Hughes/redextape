@@ -16,11 +16,15 @@ use std::collections::BTreeMap;
 
 use crate::analysis::TokenClass;
 use crate::core::NodeId;
-use crate::lambda::{Cut, LambdaTerm, Node, Owner, Path, print_lambda_linked};
+use crate::lambda::{Cut, LambdaTerm, Owner, Path, print_lambda_linked};
 use crate::sourcemap::SourceMap;
 use crate::span::Span;
 use crate::tm::machine::{Machine, Move, StateId, Symbol};
 use crate::trace::{LambdaCursor, TmCursor};
+
+pub mod tree;
+
+pub use tree::{LambdaTree, TreeAnswer};
 
 /// NO `redex` FIELD, DELIBERATELY. §4.2 lists one, and nothing in this PR can fill it: a redex is a
 /// `Path` INTO THE TERM, while highlighting it in `text` needs a byte SPAN, and correlating the two
@@ -81,15 +85,17 @@ pub struct LambdaState {
     /// resolved against; the consequence is only that a consumer painting it is showing WHAT THE STEP
     /// JUST PRODUCED, not what the step was about to contract.
     ///
-    /// **NOT ON THE WIRE — `serde(skip)`, UNTIL THE TREE VIEW READS IT.** It has no JS consumer today:
-    /// the λ pane paints from `redex_span`, and shipping the path as well put a ~9.3-element array of
+    /// **NOT ON THE WIRE — `serde(skip)`, AND THE TREE VIEW DID NOT CHANGE THAT** (spec §4.3 keeps it
+    /// skipped). It has no JS consumer: the λ view's flat text paints from `redex_span`, and its tree
+    /// marks the contractum through `LambdaTree.contractum`, which the core resolves from this same path
+    /// (below). Shipping the path as well put a ~9.3-element array of
     /// `Dir` strings on every frame that nothing read and that `lambdaFrameBytes` then charged against
     /// `HISTORY_BYTES`, evicting the ring earlier for dead weight. `reduce.rs`'s `reduce_trace` refuses
     /// to widen `Step` for exactly that reason ("a field with no reader"); the same rule applies here.
     ///
     /// **IT STAYS ON THE RUST TYPE RATHER THAN BEING DELETED**, because `redex_span` cannot replace it
-    /// for a STRUCTURAL consumer: a byte span is a coordinate into `text`, and `LambdaState::tree`'s
-    /// `TermTree` has no text to index into. The planned tree view needs the path itself. Skipping is
+    /// for a STRUCTURAL consumer: a byte span is a coordinate into `text`, and `LambdaTree` — which the tree
+    /// view reads — marks the contractum by node index, resolving this path Rust-side (`viewmodel::tree`). Skipping is
     /// what makes that a wire decision that can be reversed by deleting one attribute, rather than a
     /// deletion that has to be re-derived. `Option<Path>` is `Default`, so the `Deserialize` half of the
     /// derive is well-formed even though nothing in this tree deserializes a `LambdaState`.
@@ -240,54 +246,6 @@ pub struct TmState {
     pub rule: Option<usize>,
 }
 
-/// A λ term as a flat arena, so that NOTHING DERIVED ON IT RECURSES.
-///
-/// The obvious shape — `Abs(String, Box<TermNode>)` — gives the type two recursive paths, and both
-/// are linear in DEPTH rather than node count: serde's derived `Serialize` descends one frame per
-/// level, and the compiler's `drop_in_place` walks the `Box` chain the same way. A wasm trap does not
-/// unwind, so neither returns an error — both poison the module, and the `Drop` path fires where no
-/// caller can see it. `LambdaTerm`, the type this is built FROM, carries a hand-written iterative
-/// destructor (`term.rs`'s `impl Drop for LambdaTerm`) for exactly that hazard; indices are how this
-/// type avoids needing one.
-///
-/// `nodes` is in POST-ORDER — every child precedes its parent — because the walk that builds it
-/// completes children before parents. `root` is therefore always `nodes.len() - 1`, and is stored
-/// anyway so a consumer never encodes that convention.
-///
-/// `nodes` is never empty: a term has at least one node, and a zero budget refuses at the first one,
-/// so `root` always indexes a real element.
-///
-/// THAT POINTER READ `term.rs` line 482 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It was
-/// `impl Drop for LambdaTerm`'s own opening line when the arena rewrite (#15) wrote it, and three
-/// commits moved it 166 lines down between them — static click-linking (#23) by 5, the dual-focus
-/// slice (#26) by 95, and `clippy::pedantic` (#31) by 66. This conversion found 482, as this file
-/// then stood, inside a comment in `subst`'s body, arguing why the `maxfree` check has to come
-/// BEFORE the `Abs` arm builds its shifted argument — a different function, and an argument about
-/// substitution COST rather than about teardown depth, so nothing near where it landed could be
-/// mistaken for the destructor. THIS COMMIT'S OWN ADDED LINES ELSEWHERE IN `term.rs` HAVE SINCE
-/// MOVED 482 AGAIN, off that landing too — the tightest demonstration available of why this note
-/// retires the coordinate rather than trusting it: even the sentence recording the drift did not
-/// outlive its own commit.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct TermTree {
-    pub nodes: Vec<TermNode>,
-    pub root: u32,
-}
-
-/// One node of a [`TermTree`]. Children are indices into that tree's `nodes`, never owned subtrees.
-///
-/// `u32` rather than `usize` is a BOUNDARY decision, not a memory one: wasm-bindgen maps `u64` to a
-/// JavaScript `bigint`, and `Var`'s de Bruijn index is already `u32`, so the payload stays uniformly
-/// numeric. On wasm32 `usize` is 32 bits, which makes the two exactly as wide as `node_budget` there.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum TermNode {
-    Var(u32),
-    Abs(String, u32),
-    App(u32, u32),
-}
-
 impl LambdaState {
     /// Render the term the cursor currently holds, bounded by `byte_budget` and `depth_cap`.
     ///
@@ -333,106 +291,6 @@ impl LambdaState {
             owner: c.last_owner(),
         }
     }
-
-    /// The term as a flat tree, or `None` if it exceeds `node_budget`. A second, independent cause
-    /// also yields `None`: the arena's own `u32` index space overflowing before the budget would have
-    /// refused first (see `emit`'s doc for why that is a refusal rather than a panic) -- a consumer
-    /// reading only this entry point could not otherwise tell the two apart.
-    ///
-    /// `None` RATHER THAN A PARTIAL TREE. Truncated text is visibly truncated; a truncated AST is a lie
-    /// about the term's shape, and a partial arena would be the same lie with an index on it. The count
-    /// happens during the walk for the same reason the printer's budget does — building the tree and
-    /// then measuring it defeats the purpose.
-    #[must_use]
-    pub fn ast(c: &LambdaCursor, node_budget: usize) -> Option<TermTree> {
-        let mut budget = node_budget;
-        to_tree(c.term(), &mut budget)
-    }
-}
-
-/// One `to_tree` work item: either a subterm still to visit, or a marker recording how many completed
-/// children to pop off `results` and how to combine them, once every item pushed after it is done.
-enum Work<'a> {
-    Enter(&'a LambdaTerm),
-    Abs(String),
-    App,
-}
-
-/// `LambdaState::ast`'s walk. ITERATIVE, OVER AN EXPLICIT STACK, deliberately: `LambdaTerm` is only
-/// guarded against unbounded depth from the SECOND step onward (`LambdaCursor::next`'s depth check),
-/// not at construction, so the very first term a cursor holds can already be deeper than a native
-/// recursive walk survives — the same hazard `term.rs`'s own `Drop` and `logical_sizes` are iterative
-/// to avoid.
-///
-/// IT BUILDS AN ARENA RATHER THAN A TREE OF `Box`ES, and that is what extends the same protection to
-/// everything that happens to the RESULT. This walk was always safe; the derived `Serialize` and
-/// derived `Drop` on the value it returned were not. See [`TermTree`].
-///
-/// THE BUDGET IS CHECKED BEFORE EACH NODE IS COUNTED AND BUILT, so a term that would exceed it returns
-/// `None` at the node that overshoots rather than after the whole tree is built and measured — an
-/// early `return` here abandons `work`, `nodes` and `results` without finishing them, which is fine
-/// because nothing downstream reads any of them once this function has returned.
-///
-/// A SHARED SUBTERM COSTS THE BUDGET ONCE PER OCCURRENCE, not once per allocation: the arena is
-/// unshared, so a DAG node reached through two parents becomes two distinct entries, and both must be
-/// paid for — exactly as `print_lambda_capped` pays per occurrence in the text it writes, not per
-/// underlying `Rc`.
-fn to_tree<'a>(t: &'a LambdaTerm, budget: &mut usize) -> Option<TermTree> {
-    let mut work: Vec<Work<'a>> = Vec::new();
-    let mut nodes: Vec<TermNode> = Vec::new();
-    let mut results: Vec<u32> = Vec::new();
-    work.push(Work::Enter(t));
-    while let Some(item) = work.pop() {
-        match item {
-            Work::Enter(term) => {
-                if *budget == 0 {
-                    return None;
-                }
-                *budget -= 1;
-                match term.node() {
-                    Node::Var(i) => emit(&mut nodes, &mut results, TermNode::Var(*i))?,
-                    Node::Abs(name, body) => {
-                        work.push(Work::Abs(name.to_string()));
-                        work.push(Work::Enter(body));
-                    }
-                    Node::App(f, a, _) => {
-                        work.push(Work::App);
-                        work.push(Work::Enter(a));
-                        work.push(Work::Enter(f));
-                    }
-                }
-            }
-            // `f` was pushed after `a` (see the `App` arm above), so it is popped from `work` — and
-            // therefore built — first. Its index lands in `results` first too, with `a`'s pushed on
-            // top once `a` finishes: `results` is itself a stack, so `a` comes off it FIRST and `f`
-            // comes off LAST.
-            Work::App => {
-                let a = results.pop()?;
-                let f = results.pop()?;
-                emit(&mut nodes, &mut results, TermNode::App(f, a))?;
-            }
-            Work::Abs(name) => {
-                let body = results.pop()?;
-                emit(&mut nodes, &mut results, TermNode::Abs(name, body))?;
-            }
-        }
-    }
-    let root = results.pop()?;
-    Some(TermTree { nodes, root })
-}
-
-/// Append `n` to the arena and push the index it landed at onto `results`.
-///
-/// `None` WHEN THE INDEX WOULD NOT FIT `u32`, refusing through the channel that already means "no
-/// tree" rather than panicking — a panic under wasm aborts the module, and `unreachable!` is ruled
-/// out for the same reason. 2^32 entries is on the order of 100 GB at `size_of::<TermNode>()`, so
-/// this cannot occur; it is written as a branch rather than an assumption because a branch that
-/// claims to be total and is not is the defect this project has corrected twice.
-fn emit(nodes: &mut Vec<TermNode>, results: &mut Vec<u32>, n: TermNode) -> Option<()> {
-    let idx = u32::try_from(nodes.len()).ok()?;
-    nodes.push(n);
-    results.push(idx);
-    Some(())
 }
 
 fn move_text(m: Move) -> &'static str {
@@ -550,7 +408,12 @@ impl TmState {
     }
 }
 
-/// Everything a renderer needs to link one construct across three panes, built ONCE PER COMPILE.
+/// The step-0 half of linking one construct across the panes, built ONCE PER COMPILE.
+///
+/// **THE λ VIEW NO LONGER LINKS THROUGH THIS (Plan 7 part 4a).** It links through the tree it draws,
+/// `LambdaTree`'s per-node `link`, at whatever step it shows. `lambda_spans` and `lambda_nodes` still
+/// cross the wasm boundary but have no reader in the web app; what it reads here is the source spans,
+/// the TM owners and `lambda_text`, the initial term a copy is seeded from.
 ///
 /// NOT A FRAME, AND THE DIFFERENCE IS THE WHOLE DESIGN. `LambdaState` is recorded per step at
 /// `FRAME_BYTES`; this is built once, at the readout's budget, for the INITIAL term only. That is
@@ -601,7 +464,7 @@ pub struct LinkIndex {
     /// negative value otherwise, and either way becoming indistinguishable from (or worse, a wrong
     /// index next to) a state that genuinely has no owner. `build` refuses that cast with
     /// `i32::try_from` and empties the whole vec on failure — the same "no lie, just nothing" refusal
-    /// `emit` (above) makes for `TermTree`'s arena index.
+    /// `LambdaTree::build` makes when its arena index would not fit `u32`.
     ///
     /// **THAT REFUSAL IS NOW PROVABLY UNREACHABLE, AND IS KEPT ANYWAY.** It used to cite
     /// `core::NodeGen::fresh` as a bare counter that bounded nothing; `core::MAX_NODE_ID` bounds it
@@ -671,43 +534,6 @@ impl LinkIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn to_tree_matches_the_term_shape_within_budget() {
-        // `App(Var(0), Var(1))` is the minimal discriminator: a transposed pop order builds
-        // `App(Var(1), Var(0))` instead, a difference `is_some()` cannot see. Built directly with the
-        // `lambda::term` constructors, not lowered from source, so the expected shape is unambiguous.
-        //
-        // THE ARENA IS ASSERTED IN FULL, INDICES AND ALL, not just its root. Post-order is what makes
-        // `root == nodes.len() - 1` true, and an implementation that emitted the right nodes in the
-        // wrong order would still satisfy a root-only assertion.
-        use crate::lambda::term::{app, var};
-
-        let flat = app(var(0), var(1));
-        let flat_ast = LambdaState::ast(&LambdaCursor::new(&flat, 1_000), usize::MAX);
-        assert_eq!(
-            flat_ast,
-            Some(TermTree { nodes: vec![TermNode::Var(0), TermNode::Var(1), TermNode::App(0, 1)], root: 2 })
-        );
-
-        // Nested one level, so a fix that only gets the outermost `App` right cannot pass: the
-        // function position is itself an `App`, and its two children must land in order too.
-        let nested = app(app(var(0), var(1)), var(2));
-        let nested_ast = LambdaState::ast(&LambdaCursor::new(&nested, 1_000), usize::MAX);
-        assert_eq!(
-            nested_ast,
-            Some(TermTree {
-                nodes: vec![
-                    TermNode::Var(0),
-                    TermNode::Var(1),
-                    TermNode::App(0, 1),
-                    TermNode::Var(2),
-                    TermNode::App(2, 3),
-                ],
-                root: 4,
-            })
-        );
-    }
 
     #[test]
     fn move_text_matches_the_text_forms_own_vocabulary() {

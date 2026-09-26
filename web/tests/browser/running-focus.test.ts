@@ -182,9 +182,8 @@ describe('the running focus', () => {
   // FILE its own page and worker; `app.test.ts` runs ~40 tests against one long-lived pair, and two
   // previous slices (5b, and the print-depth cap) each found that a program needing many steps
   // degrades badly there against a fresh page — a worker's print stack ceiling settles lower after its
-  // first deep print, so which program settles depends on run order within the worker. See
-  // `link-truncated.test.ts`'s own file comment for the full account. These tests walk two programs to
-  // their frontier and back, several times each.
+  // first deep print, so which program settles depends on run order within the worker. These tests
+  // walk two programs to their frontier and back, several times each.
   beforeAll(async () => {
     window.addEventListener('error', (e) => pageErrors.push(`error: ${e.message}`))
     window.addEventListener('unhandledrejection', (e) => pageErrors.push(`rejection: ${String(e.reason)}`))
@@ -446,6 +445,22 @@ describe('the running focus', () => {
     // what you pinned"; `#link-status` is the whole signal, so it is asserted here.
     expect(tmFocusRows()[0]?.classList.contains('is-linked'), 'one row, both classes').toBe(true)
     expect(linkStatusText()).toContain('the machine is here right now')
+  }, 30_000)
+
+  // AN EDIT CLEARS THE δ TABLE'S FOCUS ON ITS OWN KEYSTROKE, not when the next compile lands: the machine it
+  // marks belongs to a program the editor no longer holds. Asserted with no `await` after the edit, as
+  // `app.test.ts`'s own clears-on-an-edit case is, for the same reason.
+  it('clears the δ-table focus on the keystroke that edits the program', async () => {
+    await settled(view, SAMPLE)
+    tmClick('◀')
+    tmClick('◀')
+    expect(tmStepText()).toContain('step 2,868')
+    expect(tmFocusRows().length, 'nothing is focused, so the edit has nothing to clear').toBeGreaterThan(0)
+
+    view.dispatch({ changes: { from: view.state.doc.length, insert: ' ' } })
+    expect(tmFocusRows()).toEqual([])
+
+    await settled(view, SAMPLE)
   }, 30_000)
 
   // §5.1 THROUGH THE APP: `None` is common and correct, and a program that never leaves it must show

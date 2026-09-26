@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { History } from '../../src/history'
+import { LambdaTrees } from '../../src/lambda-trees'
 import type { LinkWiring } from '../../src/link-wiring'
 import { PaneCollection, type PaneEntry } from '../../src/panes'
 import type { RunReply, RunRequest } from '../../src/protocol'
@@ -116,6 +117,7 @@ function driver(entry: SessionEntry) {
   const links = { setIndex: (i: unknown) => indexed.push(i) } as unknown as LinkWiring
   const replies = createReplies({
     setProgram: () => undefined,
+    trees: new LambdaTrees(() => undefined),
     sessions: reg,
     scratchpad: undefined as unknown as ScratchBuffers,
     results: undefined as unknown as HTMLElement,
@@ -285,6 +287,7 @@ function scratchDriver() {
   })
   const replies = createReplies({
     setProgram: () => undefined,
+    trees: new LambdaTrees(() => undefined),
     sessions: reg,
     scratchpad: buffers,
     results: undefined as unknown as HTMLElement,

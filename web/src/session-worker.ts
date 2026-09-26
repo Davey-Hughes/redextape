@@ -39,7 +39,7 @@
  */
 import init, { compile, lambdaScratchAt, tapeNames, tmScratch } from '../../pkg/redextape_wasm.js'
 import type { LinkIndexWire } from './link'
-import type { LambdaLeg, Leg, RecordEnd, RunReply, RunRequest, TmLeg } from './protocol'
+import type { LambdaLeg, LambdaTreeWire, Leg, RecordEnd, RunReply, RunRequest, TmLeg } from './protocol'
 import {
   EXTEND_CELLS,
   EXTEND_STEPS,
@@ -76,6 +76,7 @@ type Session = {
   lambdaState(byteBudget: number): LambdaState
   lambdaValue(): Decoded
   stepLambda(): boolean
+  lambdaTree(step: number, nodeBudget: number): LambdaTreeWire
   raiseLambdaCap(extra: number): void
   tmStatus(): TmStatus
   tmProgram(): TmProgram
@@ -114,6 +115,7 @@ type LambdaScratchHandle = {
   lambdaStatus(): LambdaStatus
   lambdaState(byteBudget: number): LambdaState
   stepLambda(): boolean
+  lambdaTree(step: number, nodeBudget: number): LambdaTreeWire
   raiseLambdaCap(extra: number): void
   free(): void
 }
@@ -820,6 +822,35 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
   ctx.postMessage({ kind: 'result', gen: req.gen, lambda: lambdaLeg(live.session), tm: tmLeg(live.session) })
 }
 
+/**
+ * Answer one `lambda-tree` request, synchronously, between record chunks (spec §4.1).
+ *
+ * **NOT A CLAIM ON `latest`.** A tree is a question about what a `run` or `lambda-scratch` built, not a
+ * new build, so it supersedes nothing; a request for a generation that is no longer live is dropped, as a
+ * stale record loop's frames are.
+ *
+ * **A DECLINED λ LEG IS ASKED NOTHING.** `Session.lambdaTree` throws for an absent leg, and a throw here
+ * lands in the listener's `catch`, which drops the whole session — a λ view on a TM-only program would
+ * kill that program's TM leg. The view never asks for such a leg, since it has no frames; this guard is
+ * what makes that true rather than merely usual.
+ *
+ * THE COLUMNS ARE TRANSFERRED, not cloned: `tree_to_js` copies each out of wasm memory into its own
+ * `ArrayBuffer`, which nothing here reads again.
+ */
+function onLambdaTree(req: Extract<RunRequest, { kind: 'lambda-tree' }>): void {
+  if (live?.gen !== req.gen || live.kind === 'tm-scratch') return
+  if (live.kind === 'session' && !live.session.lambdaStatus().available) return
+  const tree = live.session.lambdaTree(req.step, req.budget)
+  ctx.postMessage({ kind: 'lambda-tree', gen: req.gen, tree }, [
+    tree.kind.buffer,
+    tree.left.buffer,
+    tree.right.buffer,
+    tree.name.buffer,
+    tree.hint.buffer,
+    tree.link.buffer,
+  ])
+}
+
 ctx.addEventListener('message', async (e: MessageEvent<RunRequest>) => {
   const req = e.data
   try {
@@ -840,6 +871,8 @@ ctx.addEventListener('message', async (e: MessageEvent<RunRequest>) => {
       await onTmScratch(req)
     } else if (req.kind === 'extend') {
       await onExtend(req)
+    } else if (req.kind === 'lambda-tree') {
+      onLambdaTree(req)
     }
   } catch (err) {
     // A THROWN SESSION CALL MUST NOT BECOME SILENCE. Every wasm entry point is fallible at the

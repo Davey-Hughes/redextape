@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { STORAGE_KEY } from '../../src/appearance'
 import { OVERSCAN, ROW_HEIGHT } from '../../src/tm-pane'
 import { SHELL, until } from './harness'
+import { lambdaSettled } from './lambda-text'
 
 const LAMBDA_DECLINES = 'let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)'
 
@@ -107,14 +108,19 @@ describe('the app, end to end', () => {
     expect(resultsText()).toContain('42')
   })
 
-  // THE CRITICAL FINDING THIS TEST EXISTS TO CATCH: `LambdaState.spans` are BYTE offsets
-  // (`print_lambda_capped`'s doc), and `λ` is 2 bytes but 1 UTF-16 code unit. Slicing `frame.text` by
-  // byte offset instead of converting first renders this span as `"λf"` (the binder glyph plus its
-  // name) rather than `"λ"` alone — nothing before this test asserted the CONTENTS of any token class
-  // inside `[data-leaf="lambda-0"]`, so 114 tests and six eye checks all missed it.
+  // THE FIRST BINDER TOKEN IS EXACTLY `λ`, NOT `λ` PLUS ITS NAME. Written for a critical finding on the
+  // flat frame — `LambdaState.spans` are BYTE offsets, `λ` is 2 bytes but 1 UTF-16 code unit, and slicing
+  // `frame.text` by byte offset drew this span as `"λf"` — it now reads the step's tree, whose layout
+  // writes the glyph and the name as two tokens. The flat frame's byte conversion has its own test, in
+  // `lambda-body.test.ts`.
   it('renders the λ pane’s first binder span as exactly "λ", not "λ" plus its name', async () => {
     await until(() => resultsText().includes('reductions'))
-    await until(() => document.querySelector('[data-leaf="lambda-0"] .tok-binder') !== null)
+    // STEP 0, WHERE THE TERM HAS BINDERS TO SHOW: the frontier is a normal form the λ view draws as the
+    // chip `42` (Plan 7 part 4a), which has none.
+    ;[...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')]
+      .find((b) => b.textContent === '↺')
+      ?.click()
+    await lambdaSettled()
     const first = document.querySelector('[data-leaf="lambda-0"] .tok-binder')
     expect(first?.textContent).toBe('λ')
   })
@@ -453,11 +459,16 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = 40; x + 2')
       // Recording finished, so the head sits on step 7.
       expect(stepText('lambda')).toContain('step 7')
+      // EVERY READ WAITS FOR THE STEP'S OWN TREE: the view draws the last step's tree, marked stale, for the
+      // one worker round trip until this step's arrives (Plan 7 part 4a's `lambdaSettled`).
+      await lambdaSettled()
       const atSeven = paneText('lambda')
       click('lambda', '◀')
+      await lambdaSettled()
       const atSix = paneText('lambda')
       expect(atSix).not.toBe(atSeven)
       click('lambda', '▶')
+      await lambdaSettled()
       expect(paneText('lambda')).toBe(atSeven)
 
       // A `forward()` that always jumped to the NEWEST recorded frame, instead of incrementing the
@@ -467,74 +478,68 @@ describe('the app, end to end', () => {
       // first `▶` below instead of `atFive`, and the step readout would jump straight to 7 instead of
       // counting 5, 6, 7.
       click('lambda', '◀')
+      await lambdaSettled()
       const atSixAgain = paneText('lambda')
       click('lambda', '◀')
+      await lambdaSettled()
       const atFive = paneText('lambda')
       click('lambda', '◀')
+      await lambdaSettled()
       const atFour = paneText('lambda')
       expect(atFour).not.toBe(atFive)
       expect(stepText('lambda')).toContain('step 4')
 
       click('lambda', '▶')
+      await lambdaSettled()
       expect(paneText('lambda')).toBe(atFive)
       expect(stepText('lambda')).toContain('step 5')
       click('lambda', '▶')
+      await lambdaSettled()
       expect(paneText('lambda')).toBe(atSixAgain)
       expect(stepText('lambda')).toContain('step 6')
       click('lambda', '▶')
+      await lambdaSettled()
       expect(paneText('lambda')).toBe(atSeven)
       expect(stepText('lambda')).toContain('step 7')
     })
 
-    // THE LAYER 5b's WORST BUG LIVED IN, ON THE ONE FEATURE THAT HAD NO TEST HERE. `lambda-pane.ts`'s
-    // `#redraw` converts `frame.redex_span` — BYTE offsets, like every span crossing the wasm boundary
-    // — through `byteToIndex`/`byteIndexAt` before deciding which tokens get `is-redex`. Nothing
-    // exercised that conversion: the node tier cannot (it has no DOM), the Rust tier stops at the
-    // span's value, and the sibling `is-linked` path is the only one this file was checking.
+    // THE CONTRACTUM, MARKED BY NODE. At step 6 of this program the view marks `(λx0. f (f x0))` — the
+    // subterm standing at the last redex's path in THIS step's term, parens included. That is an `Abs`,
+    // so it is plainly not the redex itself: the path named a redex `App` in the PRE-step term and β
+    // replaced it with this, its CONTRACTUM (`viewmodel.rs`'s `redex_span` doc).
     //
-    // THE FIXTURE IS CHOSEN SO THE TWO READINGS DISAGREE, which most would not. At step 6 of this
-    // program the frame text is `λf. λx. f (f ( … ((λx0. f (f x0)) x)) … )` and the redex span is bytes
-    // [130, 146]. Two `λ` (in `λf.` and `λx.`) precede byte 130 and a third precedes byte 146, and `λ`
-    // is 2 bytes but 1 UTF-16 code unit — so the correct UTF-16 range is [128, 143] and the span sits
-    // AFTER binders rather than at the root, which is what makes the displacement possible at all.
-    // Converted, the lit text is `(λx0. f (f x0))` — the subterm standing at the redex's path in THIS
-    // frame's term, parens included. That is an `Abs`, so it is plainly not the redex itself: the path
-    // named a redex `App` in the PRE-step term and β replaced it with this, its CONTRACTUM. See
-    // `viewmodel.rs`'s `redex_span` doc; the conversion under test is the same either way.
-    // Sliced as UTF-16 without converting, [130, 146] reads `x0. f (f x0)) x)` — a window shifted off
-    // the front of the subterm and past its end, lighting a different token set entirely. A root-path
-    // span (`[]`, byte 0) or an ASCII-only fixture would score both readings identical and prove
-    // nothing; this one cannot.
-    it('paints its own redex by converting the byte span, not by slicing it as UTF-16', async () => {
+    // THE FIXTURE WAS CHOSEN FOR LAYER 5b's WORST BUG, a byte span sliced as UTF-16: three `λ` precede
+    // this redex's span, so the two readings disagree. The tree marks by node and has no span to slice,
+    // so that conversion now happens only in the flat text a step shows before its tree arrives, and
+    // `lambda-body.test.ts` holds it there.
+    it('marks the contractum the step produced, and nothing at step 0', async () => {
       await settled(view, 'let x = 40; x + 2')
-      // `settled` resolves on the RESULTS pane, which is not the same event as the λ pane holding
-      // frames — the same race the restart test above documents.
       await until(() => !stepText('lambda').includes('not run'))
       expect(stepText('lambda')).toContain('step 7')
 
-      // Step 6, one back from the frontier. Synchronous, like the stepping test above: `#redraw` runs
-      // in the click handler, so an `await` here would be waiting for nothing.
+      // Step 6, one back from the frontier, once the view has that step's tree.
       click('lambda', '◀')
       expect(stepText('lambda')).toContain('step 6')
+      await lambdaSettled()
 
-      const lit = [...document.querySelectorAll('[data-leaf="lambda-0"] .term .is-redex')]
-      // Non-empty first, and separately: a `join('')` over an empty list is `''`, which would compare
-      // equal to nothing useful and hide a feature that paints no token at all.
+      const lit = [...document.querySelectorAll('[data-leaf="lambda-0"] .term .is-contractum')]
       expect(lit.length).toBeGreaterThan(0)
-      // Whitespace between tokens is a text node rather than part of any token's span, so the joined
-      // token text is the subterm with its spaces squeezed out.
-      expect(lit.map((e) => e.textContent).join('')).toBe('(λx0.f(fx0))')
-      // The redex starts at its own opening paren and the binder is inside it — the two facts a
-      // displaced window loses first.
+      // Whitespace squeezed out, as it was when this read the flat text: the contractum may break across
+      // lines at the view's width, and a line break is not a space in the DOM.
+      expect(
+        lit
+          .map((e) => e.textContent)
+          .join('')
+          .replace(/\s/g, ''),
+      ).toBe('(λx0.f(fx0))')
       expect(lit[0]?.textContent).toBe('(')
       expect(lit.some((e) => e.classList.contains('tok-binder'))).toBe(true)
 
-      // Step 0 has no redex at all (`LambdaState.redex_span` is `null` there), so nothing may be lit.
-      // Without this the assertions above would also pass against a pane that painted `is-redex` on
-      // every token of every frame.
+      // Step 0 has no contractum at all, so nothing may be marked.
       click('lambda', '↺')
       expect(stepText('lambda')).toContain('step 0')
-      expect(document.querySelector('[data-leaf="lambda-0"] .term .is-redex')).toBeNull()
+      await lambdaSettled()
+      expect(document.querySelector('[data-leaf="lambda-0"] .term .is-contractum')).toBeNull()
     })
 
     it('shows five labelled tape rows with the head inside the window', async () => {
@@ -572,14 +577,13 @@ describe('the app, end to end', () => {
       expect(click('lambda', '◀')?.disabled).toBe(false)
     })
 
-    // `lambdaLinkState`'S `'declined'` BRANCH, NEVER EXERCISED END TO END BEFORE THIS.
+    // THE `'declined'` λ LINK STATE, NEVER EXERCISED END TO END BEFORE THIS.
     // `link-status.test.ts` drives `linkStatus` directly with an ALREADY-DECIDED state, and every other
     // link test in this file clicks a construct under a program whose λ leg is available — so the
-    // "ORDERED MOST-GLOBAL FIRST" branch order `link-wiring.ts`'s `lambdaLinkState` doc claims (`declined`
-    // checked before the play head, before the span, before truncation) was verified only by
-    // inspection. `LAMBDA_DECLINES` is this file's own λ-declining fixture, reused rather than invented
-    // — its λ backend refuses the whole PROGRAM, so whatever source construct is clicked must report
-    // `'declined'`, not merely "no link" or one of the narrower absences.
+    // order `draw.ts`'s `createDraw` asks in (no view, then a declined program, then the view's own
+    // answer) was verified only by inspection. `LAMBDA_DECLINES` is this file's own λ-declining fixture,
+    // reused rather than invented — its λ backend refuses the whole PROGRAM, so whatever source construct
+    // is clicked must report `'declined'`, not merely "no link" or one of the narrower absences.
     it('reports the declined state when linking a construct under a λ-declining program', async () => {
       await settled(view, LAMBDA_DECLINES)
       linkAt(view, 0)
@@ -589,7 +593,8 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = 40; x + 2')
     })
 
-    // `lambdaLinkState`'S `'truncated'` BRANCH IS NOT COVERED END TO END HERE — TRIED, AND SKIPPED.
+    // THE `'too-large'` λ LINK STATE IS NOT COVERED END TO END HERE, AND NEITHER WAS `'truncated'`, THE
+    // STATE IT REPLACED (Plan 7 part 4a) — TRIED, AND SKIPPED, on the one program shape that reaches either.
     // `let x = 20000; x + 1` was the candidate (this language lowers naturals to unary Church numerals,
     // so one literal is O(n) bytes of printed λ text): verified directly against `LinkIndex::build`
     // (`redextape-core`) and against `redextape-wasm`'s own `Session`, natively, that this exact program
@@ -684,30 +689,26 @@ describe('the app, end to end', () => {
       expect(stepText('lambda')).toContain('step 1')
     })
 
-    // `drawLink()` USED TO RUN ONLY FROM `setLinkTo` AND FROM `onReply`'S ARMS, NEVER FROM `draw()` —
-    // so a link made at step 0 kept reporting step 0 forever, through every `back`/`forward`/`play`/
-    // `restart` click, because none of those call `drawLink()` on their own. `link-status.ts`'s
-    // `not-step-0` message exists specifically to say "you moved off step 0"; wired that way, it could
-    // never fire from stepping alone.
-    it('reports the step-0 restriction once the play head leaves it, not only at link time', async () => {
+    // LINKING AT EVERY STEP (Plan 7 part 4a). This test pinned the sentence that said the λ link was
+    // defined at step 0 only; the tree carries the constructs an `App` still owns at any step, so a later
+    // step links what reduction has not yet rewritten away — and says so, per step, for what it has.
+    // `drawLink()` runs from `draw()`, so the sentence follows the play head without a click.
+    it('links a construct at a later step while the term still carries it, and says when it no longer does', async () => {
       await settled(view, 'let x = 40; x + 2')
-      // Recording follows to the frontier (step 7 — see the first test in this block); the λ link is
-      // only ever defined at step 0, so land there before linking anything.
       click('lambda', '↺')
-      expect(stepText('lambda')).toContain('step 0')
-
-      // The second `x` in `x + 2`, a `Var` reference — any construct works here, since `lambdaLinkState`
-      // checks the play head BEFORE it ever asks whether this particular node has a λ span (`link-wiring.ts`'s
-      // ordering comment: "ORDERED MOST-GLOBAL FIRST").
-      linkAt(view, 'let x = 40; x + 2'.indexOf('x + 2'))
-      // Resolved to a real node, not a click that landed on nothing — the concrete, pane-independent
-      // signal `linkMark` leaves in the source.
-      expect(document.querySelector('.cm-editor .linked')).not.toBeNull()
-      expect(linkStatusText()).not.toContain('only defined at step 0')
-
       click('lambda', '▶')
       expect(stepText('lambda')).toContain('step 1')
-      expect(linkStatusText()).toContain('the λ link is only defined at step 0')
+      await lambdaSettled()
+      linkAt(view, 'let x = 40; x + 2'.indexOf('+'))
+      await until(() => document.querySelector('[data-leaf="lambda-0"] .term .is-linked') !== null, 'x + 2 at step 1')
+      expect(linkStatusText()).not.toContain('no node in the λ term')
+
+      // THE FRONTIER IS THE NORMAL FORM — the chip `42` — and nothing the source wrote survives into it.
+      for (let s = 1; s < 7; s += 1) click('lambda', '▶')
+      expect(stepText('lambda')).toContain('step 7')
+      await lambdaSettled()
+      expect(document.querySelector('[data-leaf="lambda-0"] .term .is-linked')).toBeNull()
+      expect(linkStatusText()).toContain('this construct has no node in the λ term at this step')
     })
 
     // FIX 2's PRIMARY-DIRECTION PROOF: design decision 3's "source -> both", the primary direction of
@@ -717,12 +718,13 @@ describe('the app, end to end', () => {
     // OUT without ever asserting any exist — its own `tokens.length > 0` would pass even if `.is-linked`
     // were never applied to anything. Nothing anywhere asserted that a SOURCE-originated link actually
     // paints the λ window and the δ table, not only the source echo.
-    it('a source-originated link lights both the λ window and the δ table', async () => {
+    it('a source-originated link lights both the λ view and the δ table', async () => {
       await settled(view, 'let x = 40; x + 2')
-      // The λ window only ever renders at step 0 (`lambdaLinkWindow`'s gate) — `settled` leaves the
-      // head at the frontier (step 7), so restart before linking anything.
+      // STEP 0, WHERE EVERY CONSTRUCT HAS A NODE: `settled` leaves the head at the frontier, the chip `42`,
+      // which carries none.
       click('lambda', '↺')
       expect(stepText('lambda')).toContain('step 0')
+      await lambdaSettled()
 
       // The second `x` in `x + 2`, a `Var` reference that reads the let-bound value — verified directly
       // against the running app to own both a λ span and at least one machine state.
@@ -732,6 +734,38 @@ describe('the app, end to end', () => {
       const litToken = document.querySelector('.term .is-linked')
       expect(litToken?.textContent).not.toBe('')
       expect(linkedRowCount()).toBeGreaterThan(0)
+    })
+
+    // EVERY NODE THAT CARRIES THE CONSTRUCT, NOT THE FIRST. `double` uses its argument twice and the term
+    // reduces in normal order, so the argument is substituted unreduced: at step 7 the application `1 + 2`
+    // lowers to is in the term twice, and a source link to it marks both copies — two stretches of marked
+    // tokens with unmarked ones between them. A row's gutter is not a token of the term and is skipped.
+    it('a source link marks every copy of a construct that reduction has duplicated', async () => {
+      const src = 'fn double(n) { n + n } double(1 + 2)'
+      await settled(view, src)
+      click('lambda', '↺')
+      for (let s = 0; s < 7; s += 1) click('lambda', '▶')
+      expect(stepText('lambda')).toContain('step 7')
+      await lambdaSettled()
+      linkAt(view, src.indexOf('1 + 2') + 2)
+      await until(() => linkedSource() === '1 + 2', '1 + 2 linked')
+      await until(() => document.querySelector('[data-leaf="lambda-0"] .term .is-linked') !== null, '1 + 2 marked')
+
+      const runs: string[] = []
+      let run: string | null = null
+      for (const t of document.querySelectorAll<HTMLElement>('[data-leaf="lambda-0"] .term [data-node]')) {
+        if (t.classList.contains('term-gutter')) continue
+        if (t.classList.contains('is-linked')) run = (run ?? '') + (t.textContent ?? '')
+        else if (run !== null) {
+          runs.push(run)
+          run = null
+        }
+      }
+      if (run !== null) runs.push(run)
+      expect(runs, 'the marked stretches of the term').toHaveLength(2)
+      expect(runs[0], 'two copies of one construct print alike').toBe(runs[1])
+
+      await settled(view, 'let x = 40; x + 2')
     })
 
     // FIX 3's REGRESSION GUARD: `linkMark` clears its own decoration on `docChanged`, and `main.ts`'s
@@ -745,9 +779,10 @@ describe('the app, end to end', () => {
     // did: a version that needed one would be proving the wrong thing.
     it('clears all three panes on an edit, not only the source echo, and says linking will resume', async () => {
       await settled(view, 'let x = 40; x + 2')
-      // The λ window only ever renders at step 0 — restart so this test can prove the λ pane was
-      // actually painted before the edit, not merely that it stayed absent the whole time.
+      // Step 0, so this test can prove the λ view was actually painted before the edit, not merely that
+      // it stayed unmarked the whole time.
       click('lambda', '↺')
+      await lambdaSettled()
       linkAt(view, 'let x = 40; x + 2'.indexOf('x + 2'))
       await until(() => linkedSource() !== '')
       await until(() => document.querySelector('.term .is-linked') !== null)
@@ -764,34 +799,97 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = 40; x + 2')
     })
 
-    // TASK 11's PROOF: the third link direction, λ token -> source. The λ window only ever renders at
-    // step 0 (`lambdaLinkWindow`'s gate, same as the test above), so the head is parked there first.
-    it('clicking a token in the lambda window lights the specific source construct it names', async () => {
+    // THE THIRD LINK DIRECTION, λ -> SOURCE: a click on a token links the construct its node belongs to —
+    // its own link, or its nearest ancestor's (`Tree.linkedAncestor`, the innermost, as `nodeAtLambda`
+    // answered for the step-0 window this replaced).
+    it('clicking a λ token lights the specific source construct its node belongs to', async () => {
       await settled(view, 'let x = 40; x + 2')
       click('lambda', '↺')
-      expect(stepText('lambda')).toContain('step 0')
+      await lambdaSettled()
 
       linkAt(view, 12)
-      await until(() => document.querySelector('.term [data-at]') !== null)
+      await until(() => document.querySelector('[data-leaf="lambda-0"] .term .is-linked') !== null)
+      const first = linkedSource()
 
-      // Pick a token that is NOT the current target, so the assertion is that the click moved the link
-      // rather than that it left it alone.
-      const tokens = [...document.querySelectorAll<HTMLElement>('.term [data-at]')].filter(
-        (el) => !el.classList.contains('is-linked'),
+      // The first token of the first line — a node the target does not contain, so the assertion is that
+      // the click moved the link rather than that it left it alone.
+      const token = document.querySelector<HTMLElement>(
+        '[data-leaf="lambda-0"] .term-line [data-node]:not(.term-gutter)',
       )
-      expect(tokens.length, 'the window must show more than the target alone').toBeGreaterThan(0)
-      tokens[0]?.click()
-      await until(() => linkedSource() !== '')
-
-      // THE SPECIFIC CONSTRUCT, NOT MERELY "IT CHANGED". The previous version of this test only checked
-      // `linkedSource() !== first` (the target's own source, `"x"`) — satisfied by ANY resolution that
-      // differs from the original target, including a wrong one. `tokens[0]` is the window's very first
-      // token, `(` at byte offset 0 of `lambdaText`; resolving it against `main.ts`'s
-      // `let x = 40; x + 2` names the enclosing `let` binding — verified directly against the running
-      // app. A regression in `nodeAtLambda`/`data-at` resolution now has to reproduce this exact string
-      // to keep passing, not merely produce something other than `"x"`.
+      expect(token?.classList.contains('is-linked')).toBe(false)
+      token?.click()
+      await until(() => linkedSource() !== first)
+      // THE SPECIFIC CONSTRUCT, measured against the running app: the first token is the root application's
+      // head, the `let`'s own lowering — the same answer the step-0 window gave for its first token.
       expect(linkedSource()).toBe('let x = 40;')
       expect(view.state.doc.toString()).toContain(linkedSource())
+    })
+
+    // A NEW PIN SCROLLS THE λ VIEW ONCE, TO THE PIN'S FIRST NODE — WHEN THE PIN CAME FROM ANOTHER VIEW. At
+    // step 1, with the `40` chip opened, the numeral is a column of `(f` rows taller than the view, and
+    // `x + 2`'s node is the root application: its first row is row 0 and its closing parens end the numeral.
+    const frames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+    /** Whether row `line` of the λ view is drawn inside the view's visible box. */
+    const rowShown = (term: HTMLElement, line: number): boolean => {
+      const row = term.querySelector<HTMLElement>(`.term-line[data-line="${line}"]`)
+      if (row === null) return false
+      const r = row.getBoundingClientRect()
+      const box = term.getBoundingClientRect()
+      return r.top >= box.top - 1 && r.bottom <= box.bottom + 1
+    }
+    /** Step 1 of `let x = 40; x + 2`, the `40` chip opened, the view scrolled to its end: row 0 is off screen. */
+    const scrolledToTheNumeral = async (): Promise<HTMLElement> => {
+      await settled(view, 'let x = 40; x + 2')
+      click('lambda', '↺')
+      click('lambda', '▶')
+      expect(stepText('lambda')).toContain('step 1')
+      await lambdaSettled()
+      const term = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term') as HTMLElement
+      const chip = [...term.querySelectorAll<HTMLElement>('.term-chip')].find((c) => c.textContent === '40')
+      expect(chip, 'no 40 chip to open').toBeDefined()
+      chip?.click()
+      await frames()
+      term.scrollTop = term.scrollHeight
+      await frames()
+      expect(term.scrollTop, 'the view does not scroll, so nothing here can move it').toBeGreaterThan(0)
+      expect(rowShown(term, 0), 'row 0 is on screen, so a scroll to it would not be one').toBe(false)
+      return term
+    }
+
+    it('a source link scrolls the λ view to the construct when its first node is off screen', async () => {
+      const term = await scrolledToTheNumeral()
+      const before = term.scrollTop
+      linkAt(view, 'let x = 40; x + 2'.indexOf('+'))
+      await until(() => linkedSource() === 'x + 2', 'x + 2 linked from source')
+      await frames()
+      expect(term.scrollTop).toBeLessThan(before)
+      expect(rowShown(term, 0), 'the first node’s row is still off screen').toBe(true)
+      expect(term.querySelector('.term-line .is-linked')?.closest<HTMLElement>('.term-line')?.dataset.line).toBe('0')
+    })
+
+    // A CLICK IN THE VIEW PINS WHAT IS UNDER THE POINTER, so the view stays where it is — even when the
+    // construct the click links starts far above it. Enter on a row with nothing closed on it links through
+    // the same path.
+    it('a λ click links without scrolling the view it was made in', async () => {
+      const term = await scrolledToTheNumeral()
+      const before = term.scrollTop
+      const box = term.getBoundingClientRect()
+      const shown = [...term.querySelectorAll<HTMLElement>('.term-line')].filter((r) => {
+        const b = r.getBoundingClientRect()
+        return b.top >= box.top - 1 && b.bottom <= box.bottom + 1
+      })
+      const isToken = (t: HTMLElement) =>
+        !['term-gutter', 'term-chip', 'term-fold'].some((c) => t.classList.contains(c))
+      // THE LAST TOKEN ON SCREEN, among the numeral's closing parens.
+      const row = [...shown].reverse().find((r) => [...r.querySelectorAll<HTMLElement>('[data-node]')].some(isToken))
+      const token = [...(row?.querySelectorAll<HTMLElement>('[data-node]') ?? [])].filter(isToken).at(-1)
+      expect(token, 'no token on screen to click').toBeDefined()
+      const line = Number(row?.dataset.line)
+      token?.click()
+      await until(() => linkedSource() === 'x + 2', 'x + 2 linked from the λ view')
+      await frames()
+      expect(term.scrollTop, 'the click scrolled its own view').toBe(before)
+      expect(rowShown(term, line), 'the clicked row left the screen').toBe(true)
     })
 
     // FIX 4's REGRESSION GUARD: `TmPane.setLink` wrote `scrollTop` and then called `#drawTable`, which

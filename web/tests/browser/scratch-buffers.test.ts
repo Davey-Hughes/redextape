@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
+import { lambdaSettled } from './lambda-text'
 
 /**
  * **WHAT ENDS A BUFFER, DRIVEN THROUGH THE APP** — design §4.3's table, and the row this task changes:
@@ -183,9 +184,11 @@ describe('a scratch buffer across a recompile of the source', () => {
     // assertion after the recompile mean "the buffer's own work is still there" rather than "a λ
     // session is still bound": `(λa. a a) (λb. b)` is the user's text, reduced on the buffer's own
     // thread, and it is neither the source's old program nor its new one.
+    await lambdaSettled()
     const seeded = term()
     typeIntoBufferEditor('(λa. a a) (λb. b)')
     await until(() => term() !== seeded, 'the edited buffer to recompile')
+    await lambdaSettled()
     const edited = term()
     expect(edited).not.toBe('')
     expect(edited).toContain('λ')

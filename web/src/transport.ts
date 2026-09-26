@@ -295,7 +295,7 @@ export function createTransport(deps: {
     // taken mid-run, and `null` outright for a declined leg. `index.lambdaText` is the SOURCE
     // compile's step-0 term printed at `LAMBDA_BYTE_BUDGET` (`session-worker.ts`'s `onRun`:
     // `session.linkIndex(LAMBDA_BYTE_BUDGET)`, built for every session that exists, decline or not),
-    // and it is already what `link-wiring.ts`'s `lambdaLinkWindow` reads for the very same reason — a
+    // and it is already what `draw.ts`'s `createDraw` reads to tell a declined λ leg from a live one — a
     // second name for the one string this file already holds, not a second lookup.
     //
     // `index === null || index.lambdaText === ''` COVERS EVERY CASE A FORK CAN BE CLICKED FROM AND
@@ -303,7 +303,7 @@ export function createTransport(deps: {
     // for an uncompiled page — but `#refreshDetach` already hides this control whenever the pane's
     // frame is `null`, which a `no-session`/pre-compile leg always is, so this guard is defence
     // against a call this file's own chrome should never produce, not a path a user can reach.
-    // `lambdaText === ''` is `link-wiring.ts`'s `lambdaLinkState` spelling "declined" — a declined leg
+    // `lambdaText === ''` is how `draw.ts`'s `createDraw` spells "declined" — a declined leg
     // also renders no frame, so the same defence applies. NEITHER READS THE SLOT'S SESSION: a
     // detached pane's own `#refreshDetach` already refuses (`!this.#detached`), and the only session
     // that is ever NOT detached is `SOURCE_SESSION` — the one `index` describes — so whenever this
@@ -369,9 +369,9 @@ export function createTransport(deps: {
     // message and changes nothing else synchronously: the pane is already on this session and
     // stays on it (`scratch.ts`'s own doc: "does not rebind and does not touch the registry"),
     // so there is no fact for a draw to catch up on until the worker's `scratch-compiled` reply
-    // arrives and `onScratchReply` paints it. Drawing here would be the same waste the source
-    // editor's own `EditorView.updateListener` in `main.ts` already declines to pay on every
-    // keystroke — its comment states the reason: `hist` has not changed, so repainting is waste.
+    // arrives and `onScratchReply` paints it. A frame is drawn on the way regardless:
+    // `ScratchBuffers.recompile` claims a generation with `client.supersede()`, and the pool's
+    // `onSupersede` repaints through `draw()`, as it does for a source keystroke's compile.
     //
     // **PROVIDED ON BOTH LEGS, NOT ONLY λ — WHICH REVERSES WHAT THIS PROPERTY USED TO SAY, Important
     // finding, review of Task 8.** It used to sit inside the `leg === 'lambda'` spread above, beside
@@ -512,13 +512,13 @@ export function createTransport(deps: {
         }
       : {}),
     // OMITTED ENTIRELY ON THE TM LEG, mirroring `linkState` above — `PaneEvents.linkLambda` is
-    // optional under `exactOptionalPropertyTypes`, and the TM pane has no λ window to click.
+    // optional under `exactOptionalPropertyTypes`, and the TM pane has no λ term to click.
     ...(slot.binding.leg === 'lambda'
       ? {
-          linkLambda: (byteOffset: number) => {
+          linkLambda: (node: number) => {
             const wiring = linkWiring()
-            if (!wiring.linkable || wiring.index === null) return
-            wiring.setLinkTo(wiring.index.nodeAtLambda(byteOffset), 'lambda')
+            if (!wiring.linkable) return
+            wiring.setLinkTo(node, 'lambda')
           },
         }
       : {}),

@@ -25,7 +25,7 @@ import { KEYMAP_LABEL, KEYMAP_MODES, parseKeymapMode, readFormatOnBlur, writeFor
 import { declineMark, focusMark, linkMark } from './highlight'
 import { History } from './history'
 import { icon } from './icons'
-import type { LambdaPane } from './lambda-pane'
+import { LambdaTrees } from './lambda-trees'
 import { closeLeaf, defaultLayout, LAYOUT_STORAGE_KEY, type LayoutNode, leaves, SOURCE_LEAF } from './layout'
 import { createLinkWiring, type LinkWiring } from './link-wiring'
 import { LspClient } from './lsp-client'
@@ -68,6 +68,7 @@ import { pairLabel, sourceViewHeader, viewMenu } from './view-header'
 import {
   defaultFocus,
   defaultWorkspace,
+  type LambdaDisplay,
   PRESETS,
   parseSwitches,
   parseWorkspace,
@@ -76,6 +77,7 @@ import {
   type Switches,
   serializeWorkspace,
   type Workspace,
+  withDisplay,
   withPanel,
 } from './workspace'
 
@@ -640,6 +642,10 @@ async function main(): Promise<EditorView> {
     tmProgram: null,
     tmScratch: null,
   })
+  /** The λ trees the views draw (spec §4) — one cache, asked through each session's own client. */
+  const trees = new LambdaTrees((id) => (sessions.has(id) ? sessions.entryOf(id).client : undefined))
+  /** TM views a machine reached while they were off the page — `replies.ts` adds, `draw()` seeds and removes. */
+  const unseenTm = new WeakSet<TmPane>()
   /**
    * TRANSPORT, BEFORE EITHER PANE — its `events(...)` is what each pane is constructed with, so it has
    * to exist first. `scratchpad` is a real value (constructed above, and nothing later reassigns it);
@@ -963,6 +969,7 @@ async function main(): Promise<EditorView> {
     focused: restored.focused,
     panels: restored.panels,
     inspector: restored.inspector,
+    display: restored.display,
   }
   /**
    * The focused view, repaired against the tree it names a leaf of.
@@ -976,19 +983,22 @@ async function main(): Promise<EditorView> {
   const focusedLeaf = (): LeafId => (leaves(tree).some((l) => l.id === ws.focused) ? ws.focused : defaultFocus(tree))
 
   /**
-   * Drop what the tree no longer holds — the panel state of a closed view, and a focus on one.
+   * Drop what the tree no longer holds — the panel state and the display of a closed view, and a focus
+   * on one.
    *
    * **`defaultLayout()` RE-MINTS `source`, `lambda-0` AND `tm-0` AS LITERALS**, so a leaf id genuinely
    * comes back: close the TM view with its rules panel shut, then *reset preset*, and the new `tm-0`
    * would inherit the closed view's panel state — from memory, since the write had already dropped it.
    * The same clicks then behaved differently depending on whether the page had been reloaded in
-   * between. `editor-custody.ts`'s `editorOwner` records the identical hazard for claims and answers it
+   * between. A λ view's display is kept per leaf beside its panels and is dropped here for the same
+   * reason. `editor-custody.ts`'s `editorOwner` records the identical hazard for claims and answers it
    * the same way, in `applyLayout`'s creation pass.
    */
   const normaliseWorkspace = (): void => {
     const live = new Set(leaves(tree).map((l) => l.id))
     const panels = Object.fromEntries(Object.entries(ws.panels).filter(([leaf]) => live.has(leaf)))
-    ws = { ...ws, focused: focusedLeaf(), panels }
+    const display = Object.fromEntries(Object.entries(ws.display).filter(([leaf]) => live.has(leaf)))
+    ws = { ...ws, focused: focusedLeaf(), panels, display }
   }
 
   const persistWorkspace = (): void => {
@@ -1053,6 +1063,10 @@ async function main(): Promise<EditorView> {
     panelOpen: (leaf: LeafId, name: string) => ws.panels[leaf]?.[name],
     setPanel: (leaf: LeafId, name: string, open: boolean) => {
       ws = { ...ws, panels: withPanel(ws.panels, leaf, name, open) }
+    },
+    displayOf: (leaf: LeafId) => ws.display[leaf],
+    setDisplay: (leaf: LeafId, d: LambdaDisplay) => {
+      ws = { ...ws, display: withDisplay(ws.display, leaf, d) }
     },
     layoutChanged,
     draw: () => draw(),
@@ -1260,7 +1274,9 @@ async function main(): Promise<EditorView> {
   let lastSteppable: LeafId | null = null
   const barTargetNow = (): BarTarget | null => {
     // EVERY PANE IS STEPPABLE: the source LEAF has no `PaneEntry` at all (`draw.ts`'s readout block says
-    // so from the other side), so this list is already "every λ or TM view on the page".
+    // so from the other side), so this list is already "every λ or TM view in the layout" — in Stage,
+    // views off the page too. That is spec §8's rule, not an oversight: with the focused view unable to
+    // step, the bar keeps "the last view that could", and in Stage the source tab is that case.
     const id = barTarget(
       focusedLeaf(),
       panes.all().map((p) => p.id),
@@ -1668,16 +1684,16 @@ async function main(): Promise<EditorView> {
    * review round 2, Finding 1.** `refreshBuffers()`'s start-up call (this function's own doc has the
    * full argument for where it sits) can now reach `reportStorageFailure()` reaches `draw()` reaches
    * `linkWiring.drawLink(...)` reaches `detachedPanes()` here — `theLambdaSlot()`/`theTmSlot()` read
-   * `panes.active(...)` — all before `paneHost.applyLayout()` has ever run once.
+   * `panes.shown(...)`/`panes.active(...)` — all before `paneHost.applyLayout()` has ever run once.
    *
    * **TWO MORE CALLS REACH `draw()` BEFORE `applyLayout()` DOES, NEITHER THROUGH
    * `reportStorageFailure()`.** `compile.schedule(SAMPLE)` — this file's own start-up compile — is now
    * the first `draw()` of the app's life, ahead of the one inside `paneHost.applyLayout()` itself,
    * reached through `client.supersede()`'s `onSupersede` callback. The restore's warming loop reaches
    * it the same way, once per warmed session: `scratchpad.warm(session)` spawns a worker, and the spawn
-   * calls `client.supersede()` too. `draw()`'s own body (`draw.ts`) reads `panes` three more times
-   * before it gets that far, regardless of which of the three paths reached it: `panes.active('lambda')`/
-   * `panes.active('tm')`, `panes.all()` and `panes.of('lambda')`.
+   * calls `client.supersede()` too. `draw()`'s own body (`draw.ts`) reads `panes` again before it gets
+   * that far, regardless of which of the three paths reached it: `panes.active('lambda')`/
+   * `panes.active('tm')`, `panes.all()`, `panes.of('lambda')` and `panes.shown('lambda', …)`.
    *
    * **STILL SAFE, AND FOR A REASON THAT HAS NOTHING TO DO WITH ORDERING.** `applyLayout` remains the
    * only thing that ever populates `panes`, so every one of those reads runs against a collection that
@@ -1725,6 +1741,8 @@ async function main(): Promise<EditorView> {
     sessions,
     panes,
     links: linkWiring,
+    trees,
+    unseen: unseenTm,
     leaves: () => leaves(tree).length,
     sourceAvailable: () => !leaves(tree).some((l) => l.pane === 'source'),
     // WRAPPED RATHER THAN PASSED AS `custody.hasEditor`, the same shape `editorHome` below uses for
@@ -1798,6 +1816,8 @@ async function main(): Promise<EditorView> {
     view: () => view,
     panes,
     links: linkWiring,
+    trees,
+    unseen: unseenTm,
     draw,
     notify: (text: string) => notices.notify(text),
     setProgram: (r: ProgramResult) => {
@@ -1912,33 +1932,28 @@ async function main(): Promise<EditorView> {
           // source document of this size, measured, and it is on another thread.
           lspClient.changeDocument(SOURCE_URI, src)
           // STALE FROM THIS KEYSTROKE UNTIL THE NEXT COMPILE. `linkMark` clears its own decoration on
-          // `docChanged`; this clears the state behind it, the status line, AND THE OTHER TWO PANES —
-          // design §6 case 4 requires all three cleared, not only the source echo. Before this, the λ
-          // window and the δ-table's `.is-linked` rows stayed painted from the PREVIOUS index until the
-          // next `compiled` reply landed — up to `DEBOUNCE_MS` plus a compile, seconds on a larger
-          // program — while the status line already said "linking resumes when this compiles".
+          // `docChanged`; this clears the state behind it and, with the `draw()` it causes, the status line
+          // AND THE OTHER TWO PANES — design §6 case 4 requires all three cleared, not only the source
+          // echo. Before this, the λ window and the δ-table's `.is-linked` rows stayed painted from the
+          // PREVIOUS index until the next `compiled` reply landed — up to `DEBOUNCE_MS` plus a compile,
+          // seconds on a larger program — while the status line already said "linking resumes when this
+          // compiles".
           //
-          // A SECOND `drawLink()`/`renderLink()`/`setLink()` CALL SITE, DELIBERATELY — none of this is
-          // redundant with `draw()`'s. Nothing here calls `draw()`: `lam.hist`/`tm.hist` have not
-          // changed, so repainting both panes on every keystroke would be pure waste. But all three
-          // panes still have to go stale THIS keystroke, not 300 ms from now when `compile.schedule`'s
-          // debounce finally lands a `compiled`/`no-session` reply — so each gets its own direct, targeted call
-          // rather than waiting for `draw()` to earn one. Passed `null`/`[]`/`false` rather than
-          // resolving anything: `linkable` is already false on the line above, and every one of these
-          // reads that (`drawLink` directly; `renderLink`/`setLink`/`setFocus` take the already-cleared
-          // view) before it would ever look at what is linked or focused.
+          // **`draw()` RUNS ON THIS KEYSTROKE, AND IT CLEARS MOST OF IT.** `compile.schedule` below claims its
+          // generation synchronously, and the pool's `onSupersede` repaints through `draw()` before
+          // `schedule` returns — not 300 ms from now, when its debounce lands a `compiled`/`no-session`
+          // reply. `clearLink` has made `linkable` false by then, so that `draw()` writes "linking resumes
+          // when this compiles" to the status line, hands each λ view no pin, and gives each TM view on the
+          // page an empty running focus before it renders it; a TM view off the page gets its focus from the
+          // `draw()` that shows it. `focusMark` (the CodeMirror decoration) clears itself on `docChanged`,
+          // as `linkMark` does.
           //
-          // `setFocus([])` TOO, NOT ONLY `setLink` — the running focus is the δ-table's own second
-          // highlight layer (`TmPane`'s own doc) and goes stale on this same keystroke, for the same
-          // reason `.is-linked` does: `tm.hist` is untouched by a keystroke, so without this call the
-          // previous program's focused rows would stay painted until the next `compiled` reply.
-          // `focusMark` (the CodeMirror decoration) needs no matching call — it clears itself on
-          // `docChanged`, same as `linkMark`.
-          //
-          // AND IT RUNS BEFORE `setLink`, WHICH IS THE ONE THAT DRAWS. `setFocus` is a pure setter (its
-          // own doc says why); `setLink` is what calls `#drawTable`, so it has to be the LAST of the two
-          // or the cleared focus would not reach the DOM until some later draw. Same rule `draw()`
-          // follows by putting its own `setFocus` ahead of `tmPane.render`.
+          // **THE TM VIEWS' `setLink([])` IS THE ONE DIRECT CALL LEFT, AND IT IS STILL NEEDED.** `draw()`
+          // never sets a TM view's link: `setLinkTo` does, and a compile's `setProgram` clears it. Without
+          // this the δ-table's `.is-linked` rows would stay painted until the next compile lands. Every TM
+          // view, hidden ones too, since a hidden one would show its rows again when its tab is selected.
+          // `setLink` redraws the table with the old running focus still in it; the `draw()` that
+          // `schedule` causes repaints it without.
           //
           // PER-LEG, FANNED OUT THROUGH `panes` (T7) — every pane on a leg follows the same app-wide
           // link state, matching `draw.ts`'s and `link-wiring.ts`'s identical loops. THERE ARE NO
@@ -1946,13 +1961,7 @@ async function main(): Promise<EditorView> {
           // every pane from the tree's leaves, so a leg can now hold more than one, and the collection
           // is the one route every consumer of this rule shares.
           linkWiring.clearLink()
-          linkWiring.drawLink(null, false)
-          for (const p of panes.of('lambda')) (p.pane as LambdaPane).renderLink(null)
-          for (const p of panes.of('tm')) {
-            const pane = p.pane as TmPane
-            pane.setFocus([])
-            pane.setLink([], false)
-          }
+          for (const p of panes.of('tm')) (p.pane as TmPane).setLink([], false)
           compile.schedule(src)
         }),
       ],

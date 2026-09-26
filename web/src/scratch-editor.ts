@@ -116,12 +116,13 @@ export type ScratchEditorConfig = {
  * gate can see it, which `session-worker.ts` is not.
  *
  * **TWO COLOURING PATHS ON ONE PANE, ON DIFFERENT CLOCKS, AND THE OLDER ARGUMENT IS STILL HALF TRUE.**
- * The pane's `<pre>` colours tokens from `spans`, which the worker computes per frame from a term it
- * holds, and **that path is unchanged** — its frame is a printed term, so its colouring is a fact about
- * what the worker last sent. What this class used to carry was the conclusion drawn from that: an
- * editor's buffer is text the user is halfway through typing, there is no frame for it, and a colouring
- * computed from printed output is stale the instant the user types. That half still holds, and it is
- * exactly why the frame's spans are not reused here.
+ * The λ view's flat text colours tokens from `spans`, which the worker computes per frame from a term
+ * it holds, and **that path is unchanged** — its frame is a printed term, so its colouring is a fact about
+ * what the worker last sent. (A drawn tree colours by token kind instead; `lambda-body.ts`.) What this
+ * class used to carry was the conclusion drawn from that: an editor's buffer is text the user is halfway
+ * through typing, there is no frame for it, and a colouring computed from printed output is stale the
+ * instant the user types. That half still holds, and it is exactly why the frame's spans are not reused
+ * here.
  *
  * **THE OTHER HALF WAS "λ HAS NO PARSER FOR BUFFER TEXT", AND TREE-SITTER IS THE ANSWER TO IT.** The
  * argument ran that `analyze` is the SOURCE language's parser rather than λ's, that colouring a buffer

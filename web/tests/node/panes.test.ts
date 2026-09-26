@@ -189,3 +189,39 @@ describe('active', () => {
     expect(panes.active('lambda')?.id).toBe('a')
   })
 })
+
+/**
+ * `shown`: `active`, among the panes on the page. The collection is told which those are rather than
+ * reading the DOM, so the test names them by id.
+ */
+describe('shown', () => {
+  const onPage =
+    (...ids: string[]) =>
+    (e: PaneEntry<Leg>) =>
+      ids.includes(e.id)
+
+  it('is the active pane while it is on the page', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    panes.add(lambdaEntry('b', 'source'))
+    panes.markActive('b')
+    expect(panes.shown('lambda', onPage('a', 'b'))?.id).toBe('b')
+  })
+
+  it('is the first pane on the page when the active one is not', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    panes.add(lambdaEntry('b', 'source'))
+    panes.add(lambdaEntry('c', 'source'))
+    panes.markActive('a')
+    expect(panes.shown('lambda', onPage('c'))?.id).toBe('c')
+  })
+
+  it('is undefined when no pane on the leg is on the page', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    panes.add(tmEntry('b', 'source'))
+    expect(panes.shown('lambda', onPage('b'))).toBeUndefined()
+    expect(panes.shown('tm', onPage('a'))).toBeUndefined()
+  })
+})

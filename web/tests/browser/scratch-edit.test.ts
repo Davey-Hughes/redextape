@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { SHELL, until } from './harness'
+import { lambdaSettled } from './lambda-text'
 
 /**
  * **THE SECOND EDIT GESTURE, DRIVEN THROUGH THE APP** — design §4.3's `editScratch`, plan T8's last
@@ -78,6 +79,7 @@ describe('editing the scratch, through the app', () => {
     expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
     await until(() => editorHost() !== null, 'the editor to mount')
     await until(() => term() !== '', 'the scratchpad to produce its first frame')
+    await lambdaSettled()
 
     // STAGE 2 — a genuine edit changes the frames region, and the SOURCE's own result is untouched.
     // `onScratchReply` never writes `#results` (its own doc: "never touches `results.dataset.state`
@@ -86,6 +88,7 @@ describe('editing the scratch, through the app', () => {
     const beforeEdit = term()
     typeIntoScratchEditor('(λa. a a) (λb. b)')
     await until(() => term() !== beforeEdit, 'the edited scratch to recompile')
+    await lambdaSettled()
     expect(term()).toContain('b')
     focusProgram()
     expect(resultsText()).toBe(resultsBefore)
@@ -94,6 +97,7 @@ describe('editing the scratch, through the app', () => {
     // good run and puts the diagnostics in the gutter" — the opposite of what a broken SOURCE program
     // does to its own panes (`onReply`'s `no-session`: "stale frames must not survive a broken
     // program"), and deliberately so: a scratch mid-edit still has the term it had a keystroke ago.
+    await lambdaSettled()
     const lastGood = term()
     typeIntoScratchEditor('(λa.')
     await until(
@@ -131,6 +135,7 @@ describe('editing the scratch, through the app', () => {
     // moving to the new term is that worker replying after the source recompile that used to kill it.
     typeIntoScratchEditor('(λm. m) (λn. n)')
     await until(() => term() !== lastGood, 'the buffer to recompile after the source did')
+    await lambdaSettled()
     expect(term()).toContain('n')
     expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
   })

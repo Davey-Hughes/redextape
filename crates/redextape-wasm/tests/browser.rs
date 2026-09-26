@@ -80,44 +80,28 @@ fn compile(src: &str) -> (Array, JsValue) {
     (diagnostics, get(&out, "session"))
 }
 
-/// The height of a `TermTree` arena (`ast`, a `lambdaAst` result), computed as a single linear pass
-/// over `nodes` rather than by recursing — this is the capability the flat, post-order arena exists to
-/// provide, and using it here is the same walk a real renderer would need to lay a term out without
-/// recursing in JavaScript. A nested `Box`-shaped payload would force that walk to recurse instead;
-/// this helper is a consumer-side demonstration that the arena shape avoids it.
+/// The height of a `lambdaTree` result, in edges from the root, in ONE FORWARD PASS over its columns.
 ///
-/// Post-order guarantees `child_index < parent_index` for every child, so by the time index `i` is
-/// reached, `depth[child]` has already been computed for every child `i` can name: no worklist, no
-/// stack, no recursion, one forward pass filling a growing `Vec`. `depth[i]` is `0` for `Var`, `1 +
-/// depth[body]` for `Abs`, and `1 + max(depth[f], depth[a])` for `App`; the tree's height is the
-/// maximum over all of them (which is always `depth[root]`, since a node's depth already folds in
-/// every depth beneath it — the max is taken explicitly anyway so this makes no assumption about which
-/// index the root is).
-fn depth(ast: &JsValue) -> u32 {
-    let nodes: Array = get(ast, "nodes").unchecked_into();
-    let len = nodes.length();
-    let mut depths: Vec<u32> = Vec::with_capacity(len as usize);
-    for i in 0..len {
-        let node = nodes.get(i);
-        let var = get(&node, "Var");
-        let d = if !var.is_undefined() {
-            0
-        } else {
-            let abs = get(&node, "Abs");
-            if !abs.is_undefined() {
-                let tuple: Array = abs.unchecked_into();
-                let body = tuple.get(1).as_f64().expect("Abs body index marshals as a number") as usize;
-                1 + depths[body]
-            } else {
-                let app: Array = get(&node, "App").unchecked_into();
-                let f = app.get(0).as_f64().expect("App fn index marshals as a number") as usize;
-                let a = app.get(1).as_f64().expect("App arg index marshals as a number") as usize;
-                1 + depths[f].max(depths[a])
-            }
-        };
-        depths.push(d);
+/// Pre-order puts every child after its parent, so a node's depth is known before its children are
+/// reached: no stack, no recursion — the walk a renderer does to lay a term out, which is the property
+/// the flat arena exists to give a JavaScript consumer.
+fn depth(tree: &JsValue) -> u32 {
+    let kind = get(tree, "kind").unchecked_into::<js_sys::Uint8Array>().to_vec();
+    let left = get(tree, "left").unchecked_into::<js_sys::Uint32Array>().to_vec();
+    let right = get(tree, "right").unchecked_into::<js_sys::Uint32Array>().to_vec();
+    let mut depths = vec![0u32; kind.len()];
+    let mut height = 0;
+    for i in 0..kind.len() {
+        let d = depths[i];
+        height = height.max(d);
+        if kind[i] != 0 {
+            depths[left[i] as usize] = d + 1;
+        }
+        if kind[i] == 2 {
+            depths[right[i] as usize] = d + 1;
+        }
     }
-    depths.into_iter().max().unwrap_or(0)
+    height
 }
 
 #[wasm_bindgen_test]
@@ -186,69 +170,25 @@ fn compile_step_and_read_both_legs() {
     // `redex` and `protocol.ts`'s `PATH_ENTRY_BYTES` term with it, and this is what says so.  check-attributions: allow
     assert!(get(&state, "redex").is_undefined(), "the redex path is skipped on the wire; only `redex_span` crosses");
 
-    let ast = call(&session, "lambdaAst", &[JsValue::from_f64(1_000_000.0)]);
-    assert!(!ast.is_null(), "an unreachable node budget yields a tree");
+    let tree = call(&session, "lambdaTree", &[JsValue::from_f64(1_000_000.0), JsValue::from_f64(1_000_000.0)]);
+    assert!(get(&tree, "refused").is_null(), "an unreachable node budget yields a tree, and `refused` is null");
 
-    // THE WIRE SHAPE, MEASURED RATHER THAN DESIGNED — PR 3b's `Decoded` lesson, applied before the
-    // fact this time. `TermTree` is a struct, so it crosses as an object with `nodes` and `root`;
-    // `TermNode` is an EXTERNALLY TAGGED enum, so each node is `{ Var: n }`, `{ Abs: [name, body] }`
-    // or `{ App: [f, a] }`. A consumer branches on which key is present — there is no `kind` field.
-    let nodes: Array = get(&ast, "nodes").unchecked_into();
-    assert!(nodes.length() > 0, "a term has at least one node");
-    assert_eq!(
-        num(&ast, "root"),
-        f64::from(nodes.length() - 1),
-        "post-order puts the root last, and `root` says so explicitly"
-    );
-
-    // The term here is Church 42 — `λf. λx. f (f ... x)` — so its root is an `Abs`.
-    let root_node = nodes.get(nodes.length() - 1);
-    let abs: Array = get(&root_node, "Abs").unchecked_into();
-    assert_eq!(abs.length(), 2, "`Abs(String, u32)` crosses as a two-element tuple");
-    assert!(abs.get(0).as_string().is_some(), "the binder name marshals as a string");
-    // THE LOAD-BEARING ASSERTION FOR `u32` OVER `usize`: an index must arrive as a JS number. A
-    // `usize` child would cross as a `bigint`, which `as_f64` cannot read and a renderer cannot index
-    // an array with.
-    assert!(abs.get(1).as_f64().is_some(), "the body index marshals as a number, not a bigint");
-
-    // `{Var:n}` and `{App:[f,a]}` ARE PUBLISHED AS MEASURED FACTS TOO (this file's own comment two
-    // blocks up), but until now only `Abs` was actually exercised above. Found by scanning the arena
-    // for a real occurrence of each rather than constructing one by hand: Church 42's body is an `App`
-    // spine of `f` applied to itself repeatedly, ending in `x`, so both variants exist in this tree.
-    let mut saw_var = false;
-    let mut saw_app = false;
-    for i in 0..nodes.length() {
-        let node = nodes.get(i);
-        let var = get(&node, "Var");
-        if !var.is_undefined() {
-            assert!(var.as_f64().is_some(), "node {i}: `Var(u32)` must cross as a bare number, got {var:?}");
-            saw_var = true;
-        }
-        let app = get(&node, "App");
-        if !app.is_undefined() {
-            let app_pair: Array = app.unchecked_into();
-            assert_eq!(app_pair.length(), 2, "node {i}: `App(u32, u32)` must cross as a two-element tuple");
-            assert!(
-                app_pair.get(0).as_f64().is_some(),
-                "node {i}: App's fn index must marshal as a number, not a bigint"
-            );
-            assert!(
-                app_pair.get(1).as_f64().is_some(),
-                "node {i}: App's arg index must marshal as a number, not a bigint"
-            );
-            saw_app = true;
-        }
-        if saw_var && saw_app {
-            break;
-        }
+    // THE WIRE SHAPE, MEASURED RATHER THAN DESIGNED: one typed array per column, marks as a number or null.
+    assert!(get(&tree, "kind").is_instance_of::<js_sys::Uint8Array>(), "kind crosses as a Uint8Array");
+    for column in ["left", "right", "name", "hint", "link"] {
+        assert!(get(&tree, column).is_instance_of::<js_sys::Uint32Array>(), "{column} crosses as a Uint32Array");
     }
-    assert!(saw_var, "Church 42's arena has no Var node to assert {{Var:n}} against -- fixture assumption broke");
-    assert!(saw_app, "Church 42's arena has no App node to assert {{App:[f,a]}} against -- fixture assumption broke");
+    assert!(get(&tree, "names").is_instance_of::<Array>(), "names cross as an array");
+    // The term here is Church 42 — `λf. λx. f (f ... x)` — a normal form: pre-order puts its `Abs` root
+    // first, and it has no next redex, which crosses as `null` rather than `undefined`.
+    let kinds = get(&tree, "kind").unchecked_into::<js_sys::Uint8Array>().to_vec();
+    assert_eq!(kinds.first(), Some(&1), "the root comes first, and Church 42's root is an Abs");
+    assert!(get(&tree, "nextRedex").is_null(), "a normal form has no next redex");
+    assert!(num(&tree, "step") > 0.0, "the step it answers is a number, clamped to the run");
 
-    // `None` must arrive as `null`, not `undefined` — §5.1 writes this `TermTree | null`.
-    let refused = call(&session, "lambdaAst", &[JsValue::from_f64(1.0)]);
-    assert!(refused.is_null(), "a 1-node budget refuses, and refusal marshals as null");
-    assert!(!refused.is_undefined(), "null, specifically — a renderer testing `=== null` must see it");
+    let refused = call(&session, "lambdaTree", &[JsValue::from_f64(0.0), JsValue::from_f64(1.0)]);
+    assert!(num(&refused, "refused") > 1.0, "a 1-node budget refuses with the term's size");
+    assert_eq!(get(&refused, "kind").unchecked_into::<js_sys::Uint8Array>().length(), 0, "and every column is empty");
 
     // --- the TM leg: 2,870 δ-steps on a 5-tape, 123-state machine fitted to width 64.
     let program = call(&session, "tmProgram", &[]);
@@ -463,9 +403,10 @@ fn a_lambda_limitation_program_reports_a_tm_only_session() {
     assert!(get(&lambda, "run").is_null(), "there is no λ run to have a status, got {:?}", get(&lambda, "run"));
 
     // Every λ method now throws rather than aborting the module.
-    for method in ["stepLambda", "lambdaState", "lambdaAst"] {
+    for method in ["stepLambda", "lambdaState", "lambdaTree"] {
         let f: Function = get(&session, method).unchecked_into();
         let args = Array::new();
+        args.push(&JsValue::from_f64(1_000_000.0));
         args.push(&JsValue::from_f64(1_000_000.0));
         assert!(Reflect::apply(&f, &session, &args).is_err(), "{method} must throw for an absent leg");
     }
@@ -575,7 +516,7 @@ fn a_deep_but_legal_program_needs_the_raised_shadow_stack() {
 /// NOT A REGRESSION TEST, and the distinction is recorded rather than glossed: measured before the
 /// arena landed, the `Box`-shaped `TermNode` did not trap at any depth the guards admit on the 8 MiB
 /// shadow stack. There is no crash here to pin. What this is instead is a TRIPWIRE: a future change
-/// that reintroduces per-level recursion into `lambdaAst`'s marshaling, or that lowers the shadow
+/// that reintroduces per-level recursion into `lambdaTree`'s marshaling, or that lowers the shadow
 /// stack, has nothing to trap on today — this case is what would first notice, by no longer being able
 /// to walk a term this deep without itself recursing into a stack it does not have.
 ///
@@ -595,14 +536,15 @@ fn a_deep_but_legal_program_needs_the_raised_shadow_stack() {
 /// maximum, only that a depth in that neighborhood was reached.
 ///
 /// THE HELPER ITSELF IS THE OTHER HALF OF THE POINT: `depth` is a consumer-side walk of the arena,
-/// computed with one linear pass and no recursion — the capability the flat, post-order shape exists to
+/// computed with one linear pass and no recursion — the capability the flat, pre-order shape exists to
 /// provide. A `Box`-shaped payload would force this exact walk to recurse in JavaScript instead.
 ///
 /// THE BUDGET IS DELIBERATELY UNREACHABLE: `usize` is 32 bits on wasm32, so 4,000,000,000 is a node
-/// budget no term can exhaust. A `null` would mean the BUDGET refused rather than the depth being
-/// tolerated, and the case would pass for the wrong reason.
+/// budget no term can exhaust. A refusal is a non-null `refused` with no arena to walk, so it would mean
+/// the BUDGET stopped the build rather than the depth being tolerated; the `refused` assertions below
+/// fail the case then, rather than let it pass for the wrong reason.
 #[wasm_bindgen_test]
-fn the_ast_tolerates_the_deepest_term_a_reduction_reaches() {
+fn the_tree_tolerates_the_deepest_term_a_reduction_reaches() {
     let elems = vec!["0"; 600].join(", ");
     let (diagnostics, session) = compile(&format!("[{elems}]"));
     assert_eq!(diagnostics.length(), 0, "a 600-deep cons spine is inside every front-end guard");
@@ -616,8 +558,9 @@ fn the_ast_tolerates_the_deepest_term_a_reduction_reaches() {
     let mut chunks = 0;
     let mut depths: Vec<u32> = Vec::new();
     loop {
-        let ast = call(&session, "lambdaAst", &[JsValue::from_f64(4_000_000_000.0)]);
-        assert!(!ast.is_null(), "the arena crosses at chunk {chunks}");
+        let ast =
+            call(&session, "lambdaTree", &[JsValue::from_f64(4_000_000_000.0), JsValue::from_f64(4_000_000_000.0)]);
+        assert!(get(&ast, "refused").is_null(), "the arena crosses at chunk {chunks}");
         depths.push(depth(&ast));
         let status = call(&session, "runLambda", &[JsValue::from_f64(100.0)]);
         chunks += 1;
@@ -627,8 +570,8 @@ fn the_ast_tolerates_the_deepest_term_a_reduction_reaches() {
         }
     }
 
-    let ast = call(&session, "lambdaAst", &[JsValue::from_f64(4_000_000_000.0)]);
-    assert!(!ast.is_null(), "and on the normal form too");
+    let ast = call(&session, "lambdaTree", &[JsValue::from_f64(4_000_000_000.0), JsValue::from_f64(4_000_000_000.0)]);
+    assert!(get(&ast, "refused").is_null(), "and on the normal form too");
     depths.push(depth(&ast));
     assert!(chunks > 1, "the loop must have actually stepped — one chunk means the run never ran");
 
@@ -641,11 +584,11 @@ fn the_ast_tolerates_the_deepest_term_a_reduction_reaches() {
     assert!(peak > 1_500, "peak sampled depth was {peak}, expected > 1500; samples were {depths:?}");
 }
 
-/// MEASURES V8's OWN LIMITS on a nested plain JS object, independent of `TermTree`/`TermNode`
-/// entirely. The design's load-bearing justification for this whole branch is a claim that was never
+/// MEASURES V8's OWN LIMITS on a nested plain JS object, independent of any type this crate marshals.
+/// The design's load-bearing justification for this whole branch is a claim that was never
 /// run: *"a 3,000-deep nested object still traps a recursive JS walk or a `JSON.stringify`"*
 /// (`docs/superpowers/specs/2026-08-07-termnode-arena-design.md` §0). This project's own standard —
-/// applied to the Rust side just above, in `the_ast_tolerates_the_deepest_term_a_reduction_reaches` —
+/// applied to the Rust side just above, in `the_tree_tolerates_the_deepest_term_a_reduction_reaches` —
 /// is that a claim like this is not established until a program chosen to break it has actually been
 /// run. This test runs it, checking both the design's own quoted 3,000 and the smaller 1,805 this
 /// project's own reduction is independently measured to reach (a native run recorded in the roadmap;
@@ -1132,9 +1075,9 @@ fn a_lambda_scratch_crosses_as_a_handle_and_steps() {
     assert_eq!(get(&state, "text").as_string().as_deref(), Some("λy. y"), "the identity applied to the identity");
     assert_eq!(num(&state, "step"), 1.0);
 
-    let ast = call(&scratch, "lambdaAst", &[JsValue::from_f64(1_000_000.0)]);
-    assert!(!ast.is_null(), "an unreachable node budget yields a tree");
-    assert_eq!(depth(&ast), 1, "`λy. y` is one binder over one variable");
+    let tree = call(&scratch, "lambdaTree", &[JsValue::from_f64(1_000_000.0), JsValue::from_f64(1_000_000.0)]);
+    assert!(get(&tree, "refused").is_null(), "an unreachable node budget yields a tree");
+    assert_eq!(depth(&tree), 1, "`λy. y` is one binder over one variable");
 
     // `raiseLambdaCap` returns `void` rather than a `Result` — there is no absent leg for it to throw
     // about — and `runLambda` still answers a `RunStatus` string. Both are called so the glue is

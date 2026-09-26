@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
+import { asShown } from './lambda-text'
 
 /**
  * **THE COOL → WARM → BIND ROUND TRIP, AND THE DEFECT IT USED TO END IN** — design §4.5's stated flow
@@ -192,7 +193,7 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // 0, which is already a normal form here, so the pane ends up showing exactly the string the editor
     // is holding. Without this wait the `term() !== beforeEdit` below would fire on the REBUILD rather
     // than on the keystroke, and the edit would go unmeasured.
-    await until(() => term() === forked, "the warmed buffer's own rebuild to reach its newly bound pane")
+    await until(() => term() === asShown(forked), "the warmed buffer's own rebuild to reach its newly bound pane")
     const beforeEdit = term()
     typeIntoScratchEditor('(λa. a a) (λb. b)')
     await until(() => term() !== beforeEdit, 'the re-bound buffer to recompile from a keystroke')
