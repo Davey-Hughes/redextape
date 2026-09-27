@@ -92,46 +92,53 @@ describe('a pointer on the rows a draw rebuilds', () => {
     expect(getComputedStyle(active).outlineStyle).not.toBe('none')
   })
 
-  it('shows the local level on a click on show states, and hands the focus to it', async () => {
-    // Inside `cmpeq`, where the current instruction opens onto its sub-steps and so has a show states.
-    control('↺')?.click()
-    for (let i = 0; i < 20_000 && !/^cmp/.test(status()); i += 1) control('▶')?.click()
-    await until(() => /^cmp/.test(status()), 'the machine to be inside cmpeq')
-    // THE GRID TAKES THE FOCUS FROM ELSEWHERE, so the click below comes with the grid already focused. The button
-    // is found AFTER that focus, not before: taking it draws the view and replaces every row, and `userEvent.click`
-    // on an element no longer in the document throws (`Cannot read properties of undefined (reading 'includes')`)
-    // before any pointer event is sent.
-    view.focus()
-    programGrid().focus()
-    expect(document.activeElement).toBe(programGrid())
-    const show = diagram().querySelector<HTMLButtonElement>('.program-show') as HTMLButtonElement
-    expect(within(show, programGrid())).toBe(true)
-    await userEvent.click(show)
-    await until(() => diagram().querySelector('.local-node') !== null, 'the local level to draw')
-    expect(drawn('.local-level')).toBe(true)
-    expect(drawn('.program-level')).toBe(false)
-    const focused = document.activeElement as HTMLElement
-    expect(focused).not.toBe(document.body)
-    expect(focused.classList.contains('local-node')).toBe(true)
-    expect(focused.tabIndex).toBe(0)
-  })
+  describe('inside cmpeq', () => {
+    // Inside `cmpeq`, where the current instruction opens onto its sub-steps and so has a show states. REACHED IN A
+    // HOOK: 1,732 clicks, a full redraw each, whose time is the machine's, and on the slower CI runner a body that
+    // walked here came within a second or two of Vitest's 15 s cap. See `intoCmpeq` in `state-diagram.test.ts`.
+    beforeAll(async () => {
+      control('↺')?.click()
+      for (let i = 0; i < 20_000 && !/^cmp/.test(status()); i += 1) control('▶')?.click()
+      await until(() => /^cmp/.test(status()), 'the machine to be inside cmpeq')
+    })
 
-  it('does the same with the focus coming from the source editor', async () => {
-    const choice = (value: string) =>
-      [...diagram().querySelectorAll<HTMLButtonElement>('.diagram-mode')].find((b) => b.dataset.value === value)
-    choice('program')?.click()
-    expect(drawn('.program-level')).toBe(true)
-    view.focus()
-    expect(view.hasFocus).toBe(true)
-    const show = diagram().querySelector<HTMLButtonElement>('.program-show') as HTMLButtonElement
-    expect(within(show, programGrid())).toBe(true)
-    await userEvent.click(show)
-    await until(() => drawn('.local-level'), 'the local level to show')
-    expect(drawn('.program-level')).toBe(false)
-    // THE CLICK TOOK THE FOCUS INTO THE LEVEL IT LEFT, as a pointer on a focusable grid does, and the level
-    // handed it on: it is on the local level's tab stop, not left in the editor and not dropped to the page.
-    const focused = document.activeElement as HTMLElement
-    expect(focused.classList.contains('local-node')).toBe(true)
-    expect(focused.tabIndex).toBe(0)
+    it('shows the local level on a click on show states, and hands the focus to it', async () => {
+      // THE GRID TAKES THE FOCUS FROM ELSEWHERE, so the click below comes with the grid already focused. The button
+      // is found AFTER that focus, not before: taking it draws the view and replaces every row, and `userEvent.click`
+      // on an element no longer in the document throws (`Cannot read properties of undefined (reading 'includes')`)
+      // before any pointer event is sent.
+      view.focus()
+      programGrid().focus()
+      expect(document.activeElement).toBe(programGrid())
+      const show = diagram().querySelector<HTMLButtonElement>('.program-show') as HTMLButtonElement
+      expect(within(show, programGrid())).toBe(true)
+      await userEvent.click(show)
+      await until(() => diagram().querySelector('.local-node') !== null, 'the local level to draw')
+      expect(drawn('.local-level')).toBe(true)
+      expect(drawn('.program-level')).toBe(false)
+      const focused = document.activeElement as HTMLElement
+      expect(focused).not.toBe(document.body)
+      expect(focused.classList.contains('local-node')).toBe(true)
+      expect(focused.tabIndex).toBe(0)
+    })
+
+    it('does the same with the focus coming from the source editor', async () => {
+      const choice = (value: string) =>
+        [...diagram().querySelectorAll<HTMLButtonElement>('.diagram-mode')].find((b) => b.dataset.value === value)
+      choice('program')?.click()
+      expect(drawn('.program-level')).toBe(true)
+      view.focus()
+      expect(view.hasFocus).toBe(true)
+      const show = diagram().querySelector<HTMLButtonElement>('.program-show') as HTMLButtonElement
+      expect(within(show, programGrid())).toBe(true)
+      await userEvent.click(show)
+      await until(() => drawn('.local-level'), 'the local level to show')
+      expect(drawn('.program-level')).toBe(false)
+      // THE CLICK TOOK THE FOCUS INTO THE LEVEL IT LEFT, as a pointer on a focusable grid does, and the level
+      // handed it on: it is on the local level's tab stop, not left in the editor and not dropped to the page.
+      const focused = document.activeElement as HTMLElement
+      expect(focused.classList.contains('local-node')).toBe(true)
+      expect(focused.tabIndex).toBe(0)
+    })
   })
 })

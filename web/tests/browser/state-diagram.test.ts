@@ -30,6 +30,11 @@ const control = (label: string) =>
 /**
  * From step 0 to the first step inside `cmpeq` — 1,732 steps forward, where stepping back from the frontier took
  * about 9,000, one redraw each, and ran past the test's time under a full suite's load.
+ *
+ * **IT RUNS IN A HOOK, NEVER IN A TEST'S BODY.** Each click is a full redraw, so the walk's time is the machine's,
+ * and on the slower CI runner a body that walked here and then on to `sub` ran past Vitest's 15 s cap. A hook has
+ * its own 30 s, so a body keeps only the steps its claim is about — the arrangement `state-diagram-local.test.ts`
+ * and `tm-reduced-buffer.test.ts` already use.
  */
 async function intoCmpeq(): Promise<void> {
   control('↺')?.click()
@@ -101,16 +106,19 @@ describe('the program level, drawn as arcs', () => {
     expect(chips.classList.contains('visually-hidden')).toBe(true)
   })
 
-  it('opens the current instruction onto its sub-steps, and follows the run', async () => {
+  describe('inside cmpeq', () => {
     // A step inside `cmpeq`, the first instruction whose gadget has named sub-steps.
-    await intoCmpeq()
-    const current = diagram().querySelector('.program-row[aria-current="step"]')
-    expect(current?.querySelector('.program-name')?.textContent).toBe('pc4')
-    const steps = current?.nextElementSibling
-    expect(steps?.classList.contains('is-steps')).toBe(true)
-    const now = steps?.querySelector('.program-step.is-now')?.textContent
-    // The sub-step marked is the current state's second name segment.
-    expect(now).toBe(status().split(' ')[0]?.split('.')[1])
+    beforeAll(intoCmpeq)
+
+    it('opens the current instruction onto its sub-steps, and follows the run', () => {
+      const current = diagram().querySelector('.program-row[aria-current="step"]')
+      expect(current?.querySelector('.program-name')?.textContent).toBe('pc4')
+      const steps = current?.nextElementSibling
+      expect(steps?.classList.contains('is-steps')).toBe(true)
+      const now = steps?.querySelector('.program-step.is-now')?.textContent
+      // The sub-step marked is the current state's second name segment.
+      expect(now).toBe(status().split(' ')[0]?.split('.')[1])
+    })
   })
 
   it("links a row's construct, as a click on the rule table does", async () => {
@@ -181,17 +189,23 @@ describe('the program level through a moving run', () => {
     await until(() => pattern.test(status()), `the machine to reach ${pattern}`)
   }
 
-  it('keeps the active row on its row when the sub-steps row moves past it', async () => {
-    await wholeListing()
-    await intoCmpeq()
-    grid().focus()
-    await userEvent.keyboard('{Home}')
-    for (let i = 0; i < 30 && named() !== 'pc10'; i += 1) await userEvent.keyboard('{ArrowDown}')
-    expect(named()).toBe('pc10')
-    // From pc4's gadget to pc11's: the sub-steps row moves from above pc10 to below it.
-    await stepUntil(/^sub/)
-    expect(diagram().querySelector('.program-row[aria-current="step"] .program-name')?.textContent).toBe('pc11')
-    expect(named()).toBe('pc10')
+  describe('with the active row on pc10 and the run inside cmpeq', () => {
+    beforeAll(async () => {
+      await wholeListing()
+      await intoCmpeq()
+      grid().focus()
+      await userEvent.keyboard('{Home}')
+      for (let i = 0; i < 30 && named() !== 'pc10'; i += 1) await userEvent.keyboard('{ArrowDown}')
+    })
+
+    it('keeps the active row on its row when the sub-steps row moves past it', async () => {
+      expect(named()).toBe('pc10')
+      expect(diagram().querySelector('.program-row[aria-current="step"] .program-name')?.textContent).toBe('pc4')
+      // From pc4's gadget to pc11's: the sub-steps row moves from above pc10 to below it.
+      await stepUntil(/^sub/)
+      expect(diagram().querySelector('.program-row[aria-current="step"] .program-name')?.textContent).toBe('pc11')
+      expect(named()).toBe('pc10')
+    })
   })
 
   it("keeps a runtime box's focus while the run moves, and the column is one tab stop", async () => {

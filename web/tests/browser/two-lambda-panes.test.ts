@@ -1178,11 +1178,20 @@ describe('two λ panes on two λ sessions', () => {
       // comment is what it was left to the first time. `not.toBe(seededA)` is what caught it, and
       // `not.toContain` is what names it: if the sample program ever grows the marker, the failure
       // says so instead of reading as a term mismatch. The first test carries the same pair.
+      //
+      // **EVERY TEXT THIS TEST KEEPS OR COMPARES EXACTLY IS READ FROM A SETTLED VIEW** — `lambdaSettled`, after the
+      // marker's wait and before the read. Between a frame and its tree the λ view shows the frame's flat text, one
+      // worker round trip long: after the edit it read `λp. λq. p q` for a frame and then the tree's `λp q. p q`.
+      // `termA` taken in that frame never equals the settled pane it is compared with at the end, and on the slower
+      // CI runner, where the round trip is longer, the marker's 20 ms poll landed in it and failed this test on
+      // `main`. The marker wait stays first: before the edit reaches the pane, the seed's tree is already settled.
       await until(() => textOf('lambda-0') !== '')
+      await lambdaSettled('lambda-0')
       const seededA = textOf('lambda-0')
       expect(seededA).not.toContain('p q')
       typeInto('lambda-0', 'λp.λq. p q')
       await until(() => textOf('lambda-0').includes('p q'))
+      await lambdaSettled('lambda-0')
       const termA = textOf('lambda-0')
       expect(termA).not.toBe(seededA)
 
@@ -1195,6 +1204,7 @@ describe('two λ panes on two λ sessions', () => {
       expect(first).toBe('lambda-0')
       expect(selectOf(second ?? '')?.value).toBe(valueA)
       await until(() => textOf(second ?? '') !== '')
+      await lambdaSettled(second ?? '')
       expect(textOf(second ?? '')).toBe(termA)
 
       // 4. Put the new pane back on the source session, which is what makes it forkable.
@@ -1223,10 +1233,12 @@ describe('two λ panes on two λ sessions', () => {
 
       // 6. And give B its own term, through B's own editor — the same marker wait, for step 2's reason.
       await until(() => textOf(second ?? '') !== '')
+      await lambdaSettled(second ?? '')
       const seededB = textOf(second ?? '')
       expect(seededB).not.toContain('n m')
       typeInto(second ?? '', 'λm.λn. n m')
       await until(() => textOf(second ?? '').includes('n m'))
+      await lambdaSettled(second ?? '')
       expect(textOf(second ?? '')).not.toBe(seededB)
 
       // **THE HEADLINE, READ OFF BOTH PANES AT ONE MOMENT.** Each shows the term typed into ITS buffer
