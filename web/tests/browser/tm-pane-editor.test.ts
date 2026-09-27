@@ -47,11 +47,13 @@ const mountPane = (): { pane: TmPane; host: HTMLElement } => {
  * `PROGRAM` fixture — one state, one rule, one tape.
  */
 const PROGRAM: TmProgram = {
-  states: [{ name: 'pc0', accept: false, rules: [{ read: ['a'], write: ['b'], moves: ['R'], next: 0 }] }],
+  states: [{ name: 'pc0', accept: false, rules: [{ read: ['a'], write: ['b'], moves: ['R'], next: 0 }], instr: null }],
   alphabet: ['a', 'b'],
   tapes: 1,
   width: 8,
   start: 0,
+  listing: [],
+  labels: [],
 }
 
 /** One configuration over `PROGRAM`'s single tape, modelled on `tests/node/tape.test.ts`'s `state` helper. */

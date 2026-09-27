@@ -197,6 +197,16 @@ fn compile_step_and_read_both_legs() {
     assert_eq!(num(&program, "start"), 2.0);
     let states: Array = get(&program, "states").unchecked_into();
     assert_eq!(states.length(), 123, "the whole machine crosses once, and all of it arrives");
+    // Each state's instruction crosses as a number or as `null`, never `undefined`: 121 of the 123 are
+    // built for one of the sample's five instructions, and the halt and overflow states for none.
+    let instrs: Vec<JsValue> = states.iter().map(|s| get(&s, "instr")).collect();
+    assert!(instrs.iter().all(|i| i.is_null() || i.as_f64().is_some()), "`instr` is a number or null");
+    assert_eq!(instrs.iter().filter(|i| i.as_f64().is_some()).count(), 121, "every billed state carries it");
+    let listing: Array = get(&program, "listing").unchecked_into();
+    assert_eq!(listing.length(), 5, "one line per instruction");
+    assert_eq!(listing.get(0).as_string().as_deref(), Some("li\tr0, #40"), "`print_asm`'s text, tab and all");
+    let labels: Array = get(&program, "labels").unchecked_into();
+    assert_eq!(labels.length(), 0, "the sample has no label, and an empty list still crosses as an array");
 
     let mut delta = 0;
     while call(&session, "stepTm", &[]) == JsValue::TRUE {

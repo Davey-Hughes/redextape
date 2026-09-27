@@ -171,13 +171,12 @@ describe('a pane at the floor', () => {
 
       const tmAtHeightFloor = root.querySelector<HTMLElement>('[data-leaf="tm-0"]')
       const tmHeight = Math.round(tmAtHeightFloor?.getBoundingClientRect().height ?? 0)
-      // UNLIKE THE WIDTH CASE, THE OUTER `.pane`'S OWN OVERFLOW IS A GENUINE SIGNAL HERE. TM's
-      // `.state-table` caps itself at `max-height: 40vh` — the real tester VIEWPORT, not this
-      // squeezed pane — so at a small enough height floor the table (open by default, since
-      // `createPanel`'s `open` option defaults to `true`) can legitimately exceed the pane's own
-      // `clientHeight` and push the outer `.pane` (`overflow: auto` in its own right) into
-      // scrolling, which is exactly what `.cm-scroller`/`.cells` never let the outer element do on
-      // the width axis.
+      // UNLIKE THE WIDTH CASE, THE OUTER `.pane`'S OWN OVERFLOW IS A GENUINE SIGNAL HERE. A TM view's
+      // open panels shrink with the pane only down to their floors (spec §9.1), so at a small enough
+      // height floor the table (open by default, since `createPanel`'s `open` option defaults to `true`)
+      // can legitimately exceed the pane's own `clientHeight` and push the outer `.pane` (`overflow:
+      // auto` in its own right) into scrolling, which is exactly what `.cm-scroller`/`.cells` never let
+      // the outer element do on the width axis.
       const tmVerticalOverflow =
         tmAtHeightFloor === null || tmAtHeightFloor.clientHeight === 0
           ? 'n/a'

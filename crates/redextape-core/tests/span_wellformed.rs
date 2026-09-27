@@ -270,8 +270,7 @@ fn text_that_merely_looks_like_a_state_name_is_never_attributed() {
         })
         .collect();
     let tm_name_to_node = owner.iter().map(|(name, id)| ((*name).to_string(), *id)).collect();
-    let map =
-        SourceMap { node_to_lambda: BTreeMap::new(), node_to_tm, tm_name_to_node, node_to_source: BTreeMap::new() };
+    let map = SourceMap { node_to_tm, tm_name_to_node, ..SourceMap::default() };
 
     let (text, spans) = print_tm_mapped(&m);
     let attributed = attribute_tm_spans(&text, &map, &spans);

@@ -14,6 +14,7 @@ import {
   WORKSPACE_VERSION,
   withDisplay,
   withPanel,
+  withTmDisplay,
 } from '../../src/workspace'
 
 const SPLIT = splitLeaf(defaultLayout(), 'lambda-0', 'row', 'pane-1', 'tm')
@@ -71,6 +72,7 @@ describe('parseWorkspace', () => {
       panels: { 'tm-0': { rules: false } },
       inspector: false,
       display: { 'pane-1': { layout: 'outline' as const, vars: 'debruijn' as const, map: 'minimap' as const } },
+      tmDisplay: { 'tm-0': { level: 'local' as const, edges: 'chips' as const } },
     }
     const raw = serializeWorkspace(ws)
     expect(JSON.parse(raw).version).toBe(WORKSPACE_VERSION)
@@ -171,6 +173,23 @@ describe('parseWorkspace', () => {
     }
   })
 
+  // **THE SAME FOR A TM VIEW'S DISPLAY**, which Plan 7 part 4b added after 4a's.
+  it('defaults a missing TM display to none stored, and refuses a malformed one', () => {
+    const base = { version: 2, tree: SPLIT, switches: PRESETS.explorer, speed: 8, focused: 'lambda-0', panels: {} }
+    expect(parseWorkspace(JSON.stringify(base))?.tmDisplay).toEqual({})
+    const good = { 'tm-0': { level: 'local', edges: 'chips' } }
+    expect(parseWorkspace(JSON.stringify({ ...base, tmDisplay: good }))?.tmDisplay).toEqual(good)
+    for (const bad of [
+      { 'tm-0': { level: 'program', edges: 'boxes' } },
+      { 'tm-0': { level: 'states', edges: 'arcs' } },
+      { 'tm-0': { edges: 'arcs' } },
+      { 'nowhere-9': { level: 'program', edges: 'arcs' } },
+      [],
+    ]) {
+      expect(parseWorkspace(JSON.stringify({ ...base, tmDisplay: bad })), JSON.stringify(bad)).toBeNull()
+    }
+  })
+
   it('opens the inspector for a migrated version 1 layout', () => {
     expect(parseWorkspace(serializeLayout(SPLIT))?.inspector).toBe(true)
   })
@@ -184,10 +203,15 @@ describe('serializeWorkspace', () => {
       focused: 'pane-9',
       panels: { 'pane-9': { rules: false }, 'tm-0': { rules: false } },
       display: { 'pane-9': outline, 'lambda-0': outline },
+      tmDisplay: {
+        'pane-9': { level: 'program' as const, edges: 'chips' as const },
+        'tm-0': { level: 'program' as const, edges: 'chips' as const },
+      },
     }
     const back = JSON.parse(serializeWorkspace(ws))
     expect(back.panels).toEqual({ 'tm-0': { rules: false } })
     expect(back.display).toEqual({ 'lambda-0': outline })
+    expect(back.tmDisplay).toEqual({ 'tm-0': { level: 'program', edges: 'chips' } })
     expect(back.focused).toBe('lambda-0')
     expect(back.inspector).toBe(true)
     expect(JSON.parse(serializeWorkspace({ ...ws, inspector: false })).inspector).toBe(false)
@@ -199,6 +223,14 @@ describe('withDisplay', () => {
     const a = { layout: 'code' as const, vars: 'names' as const, map: 'icicle' as const }
     const b = { layout: 'outline' as const, vars: 'debruijn' as const, map: 'minimap' as const }
     expect(withDisplay({ 'lambda-0': a }, 'pane-1', b)).toEqual({ 'lambda-0': a, 'pane-1': b })
+  })
+})
+
+describe('withTmDisplay', () => {
+  it('records one view’s display without touching the others', () => {
+    const program = { level: 'program' as const, edges: 'arcs' as const }
+    const local = { level: 'local' as const, edges: 'chips' as const }
+    expect(withTmDisplay({ 'tm-0': program }, 'pane-1', local)).toEqual({ 'tm-0': program, 'pane-1': local })
   })
 })
 

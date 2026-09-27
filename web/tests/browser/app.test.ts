@@ -947,7 +947,7 @@ describe('the app, end to end', () => {
       await until(() => spacer().style.height === BIG_SPACER)
       const rows = document.querySelectorAll('[data-leaf="tm-0"] .state-row')
       // THE SCROLL CONTAINER MUST ACTUALLY BE BOUNDED, and this asserts it rather than assuming it.
-      // `.state-table`'s `max-height: 40vh` is what bounds it, and Vitest serves its own tester HTML —
+      // The TM view's flex rules (spec §9.1) are what bound it, and Vitest serves its own tester HTML —
       // `tests/browser/setup.ts` is what gets `style.css` onto that page. If that setup ever breaks, the
       // box lays out at its full content height (measured: 271,968px for 11,332 rows), nothing bounds
       // `#drawTable`'s window computation, and every draw during recording renders every row. THERE IS
@@ -979,12 +979,12 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = 40; x + 2')
       // By the time `settled` resolves, the TM leg is fully recorded and its head sits at the
       // frontier, which is `halt` — `frame.rule` is `null` there (`types.ts`'s doc: "at an accept
-      // state, at `halt`, or at a stuck configuration"), so `is-firing` would be empty at this exact
+      // state, at `halt`, or at a stuck configuration"), so `is-next` would be empty at this exact
       // frame. `◀` once steps back to the frame whose rule fires INTO halt, which is where a rule is
       // actually about to fire.
       click('tm', '◀')
       expect(document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-current').length).toBe(1)
-      expect(document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-firing').length).toBe(1)
+      expect(document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-next').length).toBe(1)
     })
 
     it('moves the highlight as the machine steps', async () => {
@@ -1199,7 +1199,7 @@ describe('the app, end to end', () => {
       toggle.click()
       toggle.click()
       expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-current')?.textContent).toBe(current)
-      expect(document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-firing').length).toBe(1)
+      expect(document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-next').length).toBe(1)
     })
   })
 })

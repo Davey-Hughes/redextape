@@ -43,8 +43,8 @@ describe('rows mark position with the left edge and the outline', () => {
     expect(getComputedStyle(row).borderLeftStyle).toBe('dashed')
   })
 
-  it('keeps the outline on the firing row', () => {
-    const row = mount('<div class="state-row is-firing">q0</div>', '.state-row')
+  it('keeps the outline on the row of the rule that fires next', () => {
+    const row = mount('<div class="state-row is-next">q0</div>', '.state-row')
     expect(getComputedStyle(row).outlineStyle).toBe('solid')
   })
 })

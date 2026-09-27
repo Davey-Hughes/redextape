@@ -42,7 +42,7 @@ use crate::core::{Core, NodeId};
 use crate::lambda::{Path, lower_mapped};
 use crate::span::Span;
 use crate::tm::machine::StateId;
-use crate::tm::{Encoding, LowerError, defunc_mapped, lower_asm_mapped, lower_tm_mapped};
+use crate::tm::{Encoding, LowerError, defunc_mapped, lower_asm_mapped, lower_tm_mapped, print_instr};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SourceMap {
@@ -57,6 +57,16 @@ pub struct SourceMap {
     /// the field is `pub`, like the other two, so `map.node_to_source = other_spans` compiles and
     /// reintroduces the same mismatch a setter would.
     pub node_to_source: BTreeMap<NodeId, Span>,
+    /// The `prog.code` index each state was built for, keyed by the state's printed NAME as
+    /// `tm_name_to_node` is. A state with no instruction behind it — the shared return handler, the halt
+    /// and overflow states — is absent, so `tm_instr` answers `None` for it. Unlike `tm_name_to_node`,
+    /// states built for a construct `defunc` minted are present: they still belong to an instruction.
+    pub tm_name_to_instr: BTreeMap<String, usize>,
+    /// The asm program the TM half lowered, one line per `prog.code` index, each as `print_instr` writes
+    /// it. Empty when the TM half is. The indices `tm_name_to_instr` holds index this.
+    pub tm_listing: Vec<String>,
+    /// That program's labels, each with the `prog.code` index it precedes, in `prog.labels` order.
+    pub tm_labels: Vec<(String, usize)>,
 }
 
 impl SourceMap {
@@ -78,8 +88,16 @@ impl SourceMap {
     /// it. `build_is_total_on_a_core_too_deep_for_the_tm_lowering` pins it on an input past the depth at
     /// which the unguarded λ lowering used to abort.
     pub fn build(core: &Core, enc: &dyn Encoding) -> SourceMap {
-        let (node_to_tm, tm_name_to_node) = tm_half(core, enc);
-        SourceMap { node_to_lambda: lambda_half(core), node_to_tm, tm_name_to_node, node_to_source: BTreeMap::new() }
+        let tm = tm_half(core, enc);
+        SourceMap {
+            node_to_lambda: lambda_half(core),
+            node_to_tm: tm.node_to_tm,
+            tm_name_to_node: tm.name_to_node,
+            node_to_source: BTreeMap::new(),
+            tm_name_to_instr: tm.name_to_instr,
+            tm_listing: tm.listing,
+            tm_labels: tm.labels,
+        }
     }
 
     /// Both backend halves AND the source leg, from the one desugar that produced the `Core`.
@@ -121,6 +139,18 @@ impl SourceMap {
         self.tm_name_to_node.get(name).copied()
     }
 
+    /// The `prog.code` index — a line of `tm_listing` — whose gadgets built the state printed as `name`.
+    /// `None` for machine scaffolding and for any name this lowering never produced, with no fallback, as
+    /// `tm_owner`.
+    ///
+    /// **NAMES DEPEND ON THE FIELD WIDTH**, so this answers for the machine lowered at the width `build`
+    /// was handed and for no other: a wider machine has states no narrower one names. A caller asking
+    /// about a machine it ran builds the map at the width that run fitted.
+    #[must_use]
+    pub fn tm_instr(&self, name: &str) -> Option<usize> {
+        self.tm_name_to_instr.get(name).copied()
+    }
+
     /// The source text a Core node came from. `None` for a map built by `build`, which has no `Program`.
     #[must_use]
     pub fn source_span(&self, id: NodeId) -> Option<Span> {
@@ -140,7 +170,19 @@ fn lambda_half(core: &Core) -> BTreeMap<NodeId, Path> {
     out
 }
 
-fn tm_half(core: &Core, enc: &dyn Encoding) -> (BTreeMap<NodeId, Vec<StateId>>, BTreeMap<String, NodeId>) {
+/// Everything `tm_half` records about one lowering: the two owner indexes, the instruction index, and
+/// the listing and labels those instruction indices point into. `Default` is the empty half every
+/// refusal returns.
+#[derive(Default)]
+struct TmHalf {
+    node_to_tm: BTreeMap<NodeId, Vec<StateId>>,
+    name_to_node: BTreeMap<String, NodeId>,
+    name_to_instr: BTreeMap<String, usize>,
+    listing: Vec<String>,
+    labels: Vec<(String, usize)>,
+}
+
+fn tm_half(core: &Core, enc: &dyn Encoding) -> TmHalf {
     // `attribute.rs`'s `lower_mapped`, error discrimination included: try the program as first-order
     // Core FIRST, retry through `defunc` only on `Unsupported`, and give up on `TooDeep` immediately —
     // a looser `or_else` would swallow it and replay a deep Core through `defunc`'s own recursive
@@ -152,14 +194,14 @@ fn tm_half(core: &Core, enc: &dyn Encoding) -> (BTreeMap<NodeId, Vec<StateId>>, 
         Ok((p, o)) => (p, o, BTreeSet::new()),
         Err(LowerError::Unsupported { .. }) => {
             let Ok((defunced, synthetic)) = defunc_mapped(core) else {
-                return (BTreeMap::new(), BTreeMap::new());
+                return TmHalf::default();
             };
             let Ok((p, o)) = lower_asm_mapped(&defunced) else {
-                return (BTreeMap::new(), BTreeMap::new());
+                return TmHalf::default();
             };
             (p, o, synthetic)
         }
-        Err(LowerError::TooDeep { .. }) => return (BTreeMap::new(), BTreeMap::new()),
+        Err(LowerError::TooDeep { .. }) => return TmHalf::default(),
     };
     // `None` is the state-ceiling refusal — one of `lower_tm_mapped`'s four layout refusals (`MAX_SLOTS`,
     // `MAX_FRAME_LOC`, `MAX_MUL_INSTRS`, `MAX_MACHINE_STATES`; see its doc). NONE of the four is
@@ -170,14 +212,20 @@ fn tm_half(core: &Core, enc: &dyn Encoding) -> (BTreeMap<NodeId, Vec<StateId>>, 
     // as `TooDeep`/`Unsupported`-then-`defunc`-failure just above: a refused program built no machine,
     // so there is no state to own anything.
     let Some((machine, state_origins)) = lower_tm_mapped(&prog, enc) else {
-        return (BTreeMap::new(), BTreeMap::new());
+        return TmHalf::default();
     };
     let mut out: BTreeMap<NodeId, Vec<StateId>> = BTreeMap::new();
+    let mut name_to_instr: BTreeMap<String, usize> = BTreeMap::new();
     for state in 0..machine.states.len() {
         // `None` is machine scaffolding with no instruction behind it; skip rather than invent an owner.
         let Some(Some(code_index)) = state_origins.get(state) else {
             continue;
         };
+        // BEFORE THE `synthetic` SKIP BELOW: a state built for a construct `defunc` minted has no owner
+        // to name, but it was still built for this instruction.
+        if let Some(s) = machine.states.get(state) {
+            name_to_instr.entry(s.name.clone()).or_insert(*code_index);
+        }
         let Some(&node) = origins.get(*code_index) else {
             continue;
         };
@@ -211,7 +259,8 @@ fn tm_half(core: &Core, enc: &dyn Encoding) -> (BTreeMap<NodeId, Vec<StateId>>, 
             }
         }
     }
-    (out, names)
+    let listing = prog.code.iter().map(print_instr).collect();
+    TmHalf { node_to_tm: out, name_to_node: names, name_to_instr, listing, labels: prog.labels }
 }
 
 #[cfg(test)]

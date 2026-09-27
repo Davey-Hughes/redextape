@@ -20,7 +20,7 @@ import type { SessionId } from './session-client'
 import { type Binding, PaneSlot, type TmCompiled, type TmScratchReading } from './sessions'
 import { TmPane } from './tm-pane'
 import { seedTm } from './tm-seed'
-import { DEFAULT_DISPLAY, type LambdaDisplay } from './workspace'
+import { DEFAULT_DISPLAY, DEFAULT_TM_DISPLAY, type LambdaDisplay, type TmDisplay } from './workspace'
 
 /**
  * THE PANE LIFECYCLE — which panes exist, what element each one lives in, and what its controls do —
@@ -197,6 +197,10 @@ export function createPaneHost(deps: {
   displayOf(leaf: LeafId): LambdaDisplay | undefined
   /** Record a λ view's display settings; `persist` is the caller's to make. */
   setDisplay(leaf: LeafId, d: LambdaDisplay): void
+  /** A TM view's stored display settings, or `undefined` for none (Plan 7 part 4b). */
+  tmDisplayOf(leaf: LeafId): TmDisplay | undefined
+  /** Record a TM view's display settings; `persist` is the caller's to make. */
+  setTmDisplay(leaf: LeafId, d: TmDisplay): void
   /** A view was added, closed, or switched to show something else — `main.ts` says it as a notice (spec §11). */
   layoutChanged(e: LayoutEvent): void
   draw(): void
@@ -262,6 +266,8 @@ export function createPaneHost(deps: {
     setPanel,
     displayOf,
     setDisplay,
+    tmDisplayOf,
+    setTmDisplay,
     layoutChanged,
     draw,
     tmProgramOf,
@@ -791,6 +797,10 @@ export function createPaneHost(deps: {
         setDisplay(id, d)
         persist()
       },
+      tmDisplay: (d: TmDisplay) => {
+        setTmDisplay(id, d)
+        persist()
+      },
     }
   }
 
@@ -1049,11 +1059,18 @@ export function createPaneHost(deps: {
         // closed every time. An entry is passed only when it is stored, so each panel keeps its own
         // default — `rules` opens, `outline` does not.
         const rules = panelOpen(l.id, 'rules')
+        const diagram = panelOpen(l.id, 'diagram')
         const outline = panelOpen(l.id, 'outline')
-        const pane = new TmPane(host, paneEvents(l.id, slot), {
-          ...(rules === undefined ? {} : { rules }),
-          ...(outline === undefined ? {} : { outline }),
-        })
+        const pane = new TmPane(
+          host,
+          paneEvents(l.id, slot),
+          {
+            ...(rules === undefined ? {} : { rules }),
+            ...(diagram === undefined ? {} : { diagram }),
+            ...(outline === undefined ? {} : { outline }),
+          },
+          tmDisplayOf(l.id) ?? DEFAULT_TM_DISPLAY,
+        )
         // **A NEW TM PANE IS SEEDED FROM ITS SESSION, BECAUSE THE REPLY THAT WOULD HAVE TOLD IT HAS
         // ALREADY BEEN AND GONE.** `TmPane.setProgram` was called from `replies.ts` and from nowhere
         // else, so a pane created after its session's last `compiled` reply rendered no tapes, no status

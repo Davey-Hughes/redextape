@@ -15,7 +15,9 @@
 
 use redextape_core::core::{Core, NodeId};
 use redextape_core::sourcemap::SourceMap;
-use redextape_core::tm::{Unary, lower_asm};
+use redextape_core::tm::{
+    EncodingKind, LowerError, MIN_FIELD_WIDTH, Program, Unary, defunc, lower_asm, lower_tm_mapped, print_asm,
+};
 
 mod common;
 use common::core_of;
@@ -635,4 +637,79 @@ fn node_id_allocation_order_is_pinned_for_every_mint_before_children_site() {
     assert_eq!(*assign_id, 19, "Stmt::Assign (`n = 1;`)'s id");
     assert_eq!(*while_id, 8, "Stmt::While's id");
     assert_eq!(*expr_lambda_id, 3, "Expr::Lambda (`|y| y + 1`)'s id");
+}
+
+/// The asm program `tm_half` lowers, reached by the OTHER road: `lower_asm` and `defunc` rather than their
+/// `_mapped` twins, retrying through `defunc` on `Unsupported` as `run_tm`'s own lowering does. The map's
+/// instruction indices are only worth checking against a program the map did not build.
+fn asm_of(core: &Core) -> Program {
+    match lower_asm(core) {
+        Ok(p) => p,
+        Err(LowerError::Unsupported { .. }) => lower_asm(&defunc(core).expect("defunc")).expect("lowers after defunc"),
+        Err(e) => panic!("the corpus lowers: {e:?}"),
+    }
+}
+
+/// `tm_instr` answers, for every state of the machine lowered at the map's own width, the instruction
+/// `lower_tm_mapped` billed it to — `None` exactly where the lowering billed none. Over both corpora, so
+/// the defunc branch is held too, at two encodings and two widths, since names depend on both.
+#[test]
+fn tm_instr_is_the_instruction_each_state_was_built_for() {
+    for src in BOTH_BACKENDS.iter().chain(HIGHER_ORDER) {
+        let core = core_of(src);
+        let prog = asm_of(&core);
+        for kind in [EncodingKind::Unary, EncodingKind::Binary] {
+            for width in [MIN_FIELD_WIDTH, 64] {
+                let enc = kind.at(width);
+                let map = SourceMap::build(&core, &*enc);
+                let (machine, origins) = lower_tm_mapped(&prog, &*enc).expect("the corpus lays out");
+                let mut billed = 0;
+                for (state, origin) in machine.states.iter().zip(&origins) {
+                    assert_eq!(map.tm_instr(&state.name), *origin, "{src:?} {kind:?} width {width}: {}", state.name);
+                    billed += usize::from(origin.is_some());
+                }
+                assert!(billed > 0, "{src:?}: a machine with no billed state pins nothing");
+            }
+        }
+    }
+}
+
+/// The listing is `print_asm`'s own instruction lines, in `prog.code` order, without their indentation; and
+/// the labels are the program's. A listing that dropped, reordered or re-spelled an instruction would put
+/// every state after it on the wrong line.
+#[test]
+fn the_listing_is_print_asm_line_for_line() {
+    for src in BOTH_BACKENDS.iter().chain(HIGHER_ORDER) {
+        let core = core_of(src);
+        let prog = asm_of(&core);
+        let map = SourceMap::build(&core, &Unary::default());
+        let printed = print_asm(&prog);
+        let lines: Vec<&str> = printed.lines().filter_map(|l| l.strip_prefix("    ")).collect();
+        assert_eq!(lines.len(), prog.code.len(), "{src:?}: one indented line per instruction");
+        assert_eq!(map.tm_listing, lines, "{src:?}");
+        assert_eq!(map.tm_labels, prog.labels, "{src:?}");
+    }
+}
+
+/// **NAMES DEPEND ON THE WIDTH, WHICH IS WHY `tm_instr` ANSWERS ONLY FOR THE WIDTH THE MAP WAS BUILT AT.**
+/// `let x = 40; x + 2` fits at width 64 under unary, and its width-64 machine has states whose names no
+/// width-4 machine has: a map built at width 4 resolves none of them, and one built at 64 resolves all.
+/// This is the premise that makes `compile` build its map at the width the run fitted (spec amendment 14).
+#[test]
+fn a_map_built_at_another_width_misses_the_states_only_this_width_names() {
+    let core = core_of("let x = 40; x + 2");
+    let prog = asm_of(&core);
+    let (machine, origins) = lower_tm_mapped(&prog, &*EncodingKind::Unary.at(64)).expect("lays out");
+    let narrow = SourceMap::build(&core, &*EncodingKind::Unary.at(MIN_FIELD_WIDTH));
+    let wide = SourceMap::build(&core, &*EncodingKind::Unary.at(64));
+    let billed: Vec<&str> =
+        machine.states.iter().zip(&origins).filter(|(_, o)| o.is_some()).map(|(s, _)| s.name.as_str()).collect();
+    let missed = billed.iter().filter(|n| narrow.tm_instr(n).is_none()).count();
+    assert!(missed > 0, "the width-64 machine must name states the width-4 one does not, or this pins nothing");
+    assert!(billed.iter().all(|n| wide.tm_instr(n).is_some()), "the map at the machine's own width resolves all");
+    assert!(
+        billed.iter().filter(|n| wide.tm_owner(n).is_some()).count()
+            > billed.iter().filter(|n| narrow.tm_owner(n).is_some()).count(),
+        "`tm_owner` has the same hole, and the same fix"
+    );
 }

@@ -128,7 +128,7 @@ export function linkedRows(index: StateIndex, states: number[]): Set<number> {
  * animation frame while a leg plays — and repainting dozens of rule rows on every frame is a flicker nobody
  * asked for. The header
  * alone answers "which construct is the machine working on right now" without competing for attention
- * with `highlight()`'s `is-current`/`is-firing`, which already marks the single row the machine is
+ * with `highlight()`'s `is-current`/`is-next`, which already marks the single row the machine is
  * literally sitting on.
  *
  * EMPTY IS THE COMMON CASE, NOT AN EDGE ONE. Measured, the TM leg's coverage runs 50-82% of
@@ -146,7 +146,7 @@ export function focusedRows(index: StateIndex, states: number[]): Set<number> {
   return out
 }
 
-/** The table's row height in pixels. Must match `.state-row`'s height in `style.css`. */
+/** The table's row height in pixels. Must match `.state-row`'s height in `style.css`, and `.program-row`'s. */
 export const ROW_HEIGHT = 24
 
 /**
@@ -201,6 +201,8 @@ const ECHO_TOLERANCE = ROW_HEIGHT / 2
 export class Follow {
   #following = true
   #expected: number | null = null
+  /** Where the last `scroll` event or programmatic write left the box — what `onResize` compares against. */
+  #seen: number | null = null
 
   get following(): boolean {
     return this.#following
@@ -222,14 +224,28 @@ export class Follow {
   /** Record a scrollTop this code is about to write, so its echo is not read as user intent. */
   onProgrammaticScroll(top: number): void {
     this.#expected = top
+    this.#seen = top
   }
 
   onScroll(top: number): void {
+    this.#seen = top
     if (this.#expected !== null && Math.abs(top - this.#expected) <= ECHO_TOLERANCE) {
       return
     }
     this.#expected = null
     this.#following = false
+  }
+
+  /**
+   * The box was resized, and `top` is where its scroll stands now. **A POSITION THAT MOVED SINCE THE LAST EVENT OR
+   * WRITE WAS THE BROWSER CLAMPING IT** — a box that grew past its content can no longer scroll as far — and the
+   * clamp's `scroll` event, which comes later, must not read as the user taking control. Plan 7 part 4b's state
+   * diagram detached exactly so when a panel beside it closed: it grew, its scroll was clamped from 280 to 0, and
+   * following stopped. A position that did not move leaves everything as it was.
+   */
+  onResize(top: number): void {
+    if (this.#seen !== null && top !== this.#seen) this.#expected = top
+    this.#seen = top
   }
 
   /** Where to scroll so `stateRow` is centred, or `null` when not following. Clamped into the document. */

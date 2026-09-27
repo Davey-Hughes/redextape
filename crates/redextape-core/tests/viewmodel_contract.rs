@@ -226,7 +226,7 @@ fn the_window_costs_the_same_regardless_of_how_large_the_tape_has_grown() {
 #[test]
 fn tm_program_projects_the_machine_and_agrees_with_its_alphabet() {
     let (machine, _) = tm_fixture("let x = 40; x + 2");
-    let p = TmProgram::of(&machine, 64);
+    let p = TmProgram::of(&machine, 64, None);
     assert_eq!(p.states.len(), machine.states.len());
     assert_eq!(p.tapes, machine.tapes);
     assert_eq!(p.width, 64);
@@ -285,7 +285,7 @@ fn a_tape_can_be_sliced_in_the_same_coordinates_the_window_reports() {
 #[test]
 fn tm_program_reports_the_machines_start_state() {
     let (machine, _) = tm_fixture("let x = 40; x + 2");
-    let p = TmProgram::of(&machine, 64);
+    let p = TmProgram::of(&machine, 64, None);
     assert_eq!(p.start, machine.start);
     assert!(p.states.get(p.start as usize).is_some(), "the entry state must name a state that exists");
 }
@@ -369,7 +369,7 @@ fn every_view_model_round_trips_through_json() {
     assert_eq!(ls, back);
 
     let (machine, init) = tm_fixture("let x = 40; x + 2");
-    let p = TmProgram::of(&machine, 64);
+    let p = TmProgram::of(&machine, 64, None);
     let back: TmProgram = serde_json::from_str(&serde_json::to_string(&p).expect("serialize")).expect("deserialize");
     assert_eq!(p, back);
 
@@ -500,24 +500,29 @@ fn rule_names_the_transition_the_next_step_actually_takes() {
 
 #[test]
 fn link_index_resolves_tm_owners_by_name_at_the_width_the_run_fitted() {
-    // THE TRAP THIS PINS. `SourceMap::build_from_program` lowers at `MIN_FIELD_WIDTH` purely to record
-    // ownership; `run_tm_described` re-lowers and auto-fits a possibly different width. `node_to_tm`'s
-    // StateIds therefore index a DIFFERENT machine from `TmProgram.states`. Only names agree, so
-    // `tm_owner` must be built by name — the same resolution `TmState::window` performs per step.
+    // THE TRAP THIS PINS. `run_tm_described` auto-fits the width, and state NAMES depend on the width: a
+    // map built at any other width resolves only the names both machines happen to share. So the map is
+    // built at the width the run fitted, as `compile` builds it, and `tm_owner` is built by name — the
+    // same resolution `TmState::window` performs per step. At width 4 this sample resolved 77 of its 110
+    // billed states under binary; at the fitted width every one resolves.
     let src = "let x = 40; x + 2";
     let (program, diags) = redextape_core::parser::parse(src);
     let program = program.expect("the sample must parse");
     assert!(diags.is_empty(), "diagnostics: {diags:?}");
     let ty = redextape_core::typeck::result_type(&program).expect("the sample must type");
     let kind = redextape_core::tm::EncodingKind::Binary;
-    let enc = kind.at(redextape_core::tm::MIN_FIELD_WIDTH);
-    let (core, map) = SourceMap::build_from_program(&program, &*enc);
-
-    let described = redextape_core::tm::run_tm_described(&core, kind, ty, redextape_core::tm::TM_DEFAULT_CAPS)
-        .expect("the sample must lower");
+    let described = redextape_core::tm::run_tm_described(
+        &redextape_core::desugar::desugar(&program),
+        kind,
+        ty,
+        redextape_core::tm::TM_DEFAULT_CAPS,
+    )
+    .expect("the sample must lower");
     let width = described.header.width;
+    assert!(width > redextape_core::tm::MIN_FIELD_WIDTH, "the run must widen, or the trap is not set");
+    let (core, map) = SourceMap::build_from_program(&program, &*kind.at(width));
     let machine = std::rc::Rc::new(described.machine);
-    let tm_program = TmProgram::of(&machine, width);
+    let tm_program = TmProgram::of(&machine, width, Some(&map));
 
     let term = redextape_core::lambda::lower(&core).expect("the sample must lower to lambda");
     let index = LinkIndex::build(Some(&term), Some(&tm_program), &map, 65_536, MAX_TERM_DEPTH);
@@ -531,7 +536,11 @@ fn link_index_resolves_tm_owners_by_name_at_the_width_the_run_fitted() {
             owned += 1;
         }
     }
-    assert!(owned > 0, "the sample must have at least one owned state, or this test proves nothing");
+    // A first-order program has no `defunc`-minted construct, so every state its run bills to an
+    // instruction has an owner. `owned > 0` alone passed with a third of them missing.
+    let billed = tm_program.states.iter().filter(|s| s.instr.is_some()).count();
+    assert!(billed > 100, "the sample bills {billed} states; it must bill enough to pin anything");
+    assert_eq!(owned, billed, "every billed state of the sample resolves an owner");
 
     // The lambda leg. The sample's every source-mapped node carries a path, and the term prints well
     // inside the budget, so every one of them must have a span.
@@ -576,7 +585,7 @@ fn link_index_is_total_when_only_the_lambda_leg_is_present() {
 #[test]
 fn link_index_is_total_when_only_the_tm_leg_is_present() {
     let (_, _, map, machine, _) = tm_fixture_with_map("let x = 40; x + 2");
-    let tm_program = TmProgram::of(&machine, 64);
+    let tm_program = TmProgram::of(&machine, 64, None);
     let index = LinkIndex::build(None, Some(&tm_program), &map, 65_536, MAX_TERM_DEPTH);
     assert_eq!(index.lambda_text, "", "no term means no lambda text, not one fabricated to match");
     assert!(index.lambda_nodes.is_empty());

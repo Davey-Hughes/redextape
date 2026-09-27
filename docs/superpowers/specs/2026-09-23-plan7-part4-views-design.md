@@ -61,6 +61,86 @@ build settled otherwise than this text:
    and a pin's first scroll detach following too, not only a user scroll. §10: a tree the view cannot lay
    out shows its frame's text with one note, a failure the list there did not have.
 
+**Amended 2026-09-25, while writing 4b's plan, before any code.** Code facts in these six were read at
+`ec79f21` (#106, 4a's squash merge). 8 and 13 correct claims the approved text made; 9 to 12 record choices
+the user approved on 2026-09-25, 11 after a mockup of the program level drawn from `fact(3)`'s emitted
+machine:
+
+8. **No one-line asm printer exists.** §7 said the listing is printed "by the code `print_asm` already uses
+   for one line". `print_asm_with_inner` writes each instruction inline, from `instr_parts` and
+   `operand_str`. A one-line printer is extracted, and `print_asm` goes through it, so each `listing` entry
+   is byte for byte the line `print_asm` prints for that index (§7, §11). `TmProgram::of` sees only the
+   machine, so the session fills the fields §7 adds from its `SourceMap` after projecting.
+9. **The listing carries its labels.** A jump's operand names a label, not an index, and §7 carried no
+   labels. `TmProgram.labels` lists them with the `prog.code` index each precedes, and the program level
+   draws a label row above the instruction it names, as `print_asm` does (§7, §8).
+10. **The local level's columns are signed.** §8 said "every state within 2 rules" and "columns by forward
+    distance", and §2.3 measured that neighbourhood in either direction, which left predecessors with no
+    column. The columns run from −2 to +2 with the current state at 0; a state within 2 rules both ways
+    takes its forward distance (§8).
+11. **The program level has two renderings, *arcs* and *chips*, and a toggle.** *Arcs* is §8 as written;
+    *chips* lists each row's jump targets and callers as text and puts the runtime routines in rows under a
+    `runtime` heading. The user chose both. Both read one list of edges per row, and in *arcs* the chips'
+    text stays in the page, visually hidden, as the arcs' non-visual equivalent. Neither draws a
+    fall-through, where §8 had short arrows: row order implies it. Both virtualize by row, as the rule
+    table does (§8).
+12. **The outline shares the height too.** §9.1 named the rules and the diagram, but the TM view has had a
+    third panel since part 3, the outline of its states, capped at `40vh` like the rule table. It takes one
+    share (§9.1).
+13. **The grid's active element is a cell.** §9.2 had `aria-activedescendant` name the active row, but in an
+    ARIA grid cells take focus and rows do not. Each row is one `gridcell`, and `aria-activedescendant`
+    names the active row's (§9.2).
+
+**Amended again 2026-09-25, from a probe run while prototyping 4b's first task.**
+
+14. **The map is built at the width the run fitted, which fixes `tm_owner` as well.** §7 keyed `tm_instr`
+    by state name "exactly as `tm_owner` is", on the map `compile` builds at `MIN_FIELD_WIDTH` (4), before
+    the run has fitted its width. State names depend on the width. The app's own sample, `let x = 40; x +
+    2`, runs at width 64, and 47 of its 123 states have names no width-4 machine has, so `tm_owner`
+    resolves 74 of the 121 states billed to an instruction; `list60` runs at 64 with 9,291 such states
+    (§14.1). In all 32 width comparisons the probe made, a name that both widths have is billed to the same
+    instruction at both, so on those programs a resolved owner was never wrong, only often missing.
+    `compile` now runs the machine first and builds the map at the width the run fitted. `tm_instr` then
+    resolves every state the run bills to an instruction, and `tm_owner` every such state whose construct
+    `defunc` did not mint, so TM linking and the running focus reach those states too. The user chose to
+    fix `tm_owner` in 4b rather than leave it for a later PR (§7).
+
+**Amended again 2026-09-25, from the review of 4b's prototype and the plan's check against this text.**
+
+15. **Name groups are ordered by first reach, not by first appearance.** §8 put a name-tier row "in the
+    order its first state appears". The lowering allocates every instruction's entry state (`pcN`) before
+    any gadget, so in a TM copy of `fact(3)` all 21 entries came above all their gadgets, and each entry
+    was joined to its own gadget by a long arc: 48 arcs over 45 rows, where the instruction tier draws 5
+    over the same machine. The rows are now ordered by first reach from the start state, depth first with
+    rules in order, and a group the start never reaches follows in appearance order. Each gadget then
+    follows the entry that falls into it, that edge is a fall-through again, and the copy draws 9 arcs
+    (§8, §14.1, §14.6).
+16. **The grid's index arithmetic is a browser test, not a node test.** §11 listed it among the node tests
+    of pure functions, and among the browser tests as the keys moving the active row by index past the
+    rendered window. It has no pure function to test: the arithmetic is the key handler's, inside
+    `TmPane`, over the index's row count. The browser test is the one §11 keeps (§11).
+
+**Amended again 2026-09-26, from the task review of 4b's program level.**
+
+17. **In *arcs* the program level has two tab stops.** §8 said "Nodes are reached through one tab stop
+    and a roving cursor", in a paragraph that opens "Both". The local level's nodes are one tab stop with
+    a roving cursor. The program level is a grid, one tab stop whose active row moves by index as the
+    rule table's does (§9.2); in *arcs* the runtime routines have no row, and their boxes, in the column
+    beside the grid, are a second tab stop with a roving cursor of their own (↑/↓). In *chips* they are
+    rows, and the program level is one tab stop. The user chose to record this rather than fold the
+    column into the grid (§8).
+
+**Amended again 2026-09-26, from the whole-branch review of 4b.**
+
+18. **Per frame the program level redraws its visible rows.** §8 said "Per frame only highlight classes
+    change". The program level, like the rule table, draws its visible window of rows afresh on every
+    frame and every scroll, and the local level repaints its marks in place; only the local level's
+    layout waits for a state change. A row replaced between a pointer's `mousedown` and `mouseup` loses
+    the click, and focusing a grid draws the view, so the row containers take no focus on `mousedown`
+    and the grid takes it when the click lands. During play, when every frame redraws the rows, a click
+    that spans a frame can still land on a replaced row, as it could on the rule table before this
+    part. The user chose this over keeping each row's element across draws (§8).
+
 ## §1 Scope, and the two PRs
 
 One design, two PRs, each with its own plan and roadmap entry. **4a ships first**, because 4b's diagram
@@ -171,6 +251,7 @@ states to 14 constructs, with 244 states unowned and the largest construct ownin
 | 6 | State diagram | Two levels, *program \| local*: grouped by instruction by default, the states within 2 rules on drill-down | local only (the umbrella's reading, §2.3); grouping by source construct (§2.3) |
 | 7 | Diagram layout | Hand-written and deterministic: a listing, and layers by distance | elkjs, dagre, or any graph-layout dependency |
 | 8 | Linking in λ | Through the tree: `node_to_lambda` path links at step 0, `App` owner tags at every step; the step-0 link window is deleted | keeping the link window beside the tree; owner tags alone (§14.1: 7 of 17 constructs at step 0) |
+| 9 | Program level's edges | Both *arcs* and *chips*, toggled in the panel header, *arcs* by default (amendment 11) | arcs alone; chips alone; chips with arcs for the current instruction only |
 
 ## §4 4a — the tree on demand
 
@@ -317,11 +398,14 @@ window. A click scrolls the view to that node, opening folds on its path.
 ## §7 4b — what the core adds for TM
 
 - **`SourceMap::tm_instr(name) -> Option<usize>`**, kept from the `state_origins` `SourceMap::build`
-  already reads, keyed by state name exactly as `tm_owner` is.
-- **`StateView.instr: number | null`** and **`TmProgram.listing: string[]`**, one printed asm
-  instruction per `prog.code` index, printed by the code `print_asm` already uses for one line; the plan
-  names the function. Both are
-  sent once per compile, as `TmProgram` is today.
+  already reads, keyed by state name exactly as `tm_owner` is. Names depend on the field width, so
+  `compile` builds the map at the width the run fitted rather than at `MIN_FIELD_WIDTH`, which makes
+  `tm_owner` resolve every billed state as well (amendment 14).
+- **`StateView.instr: number | null`**, **`TmProgram.listing: string[]`**, one printed asm instruction
+  per `prog.code` index, and **`TmProgram.labels`**, each asm label with the `prog.code` index it precedes
+  (amendment 9). A listing line is printed by a one-line printer extracted from `print_asm_with_inner`,
+  which `print_asm` then goes through (amendment 8). All three are sent once per compile, as `TmProgram`
+  is today, and the session fills them from its `SourceMap`, since `TmProgram::of` sees only the machine.
 
 **Grouping has three tiers, chosen per machine:**
 
@@ -341,35 +425,58 @@ A collapsible panel named **state diagram**, beside the rules panel, with a *pro
 among its header actions.
 
 - **Program level**: one row per instruction, in listing order, with its state count —
-  `pc4 cmpeq r1, r2, r3 · N states`.
-  Fall-throughs are short arrows, jumps and calls are arcs, and runtime routines sit in a side column.
-  Edges into `overflow` collapse into a ⚠ badge on their row. The current instruction opens to show its
-  sub-steps — the second name segment, `m1 z1 pk m2 …` — with the current one highlighted, and a "show
-  states" action that switches to the local level.
-- **Local level**: the current state and every state within 2 rules, in columns by forward distance,
-  self-loops drawn. An edge label names only the tapes its rule touches, by tape name — `reg:1 L` for
-  "on `reg` read 1, move left" — and the next rule's edge is marked.
+  `pc4 cmpeq r1, r2, r3 · N states` — and a label row above each instruction a label names (amendment
+  9). Edges into `overflow` collapse into a ⚠ badge on their row. A fall-through is not drawn; row order
+  implies it (amendment 11). Every other edge between rows is drawn one of two ways, chosen by an *arcs |
+  chips* radio group among the header actions, beside *program | local*:
+  - **arcs** (the default): jumps and calls are arcs in a gutter left of the rows, each in a lane
+    assigned once per compile — `map_fold` needs 7 (§14.1) — and the runtime routines sit in a side
+    column with their connectors;
+  - **chips**: each row lists its targets (`→ skip1`) and its sources (`← pc13 pc19`) as text, and the
+    runtime routines are rows under a `runtime` heading.
 
-Both follow the running state. Per frame only highlight classes change; the local level re-lays out
-when the state changes, and it is small (§2.3). A click links exactly as a rule-table click does. Nodes
-are reached through one tab stop and a roving cursor. The program level grows with instruction count,
-one row each, so a large program is a taller scroll, not a denser picture.
+  Both read one list of edges per row, and in *arcs* each row's chip text is present and visually
+  hidden, as the arcs' non-visual equivalent. The choice is kept per view in the workspace, as the term
+  map's mode is; at the local level the group is disabled with its reason stated (umbrella rule 4). Rows
+  render through `visibleWindow`, as the rule table's do — `list150` compiles to 302 instructions
+  (§14.1) — and an arc that crosses the window is drawn clipped to it. Grouped by name (§7's second
+  tier), a row is one group, in the order the start state first reaches it (amendment 15), with no
+  label rows; an edge to the next row is not drawn there either. A row links as a click on its first
+  state does. The current instruction opens to show its sub-steps — the second name segment, `m1 z1 pk
+  m2 …` — with the current one highlighted, and a "show states" action that switches to the local level.
+- **Local level**: the current state and every state within 2 rules in either direction, in columns
+  from −2 to +2 by signed distance, the current state at 0 and a state within 2 rules both ways at its
+  forward distance (amendment 10); self-loops drawn. An edge label names only the tapes its rule
+  touches, by tape name — `reg:1 L` for "on `reg` read 1, move left" — and the next rule's edge is
+  marked.
+
+Both follow the running state. Per frame the program level redraws its visible rows and the local level
+repaints its marks; the local level re-lays out only when the state changes, and it is small (§2.3,
+amendment 18). A click links exactly as a rule-table click does. The
+local level's nodes are reached through one tab stop and a roving cursor, and the program level's rows
+through its grid's one tab stop; in *arcs* its runtime column is a second (amendment 17). The program
+level grows with instruction count, one row each, so a large program is a taller scroll, not a denser
+picture.
 
 ## §9 4b — the rule table, tapes and accessibility
 
 ### §9.1 Sizing
 
 A view's open panels share its height through flex rather than the rule table's `max-height: 40vh`:
-the rules panel takes two shares and the diagram one, each with a minimum height, and a collapsed panel
-keeps only its header. `draw()` already measures `#tableHost.clientHeight`, so the virtual window's
-arithmetic does not change. This closes 2a's "the TM rules panel's viewport-relative height".
+the rules panel takes two shares, the diagram one and the outline one (amendment 12), each with a
+minimum height, and a collapsed panel keeps only its header. The editor and the tapes keep their natural
+height. `.pane` is not a flex column today, which is why the rule table needed its cap; the TM view's body
+becomes one. The source view's outline keeps its `40vh` cap (§13). `draw()` already measures
+`#tableHost.clientHeight`, so the virtual window's arithmetic does not change. This closes 2a's "the TM
+rules panel's viewport-relative height".
 
 ### §9.2 The grid (accessibility item 3)
 
 The table becomes `role="grid"`, with `aria-rowcount` set to the full row total from `StateIndex`, and
-each rendered row carries its `aria-rowindex`. The grid is one tab stop; ↑/↓, PgUp/PgDn and Home/End
-move an **active row by index**, the window scrolls so that row is rendered, and
-`aria-activedescendant` names it. Enter on a row does what a click does. The active row is designed
+each rendered row carries its `aria-rowindex` and holds one `gridcell`. The grid is one tab stop;
+↑/↓, PgUp/PgDn and Home/End move an **active row by index**, the window scrolls so that row is rendered,
+and `aria-activedescendant` names that row's cell, since a grid's cells take focus and its rows do not
+(amendment 13). Enter on a row does what a click does. The active row is designed
 against the index, as item 3 asks, never against the rendered window.
 
 ### §9.3 Current state, next rule and head (accessibility item 4)
@@ -401,14 +508,19 @@ Each failure leaves a working view and at most one notice.
      *contractum* equals `last_redex()`;
    - a tree built from checkpoint replay equals one built by stepping directly from step 0;
    - the display names equal the names `print_lambda_capped` prints;
-   - `tm_instr` agrees with `state_origins` for every state.
+   - `tm_instr` agrees with `state_origins` for every state of the machine the session runs, at the
+     width it fitted, and `tm_owner` resolves every billed state whose construct `defunc` did not mint
+     (amendment 14);
+   - each `listing` entry equals the line `print_asm` prints for that index (amendment 8).
 2. **Node tests** of the pure functions: code and outline line layout from an arena; chip detection by
    hint; the fold policy, and an override surviving a step outside the redex and dropping inside it;
-   icicle geometry; the grid's index arithmetic; the three grouping tiers; the local level's layering.
+   icicle geometry; the three grouping tiers; each row's edge list, the arcs' lanes and the chips read
+   from that list; the local level's signed layering (amendment 16).
 3. **Browser tests**: `fact(3)` draws in both layouts; follow redex detaches and re-attaches; keyboard
    folding; a source click at step *k* marks owned λ nodes; a term-map click scrolls the view; the
    grid's keys move the active row by index past the rendered window; the diagram follows the running
-   state. Panel sizing is asserted as **geometry and computed style**, not `textContent`.
+   state; the *arcs | chips* choice survives a reload and is disabled at the local level. Panel sizing
+   is asserted as **geometry and computed style**, not `textContent`.
 4. **Each key test is sabotaged once** and the sabotage recorded, per the repository's practice: a test
    that cannot be shown to fail has not been shown to test anything.
 5. **A `REDEXTAPE_PROBE`-tier cost probe** for tree requests during play, beside `frame-cost.test.ts`.
@@ -421,8 +533,8 @@ the three presets in light and dark.
 - **4a** — core arena and checkpoints → wasm and protocol → the two layouts → folding, chips and the
   toggle → marks, follow and linking, with the link window deleted → the term map → hidden views.
   Roughly 15–18 commits.
-- **4b** — `tm_instr` and `listing` → panel sizing and the grid → tape labelling → the program level →
-  the local level and the switch. Roughly 10–12 commits.
+- **4b** — `tm_instr`, `listing` and `labels` → panel sizing and the grid → tape labelling → the program
+  level, *arcs* then *chips* → the local level and the switch. Roughly 10–12 commits.
 
 Each is its own branch, plan, PR and roadmap entry, and each plan builds every task's end state before
 dispatching, per the repository's practice for plan code.
@@ -457,10 +569,19 @@ dispatching, per the repository's practice for plan code.
 | 5,000,000 | `MAX_REDUCTION_STEPS` | `crates/redextape-core/src/lambda/reduce.rs` |
 | 512, 32 MiB | `FRAME_BYTES`, `HISTORY_BYTES` | `web/src/protocol.ts` |
 | 127,881 | rows in `list60`'s rule table | the roadmap's accessibility item 3 |
+| 21, 302 | instructions in `fact(3)` and in `list150`, the list literal `[1, …, 150]` | `emit PROGRAM.rxt --lang asm \| grep -cE '^\s{4}[a-z]'` |
+| 197,265 | states in `list150`'s machine, which only binary encoding admits | `emit list150.rxt --lang tm --encoding binary \| grep -c '^state '` |
+| 5 of 21, 7 of 107 | most arcs over one row, and instructions, for `fact3` and `map_fold`; `list20` and `list60` have no arcs | the script in §14.4 over each `emit --lang tm` |
+| 64, 123, 121, 47, 74 | `sample` at unary: fitted width, states, states billed to an instruction, states whose name no width-4 machine has, states `tm_owner` resolves on a map built at width 4 | `probe_4b_fitted` (§14.5) |
+| 32, 4,439, 4,437, 1,071, 3,366 and 64, 33,699, 33,697, 9,291, 24,406 | the same five for `list20` and `list60` at unary | `probe_4b_fitted` (§14.5) |
+| 32 of 32 | width comparisons in which every shared state name is billed to the same instruction | `probe_4b_widths` (§14.5) |
+| 48 and 9 over 45 rows; 5 over 25 | arcs the program level draws for a TM copy of `fact(3)`, name groups in appearance order and in reach order; and for `fact(3)` compiled, grouped by instruction | the name-order probe (§14.6) |
 
 All measured on 2026-09-23 against `c9b6876`, natively in release, each probe under
 `systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=0`, with `CARGO_TARGET_DIR` outside the
-repository.
+repository — except the six rows from `21, 302` to `32 of 32`, measured on 2026-09-25 against `ec79f21`:
+the first three with a release CLI rebuilt there, the last three with §14.5's probes run in release under
+the same cap; and the last row, measured on 2026-09-25 by §14.6's probe in Playwright's Chromium.
 
 ### §14.2 The probes
 
@@ -500,4 +621,82 @@ END {
   for (g in groups) ng++; for (k in ge) ne++
   print ng " groups, " ne " inter-group edges"
 }'
+```
+
+### §14.4 The arc count
+
+The program level's arcs, counted before `tm_instr` exists, so the instruction groups are **approximated
+from the state names**: each `pcN` state and every state reachable from it without passing another `pcN`
+or a state whose first segment is `ret`, `overflow` or `halt` belong to instruction N, first claim
+winning. An arc is an edge between two instructions' groups whose target is neither the same instruction
+nor the next. The plan re-measures through `tm_instr`, which reads `state_origins` itself.
+
+```python
+import re, sys
+from collections import defaultdict
+names, out, cur = [], defaultdict(set), None
+for line in open(sys.argv[1]):
+    if m := re.match(r'state (\S+):', line): cur = m[1]; names.append(cur)
+    elif m := re.search(r'goto (\S+)\s*$', line): out[cur].add(m[1])
+pc = lambda s: re.fullmatch(r'pc(\d+)', s)
+instr = {s: int(pc(s)[1]) for s in names if pc(s)}
+for s, n in list(instr.items()):
+    todo = [s]
+    while todo:
+        for t in out[todo.pop()]:
+            if t not in instr and t.split('.')[0] not in ('ret', 'overflow', 'halt'):
+                instr[t] = n; todo.append(t)
+arcs = {(instr[s], instr[t]) for s in names for t in out[s] if s in instr and t in instr}
+arcs = [(a, b) for a, b in arcs if b not in (a, a + 1)]
+count = max(instr.values()) + 1
+print(count, 'instructions,', len(arcs), 'arcs, at most',
+      max((sum(min(a, b) <= i <= max(a, b) for a, b in arcs) for i in range(count)), default=0), 'over one row')
+```
+
+### §14.5 The width probes
+
+Two throwaway examples in `redextape-core`, built at `ec79f21` and deleted after. Both lower through
+`parser::parse`, `desugar_mapped`, and `lower_asm_mapped`, retrying through `defunc_mapped` on
+`Unsupported`, as `SourceMap`'s TM half does.
+
+- **`probe_4b_widths`**: for `fact3`, `while4`, `map_fold` and `list20`, at unary and binary, runs
+  `lower_tm_mapped` at widths 4, 8, 16, 32 and 64, and compares each width's name→instruction map with
+  width 4's. It counts the names found only at one side, and the names found at both whose instructions
+  differ.
+- **`probe_4b_fitted`**: for `sample`, `fact3`, `fact5`, `while4`, `map_fold`, `list20` and `list60`, at
+  unary and binary, runs `run_tm_described` at `TM_DEFAULT_CAPS` and reads the width it fitted. It
+  lowers again at that width with `lower_tm_mapped`, asserts that the machine is the run's, state for
+  state, and counts states billed to an instruction, states whose name is absent from the width-4
+  machine, and states that `tm_owner` resolves on a map built by `SourceMap::build_from_program` at width
+  4, as `compile` built it.
+
+### §14.6 The name-order probe
+
+A throwaway browser test, run with `pnpm exec vitest run --project browser --reporter=verbose` in the
+prototype of 4b's plan at its last code task, release wasm, and deleted after. It compiles `fact(3)` at
+unary, seeds a `TmScratch` from the session's `tmText()` as *edit a copy* does, and counts each
+machine's rows and arcs through the diagram's own `groupStates`, `programRows` and `arcsOf`. The
+appearance-order figure is the same probe run again with `groupStates`' call to `reorderByReach`
+deleted.
+
+```ts
+import { it } from 'vitest'
+import init, { compile, tmScratch } from '../../../pkg/redextape_wasm.js'
+import { arcsOf, programRows } from '../../src/program-level'
+import { groupStates } from '../../src/state-groups'
+import type { TmProgram } from '../../src/types'
+
+const FACT3 = 'fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact(3)'
+
+it('probe: name-tier row order on a copy of fact(3)', async () => {
+  await init()
+  const { session } = compile(FACT3, 'unary') as { session: { tmProgram(): TmProgram; tmText(): string } }
+  const { scratch } = tmScratch(session.tmText()) as { scratch: { tmProgram(): TmProgram } }
+  for (const [label, p] of [['compiled', session.tmProgram()], ['copy', scratch.tmProgram()]] as const) {
+    const g = groupStates(p)
+    const shown = g.groups.filter((x) => !x.runtime).length
+    const rows = programRows(g, p.labels, 'arcs', null).length
+    console.log(`PROBE ${label}: tier ${g.tier}, states ${p.states.length}, groups ${g.groups.length}, non-runtime ${shown}, arcs-rows ${rows}, chips-rows ${programRows(g, p.labels, 'chips', null).length}, arcs ${arcsOf(g).length}`)
+  }
+})
 ```

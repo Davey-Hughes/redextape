@@ -87,11 +87,13 @@ function sourceEntry(): SessionEntry {
 
 /** A machine small enough to compare by identity, with a state so a `StateIndex` over it is non-empty. */
 const PROGRAM: TmProgram = {
-  states: [{ name: 'pc0', accept: false, rules: [{ read: ['a'], write: ['b'], moves: ['R'], next: 0 }] }],
+  states: [{ name: 'pc0', accept: false, rules: [{ read: ['a'], write: ['b'], moves: ['R'], next: 0 }], instr: null }],
   alphabet: ['a', 'b'],
   tapes: 1,
   width: 8,
   start: 0,
+  listing: [],
+  labels: [],
 }
 
 const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): RunReply => ({
@@ -188,7 +190,7 @@ describe('a session retains its last compiled machine', () => {
   it('holds the machine from the latest compile, not the first', () => {
     const entry = sourceEntry()
     const { replies } = driver(entry)
-    const second: TmProgram = { ...PROGRAM, states: [{ name: 'pc1', accept: true, rules: [] }] }
+    const second: TmProgram = { ...PROGRAM, states: [{ name: 'pc1', accept: true, rules: [], instr: null }] }
 
     replies.onReply(SOURCE, compiled(PROGRAM, ['TAPE']))
     replies.onReply(SOURCE, compiled(second, ['REG']))

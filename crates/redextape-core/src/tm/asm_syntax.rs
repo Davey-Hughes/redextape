@@ -633,6 +633,19 @@ mod tests {
         }
     }
 
+    /// `print_instr` is `print_asm`'s line for the same instruction, indentation aside, for every variant —
+    /// what lets the TM view's listing stand in for the listing itself.
+    #[test]
+    fn print_instr_is_the_line_print_asm_writes() {
+        let prog = crate::tm::asm::Program { code: every_instr(), labels: Vec::new() };
+        let printed = crate::tm::asm::print_asm(&prog);
+        let lines: Vec<&str> = printed.lines().collect();
+        assert_eq!(lines.len(), prog.code.len(), "one line per instruction and no label lines");
+        for (instr, line) in prog.code.iter().zip(lines) {
+            assert_eq!(format!("    {}", crate::tm::asm::print_instr(instr)), line);
+        }
+    }
+
     #[test]
     fn the_table_has_one_row_per_mnemonic_and_no_duplicates() {
         let mut names: Vec<&str> = MNEMONICS.iter().map(|(m, _)| *m).collect();

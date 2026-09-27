@@ -76,9 +76,11 @@ import {
   type Speed,
   type Switches,
   serializeWorkspace,
+  type TmDisplay,
   type Workspace,
   withDisplay,
   withPanel,
+  withTmDisplay,
 } from './workspace'
 
 const SAMPLE = 'let x = 40; x + 2'
@@ -970,6 +972,7 @@ async function main(): Promise<EditorView> {
     panels: restored.panels,
     inspector: restored.inspector,
     display: restored.display,
+    tmDisplay: restored.tmDisplay,
   }
   /**
    * The focused view, repaired against the tree it names a leaf of.
@@ -990,7 +993,7 @@ async function main(): Promise<EditorView> {
    * comes back: close the TM view with its rules panel shut, then *reset preset*, and the new `tm-0`
    * would inherit the closed view's panel state — from memory, since the write had already dropped it.
    * The same clicks then behaved differently depending on whether the page had been reloaded in
-   * between. A λ view's display is kept per leaf beside its panels and is dropped here for the same
+   * between. A λ or TM view's display is kept per leaf beside its panels and is dropped here for the same
    * reason. `editor-custody.ts`'s `editorOwner` records the identical hazard for claims and answers it
    * the same way, in `applyLayout`'s creation pass.
    */
@@ -998,7 +1001,8 @@ async function main(): Promise<EditorView> {
     const live = new Set(leaves(tree).map((l) => l.id))
     const panels = Object.fromEntries(Object.entries(ws.panels).filter(([leaf]) => live.has(leaf)))
     const display = Object.fromEntries(Object.entries(ws.display).filter(([leaf]) => live.has(leaf)))
-    ws = { ...ws, focused: focusedLeaf(), panels, display }
+    const tmDisplay = Object.fromEntries(Object.entries(ws.tmDisplay).filter(([leaf]) => live.has(leaf)))
+    ws = { ...ws, focused: focusedLeaf(), panels, display, tmDisplay }
   }
 
   const persistWorkspace = (): void => {
@@ -1067,6 +1071,10 @@ async function main(): Promise<EditorView> {
     displayOf: (leaf: LeafId) => ws.display[leaf],
     setDisplay: (leaf: LeafId, d: LambdaDisplay) => {
       ws = { ...ws, display: withDisplay(ws.display, leaf, d) }
+    },
+    tmDisplayOf: (leaf: LeafId) => ws.tmDisplay[leaf],
+    setTmDisplay: (leaf: LeafId, d: TmDisplay) => {
+      ws = { ...ws, tmDisplay: withTmDisplay(ws.tmDisplay, leaf, d) }
     },
     layoutChanged,
     draw: () => draw(),

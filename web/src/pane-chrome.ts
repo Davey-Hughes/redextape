@@ -3,7 +3,7 @@ import type { Leg } from './protocol'
 import type { ScratchEditorConfig } from './scratch-editor'
 import type { SessionId } from './session-client'
 import type { Binding, PaneOption } from './sessions'
-import type { LambdaDisplay, Speed } from './workspace'
+import type { LambdaDisplay, Speed, TmDisplay } from './workspace'
 
 export type PaneEvents = {
   /**
@@ -174,6 +174,8 @@ export type PaneEvents = {
   panel?: (name: string, open: boolean) => void
   /** A λ view's display settings changed — recorded per view, as `panel` is (Plan 7 part 4a). */
   display?: (d: LambdaDisplay) => void
+  /** A TM view's display settings changed — `display`'s twin (Plan 7 part 4b). */
+  tmDisplay?: (d: TmDisplay) => void
   /**
    * Fork this pane's MACHINE into a TM scratch buffer — 5d-iv design §4.3.
    *

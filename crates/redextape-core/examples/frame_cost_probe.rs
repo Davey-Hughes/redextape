@@ -181,20 +181,19 @@ fn compile(src: &str, kind: EncodingKind) -> Option<Compiled> {
     }
     let ty = typeck::result_type(&program).ok()?;
 
-    let enc = kind.at(tm::MIN_FIELD_WIDTH);
-    let (core, map) = {
-        let (core, spans) = desugar_mapped(&program);
-        let mut map = SourceMap::build(&core, &*enc);
-        map.node_to_source = spans.into_iter().collect();
-        (core, map)
-    };
+    // The session's order: run first, then build the map at the width the run fitted, since the map keys
+    // on state names and names depend on the width (`Session::compile`'s doc).
+    let (core, spans) = desugar_mapped(&program);
+    let described = tm::run_tm_described(&core, kind, ty, tm::TM_DEFAULT_CAPS);
+    let width = described.as_ref().map_or(tm::MIN_FIELD_WIDTH, |d| d.header.width);
+    let mut map = SourceMap::build(&core, &*kind.at(width));
+    map.node_to_source = spans.into_iter().collect();
 
     let (lambda, lambda_decline) = match lambda::lower(&core) {
         Ok(t) => (Some(LambdaCursor::new(&t, MAX_REDUCTION_STEPS)), None),
         Err(e) => (None, Some(format!("{e:?}"))),
     };
 
-    let described = tm::run_tm_described(&core, kind, ty, tm::TM_DEFAULT_CAPS);
     let tm_total_steps = described.as_ref().ok().map(|d| d.steps);
     let (tm, tm_decline) = match described {
         Err(e) => (None, Some(format!("{e:?}"))),
@@ -203,7 +202,7 @@ fn compile(src: &str, kind: EncodingKind) -> Option<Compiled> {
                 let init = d.header.init(d.machine.tapes);
                 let width = d.header.width;
                 let machine = Rc::new(d.machine);
-                let program = TmProgram::of(&machine, width);
+                let program = TmProgram::of(&machine, width, Some(&map));
                 let cursor = TmCursor::new(Rc::clone(&machine), &init, tm::TM_DEFAULT_CAPS);
                 (Some((program, cursor)), None)
             }

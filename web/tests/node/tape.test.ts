@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { tapeRows } from '../../src/tape'
+import { tapeLabel, tapeRows } from '../../src/tape'
 import type { TmState } from '../../src/types'
 
 const NAMES = ['REG', 'WORK', 'STACK', 'HEAP', 'BOX']
@@ -65,5 +65,28 @@ describe('tapeRows', () => {
 
   it('returns one row per tape in the window, and no rows for none', () => {
     expect(tapeRows(state({ heads: [], window_start: [], window: [] }), NAMES)).toEqual([])
+  })
+})
+
+describe('tapeLabel', () => {
+  it("says the tape, the head's cell on the whole tape, and what it reads", () => {
+    // The head is at cell 5 of the tape and index 2 of the window: the label says 5, and reads the window's 2.
+    const [row] = tapeRows(state(), NAMES)
+    expect(row === undefined ? '' : tapeLabel(row)).toBe('tape REG, head at cell 5, reading c')
+  })
+
+  it('says the blank symbol as a word', () => {
+    const [row] = tapeRows(state({ window: [['a', 'b', '_', 'd', 'e']] }), NAMES)
+    expect(row === undefined ? '' : tapeLabel(row)).toBe('tape REG, head at cell 5, reading blank')
+  })
+
+  it('says a head outside the window rather than reading a cell it is not on', () => {
+    const [row] = tapeRows(state({ heads: [99], window_start: [3] }), NAMES)
+    expect(row === undefined ? '' : tapeLabel(row)).toBe('tape REG, head at cell 99, outside the window')
+  })
+
+  it('names an unnamed tape once, not twice', () => {
+    const [row] = tapeRows(state(), [])
+    expect(row === undefined ? '' : tapeLabel(row)).toBe('tape 0, head at cell 5, reading c')
   })
 })

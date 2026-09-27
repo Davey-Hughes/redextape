@@ -160,15 +160,16 @@ fn build(name: &str, src: &str) -> Option<Row> {
     }
     let ty = typeck::result_type(&program).ok()?;
     let kind = EncodingKind::Binary;
-    let enc = kind.at(tm::MIN_FIELD_WIDTH);
-    let (core, map) = SourceMap::build_from_program(&program, &*enc);
+    // The session's order: run first, then build the map at the width the run fitted, since the map keys
+    // on state names and names depend on the width (`Session::compile`'s doc). `own_st` read low while the
+    // map was built at `MIN_FIELD_WIDTH`.
+    let described = tm::run_tm_described(&redextape_core::desugar::desugar(&program), kind, ty, tm::TM_DEFAULT_CAPS);
+    let width = described.as_ref().map_or(tm::MIN_FIELD_WIDTH, |d| d.header.width);
+    let (core, map) = SourceMap::build_from_program(&program, &*kind.at(width));
 
-    let tm_program = match tm::run_tm_described(&core, kind, ty, tm::TM_DEFAULT_CAPS) {
+    let tm_program = match described {
         Ok(d) => match d.run {
-            TmRun::Ran { .. } | TmRun::HitCap => {
-                let width = d.header.width;
-                Some(TmProgram::of(&Rc::new(d.machine), width))
-            }
+            TmRun::Ran { .. } | TmRun::HitCap => Some(TmProgram::of(&Rc::new(d.machine), width, Some(&map))),
             _ => None,
         },
         Err(_) => None,

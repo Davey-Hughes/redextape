@@ -40,11 +40,13 @@ import { SHELL, until } from './harness'
  */
 
 const PROGRAM: TmProgram = {
-  states: [{ name: 'pc0', accept: false, rules: [{ read: ['a'], write: ['b'], moves: ['R'], next: 0 }] }],
+  states: [{ name: 'pc0', accept: false, rules: [{ read: ['a'], write: ['b'], moves: ['R'], next: 0 }], instr: null }],
   alphabet: ['a', 'b'],
   tapes: 1,
   width: 8,
   start: 0,
+  listing: [],
+  labels: [],
 }
 
 const REDUCED: TmScratchStatus = {

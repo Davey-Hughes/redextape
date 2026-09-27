@@ -492,11 +492,13 @@ describe('PaneSlot', () => {
     const reg = new SessionRegistry()
     const source = entry('source', { label: 'source', tm: [0] })
     const program: TmProgram = {
-      states: [{ name: 'pc0', accept: false, rules: [] }],
+      states: [{ name: 'pc0', accept: false, rules: [], instr: null }],
       alphabet: ['a'],
       tapes: 1,
       width: 8,
       start: 0,
+      listing: [],
+      labels: [],
     }
     source.tmProgram = { program, tapeNames: ['TAPE'], tmText: 'tapes 1\nstart pc0\nstate pc0:\n' }
     reg.add(source)

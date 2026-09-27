@@ -19585,3 +19585,409 @@ lambda-tree-cost list699: round trip n=300 median=53.90ms p90=61.80ms max=132.90
 | 143 files, 1,236 tests; 96.72, 90.94, 97.59, 98.58 against 95, 89, 97, 97 | the web CI sequence at `41f9fc3`: statements, branches, functions and lines against their floors | `pnpm run build:wasm && pnpm exec biome ci --error-on-warnings && pnpm run typecheck && pnpm run test:coverage && pnpm run build:app` |
 | 200; healthy; 7 | the image at `41f9fc3`: its status, its health, and its wasm assets (both crates, four grammars, the tree-sitter runtime) | `docker build`, `docker run -d -p 8099:80`, `curl -w '%{http_code}'`, `docker inspect --format '{{.State.Health.Status}}'`, `docker exec … ls /usr/share/nginx/html/assets/ \| grep wasm` |
 | six | screenshots of the by-hand check | three presets × two themes |
+
+#### PLAN 7 PART 4b, THE TM VIEW: THE RULE TABLE BECOMES A GRID THAT SHARES THE VIEW'S HEIGHT, EACH TAPE TELLS A SCREEN READER WHERE ITS HEAD IS, AND A STATE DIAGRAM DRAWS THE PROGRAM A ROW PER INSTRUCTION, ITS JUMPS AS ARCS OR AS CHIPS, BESIDE A LOCAL LEVEL OF THE STATES WITHIN TWO RULES — AND PROTOTYPING FOUND THE SESSION'S MAP BUILT AT A WIDTH THE RUN DID NOT USE, SO `tm_owner` RESOLVED 74 OF THE SAMPLE'S 121 BILLED STATES; NO TEST CLICKED THROUGH THE BROWSER'S POINTER, SO A REAL CLICK ON A ROW, LOST BECAUSE FOCUSING A GRID REDRAWS THE ROW UNDER IT, PASSED EVERY TASK REVIEW; A TEST A FIX ROUND ADDED HAD BEEN SEEN TO FAIL ONLY UNDER `-t`, AND RUN WHOLE IT COULD NOT; AND AN EXTENSION THE LAST FIX ROUND MADE BEYOND ITS BRIEF HID THE ACTIVE ROW FROM THE KEYBOARD AFTER A CLICK (2026-09-25 to 2026-09-26, branch `plan7-part4b-tm-view`, `ec79f21..80000a0`, 22 commits, plus this entry)
+
+**Part 4b of Plan 7** ([design](../specs/2026-09-23-plan7-part4-views-design.md),
+[plan](2026-09-25-plan7-part4b-tm-view.md)), the second of part 4's two PRs and its TM half. It gives the rule
+table grid semantics and a share of the view's height in place of its `40vh` cap, labels the tapes for a
+screen reader, and adds a state diagram panel with two levels. The spec gained eleven amendments for it, 8 to
+18: six while the plan was written, one from a probe run while prototyping its first task, two from the
+prototype's review and the plan's check against the spec, one from a task review and one from the whole-branch
+review. Six of the 22 commits touch only `docs/` — five amendment commits and the plan, which alone is 6,566
+of the branch's 11,278 added lines.
+
+**The user's decisions before any task began (2026-09-25):** the listing carries its labels, each drawn as a
+row above the instruction it names (amendment 9); the local level's columns are signed, −2 to +2 (amendment
+10); the program level has both *arcs* and *chips*, toggled in the panel header, *arcs* by default, chosen
+after a mockup drawn from `fact(3)`'s emitted machine (amendment 11); the outline takes one share beside the
+rules' two and the diagram's one, while the source view's outline keeps its `40vh` cap (amendment 12); and
+`tm_owner`'s width hole is fixed in 4b rather than in a later PR (amendment 14).
+
+##### WHAT PART 4b BUILT
+
+- **The core keeps each state's instruction.** `SourceMap` keeps, beside each TM state's owner, the
+  `prog.code` index the state was built for (`tm_name_to_instr`, read through `tm_instr`), the program's
+  listing (`tm_listing`) and its labels (`tm_labels`). `write_instr` is now the one place an instruction
+  becomes text: `print_instr` prints one line through it and `print_asm` goes through it too, so each listing
+  entry is byte for byte the line `print_asm` prints, less its four-space indent (amendment 8). The wire
+  carries the three as `StateView.instr`, `TmProgram.listing` and `TmProgram.labels`, once per compile.
+- **The map is built at the width the run fitted** (amendment 14). State names depend on the field width, and
+  `compile` built its map at `MIN_FIELD_WIDTH` (4) before the run had fitted one. It now runs the machine
+  first and builds the map at the width the run fitted, so `tm_instr` resolves every state the run bills to an
+  instruction and `tm_owner` every such state whose construct `defunc` did not mint, and TM linking and the
+  running focus reach those states too.
+- **The rule table is a grid that shares the view's height.** A TM view's body is a flex column in which the
+  open panels share the height — the rules two shares, the diagram one, the outline one, each body at least
+  five rows — and the table's `max-height: 40vh` is gone, which answers the question the divider-drag entry
+  left for the user, whether that cap should track the pane rather than the window. The table is
+  `role="grid"`: one tab stop, `aria-rowcount` over the whole `StateIndex`, one `gridcell` per drawn row, and
+  an active row by index, named by `aria-activedescendant`, that the arrow keys, PgUp/PgDn and Home/End move
+  past the drawn window. Enter links as a click does. The mark *firing* is now *next rule* (`.is-next`), whose
+  row says "fires next" as generated content, and the current state's header row carries
+  `aria-current="step"`. Nothing is announced per step (§9.3).
+- **Tapes a screen reader can read.** Each tape row is a labelled group, read in the manual check as "tape
+  REG, head at cell 0, reading #".
+- **The state diagram**, a panel beside the rules with *program | local* and *arcs | chips* radio groups in
+  its header, kept per view in the workspace's `tmDisplay` (default *program* and *arcs*; `WORKSPACE_VERSION`
+  unchanged) and restored on load. A machine's states are grouped once per compile: by instruction when any
+  state carries one, else by the first dotted segment of the name, else not at all — and then the diagram
+  shows only the local level, with *program* disabled and its reason stated.
+- **The program level** is a grid of 24 px rows drawn through `visibleWindow`: one row per instruction in
+  listing order under its labels (its name, its asm line and its state count, as
+  `pc17 li r0, #3 … 11 states`), a ⚠ badge on a row that reaches `overflow`, and no drawn fall-through, which
+  row order implies. *Arcs* draws jumps and calls as arcs in a gutter, each in a lane assigned once per
+  compile, puts the runtime routines in a side column of boxes with connectors, and keeps each row's chip text
+  in the page, visually hidden, as the arcs' non-visual equivalent; *chips* writes each row's targets and
+  sources as text and lists the runtime routines as rows under a `runtime` heading. Name groups are ordered by
+  first reach from the start state (amendment 15). The current instruction opens onto its sub-steps, with a
+  *show states* button that switches to the local level. The level follows the run; a user scroll or a key
+  that scrolls detaches it, and a *follow current state* header action re-attaches it. A row links as a click
+  on its first state does, and in *arcs* the runtime column is a second tab stop, moved by ↑/↓ (amendment 17).
+- **The local level** is a graph — its states buttons, its edges SVG beneath them — of the current state and
+  every state within `REACH` (2) rules, in columns −2 to +2 by signed distance, with self-loops drawn, each
+  edge labelled with only the tapes its rule touches, and the next rule's edge marked. It is one tab stop with
+  a roving cursor: the arrows move between states and Enter links. Each node's `aria-description` says its
+  distance and its edges, the level's non-visual equivalent. It lays out when the state or its width changes
+  and repaints its marks every frame.
+- **A resize clamp is not a user scroll.** `Follow.onResize` records a clamp that a resize observer sees, and
+  a scroll handler that finds its box's height changed since the last draw calls it too, so a panel closing
+  beside a following table or diagram no longer detaches it.
+- **Views off the page cost nothing here either**: a hidden TM view groups and draws no diagram until it is
+  shown.
+- **A radio choice that cannot be made says why.** `radioGroup` disables a choice, or a whole group, with its
+  reason as `aria-description` and tooltip, and its keys skip a disabled choice. The diagram uses it for
+  *program* on a machine with no program level and for *arcs | chips* at the local level.
+- **A real click on a row lands.** The rule table's and the program level's row containers take no focus on
+  `mousedown`, and the grid takes it when the click lands — the whole-branch review's Critical, below.
+
+##### THE PLAN'S CODE WAS BUILT AND REPLAYED BEFORE IT WAS HANDED OUT
+
+Every task was built, gated and sabotaged in a scratch worktree at `7a5c0ad` before the plan was written, and
+then rebuilt task by task from the plan's own blocks on a fresh worktree at `0adcab7`, as an executor would
+run it: each task's red step, its green step and gates, and every sabotage in its table, one at a time. All
+six trees were identical to the prototype's, `docs/` aside. **83 sabotages ran in that replay and 81 fired**;
+the two that do not are Task 5's, under what this did not close. What the prototype found, each answered in
+the plan before any task began:
+
+1. **`tm_owner` had the hole `tm_instr` would have had** (amendment 14). The app's own sample,
+   `let x = 40; x + 2`, runs at width 64, 47 of its 123 states have names no width-4 machine has, and
+   `tm_owner` on the width-4 map resolved 74 of the 121 states billed to an instruction. The test meant to pin
+   that passed as soon as one state resolved; its replacement counts every billed state.
+2. **No one-line asm printer existed** (amendment 8); the spec had assumed one.
+3. **A closed outline's list stayed on screen, on `main`.** `.outline { display: flex }` outranks the
+   browser's `[hidden] { display: none }`, so hiding a closed panel's body hid nothing — the source view's
+   outline from the first draw, its `40vh` cap hiding what that cost. `hidden.test.ts` now looks for the whole
+   class across the app, and it caught two instances the prototype itself had added.
+4. **A resize read as a user's scroll.** Once the table and the diagram took the view's height, a panel
+   closing beside one grew it, the browser clamped its scroll, and the clamp's `scroll` event detached
+   following. That is what `Follow.onResize` answers.
+5. **Four tests passed for the wrong reason until a sabotage showed it:** a resize-redraw test that polled
+   long enough for another draw to fill the rows; a sub-step de-duplication with no repeated sub-step in its
+   fixture; a radio key that could not be seen to land on a disabled choice; and a *show states* handler that
+   a click on its row made redundant, which was deleted.
+6. **Grouping costs 1.4–1.8 ms for `fact(3)`'s 1,199 states, 8.3–13.7 ms for `list60`'s 33,699 and 38.5–39.9
+   ms for `list150`'s 197,265 at binary** — the first call on each machine, on the main thread, over three
+   page loads — once per compile. Building the map at the fitted width costs 4.3–5.5 ms more than at width 4
+   for `list60` at unary and 31–34 ms more for `list150` at binary.
+7. **Stepping to a mid-run state by 9,000 clicks timed out under a full suite's load**; the tests restart and
+   step 1,732 steps forward to `cmpeq` instead.
+8. **An independent review of the whole prototype, in a browser, found six Important defects and nine Minor
+   ones**, all fixed in the plan's code except three that the plan recorded for this entry's list of what it
+   did not close. Among the six: a TM copy of `fact(3)`, its name groups ordered by appearance, drew 48 arcs
+   over 45 rows where reach order draws 9 (amendment 15); and the local level had no non-visual equivalent.
+9. **No test read the *arcs | chips* choice back after a reload**, which §11 asks for: one test wrote it and
+   another parsed it, and none built a view from it. `tm-display-restore.test.ts` seeds a stored display
+   before the app loads.
+
+Replaying the plan then found four things more, fixed before it was committed: the rule table's resize test
+passed with its resize observer removed, because the pane's other ways in to its draw, and rows left over from
+the table's larger size, stood in for it; two red steps could not show their own failure — Task 2's
+`pnpm run typecheck` fails on the Rust red before `tsc` runs, and Task 3's node and browser runs, joined by
+`&&`, never reached the browser half; the hand-written sabotage tables had drifted from what the sabotages
+fail — Task 4's `tierOf` row said fifteen cases and fails 13 — so every *Fails* column is now the replay's own
+output; and two figures came from an earlier state of the code, the name tier's arcs by appearance among them
+(33 written, 48 measured).
+
+##### TASKS 3 TO 6 CAME BACK WITH FINDINGS IN THE PLAN'S OWN CODE, AND THE FIX ROUNDS FOUND TESTS THAT COULD NOT FAIL
+
+Tasks 1 and 2, the core and the wire, came back clean, each tree equal to its prototype commit and each task's
+6 sabotages failing what the plan said. Tasks 3 to 6 came back with findings in code the plan supplied
+verbatim, and the user's decisions are named where they were made.
+
+- **Task 3, the grid.** Approved, with one Important: `tm-grid.test.ts` mounts the app once for all its cases,
+  and in one of the implementer's three runs of the sabotage that stops Enter linking, a later case's resize
+  test failed too, after the Enter case's 10 s wait had timed out; six re-runs did not reproduce it, and no
+  clean run failed. **The user decided (2026-09-26) to keep the shared mount and record it** (below). 14 of 14
+  sabotages fired.
+- **Task 4, the diagram's model.** `groupStates` de-duplicated sub-steps and successors with `Array.includes`
+  inside the pass its doc called O(states + rules), and binary encoding's `Mul` names about six sub-steps per
+  bit of the width into one group. **The user decided (2026-09-26) to fix it with `Set`s** (`fe2772d`). Of
+  that fix's two sabotages the successor one cannot fire: `reorderByReach`'s walk skips a group it has already
+  visited, so a duplicate costs work and changes no result.
+- **Task 5, the program level, in three fix rounds.** Two Important findings came from the plan's code. First,
+  in *arcs* the diagram detached itself from following at `fact(3)`'s step 18,573, from `pc20` into the `halt`
+  box: a runtime routine has no row there, so the sub-steps row went, the listing shrank from 626 to 600 px,
+  and the browser's clamp landed 24 px from where `Follow` expected, past its 12 px tolerance; `#draw`'s
+  guard, which read the scroll before the gutter shrank, did not see it. **The user decided (2026-09-26) to
+  fix it by recording the clamp**: `#draw` predicts it from the list's new height and records it before the
+  spacer shrinks (`098997b`), and the re-review counted 0 detaches over 18,574 steps, in *arcs* at 1280×2400
+  and at 1280×900 and in *chips*. Second, §8 said the diagram's nodes are one tab stop, and in *arcs* the
+  runtime column is a second; **the user decided (2026-09-26) to amend the spec rather than fold the column
+  into the grid** — amendment 17 (`6b0a785`). Rounds 2 and 3 fixed task numbers left in the fix's comments and
+  a compile that yields no machine leaving the previous machine's arcs in the gutter. Round 2 cleared the
+  paths but only unset the gutter's size, and an unsized SVG falls back to 300×150 at its old offset — a
+  `scrollHeight` of 558 against a `clientHeight` of 120 at 1280×900 — which round 2's test, never scrolled,
+  could not see; round 3 sizes it to 0 and scrolls first (`f155a25`, `ea197f7`). Its 21 sabotages failed what
+  the plan said, the two that do not fire included.
+- **Task 6, the local level, in three fix rounds.** Its sabotage table's row 18, *show states* moved last in
+  its row, had failed 9 cases in the plan's replay, in a worktree whose `node_modules` was a symlink, and
+  failed none in the main checkout. There the row fit its cell at 1280 px (`scrollWidth` and `clientWidth`
+  both 1,028), so the button ended inside the cell whichever end of the row it was at, and the test's one
+  position check held. The test now narrows the view to 400 px and asserts the overflow before the position
+  (`e4b90ee`). The review then found three Important defects: the next-rule mark was computed at layout, which
+  waits for a state change, so inside a state whose self-loop gives way to its exit it stayed on the
+  self-loop; a compile with no machine read as §7's third tier, which hid the program level, disabled *arcs |
+  chips*, and left Task 5's no-machine scroll test comparing a `display: none` grid with itself (0 ≤ 0); and
+  `.program-show`'s `margin-inline-start: auto` right-aligned the whole sub-steps row whenever it fit. All
+  three were fixed in `1964ac9`, the margin by deleting it. Round 3 found one of round 2's tests unable to
+  fail and an assertion of another, both tests red-checked and sabotaged under `-t`: the first, run whole,
+  measured a hidden program level, where every rectangle is 0, because `-t` had skipped the case before it
+  that switches to the local level; the other's edge assertion asked for one marked edge, which a mark frozen
+  at the first layout also leaves, while its description assertion could fail. Round 2's focus hand-off, for a
+  recompile that leaves no machine while a local node holds the focus, had also done nothing, since the
+  emptied level had no node to focus; the level's container now takes the focus (`c00dd81`). Rounds 2 and 3
+  were dispatched without asking the user: bugs, no design choice.
+
+##### WHAT THE WHOLE-BRANCH REVIEW FOUND
+
+Every task review had ended clean or approved when the whole-branch review read `ec79f21..c00dd81` on
+2026-09-26, measuring in Chromium against the real wasm. It returned "with fixes": one Critical and two
+Important, and a triage that sent six more items to the same round and recorded the rest as leftovers. The
+fixes are `c00dd81..80000a0`, 4 commits including amendment 18. The final re-review found one Important in the
+fix round's own work, fixed at `80000a0`, and then called the branch ready to merge.
+
+- **Critical: a real click on a rule-table row, a program row or *show states* was lost.** A `mousedown` on a
+  row moved the focus into its grid, which this branch made focusable as the grid's one tab stop; the view's
+  `focusin` draws the view, and the draw replaces every row, so the row under the pointer had left the
+  document before `mouseup` and Chromium fired no `click`. The rule table and the program level lost the first
+  click whenever the focus came from outside their grid — a regression of the rule table's click-to-link,
+  which works on `main` — and *show states* fired no click in 3 trials of 3, twice with the grid already
+  focused, the focus dropping to `<body>`. With the table's `tabindex` removed, as on `main`, a row click
+  fired 2 of 2. No test on the branch clicked through the browser's pointer: at `c00dd81` the tests'
+  `userEvent` calls were `keyboard`, `tab`, `hover` and `unhover`, none of them a click, while `.click()`
+  appeared on 476 lines in 70 test files and 5 files constructed synthetic `PointerEvent`s or `MouseEvent`s.
+  **The user decided (2026-09-26) to stop the focus on `mousedown`** in the row containers and focus the grid
+  when the click lands, rather than keep each row's element across draws; skipping the draw on `focusin` was
+  ruled out, since it would not fix a first click from another view. **A click during play that spans a frame
+  can still land on a replaced row**, as on `main`'s rule table (amendment 18). The fix, `ead09bb`, prevents a
+  primary-button `mousedown`'s default on `.state-rows` and `.program-rows` and reads the clicked row before
+  the focus, since the focus redraws. The new `tm-pointer.test.ts` clicks through Playwright's pointer
+  (`userEvent.click`), and all four of its cases failed on `c1f9793`. The reviewer's `userEvent.click` on
+  *show states* had thrown inside the harness; the fix round found that it throws a `TypeError`, before
+  sending any pointer event, on an element no longer in the document, which is what the focus draw had made of
+  a button found before it. The re-review repeated the gestures: rule rows and program rows 6 of 6, from the
+  editor, the same grid and another grid, and *show states* 4 of 4, the focus landing on the local level's tab
+  stop.
+- **Important: no test performed a pointer gesture.** Answered by `tm-pointer.test.ts`, above.
+- **Important: the diagram's class doc said only the highlight moves per frame**, and so did §8. Each frame,
+  scroll and resize, and the draw a focus brings, builds the window's rows, the gutter's paths and the runtime
+  connectors afresh; the doc now says what is built when, and amendment 18 corrects the spec (`c1f9793`). The
+  review measured the per-frame cost as built: a frame's render on `list150` at binary took a median of 0.60
+  ms (p95 0.80) in *arcs* and in *chips*, and 0.00 ms at the local level; `setProgram` on `list150` took 63
+  ms, once per compile.
+- **Fixed in the same round, from the triage:** process references in shipped code and tests, with a sweep of
+  every line the branch added; `state-diagram-no-machine.test.ts`'s doc, which claimed an empty scroll range
+  that holds only for a diagram at least 150 px tall; `reorderByReach`'s
+  `names.splice(0, names.length, ...renamed)`, which in Chromium passed at 120,000 name groups and threw
+  `RangeError` at 150,000 — a hand-written dotted file could reach it — now an assignment loop, under a
+  150,000-group node test that threw `RangeError: Maximum call stack size exceeded` before the change; a
+  recompile that changes the level shown now hands the focus to that level's tab stop, a change `ead09bb` made
+  with the Critical's fix; notes on both sides that `ROW_HEIGHT` and `.program-row`'s height, and `BOX_WIDTH`
+  and `.program-box`'s width, must be equal; and a comment stating the invariant `reorderByReach` relies on
+  (the rest in `3506403`).
+- **Two extensions beyond the round's brief, both kept by the controller.** The recompile hand-off also
+  catches the focus a rebuilt runtime box drops, where the level shown does not change, and gives it to the
+  grid. And the click's focus passed `focusVisible: false`, to keep `main`'s look without the keyboard ring.
+  **The re-review's one Important was that second extension**: it left `:focus-visible` off through the arrow
+  keys that followed a click, so neither grid showed which row was active while the keys moved it. The option
+  was dropped at `80000a0`, since the user had not asked for it, and `tm-pointer.test.ts`'s first two cases
+  now press ↓ after the click and assert both the ring and the active row's mark, each assertion sabotaged.
+  The accepted cost: right after a click from the source editor the grid shows its ring.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Two clamp paths that no test reaches** (Task 5's sabotage rows 16 and 21, which failed nothing). One is
+  the rule table's scroll-handler height check: no test produces, for the table, the order in which a clamp's
+  `scroll` comes before its resize observer runs. The other is the diagram's resize-observer `onResize`: in
+  the diagram the `scroll` comes first, and the height check answers it.
+- **The λ body's own scroll handler** has the same clamp class on a window resize, and this branch does not
+  touch it.
+- **A real user scroll in a frame whose box height changed reads as a clamp**, in the table and the diagram
+  alike, so following snaps back; the trade-off is not documented in the code.
+- **The disabled *arcs | chips* group at the local level has no tab stop**, so a keyboard reader reaches its
+  reason only by its tooltip — the precedent of the view menu's *edit a copy*, kept deliberately.
+- **A machine halted in the overflow guard is marked nowhere at the program level**, since the guard is a
+  badge on the rows that reach it and not a row; the status line names the state.
+- **A click during play that spans a frame can land on a replaced row**, in the rule table as on `main` and
+  now in the program level too (amendment 18).
+- **Text selection in rule-table and program rows is gone**: with `mousedown`'s default prevented, a drag or a
+  double-click selects nothing, where on `main` a drag across the paused rule table did. The re-review
+  suggested skipping the `preventDefault` when the grid already holds the focus.
+- **Unbounded spreads.** The local level's `#localNodes.replaceChildren(...)` and its edges' grow with the
+  states within `REACH` of the current one, which `localLevel` does not cap, and the gutter's
+  `replaceChildren(...paths)` with the arcs crossing the window. The fix round's sibling search found them
+  beside the splice above. In the splice's case a spread of that kind passed at 120,000 elements and threw at
+  150,000; whether any machine brings these near it is not measured, and the review measured 301 local nodes
+  for `list150` at `overflow`. The re-review suggested capping the local level per column, which would also
+  bound the next item's cost.
+- **The local level at `overflow`** lays out every predecessor — nearly every gadget — in one column, and
+  `#said` costs nodes × edges there. The review measured 121 nodes and 5.2 ms for `list60`, and 301 nodes and
+  11.6 ms for `list150`. Nothing tests or caps it.
+- **The Explorer preset at 1280×800 puts every TM view's state diagram below that view's fold**, the
+  whole-branch review's M3. The second by-hand pass measured it: in the lower `TM · program` view the diagram
+  panel's body starts at 824.75 px against the view's bottom edge at 771.5, the view's content runs 173 px
+  past that edge, and 4 rule-table rows show above it; the diagram panel bodies of the other two TM views
+  start at 728.5 and 596 px, against their views' bottom edge at 402.75. Each view must be scrolled to reach
+  its diagram. It is §9.1 as specified.
+- **Narrow views.** At 420 px the diagram's radio groups stack, and *arcs*' runtime column does not shrink
+  (`flex: none`, 11rem).
+- **A recompile from a machine with a program level to one without leaves the old rows in the hidden program
+  level**, because `#draw` returns before replacing them when its viewport is 0 and there are groups. They are
+  hidden and out of the accessibility tree.
+- **A recompile landing while the diagram's *follow current state* button holds the focus** can drop it to
+  `<body>`, as Task 5's review recorded, calling the timing contrived. The final round's hand-off watches the
+  focus inside the diagram's body, and the button sits in the panel's header.
+- **Smaller things the reviews recorded and left.** `print_instr`'s doc wraps its example code span across two
+  `///` lines. `TmProgram::of` shadows its `m: &Machine` three times with closures' `|m|` over a `&SourceMap`.
+  No test isolates `compile`'s `MIN_FIELD_WIDTH` fallback for a run with no leg — a `LowerError`, `TooLarge`
+  or `Overflow` — which is the behaviour from before this branch. No sabotage aims at the rule table filling
+  the view rather than `40vh`; that test is held only by its red and green. `tm-grid.test.ts` keeps its one
+  shared mount, by the user's decision above. No test runs `groupStates` on an instruction- or name-tier
+  machine without an `overflow` guard; `arcsOf`'s lanes are tested for two overlapping spans and two disjoint
+  ones, not three mutually overlapping nor two touching at an endpoint; and no test asserts that a group
+  nothing reaches, such as `pc0`, has empty `sources`. `reorderByReach` permutes `names` and `groupOf` but not
+  `instrs` and `runtime`, safe because in the name tier no state carries `instr` — stated in a comment, not
+  enforced — and no test sees its successor de-duplication, since a duplicate changes no result.
+  `setProgram`'s `#active = 0` is overridden by `#layout`, which re-finds the previous machine's row by label
+  name or group index, meaningless across programs and harmless because it is clamped. The diagram's re-attach
+  test asserts only that the button hides, not that the view scrolls back, and `state-diagram.test.ts`'s
+  moving-run cases depend on each other's state. `LocalEdge.next` is computed and read by no production code,
+  the mark being painted from `#nextEdge`, so its node test guards an unused output. The repaint for a state
+  whose next rule becomes null is untested; no fixture stays in one state into a stuck configuration.
+- **Part 4a's leftovers, which this branch does not touch:** `LinkIndex`'s λ columns with no reader in the
+  web; `assertTokenClasses` guarding no reader; the `'too-large'` λ link state not covered end to end; the
+  worker's declined-leg guard in `onLambdaTree` unreachable through the view; the owner-tag against path-link
+  order unobservable on the corpus; the λ leg's checkpoints never pruned; the term map repainting whole on
+  every scroll, and the two smaller costs beside it; `aria-setsize` and `aria-posinset` counting every row of
+  a term; a theme or palette change reaching a paused term map only at its next draw, and an OS scheme change
+  reaching nothing; the arena's super-linear naming; fold-key memory growing with the square of the depth; the
+  worker's stack margin under `MAX_TERM_DEPTH`; `draw()`'s per-frame `setFocus` possibly keeping pointer hover
+  from opening during play; the notice line moving the workspace 28.5 px; §5.5's three text-only reply arms
+  writing into a TM view off the page; `unseen` optional in `createReplies`; the smaller things 4a's task
+  reviews left — among them the λ view's layout, variables and *reset folds* enabled with no reason over flat
+  text, where the `disabled` reason that `radioGroup` gained here could now serve the layout and variable
+  groups; and the nested-box layout. Each is stated in 4a's entry, whose last item, 4b, is this one.
+
+##### VERIFICATION
+
+The figures taken for this entry were run on 2026-09-26 at `80000a0`, between 12:00 and 18:56, with the tree
+clean before and after every command; the second by-hand pass ran later the same day, at `80000a0` with only
+this entry staged. Each gate ran alone, in a detached `systemd-run --user` unit capped at 16G with no swap,
+with `PATH` (chromedriver 154 first, matching Chrome 154.0.8037.57, then `/usr/sbin` and `$CARGO_HOME/bin`),
+`CARGO_HOME`, `RUSTUP_HOME` and `HOME` set: `check-all.sh` (with `TREE_SITTER` at the pinned
+`.tools/tree-sitter`), `check-slow.sh`, the Rust coverage floor, the six hygiene scans (each `--self-test`,
+then alone) and the web CI sequence; the Docker image was built, run and checked in the foreground. Every one
+exited 0.
+
+The by-hand check ran in two passes against `pnpm run dev` at 1280×800, both driven through Playwright's real
+pointer and keyboard on `fact(3)`, which settled at `λ 6 · 1,319 reductions` and
+`TM 6 · 18,574 transitions · width 8`. **The first pass ran its checklist in the Stage preset, light** — its
+report recorded Explorer, dark, but the screenshots taken with it show Stage in the light theme: the rule
+table's ↓ moving its active row past the drawn rows and Enter linking; a tape's label read from the
+accessibility tree; the program level in *arcs* and in *chips* following the run and opening the current
+instruction, `pc17`; *show states*; the local level's arrows and Enter; and a TM copy of a machine with no
+dotted names, where *program* was disabled with its reason word for word. Eleven targets were each given one
+real click, starting with the focus in the source editor, and each acted on that first click; a click then ↓
+on each grid moved and showed the active row. Its seven screenshots show Stage in light and dark and Debugger
+in dark and light, the light ones partly through the *system* theme, and the rule table's keys and Enter were
+checked again in Debugger, dark. No screenshot showed Explorer, which the fact-check of this entry found.
+**The second pass ran the same checks, as eight items, in Explorer, light and then dark**, reading the preset
+and the theme from the page before each, and the first seven passed in both themes: the rule table's Home,
+End, PgUp, ↓ and Enter; the tape label; the program level in both edge modes following the run; *show states*,
+and the local level's arrows and Enter; the copy's disabled *program* and its reason; one real first click on
+each of the same eleven targets; a click then ↓ on both grids. The eighth measured the diagram's place in the
+view, which is the Explorer leftover above. Its four screenshots are kept outside the tree with the first
+pass's. The console held only a `favicon.ico` 404, and in the second pass two font-preload warnings as well. A
+scroll detaching the diagram, which first read as following not working, is the designed behaviour.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 22 | commits before this entry | `git log --oneline ec79f21..80000a0 \| wc -l` |
+| 6 | of them touching only `docs/`: five amendment commits and the plan | `git log --oneline ec79f21..80000a0 -- docs \| wc -l`, each checked with `git show --name-only` |
+| 53 files, +11,278 / −230 | the branch against main | `git diff --shortstat ec79f21..80000a0` |
+| 6,566 | lines of the plan | `git show --stat 85c2f56` |
+| eleven, 8 to 18; six, one, two, one, one | 4b's spec amendments, by where they came from | the five "Amended" blocks from amendment 8 on, at the head of the spec |
+| 4 | `MIN_FIELD_WIDTH` | `git grep -n 'pub const MIN_FIELD_WIDTH' crates` |
+| 24 px; 2, −2 to +2; 104; 12 px | `ROW_HEIGHT`; `REACH` and the local level's columns (amendment 10); `BOX_WIDTH`; `ECHO_TOLERANCE` (`ROW_HEIGHT / 2`) | `git grep -nE 'export const (ROW_HEIGHT\|REACH) =\|const (BOX_WIDTH\|ECHO_TOLERANCE) =' -- web/src`; amendment 10 |
+| five rows; 11rem | the panel bodies' floor; the runtime column's width | `style.css`'s `min-height: calc(5 * 24px)` and `5lh`, and `.program-side` |
+| 64; 123, 121, 47, 74 | the sample's fitted width; its states, those billed to an instruction, those whose name no width-4 machine has, those `tm_owner` resolved on a width-4 map | `probe_4b_fitted`, the spec's §14.1 and §14.5 |
+| 83, 81 | sabotages in the plan's replay, and how many fired | the plan's Pre-flight status |
+| 1.4–1.8, 8.3–13.7, 38.5–39.9 ms; 1,199, 33,699, 197,265 | grouping's first call per machine over three page loads; the machines' states | the plan's appendix grouping probe, `pnpm exec vitest run --project browser --reporter=verbose tests/browser/zz-probe-group-cost.test.ts`, deleted after |
+| 4.3–5.5 ms; 31–34 ms | the map at the fitted width over width 4, `list60` at unary and `list150` at binary | the plan's appendix map probe, `cargo run -q --release -p redextape-core --example probe_4b_mapcost` under the cap, deleted after |
+| 9,000; 1,732 | clicks that timed out; steps forward to `cmpeq` | the plan's "What the prototype found", 7 |
+| six, nine; three | the prototype review's Important and Minor defects; those carried to this entry | the plan's "What the prototype found", 8 |
+| 48 over 45 rows, 9; 33 | a TM copy of `fact(3)`'s arcs in appearance and reach order; the earlier, stale figure | the spec's §14.6 name-order probe; the plan's "What replaying this plan found", 4 |
+| fifteen, 13 | cases Task 4's `tierOf` sabotage row claimed, and fails | the plan's "What replaying this plan found", 3 |
+| two; four; four, two, two | `hidden.test.ts`'s catches in the prototype; tests passing for the wrong reason; the replay's findings, among them two red steps and two stale figures | the plan's "What the prototype found", 3 and 5, and "What replaying this plan found" |
+| six | code tasks, each tree identical to the prototype's in the replay | the plan's Pre-flight table |
+| two; two | part 4's PRs; the diagram's levels | the spec's §1 and §8 |
+| 2, 1, 1 | the panels' shares: rules, diagram, outline | `style.css`'s `flex: 2 1 0` and `flex: 1 1 0` |
+| four | spaces `print_asm` indents an instruction line by, which a listing entry leaves out | `print_asm_with_inner`'s `"    "`; `the_listing_is_print_asm_line_for_line`'s `strip_prefix` |
+| 11 | `pc17`'s states, in the example row | the first pass's screenshots 06 and 07 |
+| three | fields the wire gains: `StateView.instr`, `TmProgram.listing`, `TmProgram.labels` | `0d37c1b`, Task 2's commit |
+| one; one, one | the billed states the old width test needed resolved; the test that wrote the stored display, and the one that parsed it | the plan's "What the prototype found", 1 and 9 |
+| one, a second | tab stops: the rule table's, the program level's grid and the local level's one each; *arcs*' runtime column the program level's second | the spec's §8, §9.2 and amendment 17 |
+| one each | a `gridcell` per drawn row; a program row per instruction; the place an instruction becomes text (`write_instr`); `tm-grid.test.ts`'s mount; the column the local level at `overflow` lays its predecessors in | the spec's §8 and §9.2; amendment 8; the Task 3 review and the Task 6 Minor, in the ledger |
+| two: rows 16 and 21 | clamp paths no test reaches, whose sabotages failed nothing | the plan's Task 5 table; the Task 5 report |
+| 6, 6, 14, 12, 21, 24 | the rows of each task's sabotage table, as executed | the Task 1 to 6 reports (`.superpowers/sdd/`, not tracked) |
+| one of three; six; 10 s | runs of Task 3's Enter sabotage in which a later case failed too; re-runs, in which none did; the Enter case's wait that timed out | the Task 3 report and the ledger, same place |
+| about six | sub-steps per bit of the width in one binary `Mul` group | the Task 4 report, from the gadget's state names (`.s`, `.a`, `.k`, `.b`, `.p`, `.j` per bit) |
+| two | sabotages of Task 4's fix, one unable to fire | the Task 4 report, fix round 1 |
+| one; two; three; one | Important findings of Task 3's review, of Task 5's first review, and of Task 6's review after its first fix round; the final re-review's | the ledger; the Task 5 report, fix round 1; the Task 6 report, fix round 2 |
+| three, three; two | fix rounds in Tasks 5 and 6; extensions beyond the final round's brief | the ledger; the final fix round's report |
+| one test and one assertion; one; one | round 2's that round 3 found unable to fail; the marked edge that assertion asked for; the position check row 18's test made at 1280 px | the Task 6 report, fix rounds 1 and 3 |
+| 0; 0 ≤ 0; 0 | a hidden program level's rectangles; the no-machine test's comparison of a `display: none` grid; the viewport at which `#draw` returns before replacing its rows | the Task 6 report, fix rounds 2 and 3; the final fix round's report |
+| 1280×2400, 1280×900 | the re-review's viewports for the detach count | the ledger |
+| 18,573; 626 → 600 px; 24 px; 18,574 | the step `fact(3)`'s diagram detached at; the listing's shrink; the clamp's distance from what `Follow` expected; steps re-checked with 0 detaches | the Task 5 review's measurement, in the Task 5 report and the ledger |
+| 558, 120 | the emptied diagram's `scrollHeight` and `clientHeight` at 1280×900, before round 3 | the Task 5 report, round 3's sabotage (a) |
+| 300×150; 150 px | the size an unsized SVG falls back to; the diagram height below which the no-machine doc's claim failed | the Task 5 report, round 3; the ledger and the fix round's brief, item 5 |
+| 9; 1,028, 1,028; 400 px | the cases row 18 failed in the replay; the cell's `scrollWidth` and `clientWidth` at 1280 px; the forced width | the plan's Task 6 table; the Task 6 report, fix round 1 |
+| 1 Critical, 2 Important; six | the whole-branch review's findings; the triage items fixed with them | the ledger's whole-branch review section, and the fix round's brief (`p4b-final-fix-brief.md`, same place) |
+| 4 | commits fixing them, amendment 18 included | `git log --oneline c00dd81..80000a0 \| wc -l` |
+| 3 of 3, twice; 2 of 2 | *show states* trials with no click event, and those from a focused grid; row clicks with the table's `tabindex` removed | the review's Playwright reproduction, recorded in the fix round's brief |
+| `keyboard`, `tab`, `hover`, `unhover`; 476 lines in 70 files; 5 | the `userEvent` calls in `web/tests` at `c00dd81`; lines calling `.click()`; files constructing a `PointerEvent` or `MouseEvent` | `git grep -hoE 'userEvent\.[a-zA-Z]+' c00dd81 -- web/tests \| sort \| uniq -c`; `git grep -c '\.click()' c00dd81 -- web/tests`, summed; `git grep -lE 'new (Mouse\|Pointer)Event' c00dd81 -- web/tests \| wc -l` |
+| 4; two | `tm-pointer.test.ts`'s cases, all failing on `c1f9793`; those that now press ↓ after the click | the final fix round's report |
+| 6 of 6; 4 of 4 | the re-review's row clicks and *show states* clicks | the ledger |
+| 0.60 ms, p95 0.80; 0.00 ms; 63 ms | a frame's render on `list150` at binary, median, in *arcs* and in *chips*; at the local level; `setProgram` on `list150` | the review's measurement in Chromium, at `c00dd81` |
+| 120,000, 150,000 | name groups the splice passed at, and threw at, in Chromium | the review, recorded in the fix round's brief |
+| 150,000 | groups in the node test that threw before the change | `pnpm exec vitest run --project node tests/node/state-groups.test.ts`, the fix round's red step |
+| 121 nodes, 5.2 ms; 301 nodes, 11.6 ms | the local level at `overflow` for `list60` and for `list150` | the review's measurement, in the ledger |
+| 824.75, 771.5; 173 px; 4; 728.5, 596, 402.75; three | the lower `TM · program` view's diagram panel body's top and the view's bottom edge; its content past that edge; rule-table rows above the edge; the other two TM views' diagram panel bodies' tops and their views' bottom edge; the preset's TM views | the second by-hand pass's item 8 (`p4b-task-7-explorer-check.md`, same place), measured in light and again in dark; the whole-branch review's M3, in the ledger |
+| 420 px | a width at which the diagram's radio groups stack | the whole-branch review's triage (M2), in the ledger |
+| 1,319; 18,574; 8 | `fact(3)`'s λ reductions, TM transitions and width, as the app showed them | both by-hand passes |
+| 28.5 px; three; two | the notice line's shift; §5.5's text-only reply arms; the smaller costs beside the term map's repaint — all restated from part 4a | 4a's entry, where each is stated |
+| eleven | real first clicks in each pass, each starting from the editor and each acted on | the verification report and the second pass's item 6: rule row, group row, label row, *show states*, a runtime box in *arcs*, a runtime row in *chips*, a local node, and the four radios |
+| seven; four | the first pass's screenshots — Stage light twice, Stage dark, Debugger dark, Debugger and Stage under the *system* theme rendered light, Stage dark; the second pass's — Explorer light and dark, each at its precondition and at item 8 | read from each screenshot's preset button, layout and theme button |
+| two; 1280×800; eight; two | by-hand passes; their viewport; the second pass's items, each run in light and in dark, seven passing and one a measurement; font-preload warnings in its console | the verification report; `p4b-task-7-explorer-check.md` |
+| 154; 154.0.8037.57 | chromedriver's major version on `PATH`; Chrome's version | the verification's environment check |
+| 16G | each gate's memory cap | the verification report |
+| two; three; two and two; three, two | the `///` lines `print_instr`'s example spans; `TmProgram::of`'s shadowing closures; the overlapping and the disjoint spans `arcsOf`'s lane tests use; the mutually overlapping spans, and the spans touching at an endpoint, they do not | the ledger's Minors from the Task 1, 2 and 4 reviews |
+| exit 0 | `all configs green — base, LLVM and browser` | `TREE_SITTER=/home/davey/projects/redextape/.tools/tree-sitter scripts/check-all.sh` |
+| exit 0 | `slow tier green` | `scripts/check-slow.sh` |
+| 95.66% (31,166 lines, 1,354 missed); 1,825 run, all passed, 33 skipped | Rust line coverage and tests, floor 90 | `cargo llvm-cov nextest --workspace --fail-under-lines 90` |
+| 12 of 12 exit 0; 615 files; 569 sites; 46 figures; 12 regions in 4 files | the hygiene scans | `scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua}.sh`, each `--self-test` then alone |
+| 154 files, 1,324 tests; 96.67, 90.23, 97.87, 98.38 against 95, 89, 97, 97 | the web CI sequence: statements, branches, functions and lines against their floors | `pnpm run build:wasm && pnpm exec biome ci --error-on-warnings && pnpm run typecheck && pnpm run test:coverage && pnpm run build:app` |
+| 200; healthy; 7 | the image: its status, its health, and its wasm assets (both crates, four grammars, the tree-sitter runtime) | `docker build -t redextape-check .`, `docker run -d -p 8099:80`, `curl -w '%{http_code}'`, `docker inspect --format '{{.State.Health.Status}}'`, `docker exec … ls /usr/share/nginx/html/assets/ \| grep wasm` |

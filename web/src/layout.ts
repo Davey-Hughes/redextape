@@ -69,10 +69,10 @@ export type LayoutNode =
  * into a scratch buffer — a state this reading still does not exercise directly, so that half remains
  * inference by symmetry rather than a direct measurement.
  *
- * 0.1 DOES NOT STAND FOR TM's HEIGHT, AND THIS IS A FINDING, NOT A FIX. At every size TM's own content
- * is 6-11x taller than the box the drag left it — the `[data-leaf="tm-0"]` pane's `overflow: auto`
- * genuinely fires here (unlike the width case above), because `.state-table`'s `max-height: 40vh` is
- * relative to the BROWSER'S viewport, not to this pane. A divider drag does not resize the browser
+ * 0.1 DID NOT STAND FOR TM's HEIGHT WHEN THIS WAS MEASURED, AND THAT WAS A FINDING, NOT A FIX. At every
+ * size TM's own content was 6-11x taller than the box the drag left it — the `[data-leaf="tm-0"]` pane's
+ * `overflow: auto` genuinely fired here (unlike the width case above), because `.state-table`'s cap was
+ * then `max-height: 40vh`, relative to the BROWSER'S viewport, not to this pane. A divider drag does not resize the browser
  * window, so shrinking TM's allocated share of the split does nothing to that cap — the δ-table (open
  * by default, since `createPanel`'s `open` option defaults to `true`) stays whatever size the WINDOW
  * allows regardless of how little SPACE the pane itself was just given. This is a shape mismatch
@@ -81,6 +81,10 @@ export type LayoutNode =
  * design §9 this module does not become the place a pixel fix would live even if one were made; this
  * is flagged as a design question (does `.state-table`'s cap want to track the PANE rather than the
  * viewport?) rather than acted on here.
+ *
+ * **PLAN 7 PART 4's SPEC §9.1 ANSWERED IT: THE TABLE TRACKS THE VIEW.** A TM view's open panels now share its
+ * height through flex, each down to a floor, so a drag shrinks the table with the pane until the floors are
+ * reached, and the view scrolls only below them. The 6-11x figures above predate that and were not re-measured.
  */
 export const MIN_PANE_FRACTION = 0.1
 

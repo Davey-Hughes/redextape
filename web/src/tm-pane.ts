@@ -11,17 +11,22 @@ import { valueLine } from './results'
 import type { ScratchEditorConfig } from './scratch-editor'
 import { ScratchEditor } from './scratch-editor'
 import type { Binding, PaneOption } from './sessions'
+import { StateDiagram } from './state-diagram'
 import { centredScrollTop, Follow, focusedRows, highlight, linkedRows, ROW_HEIGHT, StateIndex } from './state-table'
 import { stepControls } from './step-controls'
-import { tapeRows } from './tape'
+import { tapeLabel, tapeRows } from './tape'
 import type { TmProgram, TmScratchStatus, TmState, ValueReading } from './types'
-import { type ViewHeader, type ViewMenu, viewHeader, viewMenu } from './view-header'
+import { radioGroup, type ViewHeader, type ViewMenu, viewHeader, viewMenu } from './view-header'
 import { visibleWindow } from './virtual-list'
+import { DEFAULT_TM_DISPLAY, type TmDisplay } from './workspace'
 
 export { ROW_HEIGHT } from './state-table'
 
 /** Rows rendered beyond the viewport on each side, so a fast scroll does not show blank space. */
 export const OVERSCAN = 4
+
+/** Mints each pane's grid a prefix for its cells' ids, which `aria-activedescendant` names. */
+let gridsMinted = 0
 
 /**
  * The TM pane: a row per tape, a status line, a value line for a headered TM buffer, and the δ function as a
@@ -183,6 +188,18 @@ export class TmPane implements EditablePane {
   #rulesPanel: Panel
   /** This view's outline, present only while it holds an editable copy. */
   #outline: ReturnType<typeof createOutlinePanel>
+  /**
+   * The state diagram (spec §8) and its panel, whose header carries *program | local* and *arcs | chips*, and its
+   * own re-attach.
+   */
+  #diagram: StateDiagram
+  #diagramPanel: Panel
+  #diagramReattach: HTMLButtonElement
+  #edgesChoice: ReturnType<typeof radioGroup>
+  #levelChoice: ReturnType<typeof radioGroup>
+  /** This view's display settings, and where a change to them is recorded — `LambdaPane`'s pair. */
+  #display: TmDisplay
+  #onDisplay: ((d: TmDisplay) => void) | undefined
   #reattach: HTMLButtonElement
   #index: StateIndex | null = null
   #follow = new Follow()
@@ -201,16 +218,31 @@ export class TmPane implements EditablePane {
   #pendingScroll: number | null = null
   /** The DOM index of `this.#rows.children[0]`, within `#index`. See `#drawTable`'s doc. */
   #firstDrawn = 0
+  /** The table's height at the last draw — how its `scroll` handler tells a clamp from a user's scroll. */
+  #drawnHeight = 0
+  /**
+   * The grid's active row (spec §9.2), **AN INDEX INTO `#index`, NOT INTO THE DRAWN WINDOW** — accessibility
+   * item 3, which found a cursor designed against the rendered rows unable to move past them. The keys move it
+   * by index and scroll so it is drawn; a scroll the user or following makes carries it along instead, so
+   * `aria-activedescendant` always names a row that is in the DOM (`#drawTable`), as the λ view's does.
+   */
+  #active = 0
+  /** This pane's prefix for its cells' ids. */
+  #gridId = `tm-grid-${gridsMinted++}`
 
   /**
-   * `panels` is the view's stored panel state (`workspace.ts`'s `Panels`), read once here; the rules panel
-   * reports every later toggle through `on.panel`.
+   * `panels` is the view's stored panel state (`workspace.ts`'s `Panels`), read once here; each panel reports
+   * every later toggle through `on.panel`. `display` is its stored display settings, reported through
+   * `on.tmDisplay`.
    */
   constructor(
     host: HTMLElement,
     on: PaneEvents,
-    panels: { readonly rules?: boolean; readonly outline?: boolean } = {},
+    panels: { readonly rules?: boolean; readonly diagram?: boolean; readonly outline?: boolean } = {},
+    display: TmDisplay = DEFAULT_TM_DISPLAY,
   ) {
+    this.#display = display
+    this.#onDisplay = on.tmDisplay
     this.#header = viewHeader(on.rebind)
     this.#status = document.createElement('div')
     this.#status.className = 'tm-status'
@@ -283,23 +315,36 @@ export class TmPane implements EditablePane {
       // Chromium: step, close the rules panel, reopen it, and the table is detached with the current row
       // gone from the DOM. A hidden box cannot be scrolled by a person, so there is nothing here to honour.
       if (!this.#rulesPanel.isOpen()) return
+      // A TABLE THAT CHANGED HEIGHT SINCE IT WAS DRAWN MAY HAVE HAD ITS SCROLL CLAMPED (spec §9.1 made its height
+      // the view's), and this event can come before the resize observer's — `StateDiagram`'s handler says how.
+      if (this.#tableHost.clientHeight !== this.#drawnHeight) this.#follow.onResize(this.#tableHost.scrollTop)
       this.#follow.onScroll(this.#tableHost.scrollTop)
       this.#drawTable()
     })
 
+    // A ROW TAKES NO FOCUS ON `mousedown`; THE GRID TAKES IT WHEN THE CLICK LANDS (spec amendment 18). Focusing
+    // the grid draws the view, and the draw replaces every row: taken on `mousedown`, as the browser would, it
+    // removed the row under the pointer before `mouseup`, and the browser fired no `click` at all — every first
+    // click on the table from anywhere else was lost. The primary button only, so a middle button still scrolls.
+    this.#rows.addEventListener('mousedown', (event) => {
+      if (event.button === 0) event.preventDefault()
+    })
     // CLICK A ROW, LIGHT ITS SOURCE. The table is 127,881 rows for `list60` and nothing in it says
     // what any row is FOR; this is the answer to that. Delegated from the container rather than bound
-    // per row, because rows are recreated on every draw.
+    // per row, because rows are recreated on every draw. The row clicked becomes the grid's active row,
+    // painted before the link's own draw so a pane with no `linkState` handler shows it too.
     this.#rows.addEventListener('click', (event) => {
-      if (this.#index === null) return
       const target = event.target
-      if (!(target instanceof HTMLElement)) return
-      const el = target.closest('.state-row')
-      if (!(el instanceof HTMLElement)) return
-      const i = [...this.#rows.children].indexOf(el)
-      if (i < 0) return
-      const row = this.#index.row(this.#firstDrawn + i)
+      const el = target instanceof HTMLElement ? target.closest('.state-row') : null
+      // READ BEFORE THE FOCUS BELOW, whose draw replaces the rows and can move the window they start at.
+      const i = el instanceof HTMLElement ? [...this.#rows.children].indexOf(el) : -1
+      const at = this.#firstDrawn + i
+      this.#tableHost.focus({ preventScroll: true })
+      if (this.#index === null || i < 0) return
+      const row = this.#index.row(at)
       if (row === null) return
+      this.#active = at
+      this.#drawTable()
       on.linkState?.(row.kind === 'state' ? row.id : row.stateId)
     })
 
@@ -325,6 +370,92 @@ export class TmPane implements EditablePane {
       },
     })
     this.#rulesPanel.actions.append(this.#reattach)
+
+    // THE TABLE IS A GRID (spec §9.2, accessibility item 3): one tab stop, one `gridcell` per row, and a
+    // roving active row that `aria-activedescendant` names. `createPanel`, just above, made `#tableHost` a labelled
+    // region; it is the grid instead, still labelled by the panel's own toggle. The two wrappers between it and
+    // the rows are layout, so they say so to the accessibility tree.
+    this.#tableHost.setAttribute('role', 'grid')
+    this.#tableHost.tabIndex = 0
+    this.#spacer.setAttribute('role', 'none')
+    this.#rows.setAttribute('role', 'rowgroup')
+    this.#tableHost.addEventListener('keydown', (e) => this.#key(e, on.linkState))
+    // THE TABLE'S HEIGHT IS THE VIEW'S NOW, NOT THE VIEWPORT'S (spec §9.1): a divider drag, a panel opening
+    // beside it or a window resize changes it with no frame or scroll to redraw the window it draws.
+    new ResizeObserver(() => {
+      this.#follow.onResize(this.#tableHost.scrollTop)
+      this.#drawTable()
+    }).observe(this.#tableHost)
+
+    // THE STATE DIAGRAM (spec §8): a panel beside the rules, open by default since it is the view's map of the
+    // machine, with *program | local* and *arcs | chips* (amendment 11) among its header actions and a
+    // re-attach of its own, for the rule table's reason: following is per surface, and a scroll in one
+    // must not detach the other.
+    this.#diagram = new StateDiagram({
+      link: (state) => on.linkState?.(state),
+      moved: () => this.#syncDiagramReattach(),
+      showStates: () => this.#setDisplay({ ...this.#display, level: 'local' }),
+    })
+    this.#diagram.setEdges(display.edges)
+    this.#diagram.setLevel(display.level)
+    this.#diagramReattach = document.createElement('button')
+    this.#diagramReattach.type = 'button'
+    this.#diagramReattach.className = 'diagram-reattach'
+    this.#diagramReattach.textContent = 'follow current state'
+    this.#diagramReattach.hidden = true
+    this.#diagramReattach.addEventListener('click', () => {
+      const had = document.activeElement === this.#diagramReattach
+      this.#diagram.attach()
+      this.#syncDiagramReattach()
+      if (had && this.#diagramReattach.hidden) this.#diagramPanel.toggle.focus()
+    })
+    // *PROGRAM | LOCAL* AND *ARCS | CHIPS*, EACH DISABLED WITH ITS REASON WHERE IT CANNOT APPLY (umbrella rule 4): a
+    // machine with neither instructions nor dotted names has no program level (§7's third tier), and the edges'
+    // two renderings are the program level's.
+    this.#levelChoice = radioGroup(
+      {
+        label: 'level',
+        choices: [
+          {
+            value: 'program',
+            label: 'program',
+            disabled: () =>
+              this.#diagram.tier === 'none' && this.#program !== null
+                ? 'this machine has no program level: its states carry no instruction and no dotted name to group by'
+                : null,
+          },
+          { value: 'local', label: 'local' },
+        ],
+        current: () => this.#diagram.shown,
+        pick: (v) => this.#setDisplay({ ...this.#display, level: v === 'local' ? 'local' : 'program' }),
+      },
+      'diagram-mode',
+    )
+    this.#edgesChoice = radioGroup(
+      {
+        label: 'edges',
+        choices: [
+          { value: 'arcs', label: 'arcs' },
+          { value: 'chips', label: 'chips' },
+        ],
+        current: () => this.#display.edges,
+        pick: (v) => this.#setDisplay({ ...this.#display, edges: v === 'chips' ? 'chips' : 'arcs' }),
+        disabled: () => (this.#diagram.shown === 'local' ? 'arcs and chips draw the program level' : null),
+      },
+      'diagram-mode',
+    )
+    this.#diagramPanel = createPanel({
+      name: 'diagram',
+      label: 'state diagram',
+      body: this.#diagram.el,
+      open: panels.diagram ?? true,
+      onToggle: (open) => {
+        this.#diagram.redraw()
+        this.#syncDiagramReattach()
+        on.panel?.('diagram', open)
+      },
+    })
+    this.#diagramPanel.actions.append(this.#diagramReattach, this.#levelChoice.el, this.#edgesChoice.el)
 
     // **A TM VIEW'S OUTLINE IS ITS STATES** — measured against the real server, which answers a
     // `state` block per symbol at kind 5. Closed by default, like the source view's: a machine of
@@ -352,6 +483,7 @@ export class TmPane implements EditablePane {
       this.#value,
       this.#tapes,
       this.#rulesPanel.el,
+      this.#diagramPanel.el,
       this.#outline.panel.el,
     )
     this.#header.steps.append(this.#steps.el)
@@ -373,6 +505,7 @@ export class TmPane implements EditablePane {
     // or may now name something else entirely.
     this.#linked = new Set()
     this.#focused = new Set()
+    this.#active = 0
     this.#follow.attach()
     // `onProgrammaticScroll` BEFORE the write, not after, and not omitted. Setting `scrollTop` fires a
     // `scroll` event; without a pending expectation `Follow` reads it as the user taking control and
@@ -383,6 +516,29 @@ export class TmPane implements EditablePane {
     this.#tableHost.scrollTop = 0
     this.#frame = null
     this.#drawTable()
+    this.#diagram.setProgram(p, names)
+    this.#levelChoice.sync()
+    this.#edgesChoice.sync()
+    this.#syncDiagramReattach()
+  }
+
+  /** Record a changed display, draw it, and report it for the workspace — `LambdaPane.#setDisplay`'s shape. */
+  #setDisplay(d: TmDisplay): void {
+    this.#display = d
+    this.#diagram.setEdges(d.edges)
+    this.#diagram.setLevel(d.level)
+    this.#levelChoice.sync()
+    this.#edgesChoice.sync()
+    this.#syncDiagramReattach()
+    this.#onDisplay?.(d)
+  }
+
+  /**
+   * The diagram's re-attach exists only while it does something, as the rules panel's does: hidden while the
+   * diagram follows, and while its panel is closed.
+   */
+  #syncDiagramReattach(): void {
+    this.#diagramReattach.hidden = this.#diagram.following || !this.#diagramPanel.isOpen()
   }
 
   /**
@@ -404,6 +560,7 @@ export class TmPane implements EditablePane {
    */
   setLink(states: number[], scrollTo: boolean): void {
     this.#linked = this.#index === null ? new Set() : linkedRows(this.#index, states)
+    this.#diagram.setLinked(states)
     if (scrollTo && this.#index !== null && this.#rulesPanel.isOpen()) {
       const first = [...this.#linked].sort((a, b) => a - b)[0]
       if (first !== undefined) {
@@ -778,6 +935,8 @@ export class TmPane implements EditablePane {
   render(frame: TmState | null, controls: ControlState): void {
     this.#frame = frame
     this.#steps.update(controls)
+    this.#diagram.render(this.#program === null ? null : frame)
+    this.#syncDiagramReattach()
     if (frame === null || this.#program === null) {
       this.#drawStatus()
       this.#tapes.replaceChildren()
@@ -791,6 +950,9 @@ export class TmPane implements EditablePane {
       ...tapeRows(frame, this.#names).map((row) => {
         const el = document.createElement('div')
         el.className = 'tape'
+        // A LABELLED GROUP (spec §9.3): where the head is and what it reads, said when a reader reaches the row.
+        el.setAttribute('role', 'group')
+        el.setAttribute('aria-label', tapeLabel(row))
         const label = document.createElement('span')
         label.className = 'tape-label'
         label.textContent = row.label
@@ -863,8 +1025,11 @@ export class TmPane implements EditablePane {
     if (this.#index === null) {
       this.#rows.replaceChildren()
       this.#spacer.style.height = '0px'
+      this.#tableHost.removeAttribute('aria-rowcount')
+      this.#tableHost.removeAttribute('aria-activedescendant')
       return
     }
+    this.#tableHost.setAttribute('aria-rowcount', String(this.#index.rowCount))
 
     // THE SPACER CARRIES THE SCROLL RANGE, AND IT MUST STAY HONEST WHILE THE TABLE IS CLOSED. Setting
     // `scrollTop` CLAMPS to the element's current scroll height, so a spacer left at a previous
@@ -885,13 +1050,14 @@ export class TmPane implements EditablePane {
     // all discarded on reopen, so this returns before the work as well as before the harm.
     if (!this.#rulesPanel.isOpen()) return
 
-    // `.state-table`'s `max-height: 40vh` is the ONLY thing bounding this box, and `clientHeight`
-    // reports what it actually laid out rather than what the stylesheet asked for. If the rule never
-    // reaches the page the box grows to its full content height — measured at 271,968px for 11,332
-    // rows — `spanned` covers the whole table, and every draw renders every row. The browser tier
-    // loads `style.css` (`tests/browser/setup.ts`) and asserts this box stays bounded, so that gap
-    // fails a test rather than silently costing O(rowCount) per frame.
+    // THE VIEW'S FLEX LAYOUT IS THE ONLY THING BOUNDING THIS BOX (`style.css`'s `.tm-pane > .panel` rules,
+    // spec §9.1), and `clientHeight` reports what it actually laid out rather than what the stylesheet asked
+    // for. If those rules never reach the page the box grows to its full content height — measured at
+    // 271,968px for 11,332 rows — `spanned` covers the whole table, and every draw renders every row. The
+    // browser tier loads `style.css` (`tests/browser/setup.ts`) and asserts this box stays bounded, so that
+    // gap fails a test rather than silently costing O(rowCount) per frame.
     const viewportHeight = this.#tableHost.clientHeight
+    this.#drawnHeight = viewportHeight
     const marks = highlight(this.#index, this.#frame)
     // A PENDING LINK SCROLL WINS OVER THE FOLLOW TARGET FOR EXACTLY THIS DRAW, then is consumed —
     // design §5.1. Read and cleared together so a link recorded during THIS call is what the very next
@@ -919,6 +1085,13 @@ export class TmPane implements EditablePane {
     }
 
     const w = visibleWindow(this.#index.rowCount, ROW_HEIGHT, viewportHeight, this.#tableHost.scrollTop, OVERSCAN)
+    // THE ACTIVE ROW COMES WITH THE VIEW: kept to the whole rows on screen, not the overscan, so whatever
+    // moved the view — following, a link, the user — leaves `aria-activedescendant` naming a drawn row.
+    if (viewportHeight > 0) {
+      const top = Math.ceil(this.#tableHost.scrollTop / ROW_HEIGHT)
+      const bottom = Math.max(top, Math.floor((this.#tableHost.scrollTop + viewportHeight) / ROW_HEIGHT) - 1)
+      this.#active = Math.min(Math.max(this.#active, top), bottom, this.#index.rowCount - 1)
+    }
     // THE VIRTUALIZATION OFFSET THE CLICK HANDLER NEEDS. `this.#rows.children[i]`'s row number is
     // `w.firstIndex + i`, not `i` — the rows array is windowed and `translateY`-offset, so recording
     // anything else here lights a plausible-looking but wrong block the moment the table is scrolled.
@@ -931,23 +1104,100 @@ export class TmPane implements EditablePane {
       if (row === null) continue
       const el = document.createElement('div')
       el.className = 'state-row'
+      el.setAttribute('role', 'row')
+      // 1-BASED, as `aria-rowindex` is, and counted over the whole table: a screen reader says "row 40,213
+      // of 127,881" for a row that is one of forty in the DOM.
+      el.setAttribute('aria-rowindex', String(i + 1))
+      const text = document.createElement('div')
+      text.className = 'state-cell'
+      text.setAttribute('role', 'gridcell')
+      text.id = `${this.#gridId}-${i}`
       if (row.kind === 'state') {
         el.classList.add('is-state')
         if (row.accept) el.classList.add('is-accept')
-        el.textContent = row.name
+        text.textContent = row.name
       } else {
         el.classList.add('is-rule')
         const cell = (v: string | null) => v ?? '*'
-        el.textContent = `[${row.read.map(cell).join(' ')}] → [${row.write.map(cell).join(' ')}] ${row.moves.join(' ')} → ${
+        text.textContent = `[${row.read.map(cell).join(' ')}] → [${row.write.map(cell).join(' ')}] ${row.moves.join(' ')} → ${
           this.#program?.states[row.next]?.name ?? row.next
         }`
       }
-      if (marks !== null && i === marks.stateRow) el.classList.add('is-current')
-      if (marks !== null && i === marks.ruleRow) el.classList.add('is-firing')
+      el.append(text)
+      // THE CURRENT STATE IS SAID, NOT ONLY SHADED (spec §9.3, accessibility item 4); the next rule's words are
+      // generated content (`style.css`'s `.state-cell[data-marks]`), so they are read and are not the row's text.
+      if (marks !== null && i === marks.stateRow) {
+        el.classList.add('is-current')
+        el.setAttribute('aria-current', 'step')
+      }
+      if (marks !== null && i === marks.ruleRow) {
+        el.classList.add('is-next')
+        text.dataset.marks = 'fires next'
+      }
       if (this.#linked.has(i)) el.classList.add('is-linked')
       if (this.#focused.has(i)) el.classList.add('is-focus')
+      if (i === this.#active) el.classList.add('is-active')
       els.push(el)
     }
     this.#rows.replaceChildren(...els)
+    if (this.#active >= w.firstIndex && this.#active <= w.lastIndex) {
+      this.#tableHost.setAttribute('aria-activedescendant', `${this.#gridId}-${this.#active}`)
+    } else {
+      this.#tableHost.removeAttribute('aria-activedescendant')
+    }
+  }
+
+  /**
+   * The grid's keys (spec §9.2): ↑/↓, PgUp/PgDn and Home/End move the active row BY INDEX, and the table scrolls
+   * so it is drawn; Enter does what a click does.
+   *
+   * **A KEY THAT SCROLLS IS THE USER TAKING CONTROL**, so following is detached before the draw below — its
+   * `scroll` event comes a frame later, and a draw still following would put the view back on the current row
+   * and carry the active row with it. The λ view's keys do the same (`lambda-body.ts`).
+   */
+  #key(e: KeyboardEvent, linkState: ((state: number) => void) | undefined): void {
+    const index = this.#index
+    if (index === null || index.rowCount === 0) return
+    const page = Math.max(1, Math.floor(this.#tableHost.clientHeight / ROW_HEIGHT) - 1)
+    let next = this.#active
+    switch (e.key) {
+      case 'ArrowDown':
+        next += 1
+        break
+      case 'ArrowUp':
+        next -= 1
+        break
+      case 'PageDown':
+        next += page
+        break
+      case 'PageUp':
+        next -= page
+        break
+      case 'Home':
+        next = 0
+        break
+      case 'End':
+        next = index.rowCount - 1
+        break
+      case 'Enter': {
+        const row = index.row(this.#active)
+        if (row === null) return
+        e.preventDefault()
+        linkState?.(row.kind === 'state' ? row.id : row.stateId)
+        return
+      }
+      default:
+        return
+    }
+    e.preventDefault()
+    this.#active = Math.min(Math.max(next, 0), index.rowCount - 1)
+    const top = this.#active * ROW_HEIGHT
+    const from = this.#tableHost.scrollTop
+    const to = top < from ? top : Math.max(from, top + ROW_HEIGHT - this.#tableHost.clientHeight)
+    if (to !== from) {
+      this.#follow.detach()
+      this.#tableHost.scrollTop = to
+    }
+    this.#drawTable()
   }
 }

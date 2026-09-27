@@ -137,6 +137,10 @@ pub struct StateView {
     pub name: String,
     pub accept: bool,
     pub rules: Vec<RuleView>,
+    /// The line of `TmProgram.listing` whose instruction built this state — `SourceMap::tm_instr` — or
+    /// `None` for machine scaffolding, and for every state of a machine with no map behind it: a copy, a
+    /// reduced file.
+    pub instr: Option<usize>,
 }
 
 /// One transition, projected for a renderer. `read`/`write` carry one entry PER TAPE and `None` is a
@@ -180,6 +184,11 @@ pub struct TmProgram {
     pub width: usize,
     /// The state the machine enters at step 0, as an index into `states`.
     pub start: StateId,
+    /// The asm program this machine was lowered from, one instruction per line as `print_instr` writes
+    /// it — `SourceMap::tm_listing`. Empty for a machine with no map behind it.
+    pub listing: Vec<String>,
+    /// That program's labels, each with the `listing` line it precedes — `SourceMap::tm_labels`.
+    pub labels: Vec<(String, usize)>,
 }
 
 /// `source_node` IS THE CORE NODE THAT PRODUCED THE CURRENT STATE, resolved through the `SourceMap`
@@ -308,14 +317,19 @@ impl TmProgram {
     /// Project `m` once (see the module doc: this is built per compile, never per step). `width` is
     /// the caller's field-width choice for the encoding that produced `m` — a fact about the encoding,
     /// not something a `Machine` carries, so it comes in as a parameter rather than a re-derivation.
+    ///
+    /// `map` supplies each state's instruction, the listing and the labels, and `None` leaves them empty:
+    /// a copy or a reduced file has no program behind it. **A MAP MUST HAVE BEEN BUILT AT `width`**, since
+    /// it answers by state name and names depend on the width (`SourceMap::tm_instr`).
     #[must_use]
-    pub fn of(m: &Machine, width: usize) -> TmProgram {
+    pub fn of(m: &Machine, width: usize, map: Option<&SourceMap>) -> TmProgram {
         let states = m
             .states
             .iter()
             .map(|s| StateView {
                 name: s.name.clone(),
                 accept: s.accept,
+                instr: map.and_then(|m| m.tm_instr(&s.name)),
                 rules: s
                     .rules
                     .iter()
@@ -331,7 +345,15 @@ impl TmProgram {
         // `m.alphabet()`, NOT a re-derivation: `Machine::alphabet` already walks every rule's read and
         // write symbols into a sorted set, and duplicating that here is exactly the second copy this
         // codebase's conventions treat as a defect (see `sourcemap.rs`'s module doc on the same point).
-        TmProgram { states, alphabet: m.alphabet(), tapes: m.tapes, width, start: m.start }
+        TmProgram {
+            states,
+            alphabet: m.alphabet(),
+            tapes: m.tapes,
+            width,
+            start: m.start,
+            listing: map.map(|m| m.tm_listing.clone()).unwrap_or_default(),
+            labels: map.map(|m| m.tm_labels.clone()).unwrap_or_default(),
+        }
     }
 }
 
@@ -448,12 +470,12 @@ pub struct LinkIndex {
     pub source_nodes: Vec<(Span, NodeId)>,
     /// `tm_owner[state_id]` is the Core node that produced that state, or `-1`.
     ///
-    /// **BUILT BY NAME, NOT BY FLATTENING `node_to_tm`.** `SourceMap::build_from_program` lowers at
-    /// `MIN_FIELD_WIDTH` only to record ownership, and `run_tm_described` re-lowers with its own
-    /// auto-fitted width — so `node_to_tm`'s `StateId`s index a different machine from the one
-    /// `TmProgram.states` indexes. The invariant that survives the width change is that `lower_tm`
-    /// derives state NAMES from the instruction stream, so the two lowerings agree on names. This is
-    /// the same resolution `TmState::window` performs per step, hoisted to once per compile.
+    /// **BUILT BY NAME, NOT BY FLATTENING `node_to_tm`.** `node_to_tm`'s `StateId`s index the machine the
+    /// map itself lowered, and nothing checks that it is the machine `TmProgram.states` projects; a
+    /// state's printed name is the association the map recorded where both were in hand. This is the
+    /// same resolution `TmState::window` performs per step, hoisted to once per compile. **NAMES AGREE AT
+    /// ONE WIDTH ONLY** — a wider machine has states no narrower one names — so a session builds its map
+    /// at the width its run fitted (`SourceMap::tm_instr`'s doc).
     ///
     /// `-1` RATHER THAN `Option<NodeId>` because this crosses to JavaScript as an `Int32Array`, and a
     /// dense typed array is the difference between 143 KB and 26,484 objects for `list60`.
@@ -560,14 +582,16 @@ mod tests {
             states: vec![
                 // `s0`'s "owner" is `NodeId::MAX` (`u32::MAX`) — unrepresentable in `i32`, and the one
                 // value whose wraparound lands exactly on the `-1` sentinel.
-                StateView { name: "s0".to_string(), accept: false, rules: Vec::new() },
+                StateView { name: "s0".to_string(), accept: false, rules: Vec::new(), instr: None },
                 // `s1` has a real absence: no entry in `tm_name_to_node` at all.
-                StateView { name: "s1".to_string(), accept: true, rules: Vec::new() },
+                StateView { name: "s1".to_string(), accept: true, rules: Vec::new(), instr: None },
             ],
             alphabet: Vec::new(),
             tapes: 1,
             width: 1,
             start: 0,
+            listing: Vec::new(),
+            labels: Vec::new(),
         };
         let map = SourceMap {
             tm_name_to_node: [("s0".to_string(), NodeId::MAX)].into_iter().collect(),

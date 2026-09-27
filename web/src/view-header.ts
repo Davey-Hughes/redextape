@@ -258,9 +258,16 @@ export type ViewMenu = {
 /** One group of mutually exclusive settings in a view's `⋯` menu — `layout: code | outline`. */
 export type DisplayGroup = {
   readonly label: string
-  readonly choices: readonly { readonly value: string; readonly label: string }[]
+  readonly choices: readonly {
+    readonly value: string
+    readonly label: string
+    /** Why this choice cannot be made now, or `null` when it can — umbrella rule 4's disabled-with-its-reason. */
+    readonly disabled?: () => string | null
+  }[]
   readonly current: () => string
   readonly pick: (value: string) => void
+  /** Why no choice in the group can be made now — every choice disabled, with this reason — or `null`. */
+  readonly disabled?: () => string | null
 }
 
 /**
@@ -283,6 +290,9 @@ export type DisplayMenu = { readonly groups: readonly DisplayGroup[]; readonly r
  *
  * `sync` puts the choices in step with `current()`. A choice made here syncs itself; a caller whose
  * setting can change from elsewhere calls it before the group is next seen.
+ *
+ * **A CHOICE THAT CANNOT BE MADE NOW IS DISABLED WITH ITS REASON STATED** (the umbrella's rule 4), the way the view
+ * menu's *edit a copy* is: `disabled`, and the reason as its `aria-description` and its tooltip. The keys skip it.
  */
 export function radioGroup(
   g: DisplayGroup,
@@ -302,10 +312,20 @@ export function radioGroup(
   })
   const sync = (): void => {
     const now = g.current()
-    for (const b of radios) {
+    const whole = g.disabled?.() ?? null
+    for (const [i, b] of radios.entries()) {
       const on = b.dataset.value === now
       b.setAttribute('aria-checked', String(on))
       b.tabIndex = on ? 0 : -1
+      const reason = whole ?? g.choices[i]?.disabled?.() ?? null
+      b.disabled = reason !== null
+      if (reason === null) {
+        b.removeAttribute('aria-description')
+        b.removeAttribute('title')
+      } else {
+        b.setAttribute('aria-description', reason)
+        b.title = reason
+      }
     }
   }
   const choose = (b: HTMLButtonElement): void => {
@@ -318,7 +338,12 @@ export function radioGroup(
       if (e.altKey || e.ctrlKey || e.metaKey) return
       const by =
         e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
-      const next = by === 0 ? undefined : radios[(i + by + radios.length) % radios.length]
+      if (by === 0) return
+      let next: HTMLButtonElement | undefined
+      for (let k = 1; k < radios.length && next === undefined; k += 1) {
+        const candidate = radios[(i + by * k + radios.length * k) % radios.length]
+        if (candidate !== undefined && !candidate.disabled) next = candidate
+      }
       if (next === undefined) return
       e.preventDefault()
       next.focus()

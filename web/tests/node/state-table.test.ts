@@ -21,6 +21,7 @@ const st = (name: string, rules: number, accept = false): StateView => ({
   name,
   accept,
   rules: Array.from({ length: rules }, (_, i) => rule(i)),
+  instr: null,
 })
 
 // 3 rules, then 0 (a `halt`-shaped state), then 2, then 1 => rows 0..9
@@ -34,6 +35,8 @@ const program = (): TmProgram => ({
   tapes: 5,
   width: 64,
   start: 0,
+  listing: [],
+  labels: [],
 })
 
 const frame = (over: Partial<TmState> = {}): TmState => ({
@@ -229,6 +232,26 @@ describe('Follow', () => {
     f.onScroll(1000)
     f.onScroll(1000)
     expect(f.following).toBe(true)
+  })
+
+  // A BOX THAT GROWS PAST ITS CONTENT HAS ITS SCROLL CLAMPED, and the browser reports the clamp as a scroll a frame
+  // later. Read as a user's, it detached a following view every time a panel beside it closed.
+  it('does not detach on the scroll a resize clamped', () => {
+    const f = new Follow()
+    f.onProgrammaticScroll(280)
+    f.onScroll(280)
+    f.onResize(0)
+    f.onScroll(0)
+    expect(f.following).toBe(true)
+  })
+
+  it('still detaches on a real scroll after a resize that moved nothing', () => {
+    const f = new Follow()
+    f.onProgrammaticScroll(280)
+    f.onScroll(280)
+    f.onResize(280)
+    f.onScroll(40)
+    expect(f.following).toBe(false)
   })
 
   it('detaches on demand, and an echo still expected does not hold it', () => {

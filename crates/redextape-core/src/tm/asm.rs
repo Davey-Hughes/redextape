@@ -227,9 +227,9 @@ fn operand_str(o: &Operand<'_>) -> String {
     }
 }
 
-/// The mnemonic and operands of one instruction. `print_asm_mapped` is the only place that joins
-/// them into text, so the listing's separator and its classification cannot disagree about where an
-/// operand starts.
+/// The mnemonic and operands of one instruction. `write_instr` is the only place that joins them into
+/// text, so the listing's separator and its classification cannot disagree about where an operand
+/// starts.
 pub(super) fn instr_parts(i: &Instr) -> (&'static str, Vec<Operand<'_>>) {
     match i {
         Instr::Li(rd, n) => ("li", vec![Operand::Reg(*rd), Operand::Imm(*n)]),
@@ -361,19 +361,7 @@ fn print_asm_with_inner(
         }
         cw.own_line(&mut out, &mut spans, AsmAnchor::Instr(idx), "    ");
         out.push_str("    ");
-        let (mnemonic, operands) = instr_parts(instr);
-        push_span(&mut out, &mut spans, mnemonic, C::Mnemonic);
-        for (i, operand) in operands.iter().enumerate() {
-            // The `\t` before the first operand and the space after each `,` are whitespace and belong
-            // to no span; the `,` itself is punctuation, classified as the TM printer already does.
-            if i == 0 {
-                out.push('\t');
-            } else {
-                push_span(&mut out, &mut spans, ",", C::Punct);
-                out.push(' ');
-            }
-            push_span(&mut out, &mut spans, &operand_str(operand), operand.class());
-        }
+        write_instr(&mut out, &mut spans, instr);
         cw.trailing(&mut out, &mut spans, AsmAnchor::Instr(idx));
         out.push('\n');
     }
@@ -383,6 +371,38 @@ fn print_asm_with_inner(
     }
     cw.own_line(&mut out, &mut spans, AsmAnchor::Eof, "");
     (out, spans)
+}
+
+/// One instruction as `print_asm` writes it, without the line's indentation or its newline: `cmpeq\tr1, r2,
+/// r3`. The TM view's listing reads one of these per `prog.code` index.
+///
+/// **`print_asm` WRITES EVERY INSTRUCTION THROUGH `write_instr`, AND SO DOES THIS**, so this line and
+/// `print_asm`'s line for the same instruction cannot disagree about the separator after the mnemonic or
+/// between operands.
+#[must_use]
+pub fn print_instr(instr: &Instr) -> String {
+    let mut out = String::new();
+    write_instr(&mut out, &mut Vec::new(), instr);
+    out
+}
+
+/// Append one instruction to `out` and a class per span of it to `spans`: the mnemonic, a tab, then the
+/// operands separated by `, `. The one place an instruction becomes text.
+fn write_instr(out: &mut String, spans: &mut crate::analysis::Classified, instr: &Instr) {
+    use crate::analysis::TokenClass as C;
+    let (mnemonic, operands) = instr_parts(instr);
+    push_span(out, spans, mnemonic, C::Mnemonic);
+    for (i, operand) in operands.iter().enumerate() {
+        // The `\t` before the first operand and the space after each `,` are whitespace and belong
+        // to no span; the `,` itself is punctuation, classified as the TM printer already does.
+        if i == 0 {
+            out.push('\t');
+        } else {
+            push_span(out, spans, ",", C::Punct);
+            out.push(' ');
+        }
+        push_span(out, spans, &operand_str(operand), operand.class());
+    }
 }
 
 /// Render a document — program, header and comments — as `.asm` text.

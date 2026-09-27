@@ -28,7 +28,7 @@ pub mod universal;
 pub use asm::{
     AsmHeader, AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, DecodeFailure, Instr, Program, Reg, decode_asm,
     decode_asm_reason, decode_asm_ty, decode_asm_ty_reason, print_asm, print_asm_doc, print_asm_mapped, print_asm_with,
-    print_asm_with_mapped, run_asm,
+    print_asm_with_mapped, print_instr, run_asm,
 };
 pub use asm_syntax::{AsmDocument, MnemonicDoc, instr_at, parse_asm, parse_asm_full, parse_asm_nav};
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};

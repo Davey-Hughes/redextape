@@ -6,6 +6,10 @@ export type TapeRow = {
   /** The head's index INTO `cells`. May fall outside `cells` — see `headInWindow`. */
   headIndex: number
   headInWindow: boolean
+  /** The head's cell on the whole tape — `heads[i]`, a materialized-tape coordinate. */
+  head: number
+  /** Whether `label` is the tape's own name, or the `tape i` stand-in for a tape the header did not name. */
+  named: boolean
 }
 
 /**
@@ -28,6 +32,24 @@ export function tapeRows(state: TmState, names: string[]): TapeRow[] {
       cells,
       headIndex,
       headInWindow: headIndex >= 0 && headIndex < cells.length,
+      head: state.heads[i] ?? 0,
+      named: names[i] !== undefined,
     }
   })
+}
+
+/**
+ * What a tape row says to a screen reader, where a sighted reader sees a bordered cell — accessibility item 4
+ * (spec §9.3): `tape reg, head at cell 12, reading 1`. The blank symbol is said as `blank`, since `_` is a
+ * glyph and not a word.
+ *
+ * **SAID ON DEMAND, NOT ANNOUNCED.** It is the row's label, read when a reader moves to the row; no live region
+ * repeats it per step, since at 5,000 steps a second that would be noise (spec §9.3).
+ *
+ * A HEAD OUTSIDE THE WINDOW IS SAID, NOT GUESSED AT, for `tapeRows`' reason: the pane draws no marker for it.
+ */
+export function tapeLabel(row: TapeRow): string {
+  const read = row.headInWindow ? row.cells[row.headIndex] : undefined
+  const reading = read === undefined ? 'outside the window' : `reading ${read === '_' ? 'blank' : read}`
+  return `${row.named ? `tape ${row.label}` : row.label}, head at cell ${row.head}, ${reading}`
 }

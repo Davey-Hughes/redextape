@@ -395,9 +395,17 @@ pub struct Session {
 /// spell. Widening would put decision 6's invented width and invented tapes one accidental `None`
 /// away from a compiled program. The shared part is factored into `tm_leg_at` instead, which knows
 /// nothing about headers.
-fn build_tm_leg(header: &tm::TmHeader, machine: Rc<Machine>, caps: tm::TmCaps) -> (TmProgram, TmCursor<Rc<Machine>>) {
+///
+/// `map` IS THE SESSION'S OWN, BUILT AT `header.width` — `compile`'s doc says why it has to be — and gives
+/// the projection each state's instruction and the listing. A scratch has none.
+fn build_tm_leg(
+    header: &tm::TmHeader,
+    machine: Rc<Machine>,
+    caps: tm::TmCaps,
+    map: Option<&SourceMap>,
+) -> (TmProgram, TmCursor<Rc<Machine>>) {
     let init = header.init(machine.tapes);
-    tm_leg_at(machine, header.width, &init, caps)
+    tm_leg_at(machine, header.width, &init, caps, map)
 }
 
 /// Project a machine and open a cursor on it at an explicit `width` and initial configuration — the
@@ -414,11 +422,12 @@ fn tm_leg_at(
     width: usize,
     init: &[Vec<Symbol>],
     caps: tm::TmCaps,
+    map: Option<&SourceMap>,
 ) -> (TmProgram, TmCursor<Rc<Machine>>) {
     // `TmProgram` is projected ONCE, here, and cached — never per step. The `map` demo is 3,203 states
     // over 344,999 steps; re-projecting per `tmState` is the cost the `TmProgram`/`TmState` split
     // exists to avoid.
-    let program = TmProgram::of(&machine, width);
+    let program = TmProgram::of(&machine, width, map);
     let cursor = TmCursor::new(machine, init, caps);
     (program, cursor)
 }
@@ -581,14 +590,14 @@ fn decoded_of(run: Result<redextape_core::value::Value, redextape_core::interp::
 impl Session {
     /// Parse, typecheck, and build whichever legs the backends accept.
     ///
-    /// THE WIDTH PASSED TO `build_from_program` IS NOT THE WIDTH THE MACHINE RUNS AT, and that is
-    /// deliberate rather than sloppy. `SourceMap::build_from_program` needs an `Encoding` only to lower
-    /// the Core far enough to record which states belong to which node, and `run_tm_described` then
-    /// auto-fits its own width by re-lowering from `MIN_FIELD_WIDTH` upward. The map keys on state
-    /// NAMES, which `lower_tm` derives from the instruction stream rather than the field width, so the
-    /// two agree on names regardless of which width either used — `tm_state_resolves_its_source_node_through_the_map`
-    /// in core pins that the names line up at all, and `the_source_node_resolves_at_the_width_the_run_fitted`
-    /// below pins that they still line up after the auto-fit has moved the width.
+    /// **THE MACHINE RUNS FIRST, AND THE MAP IS BUILT AT THE WIDTH IT FITTED.** The map keys the TM half
+    /// on state NAMES, and names depend on the field width: the sample, `let x = 40; x + 2`, fits at 64
+    /// under unary, and 47 of its 123 states have names no width-4 machine has. The map was once built at
+    /// `MIN_FIELD_WIDTH` before the run, and `tm_owner` then resolved 74 of the 121 states the run bills
+    /// to an instruction. `every_billed_state_resolves_at_the_width_the_run_fitted` below holds all of
+    /// them. The run desugars the program on its own, since the map's constructor is what pairs a `Core`
+    /// with its spans and it cannot be called until the width is known; `desugar` mints the same ids
+    /// every time, and only the machine leaves the run.
     pub fn compile(src: &str, kind: EncodingKind) -> Compiled {
         Session::compile_with_caps(src, kind, tm::TM_DEFAULT_CAPS)
     }
@@ -628,8 +637,15 @@ impl Session {
             }
         };
 
-        let enc = kind.at(tm::MIN_FIELD_WIDTH);
-        let (core, map) = SourceMap::build_from_program(&program, &*enc);
+        // A run that yields a leg — `Ran` or `HitCap` — fitted a width, and that is the width the map must be built
+        // at. Any other leaves no machine for the map to describe, so the narrowest width, the cheapest to lower, is
+        // as good as any: an `Overflow` decline fitted 64 for a machine nothing will show.
+        let described = tm::run_tm_described(&redextape_core::desugar::desugar(&program), kind, ty.clone(), caps);
+        let width = match &described {
+            Ok(d) if matches!(d.run, TmRun::Ran { .. } | TmRun::HitCap) => d.header.width,
+            _ => tm::MIN_FIELD_WIDTH,
+        };
+        let (core, map) = SourceMap::build_from_program(&program, &*kind.at(width));
 
         let (lambda, initial_lambda) = match lambda::lower(&core) {
             Ok(t) => (Ok(LambdaLeg::new(&t, lambda::MAX_REDUCTION_STEPS)), Some(t)),
@@ -644,7 +660,6 @@ impl Session {
         // reaching `MAX_FIELD_WIDTH` and still overflowing returns `Ok` with `run: TmRun::Overflow` and
         // a machine attached — so the decline for it is read off `d.run`, which is why this is two
         // matches and not one.
-        let described = tm::run_tm_described(&core, kind, ty.clone(), caps);
         // Read off the `Ok` BEFORE the match consumes it, so every run that STARTED reports its own
         // count — including `Overflow` and `TooLarge` arriving inside an `Ok`, which decline the leg
         // and still ran. See the field's doc for where a declined leg's length is withheld.
@@ -667,11 +682,11 @@ impl Session {
                 // a run that spent its budget is resumable through `raise_tm_cap`, so flattening it
                 // into a decline would throw away a session the user can still drive.
                 TmRun::Ran { tapes } => {
-                    let (p, c) = build_tm_leg(&d.header, Rc::new(d.machine), caps);
+                    let (p, c) = build_tm_leg(&d.header, Rc::new(d.machine), caps, Some(&map));
                     Ok(((p, c, d.header), Some(tapes)))
                 }
                 TmRun::HitCap => {
-                    let (p, c) = build_tm_leg(&d.header, Rc::new(d.machine), caps);
+                    let (p, c) = build_tm_leg(&d.header, Rc::new(d.machine), caps, Some(&map));
                     Ok(((p, c, d.header), None))
                 }
             },
@@ -1392,14 +1407,14 @@ fn tm_scratch_with_caps(src: &str, caps: tm::TmCaps) -> TmScratched {
             // The IDENTICAL function `compile` builds its leg with, not a copy of it — which is what
             // makes "a headered scratch matches the `Session` path" a property of one code path rather
             // than an agreement between two.
-            Some(h) => build_tm_leg(h, m, caps),
+            Some(h) => build_tm_leg(h, m, caps, None),
             // BLANK TAPES, SPELLED AS AN EMPTY `init` RATHER THAN AS `vec![Vec::new(); m.tapes]`.
             // `TmCursor::new` reads `init.get(i)` and falls back to an empty slice per tape, so the two
             // are the same configuration — and it is also exactly what `TmHeader::init`
             // (`tm/header.rs`) yields for a header carrying no `tape` directives, which is the sense in
             // which decision 6's default is not a new kind of configuration, only a new way to reach
             // one.
-            None => tm_leg_at(m, tm::MIN_FIELD_WIDTH, &[], caps),
+            None => tm_leg_at(m, tm::MIN_FIELD_WIDTH, &[], caps, None),
         };
         TmScratch { program, cursor, header }
     };
@@ -1603,6 +1618,17 @@ impl TmValueRun {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `p` with every field a `SourceMap` supplies emptied — what a scratch of the same machine projects,
+    /// since a scratch has no map.
+    fn without_map(mut p: TmProgram) -> TmProgram {
+        for s in &mut p.states {
+            s.instr = None;
+        }
+        p.listing.clear();
+        p.labels.clear();
+        p
+    }
     use redextape_core::tm::EncodingKind;
 
     /// From `three_way_oracle.rs`'s `LAMBDA_LIMITATION_DEMOS` — the corpus of programs the λ backend
@@ -2552,9 +2578,11 @@ state halt: accept
     /// `print_tm_with` — rather than hand-written, so this also exercises the round trip a user
     /// actually performs: emit a file, paste it into a pane.
     ///
-    /// **`source_node` IS THE ONE FIELD ALLOWED TO DIFFER, AND THE STRUCT-UPDATE ASSERTION IS WHAT SAYS
-    /// SO.** That is T1's whole contract seen from the consumer side: the scratch passes `None` to
-    /// `TmState::window`, so it loses the sync anchor and nothing else. `core`'s
+    /// **WHAT A MAP SUPPLIES IS ALL THAT MAY DIFFER, AND THE TWO ASSERTIONS THAT STRIP IT ARE WHAT SAY SO:**
+    /// `source_node` on each state, and each state's `instr` with the `listing` and `labels` on the
+    /// projection. That is the map's whole contract seen from the consumer side: the scratch passes `None` to
+    /// `TmState::window` and to `TmProgram::of`, so it loses the sync anchor and the listing and nothing
+    /// else. `core`'s
     /// `an_absent_map_zeroes_the_source_node_and_leaves_every_other_field_alone` pins the same property
     /// at the builder; this pins that the boundary actually wired it that way.
     #[test]
@@ -2581,7 +2609,11 @@ state halt: accept
         assert_eq!(st.width, 64, "the width the auto-fit chose, not `MIN_FIELD_WIDTH`");
 
         let mut s = Session::compile(src, kind).session.expect("compiles");
-        assert_eq!(sc.tm_program(), s.tm_program().expect("TM available"), "same machine, same projection");
+        assert_eq!(
+            sc.tm_program(),
+            without_map(s.tm_program().expect("TM available")),
+            "same machine, same projection"
+        );
 
         // Driven in lockstep rather than compared only at step 0: a wrong `init` can still agree on an
         // empty tape at step 0 and diverge the moment the machine reads one.
@@ -2626,7 +2658,11 @@ state halt: accept
         let st = sc.tm_status();
         assert!(st.header, "the header survived `compile` and reached the printer");
         assert_eq!(st.width, 64, "the auto-fit width, not `MIN_FIELD_WIDTH`");
-        assert_eq!(sc.tm_program(), s.tm_program().expect("TM available"), "same machine, same projection");
+        assert_eq!(
+            sc.tm_program(),
+            without_map(s.tm_program().expect("TM available")),
+            "same machine, same projection"
+        );
 
         // Lockstep rather than a step-0 comparison: a wrong `init` can agree on an empty tape at step 0
         // and diverge the moment the machine reads one.
@@ -3178,37 +3214,75 @@ state halt: accept
         assert!(Session::compile("1 + true", EncodingKind::Unary).session.is_none());
     }
 
-    /// `compile` builds the map at `MIN_FIELD_WIDTH` and lets `run_tm_described` auto-fit the width the
-    /// machine actually runs at, so the two can differ. That is only sound because `lower_tm` derives
-    /// state NAMES from the instruction stream rather than the field width.
+    /// **EVERY STATE THE RUN BILLS TO AN INSTRUCTION RESOLVES — ITS INSTRUCTION, AND FOR A FIRST-ORDER
+    /// PROGRAM ITS OWNER.** State names depend on the field width, so this holds only because `compile`
+    /// builds its map at the width the run fitted (its doc has the numbers from when it did not).
     ///
-    /// PINNED RATHER THAN ASSUMED, because the failure would be silent: if a future encoding put the
-    /// width into a state name, `tm_owner` would stop matching and `source_node` would read `None`
-    /// everywhere — which is also what it honestly reads for scaffolding, so nothing downstream could
-    /// tell the difference. This test fails instead.
+    /// **THIS REPLACES A TEST THAT WAS GREEN OVER THE HOLE.** Its predecessor stepped the sample until ONE
+    /// state resolved an owner and passed — which the map built at `MIN_FIELD_WIDTH` did, with 47 of the
+    /// sample's 121 billed states unresolved. So this counts: the authority is `lower_tm_mapped` at the
+    /// fitted width, over a program lowered by `lower_asm` and `defunc` rather than their `_mapped` twins
+    /// the map uses, and every state must agree with it. Each fixture fits wider than `MIN_FIELD_WIDTH`,
+    /// or it could not tell the two widths apart.
+    ///
+    /// **BOTH ARMS THAT YIELD A LEG, AND THE DEFUNC ROAD.** A budget of 10 steps stops the sample in `HitCap` at the
+    /// narrowest width — the fitting loop retries only an overflow — so that case asks for no widening. A program
+    /// `lower_asm` refuses reaches the TM half only through `defunc`, whose minted constructs own nothing: there
+    /// every owned state is billed, and some billed states are not owned.
     #[test]
-    fn the_source_node_resolves_at_the_width_the_run_fitted() {
-        use redextape_core::viewmodel::TmState;
-
-        let s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
-        let (program, mut c, _) = s.tm.expect("the TM leg runs this");
-        let fitted = program.width;
-
-        let mut saw_some = false;
-        for _ in 0..200 {
-            if TmState::window(&c, Some(&s.map), 2).source_node.is_some() {
-                saw_some = true;
-                break;
+    fn every_billed_state_resolves_at_the_width_the_run_fitted() {
+        let list20 = format!("[{}]", (1..=20).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
+        let capped = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
+        let higher = "fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)";
+        for (src, kind, caps, widens) in [
+            ("let x = 40; x + 2", EncodingKind::Unary, tm::TM_DEFAULT_CAPS, true),
+            ("let x = 40; x + 2", EncodingKind::Binary, tm::TM_DEFAULT_CAPS, true),
+            (list20.as_str(), EncodingKind::Unary, tm::TM_DEFAULT_CAPS, true),
+            ("let x = 40; x + 2", EncodingKind::Unary, capped, false),
+            (higher, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, true),
+        ] {
+            let s = Session::compile_with_caps(src, kind, caps).session.expect("compiles");
+            let program = s.tm_program().expect("the TM leg runs this");
+            if widens {
+                assert!(program.width > tm::MIN_FIELD_WIDTH, "{src} {kind:?}: fits at the narrowest width");
             }
-            if c.next().is_none() {
-                break;
+
+            let (asm, first_order) = match tm::lower_asm(&s.core) {
+                Ok(p) => (p, true),
+                Err(tm::LowerError::Unsupported { .. }) => {
+                    (tm::lower_asm(&tm::defunc(&s.core).expect("defunc")).expect("lowers after defunc"), false)
+                }
+                Err(e) => panic!("{src}: the fixture lowers: {e:?}"),
+            };
+            let (machine, origins) = tm::lower_tm_mapped(&asm, &*kind.at(program.width)).expect("the fixture lays out");
+            assert_eq!(machine.states.len(), program.states.len(), "{src} {kind:?}: the run's machine");
+            let (mut billed, mut owned) = (0, 0);
+            for (s_id, (state, origin)) in program.states.iter().zip(&origins).enumerate() {
+                assert_eq!(state.instr, *origin, "{src} {kind:?}: state {s_id} ({})", state.name);
+                let has_owner = s.map.tm_owner(&state.name).is_some();
+                assert!(
+                    !has_owner || origin.is_some(),
+                    "{src} {kind:?}: state {s_id} ({}) owned, unbilled",
+                    state.name
+                );
+                if first_order {
+                    assert_eq!(
+                        has_owner,
+                        origin.is_some(),
+                        "{src} {kind:?}: state {s_id} ({}) billed, unowned",
+                        state.name
+                    );
+                }
+                billed += usize::from(origin.is_some());
+                owned += usize::from(has_owner);
             }
+            assert!(billed > 100, "{src} {kind:?}: {billed} billed states is too few to pin anything");
+            if !first_order {
+                assert!(owned > 0 && owned < billed, "{src} {kind:?}: {owned} of {billed} owned through defunc");
+            }
+            assert_eq!(program.listing, s.map.tm_listing, "{src} {kind:?}");
+            assert_eq!(program.listing.len(), asm.code.len(), "{src} {kind:?}: one line per instruction");
+            assert_eq!(program.labels, asm.labels, "{src} {kind:?}");
         }
-        assert!(
-            saw_some,
-            "no visited state resolved to a Core node at fitted width {fitted} — the map was built at \
-             {}, so state names have started depending on the width",
-            tm::MIN_FIELD_WIDTH
-        );
     }
 }

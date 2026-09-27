@@ -2,6 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { LambdaTrees } from '../../src/lambda-trees'
 import { ruleCount } from '../../src/protocol'
+import { StateDiagram } from '../../src/state-diagram'
 import { TmPane } from '../../src/tm-pane'
 import { SHELL, until } from './harness'
 
@@ -93,6 +94,23 @@ describe('views off the page', () => {
       seeded === null ? -1 : ruleCount(seeded),
       "the seeded program is this compile's, not the stale one",
     ).not.toBe(baselineRules)
+  })
+
+  // THE STATE DIAGRAM (Plan 7 part 4b) RIDES THE SAME SEED: its states are grouped when its view is handed a machine
+  // and drawn when its view is painted, and a view off the page is neither — so it costs nothing either, per compile
+  // or per frame, until its tab is shown.
+  it('groups and draws no state diagram for a hidden TM view, and does both once it is shown', async () => {
+    tab('lambda-0')?.click()
+    await tick()
+    const group = vi.spyOn(StateDiagram.prototype, 'setProgram')
+    const paint = vi.spyOn(StateDiagram.prototype, 'render')
+    await compile('let z = 2; z + 3')
+    expect(group, 'no grouping off the page').not.toHaveBeenCalled()
+    expect(paint, 'no drawing off the page').not.toHaveBeenCalled()
+    tab('tm-0')?.click()
+    await until(() => group.mock.calls.length > 0, 'the shown view to group its states')
+    await until(() => document.querySelector('[data-leaf="tm-0"] .program-row') !== null, 'the diagram to draw')
+    expect(paint).toHaveBeenCalled()
   })
 
   it('asks for no λ tree for a hidden λ view', async () => {

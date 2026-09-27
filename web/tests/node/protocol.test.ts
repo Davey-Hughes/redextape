@@ -123,11 +123,12 @@ function programOf(n: number): TmProgram {
     name: `q${i}`,
     accept: false,
     rules: [] as TmProgram['states'][number]['rules'],
+    instr: null,
   }))
   for (let i = 0; i < n; i++) {
     states[i % 10]?.rules.push({ read: [null], write: [null], moves: ['S'], next: 0 })
   }
-  return { states, alphabet: ['_'], tapes: 1, width: 4, start: 0 }
+  return { states, alphabet: ['_'], tapes: 1, width: 4, start: 0, listing: [], labels: [] }
 }
 
 describe('the fork cap', () => {
