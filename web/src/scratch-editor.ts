@@ -282,8 +282,15 @@ export class ScratchEditor {
    *
    * A NO-OP WHEN THE TEXT ALREADY MATCHES, because a re-seed would move the user's cursor to the end
    * of a document they are working in.
+   *
+   * **AND A NO-OP WHILE AN EDIT IS PENDING, because `text` is then older than the editor.** Every
+   * build reply re-seeds through here, and a build carries what the editor held when its debounce
+   * fired; whatever was typed after that is in the editor alone, with a debounce of its own still to
+   * fire. Replacing it lost the typing, and that debounce then posted the older text as the user's.
+   * Left alone, the pending build carries the typing, and its own reply re-seeds.
    */
   setText(text: string): void {
+    if (this.#timer !== null) return
     if (this.#view.state.doc.toString() === text) return
     this.#seeding = true
     try {
@@ -352,12 +359,13 @@ export class ScratchEditor {
       clearTimeout(this.#timer)
       this.#timer = null
     }
-    const before = this.#view.state.doc.toString()
+    const asked = this.#view.state.doc
+    const before = asked.toString()
     doc.client.changeDocument(doc.uri, before)
     try {
       const edits = await doc.client.format(doc.uri)
       if (this.#destroyed) return
-      applyEdits(this.#view, edits)
+      applyEdits(this.#view, edits, asked)
     } catch {
       // Reported by the client, once, for the server rather than for this gesture.
     }
@@ -368,8 +376,9 @@ export class ScratchEditor {
     // removed and dispatch into a destroyed view.
     if (this.#destroyed) return
     const after = this.#view.state.doc.toString()
-    // Rebuilt when a recompile was owed, or when formatting changed the text. Skipped when neither
-    // holds, so formatting an untouched, already-formatted editor costs nothing.
+    // Rebuilt when a recompile was owed, or when the text changed — by the format, or by typing that
+    // overtook it. Skipped when neither holds, so formatting an untouched, already-formatted editor
+    // costs nothing.
     if (pending || after !== before) this.#onEdit(after)
   }
 

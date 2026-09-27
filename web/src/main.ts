@@ -781,9 +781,10 @@ async function main(): Promise<EditorView> {
     // The source view always has its editor, so unlike a copy's this never comes and goes —
     // `setFormattable(true)` is set once below rather than tracked.
     format: () => {
+      const asked = view.state.doc
       lspClient
         .format(SOURCE_URI)
-        .then((edits) => applyEdits(view, edits))
+        .then((edits) => applyEdits(view, edits, asked))
         .catch(() => {
           // The client has already said the server is gone; this is one gesture, not a second report.
         })
@@ -1887,9 +1888,10 @@ async function main(): Promise<EditorView> {
           // rather than on a debounce, so the server's copy is never behind what is on screen.
           blur: () => {
             if (!formatOnBlur) return false
+            const asked = view.state.doc
             lspClient
               .format(SOURCE_URI)
-              .then((edits) => applyEdits(view, edits))
+              .then((edits) => applyEdits(view, edits, asked))
               .catch(() => {
                 // The client reports the server; a blur is not the place to repeat it.
               })

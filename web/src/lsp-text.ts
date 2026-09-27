@@ -42,9 +42,14 @@ export function rangeOf(doc: Text, range: LspRange): { from: number; to: number 
  * `textDocumentSync` is Full and the formatter is `print ∘ parse`, so today the server sends exactly
  * one edit spanning the whole buffer — `Server::formatting`'s own comment says a range that stopped
  * short would append the formatted file to the remains of the old one.
+ *
+ * **NOTHING IS APPLIED IF THE DOCUMENT IS NO LONGER `asked`, the text the server held when it was
+ * asked.** The answer is a round trip away, and what is typed in the meantime is not in it: applied
+ * anyway, that one whole-buffer edit replaced the typing with the older text, formatted. A format
+ * overtaken by typing does nothing, and asking again formats what is there now.
  */
-export function applyEdits(view: EditorView, edits: LspTextEdit[]): void {
-  if (edits.length === 0) return
+export function applyEdits(view: EditorView, edits: LspTextEdit[], asked: Text): void {
+  if (edits.length === 0 || !view.state.doc.eq(asked)) return
   const doc = view.state.doc
   view.dispatch({
     changes: edits.map((e) => ({ ...rangeOf(doc, e.range), insert: e.newText })),

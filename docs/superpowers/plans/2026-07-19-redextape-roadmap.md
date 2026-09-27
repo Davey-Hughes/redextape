@@ -19991,3 +19991,62 @@ scroll detaching the diagram, which first read as following not working, is the 
 | 12 of 12 exit 0; 615 files; 569 sites; 46 figures; 12 regions in 4 files | the hygiene scans | `scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua}.sh`, each `--self-test` then alone |
 | 154 files, 1,324 tests; 96.67, 90.23, 97.87, 98.38 against 95, 89, 97, 97 | the web CI sequence: statements, branches, functions and lines against their floors | `pnpm run build:wasm && pnpm exec biome ci --error-on-warnings && pnpm run typecheck && pnpm run test:coverage && pnpm run build:app` |
 | 200; healthy; 7 | the image: its status, its health, and its wasm assets (both crates, four grammars, the tree-sitter runtime) | `docker build -t redextape-check .`, `docker run -d -p 8099:80`, `curl -w '%{http_code}'`, `docker inspect --format '{{.State.Health.Status}}'`, `docker exec … ls /usr/share/nginx/html/assets/ \| grep wasm` |
+
+#### TEXT TYPED WHILE AN ANSWER IS IN FLIGHT IS KEPT: A COPY'S BUILD REPLY RE-SEEDED ITS EDITOR OVER IT, AND A `format` ANSWER, IN A COPY OR IN THE SOURCE VIEW, REPLACED IT WITH THE OLDER TEXT FORMATTED — FOUND AS A TEST THAT TIMED OUT TWICE ON THE SLOWER CI RUNNER, AND THAT #109 HAD SET ASIDE AS A ONE-OFF (2026-09-27, branch `fix-copy-edit-in-flight`, `a96de7e..5672579`, 1 commit, plus this entry)
+
+**A product fix, in `web/` only.** `lsp-copy-diagnostics.test.ts`'s `leaves an unparseable copy alone` failed `main`'s push run for part 3a (run 453) and #108's run 465, both on runner `450440e2`, both with `timed out after 10000ms waiting for the copy to be broken`. #109's commit message set run 453's failure aside as a one-off that "now takes about 400 ms there". #108 changes no file under `web/`, so its failure did not come from #108.
+
+##### WHAT WAS WRONG
+
+- **A copy's build reply re-seeded its editor with older text.** Both reply arms, `scratch-compiled` (λ) and `tm-scratch-compiled` (TM), call `setEditor` on the pane showing the copy, which calls `ScratchEditor.setText` on an editor already mounted. A build carries what the editor held when its 300 ms debounce fired, and its reply lands a worker round trip later. Whatever was typed in between was replaced, and the debounce that typing had set then posted the older text as the user's. `SessionClient` drops a reply only once a newer build has been posted, so nothing guarded the round trip itself.
+- **That window explains the test's timeout, by inference.** The test before it formats the copy, and `format()` recompiles the formatted text at once. When that build's reply lands after the next test has typed its broken machine, the re-seed puts the valid text back, the debounce tells the server the valid text, and nothing is ever marked. Nothing in CI showed this happening; the placed race below puts the older text back over typing in every run on `main`'s `src/`.
+- **A `format` answer overwrote typing the same way.** `applyEdits` applied edits computed against the text the server held when asked to whatever the editor held when they came back, and the one whole-buffer edit the server sends replaced anything typed during the round trip with the older text, formatted. It has three callers: a copy's `format()`, and the source view's menu format and format on blur.
+
+##### WHAT CHANGED
+
+- **`ScratchEditor.setText` does nothing while an edit is pending**, meaning while its debounce timer is set. The pending build carries the typing, and its own reply re-seeds.
+- **`applyEdits` takes `asked`, the document the server was asked about, and applies nothing unless the editor still holds it.** Each caller captures it before the request. A format overtaken by typing does nothing, and asking again formats what is there. The parameter is required, so the compiler names every caller.
+- **`keystrokes-in-flight.test.ts`, four tests**: typing into a TM copy and into a λ copy while a build is in flight, and into a copy and into the source view while a `format` is in flight. Each types from inside the app's own `postMessage` of the request, so the typing lands after the request leaves and before any answer can return, on any machine, and each waits for that request's own reply on the worker rather than for a time. The two build tests also assert that no newer build was posted before the reply, which is the case where the client drops it and the test would place nothing.
+
+##### THE SIBLING SEARCH
+
+- **Two functions write text into an editor after it is built**: `applyEdits` and `ScratchEditor.setText`. `grep -rnE '\b(changes|insert):' web/src` finds their two dispatches and nothing else that edits a document, and the only other writers are the two `EditorState.create` calls that build the editors.
+- **Every caller is covered.** `applyEdits` is called from `scratch-editor.ts`'s `format` and twice from `main.ts`. `setText` is called from `LambdaPane.setEditor` and `TmPane.setEditor`, which `replies.ts`'s two reply arms reach; `pane-host.ts`'s `mountScratchEditor` also calls `setEditor`, but only when no editor exists, so it never reaches `setText`.
+
+##### WHAT PROVING IT FOUND
+
+- **`main`'s `src/` fails all four tests, each on its property**, in three runs of three. The TM copy read `start q` where the broken machine had been typed over it. The λ copy read `λz. z`, the older build's text as the worker prints it, where `\y. y y` had been typed. The copy's format answer left the older text formatted, and the source view's replaced `let y = 1; y + 1` with the formatted `fact`. No placed reply was overtaken.
+- **Each half of the fix is held by its own two tests.** With `setText`'s guard removed, the two build tests fail and the two format tests pass; with `applyEdits`' check removed, the reverse. Two runs each.
+- **The CPU quota that reproduced #109's timeout does not reproduce this one.** Under `CPUQuota=50%`, `lsp-copy-diagnostics.test.ts` passed five runs of five with `main`'s `src/`, and five of five with the fix. The evidence is the placed race, not the flake reproduced. The new file passes three runs of three under the same quota.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Diagnostics carry no version check.** `LspClient`'s `#dispatch` hands a `publishDiagnostics` to its document's sink without comparing the version it was computed for with the document's. Not changed, and not measured.
+
+##### VERIFICATION
+
+Run on 2026-09-27 at `5672579`, from `web/`, after `pnpm run build:wasm` and `pnpm run build:lsp-wasm` rebuilt both packages from this tree, under `systemd-run --user --scope -p MemoryMax=16G -p MemorySwapMax=0` plus the `CPUQuota` named. "`main`'s `src/`" means `git checkout a96de7e -- src/scratch-editor.ts src/lsp-text.ts src/main.ts`, restored after each run; the sabotages were each reverted after their runs.
+
+```
+pnpm exec biome ci --error-on-warnings (web/)  → exit 0, 250 files (1 info: biome.json's deprecation notice)
+pnpm run typecheck (web/)                      → exit 0
+pnpm run test:coverage (web/)                  → exit 0, 155 files / 1,328 tests; 96.65 / 90.24 / 97.78 / 98.36
+pnpm run build:app (web/)                      → exit 0
+```
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 1 | commits in the range | `git log --oneline a96de7e..5672579 \| wc -l` |
+| 453, 465 | the runs | `actions_run_read` `list_runs` on `davey/redextape`; their API ids are 1761 and 1803, matched by `html_url` |
+| `450440e2` | the runner of both | line 1 of each run's `web` job log, jobs 8806 and 9043 from `list_run_jobs`, read with `download_job_log` |
+| `79b0f14`, `0990211` | what each run tested | the same logs: the commit checked out |
+| "now takes about 400 ms there" | #109's reading of run 453 | `git show -s --format=%B a96de7e \| grep 'about 400 ms'` |
+| 300 ms | the copy's debounce | `EDITOR_DEBOUNCE_MS` in `web/src/editor-debounce.ts` |
+| three runs of three; `start q`, `λz. z`, `let y = 1; y + 1` | `main`'s `src/` failing | `pnpm exec vitest run --project browser tests/browser/keystrokes-in-flight.test.ts` on `main`'s `src/`, three runs; the assertion messages, at the four `toBe`s that follow the placement |
+| two runs each, 2 failed and 2 passed in each | the sabotages | the same file, with `setText`'s `if (this.#timer !== null) return` deleted, then with `applyEdits`' `\|\| !view.state.doc.eq(asked)` deleted |
+| five of five, five of five | `lsp-copy-diagnostics.test.ts` at 50% | `pnpm exec vitest run --project browser tests/browser/lsp-copy-diagnostics.test.ts` at `CPUQuota=50%`, on `main`'s `src/` and at `5672579` |
+| three of three | the new file at 50% | the new file's command above, at `CPUQuota=50%` |
+| 250; 155, 1,328 and the four coverage figures | Biome's files, the web suite | the block above |
+| 200; healthy; 7 | the image: its status, its health, and its wasm assets | `docker build -t redextape-check .`, `docker run -d -p 8099:80`, `curl -w '%{http_code}'`, `docker inspect --format '{{.State.Health.Status}}'`, `docker exec … ls /usr/share/nginx/html/assets/ \| grep -c wasm` |
