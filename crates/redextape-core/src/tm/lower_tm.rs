@@ -355,10 +355,11 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
 /// TWO callers for which discarding it means two DIFFERENT things.
 ///
 /// `sourcemap.rs`'s `tm_half` is one. Reading "every state maps to `None`" as "no ownership recorded" is
-/// TRUE for it, and it already returns empty maps on every OTHER refusal along the same lowering path
-/// (`Unsupported`-then-`defunc`-failure, `TooDeep`) — so on this `None` too it takes that same existing
-/// branch. For that caller the pre-`Option` behaviour was never wrong, only implicit where it is now a
-/// branch a reader can see.
+/// TRUE for it, and `SourceMap::build` already gives empty TM maps on every OTHER refusal along the same
+/// lowering path (`Unsupported`-then-`defunc`-failure, `TooDeep`), which `sourcemap.rs`'s `asm_half`
+/// returns as `None` before `tm_half` is ever called — so on this `None` `tm_half` returns those same
+/// empty maps. For that caller the pre-`Option` behaviour was never wrong, only implicit where it is now
+/// a branch a reader can see.
 ///
 /// `attribute.rs`'s `lower_mapped` is the other, and for it "no ownership recorded" does NOT hold:
 /// simulating the degenerate machine reports `{ histogram: {}, total: 0, capped: false }` — a program

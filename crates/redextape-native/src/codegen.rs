@@ -197,8 +197,9 @@ pub(crate) fn declare_subroutines(
     Ok((func_ids, arity))
 }
 
-/// Read register `r` as a value in the current block. Out-of-bank indices read `0`, mirroring
-/// `run_asm`'s `args.get(n).unwrap_or(0)` / `locals.get(n).unwrap_or(0)` (and keeping this total).
+/// Read register `r` as a value in the current block. Out-of-bank indices read `0`, mirroring the asm
+/// interpreter's `Vm::read` (behind `trace::AsmCursor`), whose `locals.get(n)` / `args.get(n)` fall back to
+/// `0` (and keeping this total).
 fn read_reg(b: &mut FunctionBuilder, r: Reg, locs: &[Variable], args: &[Variable], rr: Variable) -> Value {
     match r {
         Reg::Loc(n) => match locs.get(n as usize) {
@@ -237,10 +238,10 @@ fn emit_cmp(b: &mut FunctionBuilder, cc: IntCC, x: Value, y: Value) -> Value {
     b.ins().uextend(types::I64, c)
 }
 
-/// Emit `x op y` per `run_asm`'s `eval_bin`. All words are `u64`, so: `Add`/`Mul` SATURATE at
-/// `u64::MAX` on overflow (matching `saturating_add`/`saturating_mul`); `Sub` is saturating monus
-/// `x - min(x, y)`; comparisons are UNSIGNED. Cranelift 0.134 has no scalar `*_sat` (those are SIMD
-/// lane ops that don't lower for i64), so we detect overflow and clamp: `uadd_overflow`/
+/// Emit `x op y` per the asm interpreter's `eval_bin` (`trace::AsmCursor`). All words are `u64`, so:
+/// `Add`/`Mul` SATURATE at `u64::MAX` on overflow (matching `saturating_add`/`saturating_mul`); `Sub` is
+/// saturating monus `x - min(x, y)`; comparisons are UNSIGNED. Cranelift 0.134 has no scalar `*_sat`
+/// (those are SIMD lane ops that don't lower for i64), so we detect overflow and clamp: `uadd_overflow`/
 /// `umul_overflow` return `(result, overflow_flag)`, and `select(of, MAX, result)` picks `u64::MAX`
 /// (`iconst(I64, -1)`) when the flag is set.
 fn emit_bin(b: &mut FunctionBuilder, op: BinOp, x: Value, y: Value) -> Value {

@@ -46,7 +46,7 @@ const BOTH_BACKENDS: &[&str] = &[
 
 /// Higher-order demos, from `examples/tm_demo.rs`'s `higher_order` array. EVERY ONE of these is
 /// rejected by `lower_asm` and reaches the TM half only through `defunc` — which is the point: a
-/// corpus that is entirely first-order never runs `tm_half`'s defunc branch, and an invariant that
+/// corpus that is entirely first-order never runs `asm_half`'s defunc branch, and an invariant that
 /// holds only on the direct path (such as "the root is always covered") looks true forever. The λ
 /// backend accepts all four, so the λ half is still exhaustive for them; the TM half is NOT, because
 /// `defunc` rewrites the tree and a node it dissolves has no lowering left to point at.
@@ -242,8 +242,9 @@ fn transparent_nodes_map_to_none() {
     assert_eq!(seen_kinds, ["Lambda", "Let", "Seq", "callee Var"], "the corpus must exercise every transparent kind");
 }
 
-/// Finding 3: the defunc branch of `tm_half`, which a first-order corpus never reaches. The two halves
-/// are asserted SEPARATELY here — see `HIGHER_ORDER`'s doc for why the TM half cannot be exhaustive.
+/// Finding 3: the defunc branch of `asm_half`, which a first-order corpus never reaches, and the TM half
+/// built through it. The two halves are asserted SEPARATELY here — see `HIGHER_ORDER`'s doc for why the
+/// TM half cannot be exhaustive.
 #[test]
 fn higher_order_programs_exercise_the_defunc_branch() {
     for src in HIGHER_ORDER {
@@ -639,9 +640,10 @@ fn node_id_allocation_order_is_pinned_for_every_mint_before_children_site() {
     assert_eq!(*expr_lambda_id, 3, "Expr::Lambda (`|y| y + 1`)'s id");
 }
 
-/// The asm program `tm_half` lowers, reached by the OTHER road: `lower_asm` and `defunc` rather than their
-/// `_mapped` twins, retrying through `defunc` on `Unsupported` as `run_tm`'s own lowering does. The map's
-/// instruction indices are only worth checking against a program the map did not build.
+/// The asm program `asm_half` lowers, and the TM half builds its machine from, reached by the OTHER road:
+/// `lower_asm` and `defunc` rather than their `_mapped` twins, retrying through `defunc` on `Unsupported`
+/// as `run_tm`'s own lowering does. The map's instruction indices are only worth checking against a
+/// program the map did not build.
 fn asm_of(core: &Core) -> Program {
     match lower_asm(core) {
         Ok(p) => p,

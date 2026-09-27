@@ -20050,3 +20050,185 @@ pnpm run build:app (web/)                      → exit 0
 | three of three | the new file at 50% | the new file's command above, at `CPUQuota=50%` |
 | 250; 155, 1,328 and the four coverage figures | Biome's files, the web suite | the block above |
 | 200; healthy; 7 | the image: its status, its health, and its wasm assets | `docker build -t redextape-check .`, `docker run -d -p 8099:80`, `curl -w '%{http_code}'`, `docker inspect --format '{{.State.Health.Status}}'`, `docker exec … ls /usr/share/nginx/html/assets/ \| grep -c wasm` |
+
+#### PLAN 7 PART 5a, ASM IN THE CORE: THE ASM INTERPRETER STEPS, EVERY WORD IT HOLDS CARRIES A DISPLAY TAG, THE ORACLE HOLDS IT TO THE TM INSTRUCTION BY INSTRUCTION, AND THE SOURCE MAP KEEPS EACH INSTRUCTION'S OWNER — AND THE UMBRELLA'S OWN CHECK FOR THE STEPPER COULD NOT FAIL, THE SPEC'S TAG TABLE CONTRADICTED ITS OWN RULE, AND THE DISPLAY-STATE RULE THE SPEC SAID A CHECK HELD WAS HELD BY NOTHING UNTIL THE WHOLE-BRANCH REVIEW PLANTED TWO GATES THAT BOTH PASSED ALL 1,848 TESTS (2026-09-27, branch `plan7-part5a-asm-core`, `a4e7c6f..1e451c8`, 21 commits, plus this entry)
+
+**Part 5a of Plan 7** ([design](../specs/2026-09-27-plan7-part5-asm-design.md),
+[plan](2026-09-27-plan7-part5a-asm-core.md)), the first of part 5's three PRs and its core half: Rust only,
+with nothing in `redextape-wasm` or `web/` changed. 5b makes asm the web app's third leg with an asm view, and
+5c adds asm copies. The spec was written and approved in this branch and gained five amendments. Four came
+from the plan's prototype before any task ran (1 to 4, with 3 re-measured at the plan's final state), and one
+from the whole-branch review (5). Five of the 21 commits touch only `docs/`: the spec, three amendment
+commits and the plan, which alone is 2,521 of the branch's 4,634 added lines.
+
+**The user's decisions (2026-09-27), made while the spec was brainstormed:** asm copies are in part 5 rather
+than later or never; part 5 ships as three PRs — core, view, copies — with the refactor that makes the web app's
+legs a table as 5b's first task rather than a PR of its own; the asm view has three panels, registers, call
+stack and heap; the default layout becomes source | λ above asm | TM; asm records one windowed frame per step
+into the existing history ring; and the running instruction's line in a copy's editor is out of part 5.
+
+##### WHAT PART 5a BUILT
+
+- **The asm interpreter steps.** `trace::AsmCursor` (`trace/asm_cursor.rs`) owns the register machine that
+  `run_asm` held privately — moved, not copied — and runs one instruction per `next`, yielding `AsmStep { pc }`.
+  It latches an `AsmStatus` saying why it stopped: halted, faulted with `run_asm`'s own text, or capped naming
+  the cap (steps, stack, heap, memory); `raise_cap` resumes only a step cap. `run_asm` is now a loop over the
+  cursor, with its signature, results and caps unchanged. The cursor yields its own item rather than a third
+  `StepEvent` variant, because `StepEvent`'s consumers end their loops on a variant they do not recognise.
+- **Display tags and written bits.** Every word carries a `WordTag` — value, list or box — set by the
+  instruction that makes it and copied by whatever moves it, and every local a bit saying whether its frame has
+  written it, cleared by `call` and restored by `ret`; `wrote()` names the register the last step wrote. The
+  words alone decide every fault and value; a tag is read only with a default.
+- **Two new oracle checks** in `three_way_oracle.rs`. The cursor's instruction sequence equals the sequence of
+  `pc{i}` entry states the TM passes through, on all 100 runs of the corpus (`FIRST_ORDER_DEMOS` and the latent
+  traps, under unary and binary); and at `halt`, `rr`'s tag agrees with the program's result type, `Unit`
+  included. `tm::lower_program` became public so the check steps the very program the machine was built from.
+- **A property test holds the display-state rule**: random hand-built programs run twice, the second with every
+  tag and written bit overwritten before each step, must end the same (below).
+- **Every fault text and `call`'s guard order** (stack cap, then an undefined label, then the memory cap) are
+  pinned, the texts by a table test and the order by a test of its own; nothing pinned either before.
+- **The source map keeps each instruction's owner.** `SourceMap` gains an asm half — `asm_owner`, `None` for an
+  instruction a `defunc`-minted node emitted, and its inverse `node_to_asm` — lowered once, before the machine,
+  so a program the TM refuses to lay out keeps its owners; the TM half now composes through it rather than
+  lowering again. `LinkIndex` carries the column as `asm_owner`, `-1` for no owner.
+- **Docs that quoted `run_asm`'s internals** in `redextape-native` and `redextape-native-rt` (its arms, its
+  `Vm`, `vm.` expressions, `eval_bin`) now point at the cursor.
+
+##### THE PLAN WAS BUILT AND REPLAYED BEFORE IT WAS HANDED OUT
+
+Every task was built, gated and sabotaged in a scratch worktree first, and the plan's code blocks are that
+prototype's per-task diffs. The plan was then replayed from its own markdown on a fresh worktree: all four
+trees identical, every red and green step as written, **30 of 30 sabotages fired** on their targets. What that
+work found, before any task ran:
+
+- **The umbrella's oracle for the stepper could not fail.** "Stepping to the end matches `run_asm`" compares the
+  cursor with its own loop once `run_asm` is that loop. The replacement reads the instruction sequence off the
+  TM, which shares no stepping code with the cursor; the counts were measured equal on 92 runs before the spec
+  was written and the sequences on 100 in the prototype (amendment 2). Two of Task 3's sabotages change no
+  program's result, and only these oracles see them.
+- **The spec's tag table contradicted its own rule** (amendment 1): it made `tail` produce a list while saying
+  a tag records how a word was made; `tail` copies the tail's stored tag, as `head` does.
+- **`run_asm` pays for the cursor** (amendment 3), figures below.
+- **The move stranded docs** that quoted `run_asm`'s arms and fields; a sweep for every symbol `tm/asm.rs` lost
+  found them.
+- **A sabotage's failing proptest wrote a regression seed that the prototype's task commit picked up**, which is
+  why the plan's global constraints say to check `git status` after every sabotage.
+- **A reversed `asm_owner` passed every owner test** until one read owners back as source text.
+- **The first replay from the document could not apply Task 1's patch**: a context line is an existing doc
+  comment's own three backticks, which closed the block's fence early — for a reader too. The patches are fenced
+  with four.
+- **Two doc edges**, and a fix measured and dropped: putting `wrote` back after a refused instruction cost
+  6.3 → 7.5 ms on the loop, so the doc was made true instead.
+
+##### WHAT THE TASK REVIEWS FOUND
+
+Every task's tree was identical to the prototype's, and every implementer's red, green and sabotage results
+matched the plan. The reviews still found things — some by reading, and the weightiest by running probes of
+their own:
+
+- **Task 1's review ran the pre-5a `run_asm` against the new one on 3,000,000 random hand-built programs**, all
+  equal, covering every outcome kind; the probe caught a planted guard reorder at case 95. It also found `pc`
+  misdocumented on two faults — one of them the sentence the plan's replay had just written.
+- **Task 3's review checked the TM entry rule on the whole of 200 corpus machines**, 2,591,256 rules, not only
+  on the paths the corpus runs.
+- **Task 4 came back "Needs fixes", three Important findings, all in the plan's own code:** the `-1` sentinel,
+  the owners of a `defunc`-touched program and `node_to_asm` built from raw origins could each be broken with
+  every test green; six docs still said the TM half lowered the program; and the new test had taken over its
+  neighbour's doc comment.
+- **One fix round took those three and every Minor from Tasks 1 to 4** — fifteen items, 21 sabotages, all
+  fired. Its re-review found the round's own evidence for "a tag decides nothing" blind: a planted `box_get` tag
+  gate passed all 1,294 core tests, because `box_set` rebuilt the tag before `box_get` read it. Fixed, and the
+  gate, with ones on `head`, `tail` and `box_set`, now fails the test.
+
+##### WHAT THE WHOLE-BRANCH REVIEW FOUND
+
+**The display-state rule was held by nothing.** The spec said the first oracle check held it; every oracle
+runs compiled programs, which never use a word against its tag or read a local nothing wrote. The review
+planted two gates — `head`, `tail`, `box_get` and `box_set` refusing an operand of the wrong tag, and `mov`,
+`jz`, `bin` and `cons` refusing an unwritten local — and each left the whole workspace at 1,848 passed, though
+the second faults 5,845 of 20,000 random programs. Those are the errors a helpful change would add, and 5c's
+hand-written copies are where they would change a user's result. The fix is the property test above; the
+re-review then found a gate on one instruction alone slipped a single scramble in a few runs in two hundred,
+and the test now scrambles before every step. Five gates — the two, and `tail`, `box_get` and `box_set` alone —
+each fail it on all 20 seeds tried. Amendment 5 moves the spec's claim onto the test.
+
+The review's own probes: the pre-5a differential at 1,000,000 more cases, all equal; a random-program probe
+checking the tag table, written bits, `wrote` and capped-then-resumed runs step by step over 1,000,000
+programs; and a compiled-program probe over 76 programs with no exception to the tag rules. It found the cursor
+ready for 5b: the whole frame spec §5.3 describes builds from the public API. Seven Minors were fixed with the
+Important, among them a doc on `main` calling `NodeGen::fresh` uncapped, which this branch's new test pointed
+readers at.
+
+The last fix round's first agent stopped mid-change on a weekly usage limit; the change was complete but
+uncommitted, and a second agent finished and verified it.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`run_asm` is slower**: 3.62–3.66 ms on `main` against 6.12–6.19 ms on this branch for the 1,400,009-step
+  loop, 0.056 against 0.120–0.121 ms for `sum(1000)`, 0.012 against 0.028 ms for `upto(200)`. The cost buys one
+  implementation of the instruction set; no caller runs asm in a hot path today.
+- **Nothing consumes any of this until 5b.** No wasm method exposes the cursor, and `LinkIndex::asm_owner` is
+  not marshalled to JavaScript, since the wasm crate builds its link-index object field by field.
+- **The wire form for 5b.** `WordTag`, `AsmCap`, `AsmStatus` and `Reg` have no serde or ts derives, where every
+  per-step type that crosses to JavaScript today has them. The spec's §1 says 5b touches only `redextape-wasm`
+  and `web/`; 5b's plan chooses between adding them in core, and amending §1, or mirroring the types.
+- **5b's value fallback will copy the heap.** `into_outcome` consumes the cursor and `decode_asm_ty` takes an
+  owned heap, so a capped compile later recorded to `halt` decodes from a copy; and `run_asm` returns no step
+  count, so the step total comes from driving a cursor to the end.
+- **The program is lowered more than once per compile** — by `SourceMap`'s asm half and by `run_tm_described`
+  — and 5b will lower it a third time for its cursor, indexing `asm_owner` against a program the map did not
+  come with. That is safe by construction and held by a test over a first-order and a `defunc`-touched program.
+- **Caps for 5c.** A local is now ten bytes (a word, a tag and a written bit), and saved frames reach 64 million
+  words before the memory cap; 5c's hand-written copies run in a wasm worker, and its plan chooses their caps.
+- **Copies of `lower_program`'s dispatch** remain across the workspace: in `redextape-native` (its `lib.rs` and
+  `native_oracle.rs`), `redextape-grammar-check`, `guard_counterexamples.rs` (which retries through `defunc` on
+  every error, as its doc now says) and several examples, some in looser forms that never name
+  `LowerError::Unsupported`; `sourcemap_coverage.rs` and `blowup_probe.rs` keep theirs on purpose. Routing the
+  rest to the public function is one sweep, behaviour-neutral, left for later — and it starts with a search for
+  every form of the dispatch, since a search for one form misses the others.
+- **The TM entry rule would merge an instruction that jumps straight to itself**, which only a program that
+  never halts contains.
+- **The display-state property test is probabilistic**: 4,096 cases, sized so every gate it names fails on every
+  seed tried.
+
+##### VERIFICATION
+
+The figures taken for this entry were run on 2026-09-27 at `1e451c8`. The gates ran one after another in one detached `systemd-run --user` unit capped at 16G with no swap, with `PATH`
+(`/usr/sbin` and `$CARGO_HOME/bin` first), `CARGO_HOME`, `RUSTUP_HOME` and `HOME` set: `check-all.sh` (with
+`TREE_SITTER` at the pinned `.tools/tree-sitter`), `check-slow.sh`, the Rust coverage floor, the six hygiene
+scans (each `--self-test`, then alone), the web CI sequence, and the Docker image built, started and checked.
+Every one exited 0. `run_asm` was then timed on the idle machine, both sides built fresh — `main` from its own
+worktree at `a4e7c6f` — each in its own `CARGO_TARGET_DIR`. No by-hand check ran: nothing in the app changed.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 21 | commits before this entry | `git log --oneline a4e7c6f..1e451c8 \| wc -l` |
+| five | of them touching only `docs/`: the spec, three amendment commits, the plan | each commit's `git show --name-only` |
+| 22 files, +4,634 / −365; 20 files, +1,561 / −365 | the branch against main; without `docs/` | `git diff --shortstat a4e7c6f..1e451c8`, then with `-- . ':!docs'` |
+| 2,521 | lines of the plan | `git show --stat c399cfa` |
+| five; four, one | spec amendments; from the prototype, from the whole-branch review | the "Amended" blocks at the head of the spec |
+| four; 30 of 30 | code tasks replayed with trees identical to the prototype's; sabotages fired in that replay | the plan's Pre-flight status |
+| 92; 100 | runs whose TM entry count equalled the asm step count before the spec; runs whose sequences are equal | the spec's §12 (`tmtrace`); `asm_steps_are_the_instructions_the_tm_enters` over 46 + 4 programs × 2 encodings |
+| 46; 4 | `FIRST_ORDER_DEMOS`; `LAMBDA_LIMITATION_DEMOS` | `tests/three_way_oracle.rs` |
+| 6.3, 7.5 ms | the loop without and with `wrote` put back | the plan's "What replaying this plan found", 2 |
+| 3,000,000; 95 | Task 1's review's differential cases; the case its planted reorder failed at | the ledger's review figures (`.superpowers/sdd/progress.md`, not tracked) |
+| 200 machines, 2,591,256 rules | Task 3's review's probe of the entry rule | same place |
+| three; fifteen, 21 | Task 4's Important findings; the fix round's items and sabotages | the ledger; `p5a-fix-round-report.md`, same place |
+| 1,294 | core tests a planted `box_get` tag gate passed before the fix | the ledger's review figures |
+| 1,848; 5,845 of 20,000 | the workspace under each planted gate; random programs the written-bit gate faults | the whole-branch review's figures, in the ledger |
+| 1,000,000; 76 | the review's differential and random-program probes' programs; the compiled-program probe's | same place |
+| a few in two hundred | single-instruction gates slipping a single scramble: 2, 4 and 1 of 200 seeds | same place |
+| five; 20 of 20; 4,096 | gates the final test was shown to catch; seeds each failed on; the test's cases | the final fix round's report (`p5a-final-fix-report.md`, same place); `ProptestConfig { cases: 4096, .. }` |
+| seven | the whole-branch review's Minors fixed | the final fix brief, N1–N7 |
+| ten bytes; 64 million words | a local's size now; the memory cap's saved words | a `u64`, a one-byte `WordTag` and a `bool`; `DEFAULT_CAPS.mem` |
+| 3.622–3.655 ms, 6.121–6.185 ms; 0.056, 0.120–0.121 ms; 0.012, 0.028 ms | `run_asm` on `main` and on this branch: the 1,400,009-step loop, `sum(1000)`, `upto(200)` | the plan's appendix `asmbench`, median of 15 runs, two rounds alternated, `main` built from a worktree at `a4e7c6f` |
+| 1,400,009 | the loop's steps | the spec's §2.5 (`asmprobe`) |
+| exit 0 | `all configs green — base, LLVM and browser` | `TREE_SITTER=/home/davey/projects/redextape/.tools/tree-sitter scripts/check-all.sh` |
+| exit 0 | `slow tier green` | `scripts/check-slow.sh` |
+| 95.77% (31,831 lines, 1,348 missed); 1,850 run, all passed, 33 skipped | Rust line coverage and tests, floor 90 | `cargo llvm-cov nextest --workspace --fail-under-lines 90` |
+| 1,825 | the same run's tests on `main` | part 4b's entry, as merged in `a4e7c6f` |
+| 12 of 12 exit 0 | the hygiene scans | `scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua}.sh`, each `--self-test` then alone |
+| 154 files, 1,324 tests; 96.73, 90.29, 97.78, 98.44 against 95, 89, 97, 97 | the web CI sequence: statements, branches, functions and lines against their floors | `pnpm run build:wasm && pnpm exec biome ci --error-on-warnings && pnpm run typecheck && pnpm run test:coverage && pnpm run build:app` |
+| 200; healthy | the image's status and health | `docker build -t redextape-check .`, `docker run -d -p 8099:80`, `curl -w '%{http_code}'`, `docker inspect --format '{{.State.Health.Status}}'` |

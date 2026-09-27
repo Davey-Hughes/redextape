@@ -2,6 +2,9 @@
 //! whole run. Materializing is not viable: the pre-existing `sim::Step` copies every tape each step,
 //! measured at 3,488 bytes/step and 592.9 MB for `sum(5)` — row 7 of the demo suite.
 //!
+//! The asm cursor lives here too, lazy in the same way, and is deliberately OUTSIDE that vocabulary:
+//! `AsmCursor` yields its own `AsmStep`, never a `StepEvent`, for the reason its module doc gives.
+//!
 //! THE TM DELTA IS A RULE REFERENCE, NOT A COPY OF ITS EFFECTS. The machine is immutable for the
 //! duration of a run, so `(state, rule)` determines the writes and head moves — they are recoverable
 //! as `m.states[state].rules[rule]`. That makes the variant 8 bytes with no allocation, and it carries
@@ -19,8 +22,10 @@ use crate::tm::machine::{Machine, StateId, Symbol};
 use crate::tm::sim::{Caps as TmCaps, Status as TmStatus, Tape, apply, rule_matches};
 use std::borrow::Borrow;
 
+mod asm_cursor;
 mod zipper;
 
+pub use asm_cursor::{AsmCap, AsmCursor, AsmFrame, AsmStatus, AsmStep, WordTag};
 pub use zipper::ZipperCursor;
 
 /// One step of either backend. `Delta`'s `state` is the state BEFORE the transition, matching the

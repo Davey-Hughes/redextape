@@ -118,10 +118,9 @@ pub fn compare_printed(text: &str, want: &[(Span, TokenClass)]) -> Result<(), St
     compare_classified(&ASM, HIGHLIGHTS, text, want)
 }
 
-/// `lower_program`'s template, reproduced. `redextape_core::tm::lower_program` is private, and this
-/// is the third documented duplicate of it in this workspace — `redextape-native`'s
-/// `tests/native_oracle.rs` and `redextape-core`'s `tests/guard_counterexamples.rs` are the other
-/// two, both of which say so in a doc comment.
+/// `lower_program`'s template, reproduced while `redextape_core::tm::lower_program` was private (it is
+/// public now). It is not the only copy: `redextape-native` holds two more, in `src/lib.rs` and
+/// `tests/native_oracle.rs`, each saying so in a doc comment.
 ///
 /// **THE ORDER IS LOAD-BEARING AND IS NOT A PREFERENCE.** Try the program as first-order Core
 /// unchanged, and defunctionalize only when the direct attempt rejects it as higher-order.

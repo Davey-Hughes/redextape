@@ -270,8 +270,9 @@ fn balanced(lo: usize, hi: usize) -> String {
     format!("({} + {})", balanced(lo, mid), balanced(mid, hi))
 }
 
-/// `Core` to asm, reproducing `lower_program`'s own order: direct, then `defunc` on an unsupported
-/// higher-order construct. Reproduced rather than called because `lower_program` is private.
+/// `Core` to asm: `lower_asm` directly, then, on ANY error — `TooDeep` included — again through `defunc`.
+/// That is looser than `lower_program`, which retries through `defunc` only on `Unsupported` and returns
+/// `TooDeep` at once. Written while `lower_program` was private; it is public now.
 fn asm_of(src: &str) -> redextape_core::tm::asm::Program {
     let core = core_of(src);
     lower_asm(&core).or_else(|_| defunc(&core).and_then(|d| lower_asm(&d))).expect("program must lower to asm")

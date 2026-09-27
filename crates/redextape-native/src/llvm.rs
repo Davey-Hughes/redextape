@@ -355,7 +355,7 @@ fn map_rt_symbols(ee: &ExecutionEngine<'_>, module: &Module<'_>) {
     }
 }
 
-/// The intrinsics the SATURATING arithmetic arms lower to. `run_asm`'s `eval_bin` uses
+/// The intrinsics the SATURATING arithmetic arms lower to. The asm interpreter's `eval_bin` uses
 /// `saturating_add`/`saturating_mul` and monus, so plain `add`/`mul`/`sub` (which WRAP) would
 /// disagree with the reference on overflow — the exact bug the Cranelift backend shipped once and
 /// had to fix, so it is a known trap rather than a hypothetical.
@@ -370,7 +370,8 @@ fn map_rt_symbols(ee: &ExecutionEngine<'_>, module: &Module<'_>) {
 struct SatFns<'ctx> {
     /// `llvm.uadd.sat.i64` — clamps to `u64::MAX`, matching `u64::saturating_add`.
     add: FunctionValue<'ctx>,
-    /// `llvm.usub.sat.i64` — clamps to `0`, i.e. monus, matching `run_asm`'s `x - min(x, y)`.
+    /// `llvm.usub.sat.i64` — clamps to `0`, i.e. monus, matching the asm interpreter's `eval_bin`, whose
+    /// `saturating_sub` is `x - min(x, y)`.
     sub: FunctionValue<'ctx>,
     /// `llvm.umul.with.overflow.i64` → `{i64, i1}`. LLVM has **no** scalar `llvm.umul.sat` (the only
     /// saturating multiply is the fixed-point `llvm.umul.fix.sat`, which takes an extra scale
@@ -460,8 +461,8 @@ fn load_i64<'ctx>(ctx: &'ctx Context, b: &Builder<'ctx>, slot: PointerValue<'ctx
     }
 }
 
-/// Read register `r`. Out-of-bank indices read `0`, mirroring `run_asm`'s
-/// `args.get(n).unwrap_or(0)` / `locals.get(n).unwrap_or(0)` (and `codegen::read_reg`).
+/// Read register `r`. Out-of-bank indices read `0`, mirroring the asm interpreter's `Vm::read` (behind
+/// `trace::AsmCursor`), whose `locals.get(n)` / `args.get(n)` fall back to `0` (and `codegen::read_reg`).
 fn read_reg<'ctx>(ctx: &'ctx Context, b: &Builder<'ctx>, f: &Fun<'ctx>, r: Reg) -> Result<IntValue<'ctx>, IrError> {
     let slot = match r {
         Reg::Loc(n) => f.locs.get(n as usize).copied(),
@@ -518,7 +519,7 @@ fn emit_cmp<'ctx>(
     b.build_int_z_extend(bit, ctx.i64_type(), "cmpw").map_err(ir_err)
 }
 
-/// Emit `x op y` per `run_asm`'s `eval_bin`, mirroring `codegen::emit_bin` arm for arm. All words are
+/// Emit `x op y` per the asm interpreter's `eval_bin`, mirroring `codegen::emit_bin` arm for arm. All words are
 /// `u64`, so: `Add`/`Mul` SATURATE at `u64::MAX` on overflow; `Sub` is saturating monus; comparisons
 /// are UNSIGNED. The saturating arms are intrinsic calls (see `SatFns`), *never* plain `add`/`mul`.
 fn emit_bin<'ctx>(
@@ -634,9 +635,9 @@ fn build_prologue<'ctx>(
 // holds at once.
 #[allow(clippy::too_many_lines)]
 // `h`/`t`/`p`/`v`/`x`/`y`/`l`/`r`/`f`/`b` follow the SAME compiler-codegen convention as
-// `codegen::translate_subroutine` and `run_asm`'s own `Instr` arms (head/tail/pointer/value/
-// left-operand/right-operand/label/register/function/builder) — arm-for-arm identical to the
-// Cranelift version, which reads the same way.
+// `codegen::translate_subroutine` and the asm interpreter's own `Instr` arms, in `Vm::exec` behind
+// `trace::AsmCursor` (head/tail/pointer/value/left-operand/right-operand/label/register/function/
+// builder) — arm-for-arm identical to the Cranelift version, which reads the same way.
 #[allow(clippy::many_single_char_names)]
 fn translate_subroutine<'ctx>(
     ctx: &'ctx Context,
@@ -1289,7 +1290,7 @@ mod tests {
     ///
     /// The chain is seeded from `Arg(0)` (not from `Loc(0)`'s own init-`0` value) so that no
     /// instruction here READS a `Loc` this body has not already written: `run_asm`'s `Call` clones
-    /// the caller's locals into the saved frame and leaves `vm.locals` in place, so a callee
+    /// the caller's locals into the saved frame and leaves the locals in place, so a callee
     /// INHERITS the caller's `Loc` values, whereas both native backends give the callee a zeroed
     /// bank. The same divergence class applies to `Rr`, not just `Loc`: `$main: li rr, 1; call g;
     /// halt` with `g: ret` (a callee that `Ret`s without ever writing `Rr`) yields `run_asm` → `1`

@@ -1,9 +1,9 @@
 //! `redextape-native-rt`: the native backend's runtime — heap/box arenas plus the `extern "C"`
 //! host functions that JIT-generated code (Task 4) calls for heap allocation, faults, and cap
-//! checks. Semantics mirror `redextape_core::tm::asm::run_asm`'s `Cons`/`Head`/`Tail`/`IsEmpty`/
-//! `Box`/`BoxGet`/`BoxSet` arms EXACTLY: 1-based heap/box pointers, `0` = nil, the same fault and
-//! cap conditions. This is what lets the native backend reuse `decode_asm` and agree with the asm
-//! interpreter in the oracle.
+//! checks. Semantics mirror the asm interpreter's `Cons`/`Head`/`Tail`/`IsEmpty`/`Box`/`BoxGet`/`BoxSet`
+//! arms (`redextape_core::trace::AsmCursor`, which `run_asm` loops over) EXACTLY: 1-based heap/box
+//! pointers, `0` = nil, the same fault and cap conditions. This is what lets the native backend reuse
+//! `decode_asm` and agree with the asm interpreter in the oracle.
 //!
 //! This crate is split out from `redextape-native` (which depends on Cranelift) so its `rt_*`
 //! functions can be **linked** into a standalone AOT binary without dragging Cranelift along:
@@ -26,9 +26,10 @@ use redextape_core::ty::Ty;
 /// The native backend's runtime state: heap/box arenas, step/depth counters, and fault/cap
 /// flags. JIT-generated code (Task 4) holds a `*mut Runtime` for the duration of a run and calls
 /// the `rt_*` host functions below for every heap/box operation and every cap check, mirroring
-/// `run_asm`'s `Vm` one-for-one (`heap`/`boxes`/`steps`/`caps` are the same fields; `depth` plays
-/// the role `Vm::stack.len()` plays for the stack cap, without needing the actual frame data —
-/// the JIT-generated code keeps locals on the native stack instead of a `Vec<Frame>`).
+/// the asm interpreter's machine state (`trace::AsmCursor`) one-for-one (`heap`/`boxes`/`steps`/`caps`
+/// are the same fields; `depth` plays the role the cursor's `stack().len()` plays for the stack cap,
+/// without needing the actual frame data — the JIT-generated code keeps locals on the native stack
+/// instead of a `Vec<AsmFrame>`).
 pub struct Runtime {
     pub heap: Vec<(u64, u64)>,
     pub boxes: Vec<u64>,
@@ -36,7 +37,7 @@ pub struct Runtime {
     pub depth: u64,
     pub caps: Caps,
     /// The recursion-depth limit `rt_enter` trips at. Distinct from `caps.stack` because native
-    /// keeps each frame's locals on the *real* OS call stack (not a `Vec<Frame>`), so the backend
+    /// keeps each frame's locals on the *real* OS call stack (not a `Vec<AsmFrame>`), so the backend
     /// derives a FRAME-SIZE-AWARE cap: `min(caps.stack, safe_depth)`, where `safe_depth` is how many
     /// worst-case frames fit in the run thread's reserved stack (see `redextape_native::codegen`).
     /// This guarantees the depth cap always trips *before* the native stack overflows, for any
@@ -81,15 +82,15 @@ impl Runtime {
     }
 
     /// Finish a run: pair the register-`rr` result word with the heap needed to decode it,
-    /// mirroring `run_asm`'s `AsmRun::Ran(AsmOutcome { result: vm.rr, heap: vm.heap })`.
+    /// mirroring `AsmCursor::into_outcome`, which `run_asm` answers `AsmRun::Ran` with.
     #[must_use]
     pub fn into_outcome(self, result: u64) -> AsmOutcome {
         AsmOutcome { result, heap: self.heap }
     }
 }
 
-/// `rd <- cons(rh, rt)`. Mirrors `run_asm`'s `Instr::Cons` arm: cap-checks `heap.len()` against
-/// `caps.heap` (matching `vm.heap.len() as u64 >= vm.caps.heap`), else pushes `(h, t)` and
+/// `rd <- cons(rh, rt)`. Mirrors the asm interpreter's `Instr::Cons` arm: cap-checks `heap.len()` against
+/// `caps.heap` (matching `self.heap.len() as u64 >= caps.heap`), else pushes `(h, t)` and
 /// returns the new 1-based pointer (`heap.len()` after the push).
 ///
 /// # Safety
@@ -109,7 +110,7 @@ pub unsafe extern "C" fn rt_cons(rt: *mut Runtime, h: u64, t: u64) -> u64 {
     rt.heap.len() as u64 // 1-based
 }
 
-/// `rd <- head(rl)`. Mirrors `run_asm`'s `Instr::Head` arm: `p == 0` faults ("head of empty
+/// `rd <- head(rl)`. Mirrors the asm interpreter's `Instr::Head` arm: `p == 0` faults ("head of empty
 /// list"); a non-null pointer past the heap end faults ("head of invalid list pointer") rather
 /// than indexing out of bounds; else returns the cell's head field.
 ///
@@ -137,7 +138,7 @@ pub unsafe extern "C" fn rt_head(rt: *mut Runtime, p: u64) -> u64 {
     }
 }
 
-/// `rd <- tail(rl)`. Mirrors `run_asm`'s `Instr::Tail` arm: `p == 0` faults ("tail of empty
+/// `rd <- tail(rl)`. Mirrors the asm interpreter's `Instr::Tail` arm: `p == 0` faults ("tail of empty
 /// list"); a dangling pointer faults ("tail of invalid list pointer"); else returns the cell's
 /// tail field.
 ///
@@ -163,7 +164,7 @@ pub unsafe extern "C" fn rt_tail(rt: *mut Runtime, p: u64) -> u64 {
     }
 }
 
-/// `rd <- is_empty(rl)`. Mirrors `run_asm`'s `Instr::IsEmpty` arm: `1` if `p == 0`, else `0`.
+/// `rd <- is_empty(rl)`. Mirrors the asm interpreter's `Instr::IsEmpty` arm: `1` if `p == 0`, else `0`.
 /// Never faults and never touches the heap, so it is not gated by `stopped` (there is nothing for
 /// it to corrupt).
 ///
@@ -174,9 +175,9 @@ pub unsafe extern "C" fn rt_is_empty(_rt: *mut Runtime, p: u64) -> u64 {
     u64::from(p == 0)
 }
 
-/// `rd <- box(rv)`. Mirrors `run_asm`'s `Instr::Box` arm: cap-checks `boxes.len()` against
-/// `caps.heap` (the box arena shares the heap cap, matching `vm.boxes.len() as u64 >=
-/// vm.caps.heap`), else pushes `v` and returns the new 1-based pointer.
+/// `rd <- box(rv)`. Mirrors the asm interpreter's `Instr::Box` arm: cap-checks `boxes.len()` against
+/// `caps.heap` (the box arena shares the heap cap, matching `self.boxes.len() as u64 >=
+/// caps.heap`), else pushes `v` and returns the new 1-based pointer.
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
@@ -194,7 +195,7 @@ pub unsafe extern "C" fn rt_box(rt: *mut Runtime, v: u64) -> u64 {
     rt.boxes.len() as u64 // 1-based
 }
 
-/// `rd <- box_get(rb)`. Mirrors `run_asm`'s `Instr::BoxGet` arm: `p == 0` faults ("box_get of
+/// `rd <- box_get(rb)`. Mirrors the asm interpreter's `Instr::BoxGet` arm: `p == 0` faults ("box_get of
 /// null handle"); a dangling handle faults ("box_get of invalid handle"); else returns the box's
 /// value.
 ///
@@ -226,7 +227,7 @@ pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
     }
 }
 
-/// `box_set(rb, rv)`. Mirrors `run_asm`'s `Instr::BoxSet` arm: `p == 0` faults ("box_set of null
+/// `box_set(rb, rv)`. Mirrors the asm interpreter's `Instr::BoxSet` arm: `p == 0` faults ("box_set of null
 /// handle"); a dangling handle faults ("box_set of invalid handle"); else overwrites the box in
 /// place.
 ///
@@ -253,8 +254,8 @@ pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
     }
 }
 
-/// Advance the step counter by one, mirroring `run_asm`'s per-instruction step-cap check
-/// (`vm.steps`/`vm.caps.steps`). Returns `1` (a trip signal for the generated code to branch on)
+/// Advance the step counter by one, mirroring the asm interpreter's per-instruction step-cap check
+/// (`steps`/`caps.steps`). Returns `1` (a trip signal for the generated code to branch on)
 /// once `steps` exceeds `caps.steps`, setting `hit_cap`; else `0`.
 ///
 /// # Safety
@@ -278,9 +279,9 @@ pub unsafe extern "C" fn rt_tick(rt: *mut Runtime) -> u64 {
     0
 }
 
-/// Enter a call frame, incrementing `depth`, mirroring `run_asm`'s `Instr::Call` stack-cap check
-/// (`vm.stack.len()`/`vm.caps.stack`) — the JIT-generated code keeps locals on the native call
-/// stack rather than a `Vec<Frame>`, so `depth` is the counter that stands in for `stack.len()`.
+/// Enter a call frame, incrementing `depth`, mirroring the asm interpreter's `Instr::Call` stack-cap check
+/// (`self.stack.len()`/`caps.stack`) — the JIT-generated code keeps locals on the native call
+/// stack rather than a `Vec<AsmFrame>`, so `depth` is the counter that stands in for `stack.len()`.
 /// Returns `1` (a trip signal) once `depth` exceeds `depth_cap`, setting `hit_cap`; else `0`.
 ///
 /// The cap is `depth_cap` (the frame-size-aware `min(caps.stack, safe_depth)` the backend supplied),
@@ -307,8 +308,8 @@ pub unsafe extern "C" fn rt_enter(rt: *mut Runtime) -> u64 {
     0
 }
 
-/// Leave a call frame, decrementing `depth`, mirroring `run_asm`'s `Instr::Ret` popping a frame
-/// off `vm.stack`. Uses `saturating_sub` so a spurious `rt_leave` (e.g. one emitted on a path the
+/// Leave a call frame, decrementing `depth`, mirroring the asm interpreter's `Instr::Ret` popping a frame
+/// off the cursor's call stack. Uses `saturating_sub` so a spurious `rt_leave` (e.g. one emitted on a path the
 /// matching `rt_enter` never reached) can never wrap `depth` around — defense in depth, not a case
 /// the generated code is expected to hit.
 ///

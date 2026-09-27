@@ -448,11 +448,11 @@ impl TmState {
 /// mistake and lost it — see this module's header. A consumer must not use `lambda_nodes` against any
 /// term but the one `lambda_text` holds.
 ///
-/// **ONE STRUCT RATHER THAN THREE ACCESSORS**, because all three legs must come from ONE compile. Three
-/// would be three chances to hold one program's source index beside another program's lambda index;
-/// the `NodeId`s would resolve, most of them to the wrong construct, and nothing would notice. That is
-/// the failure `SourceMap` is shaped to remove by offering no `with_source` setter, applied at the
-/// boundary instead of inside the map.
+/// **ONE STRUCT RATHER THAN AN ACCESSOR PER LEG**, because every leg must come from ONE compile. An
+/// accessor per leg would be a chance per leg to hold one program's source index beside another
+/// program's lambda index; the `NodeId`s would resolve, most of them to the wrong construct, and nothing
+/// would notice. That is the failure `SourceMap` is shaped to remove by offering no `with_source` setter,
+/// applied at the boundary instead of inside the map.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LinkIndex {
@@ -504,17 +504,23 @@ pub struct LinkIndex {
     /// Rust-side, and nothing Rust-side reads this field. Declining the leg is the only option that
     /// does not tell the UI something false about a state it can click.
     pub tm_owner: Vec<i32>,
+    /// `asm_owner[i]` is the Core node whose lowering emitted instruction `i`, or `-1` — `SourceMap`'s
+    /// `asm_owner` in the form `tm_owner` crosses to JavaScript in, and refused whole by the same rule when
+    /// an id would not fit `i32`. It needs no `TmProgram`: the asm half is built apart from the machine.
+    pub asm_owner: Vec<i32>,
 }
 
 impl LinkIndex {
-    /// Build all three legs from one compile.
+    /// Build every leg from one compile.
     ///
     /// TOTAL OVER BOTH ABSENCES. A `None` term (the lambda backend declined this program) gives empty
     /// lambda legs rather than failing, and a `None` program (the TM backend declined) gives an empty
     /// `tm_owner`. `SourceMap::build` is already total over exactly these refusals, and the index must
-    /// not be the layer that stops being. A THIRD, NARROWER REFUSAL joins those two here: a `Some`
-    /// program whose owner ids cannot all fit `i32` also empties `tm_owner` rather than emitting a
-    /// value that would misidentify a state's owner — see the field's own doc.
+    /// not be the layer that stops being. NARROWER REFUSALS join those two here, one per owner column: a
+    /// `Some` program whose owner ids cannot all fit `i32` empties `tm_owner` rather than emitting a
+    /// value that would misidentify a state's owner — see the field's own doc — and an instruction owner
+    /// that cannot fit `i32` empties `asm_owner` by the same rule, with or without a program, since the
+    /// asm column needs none.
     ///
     /// `byte_budget` AND `depth_cap` ARE PARAMETERS because this file picks no numbers — see the
     /// module header. The web app passes `LAMBDA_BYTE_BUDGET`; the wasm boundary passes
@@ -549,7 +555,16 @@ impl LinkIndex {
                     .collect::<Option<Vec<i32>>>()
             })
             .unwrap_or_default();
-        LinkIndex { lambda_text, lambda_spans, lambda_cut, lambda_nodes, source_nodes, tm_owner }
+        let asm_owner = map
+            .asm_owner
+            .iter()
+            .map(|owner| match owner {
+                None => Some(-1),
+                Some(n) => i32::try_from(*n).ok(),
+            })
+            .collect::<Option<Vec<i32>>>()
+            .unwrap_or_default();
+        LinkIndex { lambda_text, lambda_spans, lambda_cut, lambda_nodes, source_nodes, tm_owner, asm_owner }
     }
 }
 
@@ -571,11 +586,11 @@ mod tests {
     /// to the pre-fix build for `s1` (which genuinely has none). A consumer reading `tm_owner` could not
     /// tell a real, huge owner id from no owner; that is the silent wrong answer, not a crash.
     ///
-    /// A `NodeId` this large can never occur from real parsing today (`core::NodeGen::fresh` is a bare
-    /// counter with no cap — see its own doc), which is exactly why this test builds the `SourceMap`
-    /// fixture by hand instead of parsing a program: reaching `u32::MAX` legitimately would need
-    /// billions of source constructs, and the enforcement this pins must be checkable without paying
-    /// that cost.
+    /// No parse can mint a `NodeId` this large: `core::NodeGen::fresh` saturates at `core::MAX_NODE_ID`,
+    /// which sits under `i32::MAX` so that this cast cannot fail — see both docs. That is exactly why this
+    /// test builds the `SourceMap` fixture by hand instead of parsing a program: the refusal it pins is the
+    /// defence in depth `tm_owner`'s doc keeps for a ceiling raised past `2^31`, and only a hand-built map
+    /// reaches it.
     #[test]
     fn tm_owner_declines_the_whole_leg_rather_than_wrap_an_id_into_the_no_owner_sentinel() {
         let program = TmProgram {
@@ -610,5 +625,26 @@ mod tests {
              owner: got {:?}",
             index.tm_owner
         );
+    }
+
+    /// `asm_owner` refuses an id past `i32` the way `tm_owner` does, for the reason `tm_owner`'s own test
+    /// gives: `u32::MAX` would wrap onto `-1` and read as "no owner". It refuses with a program and
+    /// without one, as `LinkIndex::build` says, since the asm column needs none.
+    #[test]
+    fn asm_owner_declines_the_whole_leg_rather_than_wrap_an_id_into_the_no_owner_sentinel() {
+        let map = SourceMap { asm_owner: vec![Some(NodeId::MAX), None], ..SourceMap::default() };
+        let program = TmProgram {
+            states: Vec::new(),
+            alphabet: Vec::new(),
+            tapes: 1,
+            width: 1,
+            start: 0,
+            listing: Vec::new(),
+            labels: Vec::new(),
+        };
+        for program in [None, Some(&program)] {
+            let index = LinkIndex::build(None, program, &map, 0, 0);
+            assert!(index.asm_owner.is_empty(), "with a program: {}, got {:?}", program.is_some(), index.asm_owner);
+        }
     }
 }

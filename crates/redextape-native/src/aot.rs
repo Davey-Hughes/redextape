@@ -62,7 +62,7 @@ fn serialize_ty(ty: &Ty, out: &mut Vec<u8>) -> Result<(), AotError> {
 /// [32..)   Ty, tag-encoded (see `serialize_ty`)
 /// ```
 ///
-/// `caps.mem` is intentionally omitted: it bounds the reference interpreter's cloned-`Vec<Frame>`
+/// `caps.mem` is intentionally omitted: it bounds the reference interpreter's cloned-`Vec<AsmFrame>`
 /// words and has no native analog (native recursion is bounded by `depth_cap` instead — see
 /// `shared::native_depth_cap`).
 fn serialize_config(caps: Caps, depth_cap: u64, ty: &Ty) -> Result<Vec<u8>, AotError> {

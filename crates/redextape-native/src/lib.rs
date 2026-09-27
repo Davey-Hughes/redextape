@@ -137,10 +137,11 @@ pub enum NativeRun {
 
 /// Lower `core` to asm, trying direct (first-order) lowering before defunctionalizing.
 ///
-/// This mirrors `redextape_core::tm`'s own (private) `lower_program` template exactly: try
-/// `lower_asm(core)` first; only retry through `defunc` when it rejects the program as higher-order
-/// (`LowerError::Unsupported`). A `LowerError::TooDeep` (the deep-Core stack-safety guard) is
-/// returned immediately rather than retried -- see that function's doc comment for the rationale.
+/// This mirrors `redextape_core::tm`'s own `lower_program` template exactly: try `lower_asm(core)` first;
+/// only retry through `defunc` when it rejects the program as higher-order (`LowerError::Unsupported`).
+/// A `LowerError::TooDeep` (the deep-Core stack-safety guard) is returned immediately rather than retried
+/// -- see that function's doc comment for the rationale. This copy was made while that function was
+/// private; it is public now.
 /// Shared by both backends (Cranelift and LLVM), so its cfg is widened to either being enabled.
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
 fn lower_program(core: &Core) -> Result<Program, LowerError> {

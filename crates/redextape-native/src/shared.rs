@@ -130,7 +130,7 @@ pub(crate) fn n_arg_vars(prog: &Program, sub: &Subroutine) -> u32 {
 /// The frame-size-aware recursion-depth cap: `min(caps.stack, safe_depth)`, where `safe_depth` is
 /// how many worst-case native frames fit in the reserved recursion budget.
 ///
-/// Native keeps each call frame's `Loc`/`Arg`/`Rr` on the REAL OS call stack (not a `Vec<Frame>`
+/// Native keeps each call frame's `Loc`/`Arg`/`Rr` on the REAL OS call stack (not a `Vec<AsmFrame>`
 /// like the reference) — as Cranelift `Variable`s, or as LLVM entry-block `alloca`s — so a program
 /// whose worst subroutine has many registers builds a fat native frame. If the plain depth cap
 /// (`caps.stack`) let such a program recurse that deep, it would overflow the run thread's stack —

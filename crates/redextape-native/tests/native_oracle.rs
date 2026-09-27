@@ -92,10 +92,11 @@ fn core_of(src: &str) -> Core {
     desugar(&prog.unwrap())
 }
 
-/// Mirrors `redextape_core::tm`'s own (private) `lower_program` template exactly: try `lower_asm`
-/// first (first-order Core unchanged); only retry through `defunc` when it rejects the program as
-/// higher-order (`LowerError::Unsupported`). `run_native` uses this same template internally
-/// (it is not exported, so this is a deliberate, documented duplicate) — see this crate's `lib.rs`.
+/// Mirrors `redextape_core::tm`'s own `lower_program` template exactly: try `lower_asm` first
+/// (first-order Core unchanged); only retry through `defunc` when it rejects the program as higher-order
+/// (`LowerError::Unsupported`). `run_native` uses this same template internally, in a private copy of
+/// its own — see this crate's `lib.rs`. This copy was made while `redextape_core::tm::lower_program` was
+/// private; it is public now.
 fn lower_program(core: &Core) -> Result<Program, LowerError> {
     match lower_asm(core) {
         Ok(p) => return Ok(p),

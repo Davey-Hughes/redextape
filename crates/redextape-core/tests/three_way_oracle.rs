@@ -50,9 +50,12 @@ use redextape_core::desugar::desugar;
 use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, run_lambda};
 use redextape_core::parser::parse;
 use redextape_core::tm::{
-    Binary, Encoding, EncodingKind, MAX_FIELD_WIDTH, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary, decode_tape, run_tm,
-    run_tm_fitted,
+    Binary, DEFAULT_CAPS as ASM_CAPS, Encoding, EncodingKind, MAX_FIELD_WIDTH, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary,
+    decode_tape, lower_program, run_tm, run_tm_described, run_tm_fitted,
 };
+use redextape_core::trace::{AsmCursor, AsmStatus, StepEvent, TmCursor, WordTag};
+use redextape_core::ty::Ty;
+use redextape_core::typeck::result_type;
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 use redextape_test_support::arb_expr_over;
@@ -507,6 +510,91 @@ fn first_order_demos_stay_synced_across_all_seven_copies() {
     // this test green while its file drifted. `grep -rn FIRST_ORDER_DEMOS` over the tree is the
     // enumeration method this doc names, and 7 is what it returns — this file plus `copies`.
     assert_eq!(copies.len() + 1, 7, "a copy was added to or removed from the tree without updating this count");
+}
+
+/// The instructions the TM runs, in order, read off the states it enters. `lower_tm` builds one entry
+/// state `pc{i}` per instruction, meaning "about to execute instruction `i`", and names nothing else that
+/// way. An instruction is entered when the machine is in its `pc{i}` state on a step and was in a
+/// DIFFERENT state the step before: unary's gadgets loop on their own entry states, so counting every
+/// step spent in one would count those loops. That rule would merge an instruction that jumps straight
+/// to itself, which only a program that never halts contains.
+fn tm_instructions(src: &str, core: &redextape_core::core::Core, ty: &Ty, kind: EncodingKind) -> Vec<usize> {
+    let d = run_tm_described(core, kind, ty.clone(), TM_DEFAULT_CAPS)
+        .unwrap_or_else(|r| panic!("{src} did not run under {kind:?}: {r:?}"));
+    assert!(matches!(d.run, TmRun::Ran { .. }), "{src} must complete under {kind:?}");
+    let entry = |state: u32| {
+        let digits = d.machine.states[state as usize].name.strip_prefix("pc")?;
+        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        digits.parse::<usize>().ok()
+    };
+    let init = d.header.init(d.machine.tapes);
+    let mut entered = Vec::new();
+    let mut before: Option<u32> = None;
+    for event in TmCursor::new(&d.machine, &init, TM_DEFAULT_CAPS) {
+        let StepEvent::Delta { state, .. } = event else { panic!("a TM cursor emitted {event:?}") };
+        if before != Some(state) {
+            entered.extend(entry(state));
+        }
+        before = Some(state);
+    }
+    entered
+}
+
+/// `src`'s Core, its result type, and an unstarted asm cursor over the program `lower_program` lowers
+/// that Core to.
+fn asm_run(src: &str) -> (redextape_core::core::Core, Ty, AsmCursor<redextape_core::tm::Program>) {
+    let (prog, ds) = parse(src);
+    assert!(ds.is_empty(), "parse errors in {src:?}: {ds:?}");
+    let prog = prog.expect("a program with no diagnostics parses");
+    let ty = result_type(&prog).unwrap_or_else(|e| panic!("type errors in {src:?}: {e:?}"));
+    let core = desugar(&prog);
+    let program = lower_program(&core).unwrap_or_else(|e| panic!("{src} did not lower: {e:?}"));
+    (core, ty, AsmCursor::new(program, ASM_CAPS))
+}
+
+/// THE ASM CURSOR RUNS THE INSTRUCTIONS THE TM RUNS, STEP FOR STEP, under both encodings. `run_asm` is a
+/// loop over `AsmCursor`, so checking one against the other could not fail; the TM is a second
+/// implementation of every instruction, sharing no stepping code with the cursor (both do resolve labels
+/// through `Program::label_index`), and it enters `pc{i}` exactly when it begins instruction `i`. Every
+/// corpus program the TM runs to a value is checked, which is `FIRST_ORDER_DEMOS` and the latent traps.
+#[test]
+fn asm_steps_are_the_instructions_the_tm_enters() {
+    for src in FIRST_ORDER_DEMOS.iter().chain(LAMBDA_LIMITATION_DEMOS) {
+        let (core, ty, mut cursor) = asm_run(src);
+        let asm: Vec<usize> = cursor.by_ref().map(|s| s.pc).collect();
+        assert_eq!(cursor.status(), Some(&AsmStatus::Halted), "{src} must halt on the asm cursor");
+        for kind in [EncodingKind::Unary, EncodingKind::Binary] {
+            assert_eq!(tm_instructions(src, &core, &ty, kind), asm, "asm and TM step apart for {src} under {kind:?}");
+        }
+    }
+}
+
+/// At `halt`, `rr` is tagged by the program's result type: a list pointer for `List<T>`, a value for
+/// everything else a program can return — `Nat` and `Bool`, which the corpus returns, and `Unit`, which
+/// no corpus program does, so `UNIT` is added here. Nothing in the cursor reads the type, so this is the
+/// tags agreeing with the typechecker from outside.
+#[test]
+fn the_result_register_is_tagged_by_the_result_type() {
+    const UNIT: &str = "let x = 1;";
+    assert_eq!(asm_run(UNIT).1, Ty::Unit, "{UNIT} must return `Unit`");
+    let mut seen = std::collections::BTreeSet::new();
+    for src in FIRST_ORDER_DEMOS.iter().chain(LAMBDA_LIMITATION_DEMOS).chain([&UNIT]) {
+        let (_, ty, mut cursor) = asm_run(src);
+        cursor.by_ref().for_each(drop);
+        assert_eq!(cursor.status(), Some(&AsmStatus::Halted), "{src} must halt on the asm cursor");
+        let want = if matches!(ty, Ty::List(_)) { WordTag::List } else { WordTag::Value };
+        assert_eq!(cursor.rr_tag(), want, "{src} returns {ty:?}");
+        seen.insert(match ty {
+            Ty::Nat => "Nat",
+            Ty::Bool => "Bool",
+            Ty::Unit => "Unit",
+            Ty::List(_) => "List",
+            Ty::Fun(..) | Ty::Var(_) => "other",
+        });
+    }
+    assert_eq!(seen.into_iter().collect::<Vec<_>>(), ["Bool", "List", "Nat", "Unit"], "the types the doc names");
 }
 
 #[test]

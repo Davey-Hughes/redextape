@@ -7,6 +7,7 @@ use crate::analysis::push_span;
 use crate::core::BinOp;
 use crate::tm::asm_syntax::AsmDocument;
 use crate::tm::comments::{AnchoredComment, AsmAnchor, CommentWriter};
+use crate::trace::{AsmCursor, AsmStatus};
 use crate::ty::Ty;
 use crate::value::Value;
 use std::collections::HashMap;
@@ -429,8 +430,10 @@ pub struct Caps {
 pub const DEFAULT_CAPS: Caps = Caps { steps: 5_000_000, stack: 100_000, heap: 5_000_000, mem: 64_000_000 };
 
 /// Upper bound on a `Reg::Loc`/`Reg::Arg` index. A program with a million registers is absurd (real
-/// ones use dozens); this caps each register bank at <= 8 MB, well below allocation-abort territory,
-/// while never rejecting a legitimate program.
+/// ones use dozens); this caps each register bank at a million entries, well below allocation-abort
+/// territory, while never rejecting a legitimate program. That is 10 MB of locals at 10 bytes each — an
+/// 8-byte word, a 1-byte `WordTag` and a 1-byte written bit — and 9 MB of arguments, which have no
+/// written bit; `Vec`'s doubling can reserve up to twice what a bank holds.
 const MAX_REGISTERS: u32 = 1_000_000;
 
 /// The result of a completed run: the word in `rr` plus the heap needed to reconstruct a list.
@@ -451,65 +454,6 @@ pub enum AsmRun {
     Fault(String),
 }
 
-struct Frame {
-    ret_pc: usize,
-    saved_locals: Vec<u64>,
-}
-
-struct Vm {
-    locals: Vec<u64>,
-    args: Vec<u64>,
-    rr: u64,
-    heap: Vec<(u64, u64)>,
-    boxes: Vec<u64>,
-    stack: Vec<Frame>,
-    pc: usize,
-    steps: u64,
-    caps: Caps,
-    /// Running total of words held across all frames currently on `stack` (mirrors the sum of
-    /// `saved_locals.len()`), tracked incrementally so `Call`/`Ret` stay O(1).
-    saved_words: u64,
-}
-
-impl Vm {
-    fn read(&self, r: Reg) -> u64 {
-        match r {
-            Reg::Loc(n) => self.locals.get(n as usize).copied().unwrap_or(0),
-            Reg::Arg(n) => self.args.get(n as usize).copied().unwrap_or(0),
-            Reg::Rr => self.rr,
-        }
-    }
-
-    fn write(&mut self, r: Reg, v: u64) {
-        match r {
-            Reg::Loc(n) => grow_set(&mut self.locals, n as usize, v),
-            Reg::Arg(n) => grow_set(&mut self.args, n as usize, v),
-            Reg::Rr => self.rr = v,
-        }
-    }
-}
-
-fn grow_set(v: &mut Vec<u64>, i: usize, val: u64) {
-    if i >= v.len() {
-        v.resize(i + 1, 0);
-    }
-    v[i] = val;
-}
-
-fn eval_bin(op: BinOp, a: u64, b: u64) -> u64 {
-    match op {
-        BinOp::Add => a.saturating_add(b),
-        BinOp::Sub => a.saturating_sub(b), // monus
-        BinOp::Mul => a.saturating_mul(b),
-        BinOp::Eq => u64::from(a == b),
-        BinOp::Ne => u64::from(a != b),
-        BinOp::Lt => u64::from(a < b),
-        BinOp::Le => u64::from(a <= b),
-        BinOp::Gt => u64::from(a > b),
-        BinOp::Ge => u64::from(a >= b),
-    }
-}
-
 /// True if `r` is a bank register whose index reaches or exceeds `MAX_REGISTERS` (`Rr` never does).
 fn reg_over_cap(r: Reg) -> bool {
     match r {
@@ -519,7 +463,7 @@ fn reg_over_cap(r: Reg) -> bool {
 }
 
 /// True if any register operand of `i` reaches or exceeds `MAX_REGISTERS`.
-fn instr_reg_over_cap(i: &Instr) -> bool {
+pub(crate) fn instr_reg_over_cap(i: &Instr) -> bool {
     match i {
         Instr::Li(rd, _) | Instr::Jz(rd, _) | Instr::Nil(rd) => reg_over_cap(*rd),
         Instr::Mov(a, b)
@@ -536,183 +480,18 @@ fn instr_reg_over_cap(i: &Instr) -> bool {
 
 /// Execute `prog` starting at index 0, bounded by `caps`. Never panics, never hangs.
 ///
-/// `clippy::too_many_lines`: one `match instr` arm per `Instr` variant, executing the interpreter's
-/// fetch-decode-execute loop — the length tracks `Instr`'s variant count, not any one arm's
-/// complexity. Splitting the loop body out would separate the dispatch from the loop that drives it,
-/// the opposite of easier to follow.
-#[allow(clippy::too_many_lines)]
+/// A loop over `trace::AsmCursor`, which holds the interpreter: the cursor is the one place an
+/// instruction's meaning lives, and this is its run-to-the-end reading. A cursor stops only by latching a
+/// status, so the `None` arm below cannot be reached; it answers `HitCap` rather than panicking, because
+/// no library path may panic.
+#[must_use]
 pub fn run_asm(prog: &Program, caps: Caps) -> AsmRun {
-    // Guard against absurd register indices before running: an unbounded `Reg::Loc(n)`/`Reg::Arg(n)`
-    // would make `grow_set` attempt a multi-GB `Vec::resize`, whose allocation failure aborts the
-    // process. A one-time O(code) scan keeps `run_asm` safe on any `Program` at no per-step cost.
-    if prog.code.iter().any(instr_reg_over_cap) {
-        return AsmRun::Fault("register index exceeds MAX_REGISTERS".to_string());
-    }
-    let mut vm = Vm {
-        locals: Vec::new(),
-        args: Vec::new(),
-        rr: 0,
-        heap: Vec::new(),
-        boxes: Vec::new(),
-        stack: Vec::new(),
-        pc: 0,
-        steps: 0,
-        caps,
-        saved_words: 0,
-    };
-    loop {
-        if vm.steps >= vm.caps.steps {
-            return AsmRun::HitCap;
-        }
-        vm.steps += 1;
-        let Some(instr) = prog.code.get(vm.pc) else {
-            // Falling off the end without `halt`/`ret` is an internal lowering invariant violation;
-            // treat defensively as a fault rather than a panic.
-            return AsmRun::Fault("ran past end of program".to_string());
-        };
-        match instr {
-            Instr::Li(rd, n) => {
-                vm.write(*rd, *n);
-                vm.pc += 1;
-            }
-            Instr::Mov(rd, rs) => {
-                let v = vm.read(*rs);
-                vm.write(*rd, v);
-                vm.pc += 1;
-            }
-            Instr::Bin(op, rd, ra, rb) => {
-                let v = eval_bin(*op, vm.read(*ra), vm.read(*rb));
-                vm.write(*rd, v);
-                vm.pc += 1;
-            }
-            Instr::Jz(r, l) => {
-                if vm.read(*r) == 0 {
-                    match prog.label_index(l) {
-                        Some(i) => vm.pc = i,
-                        None => return AsmRun::Fault(format!("undefined label `{l}`")),
-                    }
-                } else {
-                    vm.pc += 1;
-                }
-            }
-            Instr::Jmp(l) => match prog.label_index(l) {
-                Some(i) => vm.pc = i,
-                None => return AsmRun::Fault(format!("undefined label `{l}`")),
-            },
-            Instr::Call(l) => {
-                if vm.stack.len() as u64 >= vm.caps.stack {
-                    return AsmRun::HitCap;
-                }
-                let Some(target) = prog.label_index(l) else {
-                    return AsmRun::Fault(format!("undefined label `{l}`"));
-                };
-                // Bound the cumulative words held across saved frames *before* cloning `locals`: a
-                // legal-but-large register bank (see `MAX_REGISTERS`) cloned on every self-recursive
-                // `Call` can accumulate tens of GB across frames well before the stack-count cap
-                // fires, and an allocation failure there aborts the process. Checking first means we
-                // never perform the clone that would have pushed us over.
-                let prospective = vm.saved_words + vm.locals.len() as u64;
-                if prospective > vm.caps.mem {
-                    return AsmRun::HitCap;
-                }
-                vm.stack.push(Frame { ret_pc: vm.pc + 1, saved_locals: vm.locals.clone() });
-                vm.saved_words = prospective;
-                vm.pc = target;
-            }
-            Instr::Ret => match vm.stack.pop() {
-                Some(frame) => {
-                    vm.saved_words -= frame.saved_locals.len() as u64;
-                    vm.locals = frame.saved_locals;
-                    vm.pc = frame.ret_pc;
-                }
-                // `ret` with an empty stack ends the program (equivalent to `halt`).
-                None => return AsmRun::Ran(AsmOutcome { result: vm.rr, heap: std::mem::take(&mut vm.heap) }),
-            },
-            Instr::Halt => return AsmRun::Ran(AsmOutcome { result: vm.rr, heap: std::mem::take(&mut vm.heap) }),
-            Instr::Nil(rd) => {
-                vm.write(*rd, 0);
-                vm.pc += 1;
-            }
-            Instr::Cons(rd, rh, rt) => {
-                if vm.heap.len() as u64 >= vm.caps.heap {
-                    return AsmRun::HitCap;
-                }
-                let (h, t) = (vm.read(*rh), vm.read(*rt));
-                vm.heap.push((h, t));
-                let ptr = vm.heap.len() as u64; // 1-based
-                vm.write(*rd, ptr);
-                vm.pc += 1;
-            }
-            Instr::Head(rd, rl) => {
-                let p = vm.read(*rl);
-                if p == 0 {
-                    return AsmRun::Fault("head of empty list".to_string());
-                }
-                // A non-null pointer past the heap end is a dangling pointer: fault, never index. `p`
-                // is a register value a program can set to any `u64` (an `Li` immediate, or arithmetic
-                // over one), so `p - 1` may not fit `usize` on a 32-bit target; `try_from` routes that
-                // case to the same fault as an in-range-but-past-the-end pointer, rather than
-                // truncating into a wrong, in-range index that would read the wrong heap cell.
-                let Some(&(h, _)) = usize::try_from(p - 1).ok().and_then(|idx| vm.heap.get(idx)) else {
-                    return AsmRun::Fault("head of invalid list pointer".to_string());
-                };
-                vm.write(*rd, h);
-                vm.pc += 1;
-            }
-            Instr::Tail(rd, rl) => {
-                let p = vm.read(*rl);
-                if p == 0 {
-                    return AsmRun::Fault("tail of empty list".to_string());
-                }
-                // Same truncation hazard as `Head` above, and the same fix: never let a `p` that does
-                // not fit `usize` alias into a small, in-range index.
-                let Some(&(_, t)) = usize::try_from(p - 1).ok().and_then(|idx| vm.heap.get(idx)) else {
-                    return AsmRun::Fault("tail of invalid list pointer".to_string());
-                };
-                vm.write(*rd, t);
-                vm.pc += 1;
-            }
-            Instr::IsEmpty(rd, rl) => {
-                let empty = u64::from(vm.read(*rl) == 0);
-                vm.write(*rd, empty);
-                vm.pc += 1;
-            }
-            Instr::Box(rd, rv) => {
-                if vm.boxes.len() as u64 >= vm.caps.heap {
-                    return AsmRun::HitCap;
-                }
-                let v = vm.read(*rv);
-                vm.boxes.push(v);
-                let ptr = vm.boxes.len() as u64; // 1-based
-                vm.write(*rd, ptr);
-                vm.pc += 1;
-            }
-            Instr::BoxGet(rd, rb) => {
-                let p = vm.read(*rb);
-                if p == 0 {
-                    return AsmRun::Fault("box_get of null handle".to_string());
-                }
-                // Same truncation hazard as `Head`/`Tail` above.
-                let Some(&v) = usize::try_from(p - 1).ok().and_then(|idx| vm.boxes.get(idx)) else {
-                    return AsmRun::Fault("box_get of invalid handle".to_string());
-                };
-                vm.write(*rd, v);
-                vm.pc += 1;
-            }
-            Instr::BoxSet(rb, rv) => {
-                let p = vm.read(*rb);
-                if p == 0 {
-                    return AsmRun::Fault("box_set of null handle".to_string());
-                }
-                let v = vm.read(*rv);
-                // Same truncation hazard as `Head`/`Tail`/`BoxGet` above.
-                let Some(slot) = usize::try_from(p - 1).ok().and_then(|idx| vm.boxes.get_mut(idx)) else {
-                    return AsmRun::Fault("box_set of invalid handle".to_string());
-                };
-                *slot = v;
-                vm.pc += 1;
-            }
-        }
+    let mut cursor = AsmCursor::new(prog, caps);
+    for _ in cursor.by_ref() {}
+    match cursor.status().cloned() {
+        Some(AsmStatus::Halted) => AsmRun::Ran(cursor.into_outcome()),
+        Some(AsmStatus::Faulted(why)) => AsmRun::Fault(why),
+        Some(AsmStatus::Capped(_)) | None => AsmRun::HitCap,
     }
 }
 

@@ -552,6 +552,27 @@ fn link_index_resolves_tm_owners_by_name_at_the_width_the_run_fitted() {
     }
 }
 
+/// The asm column carries `SourceMap::asm_owner` one slot per instruction, `-1` where there is no owner,
+/// and needs neither a term nor a machine: it is built with both legs absent. `fact` owns every
+/// instruction; `map` lowers through `defunc`, and 17 of its 54 instructions come from nodes `defunc`
+/// minted, so the column holds `-1` for exactly those.
+#[test]
+fn link_index_carries_each_instructions_owner_without_a_machine() {
+    let fact_src = "fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact(3)";
+    let map_src = "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } \
+                   map([3, 1, 2], |x| x + 1)";
+    for (src, unowned) in [(fact_src, 0), (map_src, 17)] {
+        let (program, diags) = redextape_core::parser::parse(src);
+        assert!(diags.is_empty(), "diagnostics in {src:?}: {diags:?}");
+        let (_, map) = SourceMap::build_from_program(&program.expect("parsed"), &redextape_core::tm::Unary::default());
+        assert!(!map.asm_owner.is_empty(), "{src:?} lowers to asm");
+        let index = LinkIndex::build(None, None, &map, 65_536, MAX_TERM_DEPTH);
+        let expected: Vec<i32> = map.asm_owner.iter().map(|o| o.map_or(-1, |n| n as i32)).collect();
+        assert_eq!(index.asm_owner, expected, "{src:?}");
+        assert_eq!(index.asm_owner.iter().filter(|o| **o == -1).count(), unowned, "{src:?}'s unowned instructions");
+    }
+}
+
 #[test]
 fn link_index_is_total_over_a_declined_leg() {
     // Both halves are optional and neither absence may abort. A `None` term gives empty lambda legs;
@@ -565,6 +586,7 @@ fn link_index_is_total_over_a_declined_leg() {
     assert!(index.lambda_nodes.is_empty());
     assert!(index.source_nodes.is_empty());
     assert!(index.tm_owner.is_empty());
+    assert!(index.asm_owner.is_empty());
 }
 
 /// THE MIXED CASE THE TEST ABOVE CANNOT SEE: it only ever passes `None` for BOTH legs at once, which a

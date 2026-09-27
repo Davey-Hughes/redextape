@@ -142,7 +142,20 @@ pub enum TmRun {
 /// recursive passes. `defunc` is now total on any depth (see `defunc::MAX_DEFUNC_DEPTH`), so this is no
 /// longer required for safety, but it stays narrow anyway: `TooDeep` is never a signal that
 /// defunctionalizing would help, so retrying it is redundant work at best.
-fn lower_program(core: &Core) -> Result<Program, LowerError> {
+///
+/// PUBLIC SO A CALLER CAN STEP THE PROGRAM THE MACHINE WAS BUILT FROM. Every `run_tm*` entry point in
+/// this module lowers through it, via `lower_and_size`, so a `trace::AsmCursor` over its result runs the
+/// very instructions whose `pc{i}` entry states their machines pass through — which is what lets the
+/// three-way oracle hold the two step for step. Not every lowering calls it: `attribute.rs` and
+/// `sourcemap.rs` repeat its dispatch over the `_mapped` lowerings, to keep each instruction's origin.
+///
+/// # Errors
+///
+/// `LowerError::Unsupported` when neither direct lowering nor `defunc` can express the program.
+/// `LowerError::TooDeep` when a depth guard refuses it: `lower_asm`'s `MAX_LOWER_DEPTH`, on `core` or on
+/// the Core `defunc` rewrote it to, or `defunc`'s own `MAX_DEFUNC_DEPTH`, which a program the first
+/// attempt refused as `Unsupported` can still reach.
+pub fn lower_program(core: &Core) -> Result<Program, LowerError> {
     match lower_asm(core) {
         Ok(p) => return Ok(p),
         Err(LowerError::Unsupported { .. }) => {}

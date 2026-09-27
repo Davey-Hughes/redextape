@@ -204,7 +204,7 @@ fn build_and_run(prog: &Program, subs: &[Subroutine], caps: Caps, opt: OptLevel)
     // `module` outlives this call, so the code stays mapped and executable.
     let main: extern "C" fn(*mut Runtime) -> u64 = unsafe { std::mem::transmute::<*const u8, _>(code) };
 
-    // `caps.mem` (the reference's cap on words held across cloned `Vec<Frame>` locals) has no native
+    // `caps.mem` (the reference's cap on words held across cloned `Vec<AsmFrame>` locals) has no native
     // analog: each subroutine's `Loc`/`Arg` are fixed-size `Variable`s on the real call stack, so a
     // `Call` clones nothing. Native recursion is instead bounded by the frame-size-aware
     // `native_depth_cap` (= `min(caps.stack, safe_depth)`) via `rt_enter`'s depth counter, checked
@@ -858,7 +858,7 @@ mod tests {
     ///
     /// Each `Loc(i)` is seeded by its own `Li` before being read, so no instruction here READS a
     /// `Loc` this body has not already written: `run_asm`'s `Call` leaves the caller's locals in
-    /// `vm.locals`, so a callee INHERITS them, whereas the native backends give each callee a zeroed
+    /// place, so a callee INHERITS them, whereas the native backends give each callee a zeroed
     /// bank. This helper's program is only ever asserted to `HitCap` (never compared against
     /// `run_asm`), but keeping it inside the definite-assignment contract every `lower_asm`/`defunc`
     /// output satisfies means it stays usable in an agreement test too.
