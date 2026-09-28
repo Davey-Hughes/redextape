@@ -43,11 +43,12 @@ export type ControlState = {
 /**
  * How the recording stopped, as one line the user can act on.
  *
- * THREE STOP REASONS AND THREE SENTENCES, because they are three different facts. A spent recording
- * budget leaves the run `Running` and costs nothing to continue; a spent cursor cap needs the cap
- * raised; and a depth refusal cannot be continued at all. `session.rs`'s `run_lambda` records the first
- * distinction one layer in ("A SPENT `budget` IS NOT A SPENT CAP"), and `trace.rs`'s
- * `LambdaCursor::raise_cap` records the second.
+ * A SENTENCE PER STOP REASON, because they are different facts. A spent recording budget leaves the run
+ * `Running` and costs nothing to continue; a spent cursor cap needs the cap raised; and a depth refusal
+ * cannot be continued at all. `session.rs`'s `run_lambda` records the first distinction one layer in ("A
+ * SPENT `budget` IS NOT A SPENT CAP"), and `trace.rs`'s `LambdaCursor::raise_cap` records the second. The
+ * asm leg's three full caps are the depth refusal's kind — no continue — and each names its cap
+ * (`RecordEnd`'s doc, Plan 7 part 5 spec amendment 10).
  */
 function doneText(done: RecordEnd): string {
   switch (done) {
@@ -59,6 +60,12 @@ function doneText(done: RecordEnd): string {
       return ' — the term is deeper than the reducer allows'
     case 'budget':
       return ' — history is full'
+    case 'stack-full':
+      return ' — the call stack is full'
+    case 'heap-full':
+      return ' — the heap is full'
+    case 'memory-full':
+      return ' — its saved call frames are full'
   }
 }
 

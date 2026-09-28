@@ -1,5 +1,5 @@
+import type { CopyLeg } from './legs'
 import type { LeafId } from './panes'
-import type { Leg } from './protocol'
 import type { SessionId } from './session-client'
 
 /**
@@ -46,7 +46,7 @@ export type PersistedBuffer = {
   label: string
   text: string
   collapsed: boolean
-  leg: Leg
+  leg: CopyLeg
 }
 
 /**

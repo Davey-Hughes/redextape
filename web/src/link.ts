@@ -9,11 +9,12 @@
 // eight programs was 29.4% — nowhere close. One program crossing is not "more than one", so
 // the gate did not trip: `WITHIN` RENDERS AS A HIGHLIGHT, same as `Exact`, just visibly weaker — see
 // `main.ts`'s `draw()` for the wiring and `style.css`'s `.is-focus-within` for the weaker treatment.
+import type { Leg } from './protocol'
 import type { Cut, Owner, Span } from './types'
 import { ownerNode } from './types'
 
 /**
- * `linkIndex(byteBudget)`'s wire shape: one string, one nullable cut, and ten typed arrays.
+ * `linkIndex(byteBudget)`'s wire shape: one string, one nullable cut, and eleven typed arrays.
  *
  * COLUMNAR BECAUSE THE OBJECT FORM DOES NOT FIT. `list60` is 552 KB as arrays of objects against
  * ~220 KB this way, and `prog200` is 1.9 MB against ~689 KB — and the app rebuilds this on every
@@ -32,14 +33,16 @@ export type LinkIndexWire = {
   sourceNodeEnd: Uint32Array
   sourceNodeId: Uint32Array
   tmOwner: Int32Array
+  /** Each asm instruction's owning construct, `-1` for an instruction `defunc` minted — `LinkIndex::asm_owner`. */
+  asmOwner: Int32Array
 }
 
 /**
- * Where one Core node shows up: its source span and its machine states. Either may be absent, each for its
- * own reason. **NO λ LEG SINCE PLAN 7 PART 4A** — the λ view finds a construct's nodes in the tree it draws
- * (`Tree.nodesLinkedTo`), at whatever step is on screen, where this index knew only step 0's text.
+ * Where one Core node shows up: its source span, its machine states and its asm instructions. Any may be absent,
+ * each for its own reason. **NO λ LEG SINCE PLAN 7 PART 4A** — the λ view finds a construct's nodes in the tree it
+ * draws (`Tree.nodesLinkedTo`), at whatever step is on screen, where this index knew only step 0's text.
  */
-export type Link = { source: Span | null; states: number[] }
+export type Link = { source: Span | null; states: number[]; instrs: number[] }
 
 /**
  * The smallest span containing `byteOffset`, as an index into the three parallel arrays, or `-1`.
@@ -95,6 +98,8 @@ export class LinkIndex {
   #w: LinkIndexWire
   /** `node -> its ascending state ids`, derived on first ask and cached. */
   #states = new Map<number, number[]>()
+  /** `node -> its ascending instruction indices`, derived on first ask and cached, as `#states` is. */
+  #instrs = new Map<number, number[]>()
 
   constructor(wire: LinkIndexWire) {
     this.#w = wire
@@ -116,7 +121,17 @@ export class LinkIndex {
   }
 
   /**
-   * Where `node` shows up on the index's two legs: its source span and its machine states.
+   * The Core node whose lowering emitted asm instruction `pc`, or `null` for an instruction `defunc` minted and for
+   * an index past the program (Plan 7 part 5 spec §6.6) — `nodeForState`'s rule, over `asmOwner`.
+   */
+  nodeForInstr(pc: number): number | null {
+    if (pc < 0 || pc >= this.#w.asmOwner.length) return null
+    const owner = this.#w.asmOwner[pc] as number
+    return owner < 0 ? null : owner
+  }
+
+  /**
+   * Where `node` shows up: its source span, its machine states and its asm instructions.
    *
    * NO OUTWARD WALK WHEN A LEG IS ABSENT. `sourcemap.rs` refuses to fall back to a surrounding block
    * and so does this: the walk from a transparent `let` goes Let -> Seq -> root, so "nearest enclosing
@@ -125,7 +140,11 @@ export class LinkIndex {
    * must say so rather than show nothing.
    */
   linkFor(node: number): Link {
-    return { source: this.#spanOf(node), states: this.#statesOf(node) }
+    return {
+      source: this.#spanOf(node),
+      states: this.#ownedBy(node, this.#w.tmOwner, this.#states),
+      instrs: this.#ownedBy(node, this.#w.asmOwner, this.#instrs),
+    }
   }
 
   #spanOf(node: number): Span | null {
@@ -139,18 +158,22 @@ export class LinkIndex {
   }
 
   /**
+   * The ascending indices `owner` bills to `node` — a construct's states from `tmOwner`, its instructions from
+   * `asmOwner` — derived on first ask and kept in `cache`.
+   *
    * DERIVED, NOT SHIPPED. Shipping node -> states alongside state -> node would be a second
    * representation of one association with nothing checking the two came from one lowering — the
-   * object `sourcemap.rs`'s module doc refuses to create, reintroduced at the boundary.
+   * object `sourcemap.rs`'s module doc refuses to create, reintroduced at the boundary. The asm column is the same
+   * association one lowering earlier, and gets the same treatment rather than a second copy of the loop.
    */
-  #statesOf(node: number): number[] {
-    const cached = this.#states.get(node)
+  #ownedBy(node: number, owner: Int32Array, cache: Map<number, number[]>): number[] {
+    const cached = cache.get(node)
     if (cached !== undefined) return cached
     const out: number[] = []
-    for (let s = 0; s < this.#w.tmOwner.length; s += 1) {
-      if (this.#w.tmOwner[s] === node) out.push(s)
+    for (let i = 0; i < owner.length; i += 1) {
+      if (owner[i] === node) out.push(i)
     }
-    this.#states.set(node, out)
+    cache.set(node, out)
     return out
   }
 }
@@ -158,8 +181,14 @@ export class LinkIndex {
 /** `runningFocus`'s return shape, named so `isCoincident` and callers can share it rather than re-typing it. */
 export type Focus = { node: number; claim: 'exact' | 'within' }
 
-/** The construct a click set — `main.ts`'s own `link` state, named so `isCoincident` can share the shape. */
-export type Pin = { node: number; origin: 'source' | 'lambda' | 'tm' }
+/**
+ * The construct a click set — `main.ts`'s own `link` state, named so `isCoincident` can share the shape.
+ *
+ * `origin` IS THE SOURCE VIEW OR A LEG, AND IS TYPED FROM `Leg` RATHER THAN SPELLED OUT, so a new leg can pin
+ * without this union being found and widened by hand (`legs.ts` has the class of bug) — and `link-wiring.ts`'s
+ * `setLinkTo` takes `Pin['origin']` rather than spelling it a second time.
+ */
+export type Pin = { node: number; origin: 'source' | Leg }
 
 /**
  * The source construct the CURRENT β-step belongs to — the source pane's running focus — as a node

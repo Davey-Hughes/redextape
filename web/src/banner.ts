@@ -39,7 +39,7 @@ export function showBanner(host: HTMLElement, e: unknown): void {
 /**
  * The wording for a `worker-error` — the app started fine; one request to it threw. Unlike
  * `bannerText`, there is no "run this command" fix to name: the remedy is already underway (the
- * caller resets both legs' history and clears the decline mark before this ever renders), so this
+ * caller resets every leg's history and clears the decline mark before this ever renders), so this
  * says that plainly instead of pointing at a rebuild that would not help.
  */
 export function workerErrorText(e: unknown): string {
@@ -51,7 +51,7 @@ export function workerErrorText(e: unknown): string {
  * Report a `worker-error` INTO `#results`, not over the page. `showBanner`'s `replaceChildren` is
  * right for "the app did not start" because nothing under `<main>` works yet; it is wrong here
  * because everything under `<main>` still does. `replies.ts`'s `worker-error` arm records the failure
- * with `setProgram` instead of calling `showBanner`, after resetting both legs and clearing the decline
+ * with `setProgram` instead of calling `showBanner`, after resetting every leg and clearing the decline
  * mark, and `readout.ts`'s `createReadout` is what calls this — so this only has to render the message,
  * not decide the rest of the response.
  */

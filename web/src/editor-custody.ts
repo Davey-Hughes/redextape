@@ -158,8 +158,8 @@ export function createEditorCustody(deps: {
    * session. Keying by the closed leaf would be keying by something no claim ever mentions.
    *
    * **A LEAF ID IS A WEAKER KEY THAN A SESSION, NOT MERELY A DIFFERENTLY-SHAPED ONE.** `nextLeafId`
-   * only counts up, but it is not the only source of ids: `defaultLayout()` writes `source`, `lambda-0`
-   * and `tm-0` down as literals and `reset preset` re-mints all three, so a closed `lambda-0` comes
+   * only counts up, but it is not the only source of ids: `defaultLayout()` writes `source`, `lambda-0`,
+   * `asm-0` and `tm-0` down as literals and `reset preset` re-mints all four, so a closed `lambda-0` comes
    * back — and `parseLayout` can restore any id a stored tree holds. A leaf id can therefore be
    * inherited by a pane that has nothing to do with the one that claimed the editor. `applyLayout`'s
    * pane-creation loop drops exactly that inheritance for `editorOwner` (which IS keyed by leaf) where

@@ -102,7 +102,8 @@ beforeEach(async () => {
   await until(
     () =>
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      leafIds().length === 3 &&
+      // THE DEFAULT TREE'S FOUR VIEWS: source, λ, asm and TM.
+      leafIds().length === 4 &&
       lambdaLeaves().length === 1,
     'the default layout on a settled source program',
   )
@@ -273,7 +274,7 @@ describe('the closed source pane comes back through the picker', () => {
    * **THIS IS THE CAPABILITY `reset preset` DOES NOT PROVIDE, AND THE ASSERTIONS ARE CHOSEN TO TELL THE
    * TWO APART.** Restoring the default layout also brings the source pane back — so a test that only
    * asked whether a source leaf exists afterwards would pass against a picker that quietly called
-   * `defaultLayout()`. The layout is therefore made one the default cannot produce (a fourth leaf, from a
+   * `defaultLayout()`. The layout is therefore made one the default cannot produce (a fifth leaf, from a
    * split of the TM pane) before the source pane is closed, and the whole leaf list is asserted after it
    * returns: the extra pane is still there, in its place, at the size it had.
    *
@@ -289,7 +290,7 @@ describe('the closed source pane comes back through the picker', () => {
     const onError = (e: ErrorEvent) => errors.push(e.message)
     window.addEventListener('error', onError)
     try {
-      // A LAYOUT THE DEFAULT CANNOT PRODUCE — four leaves, the fourth split off the TM pane.
+      // A LAYOUT THE DEFAULT CANNOT PRODUCE — five leaves, the fifth split off the TM pane.
       const before = leafIds()
       splitVia('tm-0', 'column', 'same')
       await until(() => leafIds().length === before.length + 1, 'the TM pane to split')
@@ -316,8 +317,8 @@ describe('the closed source pane comes back through the picker', () => {
       expect(document.querySelector('[data-leaf="source"] #editor')).not.toBeNull()
       expect(document.querySelector('[data-leaf="source"] .cm-content')?.textContent).toContain('let z = 9')
       // WHERE IT CAME BACK, AND THAT NOTHING ELSE MOVED: `reset preset` would answer
-      // `['source', 'lambda-0', 'tm-0']` here, which is what this line is chosen to fail against.
-      expect(leafIds()).toEqual(['lambda-0', 'source', 'tm-0', extra])
+      // `['source', 'lambda-0', 'asm-0', 'tm-0']` here, which is what this line is chosen to fail against.
+      expect(leafIds()).toEqual(['lambda-0', 'source', 'asm-0', 'tm-0', extra])
       expect(places().find((p) => p.startsWith(`${extra}@`))).toBe(extraPlace)
       expect(errors).toEqual([])
     } finally {

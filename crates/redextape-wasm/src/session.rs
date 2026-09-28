@@ -8,13 +8,16 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use redextape_core::core::NodeId;
+use redextape_core::core::{Core, NodeId};
 use redextape_core::lambda::{self, LambdaTerm, LowerError};
 use redextape_core::sourcemap::SourceMap;
+use redextape_core::tm::asm::{AsmOutcome, Program};
 use redextape_core::tm::machine::Machine;
 use redextape_core::tm::{self, EncodingKind, Symbol, Tape, TmRun};
-use redextape_core::trace::{LambdaCheckpoints, LambdaCursor, TmCursor};
-use redextape_core::viewmodel::{LambdaState, LambdaTree, LinkIndex, TmProgram, TmState, TreeAnswer};
+use redextape_core::trace::{self, AsmCap, AsmCursor, LambdaCheckpoints, LambdaCursor, TmCursor};
+use redextape_core::viewmodel::{
+    AsmProgram, AsmState, AsmWindow, LambdaState, LambdaTree, LinkIndex, TmProgram, TmState, TreeAnswer,
+};
 use redextape_core::{Diagnostic, Severity, Span, lints, parser, typeck};
 
 /// The deepest term any print through the session may walk — the two big-budget prints
@@ -81,6 +84,8 @@ pub enum SessionError {
     LambdaAbsent,
     /// A TM-leg method on a session whose TM backend declined. `tm_status()` says why.
     TmAbsent,
+    /// An asm-leg method on a session whose program did not lower to asm. `asm_status()` says why.
+    AsmAbsent,
     /// `tape_slice` named a tape the machine does not have.
     NoSuchTape { tape: usize, tapes: usize },
 }
@@ -90,6 +95,7 @@ impl std::fmt::Display for SessionError {
         match self {
             SessionError::LambdaAbsent => write!(f, "this program has no λ leg — see lambdaStatus()"),
             SessionError::TmAbsent => write!(f, "this program has no TM leg — see tmStatus()"),
+            SessionError::AsmAbsent => write!(f, "this program has no asm leg — see asmStatus()"),
             SessionError::NoSuchTape { tape, tapes } => {
                 write!(f, "no tape {tape}: this machine has {tapes}")
             }
@@ -136,12 +142,20 @@ pub enum RunStatus {
 /// | --- | --- | --- | --- | --- | --- |
 /// | `lambda_value` | ✅ | ✅ | ✅ | the cursor has not reached `Ended` | — |
 /// | `tm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since halted | — |
+/// | `asm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since ended | ✅ |
 /// | `evaluate` | ✅ | ✅ | — | — | ✅ |
 ///
 /// `tm_value`'s `Unfinished` is NOT λ-specific: `compile` gives both `Ran` and `HitCap` a working
 /// cursor, so a capped machine is a live session with no tapes to decode. It is also not permanent —
 /// a raised cap can drive that cursor to a halt, and `tm_value` decodes the configuration it stopped
 /// on. There is no state in which the TM leg reports `Ended` and `Unfinished` together.
+///
+/// **`asm_value` IS `tm_value`'S SHAPE WITH A FAULT ADDED.** It answers from the run `compile` performed and
+/// falls back on the cursor after a raised cap, so its `Unfinished` is the TM's; and an asm program can
+/// fault — `head([])` types, and its `head` meets `nil` — which the cursor reports with the instruction and
+/// the reason. That run has ENDED (`asm_status().run` is `Ended`), so the fault is the leg's answer,
+/// "head of empty list at pc1", and not a status. Each ✅ in its row has a test of
+/// its own below, by the program that reaches it.
 ///
 /// **BOTH `Undecodable` MARKS ARE A FIXTURE, NOT AN ARGUMENT.**
 /// `a_function_valued_program_decodes_as_undecodable_on_both_legs` pins them against `|x| x + 1`,
@@ -184,7 +198,7 @@ pub enum Decoded {
 
 /// Whether the λ leg is there, why not when it is not, and how far its run has got.
 ///
-/// `reason` IS THE PAYLOAD, which is why both legs answer a struct rather than an `Option`. A UI that
+/// `reason` IS THE PAYLOAD, which is why every leg answers a struct rather than an `Option`. A UI that
 /// only knows a leg is missing has nothing to tell the user; "the λ backend refuses a closure that
 /// assigns a captured variable" is the whole point of showing the pane at all. `node` is the Core node
 /// the refusal names, so the source pane can highlight it. `run` is `None` exactly when the leg is
@@ -277,10 +291,70 @@ pub struct TmStatus {
     pub total_steps: Option<u64>,
 }
 
+/// Whether the asm leg is there, why not when it is not, how far its cursor has got, which cap stopped it,
+/// and how long the whole run is.
+///
+/// **`TmStatus`'S SHAPE, LESS `width` AND PLUS `cap`.** An asm program has no encoding to fit, so it has no
+/// width. And `RunStatus::Capped` cannot say by itself whether "continue" is an honest offer, which on the TM
+/// it always is: the asm cursor has four caps and only the step cap resumes — `AsmCursor::raise_cap` leaves a
+/// run its stack, heap or saved-frame memory stopped where it is, since more steps cannot deepen a stack —
+/// so a renderer that offered "continue" on `Capped` alone would offer it to three runs that cannot take it.
+/// `cap` says which cap it was, and the step line names it (spec amendment 10).
+///
+/// **A FIELD, NOT MORE `RunStatus` VARIANTS.** λ's depth refusal is `RunStatus::DepthRefused` because it is
+/// one fact with one sentence. Three hard caps each need a sentence of their own, and a variant apiece would
+/// put three asm-only states into the vocabulary every leg's `run` shares, for the λ and TM renderers to
+/// match and never meet. The TM's `Capped` needs no cap beside it: both of its caps, steps and live cells,
+/// are ones `raise_tm_cap` raises.
+///
+/// **A FAULT IS AN END.** `run` is `Ended` for a run that halted and for one that faulted, and `asm_value`
+/// carries the difference: the program's value, or `Decoded::Fault` naming the instruction and the reason
+/// (spec §8). A fault is the program's answer — `head([])` faults in the reference interpreter too — not a
+/// limit of this tool, so nothing about it invites continuing.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AsmStatus {
+    pub available: bool,
+    /// Why the leg is absent — which way `tm::lower_program` refused the program — or empty when it is not.
+    ///
+    /// **NO `node`, AS `TmStatus` HAS NONE.** The TM leg lowers through the same function, so a program the
+    /// asm lowering refuses declines the TM leg too, with the same refusal behind it, and neither status
+    /// names a construct; `LambdaStatus::node` exists because the λ backend refuses things of its own.
+    pub reason: String,
+    /// Where the CURSOR stands: `Running`, `Ended` for a halt or a fault, or `Capped`. `None` exactly when
+    /// the leg is absent. `DepthRefused` is λ's and never appears here.
+    pub run: Option<RunStatus>,
+    /// Which cap stopped the cursor. `Some` exactly when `run` is `Capped` — a cap beside `Running` or
+    /// `Ended` would name a stop that did not happen — and only `Some(AsmCap::Steps)` names one that
+    /// `raise_asm_cap` resumes.
+    pub cap: Option<AsmCap>,
+    /// How long the WHOLE run is, in instructions, from the run `compile` performed (spec amendment 13).
+    ///
+    /// **`compile` RUNS THE PROGRAM TO ITS END TO KNOW THIS, AS IT RUNS THE TM.** `run_asm` returns no step
+    /// count, so `compile` drives an `AsmCursor` to the end and keeps the count and the outcome, and the
+    /// cursor a view records is a fresh one. It is a different number about a different thing than `run`,
+    /// for `TmStatus::total_steps`'s reason: "instruction 23 of 55" reads the cursor for the first number
+    /// and this for the second, and this does not move as the cursor does.
+    ///
+    /// **FOR A CAPPED RUN IT IS WHERE THE CAP FIRED, NOT THE LENGTH OF A COMPLETED RUN**: 5,000,000 under
+    /// `DEFAULT_CAPS`' step cap, and the instructions completed before the refused one under a stack, heap or
+    /// memory cap. A raised step cap can drive the cursor past it, so a renderer reads `run` before it takes
+    /// this for a length — `TmStatus::total_steps`'s caveat.
+    ///
+    /// **`Some` EXACTLY WHEN THE LEG IS AVAILABLE.** The only decline is a lowering that failed, and a program
+    /// that never lowered never ran a step, so there is no count to withhold, unlike the TM's `Overflow`.
+    ///
+    /// `ts(type = "number | null")`, for the reason `TmStatus::total_steps`'s doc records at length: `ts-rs`
+    /// maps `u64` to `bigint`, the wire carries a JS number, and `ts(type = ...)` replaces the whole field
+    /// type, `Option` and all.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub total_steps: Option<u64>,
+}
+
 /// The result of `Session::compile`. `diagnostics` is non-empty for a program the front end objected
 /// to; `session` is `None` only when nothing could be built at all.
 ///
-/// A SESSION WITH BOTH LEGS DECLINED IS STILL A SESSION. Declining is a backend's answer about a
+/// A SESSION WITH EVERY LEG DECLINED IS STILL A SESSION. Declining is a backend's answer about a
 /// program, not a failure to process it, and the UI's job is to say which backend declined and why.
 pub struct Compiled {
     pub diagnostics: Vec<Diagnostic>,
@@ -289,8 +363,9 @@ pub struct Compiled {
 
 /// Static diagnostics — parse and typecheck — with no backend and no session.
 ///
-/// **SEPARATE FROM `compile` BECAUSE OF WHAT `compile` COSTS.** `compile` lowers both backends and
-/// runs the TM to a halt (`run_tm_described`), which is 344,999 δ-steps on the `map` demo. An editor
+/// **SEPARATE FROM `compile` BECAUSE OF WHAT `compile` COSTS.** `compile` lowers every backend, runs
+/// the TM to a halt (`run_tm_described`), which is 344,999 δ-steps on the `map` demo, and runs the asm
+/// program to its end, which for a program that never halts is the whole five-million-step cap. An editor
 /// linting on every keystroke cannot go through that path, and this is the one it goes through
 /// instead. `Analysis.core` is dropped: a `Core` has no boundary representation and no consumer here.
 pub fn analyze(src: &str) -> Vec<Diagnostic> {
@@ -368,6 +443,10 @@ pub struct Session {
     /// is where that is withheld: a declined leg reports `None` however this field reads, because a
     /// length beside `available: false` describes a run the caller has no cursor to reach.
     pub(crate) total_steps: Option<u64>,
+    /// The asm leg, or the lowering's refusal. Absent ONLY when `tm::lower_program` fails: a program the TM
+    /// declines as too large to build or as overflowing every width still lowered, so it still runs here
+    /// (spec §5.2). See `AsmLeg` for what travels together inside it.
+    pub(crate) asm: Result<AsmLeg, tm::LowerError>,
 }
 
 /// The shared tail of `compile`'s two non-declining arms. `Ran` and `HitCap` build the same cursor
@@ -430,6 +509,86 @@ fn tm_leg_at(
     let program = TmProgram::of(&machine, width, map);
     let cursor = TmCursor::new(machine, init, caps);
     (program, cursor)
+}
+
+/// The asm leg: the listing, the cursor a view records, and how `compile`'s own run of the program ended,
+/// TRAVELLING TOGETHER in one `Result`, for the reason the `tm` field's doc gives for its pair — a cursor with
+/// no listing, or a total with no run behind it, is then a state the type cannot spell.
+pub(crate) struct AsmLeg {
+    /// Projected once, by `build_asm_leg`, and cloned per `asm_program` — never printed again.
+    program: AsmProgram,
+    /// A FRESH cursor, at step 0, over the program `compile`'s run stepped and under the caps it ran with —
+    /// `build_tm_leg`'s rule: a cursor budgeted differently from the run whose outcome the session reports
+    /// would stop somewhere that outcome never mentions.
+    cursor: AsmCursor<Rc<Program>>,
+    /// Instructions `compile`'s run completed. `AsmStatus::total_steps` says what it means for a capped run.
+    total_steps: u64,
+    /// How `compile`'s run ended.
+    end: AsmEnd,
+}
+
+/// How the run `compile` performed ended: what `asm_value` answers from, until a raised cap lets the recording
+/// cursor get further than that run did.
+///
+/// **THE HALT KEEPS THE OUTCOME AND NOTHING ELSE.** `AsmCursor::into_outcome` consumes the cursor, keeping the
+/// result word and the heap, which is exactly what `tm::decode_asm_ty` reads; the rest of the machine is
+/// dropped with it rather than held for the session's life.
+enum AsmEnd {
+    Halted(AsmOutcome),
+    /// The instruction that faulted — or the index a fetch past the end tried — and the fault's text.
+    Faulted {
+        pc: usize,
+        why: String,
+    },
+    /// A cap stopped it. WHICH cap is the recording cursor's to say, once it reaches the same wall under
+    /// the same caps; until then that cursor is running and no cap is named.
+    Capped,
+}
+
+/// Lower `core` for the asm leg, run the program to its end under `caps`, and open the cursor a view records.
+///
+/// **A THIRD LOWERING OF ONE `Core` PER COMPILE**, after `SourceMap`'s asm half and `run_tm_described`, and
+/// safe because all three go through one dispatch: `tm::lower_program` is a pure function of its `Core`, and
+/// `sourcemap.rs`'s `asm_owner_covers_the_program_lower_program_returns` holds that `SourceMap::asm_owner`
+/// indexes the program it returns, first-order and through `defunc` alike. So `asm_state`'s `source_node`
+/// and `link_index`'s asm column name this cursor's instructions. Sharing one lowering would mean the map
+/// handing its `Program` back out, for this one caller.
+///
+/// **THE WHOLE RUN HAPPENS HERE, ONCE** (spec amendment 13): the step total and the value both come from it,
+/// and a program that never halts spends the whole step cap here, before `compile` returns.
+fn build_asm_leg(core: &Core, caps: tm::asm::Caps) -> Result<AsmLeg, tm::LowerError> {
+    let program = Rc::new(tm::lower_program(core)?);
+    let mut run = AsmCursor::new(Rc::clone(&program), caps);
+    for _ in run.by_ref() {}
+    let total_steps = run.steps_taken();
+    let end = match run.status().cloned() {
+        Some(trace::AsmStatus::Halted) => AsmEnd::Halted(run.into_outcome()),
+        Some(trace::AsmStatus::Faulted(why)) => AsmEnd::Faulted { pc: run.pc(), why },
+        // `None` cannot be reached: a cursor stops only by latching a status. It answers as a cap, as
+        // `run_asm` does for the same arm, rather than panicking, since a panic under wasm aborts the module.
+        Some(trace::AsmStatus::Capped(_)) | None => AsmEnd::Capped,
+    };
+    Ok(AsmLeg { program: AsmProgram::of(&program), cursor: AsmCursor::new(program, caps), total_steps, end })
+}
+
+/// What `asm_status().reason` says for each way `tm::lower_program` refuses a program. One arm per variant,
+/// so a third refusal is a compile error here rather than a blank reason.
+fn asm_decline_reason(e: &tm::LowerError) -> String {
+    match e {
+        tm::LowerError::Unsupported { what, .. } => format!("the asm backend does not support {what}"),
+        tm::LowerError::TooDeep { .. } => "the program nests deeper than the asm lowering guard allows".to_string(),
+    }
+}
+
+/// A fault as the asm leg's value, "head of empty list at pc1" — the one wording for the two places a run can
+/// fault, `compile`'s run and the recording cursor after a raised cap.
+///
+/// **WHAT FAULTED, THEN WHERE, AND NO "FAULTED".** Spec §8 wrote "faulted at pc12: head of empty list", but every
+/// reader of a `Decoded::Fault` already says it is one — `web/src/types.ts`'s `decodedText` prints `fault: ` before
+/// the message — so the spec's words would read "fault: faulted at pc12: …". The message carries the fault and the
+/// instruction, and the readout reads "fault: head of empty list at pc12".
+fn asm_fault(pc: usize, why: &str) -> Decoded {
+    Decoded::Fault { message: format!("{why} at pc{pc}") }
 }
 
 /// How many β-steps apart the λ leg's checkpoints sit: a tree for any past step is rebuilt by replaying
@@ -598,20 +757,28 @@ impl Session {
     /// them. The run desugars the program on its own, since the map's constructor is what pairs a `Core`
     /// with its spans and it cannot be called until the width is known; `desugar` mints the same ids
     /// every time, and only the machine leaves the run.
+    ///
+    /// **THE ASM PROGRAM RUNS TO ITS END TOO**, from the map's own `Core` — see `build_asm_leg` for why that
+    /// program is the one the map's `asm_owner` indexes, and for what the run costs a program that never halts.
     pub fn compile(src: &str, kind: EncodingKind) -> Compiled {
-        Session::compile_with_caps(src, kind, tm::TM_DEFAULT_CAPS)
+        Session::compile_with_caps(src, kind, tm::TM_DEFAULT_CAPS, tm::asm::DEFAULT_CAPS)
     }
 
-    /// `compile` with the TM run's budget as a parameter rather than a constant.
+    /// `compile` with the TM run's and the asm run's budgets as parameters rather than constants.
     ///
-    /// PRIVATE, AND EVERY PRODUCT CALLER PASSES `TM_DEFAULT_CAPS` — the boundary exposes no way to
-    /// choose. It is a parameter because `TM_DEFAULT_CAPS` is 5,000,000 δ-steps, so the `HitCap` arm
-    /// below is otherwise only reachable by simulating five million steps and then five million more
-    /// through the cursor to reach the same wall. A test that cannot afford that is a test that never
-    /// runs, and the arm it cannot reach is the one where `final_tapes` is `None` and every question
-    /// about a continued run is decided. With a budget of ten the same arm is reached in milliseconds,
-    /// by the same code, from the same source program.
-    fn compile_with_caps(src: &str, kind: EncodingKind, caps: tm::TmCaps) -> Compiled {
+    /// PRIVATE, AND EVERY PRODUCT CALLER PASSES `TM_DEFAULT_CAPS` AND `tm::asm::DEFAULT_CAPS` — the
+    /// boundary exposes no way to choose. They are parameters because `TM_DEFAULT_CAPS` is 5,000,000
+    /// δ-steps, so the `HitCap` arm below is otherwise only reachable by simulating five million steps and
+    /// then five million more through the cursor to reach the same wall. A test that cannot afford that is
+    /// a test that never runs, and the arm it cannot reach is the one where `final_tapes` is `None` and
+    /// every question about a continued run is decided. With a budget of ten the same arm is reached in
+    /// milliseconds, by the same code, from the same source program.
+    ///
+    /// **THE ASM BUDGET IS THE SAME HOOK FOR THE SAME REASON, FOUR TIMES OVER.** Each of the asm cursor's
+    /// caps — steps, stack, heap and saved-frame memory — ends the run its own way, and at `DEFAULT_CAPS`
+    /// reaching the stack cap takes 100,000 frames and the heap and memory caps millions of cells and words.
+    /// A small budget reaches each in a few instructions of an ordinary program.
+    fn compile_with_caps(src: &str, kind: EncodingKind, caps: tm::TmCaps, asm_caps: tm::asm::Caps) -> Compiled {
         let (program, mut diagnostics) = parser::parse(src);
         let Some(program) = program else {
             return Compiled { diagnostics, session: None };
@@ -646,6 +813,7 @@ impl Session {
             _ => tm::MIN_FIELD_WIDTH,
         };
         let (core, map) = SourceMap::build_from_program(&program, &*kind.at(width));
+        let asm = build_asm_leg(&core, asm_caps);
 
         let (lambda, initial_lambda) = match lambda::lower(&core) {
             Ok(t) => (Ok(LambdaLeg::new(&t, lambda::MAX_REDUCTION_STEPS)), Some(t)),
@@ -701,7 +869,7 @@ impl Session {
 
         Compiled {
             diagnostics,
-            session: Some(Session { core, ty, lambda, initial_lambda, tm, map, final_tapes, kind, total_steps }),
+            session: Some(Session { core, ty, lambda, initial_lambda, tm, map, final_tapes, kind, total_steps, asm }),
         }
     }
 
@@ -954,6 +1122,100 @@ impl Session {
         Ok(decoded_or_undecodable(tm::decode_tape_ty(tapes, &self.ty, &*enc)))
     }
 
+    // --- the asm leg --------------------------------------------------------------------------
+
+    /// Whether the asm leg is there, how its cursor stands and which cap stopped it — see `AsmStatus`. `run`
+    /// and `cap` are read off the CURSOR, and `total_steps` off `compile`'s run, the split `tm_status` makes.
+    pub fn asm_status(&self) -> AsmStatus {
+        match &self.asm {
+            Ok(leg) => {
+                let (run, cap) = match leg.cursor.status() {
+                    None => (RunStatus::Running, None),
+                    Some(trace::AsmStatus::Halted | trace::AsmStatus::Faulted(_)) => (RunStatus::Ended, None),
+                    Some(trace::AsmStatus::Capped(cap)) => (RunStatus::Capped, Some(*cap)),
+                };
+                AsmStatus {
+                    available: true,
+                    reason: String::new(),
+                    run: Some(run),
+                    cap,
+                    total_steps: Some(leg.total_steps),
+                }
+            }
+            Err(e) => {
+                AsmStatus { available: false, reason: asm_decline_reason(e), run: None, cap: None, total_steps: None }
+            }
+        }
+    }
+
+    /// The cached listing, cloned — never printed again. Built once per compile, as `tm_program`'s
+    /// projection is, and read off `asm`, the same place `asm_status` reads availability.
+    pub fn asm_program(&self) -> Result<AsmProgram, SessionError> {
+        let leg = self.asm.as_ref().map_err(|_| SessionError::AsmAbsent)?;
+        Ok(leg.program.clone())
+    }
+
+    /// Advance one instruction. `false` once the run has halted, faulted or been capped — `asm_status().run`
+    /// and `.cap` say which, and are the only thing that can.
+    pub fn step_asm(&mut self) -> Result<bool, SessionError> {
+        let leg = self.asm.as_mut().map_err(|_| SessionError::AsmAbsent)?;
+        Ok(leg.cursor.next().is_some())
+    }
+
+    /// The cursor's machine cut to `window` — `AsmState::window` and nothing else, with the session's map, so
+    /// `source_node` resolves (`build_asm_leg` says why this map indexes this cursor's program).
+    pub fn asm_state(&self, window: AsmWindow) -> Result<AsmState, SessionError> {
+        let leg = self.asm.as_ref().map_err(|_| SessionError::AsmAbsent)?;
+        Ok(AsmState::window(&leg.cursor, Some(&self.map), window))
+    }
+
+    /// Extend the step budget, additively and saturating. It resumes a run the STEP cap stopped and nothing
+    /// else — `AsmCursor::raise_cap`'s rule — so raising it on a run a stack, heap or memory cap stopped, or
+    /// on one that ended, is harmless and changes nothing a caller can see.
+    pub fn raise_asm_cap(&mut self, extra_steps: u64) -> Result<(), SessionError> {
+        let leg = self.asm.as_mut().map_err(|_| SessionError::AsmAbsent)?;
+        leg.cursor.raise_cap(extra_steps);
+        Ok(())
+    }
+
+    /// The asm leg's answer: `rr` decoded by the program's type (`tm::decode_asm_ty`), from the run `compile`
+    /// performed.
+    ///
+    /// **AVAILABLE AT STEP 0, NOT ONLY AT THE END, BECAUSE THE ANSWER IS NOT THE CURSOR'S.** `compile` ran the
+    /// program to its end, so a halted or faulted run has its answer before the cursor takes a step — as
+    /// `tm_value` has, and unlike `lambda_value`, whose compile never reduces. Waiting for the cursor would
+    /// withhold a known answer and invite a caller to step five million instructions to get it.
+    ///
+    /// **THE CURSOR IS THE FALLBACK, AND ONLY THE FALLBACK**, for `tm_value`'s reason: a compile the step cap
+    /// stopped has no answer, and `raise_asm_cap` can then carry the cursor to a halt or a fault that
+    /// `compile`'s run never reached. The fallback decodes what the cursor already holds — no second run —
+    /// but it COPIES THE HEAP: `decode_asm_ty` reads an `AsmOutcome`, which owns its heap, and the cursor
+    /// cannot give its heap away without being consumed (`AsmCursor::into_outcome`). The copy is paid per
+    /// call, only on this path, and only for a run that outlasted its compile.
+    ///
+    /// `Unfinished` therefore means there is no end ANYWHERE: `compile`'s run was capped and the cursor has not
+    /// since ended. For a run a stack, heap or memory cap stopped that is permanent, since no raise resumes it,
+    /// and `asm_status().cap` is how a renderer tells that apart from a step cap it can raise.
+    ///
+    /// `Fault` is a run that ended in a fault, in `asm_fault`'s wording; `Undecodable` a halt whose `rr` has no
+    /// value of the program's type, which is every function-typed program; `TooLargeToPrint` a decode that
+    /// succeeded and a value too large for `decoded_value`'s capped print. See `Decoded`'s table.
+    pub fn asm_value(&self) -> Result<Decoded, SessionError> {
+        let leg = self.asm.as_ref().map_err(|_| SessionError::AsmAbsent)?;
+        Ok(match &leg.end {
+            AsmEnd::Halted(outcome) => decoded_or_undecodable(tm::decode_asm_ty(outcome, &self.ty)),
+            AsmEnd::Faulted { pc, why } => asm_fault(*pc, why),
+            AsmEnd::Capped => match leg.cursor.status() {
+                Some(trace::AsmStatus::Halted) => {
+                    let outcome = AsmOutcome { result: leg.cursor.rr(), heap: leg.cursor.heap().to_vec() };
+                    decoded_or_undecodable(tm::decode_asm_ty(&outcome, &self.ty))
+                }
+                Some(trace::AsmStatus::Faulted(why)) => asm_fault(leg.cursor.pc(), why),
+                None | Some(trace::AsmStatus::Capped(_)) => Decoded::Unfinished,
+            },
+        })
+    }
+
     // --- the reference leg --------------------------------------------------------------------
 
     /// The reference interpreter's answer — the ground truth `three_way_oracle.rs` checks both
@@ -1045,7 +1307,7 @@ impl Session {
 /// is named `session` and nothing is gained by renaming it. See the design's §4.1.
 ///
 /// **A `None` HERE IS "THE TEXT DID NOT PARSE", NOT "A BACKEND DECLINED"** — the distinction `Compiled`
-/// draws in the other direction. A `Session` with both legs declined is still a session, because
+/// draws in the other direction. A `Session` with every leg declined is still a session, because
 /// declining is a backend's answer about a program; a scratchpad IS its parsed artifact, so text that
 /// does not parse leaves nothing to hold.
 pub struct Scratched<T> {
@@ -1778,6 +2040,7 @@ mod tests {
     fn every_session_error_says_what_went_wrong() {
         assert!(SessionError::LambdaAbsent.to_string().contains("lambdaStatus"), "point the caller at the reason");
         assert!(SessionError::TmAbsent.to_string().contains("tmStatus"));
+        assert!(SessionError::AsmAbsent.to_string().contains("asmStatus"));
         let msg = SessionError::NoSuchTape { tape: 9, tapes: 5 }.to_string();
         assert!(msg.contains('9') && msg.contains('5'), "name both the index asked for and the count: {msg}");
     }
@@ -2316,8 +2579,8 @@ mod tests {
     }
 
     /// `analyze` is the CHEAP diagnostics path, and its separation from `compile` is the whole point:
-    /// linting through `compile` would lower both backends and simulate a Turing machine to a halt on
-    /// every keystroke.
+    /// linting through `compile` would lower the program three ways, run its asm to the end and simulate
+    /// a Turing machine to a halt on every keystroke.
     #[test]
     fn analyze_reports_diagnostics_without_building_a_session() {
         let clean = analyze("let x = 40; x + 2");
@@ -2470,7 +2733,7 @@ mod tests {
     #[test]
     fn a_raised_tm_cap_driven_to_a_halt_answers_what_the_status_claims() {
         let caps = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
-        let mut s = Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, caps)
+        let mut s = Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, caps, tm::asm::DEFAULT_CAPS)
             .session
             .expect("a capped run yields a working session, which is the point of the HitCap arm");
         assert!(s.final_tapes.is_none(), "a capped compile reached no final configuration to record");
@@ -2503,6 +2766,249 @@ mod tests {
             .expect("a declined TM leg is still a session");
         assert!(!s.tm_status().available, "the fixture must decline, or this test asserts nothing");
         assert_eq!(s.tm_value(), Err(SessionError::TmAbsent));
+    }
+
+    // --- the asm leg --------------------------------------------------------------------------
+
+    /// The window every asm test reads through: larger than any program below, so a frame is the whole
+    /// machine unless a test says otherwise.
+    const ASM_WHOLE: AsmWindow = AsmWindow { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16 };
+
+    /// A runaway counter: it never halts, the TM declines it as overflowing every width, and the asm leg
+    /// spends its whole step cap on it at compile time.
+    const RUNAWAY: &str = "let mut n = 1; while n > 0 { n = n + 1; } n";
+
+    /// `compile` with `asm_caps` for the asm run and the TM's default for the TM run.
+    fn compile_asm_capped(src: &str, asm_caps: tm::asm::Caps) -> Session {
+        Session::compile_with_caps(src, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, asm_caps).session.expect("compiles")
+    }
+
+    /// Step the asm cursor until it stops, and say how many steps it took.
+    fn run_asm_out(s: &mut Session) -> u64 {
+        let mut steps = 0;
+        while s.step_asm().expect("asm available") {
+            steps += 1;
+        }
+        steps
+    }
+
+    /// `total_steps` is the whole run's length and `run` is where the cursor stands, as on the TM leg: the
+    /// sample's 5 instructions are known before the cursor moves, the cursor reaches exactly that many,
+    /// and the total does not move with it. No cap is named beside a running or ended cursor.
+    #[test]
+    fn the_asm_status_reports_the_whole_runs_length_alongside_the_cursors_position() {
+        let mut s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
+        let before = AsmStatus {
+            available: true,
+            reason: String::new(),
+            run: Some(RunStatus::Running),
+            cap: None,
+            total_steps: Some(5),
+        };
+        assert_eq!(s.asm_status(), before, "the whole run's length, and a cursor that has not moved");
+        assert_eq!(run_asm_out(&mut s), 5, "the cursor reaches the length compile's run reported");
+        assert_eq!(s.asm_status(), AsmStatus { run: Some(RunStatus::Ended), ..before }, "a halt is an end");
+    }
+
+    /// The asm leg's answer is known at step 0, from the run `compile` performed, and stays the same once
+    /// the cursor has run out — `tm_value`'s arrangement, not `lambda_value`'s.
+    #[test]
+    fn asm_value_answers_from_the_run_compile_already_performed() {
+        let mut s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
+        assert_eq!(s.asm_state(ASM_WHOLE).expect("asm available").step, 0, "the cursor has not moved");
+        assert_eq!(s.asm_value(), Ok(Decoded::Value { text: "42".to_string() }));
+        run_asm_out(&mut s);
+        assert_eq!(s.asm_value(), Ok(Decoded::Value { text: "42".to_string() }));
+    }
+
+    /// The asm leg agrees with the reference over the programs `all_three_legs_agree` runs, a list among
+    /// them, so the decode reads the heap as well as `rr`.
+    #[test]
+    fn the_asm_leg_agrees_with_the_reference() {
+        for src in ["let x = 40; x + 2", "[1, 2, 3]", "true", "1 + 2 * 3"] {
+            let s = Session::compile(src, EncodingKind::Unary).session.unwrap_or_else(|| panic!("{src} compiles"));
+            assert_eq!(s.asm_value(), Ok(s.evaluate()), "{src}: asm disagrees with the reference");
+        }
+    }
+
+    /// A program the TM declines as overflowing every width still lowers, so it has an asm leg, and a
+    /// program that never halts spends the whole step cap in `compile`: the total is the cap, 5,000,000,
+    /// and there is no value. The cursor runs to the same wall, where the status names the step cap, and a
+    /// raise lets it go on.
+    #[test]
+    fn a_runaway_loop_caps_the_asm_leg_on_steps_where_the_tm_declines() {
+        let mut s = Session::compile(RUNAWAY, EncodingKind::Unary).session.expect("compiles");
+        assert_eq!(s.tm.as_ref().err(), Some(&TmDecline::Overflow), "the TM declines this program");
+        let st = s.asm_status();
+        assert_eq!((st.available, st.run, st.cap), (true, Some(RunStatus::Running), None));
+        assert_eq!(st.total_steps, Some(tm::asm::DEFAULT_CAPS.steps), "compile's run spent the whole step cap");
+        assert_eq!(s.asm_value(), Ok(Decoded::Unfinished), "a capped compile has no value");
+
+        assert_eq!(run_asm_out(&mut s), tm::asm::DEFAULT_CAPS.steps, "the cursor stops at the same wall");
+        assert_eq!((s.asm_status().run, s.asm_status().cap), (Some(RunStatus::Capped), Some(AsmCap::Steps)));
+        s.raise_asm_cap(1).expect("asm available");
+        assert_eq!(s.step_asm(), Ok(true), "a step cap is the one a raise resumes");
+    }
+
+    /// A program the TM refuses to build — 33 multiplications, one past `MAX_MUL_INSTRS`, the fixture
+    /// `sourcemap.rs`'s `the_asm_half_survives_a_machine_the_tm_refuses` uses — still lowers, and runs.
+    #[test]
+    fn a_program_the_tm_refuses_to_build_keeps_its_asm_leg() {
+        let src = vec!["1"; 34].join(" * ");
+        let s = Session::compile(&src, EncodingKind::Unary).session.expect("compiles");
+        assert_eq!(s.tm.as_ref().err(), Some(&TmDecline::TooLarge), "the TM refuses this machine");
+        let st = s.asm_status();
+        assert_eq!((st.available, st.total_steps), (true, Some(68)));
+        assert_eq!(s.asm_value(), Ok(Decoded::Value { text: "1".to_string() }));
+    }
+
+    /// A program `tm::lower_program` refuses has no asm leg: the status says why and nothing else, and
+    /// every asm method answers `AsmAbsent`. A 2,048-element list literal nests past the lowering's depth
+    /// guard — the fixture `a_declined_tm_leg_reports_why_and_refuses_its_methods` uses — and the link
+    /// index has no asm column for it.
+    #[test]
+    fn a_program_that_does_not_lower_declines_the_asm_leg_and_refuses_its_methods() {
+        let src = format!("[{}]", (0..2048).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
+        let mut s = Session::compile(&src, EncodingKind::Unary).session.expect("a declined leg is still a session");
+        let reason = "the program nests deeper than the asm lowering guard allows".to_string();
+        assert_eq!(s.asm_status(), AsmStatus { available: false, reason, run: None, cap: None, total_steps: None });
+        assert_eq!(s.asm_program(), Err(SessionError::AsmAbsent));
+        assert_eq!(s.asm_state(ASM_WHOLE), Err(SessionError::AsmAbsent));
+        assert_eq!(s.step_asm(), Err(SessionError::AsmAbsent));
+        assert_eq!(s.raise_asm_cap(1), Err(SessionError::AsmAbsent));
+        assert_eq!(s.asm_value(), Err(SessionError::AsmAbsent));
+        assert!(s.link_index(65_536).asm_owner.is_empty(), "no program, no owners");
+    }
+
+    /// `defunc`'s refusal declines the asm leg too, in its own words: `t` is both called by name and passed as
+    /// a value, and its body applies its parameter at its own arity, closing a cycle through `t`'s dispatcher
+    /// — the shape `defunc.rs`'s module doc names first. The reference and λ legs run it; asm and TM cannot.
+    #[test]
+    fn a_program_defunc_refuses_declines_the_asm_leg_with_its_reason() {
+        let src = "fn inc(x) { x + 1 } fn t(g) { g(3) } fn ap(h, y) { h(y) } t(inc) + ap(t, inc)";
+        let s = Session::compile(src, EncodingKind::Unary).session.expect("compiles");
+        let st = s.asm_status();
+        assert_eq!(
+            (st.available, st.reason.as_str()),
+            (false, "the asm backend does not support cyclic higher-order call graph through `t`")
+        );
+        assert!(s.lambda_status().available, "the λ leg runs it, so the refusal is the asm lowering's own");
+    }
+
+    /// A stack, heap or memory cap ends the run as a cap that NAMES ITSELF, and no raise resumes it: `fact(3)`
+    /// under a two-frame stack, `[1, 2, 3]` under a one-cell heap, and `fact(3)` with no memory for a saved
+    /// frame. The cursor stops where `compile`'s run did, and the value stays `Unfinished` because there is
+    /// no end anywhere.
+    #[test]
+    fn a_hard_cap_names_itself_and_does_not_resume() {
+        let d = tm::asm::DEFAULT_CAPS;
+        let cases = [
+            (FACT3, tm::asm::Caps { stack: 2, ..d }, AsmCap::Stack),
+            ("[1, 2, 3]", tm::asm::Caps { heap: 1, ..d }, AsmCap::Heap),
+            (FACT3, tm::asm::Caps { mem: 0, ..d }, AsmCap::Mem),
+        ];
+        for (src, caps, cap) in cases {
+            let mut s = compile_asm_capped(src, caps);
+            let total = s.asm_status().total_steps;
+            assert_eq!(Some(run_asm_out(&mut s)), total, "{cap:?}: the cursor stops where compile's run did");
+            let capped = (Some(RunStatus::Capped), Some(cap));
+            assert_eq!((s.asm_status().run, s.asm_status().cap), capped, "{cap:?}");
+            s.raise_asm_cap(1_000_000).expect("asm available");
+            assert_eq!(s.step_asm(), Ok(false), "{cap:?}: more steps cannot resume it");
+            assert_eq!((s.asm_status().run, s.asm_status().cap), capped, "{cap:?}");
+            assert_eq!(s.asm_value(), Ok(Decoded::Unfinished), "{cap:?}");
+        }
+    }
+
+    /// A compile the step cap stopped has no value; the cursor reaches the same cap, a raise carries it to
+    /// the halt, and the value is then decoded from the CURSOR — including the heap, which `[1, 2, 3]`
+    /// needs and `compile`'s capped run never kept.
+    #[test]
+    fn a_raised_step_cap_carries_the_asm_cursor_to_a_value() {
+        let mut s = compile_asm_capped("[1, 2, 3]", tm::asm::Caps { steps: 3, ..tm::asm::DEFAULT_CAPS });
+        assert_eq!(s.asm_status().total_steps, Some(3), "a capped run's total is where the cap fired");
+        assert_eq!(s.asm_value(), Ok(Decoded::Unfinished));
+        assert_eq!(run_asm_out(&mut s), 3);
+        assert_eq!((s.asm_status().run, s.asm_status().cap), (Some(RunStatus::Capped), Some(AsmCap::Steps)));
+
+        s.raise_asm_cap(1_000_000).expect("asm available");
+        run_asm_out(&mut s);
+        assert_eq!((s.asm_status().run, s.asm_status().cap), (Some(RunStatus::Ended), None));
+        assert_eq!(s.asm_value(), Ok(Decoded::Value { text: "[1, 2, 3]".to_string() }));
+    }
+
+    /// A fault is an end and the leg's value, in spec §8's words: `head([])` types, and its `head` meets
+    /// `nil` at instruction 1. From `compile`'s run the value is there at step 0; the cursor ends
+    /// on the same fault; and a compile the step cap stopped short of it reaches it through a raise, with
+    /// the fault then read off the cursor.
+    #[test]
+    fn a_fault_ends_the_asm_run_and_is_its_value() {
+        let fault = Decoded::Fault { message: "head of empty list at pc1".to_string() };
+        let mut s = Session::compile("head([])", EncodingKind::Unary).session.expect("compiles");
+        assert_eq!(s.asm_value(), Ok(fault.clone()), "compile's run faulted");
+        run_asm_out(&mut s);
+        assert_eq!((s.asm_status().run, s.asm_status().cap), (Some(RunStatus::Ended), None), "a fault is an end");
+        assert_eq!(s.asm_value(), Ok(fault.clone()));
+
+        let mut s = compile_asm_capped("head([])", tm::asm::Caps { steps: 1, ..tm::asm::DEFAULT_CAPS });
+        assert_eq!(s.asm_value(), Ok(Decoded::Unfinished), "the cap stopped compile's run before the fault");
+        run_asm_out(&mut s);
+        s.raise_asm_cap(1_000_000).expect("asm available");
+        run_asm_out(&mut s);
+        assert_eq!(s.asm_value(), Ok(fault), "the cursor's own fault, in the same words");
+    }
+
+    /// `|x| x + 1` types as a function, which `decode_asm_ty` has no value for, and the asm leg lowers and
+    /// runs it to a halt — so its value is `Undecodable`, the fixture `a_function_valued_program_decodes_as
+    /// _undecodable_on_both_legs` uses for the other two.
+    #[test]
+    fn a_function_valued_program_decodes_as_undecodable_on_the_asm_leg() {
+        let s = Session::compile("|x| x + 1", EncodingKind::Unary).session.expect("compiles");
+        assert!(s.asm_status().available, "the asm lowering accepts this — against a decline this proves nothing");
+        assert_eq!(s.asm_value(), Ok(Decoded::Undecodable));
+    }
+
+    /// A value `decode_asm_ty` builds but `decoded_value` refuses to print: every suffix of a 5,000-element
+    /// list shares its cells, so the decode is small in memory and about 25 million nodes printed, past
+    /// `MAX_PRINT_NODES`. The TM run is capped at ten steps, since the TM would otherwise simulate this for
+    /// its whole budget; the asm run is not.
+    #[test]
+    fn asm_value_reports_too_large_to_print_for_a_logically_enormous_decode() {
+        let src = "fn upto(n) { if n == 0 { nil } else { cons(n, upto(n - 1)) } } \
+                   fn tails(xs) { if is_empty(xs) { nil } else { cons(xs, tails(tail(xs))) } } tails(upto(5000))";
+        let tm_caps = tm::TmCaps { steps: 10, ..tm::TM_DEFAULT_CAPS };
+        let s = Session::compile_with_caps(src, EncodingKind::Unary, tm_caps, tm::asm::DEFAULT_CAPS)
+            .session
+            .expect("compiles");
+        assert_eq!(s.asm_status().run, Some(RunStatus::Running), "the leg is there");
+        assert_eq!(s.asm_value(), Ok(Decoded::TooLargeToPrint));
+    }
+
+    /// The frame at step 0 and at the end, through the session: nothing written, instruction 0 about to run
+    /// and owned by the literal `40`; then `rr` holding 42 and nothing left to run.
+    #[test]
+    fn the_asm_state_windows_the_cursor_and_names_its_owner() {
+        let src = "let x = 40; x + 2";
+        let mut s = Session::compile(src, EncodingKind::Unary).session.expect("compiles");
+        let st = s.asm_state(ASM_WHOLE).expect("asm available");
+        assert_eq!((st.step, st.pc, st.next, st.wrote), (0, 0, Some(0), None));
+        let owner = st.source_node.and_then(|n| s.source_span(n)).map(|sp| &src[sp.start..sp.end]);
+        assert_eq!(owner, Some("40"), "instruction 0's owner, through the session's own map");
+
+        run_asm_out(&mut s);
+        let end = s.asm_state(ASM_WHOLE).expect("asm available");
+        assert_eq!((end.step, end.rr.word.as_str(), end.next), (5, "42", None));
+    }
+
+    /// The link index carries one asm owner per instruction the listing prints, and every instruction of a
+    /// first-order program has one.
+    #[test]
+    fn the_link_index_carries_one_owner_per_listed_instruction() {
+        let s = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
+        let listing = s.asm_program().expect("asm available").listing;
+        let owners = s.link_index(65_536).asm_owner;
+        assert_eq!(owners.len(), listing.len());
+        assert!(owners.iter().all(|o| *o >= 0), "a first-order program owns every instruction: {owners:?}");
     }
 
     // --- the TM scratchpad -----------------------------------------------------------------------
@@ -3241,7 +3747,7 @@ state halt: accept
             ("let x = 40; x + 2", EncodingKind::Unary, capped, false),
             (higher, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, true),
         ] {
-            let s = Session::compile_with_caps(src, kind, caps).session.expect("compiles");
+            let s = Session::compile_with_caps(src, kind, caps, tm::asm::DEFAULT_CAPS).session.expect("compiles");
             let program = s.tm_program().expect("the TM leg runs this");
             if widens {
                 assert!(program.width > tm::MIN_FIELD_WIDTH, "{src} {kind:?}: fits at the narrowest width");

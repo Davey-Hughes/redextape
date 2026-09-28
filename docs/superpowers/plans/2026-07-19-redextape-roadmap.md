@@ -20232,3 +20232,429 @@ worktree at `a4e7c6f` — each in its own `CARGO_TARGET_DIR`. No by-hand check r
 | 12 of 12 exit 0 | the hygiene scans | `scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua}.sh`, each `--self-test` then alone |
 | 154 files, 1,324 tests; 96.73, 90.29, 97.78, 98.44 against 95, 89, 97, 97 | the web CI sequence: statements, branches, functions and lines against their floors | `pnpm run build:wasm && pnpm exec biome ci --error-on-warnings && pnpm run typecheck && pnpm run test:coverage && pnpm run build:app` |
 | 200; healthy | the image's status and health | `docker build -t redextape-check .`, `docker run -d -p 8099:80`, `curl -w '%{http_code}'`, `docker inspect --format '{{.State.Health.Status}}'` |
+
+#### PLAN 7 PART 5b, THE ASM VIEW: ASM IS THE WEB APP'S THIRD LEG, RECORDED BY THE WORKER, STEPPED BY THE CONTROLS λ AND TM USE AND COUNTED IN THE READOUT, AND ITS VIEW LISTS THE PROGRAM ON A GRID TAKEN OUT OF THE TM RULE TABLE, BESIDE REGISTERS, CALL STACK AND HEAP PANELS, LINKED TO THE SOURCE BY EACH INSTRUCTION'S OWNER — AND LOOKING AT THE PROTOTYPE BY HAND FOUND A LINK'S SCROLL UNDONE A FRAME LATER ON `main`, WHOSE OWN GUARD PASSED; THE PLAN'S HOLD, KEYED ON THE ROW FOLLOWING KEEPS IN VIEW, NEVER RELEASED ON A STEP THAT LOOPS IN ITS STATE; THE WHOLE-BRANCH REVIEW AND THE RE-REVIEW OF ITS FIX ROUND FOUND FOUR MORE PATHS ON WHICH A LINK'S SCROLL OR ITS HOLD WENT WRONG — A VIEW OFF THE PAGE, A CLEARED PIN, A CLOSED PANEL AND A VIEW THAT MISSED THE LAST COMPILE; AND THE CHECK BY HAND FOUND A CLOSED REGISTERS PANEL STILL TAKING HALF ITS ROW (2026-09-27 to 2026-09-28, branch `plan7-part5b-asm-view`, `899c8b2..03bdfe7`, 24 commits, plus this entry)
+
+**Part 5b of Plan 7** ([design](../specs/2026-09-27-plan7-part5-asm-design.md),
+[plan](2026-09-27-plan7-part5b-asm-view.md)), the second of part 5's three PRs and its view half. It touches
+`redextape-core`, chiefly its view model (amendment 6), `redextape-wasm`, `scripts/build-web-bindings.sh`, the
+README's count of wasm browser tests, and `web/`. 5c adds asm copies. The spec gained sixteen amendments for it,
+6 to 21: eight from reading the code at `899c8b2` before the plan (6 to 13, of which 6 and 7 are the user's
+decisions), seven from the plan's prototype before any task ran (14 to 20), and one from looking at that
+prototype by hand (21), which was then reworded three times — by Task 3's first fix round (`8b2deb3`) and by the
+final wave's first two rounds (`4147efc`, `ba00975`). Four of the commits touch only `docs/`: three amendment
+commits and the plan, which alone is 11,789 of the branch's 19,298 added lines.
+
+**The user's decisions (2026-09-27):** before the plan, the asm view's types live in core beside `TmState`, over
+mirroring them in the wasm crate (amendment 6), and the listing's grid is a module the TM rule table shares,
+over a fourth copy of the virtualized row and over moving all four copies in 5b (amendment 7); for executing,
+work run in parallel, which became the lanes below; after Task 3's review, a link's hold releases on each step
+the view shows, not when the followed row moves; and after Task 7's review, the worker's recording loop is
+extracted rather than written a third time.
+
+##### WHAT PART 5b BUILT
+
+- **Every branch on a leg or a pane kind is a switch `tsc` holds to every member** (amendment 8). `legs.ts`
+  holds the leg vocabulary: `LEG_NAME`, the one place a leg's name lives, `LEGS` in its order (λ, asm, TM),
+  `perLeg`, `unhandled` and `CopyLeg`. Each branch that read "not λ" as "TM" now returns a value from a `switch`
+  or ends in `default: unhandled(x)`; `replies.ts`'s two switches on a reply's kind and the worker's request
+  dispatch have an exhaustive end; and a pin's origin is `'source' | Leg`. Adding `'asm'` to `Leg` and
+  `PaneKind` then made `tsc` name the 31 sites a third leg had to decide.
+- **The TM rule table's grid is a module of its own** (amendment 7). `VirtualGrid` — the drawn window, the
+  active row by index, the keys, the `mousedown` guard that keeps a real click, following and its resize clamp,
+  and the link scroll — left `TmPane` with no change in behaviour, and the asm listing is its second user.
+  `createPanel` keeps a role its body already declares.
+- **A link's scroll holds a following grid until the run moves** (amendment 21), a bug on `main`, below. The
+  hold is keyed on the frame on display, and following takes over when the run moves, on re-attach, on a new
+  program, or when the link gives way to a pin with nothing in this view; following's own flag is untouched.
+  Only a pin made in the source or in another leg's view scrolls a view or releases its hold; one made in a view
+  of the same leg only paints. A view that cannot show its grid when the pin is made — off the page, or with the
+  grid's panel closed — records the row and scrolls to it at its next draw on the page with the panel open,
+  holding from the frame it shows then; a view that missed the last compile gets the pin, with its scroll, after
+  the render that shows it.
+- **Core's view model carries the asm machine** (amendment 6). `AsmState` is the asm cursor cut to a window
+  whose bounds, `AsmWindow`, are the builder's parameters, set in `protocol.ts`'s `ASM_WINDOW` as 64 locals, 16
+  arguments, 8 frames, 16 cells and 16 boxes (amendment 17). A word crosses as its decimal string with its tag
+  (amendment 13), the frames come top first, the cells are the newest plus every cell a list register names, and
+  `next` is the instruction about to run, `None` once the run has halted or faulted. `AsmProgram` is the listing
+  and the labels. `WordTag` and `AsmCap` gain serde and the canonical ts derive.
+- **The wasm session runs asm as a third leg** (amendment 13). `compile` lowers the program with
+  `tm::lower_program`, drives a cursor to its end under `DEFAULT_CAPS` for the step total and the value, and
+  records from a fresh cursor, as TM does. Six methods — `asmStatus`, `asmProgram`, `stepAsm`, `asmState`,
+  `raiseAsmCap` and `asmValue` — and `linkIndex`'s `asmOwner`, `-1` for an instruction `defunc` minted
+  (amendment 14). asm is absent only when lowering fails: a program the TM declines as too large or overflowing
+  still has an asm leg. A fault's value reads "head of empty list at pc1" (amendment 15).
+  `build-web-bindings.sh` writes once a file both crates write with the same bytes, and still refuses two
+  different types of one name.
+- **The asm view.** `AsmPane`, with its pure model in `asm-view.ts`: the listing on a `VirtualGrid`, each label
+  a row above the instruction it names, the instruction about to run marked and saying "runs next", and *follow
+  current instruction* in the listing panel's header (amendment 9); the registers, each word read by its tag,
+  the register the last instruction wrote marked, and a local the current call has not written dimmed and marked
+  `·`, "left over from caller", or "not written yet" at depth 0 (amendment 18); the call stack, top first; and
+  the heap, newest first, each cell with the list registers that point at it. The open panels share the view's
+  height — the listing two shares, the registers and the call stack side by side in one, stacking when the view
+  is narrow, the heap one — and each panel's open state is kept per view.
+- **asm is the web app's third leg.** The worker records λ, then asm, then TM; the session keeps the listing;
+  the step controls drive it as they drive λ and TM; the readout counts "N instructions"; a stack, heap or
+  memory cap ends a recording with no continue and the step line names it, as `RecordEnd` gains `stack-full`,
+  `heap-full` and `memory-full` (amendment 10); and the default tree is (source | λ) above (asm | TM), λ still
+  the first view leaf (amendment 12). A copy's leg is `CopyLeg`, λ or TM (amendment 20). The worker's three
+  recording loops are one, `recordLeg` in `record-loop.ts`, and the λ and TM end rule, `endOf`, moved beside
+  `asmRecordEnd` in `protocol.ts`, each under node tests.
+- **The asm view links** (§6.6). A click or Enter on an instruction pins its owner in every view; a pin marks
+  the instructions billed to it in every asm view and scrolls to the first unless the click came from an asm
+  listing; a keystroke in the source clears them. The status line says "this instruction has no source
+  construct" for an instruction `defunc` minted, "the asm run is here right now" when the asm run's focus meets
+  the pin, and "this construct emits no instructions or machine states" once, for a construct neither lowering
+  bills anything to (amendments 11 and 19).
+
+##### THE PLAN WAS BUILT AND REPLAYED BEFORE IT WAS HANDED OUT
+
+Every task was built, gated and sabotaged in a scratch worktree off `9b7681d` before the plan was written, and
+the plan's code blocks are that prototype's patches. The plan was then replayed from its own markdown on a fresh
+worktree at `d403a45`: 8 trees of 8 identical to the prototype's, `docs/` aside, every red and green step as
+written, and **139 of 139 sabotages fired** on the test each was aimed at. What the prototype found, each
+answered in the plan's code before any task ran:
+
+1. **The legs were two-way in more places than the spec counted** (amendment 8): 12 two-way branches and 13
+   hand-written two-leg shapes at `899c8b2`, against §2.3's 14 branches. Three dispatches — `replies.ts`'s two
+   switches on a reply's kind and the worker's chain on a request's kind — had no exhaustive end, so an
+   `asm-frames` reply nothing handled would have been dropped with `tsc` green. Adding `'asm'` ahead of the
+   refactor made `tsc` report 13 errors, none of them at the 12 branches; after it, 31: 22 in `src/` and 9
+   `DetachedPanes` literals in `tests/`.
+2. **`link-wiring.ts`'s slot lookup slipped the first probe**: its `switch` returns a value that may be
+   `undefined`, the one kind TS2366 does not police, so a leg with no arm read as a leg with no view. It ends in
+   `unhandled`.
+3. **`panel.ts` overwrote a body's declared role**: building the grid before its panel made the rule table a
+   `region` again.
+4. **The grid's closed-panel test could not fail as first written**: its sabotage fired alone and not in the
+   file, because a test counting two frames ran before the event it was about. The tests await the event.
+5. **A type both crates emit refused the web bindings build.** The wasm crate's `AsmStatus` names core's
+   `AsmCap`, ts-rs writes a dependency's file with its dependent, and the script refused any basename both
+   crates wrote, so from Task 5 on every web commit's hook would have failed.
+6. **Spec §8's fault wording read "fault: faulted at …" on screen** (amendment 15), since every reader of a
+   fault value prints `fault: ` before it.
+7. **Adding `'asm'` to `Leg` is what needs the view**: every view's title menu offers every leg, so the view is
+   built and tested alone (Task 6) and the leg wired after it (Task 7), the reverse of the approved outline's
+   order.
+8. **The grid's standalone test clicked off the page**: a 1,000-pixel host in the default 414-pixel viewport put
+   the row's centre past the page's edge.
+9. **A panel's own margin sat inside the shared row's share**, leaving the registers and the call stack 8 pixels
+   short; the row carries the spacing.
+10. **At depth 0 "left over from caller" is false** (amendment 18): there is no caller.
+11. **The controls gate was green and blind to the asm view**: it walked a hand-written `['lambda-0', 'tm-0']`.
+    It now reads the views off the page and asserts the default tree's three.
+12. **The new default tree broke tests in 16 browser test files**, each a test's assumption rather than a
+    defect; the two that measure the TM view's geometry close the asm view first.
+13. **`asmRecordEnd` belongs in `protocol.ts`**, where a test can reach it: the worker is outside the coverage
+    gate.
+14. **A word costs 48.23 bytes and is charged 52** (amendment 17), by heap differential over `upto(200)`'s 2,814
+    frames and 247,091 words; `frame-cost.test.ts` fails if a word ever costs more than it is charged.
+15. **A construct neither lowering bills anything to would have been said twice**, "no machine states" and "no
+    instructions" side by side on the constructs most often clicked (amendment 19).
+16. **A link scrolled a following grid for one frame, on `main`** (amendment 21), found looking at the asm view
+    by hand. The scroll's own `scroll` event redrew the grid, which, still following, scrolled back to the run's
+    row: a construct linked from the source moved the TM rule table to its block and back within two
+    milliseconds, whenever the table was following. `app.test.ts` had a guard for exactly this, and it passed,
+    reading the table in the link's own turn, before the event that reverts it; the grid's own test had written
+    the bug down as the contract, "win over following for exactly one draw". Both now await the event.
+17. **The asm pin's keystroke clear passed with the clear deleted**, because the recompile the keystroke
+    schedules clears the marks anyway once it lands. The test asserts with no `await` after the edit.
+18. **A sabotage that stopped the first compile reaching the asm view failed `beforeAll`**, so its file's seven
+    cases were skipped and the one it was aimed at never ran. The wait is that test's own.
+
+Replaying the plan found two things more, fixed before it was committed: a fresh worktree could not typecheck,
+since `tsc` resolves the language server's module from `pkg-lsp/`, which no task builds; and one of Task 5's
+sabotages edited the fault's old wording, which amendment 15 had already replaced.
+
+##### WHAT EXECUTING THE PLAN FOUND
+
+**Three lanes, joined by cherry-picks.** Lane A, the main checkout, ran Tasks 1 to 3, which touch only `web/`;
+lane B, a worktree on its own branch off the plan's commit with its own `CARGO_TARGET_DIR`, ran Tasks 4 and 5,
+which touch only `crates/`, `README.md` and `scripts/`. The browser suites of both lanes ran under one `flock`,
+one at a time, as the plan's constraints require. Once Task 3's first fix round was committed and Task 5 was
+clean, lane B's two commits were cherry-picked onto the branch (`80b6ac6` as `6dd2c32`, `cd92735` as `960c9c3`):
+the crates, the README and the script were then identical to the prototype's Task 5 commit, and `web/` differed
+from it only by Task 3's fix. Task 6 ran in a third worktree off `960c9c3` while Task 3's second fix round ran
+in the main checkout on other files, and was cherry-picked as `548b4c1`; Tasks 7 and 8's patches were checked to
+apply cleanly on it, although Task 3's fix rounds had touched `app.test.ts` and `link-wiring.ts`. Task 8 was
+implemented while Task 7's review ran.
+
+**Tasks 1 to 3's trees matched their prototype commits**, `docs/` aside, Tasks 4 and 5's matched theirs on
+`crates/`, `README.md` and `scripts/`, and Task 6's differed from its prototype by Task 3's first fix round and
+the `frame` below; the task tables' 140 sabotages — the plan's 139 and one Task 6 added — each fired. Two
+patches copied by hand failed `git apply --check` before touching the tree: Task 1's, a hunk mistranscribed, and
+Task 8's, retyped without the lone space a blank context line needs; Task 8's were then cut from the brief with
+`sed`, and both applied with no drift. After Task 1 the controller re-ran the sibling search with `git grep` at
+`5e6763e`: every leg comparison left is one-sided or `buffers-store.ts`'s, a copy's store and 5c's.
+
+**The plan's Task 1 probe restored from the index.** Step 4 adds `'asm'` with `sed`, runs `tsc` — 31 errors, one
+for one the plan's list — and restores with `git checkout -- src/protocol.ts src/panes.ts`, which restores from
+the index; with nothing staged, it also discarded `panes.ts`'s own Task 1 change, `legOfPane`. The replay had
+staged before probing, so it never saw this. The implementer caught it in `git status` and re-applied the hunk;
+staging before the probe would avoid it. The same trap caught Task 4's first sabotage driver, which restored
+each row with `git checkout` and so, after its first row, had put two of the task's files back to their state
+before the task: its later rows ran against the wrong tree. The implementer saw it, repaired the tree, and
+re-ran the 32 rows from a copy held in memory, checking each restore byte for byte.
+
+**Task 3's review: the hold never released on a step that loops in its state.** Task 3's red step had run the
+rewritten guard against the grid before the fix, and it failed with the grid's own test, 2 of 57. The review
+returned "needs fixes" with one Important finding in the plan's code: the hold released only when the followed row
+moved, and the TM rule table follows the current state's own row, so a self-looping step — the ordinary case in a
+compiled machine — left the table parked on the linked block, the current rule off screen, and no follow control.
+**The user decided (2026-09-27) that the hold releases on each step** (`8b2deb3`): `GridRows` gains a required
+`frame`, so `tsc` makes every grid supply it, and amendment 21 was reworded. The grid's red read `expected 132 to
+be 11892`; the new app test scans forward for a step whose state is the one before it, and finds one six steps past
+the oldest kept step of `BIG`'s machine. That test's precondition first read the current state off the rule table's
+row, which exists only once the hold has released, so both sabotages that broke the hold failed at the precondition
+and never reached the assertions meant to catch them; the second fix round (`949126b`) reads it off the TM status
+line, and both then failed at the behaviour assertion. The plan's Task 6 patch predated the change, so Task 6 added
+`frame` to the asm listing's rows with a test and a thirtieth sabotage, `frame: null`. Its review found that
+sabotage showed only that the hold releases at all; the controller's `frame: nextRow` failed the new test alone (1
+failed, 20 passed). Task 8's sabotage 14, aimed at the row-keyed condition, was re-aimed at the frame-keyed one.
+The same Task 3 review recorded as a Minor that clearing a link never released the hold; left for the whole-branch
+review, it became that review's second Important.
+
+**Tasks 4 and 5, the Rust lane, came back clean**, 32 of 32 and 28 of 28 sabotages fired. Task 5's review left
+one case unmeasured, below, and Minors, some fixed by the final wave's doc sweep and others listed below.
+
+**Task 7's review: the worker's recording loop, written a third time.** "Needs fixes", one Important finding in
+the plan's code: `recordAsm` was the third copy of the loop. **The user decided (2026-09-27) to extract it**
+(`7be0321`): `recordLeg`, in `record-loop.ts` rather than the worker because the worker is outside the coverage
+gate and no test imports it, with 7 node tests. Read side by side, the three copies differed in ten ways and in
+no accidental behaviour; one doc was wrong, saying `false` meant only a loop already in flight where each copy
+also answered `false` for a stale generation, a kind without the leg and a leg that did not compile. Of the
+round's seven sabotages on the loop, the full browser tier caught neither the budget checked after the step nor
+the `finally` clearing the flag unconditionally — 108 files and 699 tests passed under each — so those two
+properties are held only by the node tests. The re-review compared the shared loop token by token with the three
+copies it replaced, and the controller ran the two sabotages it found missing: deleting
+`if (held === null) return false` fails test 5 by a `TypeError` rather than by its assertion, and replacing the
+per-chunk re-check with `const s = held` fails test 7.
+
+**Task 8's review** came back clean, and from its flags came a gap the hold had opened: a view off the page that
+saw the compile is still told every link, and the grid guarded its draw only on a closed panel, so it set a hold
+against a scroll that never landed, and shown on the same frame it neither followed nor showed the pin. Before
+the hold, the pending scroll was simply spent. It became the whole-branch review's first Important.
+
+**A geometry case failed twice, and the hold was not why.** `tm-grid.test.ts`'s "gives the outline one share
+beside them, and redraws the rows when its share changes" failed in Task 3's second fix round's 8-file batch and
+in Task 7's first full browser run, both times `expected 2157.97 to be less than 2074.70` where it checks the
+last row against the bottom edge after the outline takes its share, and both times it passed alone and on a
+re-run. Both runs came after the frame-keyed hold; the prototype's gates and both replays had passed it. Run
+alone 8 times in each of three trees — `main`'s web, the prototype's row-keyed hold and the frame-keyed hold —
+at `CPUQuota=150%`, it passed 24 of 24; the 8-file batch, 6 times on `main`'s web and 6 with the frame-keyed
+hold under the same quota, passed 12 of 12. Across those 36 runs it never failed, and both real failures came
+while another agent's cargo builds and tests competed for the machine. The verdict: a load-sensitive timing
+assumption in the test, which reads the last row's edge two frames after the table has given up its share,
+not polled, and not the hold. It passed in every full run recorded after Task 7's first, among them the gate
+runs at `7be0321`, `6462a00` and `b48c901`.
+
+##### WHAT THE WHOLE-BRANCH REVIEW FOUND
+
+The whole-branch review read `899c8b2..7be0321`, the plan file excluded, while Task 7's re-review and the gates
+ran. It returned "with fixes": no Critical, two Important findings, both in the hold's class, and a triage of
+the ledger's Minors into a list fixed in the same round and a list recorded here.
+
+- **Important: a grid off the page took a hold it could not honour — Stage's normal flow.** In Stage the view
+  linked from and the TM or asm view are never on the page together, so every link from another view reached a
+  hidden grid: a `clientHeight` of 0, the pending target computed uncentred, a hold keyed on the pane's stale
+  frame, a `Follow` expectation armed for an echo that never came, and a `scrollTop` written to a box not
+  rendered. Shown with the run at rest, the grid showed neither the pin nor the current row, and the follow
+  control stayed hidden; on `main` the reveal draw had simply followed. The controller chose the review's option
+  of recording the row: an unrendered box is treated as a closed one, `scrollToRow` records a row rather than
+  pixels, and the first draw against a rendered box centres it and holds from the frame it shows (`4147efc`).
+- **Important: clearing a pin never released a hold.** A pane scrolled only when the pin had a row in it, and
+  the grid had no way to let go, so a pin cleared — by a click where no construct is, on a TM scaffolding state
+  or on an instruction with no owner — left the other grids parked on a block no longer marked until the frame
+  changed, and for good once the run had ended. `VirtualGrid.release()` drops the pending row and the hold and
+  leaves following's flag alone; a pane asked to scroll to a pin with no row here calls it.
+- **Fixed in the same round, from the triage** (`7ced25c`, `60d8925`, `6462a00`): `asmRecordEnd` has an arm per
+  cap and no `default`, so adding `"Frames"` to `AsmCap` makes `tsc` report TS2366 there and TS2741 in
+  `results.ts`'s per-cap table; `endOf` left the worker for `protocol.ts` and node tests; a sweep of sentences
+  that counted two legs, three link arms or fewer panes than there now are; and tests for four things the branch
+  added and nothing held — a TM state with no owner unpinning without a word, an asm-origin click leaving its
+  own listing where it was, the asm leg's *keep recording* (on `upto(600)`, whose 8,413 instructions stop at
+  step 7,400 when history is full), and an asm panel's closed state read back from storage. Each new test failed
+  under its sabotage.
+
+**The re-review of that round found two more Importants in the same class.** It confirmed the round's items done
+as briefed, and the reset test's changed expectation, `{}` to `{ 'asm-0': { heap: false } }`, correct. First, a
+pin made while the grid's panel was closed left the previous link's hold: `scrollToRow` still returned early on
+a closed panel, so the draw that reopened it found the old hold on the same frame and showed neither the new pin
+nor the current row. The round's own report had named this — a closed panel still recorded no link — and left it
+because its brief did not ask. Second, amendment 21's new sentence was false for a view that missed the last
+compile: on Stage's ordinary path, edit, link, reveal, the seed re-applied the pin with no scroll, so the view
+opened following. The controller decided both by round 1's rule, and **round 2** (`1a52ba7`, `ba00975`,
+`b48c901`) made them so: `scrollToRow` records the row behind a closed panel too, and the seeds re-apply the pin
+after the render that shows the view, scrolling unless the pin came from a view of the same leg, since a hold
+armed before that render would be keyed on the `null` frame the seed's `setProgram` leaves and the render's own
+draw would release it at once. The seed's comment had said there was "no `origin` here"; a pin carries its
+origin, and the comment was rewritten. Amendment 21 was rewritten to match, the frame-keyed sentence beside its
+reason. Replayed on round 2's tree, round 1's off-page sabotage fails the grid's test and both Stage reveal
+cases, and leaves the missed-compile cases passing, since their seed re-applies the pin once the view is on the
+page. The round's sabotages were run on whole files; one early run under `-t` was thrown away, because its
+second failure came from the cases it had skipped. **The re-review of round 2 approved it with Minors and no
+Important**, having checked amendment 21 sentence by sentence against the code.
+
+**Round 3** (`2ed4d93`) fixed the Minors the branch had introduced: two docs that named only TM views, two
+preconditions that a sibling case read and these did not, and a test for the seed's same-leg branch, which
+nothing had reached. Stage refuses a split, so the test makes a second TM view in tiles first; its sabotage
+fails that case alone, 1 of 9.
+
+**Round 4** answers what the check by hand found: in Stage, dark, closing the registers panel left it
+488 px wide and the row's 155 px tall, empty, with the call stack squeezed to half the row — the rule Task 6's
+review had flagged, `.asm-machine > .panel { flex: 1 1 18rem }`, applying to a closed panel. A closed machine
+panel now takes no share of its row: one rule, `.asm-machine > .panel[data-open="false"] { flex: none;
+align-self: flex-start }`, with geometry tests; both panels closed was already right, through Task 6's rule on the
+column. Its review found the round's one sabotage had removed the whole rule, so each geometry test stopped at the
+first assertion it failed and the checks after it were never shown able to fail; two narrower sabotages then showed
+each half on its own — without `flex: none` each test fails a width check, without `align-self` the first fails
+its height check (`03bdfe7`).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The state diagram and the λ body keep their own copies of the grid** (amendment 7, §10); moving them onto
+  `VirtualGrid` is the PR after this one. The λ body has neither the `ResizeObserver` nor the `mousedown` guard
+  the other two grids carry, and it answers the scroll trap the other way: its pin's scroll detaches following
+  (`LambdaBody.reveal`), where the grid's holds until the run moves. That PR decides each, and reconciles the
+  two answers (amendment 21). `VirtualGrid`'s class doc says a view off the page is still told every link, so a
+  grid moved onto it inherits the guard knowingly.
+- **A stored layout keeps no asm view.** §5.5 keeps every stored layout valid, `LAYOUT_VERSION` staying 1, so a
+  returning user sees an asm view only after `reset preset` or `+ view`.
+- **The asm run's focus stays on the `halt`'s owner once a run has halted**, where the TM view shows none.
+- **Asm copies are part 5c**, which widens `CopyLeg` (amendment 20), so `tsc` names each copy switch then. No
+  asm view shows a copy.
+- **The running instruction's line in a copy's editor** (§10): `parse_asm_nav` computes a line's span only for
+  diagnostics, so this needs core work first.
+- **The source editor's focus mark stays λ's** (§6.6); making it follow the focused view is out of scope (§10).
+- **Compile's asm run on a program that never halts** spends its whole 5,000,000-step cap: 14.2 → 48.8 ms
+  against the same build without the leg, about 7 ns an instruction (amendment 16). It runs in the session's
+  worker and delays that compile's first frame. Task 5's review noted, unverified, that a run stopping on the
+  heap or memory cap under `DEFAULT_CAPS` (5,000,000 cells, 64,000,000 words) is unmeasured for compile-time
+  wasm memory; amendment 16 measured only the step cap.
+- **Two of 5a's leftovers stand as 5a foresaw them.** After a raised step cap, `asmValue` decodes from a copy of
+  the cursor's heap, and the session lowers the program a third time per compile;
+  `asm_owner_covers_the_program_lower_program_returns` holds that the map's owners index that program.
+- **The TM view at half width.** In the default tree at 1280×800 the asm view halves the TM view's width; its
+  tapes scroll sideways with the rules below them, which read as readable by hand. The two tests that measure
+  the TM view's geometry close the asm view first.
+- **`tm-grid.test.ts`'s timing assumption**, above: the case reads the last row's edge two frames after the
+  resize, and failed twice under competing load. Not changed.
+- **A copy's TM view that is off the page when its own compile lands** re-applies, when shown, a source pin made
+  before that compile, and now scrolls to it and holds. The paint half was on `main`, since
+  `tm-scratch-compiled` never clears the link, and copy TM views already scroll to every source pin through the
+  fan-out; round 2's seed extends that to the reveal. For that view it contradicts amendment 21, under which
+  following takes over on a new program, on a narrow path: two views of one copy in Stage, or a tab switch
+  inside the debounce.
+- **The keystroke clear passes no scroll**, so a hidden view's pending row survives the keystroke until
+  `reset()`, which the recompile brings: transient.
+- **The grid's scroll handler treats only a closed panel as hidden**, not a box of height 0, so a `scroll` on a
+  box Stage has taken off the page could in principle read as the user's. Not reproduced; the host is detached,
+  not `display: none`.
+- **Smaller things the reviews recorded and left.** `RecordLeg`'s leg key is not tied to its frame type, and
+  `ASM_RECORDING`'s handle is a `Session`, so `step: s => s.stepTm()` would type-check. `AsmStatus` drops
+  `LowerError`'s node, though the `defunc` refusal is the asm lowering's own. No gate reaches the bindings
+  script's refusal branch, and the script, which now deletes files, has no test. No browser test carries a
+  non-null `AsmCap` across the boundary. A program the asm backend declines makes every pin read "emits no
+  instructions or machine states", though the construct is not why. `asm-link.test.ts` hard-codes 24 as a row's
+  height and treats a pc as a row index, though labels come before, and its two assertions after the ownerless
+  click were true before it. An asm copy's readout, unreachable until 5c, is built inline in `draw.ts`,
+  untested, and would read "1 instructions"; `draw.ts` holds a third copy of the pin-resolution expression, as
+  the plan wrote it. `frame-cost.test.ts` duplicates the λ heap-differential harness; `setAsmProgram` twins
+  `storeAndSetProgram`; `results.ts`'s literal `'asm'` labels are matched by `LEG_NAME` in `readout.ts`.
+  `VirtualGrid`'s click, keys and `scrollToRow` each read `rows()`, and the draw reads it again, against
+  `GridRows`' "one snapshot per draw"; `virtual-grid.test.ts` re-implements `centredScrollTop` as its oracle,
+  and its "follows again on attach after a link" has the shape of the synthetic-scroll race round 1 met in two
+  of its own drafts. Task 1's exhaustiveness probe is a check run once, not a committed guard.
+  `Session::link_index`'s doc still says "Both halves are optional". `app.test.ts` still calls `f(head(xs))` the
+  one construct in `BIG` that owns machine states, where 44 do and `f(acc, head(xs))` owns 664, and a comment
+  there describes a `tokens.length > 0` its named test no longer has. The new asm-pane test repeats the first
+  five statements of the one before it. `link-hold.test.ts` cascades after a failing Stage case, which leaves
+  the cases after it in Stage, and its `splitRow` duplicates `layout-app.test.ts`'s `splitVia`;
+  `workspace-restore.test.ts`'s reset case's DOM assertion is a consistency guard, isolated only by a two-edit
+  sabotage. A leg object in the worker that wired the wrong piece is held only by what the browser tier happens
+  to see.
+
+##### VERIFICATION
+
+The figures taken for this entry were run on 2026-09-28 at `03bdfe7`. The gates ran one after another in one
+detached `systemd-run --user` unit capped at 16G with no swap, with `PATH` (`/usr/sbin` and `$CARGO_HOME/bin`
+first), `CARGO_HOME`, `RUSTUP_HOME`, `HOME` and a `CARGO_TARGET_DIR` that was not the main checkout's set, in a
+worktree at that commit: `check-all.sh` (with `TREE_SITTER` at the pinned `.tools/tree-sitter`), `check-slow.sh`,
+the Rust coverage floor, the six hygiene scans (each `--self-test`, then alone), the web CI sequence, and the
+Docker image built, started and checked. The same gates had run whole three times before, at `7be0321`, `6462a00`
+and `b48c901`; each time every gate exited 0, and their figures are below. In all four runs the container reported
+`healthy` and the unit's `curl` read `000`, because the gate script started the container on port 8097 and curled
+port 8098; started by hand on port 8096, the image answered 200 at `7be0321`, on `127.0.0.1` and on `localhost`,
+and the image the last run built answered 200 on `127.0.0.1`.
+
+The check by hand ran at `b48c901`'s app code (round 3 changed only a test file and two doc comments), against a
+dev server at 1280×800 with fresh storage and `fact(3)` compiled, and was recorded in Explorer light, in Stage, in
+Stage dark and in Debugger dark. In Explorer the default tree showed four views of 634×357. With the asm view
+restarted (`↺`) and stepped 16 times, pinning `n * fact(n - 1)` with `Mod-'` scrolled the following listing from 24
+to 360, to pc15 `mul rr, r4, r5`, and held it past its scroll event, the follow control hidden and following still
+on; one step back (`◀`) and following took over, the listing at its top with pc1 next. At step 15, inside
+`fact(2)`, each local read dimmed and marked `·`, "left over from caller", the call stack held 2 frames and the
+heap was empty. In Stage, linking `n - 1` in the source tab showed pc11 `sub r6, r7, r8` linked and scrolled to in
+the asm tab, and 3 linked rows drawn in the TM tab, both following. In Stage, dark, the closed registers panel read
+wrong, above. In Debugger, dark, four views of 490×333, the inspector carrying the asm steps, its value and the
+link sentence. The four screenshots are kept outside the tree.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 24 | commits before this entry | `git log --oneline 899c8b2..03bdfe7 \| wc -l` |
+| four | of them touching only `docs/`: three amendment commits (`9b7681d`, `9c0b1e2`, `d403a45`) and the plan (`80d10a0`) | each commit's `git show --name-only` |
+| 96 files, +19,298/−1,320; 94 files, +7,374/−1,294 | the branch against main; without `docs/` | `git diff --shortstat 899c8b2..03bdfe7`, then with `-- . ':!docs'` |
+| 11,789; 19,298 | lines of the plan; lines the branch adds | `git show --stat 80d10a0`; `git diff --shortstat 899c8b2..03bdfe7` |
+| sixteen, 6 to 21; eight, seven, one | 5b's amendments; from reading the code, from the prototype, from looking at it by hand | the three "Amended" blocks for 5b at the head of the spec |
+| three: `8b2deb3`, `4147efc`, `ba00975` | commits that reworded amendment 21 after `d403a45` | `git log --oneline d403a45..03bdfe7 -- docs/superpowers/specs/`, then `git show -U0 <sha> -- docs` for each: one hunk, inside amendment 21 |
+| 8 of 8; 139 of 139 | trees identical to the prototype's in the replay; sabotages fired there | the plan's Pre-flight status |
+| 18; two | what the prototype found; what replaying the plan found | the plan's two lists under Pre-flight status |
+| three | lanes: A in the main checkout, B and C in worktrees | the ledger |
+| 12, 13; 14 | two-way branches and two-leg shapes at `899c8b2`; §2.3's branches | the plan's "What the prototype found", 1; the spec's §2.3 |
+| 13; 31: 22 and 9 | `tsc` errors with `'asm'` added before Task 1; after it, in `src/` and `DetachedPanes` literals in `tests/` | the plan's "What the prototype found", 1; the Task 1 report's step-4 probe (`.superpowers/sdd/p5b-task-1-report.md`, not tracked) |
+| 16 | browser test files the new default tree broke in the prototype | the plan's "What the prototype found", 12 |
+| 1,000; 414; 8 | the grid test's host and the default viewport, in pixels; the panels' margin shortfall, in pixels | the plan's "What the prototype found", 8 and 9 |
+| seven | cases skipped by the `beforeAll` sabotage | the plan's "What the prototype found", 18 |
+| 48.23, 52; 48.2328, 48.2333; 2,814, 247,091 | a word's retained bytes and its charge (`ASM_WORD_BYTES`); the two runs measured; `upto(200)`'s frames and words | amendment 17; the plan's verified fixtures; `frame-cost.test.ts` |
+| 48.2323840204621 | the cost Task 7's sabotage read with the charge set to 40 | the Task 7 report, sabotage 3 |
+| 64, 16, 8, 16, 16 | `ASM_WINDOW`: locals, arguments, frames, cells, boxes | `git grep -n 'ASM_WINDOW: AsmWindow' -- web/src/protocol.ts`; amendment 17 |
+| 1.9, 1.9; 5.0 → 14.8; 14.2 → 48.8 ms; about 7 ns; 5,000,000 | `compile` without and with the asm run: `fact(3)`, the 100,000-turn loop, the program that never halts; the cost an instruction; the step cap it spends | amendment 16; the plan's appendix probe, median of 7 alternating rounds |
+| 5,000,000; 64,000,000 | `DEFAULT_CAPS`' heap cells and memory words | `git grep -n 'pub const DEFAULT_CAPS' -- crates/redextape-core/src/tm/asm.rs`; the ledger's Task 5 review note (`.superpowers/sdd/progress.md`, not tracked) |
+| two milliseconds | the TM rule table's round trip on `main` | amendment 21 |
+| 51 files, 680 tests; 104 files, 648 tests | the node and browser suites after Task 1, which changes no test's code | the Task 1 report |
+| 13 of 13; 24; 87 | Task 2's sabotages; its two files' tests; the tests of the eight files in its second green step | the Task 2 report |
+| 2 of 57; 5 of 5; three; two | Task 3's red; its sabotages; its first fix round's; those its second re-ran | the Task 3 report |
+| 132, 11892; six | the grid's self-loop red, `scrollTop` against expected; the self-looping step past the oldest kept one | the Task 3 report, fix round 1 |
+| 32 of 32; 1,307, 32 skipped | Task 4's sabotages; `redextape-core`'s tests | the Task 4 report |
+| 28 of 28; 106; 30 | Task 5's sabotages; `redextape-wasm`'s tests; its browser tests, 27 before | the Task 5 report; `git show 960c9c3 -- README.md` |
+| 30 of 30, 29 + 1; 36 | Task 6's sabotages, the plan's and its own; its two files' tests | the Task 6 report |
+| 1 failed, 20 passed | the controller's `frame: nextRow` sabotage | the ledger |
+| 18 of 18; 52 files, 708 tests; 107 files, 692 tests | Task 7's sabotages; the node and browser suites | the Task 7 report |
+| ten; 7; seven; 108 files, 699 tests | differences between the three loops; `record-loop.test.ts`'s cases; the round's sabotages; the browser tier under sabotages a and d | the Task 7 report, fix round 1 |
+| two | sabotages the controller added after the re-review | the ledger |
+| 14 of 14; 52 files, 714 tests; 108 files, 699 tests | Task 8's sabotages; the node and browser suites | the Task 8 report |
+| 0, two; four | the whole-branch review's Critical and Important findings; the behaviours round 1 added tests for, its items 5 to 8 | the final fix brief (`.superpowers/sdd/p5b-final-fix-brief.md`, not tracked) |
+| two; two, two | the re-review's Importants after round 1; round 3's docs and preconditions | the round 2 brief (`p5b-final-fix-2-brief.md`, same place); the final fix report, round 3 |
+| 140 | the task tables' sabotages as executed: 13, 5, 32, 28, 30, 18, 14 | the Task 2 to 8 reports |
+| 2157.97, 2074.70 | the geometry case's failing values | the ledger; the Task 3 report, fix round 2 (`2157.96875`, `2074.703125`) |
+| two; 24 of 24; 12 of 12; 36; 150% | real failures; the case alone, 8 runs in each of three trees; the 8-file batch, 6 and 6; runs in all; the `CPUQuota` | the Task 3 report, fix round 2, and the Task 7 report; the flake experiments' scripts and logs (`flake.sh`, `flake.log`, `flake-batch.sh`, `flake-batch.log`, scratch, not tracked); the ledger |
+| 8,413; 7,400 | `upto(600)`'s instructions; the step its recording stops at | the final fix report, item 7 and round 2 (`.superpowers/sdd/p5b-final-fix-report.md`, not tracked) |
+| 53 files, 724 tests; 109 files, 708, 712, 713 tests | the node suite after the final wave; the browser suite after rounds 1, 2 and 3 | the final fix report |
+| 9; 1 of 9 | `link-hold.test.ts`'s cases; those round 3's sabotage fails | `git grep -c 'it(' -- web/tests/browser/link-hold.test.ts`; the final fix report, round 3 |
+| 44; 664 | constructs in `BIG` owning machine states; `f(acc, head(xs))`'s | the final fix report, round 1's concerns |
+| 257, 525, 73, 58 s; 161 files, 1,420 tests; 96.56, 89.92, 97.31, 98.12 | the gates at `7be0321`: `check-all`, `check-slow`, llvm-cov, the web sequence; the web suite; its coverage | the ledger's gate records |
+| 163, 498, 64, 57 s; 162 files, 1,432 tests; 96.58, 89.93, 97.5, 98.14 | the same at `6462a00` | the ledger's gate records |
+| 153, 489, 65, 53 s; 162 files, 1,436 tests; 96.56, 89.95, 97.41, 98.12 | the same at `b48c901` | the ledger's gate records |
+| 000; 8097, 8098; 8096; 200 | the gate unit's `curl`; the port the unit started the container on, and the port its `curl` read; the port checked by hand; its answer there | the four runs' `summary*.txt` and the gate script, `gates-final-run.sh` (scratch, not tracked); the ledger's gate records |
+| 1280×800; 634×357; 24, 360; 16, 15; 2; 3 | the by-hand viewport; Explorer's four views; the listing's scroll before and after the pin; the steps looked at; the call stack's frames; the TM tab's linked rows in Stage | the ledger's by-hand record |
+| 488 px, 155 px; 490×333 | the closed registers panel's width and the row's height; Debugger's four views | the ledger's by-hand record |
+| four | screenshots of the by-hand check | the check's screenshot directory, outside the tree |
+| exit 0, 148 s | `all configs green — base, LLVM and browser` | `TREE_SITTER=/home/davey/projects/redextape/.tools/tree-sitter scripts/check-all.sh` |
+| exit 0, 487 s | `slow tier green` | `scripts/check-slow.sh` |
+| 95.74% of 32,174 lines; 1,876 run, 33 skipped; 66 s | Rust line coverage and tests, floor 90 | `cargo llvm-cov nextest --workspace --fail-under-lines 90` |
+| 12 of 12 exit 0 | the hygiene scans | `scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua}.sh`, each `--self-test` then alone |
+| 162, 1,440; 96.58, 89.95, 97.5, 98.14 against 95, 89, 97, 97 | the web CI sequence: its files and tests; statements, branches, functions and lines against their floors | `pnpm run build:wasm && pnpm exec biome ci --error-on-warnings && pnpm run typecheck && pnpm run test:coverage && pnpm run build:app` |
+| 200; healthy | the image's status and health (the gate unit's own `curl` read port 8098, where it had not started the container, and got `000`; the status is from the image that run built, started by hand on port 8096) | the unit's `docker build -t redextape-check-5b-final .` and `docker inspect --format '{{.State.Health.Status}}'`; by hand, `docker run -d --name redextape-check-5b-final-c3 -p 8096:80 redextape-check-5b-final` and `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8096/` |

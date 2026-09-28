@@ -1,8 +1,11 @@
 import type { EditorView } from '@codemirror/view'
+import type { AsmPane } from './asm-pane'
 import { setLink } from './highlight'
+import { perLeg, unhandled } from './legs'
 import type { Link, LinkIndex, Pin } from './link'
 import { type DetachedPanes, type LambdaLinkState, linkStatus } from './link-status'
 import { onPage, type PaneCollection } from './panes'
+import type { Leg } from './protocol'
 import type { PaneSlot, SessionRegistry } from './sessions'
 import type { TmPane } from './tm-pane'
 
@@ -39,9 +42,9 @@ export type LinkWiring = {
    * `draw()` and the click handlers" — an argument that dissolved the moment `draw` and `events` moved
    * into modules of their own, without the conclusion changing at all. The real reason is that
    * `LinkIndex` (`link.ts`) exposes NOTHING that can change it: `lambdaText` and `lambdaCut` are
-   * `readonly`, every method (`nodeAtSource`, `nodeForState`, `linkFor`) is a pure read, and the wire
-   * arrays it reads them out of are `#`-private. The one write anywhere in the class is `#statesOf`'s
-   * own memo of a value it just derived — a cache, not a state a caller can set. So a
+   * `readonly`, every method (`nodeAtSource`, `nodeForState`, `nodeForInstr`, `linkFor`) is a pure read, and the
+   * wire arrays it reads them out of are `#`-private. The one write anywhere in the class is `#ownedBy`'s
+   * memo of a value it just derived — a cache, not a state a caller can set. So a
    * holder of this reference can ask it questions and nothing else, whoever they are and wherever they
    * live. WRITES to the FIELD stay confined to this module (`setIndex` is the only one); this getter is
    * what keeps reads legitimate everywhere else.
@@ -50,8 +53,8 @@ export type LinkWiring = {
   get linkable(): boolean
   get link(): Pin | null
   clearLink(): void
-  drawLink(l: Link | null, focusCoincident: boolean, lambda: LambdaLinkState): void
-  setLinkTo(node: number | null, origin: 'source' | 'lambda' | 'tm'): void
+  drawLink(l: Link | null, focusCoincident: boolean, asmCoincident: boolean, lambda: LambdaLinkState): void
+  setLinkTo(node: number | null, origin: Pin['origin']): void
   linkAtSourceOffset(byteOffset: number): void
 }
 
@@ -71,37 +74,56 @@ export function createLinkWiring(deps: {
   const linkStatusHost = deps.statusHost
 
   /**
-   * "THE" λ pane's slot and "the" TM pane's slot — `undefined` when that leg holds no pane at all —
-   * resolved fresh from the collection on every read rather than cached, the same thunk idiom
-   * `view`/`draw` above already use for the same reason: the answer can change under a caller that
-   * keeps this closure around.
+   * "The" pane's slot on `leg` — `undefined` when that leg holds no pane at all — resolved fresh from the
+   * collection on every read rather than cached, the same thunk idiom `view`/`draw` above already use for
+   * the same reason: the answer can change under a caller that keeps this closure around.
    *
-   * STAND IN FOR THE `lambdaSlot`/`tmSlot` CONSTS THIS FACTORY USED TO CLOSE OVER DIRECTLY (T7). NO
-   * LONGER "still exactly one pane of each kind", which is what these two used to assert twice by
+   * **ONE LOOKUP OVER `Leg`, WHERE THERE WERE TWO NAMED ONES, `theLambdaSlot` AND `theTmSlot`**, which
+   * `detachedPanes` called each by name. A pair of per-leg functions is a list of the legs written out, and a
+   * third leg would not be on it with `tsc` green (`legs.ts` has the class of bug); with a `switch`, a leg
+   * with no arm is a type error here.
+   *
+   * STANDS IN FOR THE `lambdaSlot`/`tmSlot` CONSTS THIS FACTORY USED TO CLOSE OVER DIRECTLY (T7). NO
+   * LONGER "still exactly one pane of each kind", which is what those two used to assert twice by
    * throwing on an empty collection. That invariant expired when `pane-host.ts`'s `applyLayout` started
    * deriving panes from the layout tree — `closeLeaf` refuses only the last leaf in the TREE, so
    * closing the one λ pane a fresh page ships is an ordinary gesture, and `drawLink` ->
-   * `detachedPanes` -> `theTmSlot` runs on every `draw()`, a keystroke's included. `PaneCollection.active`
+   * `detachedPanes` -> `theSlot` runs on every `draw()`, a keystroke's included. `PaneCollection.active`
    * answers the question now, and `shown` below is built on it — the pane the user last focused on that
    * leg, falling back to insertion order when none is marked or the mark no longer resolves (5d-ii-b) —
    * and its own doc has the argument for why all four consumers were once carrying a private copy of the
    * same expired invariant.
    *
-   * **EACH MUST NAME THE VIEW ITS LEG'S OTHER CLAUSES DESCRIBE**, because `linkStatus` suppresses a
-   * detached view's own clauses. `theTmSlot` asks `active`, the pane `draw()`'s TM running focus reads, so
-   * the copy clause and the "the machine is here" clause are about one view. `theLambdaSlot` asks
-   * `PaneCollection.shown` — `active` among the panes on the page — first, because that is the view `draw()`
-   * takes the λ link clause from: in Stage the active pane can be off the page, and a hidden view's pin
-   * and tree are stale (`shown`'s own doc). **WITH NO λ VIEW ON THE PAGE IT FALLS BACK TO `active`**, as
-   * the TM clause does, so a hidden λ copy is still named: the λ link clause then reads `'absent'` and says
-   * nothing, so there is no clause about another view for the copy's to contradict.
+   * **EACH ARM MUST NAME THE VIEW ITS LEG'S OTHER CLAUSES DESCRIBE**, because `linkStatus` suppresses a
+   * detached view's own clauses; each arm says which view that is.
    *
    * `detachedPanes` BELOW GIVES AN HONEST ANSWER FOR ABSENCE RATHER THAN PROPAGATING IT: a pane that
    * does not exist is not detached. `draw()` gives the λ link state the same kind of answer, `'absent'`.
    */
-  const theLambdaSlot = (): PaneSlot<'lambda'> | undefined =>
-    (panes.shown('lambda', onPage) ?? panes.active('lambda'))?.slot
-  const theTmSlot = (): PaneSlot<'tm'> | undefined => panes.active('tm')?.slot
+  const theSlot = (leg: Leg): PaneSlot<Leg> | undefined => {
+    switch (leg) {
+      case 'lambda':
+        // `PaneCollection.shown` — `active` among the panes on the page — FIRST, because that is the view
+        // `draw()` takes the λ link clause from: in Stage the active pane can be off the page, and a hidden
+        // view's pin and tree are stale (`shown`'s own doc). **WITH NO λ VIEW ON THE PAGE IT FALLS BACK TO
+        // `active`**, as the TM arm does, so a hidden λ copy is still named: the λ link clause then reads
+        // `'absent'` and says nothing, so there is no clause about another view for the copy's to contradict.
+        return (panes.shown('lambda', onPage) ?? panes.active('lambda'))?.slot
+      case 'tm':
+        // `active`, THE PANE `draw()`'s TM RUNNING FOCUS READS, so the copy clause and the "the machine is
+        // here" clause are about one view.
+        return panes.active('tm')?.slot
+      case 'asm':
+        // `active`, AS FOR TM: the asm view `draw()`'s asm running focus reads. No asm view shows a copy until
+        // part 5c, so today its clause is always "linked".
+        return panes.active('asm')?.slot
+      default:
+        // `unhandled` BECAUSE THIS `switch` RETURNS A VALUE THAT MAY BE `undefined`, which is the one kind
+        // TS2366 does not police: a leg with no arm would fall off the end and read as a leg with no pane.
+        unhandled(leg)
+        return undefined
+    }
+  }
 
   /**
    * Which panes are outside the source correspondence right now — §4.5's first surface, read off the
@@ -119,16 +141,13 @@ export function createLinkWiring(deps: {
    * Detachment is a property of the SESSION a pane is BOUND to, so with no pane there is no binding to
    * read and nothing is outside the correspondence — and the clause this drives ("λ view shows a copy —
    * not linked to the program") would otherwise narrate a pane that does not exist. A λ pane OFF the page,
-   * in Stage, still reads its session's detachment, as a hidden TM pane does (`theLambdaSlot`).
+   * in Stage, still reads its session's detachment, as a hidden TM pane does (`theSlot`'s λ arm).
    */
-  const detachedPanes = (): DetachedPanes => {
-    const lambda = theLambdaSlot()
-    const tm = theTmSlot()
-    return {
-      lambda: lambda !== undefined && sessions.entryOf(lambda.binding.session).detached,
-      tm: tm !== undefined && sessions.entryOf(tm.binding.session).detached,
-    }
-  }
+  const detachedPanes = (): DetachedPanes =>
+    perLeg((leg) => {
+      const slot = theSlot(leg)
+      return slot !== undefined && sessions.entryOf(slot.binding.session).detached
+    })
 
   /**
    * The current compile's link index, and the construct the user has linked.
@@ -148,6 +167,12 @@ export function createLinkWiring(deps: {
   let index: LinkIndex | null = null
   let linkable = false
   let link: Pin | null = null
+  /**
+   * The last link gesture was a click on an asm instruction with no owner (Plan 7 part 5 spec §6.6, amendment 11): it
+   * pinned nothing, and the status line says why until the next gesture, keystroke or compile replaces it. A TM state
+   * with no owner does not set it — that click clears the pin silently, which the amendment keeps.
+   */
+  let ownerless = false
 
   /**
    * Paint the link status line from `draw()`'s already-resolved link, or `null` when there is nothing
@@ -162,58 +187,66 @@ export function createLinkWiring(deps: {
    * running focus against `link` (`isCoincident`) once, and re-deriving it here would need `tmFocus`
    * threaded in anyway — passing the boolean it produces is the smaller surface. Meaningless when
    * `l === null` (nothing is pinned to coincide with) or `!linkable` (both return before reading it).
+   * `asmCoincident` is the same boolean for the asm leg's running focus.
    *
-   * `detached` IS ON ALL THREE ARMS, NOT ONLY `'linked'`, and that is §4.5's obligation rather than
+   * `detached` IS ON EVERY ARM, NOT ONLY `'linked'`, and that is §4.5's obligation rather than
    * symmetry: `{state:'none'}` with a detached λ pane is precisely the case where this line goes from
    * blank to speaking. `linkStatus` is the one function that reads the field and it suppresses a
    * detached pane's own clauses itself, so nothing here has to know which clauses those are.
    */
-  const drawLink = (l: Link | null, focusCoincident: boolean, lambda: LambdaLinkState) => {
+  const drawLink = (l: Link | null, focusCoincident: boolean, asmCoincident: boolean, lambda: LambdaLinkState) => {
     const detached = detachedPanes()
     if (!linkable) {
       linkStatusHost.textContent = linkStatus({ state: 'stale', detached })
       return
     }
     if (l === null) {
-      linkStatusHost.textContent = linkStatus({ state: 'none', detached })
+      linkStatusHost.textContent = linkStatus({ state: ownerless ? 'ownerless' : 'none', detached })
       return
     }
     linkStatusHost.textContent = linkStatus({
       state: 'linked',
       tm: l.states.length > 0,
+      instrs: l.instrs.length > 0,
       lambda,
       focus: focusCoincident,
+      asmFocus: asmCoincident,
       detached,
     })
   }
 
   /**
-   * Resolve a link and paint all three panes.
+   * Resolve a link and paint every view: the source editor's mark, and each λ, asm and TM view's.
    *
    * `origin` DRIVES SCROLLING ONLY. A scroll-into-view triggered by the pane the user is already
    * looking at moves the thing under their cursor, so the table scrolls for a source click and not
    * for its own.
    */
-  const setLinkTo = (node: number | null, origin: 'source' | 'lambda' | 'tm') => {
+  const setLinkTo = (node: number | null, origin: Pin['origin']) => {
     link = node === null ? null : { node, origin }
-    // ONE `linkFor` CALL, reused for both legs it drives here — see `drawLink`'s doc for why a second
-    // call on a path that runs per rendered frame during playback is not free.
+    // AN ASM INSTRUCTION THAT RESOLVED TO NO CONSTRUCT IS THE ONE CLICK THE LINE EXPLAINS (amendment 11); any other
+    // gesture, a resolved asm click included, replaces that explanation.
+    ownerless = node === null && origin === 'asm'
+    // ONE `linkFor` CALL, reused for the source editor's mark and both fan-outs below — see `drawLink`'s doc
+    // for why a second call on a path that runs per rendered frame during playback is not free.
     const l = node === null || index === null ? null : index.linkFor(node)
     view().dispatch({ effects: setLink.of(l?.source ?? null) })
     // `draw()` NOW CALLS `drawLink()` itself, at its end — see that function's doc. `link` is already
     // set above, so this single call sees the new value; a separate `drawLink()` call here would be
     // the same read twice.
     //
-    // CALLED BEFORE THE TM FAN-OUT'S `setLink`, NOT AFTER — ORDER IS LOAD-BEARING. `draw()` calls
-    // `PaneSlot.render(...)` on every tm-kind pane, which runs `TmPane`'s `#drawTable`
-    // UNCONDITIONALLY on every call, following included. `TmPane.setLink`'s own scroll is a one-shot
-    // target `#drawTable` honours for exactly its next call (design §5.1) — so if `draw()` ran AFTER
-    // the fan-out below, its `#drawTable` pass would be the SECOND call since the target was armed,
-    // see nothing pending (already consumed), fall back to the follow target, and silently revert the
-    // link's scroll in the same synchronous turn the link itself ran in. Calling `draw()` first burns
-    // its `#drawTable` pass on the (soon-stale) previous link state — thrown away before the browser
-    // ever paints it — so the fan-out below is the LAST word and its one-shot target is still armed
-    // when it runs.
+    // THE ORDER BETWEEN THIS CALL AND THE TM FAN-OUT'S `setLink` NO LONGER MATTERS FOR EVERY *LATER* DRAW OF THE
+    // SAME FRAME — NOT FOR THIS ONE. `draw()` calls `PaneSlot.render(...)` on every tm-kind pane, which sets
+    // `TmPane`'s own `#frame` to this tick's frame and runs `#drawTable` — this call's own pass draws with
+    // nothing pending yet. The fan-out below is what arms the link's scroll and draws it, and once armed that
+    // scroll holds the box through every later draw of the SAME FRAME, whichever of the two ran first
+    // (`VirtualGrid.scrollToRow`, design §5.1, amendment 21). THE ORDER HERE STAYS DRAW-THEN-FAN-OUT: if the
+    // fan-out ever armed the hold before this call updated `#frame` to the current tick's, it would be keyed
+    // on a frame the pane had not yet drawn, and the very next draw — this tick's own — would read a
+    // different `rows.frame` and release it at once. A view off the page, or with its grid's panel closed, arms
+    // nothing here at all: its grid keeps the link's row until the draw that shows it, and holds against the frame
+    // that draw shows (`scrollToRow`). A view that missed the compile drops that row when it is seeded, and
+    // `draw.ts`'s seed gives it the pin again, with this scroll, after the render that shows it.
     const before = linkStatusHost.textContent ?? ''
     draw()
     // ANNOUNCED HERE AND NOWHERE ELSE (spec §11): `setLinkTo` is the link gesture — a source click or
@@ -234,7 +267,8 @@ export function createLinkWiring(deps: {
     // documents: `PaneView<T>` is deliberately narrow and does not carry `setLink`, which is a fact
     // about the concrete `TmPane` class. `scrollTo` is `origin !== 'tm'`: a click that came from the
     // table itself must not scroll the table it was just clicked in out from under the cursor; a click
-    // from source or λ should bring the state block into view.
+    // from source or λ should bring the state block into view — or, when the pin names no state there, let the
+    // table follow the machine again rather than stay held on the block an earlier link scrolled to.
     //
     // **NOT SKIPPED FOR A HIDDEN PANE, UNLIKE `draw()`'S OWN RENDER LOOP.** A pane that saw the last
     // compile is not in `replies.ts`'s `unseen` set, so `draw()`'s seed block never runs for it —
@@ -248,6 +282,9 @@ export function createLinkWiring(deps: {
     // before it is next shown, and `draw.ts`'s seed block re-applies the CURRENT pin once it is, so a
     // wrong answer written here never reaches the screen.
     for (const p of panes.of('tm')) (p.pane as TmPane).setLink(l?.states ?? [], origin !== 'tm')
+    // AND EVERY ASM VIEW, BY THE TM FAN-OUT'S RULES AND FOR ITS REASONS: hidden ones included, and scrolled to the
+    // construct's first instruction unless the click came from an asm listing (spec §6.6).
+    for (const p of panes.of('asm')) (p.pane as AsmPane).setLink(l?.instrs ?? [], origin !== 'asm')
   }
 
   /** Link at a byte offset into the source document, or clear if nothing contains it. */
@@ -261,6 +298,7 @@ export function createLinkWiring(deps: {
       index = newIndex
       linkable = index !== null
       link = null
+      ownerless = false
     },
     get index(): LinkIndex | null {
       return index
@@ -274,6 +312,7 @@ export function createLinkWiring(deps: {
     clearLink(): void {
       linkable = false
       link = null
+      ownerless = false
     },
     drawLink,
     setLinkTo,

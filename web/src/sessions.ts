@@ -1,5 +1,6 @@
 import { type ControlState, controlState } from './controls'
 import type { History } from './history'
+import { LEGS } from './legs'
 // A TYPE-ONLY IMPORT, AND THE ONE DIRECTION THAT WOULD OTHERWISE BE A CYCLE — `pane-chrome.ts` already
 // imports `Binding`/`PaneOption` from here. `import type` is erased entirely at build time, so this
 // names a shape rather than creating a load-order relationship between the two modules; `SplitChoices`
@@ -8,7 +9,7 @@ import type { History } from './history'
 import type { SplitChoices } from './pane-chrome'
 import type { Leg, RecordEnd } from './protocol'
 import type { SessionClient, SessionId } from './session-client'
-import type { LambdaState, LambdaStatus, TmProgram, TmScratchStatus, TmState, TmStatus, ValueReading } from './types'
+import type { AsmProgram, AsmState, LambdaState, TmProgram, TmScratchStatus, TmState, ValueReading } from './types'
 
 /**
  * One leg's live state on this side of the boundary: its history, how recording ended, and what the
@@ -39,7 +40,7 @@ export type LegState<T> = {
  * `LegState<TmState>` with no narrowing at either call site — the property `Binding`'s own doc below
  * is about. Two named resolvers would be the duplication design §3.1 refused one layer down.
  */
-export type LegFrame = { lambda: LambdaState; tm: TmState }
+export type LegFrame = { lambda: LambdaState; asm: AsmState; tm: TmState }
 
 /**
  * The legs one session owns — AT MOST ONE PER `Leg`, AND THAT OPTIONALITY IS THIS TASK'S DOING.
@@ -164,13 +165,14 @@ export type SessionEntry = {
    * the session without a reply: at creation, which covers a split, a cross-leg pick and a layout restore
    * alike, and when a pick through its selector, a cool or a retire moves it onto the session.
    *
-   * **THE ONE WRITABLE FIELD ON THIS TYPE, AND THE ONE THAT IS NOT KNOWN AT CONSTRUCTION.** `id`,
-   * `label`, `detached` and `client` are decided by whoever registers the session; `legs` is a record
-   * whose CONTENTS move (that is what `resetLegs` is) under a reference that does not. This is neither:
-   * it is a fact the worker sends back later, replaced whole each time it does. Retaining it here rather
-   * than beside the TM `LegState` is deliberate — `LegState<T>` is the frame-generic both legs share, and
-   * a machine is not a frame; it is set once per compile and does not change as the head moves, which is
-   * the whole point of the `TmProgram`/`TmState` split one layer in.
+   * **ONE OF THE THREE WRITABLE FIELDS ON THIS TYPE, WITH `tmScratch` AND `asmProgram` BELOW, AND THE
+   * THREE ARE WHAT IS NOT KNOWN AT CONSTRUCTION.** `id`, `label`, `detached` and `client` are decided by
+   * whoever registers the session; `legs` is a record whose CONTENTS move (that is what `resetLegs` is)
+   * under a reference that does not. These three are neither: each is a fact the worker sends back
+   * later, replaced whole each time it does. Retaining this one here rather than beside the TM
+   * `LegState` is deliberate — `LegState<T>` is the frame-generic every leg shares, and a machine is not
+   * a frame; it is set once per compile and does not change as the head moves, which is the whole point
+   * of the `TmProgram`/`TmState` split one layer in.
    *
    * **IT IS WRITTEN WHEREVER THE PANES ARE PUSHED TO, WHICH IS WHY IT CANNOT GO STALE.** `replies.ts`
    * stores and fans out in one call, so every arm that clears the panes (`no-session`, `worker-error`)
@@ -184,6 +186,12 @@ export type SessionEntry = {
    * the reply that told the others is seeded from here. `null` for every session that is not a TM buffer.
    */
   tmScratch: TmScratchReading | null
+  /**
+   * The asm listing a session's last `compiled` reply carried, retained for `tmProgram`'s reason: an asm view created
+   * after that reply is seeded from here (`pane-host.ts`'s `seedAsmPane`). `null` for a session with no asm leg — a
+   * program that does not lower, and every copy, since no copy has an asm leg until part 5c.
+   */
+  asmProgram: AsmProgram | null
 }
 
 /**
@@ -205,14 +213,6 @@ export type Binding<K extends Leg> = { readonly session: SessionId; readonly leg
 /** One entry in a pane's binding selector: the session it names, and what to call it on screen. */
 export type BindingOption = { readonly id: SessionId; readonly label: string }
 
-/**
- * The two legs, in the order a selector lists them.
- *
- * A VALUE RATHER THAN A KEY WALK OVER SOME ENTRY'S `legs`, because the order must not depend on which
- * legs the first session in the registry happens to have.
- */
-const LEGS = ['lambda', 'tm'] as const satisfies readonly Leg[]
-
 /** One `(leg, session)` pair a pane may be pointed at, with the label the selector shows. */
 export type PaneOption = { readonly leg: Leg; readonly id: SessionId; readonly label: string }
 
@@ -220,9 +220,10 @@ export type PaneOption = { readonly leg: Leg; readonly id: SessionId; readonly l
  * Clear every leg this session has, and set each one's compile-time status.
  *
  * `reason` is what a leg's control strip reads (`controls.ts`'s `controlState` returns it straight as
- * `stepText` while `!available`) when there is no per-leg `LambdaStatus`/`TmStatus` to read one from —
- * i.e. when neither leg compiled at all. Design §6's error table says the panes "read 'not compiled'"
- * for that case; leaving it as `''` left them reading nothing.
+ * `stepText` while `!available`) when there is no status for the leg to read one from — no
+ * `LambdaStatus`, `AsmStatus`, `TmStatus` or TM copy's `TmScratchStatus` — i.e. when no leg compiled at
+ * all. Design §6's error table says the panes "read 'not compiled'" for that case; leaving it as `''`
+ * left them reading nothing.
  *
  * TAKES THE LEGS IT RESETS RATHER THAN A SESSION ID, and `SessionLegs` rather than the whole
  * `SessionEntry`, because a reset is exactly a statement about legs — it never touches the client. One
@@ -235,33 +236,30 @@ export type PaneOption = { readonly leg: Leg; readonly id: SessionId; readonly l
  * it is what a caller with one reply shape and three session shapes will naturally do — so this is
  * silent rather than a throw.
  *
- * **`tm` WIDENED TO `Pick<TmStatus, 'available' | 'reason'>`, WHERE IT USED TO READ `TmStatus | null` —
- * 5d-iv Task 9.** The body below reads only those two fields; the full `TmStatus` shape was never
- * needed, and `replies.ts`'s new `tm-scratch-compiled` arm has a `TmScratchStatus` to pass here rather
- * than a `TmStatus` — a different wire shape (`width`/`run` non-nullable, no `total_steps`,
- * `TmScratchStatus`'s own doc in `types.ts`) that shares exactly the two fields this function reads and
- * none of the ones it does not. Naming the narrower shape is what lets both callers pass their own
- * status without one of them fabricating fields the other's type demands and this function never asked
- * for.
+ * **ONE STATUS PER LEG, BY LEG, AND EACH ONLY ITS TWO FIELDS.** The body reads `available` and `reason` and nothing
+ * else, so each caller passes whatever status its reply carries — a `LambdaStatus`, an `AsmStatus`, a `TmStatus`, or a
+ * TM copy's `TmScratchStatus`, which shares those two fields with `TmStatus` and none of the others — without
+ * fabricating fields this function never asks for. It took the λ and TM statuses as two parameters until the asm leg
+ * made a third; keyed by `Leg`, a leg the caller has no status for is simply left out.
  */
 export function resetLegs(
   legs: SessionLegs,
-  lambda: LambdaStatus | null,
-  tm: Pick<TmStatus, 'available' | 'reason'> | null,
+  statuses: { readonly [L in Leg]?: LegAvailability | null },
   reason = '',
 ): void {
-  const lambdaLeg = legs.lambda
-  const tmLeg = legs.tm
-  for (const leg of [lambdaLeg, tmLeg]) {
+  for (const l of LEGS) {
+    const leg = legs[l]
     if (leg === undefined) continue
     leg.hist.clear()
     leg.done = null
     leg.playing = false
+    const status = statuses[l]
+    leg.status = { available: status?.available ?? false, reason: status?.reason ?? reason }
   }
-  if (lambdaLeg !== undefined)
-    lambdaLeg.status = { available: lambda?.available ?? false, reason: lambda?.reason ?? reason }
-  if (tmLeg !== undefined) tmLeg.status = { available: tm?.available ?? false, reason: tm?.reason ?? reason }
 }
+
+/** Whether a leg is there and, when it is not, why — all of a leg's status that `resetLegs` reads. */
+export type LegAvailability = { readonly available: boolean; readonly reason: string }
 
 /**
  * THE SESSION REGISTRY — the container design §3.2b says decision 1 presupposes and `main.ts` did not
@@ -389,8 +387,8 @@ export class SessionRegistry {
    *
    * **WHICH BINDINGS CAN REACH THIS, AND WHY THAT SENTENCE HAD TO BE REWRITTEN.** It read: "`options`
    * below is what a selector offers, and it offers only sessions that HAVE the leg, so a binding that
-   * names a missing one did not come from the selector." The selector offers `pairs()` now, for BOTH
-   * legs, to EVERY pane — so it is precisely a source of pairs a given slot cannot resolve, and that
+   * names a missing one did not come from the selector." The selector offers `pairs()` now, for EVERY
+   * leg, to EVERY pane — so it is precisely a source of pairs a given slot cannot resolve, and that
    * sentence went from an argument to a false reassurance in the commit that widened the control. It
    * cost a Critical: `transport.ts`'s handler took the session half of a cross-leg pick and kept the
    * slot's leg, minting exactly the binding this line throws on.
@@ -445,7 +443,8 @@ export class SessionRegistry {
   }
 
   /**
-   * Every `(leg, session)` pair a pane may be pointed at — `options` for both legs, tagged.
+   * Every `(leg, session)` pair a pane may be pointed at — `options` for every leg, tagged, the legs in
+   * `LEGS`' order (`legs.ts`).
    *
    * IT IS BUILT FROM `options`' OWN SOURCE OF TRUTH AND NOT FROM A SECOND TABLE. `options`' doc states
    * the property this inherits: "the legs an entry was built with ARE the answer, so the selector and
@@ -540,8 +539,8 @@ export type PaneView<T> = {
  * slot it owns, so it cannot go through `render` — and a second copy of this argument list is the
  * two-places-to-be-wrong failure `LegState`'s own doc refuses one type up.
  *
- * **THE `awaitingRun` READ IS PER SESSION AND NOT PER LEG** — the generation is the client's, and both legs
- * of one session share it. That is exactly the subtlety a hand-copied second version would lose, and it is
+ * **THE `awaitingRun` READ IS PER SESSION AND NOT PER LEG** — the generation is the client's, and every leg
+ * of one session shares it. That is exactly the subtlety a hand-copied second version would lose, and it is
  * why this moved rather than being written twice.
  */
 export function legControlState<K extends Leg>(
@@ -595,7 +594,7 @@ export function legControlState<K extends Leg>(
  * either. The last paragraph below has that in full. What is given up is unchanged and still worth
  * stating: a slot cannot be pointed at the other leg, and nothing above bends to let it.
  *
- * **THE SELECTOR NOW OFFERS BOTH LEGS WHILE THIS CLASS STILL VARIES ONLY THE SESSION, AND THE GAP IS
+ * **THE SELECTOR NOW OFFERS EVERY LEG WHILE THIS CLASS STILL VARIES ONLY THE SESSION, AND THE GAP IS
  * DELIBERATE RATHER THAN AN OVERSIGHT.** `render` below pushes `reg.pairs()` — every `(leg, session)`
  * pair, not `options(b.leg)` — and `PaneEvents.rebind` carries the whole pair a user picked. Nothing
  * above changed: `K` is still fixed at construction, `leg` still has no writer, and every claim in the

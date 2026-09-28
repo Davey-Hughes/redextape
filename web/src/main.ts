@@ -12,6 +12,7 @@ import {
   readStored,
   STORAGE_KEY,
 } from './appearance'
+import type { AsmPane } from './asm-pane'
 import { showBanner } from './banner'
 import { bufferList } from './buffer-list'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from './buffers-store'
@@ -27,6 +28,7 @@ import { History } from './history'
 import { icon } from './icons'
 import { LambdaTrees } from './lambda-trees'
 import { closeLeaf, defaultLayout, LAYOUT_STORAGE_KEY, type LayoutNode, leaves, SOURCE_LEAF } from './layout'
+import { type CopyLeg, LEG_NAME } from './legs'
 import { createLinkWiring, type LinkWiring } from './link-wiring'
 import { LspClient } from './lsp-client'
 import { lspHover } from './lsp-hover'
@@ -39,14 +41,14 @@ import { createOutlinePanel } from './outline'
 import type { PaneChoice } from './pane-chrome'
 import { createPaneHost, type LayoutEvent } from './pane-host'
 import { createPanel } from './panel'
-import { type LeafId, PaneCollection } from './panes'
+import { type LeafId, legOfPane, PaneCollection } from './panes'
 import type { RunReply } from './protocol'
 import { HISTORY_BYTES } from './protocol'
 import { createReadout, type ProgramResult } from './readout'
 import { createReplies } from './replies'
 import { BufferCapReached, type BufferRecord, MAX_WARM_BUFFERS, ScratchBuffers } from './scratch'
 import { type SessionId, SessionPool } from './session-client'
-import { legControlState, SessionRegistry } from './sessions'
+import { legControlState, type SessionLegs, SessionRegistry } from './sessions'
 import {
   applySkin,
   PALETTE_CHOICE_LABELS,
@@ -62,7 +64,7 @@ import {
 import { type BarTarget, barTarget, createStepBar } from './step-bar'
 import type { TmPane } from './tm-pane'
 import { createTransport } from './transport'
-import type { LambdaState, TmState } from './types'
+import type { AsmState, LambdaState, TmState } from './types'
 import { assertTokenClasses } from './types'
 import { pairLabel, sourceViewHeader, viewMenu } from './view-header'
 import {
@@ -86,10 +88,10 @@ import {
 const SAMPLE = 'let x = 40; x + 2'
 
 /**
- * The counter behind every `LeafId` a split mints, shared across both legs — module-level rather than
+ * The counter behind every `LeafId` a split mints, shared across every leg — module-level rather than
  * per call to `main()`, though `main()` only ever runs once (`ready` below is computed on import).
  *
- * STARTS AT 1 ONLY FOR THE TREE A FRESH PAGE SHIPS, whose leaves are already `lambda-0` and `tm-0`.
+ * STARTS AT 1 ONLY FOR THE TREE A FRESH PAGE SHIPS, whose leaves are already `lambda-0`, `asm-0` and `tm-0`.
  * **REASONING ONLY ABOUT `defaultLayout()` COSTS THE FIRST SPLIT AFTER EVERY RELOAD**: `main()` restores a
  * tree from `localStorage` when there is one, that tree can already contain `pane-1` from a split in an
  * earlier page load, and `splitLeaf`'s collision guard then refuses the id `nextLeafId` mints — an uncaught
@@ -134,7 +136,7 @@ function seedLeafCounter(tree: LayoutNode): void {
  * `LeafId` already declares the id opaque ("a leaf's stable identity"), so the prefix was a convenience rather
  * than a fact, and a pane that can change leg is what falsifies it.
  *
- * `defaultLayout()`'s LITERAL `lambda-0` / `tm-0` ARE LEFT ALONE, for three reasons and none of them
+ * `defaultLayout()`'s LITERAL `lambda-0` / `asm-0` / `tm-0` ARE LEFT ALONE, for three reasons and none of them
  * is inertia: browser tests select on them, `reset preset`'s re-minting of exactly those ids is what
  * `applyLayout`'s claim-dropping line reasons about, and `seedLeafCounter` reads the digits after the
  * last `-` and does not care which word precedes them. `dataset.kind` is the truthful statement of
@@ -596,8 +598,8 @@ async function main(): Promise<EditorView> {
   // aims at.
   //
   // **THE SELECTOR IS ON SCREEN FROM THE FIRST PAINT, AND THAT REVERSES WHAT THIS COMMENT USED TO SAY.**
-  // The title-selector lists `(leg, session)` PAIRS, and this one entry has BOTH legs, so it contributes two pairs
-  // on its own and the control's "not shown below two options" threshold is crossed with nothing forked. Its
+  // The title-selector lists `(leg, session)` PAIRS, and this one entry has all three legs, so it contributes three
+  // pairs on its own and the control's "not shown below two options" threshold is crossed with nothing forked. Its
   // stated idiom is unchanged; what changed is what it counts — pairs now, where a control counting SESSIONS
   // had exactly one to offer until someone forked. See its doc.
   //
@@ -605,7 +607,7 @@ async function main(): Promise<EditorView> {
   // and the client cannot exist before its worker does. The legs are initialised inline for the same
   // reason the entry exists at all: a session's legs and its client are one thing now, and splitting
   // them across two hundred lines is what let them drift apart into unrelated locals in the first
-  // place. Registered before either pane is constructed — `transport.events(...)` below resolves through the
+  // place. Registered before any pane is constructed — `transport.events(...)` below resolves through the
   // registry, and although every handler it builds runs later, `entryOf` would throw if one somehow
   // fired first.
   //
@@ -624,9 +626,19 @@ async function main(): Promise<EditorView> {
     label: 'program',
     detached: false,
     client: pool.bind(SOURCE_SESSION, (reply: RunReply) => replies.onReply(SOURCE_SESSION, reply)),
+    // EVERY LEG, AND THE `satisfies` IS WHAT SAYS SO. `SessionLegs` makes each leg optional because a copy
+    // has one (its own doc), so a leg left out of this literal would still typecheck, and the program would
+    // have no such leg to record, to bind a view to, or to offer in a selector. `Required` makes a leg with no
+    // entry here a type error instead (`legs.ts` has the class of bug).
     legs: {
       lambda: {
         hist: new History<LambdaState>(HISTORY_BYTES),
+        status: { available: false, reason: '' },
+        done: null,
+        playing: false,
+      },
+      asm: {
+        hist: new History<AsmState>(HISTORY_BYTES),
         status: { available: false, reason: '' },
         done: null,
         playing: false,
@@ -637,17 +649,20 @@ async function main(): Promise<EditorView> {
         done: null,
         playing: false,
       },
-    },
+    } satisfies Required<SessionLegs>,
     // NOTHING COMPILED YET, AND THIS SESSION IS THE ONE THAT EVER WILL — `compiled` is the reply the
     // scratch types cannot send (§4.1), so the scratchpad's own entry states the same `null` and keeps
     // it. See `SessionEntry.tmProgram` for what reads this and when.
     tmProgram: null,
     tmScratch: null,
+    asmProgram: null,
   })
   /** The λ trees the views draw (spec §4) — one cache, asked through each session's own client. */
   const trees = new LambdaTrees((id) => (sessions.has(id) ? sessions.entryOf(id).client : undefined))
-  /** TM views a machine reached while they were off the page — `replies.ts` adds, `draw()` seeds and removes. */
-  const unseenTm = new WeakSet<TmPane>()
+  /**
+   * TM and asm views a program reached while they were off the page — `replies.ts` adds, `draw()` seeds and removes.
+   */
+  const unseen = new WeakSet<TmPane | AsmPane>()
   /**
    * TRANSPORT, BEFORE EITHER PANE — its `events(...)` is what each pane is constructed with, so it has
    * to exist first. `scratchpad` is a real value (constructed above, and nothing later reassigns it);
@@ -732,7 +747,7 @@ async function main(): Promise<EditorView> {
    * that this is *"the surface that exists whether or not a pane can show anything"*, and a surface
    * inside a closeable pane cannot keep that promise. Refusals have since left the line entirely — they
    * are notices (`notice.ts`, spec §11) — but the argument survives them: of the two jobs it keeps, the
-   * views-show-copies sentence is app-wide, and what is pinned is about a construct lit in three views
+   * views-show-copies sentence is app-wide, and what is pinned is about a construct lit in every view
    * rather than about this one. So it stays where `index.html` declares it — inside `footer.strip`,
    * after `#results` (spec §9), outside every host `hostFor` can detach.
    */
@@ -990,7 +1005,7 @@ async function main(): Promise<EditorView> {
    * Drop what the tree no longer holds — the panel state and the display of a closed view, and a focus
    * on one.
    *
-   * **`defaultLayout()` RE-MINTS `source`, `lambda-0` AND `tm-0` AS LITERALS**, so a leaf id genuinely
+   * **`defaultLayout()` RE-MINTS `source`, `lambda-0`, `asm-0` AND `tm-0` AS LITERALS**, so a leaf id genuinely
    * comes back: close the TM view with its rules panel shut, then *reset preset*, and the new `tm-0`
    * would inherit the closed view's panel state — from memory, since the write had already dropped it.
    * The same clicks then behaved differently depending on whether the page had been reloaded in
@@ -1085,6 +1100,7 @@ async function main(): Promise<EditorView> {
     // for the same class of wiring bug.
     tmProgramOf: (session: SessionId) => sessions.entryOf(session).tmProgram,
     tmScratchOf: (session: SessionId) => sessions.entryOf(session).tmScratch,
+    asmProgramOf: (session: SessionId) => sessions.entryOf(session).asmProgram,
     // THE SECOND SESSION QUESTION `pane-host.ts` ASKS, ANSWERED HERE FOR THE SAME REASON AS THE FIRST —
     // this file is where `ScratchBuffers` is, and that module takes a function from a `SessionId` to one
     // value rather than the class itself. `editorSeed` answers `null` for everything that is not a warm
@@ -1151,7 +1167,10 @@ async function main(): Promise<EditorView> {
   if (restoredBuffers !== null) {
     scratchpad.restore(restoredBuffers)
     const legOfLeaf = new Map(
-      leaves(tree).flatMap((l) => (l.pane === 'lambda' || l.pane === 'tm' ? [[l.id, l.pane] as const] : [])),
+      leaves(tree).flatMap((l) => {
+        const leg = legOfPane(l.pane)
+        return leg === null ? [] : [[l.id, leg] as const]
+      }),
     )
     const legOfBuffer = new Map(restoredBuffers.buffers.map((b) => [b.id, b.leg] as const))
     for (const [leaf, session] of Object.entries(restoredBuffers.bindings)) {
@@ -1395,7 +1414,7 @@ async function main(): Promise<EditorView> {
    */
   const undo = (record: BufferRecord, shown: readonly LeafId[]): void => {
     scratchpad.reinstate(record)
-    const name = scratchpad.nameOf(record.id) ?? `${record.leg === 'lambda' ? 'λ' : 'TM'} ${record.label}`
+    const name = scratchpad.nameOf(record.id) ?? `${LEG_NAME[record.leg]} ${record.label}`
     try {
       scratchpad.warm(record.id)
     } catch (e) {
@@ -1424,6 +1443,29 @@ async function main(): Promise<EditorView> {
     const back = home === undefined ? null : document.querySelector<HTMLElement>(`[data-leaf="${home}"] .view-title`)
     if (back !== null) back.focus()
     else buffersButton.focus()
+  }
+
+  /**
+   * What a WARM copy's row says it holds — the leg's current frame, as its text, or `null` for a leg whose
+   * frame has none. The copies menu's `term` below asks this, and only for a warm buffer (that doc has why).
+   *
+   * **A BRANCH ON THE LEG IS WHAT KEEPS THIS FROM THROWING FOR A WARM TM BUFFER — 5d-iv T5 REVIEW FIX.**
+   * `legOf({ session, leg: 'lambda' })` unconditionally is a throw for any warm buffer whose entry has no
+   * `lambda` leg at all — every TM buffer, by the legs `ScratchBuffers` registers for one (`scratch.ts`) —
+   * which escaped the `beforetoggle` handler exactly the way a cold buffer's did before `term` below
+   * branched on `warm`.
+   */
+  const copyTerm = (session: SessionId, leg: CopyLeg): string | null => {
+    switch (leg) {
+      case 'lambda':
+        return sessions.legOf({ session, leg: 'lambda' }).hist.current?.text ?? null
+      case 'tm':
+        // `TmState` (`types.ts`) carries no printable `text` field the way `LambdaState` does — a
+        // configuration is tape windows and a state index, not a term to print — so there is no equivalent
+        // string to join for a TM row today; it reads `null` (`no term yet` in the row) rather than
+        // inventing one.
+        return null
+    }
   }
 
   /**
@@ -1500,23 +1542,13 @@ async function main(): Promise<EditorView> {
          * on purpose, so asking and catching would be treating a designed state as an exception — and
          * it would also swallow the genuine wiring bug the throw exists to report.
          *
-         * **A SECOND BRANCH, ON `b.leg`, IS WHAT KEEPS THIS FROM THROWING FOR A WARM TM BUFFER TOO —
-         * 5d-iv T5 REVIEW FIX.** `legOf({ session: b.id, leg: 'lambda' })` unconditionally is a throw for
-         * any warm buffer whose entry has no `lambda` leg at all — every TM buffer, by `#spawn`'s own
-         * construction (`scratch.ts`'s own doc) — which escaped the `beforetoggle` handler exactly the
-         * way the cold case above used to. `TmState` (`types.ts`) carries no printable `text` field the
-         * way `LambdaState` does — a configuration is tape windows and a state index, not a term to
-         * print — so there is no equivalent string to join for a TM row today; it reads `null` (`no term
-         * yet` in the row) rather than inventing one.
+         * **A SECOND BRANCH, ON `b.leg`, IS `copyTerm`'s** — see its own doc for why a warm TM buffer
+         * needs it too.
          *
          * For what this doc used to claim and why it changed, see the history note under `buffers` —
          * the row builder's `term`.
          */
-        term: b.warm
-          ? b.leg === 'lambda'
-            ? (sessions.legOf({ session: b.id, leg: 'lambda' }).hist.current?.text ?? null)
-            : null
-          : null,
+        term: b.warm ? copyTerm(b.id, b.leg) : null,
         warm: b.warm,
         leg: b.leg,
       })),
@@ -1692,7 +1724,7 @@ async function main(): Promise<EditorView> {
    * `applyLayout`'s FIRST CALL HAS RUN", AND THE `reportStorageFailure` MOVE MADE THAT FALSE — 5d-ii-d
    * review round 2, Finding 1.** `refreshBuffers()`'s start-up call (this function's own doc has the
    * full argument for where it sits) can now reach `reportStorageFailure()` reaches `draw()` reaches
-   * `linkWiring.drawLink(...)` reaches `detachedPanes()` here — `theLambdaSlot()`/`theTmSlot()` read
+   * `linkWiring.drawLink(...)` reaches `detachedPanes()` here — `theSlot(leg)` reads
    * `panes.shown(...)`/`panes.active(...)` — all before `paneHost.applyLayout()` has ever run once.
    *
    * **TWO MORE CALLS REACH `draw()` BEFORE `applyLayout()` DOES, NEITHER THROUGH
@@ -1751,7 +1783,7 @@ async function main(): Promise<EditorView> {
     panes,
     links: linkWiring,
     trees,
-    unseen: unseenTm,
+    unseen,
     leaves: () => leaves(tree).length,
     sourceAvailable: () => !leaves(tree).some((l) => l.pane === 'source'),
     // WRAPPED RATHER THAN PASSED AS `custody.hasEditor`, the same shape `editorHome` below uses for
@@ -1826,7 +1858,7 @@ async function main(): Promise<EditorView> {
     panes,
     links: linkWiring,
     trees,
-    unseen: unseenTm,
+    unseen,
     draw,
     notify: (text: string) => notices.notify(text),
     setProgram: (r: ProgramResult) => {
@@ -1943,7 +1975,7 @@ async function main(): Promise<EditorView> {
           lspClient.changeDocument(SOURCE_URI, src)
           // STALE FROM THIS KEYSTROKE UNTIL THE NEXT COMPILE. `linkMark` clears its own decoration on
           // `docChanged`; this clears the state behind it and, with the `draw()` it causes, the status line
-          // AND THE OTHER TWO PANES — design §6 case 4 requires all three cleared, not only the source
+          // AND EVERY VIEW'S PIN — design §6 case 4 requires every pane cleared, not only the source
           // echo. Before this, the λ window and the δ-table's `.is-linked` rows stayed painted from the
           // PREVIOUS index until the next `compiled` reply landed — up to `DEBOUNCE_MS` plus a compile,
           // seconds on a larger program — while the status line already said "linking resumes when this
@@ -1958,10 +1990,11 @@ async function main(): Promise<EditorView> {
           // `draw()` that shows it. `focusMark` (the CodeMirror decoration) clears itself on `docChanged`,
           // as `linkMark` does.
           //
-          // **THE TM VIEWS' `setLink([])` IS THE ONE DIRECT CALL LEFT, AND IT IS STILL NEEDED.** `draw()`
-          // never sets a TM view's link: `setLinkTo` does, and a compile's `setProgram` clears it. Without
-          // this the δ-table's `.is-linked` rows would stay painted until the next compile lands. Every TM
-          // view, hidden ones too, since a hidden one would show its rows again when its tab is selected.
+          // **THE TM AND ASM VIEWS' `setLink([])` ARE THE DIRECT CALLS LEFT, AND THEY ARE STILL NEEDED.**
+          // `draw()` never sets either view's link: `setLinkTo` does, and a compile's `setProgram` clears it.
+          // Without them the δ-table's and the listing's `.is-linked` rows would stay painted until the next
+          // compile lands. Every such view, hidden ones too, since a hidden one would show its rows again when
+          // its tab is selected.
           // `setLink` redraws the table with the old running focus still in it; the `draw()` that
           // `schedule` causes repaints it without.
           //
@@ -1972,6 +2005,7 @@ async function main(): Promise<EditorView> {
           // is the one route every consumer of this rule shares.
           linkWiring.clearLink()
           for (const p of panes.of('tm')) (p.pane as TmPane).setLink([], false)
+          for (const p of panes.of('asm')) (p.pane as AsmPane).setLink([], false)
           compile.schedule(src)
         }),
       ],
@@ -2094,7 +2128,7 @@ async function main(): Promise<EditorView> {
   }
 
   // THE FIRST RECONCILE, REPLACING THE BARE `draw()` THIS USED TO BE. `applyLayout()` builds the
-  // lambda-0/tm-0 panes the default tree names, attaches every host (including `sourceHost`, built
+  // lambda-0/asm-0/tm-0 panes the default tree names, attaches every host (including `sourceHost`, built
   // above) into `<main>`, persists the tree, and calls `draw()` itself at its own end — so this is
   // still "one call, at the very end of `main()`, after everything else is wired" (`view` included:
   // `linkWiring`/`draw`/`compile`/`replies` all close over it as a thunk; `draw()`'s own body reads

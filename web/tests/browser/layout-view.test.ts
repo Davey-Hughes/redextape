@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { defaultLayout, type LayoutNode, resize } from '../../src/layout'
+import { type LayoutNode, resize } from '../../src/layout'
 import { KEY_STEP, type ResizeHandlers, renderLayout, syncSizes } from '../../src/layout-view'
 
 /**
@@ -9,6 +9,34 @@ import { KEY_STEP, type ResizeHandlers, renderLayout, syncSizes } from '../../sr
  * unannounced state change, so the arrow-key path is asserted here rather than added to the standing
  * accessibility list.
  */
+
+/**
+ * The tree every case here renders: source and λ side by side above TM, the shape `defaultLayout()` had
+ * until the asm view joined it (Plan 7 part 5 spec §3, row 4).
+ *
+ * **THIS FILE'S OWN, NOT `defaultLayout()`, BECAUSE ITS SUBJECT IS THE MACHINERY AND NOT THE PRESET.** Every
+ * case asks what `renderLayout` and `syncSizes` do with a tree — how many dividers, which path a nested one
+ * answers to, which flex a resize moves — and the numbers below are facts about this particular nesting. Borrowed
+ * from the preset, they changed meaning the day the preset gained a leaf, with nothing about the machinery
+ * having moved. The preset itself is `layout-app.test.ts`'s to check, through the app.
+ */
+const tree = (): LayoutNode => ({
+  kind: 'split',
+  dir: 'column',
+  sizes: [0.5, 0.5],
+  children: [
+    {
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.5, 0.5],
+      children: [
+        { kind: 'leaf', id: 'source', pane: 'source' },
+        { kind: 'leaf', id: 'lambda-0', pane: 'lambda' },
+      ],
+    },
+    { kind: 'leaf', id: 'tm-0', pane: 'tm' },
+  ],
+})
 
 let root: HTMLElement
 const hosts = new Map<string, HTMLElement>()
@@ -35,26 +63,26 @@ beforeEach(() => {
 
 describe('renderLayout', () => {
   it('mounts every leaf host in tree order', () => {
-    renderLayout(root, defaultLayout(), hosts, inert())
+    renderLayout(root, tree(), hosts, inert())
     const mounted = [...root.querySelectorAll('[data-leaf]')].map((e) => (e as HTMLElement).dataset.leaf)
     expect(mounted).toEqual(['source', 'lambda-0', 'tm-0'])
   })
 
   it('mounts the same host element rather than a copy, so pane state survives a re-render', () => {
-    renderLayout(root, defaultLayout(), hosts, inert())
+    renderLayout(root, tree(), hosts, inert())
     const first = root.querySelector('[data-leaf="lambda-0"]')
-    renderLayout(root, defaultLayout(), hosts, inert())
+    renderLayout(root, tree(), hosts, inert())
     expect(root.querySelector('[data-leaf="lambda-0"]')).toBe(first)
   })
 
   it('puts one divider between each pair of siblings', () => {
-    renderLayout(root, defaultLayout(), hosts, inert())
+    renderLayout(root, tree(), hosts, inert())
     // column[ row[source, lambda], tm ] -> one divider inside the row, one in the column.
     expect(root.querySelectorAll('[role="separator"]').length).toBe(2)
   })
 
   it('gives every divider the separator semantics a keyboard user needs', () => {
-    renderLayout(root, defaultLayout(), hosts, inert())
+    renderLayout(root, tree(), hosts, inert())
     for (const d of root.querySelectorAll('[role="separator"]')) {
       expect(d.getAttribute('aria-orientation')).toMatch(/^(horizontal|vertical)$/)
       expect(d.getAttribute('aria-valuenow')).not.toBeNull()
@@ -66,7 +94,7 @@ describe('renderLayout', () => {
 
   it('reports a resize when a divider is dragged, as a FRACTION of the split — not raw pixels', () => {
     const calls: { path: number[]; index: number; delta: number }[] = []
-    renderLayout(root, defaultLayout(), hosts, {
+    renderLayout(root, tree(), hosts, {
       resize: (path, index, delta) => calls.push({ path, index, delta }),
       commit: () => {},
     })
@@ -86,7 +114,7 @@ describe('renderLayout', () => {
 
   it('reports a resize from the arrow keys, so the layout is not mouse-only', () => {
     const calls: { path: number[]; index: number; delta: number }[] = []
-    renderLayout(root, defaultLayout(), hosts, {
+    renderLayout(root, tree(), hosts, {
       resize: (path, index, delta) => calls.push({ path, index, delta }),
       commit: () => {},
     })
@@ -103,7 +131,7 @@ describe('renderLayout', () => {
 
   it('addresses a nested divider by its path', () => {
     const calls: { path: number[]; index: number }[] = []
-    renderLayout(root, defaultLayout(), hosts, {
+    renderLayout(root, tree(), hosts, {
       resize: (path, index) => calls.push({ path, index }),
       commit: () => {},
     })
@@ -126,7 +154,7 @@ describe('renderLayout', () => {
   })
 
   it('keeps focus on the same divider across a re-render, so a second arrow-key press still works', () => {
-    renderLayout(root, defaultLayout(), hosts, inert())
+    renderLayout(root, tree(), hosts, inert())
     const before = root.querySelector('[role="separator"][aria-orientation="vertical"]') as HTMLElement
     const path = before.dataset.path
     const index = before.dataset.index
@@ -145,7 +173,7 @@ describe('renderLayout', () => {
     // what changed is how often a resize reaches it — once per gesture instead of once per frame — not
     // whether it does.
     before.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
-    renderLayout(root, defaultLayout(), hosts, inert())
+    renderLayout(root, tree(), hosts, inert())
 
     const after = document.activeElement
     expect(after).not.toBe(document.body)
@@ -162,12 +190,12 @@ describe('renderLayout', () => {
 
 describe('syncSizes', () => {
   it('moves flex on both neighbours of the addressed divider and leaves the rest alone', () => {
-    renderLayout(root, defaultLayout(), hosts, inert())
-    const moved = resize(defaultLayout(), [0], 0, 0.2)
+    renderLayout(root, tree(), hosts, inert())
+    const moved = resize(tree(), [0], 0, 0.2)
 
     syncSizes(root, moved)
 
-    // `defaultLayout()`'s inner row split is source | lambda-0 at 0.5/0.5; +0.2 makes it 0.7/0.3.
+    // `tree()`'s inner row split is source | lambda-0 at 0.5/0.5; +0.2 makes it 0.7/0.3.
     const source = root.querySelector<HTMLElement>('[data-leaf="source"]')
     const lambda = root.querySelector<HTMLElement>('[data-leaf="lambda-0"]')
     const tm = root.querySelector<HTMLElement>('[data-leaf="tm-0"]')
@@ -181,21 +209,21 @@ describe('syncSizes', () => {
   })
 
   it('updates aria-valuenow on the divider, which would otherwise freeze at its build-time value', () => {
-    renderLayout(root, defaultLayout(), hosts, inert())
+    renderLayout(root, tree(), hosts, inert())
     const divider = root.querySelector<HTMLElement>('[role="separator"][aria-orientation="vertical"]')
     expect(divider?.getAttribute('aria-valuenow')).toBe('50')
 
-    syncSizes(root, resize(defaultLayout(), [0], 0, 0.2))
+    syncSizes(root, resize(tree(), [0], 0, 0.2))
 
     expect(divider?.getAttribute('aria-valuenow')).toBe('70')
   })
 
   it('does not replace a single element — the identity a drag depends on survives', () => {
-    renderLayout(root, defaultLayout(), hosts, inert())
+    renderLayout(root, tree(), hosts, inert())
     const divider = root.querySelector<HTMLElement>('[role="separator"][aria-orientation="vertical"]')
     const source = root.querySelector<HTMLElement>('[data-leaf="source"]')
 
-    syncSizes(root, resize(defaultLayout(), [0], 0, 0.2))
+    syncSizes(root, resize(tree(), [0], 0, 0.2))
 
     // Object identity, not equality. This is the whole point of `syncSizes` existing: `renderLayout`
     // would have built a NEW divider with the same path/index, and the drag's own closure would have
@@ -205,7 +233,7 @@ describe('syncSizes', () => {
   })
 
   it('throws rather than repairing when the DOM does not match the model', () => {
-    renderLayout(root, defaultLayout(), hosts, inert())
+    renderLayout(root, tree(), hosts, inert())
     // A three-way split against a DOM built for a two-way one: the caller took the cheap path when a
     // rebuild was required, which is a programming error and not a state to paper over.
     const wider: LayoutNode = {
@@ -227,11 +255,11 @@ describe('syncSizes', () => {
     // arm from the DOM/model mismatch above: that one fires inside `syncNode`, once there is at least a
     // rendered tree to compare against; this one fires in `syncSizes` itself, before `syncNode` is ever
     // called.
-    expect(() => syncSizes(root, defaultLayout())).toThrow(/nothing is rendered under root/)
+    expect(() => syncSizes(root, tree())).toThrow(/nothing is rendered under root/)
   })
 
   it('throws when the position after a child holds no divider', () => {
-    renderLayout(root, defaultLayout(), hosts, inert())
+    renderLayout(root, tree(), hosts, inert())
     const divider = root.querySelector<HTMLElement>('[role="separator"][aria-orientation="vertical"]')
     if (divider === null) throw new Error('no vertical divider')
     // Strip the class that marks this element as a divider WITHOUT touching child count, so the
@@ -239,7 +267,7 @@ describe('syncSizes', () => {
     // that fires — the sibling-count mismatch test above exercises the other arm instead.
     divider.classList.remove('layout-divider')
 
-    expect(() => syncSizes(root, defaultLayout())).toThrow(/no divider after child/)
+    expect(() => syncSizes(root, tree())).toThrow(/no divider after child/)
   })
 
   it('accepts a single-leaf tree, which has no split to walk', () => {

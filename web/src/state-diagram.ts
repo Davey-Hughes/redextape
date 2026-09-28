@@ -5,7 +5,7 @@ import { Follow, ROW_HEIGHT } from './state-table'
 import type { TmProgram, TmState } from './types'
 import { visibleWindow } from './virtual-list'
 
-/** Rows drawn beyond the viewport on each side — the rule table's `OVERSCAN`, for its reason. */
+/** Rows drawn beyond the viewport on each side — `virtual-grid.ts`'s `OVERSCAN`, for its reason. */
 const OVERSCAN = 4
 /** Pixels between two lanes of *arcs*' gutter, and the gutter's margin beside the rows. */
 const LANE = 9
@@ -203,7 +203,7 @@ export class StateDiagram {
       this.#on.moved?.()
     })
     // NOTHING IN THE ROWS TAKES THE FOCUS ON `mousedown`; THE GRID TAKES IT WHEN THE CLICK LANDS — the rule table's
-    // rows container says why (`TmPane`'s constructor): the view's draw on taking the focus replaced the row under
+    // rows container says why (`VirtualGrid`'s constructor): the view's draw on taking the focus replaced the row under
     // the pointer, and the click was lost. *Show states* lost every click, since a button out of the tab order still
     // takes the focus from a pointer. The primary button only, so a middle button still scrolls.
     this.#rowsEl.addEventListener('mousedown', (e) => {
@@ -939,7 +939,7 @@ export class StateDiagram {
   }
 
   /**
-   * The grid's keys, the rule table's (`TmPane`'s `#key`): ↑/↓, PgUp/PgDn and Home/End move the active row by
+   * The grid's keys, the rule table's (`VirtualGrid`'s `#key`): ↑/↓, PgUp/PgDn and Home/End move the active row by
    * index; Enter is `#linkRow`'s own — a group's row links it, the sub-steps row shows states instead — and a
    * key that scrolls detaches following before the draw that would undo it.
    */

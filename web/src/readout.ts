@@ -1,6 +1,7 @@
 import { showWorkerError } from './banner'
 import { n } from './format'
-import type { LambdaLeg, RecordEnd, TmLeg } from './protocol'
+import { LEG_NAME, LEGS } from './legs'
+import type { AsmLeg, LambdaLeg, RecordEnd, TmLeg } from './protocol'
 import { noSessionRows, resultRows, valueLine } from './results'
 import type { TmScratchReading } from './sessions'
 import type { Diagnostic } from './types'
@@ -22,7 +23,7 @@ import type { ReadoutSwitch } from './workspace'
  */
 
 export type ProgramResult =
-  | { readonly kind: 'result'; readonly lambda: LambdaLeg; readonly tm: TmLeg }
+  | { readonly kind: 'result'; readonly lambda: LambdaLeg; readonly asm: AsmLeg; readonly tm: TmLeg }
   | { readonly kind: 'no-session'; readonly diagnostics: readonly Diagnostic[] }
   | { readonly kind: 'error'; readonly error: unknown }
 
@@ -31,7 +32,7 @@ export function programSegments(r: ProgramResult | null): string[] {
   if (r === null) return []
   if (r.kind === 'error') return []
   if (r.kind === 'no-session') return noSessionRows([...r.diagnostics]).map((row) => row.value)
-  const rows = resultRows(r.lambda, r.tm)
+  const rows = resultRows(r.lambda, r.asm, r.tm)
   const leg = (name: string): string => {
     const own = rows.filter((row) => row.leg === name)
     const declined = own.find((row) => row.label === 'declined')
@@ -43,7 +44,9 @@ export function programSegments(r: ProgramResult | null): string[] {
     const width = name === 'TM' && r.tm.status.width !== null ? [`width ${n(r.tm.status.width)}`] : []
     return [value === undefined ? name : `${name} ${value}`, ...rest.map((row) => row.value), ...width].join(' · ')
   }
-  return [leg('λ'), leg('TM')]
+  // ONE SEGMENT PER LEG, IN `LEGS`' ORDER — λ, asm, TM — named as `LEG_NAME` names them, which is what `results.ts`'s
+  // rows are labelled with.
+  return LEGS.map((l) => leg(LEG_NAME[l]))
 }
 
 const STOPPED: Readonly<Record<RecordEnd, string>> = {
@@ -51,6 +54,9 @@ const STOPPED: Readonly<Record<RecordEnd, string>> = {
   capped: 'spent its step budget',
   'depth-refused': 'the term is deeper than the reducer allows',
   budget: 'history is full',
+  'stack-full': 'the call stack is full',
+  'heap-full': 'the heap is full',
+  'memory-full': 'its saved call frames are full',
 }
 
 export type LambdaCopyLeg = {
@@ -142,7 +148,7 @@ export function programRows(r: ProgramResult | null): InspectorRow[] {
   if (r === null || r.kind === 'error') return []
   if (r.kind === 'no-session')
     return noSessionRows([...r.diagnostics]).map((row) => ({ label: row.label, value: row.value }))
-  return resultRows(r.lambda, r.tm).map((row) => ({
+  return resultRows(r.lambda, r.asm, r.tm).map((row) => ({
     label: `${row.leg} ${row.label}`,
     value: row.value,
     ...(row.note === undefined ? {} : { note: row.note }),

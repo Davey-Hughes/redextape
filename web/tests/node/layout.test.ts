@@ -16,6 +16,7 @@ import {
   setLeafKind,
   splitLeaf,
 } from '../../src/layout'
+import type { PaneKind } from '../../src/panes'
 
 /**
  * THE TREE MODEL, WITH NO DOM ANYWHERE — every invariant design §4.1 states, asserted as a value.
@@ -25,10 +26,10 @@ import {
  * not sum to 1 render as a gap. Both are values here.
  */
 
-const leaf = (id: string, pane: 'source' | 'lambda' | 'tm'): LayoutNode => ({ kind: 'leaf', id, pane })
+const leaf = (id: string, pane: PaneKind): LayoutNode => ({ kind: 'leaf', id, pane })
 
 describe('defaultLayout', () => {
-  it('reproduces the arrangement index.html ships', () => {
+  it('puts source and λ above asm and TM, two rows of two', () => {
     expect(defaultLayout()).toEqual({
       kind: 'split',
       dir: 'column',
@@ -40,7 +41,12 @@ describe('defaultLayout', () => {
           sizes: [0.5, 0.5],
           children: [leaf('source', 'source'), leaf('lambda-0', 'lambda')],
         },
-        leaf('tm-0', 'tm'),
+        {
+          kind: 'split',
+          dir: 'row',
+          sizes: [0.5, 0.5],
+          children: [leaf('asm-0', 'asm'), leaf('tm-0', 'tm')],
+        },
       ],
     })
   })
@@ -59,7 +65,7 @@ describe('splitLeaf', () => {
 
   it('splits a nested leaf without disturbing its siblings', () => {
     const tree = splitLeaf(defaultLayout(), 'tm-0', 'column', 'tm-1', 'tm')
-    expect(leaves(tree).map((l) => l.id)).toEqual(['source', 'lambda-0', 'tm-0', 'tm-1'])
+    expect(leaves(tree).map((l) => l.id)).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0', 'tm-1'])
   })
 
   it('refuses to split the source leaf, because there is no second editor to duplicate', () => {
@@ -88,15 +94,21 @@ describe('closeLeaf', () => {
   })
 
   it('collapses recursively so no single-child spine survives', () => {
-    // column[ row[source, lambda-0], tm-0 ] -> close source, close lambda-0 -> leaf(tm-0)
+    // column[ row[source, lambda-0], row[asm-0, tm-0] ] -> close source, close lambda-0 -> row[asm-0, tm-0]
+    const lower: LayoutNode = {
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.5, 0.5],
+      children: [leaf('asm-0', 'asm'), leaf('tm-0', 'tm')],
+    }
     const afterSource = closeLeaf(defaultLayout(), 'source')
     expect(afterSource).toEqual({
       kind: 'split',
       dir: 'column',
       sizes: [0.5, 0.5],
-      children: [leaf('lambda-0', 'lambda'), leaf('tm-0', 'tm')],
+      children: [leaf('lambda-0', 'lambda'), lower],
     })
-    expect(closeLeaf(afterSource, 'lambda-0')).toEqual(leaf('tm-0', 'tm'))
+    expect(closeLeaf(afterSource, 'lambda-0')).toEqual(lower)
   })
 
   it('refuses to close the last leaf', () => {
@@ -351,6 +363,24 @@ describe('parseLayout', () => {
   })
 
   /**
+   * A STORED ASM VIEW SURVIVES A RELOAD. A kind `validate` does not know fails the whole layout, and a layout that
+   * fails is replaced by the default without a word, so an asm view would be lost on every reload with nothing red.
+   * Written out by hand rather than read off `defaultLayout()`, so a later default without an asm view keeps the case.
+   */
+  it('accepts an asm view in a stored tree', () => {
+    const tree = {
+      kind: 'split',
+      dir: 'row',
+      children: [
+        { kind: 'leaf', id: SOURCE_LEAF, pane: 'source' },
+        { kind: 'leaf', id: 'asm-3', pane: 'asm' },
+      ],
+      sizes: [0.5, 0.5],
+    }
+    expect(parseLayout(wrap(tree))).toEqual(tree)
+  })
+
+  /**
    * AND THE CONVERSE: `SOURCE_LEAF` IS RESERVED FOR THE SOURCE KIND. The id and the kind have to agree
    * in BOTH directions, because `pane-host.ts` keys the editor's pre-seeded host on this id — a
    * `{id: SOURCE_LEAF, pane: 'lambda'}` entry would have the creation pass build a `LambdaPane` into
@@ -486,7 +516,7 @@ describe('insertBeside', () => {
 
   it('puts the new leaf after its subject in leaves() order', () => {
     const next = insertBeside(defaultLayout(), 'lambda-0', 'row', 'pane-1', 'tm')
-    expect(leaves(next).map((l) => l.id)).toEqual(['source', 'lambda-0', 'pane-1', 'tm-0'])
+    expect(leaves(next).map((l) => l.id)).toEqual(['source', 'lambda-0', 'pane-1', 'asm-0', 'tm-0'])
   })
 
   it('still refuses a second source leaf and a duplicate id', () => {

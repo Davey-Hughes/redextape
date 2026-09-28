@@ -62,7 +62,7 @@ export const setLink = StateEffect.define<Span | null>()
  *
  * THE ECHO IS WHAT MAKES THE RESOLUTION POLICY LEGIBLE. A click resolves to the innermost node whose
  * span contains it and never walks outward, so the user has to be able to see whether they hit the
- * `x` or the statement containing it. Without this mark the other two panes would light up for a
+ * `x` or the statement containing it. Without this mark the other views would light up for a
  * construct the user cannot identify.
  *
  * A SECOND FIELD RATHER THAN A BRANCH IN `declineMark`, for the reason that field states about the
@@ -87,7 +87,7 @@ export const linkMark = StateField.define<DecorationSet>({
     }
     // A DOCUMENT CHANGE CLEARS THE LINK RATHER THAN MAPPING IT. `declineMark` maps, because a decline
     // is still true about the text it named until the next compile contradicts it. A link is a claim
-    // about the OTHER two panes, and those are showing the previous compile's term and table — so a
+    // about the OTHER views, and those are showing the previous compile's term, listing and table — so a
     // mapped link would keep pointing at a highlight that no longer corresponds to anything.
     return tr.docChanged ? Decoration.none : deco
   },

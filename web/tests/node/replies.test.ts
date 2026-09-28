@@ -82,6 +82,7 @@ function sourceEntry(): SessionEntry {
     legs: { lambda: leg<LambdaState>(), tm: leg<TmState>() },
     tmProgram: null,
     tmScratch: null,
+    asmProgram: null,
   }
 }
 
@@ -100,9 +101,11 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): RunReply =>
   kind: 'compiled',
   gen: 1,
   lambda: { available: true, reason: '', node: null, run: null },
+  asm: { available: false, reason: 'no asm leg', run: null, cap: null, total_steps: null },
   tm: { available: true, reason: '', width: 8, run: null, total_steps: null },
   declinedSpan: null,
   tmProgram,
+  asmProgram: null,
   tapeNames,
   linkIndex: null,
   tmText: null,

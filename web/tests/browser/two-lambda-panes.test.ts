@@ -313,7 +313,8 @@ beforeEach(async () => {
   await until(
     () =>
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      leafIds().length === 3 &&
+      // THE DEFAULT TREE'S FOUR VIEWS: source, λ, asm and TM.
+      leafIds().length === 4 &&
       lambdaLeaves().length === 1 &&
       // THE λ PANE IS ATTACHED AGAIN, which is the precondition every test's first click depends on and
       // the one this block used to get for free from the retire. `button.detach` is offered only on
@@ -536,7 +537,7 @@ describe('two λ panes on two λ sessions', () => {
    * CRITICAL FINDING, WHOLE-BRANCH REVIEW BEFORE MERGE — A LEG WITH NO PANE IS A LEGAL STATE.
    *
    * `closeLeaf` refuses only the last leaf in the TREE, and `draw()` offers `close` on `leaves() > 1`,
-   * so `close` is on the single λ pane a fresh page ships from the first frame — three leaves, nothing
+   * so `close` is on the single λ pane a fresh page ships from the first frame — four leaves, nothing
    * to click through to reach it. `draw.ts` and `link-wiring.ts` nonetheless threw on an empty λ or TM
    * leg, each justifying it with "`main.ts` always registers one pane of each leg before this can be
    * called" — true through wave 1, false from the moment `applyLayout` began deriving panes from the
@@ -546,7 +547,7 @@ describe('two λ panes on two λ sessions', () => {
    * IT DRIVES BOTH ENTRY POINTS, because they are reachable independently and one fix could plausibly
    * miss either. `draw()` is the per-frame path (the TM transport below); `link-wiring.ts` is reached
    * from the source editor's own `updateListener` on every keystroke, through `drawLink` ->
-   * `detachedPanes` -> `theTmSlot`/`theLambdaSlot`, with no λ pane to resolve.
+   * `detachedPanes` -> `theSlot`, per leg, with no λ pane to resolve.
    */
   it('keeps working after the last λ pane is closed, rather than throwing on every frame', async () => {
     // UNHANDLED ERRORS ARE COLLECTED, NOT INFERRED FROM A GREEN ASSERTION. A throw inside a click
@@ -559,7 +560,7 @@ describe('two λ panes on two λ sessions', () => {
     try {
       btn('lambda-0', 'close this view')?.click()
       await until(() => lambdaLeaves().length === 0)
-      expect(leafIds()).toEqual(['source', 'tm-0'])
+      expect(leafIds()).toEqual(['source', 'asm-0', 'tm-0'])
 
       // THE PER-FRAME PATH, DRIVEN ON PURPOSE AND ASSERTED ON ITS OUTPUT. Scrubbing the δ leg runs
       // `draw()` — the function that threw — and `.step` is painted by that same pass, so a changed
@@ -755,7 +756,7 @@ describe('two λ panes on two λ sessions', () => {
    * The two docs that justified keying custody by session argued from "the closed leaf's id is never
    * reused (`nextLeafId` only counts up)" — the history note under `heldEditors` and under `applyLayout`
    * holds that premise now, since both docs state the corrected one — and it is true of the ids
-   * `nextLeafId` mints and false of the three `defaultLayout` writes down. A pane that merely INHERITED the id was resolved as the editor's
+   * `nextLeafId` mints and false of the four `defaultLayout` writes down. A pane that merely INHERITED the id was resolved as the editor's
    * home the moment it was rebound to the scratch, and the next layout gesture delivered the held editor
    * onto it — the silent relocation §4.2 and §4.3 both refuse, with the claim control withdrawing itself
    * as the editor appeared where nobody had asked for it.

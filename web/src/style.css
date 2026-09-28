@@ -1175,17 +1175,20 @@ button.view-title[aria-expanded="true"] {
    panel rules (`.tm-pane > .panel`) give it two shares of whatever the tapes leave. Its height is still
    bounded, and has to be — unbounded, it grows to its full 3,069,144px and every draw renders every row —
    but by the view, which the layout sizes. */
-.state-table {
+.state-table,
+.asm-listing {
   overflow-y: auto;
   font-family: var(--font-mono);
   font-size: var(--step--2);
 }
 
-.state-spacer {
+.state-spacer,
+.asm-spacer {
   position: relative;
 }
 
-.state-rows {
+.state-rows,
+.asm-rows {
   position: absolute;
   inset-inline: 0;
   top: 0;
@@ -1194,8 +1197,10 @@ button.view-title[aria-expanded="true"] {
 
 /* MUST equal ROW_HEIGHT in state-table.ts. virtual-list.ts's offset arithmetic assumes it exactly, and
    a mismatch drifts the rows out from under the scrollbar without any test noticing. `tm-pane.ts`
-   re-exports the constant; it does not define it. */
-.state-row {
+   re-exports the constant; it does not define it. The asm listing's rows are the same grid's (`virtual-grid.ts`),
+   so the same height and the same marks. */
+.state-row,
+.asm-row {
   height: 24px;
   line-height: 24px;
   padding-inline: 0.5rem;
@@ -1214,17 +1219,20 @@ button.view-title[aria-expanded="true"] {
   border-inline-start: 3px solid transparent;
 }
 /* A row's one grid cell holds its text, so the text's clipping lives here and not on the row. */
-.state-cell {
+.state-cell,
+.asm-cell {
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.state-table:focus-visible .state-row.is-active {
+.state-table:focus-visible .state-row.is-active,
+.asm-listing:focus-visible .asm-row.is-active {
   --row-active: 0 0 0 2px var(--focus-ring);
 }
 /* A mark's words for a screen reader — "fires next" — as generated content, so they are read and are not the
    row's text; clipped away, so they are not seen. The λ view's marks do the same (`.term [data-marks]`). */
-.state-cell[data-marks]::before {
+.state-cell[data-marks]::before,
+.asm-cell[data-marks]::before {
   content: attr(data-marks);
   position: absolute;
   width: 1px;
@@ -1253,7 +1261,8 @@ button.view-title[aria-expanded="true"] {
    rather than about the selection — a row can legitimately be both, and equal specificity means
    SOURCE ORDER decides which background shows: this rule has to come first so those two, declared
    after it, are the ones that win. */
-.state-row.is-linked {
+.state-row.is-linked,
+.asm-row.is-linked {
   background: var(--link-bg);
   border-inline-start-style: dashed;
   border-inline-start-color: var(--link-edge);
@@ -1270,12 +1279,14 @@ button.view-title[aria-expanded="true"] {
    `.is-next` — the run's literal position — must still win, so they stay declared after this.
 
    ITS CUE IS THE BOTTOM EDGE, composed through `--row-edge` so it survives beside the current row's bar. */
-.state-row.is-focus {
+.state-row.is-focus,
+.asm-row.is-focus {
   background: color-mix(in oklab, var(--tok-operator) 22%, var(--bg));
   --row-edge: 0 -2px 0 var(--tok-operator);
 }
 
-.state-row {
+.state-row,
+.asm-row {
   cursor: pointer;
 }
 
@@ -1954,4 +1965,146 @@ main {
 .outline[hidden],
 .state-diagram[hidden] {
   display: none;
+}
+
+/* THE ASM VIEW (Plan 7 part 5 spec §6.1): the TM view's mechanism, with its own shares. The listing takes two, the
+   registers and call stack one between them, side by side, and the heap one; a closed panel keeps only its header, and
+   each body keeps a floor of five rows. `.asm-machine` is the row the registers and the call stack share: it wraps, so
+   the two stack when the view is too narrow for both, and it takes no share of its own while both are closed. */
+.pane[data-kind="asm"] {
+  display: flex;
+  flex-direction: column;
+}
+.asm-pane {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+.asm-pane > * {
+  flex: none;
+}
+.asm-pane > .panel[data-open="true"],
+.asm-machine > .panel[data-open="true"] {
+  display: flex;
+  flex-direction: column;
+}
+.asm-pane > .panel[data-panel="listing"][data-open="true"] {
+  flex: 2 1 0;
+}
+.asm-pane > .panel[data-panel="heap"][data-open="true"],
+.asm-pane > .asm-machine:has(> .panel[data-open="true"]) {
+  flex: 1 1 0;
+}
+.asm-machine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  column-gap: 1rem;
+  row-gap: var(--space-2);
+  margin-block-start: var(--space-2);
+}
+/* THE ROW CARRIES THE PANELS' SPACING, NOT THE PANELS: a panel's own `margin-block-start` inside the row would sit
+   within the row's share, leaving the registers and the call stack a margin shorter than the heap beside them. */
+.asm-machine > .panel {
+  flex: 1 1 18rem;
+  min-width: 0;
+  margin-block-start: 0;
+}
+/* A CLOSED PANEL TAKES NO SHARE OF THE ROW: it is its header and nothing more (spec §6.1), so the open
+   sibling beside it takes the row's width, and `align-self` stops `align-items: stretch` pulling it to the
+   row's height. */
+.asm-machine > .panel[data-open="false"] {
+  flex: none;
+  align-self: flex-start;
+}
+.asm-pane > .panel[data-open="true"] > .asm-listing {
+  flex: 1 1 0;
+  min-height: calc(5 * 24px);
+}
+.asm-registers,
+.asm-stack,
+.asm-heap {
+  flex: 1 1 0;
+  min-height: 5lh;
+  overflow-y: auto;
+  margin: 0;
+  padding-inline: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  list-style: none;
+}
+.panel-note {
+  font-size: var(--step--2);
+  color: var(--fg-dim);
+}
+
+/* An instruction row: its `pc`, its mnemonic, its operands. A label row sits above the instruction it names. */
+.asm-pc {
+  display: inline-block;
+  min-width: 5ch;
+  color: var(--fg-dim);
+}
+.asm-mnemonic {
+  display: inline-block;
+  min-width: 7ch;
+}
+.asm-row.is-label {
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+/* THE INSTRUCTION ABOUT TO RUN: the rule table's current-row bar and next-rule outline together, since for asm the
+   two are one row. Its words, "runs next", are the cell's generated content. */
+.asm-row.is-next {
+  background: color-mix(in oklab, var(--accent) 24%, var(--bg));
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  --row-bar: 3px 0 0 var(--accent);
+}
+
+/* THE REGISTERS (spec §6.3): name and word in a wrapping grid. The register the last instruction wrote is outlined —
+   a shape, not a colour — and a local the current call has not written is dimmed behind its `·`. */
+.asm-register-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14ch, 1fr));
+  gap: 0 1ch;
+  margin: 0;
+}
+.asm-register {
+  display: flex;
+  gap: 1ch;
+  padding-inline: 0.25rem;
+}
+.asm-register dt {
+  min-width: 4ch;
+  color: var(--fg-dim);
+}
+.asm-register dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asm-register.is-changed {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  font-weight: 600;
+}
+.asm-register.is-unwritten {
+  opacity: 0.55;
+}
+.asm-note {
+  margin: 0;
+  color: var(--fg-dim);
+}
+
+/* THE CALL STACK AND THE HEAP (spec §6.4, §6.5): a line each, newest or top first. */
+.asm-frame,
+.asm-cell-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.asm-ret,
+.asm-refs {
+  color: var(--fg-dim);
 }

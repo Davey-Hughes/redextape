@@ -13,7 +13,28 @@ export type LeafId = string
  * members and are deliberately not aliased to it — the day a pane kind exists that is not a leg, this
  * type extends and `Leg` does not.
  */
-export type PaneKind = 'source' | 'lambda' | 'tm'
+export type PaneKind = 'source' | 'lambda' | 'asm' | 'tm'
+
+/**
+ * The leg a pane of `kind` renders, or `null` for the source pane, which renders an editor and no leg.
+ *
+ * **A `switch`, SO THAT A NEW KIND IS A TYPE ERROR HERE RATHER THAN A SILENT ANSWER.** Because the kinds that
+ * are legs are not aliased to `Leg` (`PaneKind`'s own doc), "is this kind a leg" used to be asked by listing
+ * them — `kind === 'lambda' || kind === 'tm'` — which is `false` for a third leg's kind with `tsc` green
+ * (`legs.ts` has the class of bug). Every arm returns, so a kind with no arm is TS2366.
+ */
+export function legOfPane(kind: PaneKind): Leg | null {
+  switch (kind) {
+    case 'source':
+      return null
+    case 'lambda':
+      return 'lambda'
+    case 'asm':
+      return 'asm'
+    case 'tm':
+      return 'tm'
+  }
+}
 
 /**
  * One live pane: its leaf identity, what it renders, the slot that resolves its binding, the view

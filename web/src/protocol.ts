@@ -1,9 +1,14 @@
 import type { LinkIndexWire } from './link'
 import type {
+  AsmProgram,
+  AsmState,
+  AsmStatus,
+  AsmWindow,
   Decoded,
   Diagnostic,
   LambdaState,
   LambdaStatus,
+  RunStatus,
   Span,
   TmProgram,
   TmScratchStatus,
@@ -41,6 +46,20 @@ export const FRAME_BYTES = 512
 export const TM_RADIUS = 40
 
 /**
+ * How much of the asm machine one frame carries (Plan 7 part 5 spec §5.3): the first 64 locals and 16 arguments, the
+ * top 8 call frames, and the newest 16 heap cells and 16 boxes — plus every cell or box a register the frame shows
+ * points at, which `AsmState::window` adds so a back-reference always has its cell.
+ *
+ * **HERE, NOT IN THE CORE**, for `TM_RADIUS`'s reason: how much of the machine fits on screen is a fact about the
+ * view, and the core's view model takes it as a parameter (`viewmodel.rs`'s module doc: core never picks a number).
+ *
+ * **EVERY CORPUS PROGRAM FITS WHOLE** (spec §2.5: at most 23 locals, 3 arguments, a call depth of 7 and 11 heap
+ * cells), so the window only cuts a deep or a list-heavy run. The frame sizes these bounds produce are
+ * `asmFrameBytes`'s to charge.
+ */
+export const ASM_WINDOW: AsmWindow = { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16 }
+
+/**
  * The ring's cap, PER LEG. ~3,200 λ frames at ~10 KB, or ~58,000 TM frames at ~550 B.
  *
  * It is also what bounds RECORDING, because a step count cannot: the probe measured the λ leg at
@@ -53,13 +72,13 @@ export const TM_RADIUS = 40
  *
  * IT BOUNDS TWO DIFFERENT THINGS AT TWO DIFFERENT SITES, AND ONLY ONE OF THEM IS MEMORY.
  * `session-worker.ts`'s `allowance` bounds bytes PRODUCED — the worker posts each batch and clears
- * it, so it retains none of them. The `sessions.add` call in `main.ts` constructs the two `History` rings
- * that bound bytes RETAINED. They happen to be the same constant, which is why the plan's "one session
- * is already 64 MB" is true, but it is `main.ts`'s two rings and not the worker's `allowance` that make
- * it true. The two come apart on `[continue]`: `onExtend` (`session-worker.ts`) raises the allowance
- * to `recorded + HISTORY_BYTES` every click, so production is unbounded across clicks — while the
- * ring's budget never moves, so retention stays at one `HISTORY_BYTES` per leg however many times the
- * user continues.
+ * it, so it retains none of them. The `sessions.add` call in `main.ts` constructs the `History` rings,
+ * one per leg, that bound bytes RETAINED. They happen to be the same constant, which is why the plan's
+ * "one session is already 64 MB" was true of its two legs — 96 MB since the asm leg made three — but
+ * it is `main.ts`'s rings and not the worker's `allowance` that make it true. The two come apart on
+ * `[continue]`: `onExtend` (`session-worker.ts`) raises the allowance to `recorded + HISTORY_BYTES`
+ * every click, so production is unbounded across clicks — while the ring's budget never moves, so
+ * retention stays at one `HISTORY_BYTES` per leg however many times the user continues.
  *
  * **THE UNITS ARE THE RING'S ACCOUNTING AND NOT RETAINED HEAP, AND THE TWO LEGS TRADE AT DIFFERENT
  * RATES.** Measured 2026-08-11 by `tests/browser/session-memory.test.ts`, real Chromium, forced
@@ -257,7 +276,7 @@ export const EXTEND_CELLS = 100_000
  */
 export const VALUE_CHUNK = 500_000
 
-export type Leg = 'lambda' | 'tm'
+export type Leg = 'lambda' | 'asm' | 'tm'
 
 /**
  * Why recording stopped. FOUR OUTCOMES, NOT THREE, and conflating any two of them is the trap
@@ -267,8 +286,18 @@ export type Leg = 'lambda' | 'tm'
  *   * `capped`       — the cursor's own cap. `[continue]` raises it.
  *   * `depth-refused`— the depth guard. `raise_cap` REFUSES to clear it, so there is no continue.
  *   * `budget`       — `HISTORY_BYTES`. The run is still `Running` and continuing costs nothing.
+ *
+ * **AND THREE MORE FOR THE ASM LEG, ONE PER CAP A STEP CAP CANNOT HELP** (Plan 7 part 5 spec §8, amendment 10):
+ *
+ *   * `stack-full`   — the call stack reached its frame cap.
+ *   * `heap-full`    — the heap reached its cell cap, or the boxes did.
+ *   * `memory-full`  — the words saved across call frames reached their cap.
+ *
+ * Each is `depth-refused`'s case, not `capped`'s: raising the step cap leaves the machine exactly as full, so there
+ * is no continue. A value of its own each, rather than one `refused` with the cap beside it, so the sentences that
+ * say which cap — `controls.ts`'s `doneText`, `readout.ts`'s `STOPPED` — are switches `tsc` holds to every one.
  */
-export type RecordEnd = 'ended' | 'capped' | 'depth-refused' | 'budget'
+export type RecordEnd = 'ended' | 'capped' | 'depth-refused' | 'budget' | 'stack-full' | 'heap-full' | 'memory-full'
 
 /**
  * A λ frame's size in bytes.
@@ -292,6 +321,81 @@ export function tmFrameBytes(f: TmState): number {
   let cells = 0
   for (const tape of f.window) cells += tape.length
   return FRAME_OVERHEAD_BYTES + cells * 2 + f.heads.length * 8 + f.window_start.length * 8
+}
+
+/**
+ * A finished λ or TM cursor's `RunStatus` as a `RecordEnd`.
+ *
+ * `Running` maps to `ended` and cannot occur: this is only called once `stepLambda`/`stepTm` has
+ * answered `false`, which means the cursor is finished. Mapped rather than thrown so a future
+ * `RunStatus` variant degrades to a legible label instead of aborting the worker — and to `ended`, the
+ * one end that offers no continue, so a variant nothing here knows cannot offer one that does nothing.
+ *
+ * **HERE AND NOT IN `session-worker.ts`**, where its callers are, for `asmRecordEnd`'s reason below.
+ */
+export function endOf(run: RunStatus | null): RecordEnd {
+  switch (run) {
+    case 'Capped':
+      return 'capped'
+    case 'DepthRefused':
+      return 'depth-refused'
+    default:
+      return 'ended'
+  }
+}
+
+/**
+ * A finished asm cursor's status as a `RecordEnd`: `ended` for a halt or a fault, and a cap named.
+ *
+ * **ONLY THE STEP CAP IS `capped`.** Raising the step cap resumes a run it stopped and does nothing for one the stack,
+ * the heap or the saved frames stopped, so each of those is its own end with no continue (Plan 7 part 5 spec §8,
+ * amendment 10). A fault is `Ended`, since the run is over, and its text is the leg's value.
+ *
+ * **EVERY CAP IS AN ARM, AND THERE IS NO `default`.** A cap this `switch` folded in by default would be called
+ * `capped` and offered a continue that cannot resume it; with an arm per cap, a cap added to `AsmCap` is a type error
+ * here (TS2366) until someone decides what it ends as. A `Capped` status naming no cap cannot occur — `AsmStatus`
+ * names one exactly when the run is capped — and reads as the step cap, as it always has.
+ *
+ * **HERE AND NOT IN `session-worker.ts`**, where its one caller is, for `forkable`'s reason: the worker is outside the
+ * coverage gate and no test reaches it, so a decision written there is a decision nothing holds. `Running` cannot
+ * occur, since this is asked once `stepAsm` has answered `false`; it maps to `ended`, as `endOf` maps it, rather than
+ * throwing.
+ */
+export function asmRecordEnd(status: Pick<AsmStatus, 'run' | 'cap'>): RecordEnd {
+  if (status.run !== 'Capped') return 'ended'
+  switch (status.cap) {
+    case 'Stack':
+      return 'stack-full'
+    case 'Heap':
+      return 'heap-full'
+    case 'Mem':
+      return 'memory-full'
+    case 'Steps':
+    case null:
+      return 'capped'
+  }
+}
+
+/**
+ * What one word of an asm frame is charged: an `AsmWord` object, its decimal string and its tag.
+ *
+ * **MEASURED, AS `SPAN_BYTES` IS, AND ROUNDED UP.** `frame-cost.test.ts`'s `asm frame cost` case keeps every frame of
+ * `upto(200)` — 2,814 frames, 247,091 words — and the same frames with the words dropped, and reads the difference in
+ * retained heap after a full collection: 48.23 bytes a word, the same to four places across runs. The difference
+ * charges the arrays that hold the words to the words too, which errs high. 52 leaves the margin `SPAN_BYTES`
+ * leaves over its own figure, and that case fails if a word ever costs more than this charges, which is the direction
+ * that would let the ring keep more than `HISTORY_BYTES`.
+ */
+export const ASM_WORD_BYTES = 52
+
+/**
+ * An asm frame's size in bytes. **WORDS DOMINATE** — `rr`, the windowed locals and arguments, each shown frame's
+ * saved locals, both halves of each cell and each box's content — and a written bit is charged a byte.
+ */
+export function asmFrameBytes(f: AsmState): number {
+  let words = 1 + f.locals.length + f.args.length + 2 * f.cells.length + f.boxes.length
+  for (const frame of f.frames) words += frame.saved.length
+  return FRAME_OVERHEAD_BYTES + words * ASM_WORD_BYTES + f.written.length
 }
 
 /**
@@ -433,6 +537,8 @@ export type LambdaLeg = {
   declinedSpan: Span | null
 }
 export type TmLeg = { status: TmStatus; value: Decoded | null }
+/** The asm leg's answer after recording: its status and its value — `null` for an absent leg, as TM's. */
+export type AsmLeg = { status: AsmStatus; value: Decoded | null }
 
 export type RunReply =
   /**
@@ -513,9 +619,13 @@ export type RunReply =
       kind: 'compiled'
       gen: number
       lambda: LambdaStatus
+      /** The asm leg: absent only when the program does not lower, including where TM declines it (spec §5.2). */
+      asm: AsmStatus
       tm: TmStatus
       declinedSpan: Span | null
       tmProgram: TmProgram | null
+      /** The asm listing and its labels, sent once for `tmProgram`'s reason; `null` when there is no asm leg. */
+      asmProgram: AsmProgram | null
       tapeNames: string[]
       /**
        * The link index for this compile.
@@ -532,7 +642,7 @@ export type RunReply =
        * round trip into a worker measured starved for 4,679 ms during recording, and recording starts
        * the instant this message is posted. See design §4.1.
        *
-       * The ten typed arrays inside are TRANSFERRED, not cloned; see the worker's `postMessage`.
+       * The eleven typed arrays inside are TRANSFERRED, not cloned; see the worker's `postMessage`.
        */
       linkIndex: LinkIndexWire | null
       /**
@@ -554,11 +664,9 @@ export type RunReply =
     }
   | { kind: 'lambda-frames'; gen: number; frames: LambdaState[]; done: RecordEnd | null }
   | { kind: 'tm-frames'; gen: number; frames: TmState[]; done: RecordEnd | null }
-  /**
-   * Both legs interrogated after recording finished — what `results.ts` renders. Unchanged in shape
-   * from PR 3c so that module needs no edit.
-   */
-  | { kind: 'result'; gen: number; lambda: LambdaLeg; tm: TmLeg }
+  | { kind: 'asm-frames'; gen: number; frames: AsmState[]; done: RecordEnd | null }
+  /** Every leg interrogated after recording finished — what `results.ts` renders. */
+  | { kind: 'result'; gen: number; lambda: LambdaLeg; asm: AsmLeg; tm: TmLeg }
   /** The answer to `lambda-tree`; `tree.step` is the step it answers, clamped to the run. */
   | { kind: 'lambda-tree'; gen: number; tree: LambdaTreeWire }
   /**

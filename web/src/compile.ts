@@ -121,7 +121,7 @@ export function createCompile(deps: {
     //
     // THE SOURCE SESSION BY NAME, NOT THROUGH A PANE'S BINDING. Recompiling is what the editor does to
     // the session it is the source of; it is not something a pane slot points at, so this stays
-    // addressed to `sourceSession` however the three panes end up bound. Resolved inside `schedule`
+    // addressed to `sourceSession` however the panes end up bound. Resolved inside `schedule`
     // rather than held as a local for the reason `draw()` gives: a client belongs to a registry entry
     // now, and a second reference to it beside the registry is a second thing to keep in step.
     const client = sessions.entryOf(sourceSession).client

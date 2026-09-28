@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { LambdaLeg, TmLeg } from '../../src/protocol'
+import type { AsmLeg, LambdaLeg, TmLeg } from '../../src/protocol'
 import { noSessionRows, resultRows, valueLine } from '../../src/results'
 import type { Diagnostic, LambdaState } from '../../src/types'
 
@@ -19,6 +19,11 @@ const lambdaOk: LambdaLeg = {
   declinedSpan: null,
 }
 
+const asmOk: AsmLeg = {
+  status: { available: true, reason: '', run: 'Running', cap: null, total_steps: 55 },
+  value: { Value: { text: '42' } },
+}
+
 const tmOk: TmLeg = {
   status: { available: true, reason: '', width: 8, run: 'Running', total_steps: 2870 },
   value: { Value: { text: '42' } },
@@ -28,7 +33,7 @@ const find = (rows: ReturnType<typeof resultRows>, leg: string, label: string) =
   rows.find((r) => r.leg === leg && r.label === label)
 
 describe('resultRows — the happy path', () => {
-  const rows = resultRows(lambdaOk, tmOk)
+  const rows = resultRows(lambdaOk, asmOk, tmOk)
 
   it('shows the λ normal form, step count and value', () => {
     expect(find(rows, 'λ', 'normal form')?.value).toBe('λf. λx. f (f x)')
@@ -45,7 +50,7 @@ describe('resultRows — the happy path', () => {
 
 describe('resultRows — a cut names its cause', () => {
   it('shows the text AND says it was cut, rather than choosing one', () => {
-    const rows = resultRows({ ...lambdaOk, state: { ...okState, cut: 'Bytes' } }, tmOk)
+    const rows = resultRows({ ...lambdaOk, state: { ...okState, cut: 'Bytes' } }, asmOk, tmOk)
     const row = find(rows, 'λ', 'normal form')
     expect(row?.value).toBe('λf. λx. f (f x)')
     expect(row?.note).toBe('… truncated at 64 KiB')
@@ -55,29 +60,31 @@ describe('resultRows — a cut names its cause', () => {
   // unwinds, so the text can be well-formed λ that reparses into a DIFFERENT, shorter term. Saying
   // "truncated at 64 KiB" about a 6 KB term would be false twice over.
   it('names depth separately, because that text is not a prefix', () => {
-    const rows = resultRows({ ...lambdaOk, state: { ...okState, cut: 'Depth' } }, tmOk)
+    const rows = resultRows({ ...lambdaOk, state: { ...okState, cut: 'Depth' } }, asmOk, tmOk)
     expect(find(rows, 'λ', 'normal form')?.note).toBe('… too deep to show in full')
   })
 
   it('says nothing when the walk ran to completion', () => {
-    expect(find(resultRows(lambdaOk, tmOk), 'λ', 'normal form')?.note).toBeUndefined()
+    expect(find(resultRows(lambdaOk, asmOk, tmOk), 'λ', 'normal form')?.note).toBeUndefined()
   })
 })
 
 describe('resultRows — total_steps is read against tmValue, not against run', () => {
   // The pair `browser.rs` pins: a finished run reports run: "Running" because the CURSOR has not moved.
   it('calls it a length when a final configuration exists', () => {
-    expect(find(resultRows(lambdaOk, tmOk), 'TM', 'steps')?.value).toBe('2,870 transitions')
+    expect(find(resultRows(lambdaOk, asmOk, tmOk), 'TM', 'steps')?.value).toBe('2,870 transitions')
   })
 
   it('calls it a cap when tmValue is Unfinished, even though run is identical', () => {
     const capped: TmLeg = { status: { ...tmOk.status }, value: 'Unfinished' }
-    expect(find(resultRows(lambdaOk, capped), 'TM', 'steps')?.value).toBe('stopped after 2,870 transitions at a cap')
+    expect(find(resultRows(lambdaOk, asmOk, capped), 'TM', 'steps')?.value).toBe(
+      'stopped after 2,870 transitions at a cap',
+    )
   })
 
   it('does not name which cap it hit', () => {
     const capped: TmLeg = { status: { ...tmOk.status }, value: 'Unfinished' }
-    expect(find(resultRows(lambdaOk, capped), 'TM', 'steps')?.value).not.toContain('step cap')
+    expect(find(resultRows(lambdaOk, asmOk, capped), 'TM', 'steps')?.value).not.toContain('step cap')
   })
 })
 
@@ -94,11 +101,28 @@ describe('resultRows — refusals', () => {
       value: null,
       declinedSpan: { start: 44, end: 45 },
     }
-    const rows = resultRows(declined, tmOk)
+    const rows = resultRows(declined, asmOk, tmOk)
     expect(find(rows, 'λ', 'declined')?.value).toBe('a closure assigns a variable captured from an outer scope')
     expect(find(rows, 'λ', 'normal form')).toBeUndefined()
     // The TM leg still answers — a declined backend is not a failed compile.
     expect(find(rows, 'TM', 'value')?.value).toBe('42')
+  })
+
+  it('shows the asm reason when that backend declines, and nothing else for it', () => {
+    const declined: AsmLeg = {
+      status: {
+        available: false,
+        reason: 'the program nests deeper than the asm lowering allows',
+        run: null,
+        cap: null,
+        total_steps: null,
+      },
+      value: null,
+    }
+    const rows = resultRows(lambdaOk, declined, tmOk).filter((r) => r.leg === 'asm')
+    expect(rows).toEqual([
+      { leg: 'asm', label: 'declined', value: 'the program nests deeper than the asm lowering allows' },
+    ])
   })
 
   it('shows the TM reason and no width when that backend declines', () => {
@@ -112,7 +136,7 @@ describe('resultRows — refusals', () => {
       },
       value: null,
     }
-    const rows = resultRows(lambdaOk, declined)
+    const rows = resultRows(lambdaOk, asmOk, declined)
     expect(find(rows, 'TM', 'declined')?.value).toBe('the machine this program needs is too large to build')
     expect(find(rows, 'TM', 'width')).toBeUndefined()
   })
@@ -121,20 +145,20 @@ describe('resultRows — refusals', () => {
   // and this slice has no button to offer — so the words are the whole distinction.
   it('distinguishes a spent budget from a depth refusal', () => {
     const capped: LambdaLeg = { ...lambdaOk, status: { ...lambdaOk.status, run: 'Capped' }, value: 'Unfinished' }
-    expect(find(resultRows(capped, tmOk), 'λ', 'run')?.value).toBe('spent its step budget')
+    expect(find(resultRows(capped, asmOk, tmOk), 'λ', 'run')?.value).toBe('spent its step budget')
 
     const deep: LambdaLeg = { ...lambdaOk, status: { ...lambdaOk.status, run: 'DepthRefused' }, value: 'Unfinished' }
-    expect(find(resultRows(deep, tmOk), 'λ', 'run')?.value).toBe('the term is deeper than the reducer allows')
+    expect(find(resultRows(deep, asmOk, tmOk), 'λ', 'run')?.value).toBe('the term is deeper than the reducer allows')
   })
 
   it('reports a fault as a fault rather than as an empty value', () => {
     const faulted: LambdaLeg = { ...lambdaOk, value: { Fault: { message: 'budget exhausted' } } }
-    expect(find(resultRows(faulted, tmOk), 'λ', 'value')?.value).toBe('fault: budget exhausted')
+    expect(find(resultRows(faulted, asmOk, tmOk), 'λ', 'value')?.value).toBe('fault: budget exhausted')
   })
 
   it('reports an undecodable normal form as an answer', () => {
     const undec: LambdaLeg = { ...lambdaOk, value: 'Undecodable' }
-    expect(find(resultRows(undec, tmOk), 'λ', 'value')?.value).toBe('no encoding for this type')
+    expect(find(resultRows(undec, asmOk, tmOk), 'λ', 'value')?.value).toBe('no encoding for this type')
   })
 })
 
@@ -146,15 +170,15 @@ describe('resultRows — a run stopped by the recording budget, not by ending', 
   const running: LambdaLeg = { ...lambdaOk, status: { ...lambdaOk.status, run: 'Running' } }
 
   it('does not call the term a normal form', () => {
-    expect(find(resultRows(running, tmOk), 'λ', 'normal form')).toBeUndefined()
+    expect(find(resultRows(running, asmOk, tmOk), 'λ', 'normal form')).toBeUndefined()
   })
 
   it('labels it "term so far" instead, still showing the text', () => {
-    expect(find(resultRows(running, tmOk), 'λ', 'term so far')?.value).toBe(okState.text)
+    expect(find(resultRows(running, asmOk, tmOk), 'λ', 'term so far')?.value).toBe(okState.text)
   })
 
   it('explains that recording stopped, not that the run ended', () => {
-    const note = find(resultRows(running, tmOk), 'λ', 'run')?.value
+    const note = find(resultRows(running, asmOk, tmOk), 'λ', 'run')?.value
     expect(note).toBeTruthy()
     expect(note).not.toMatch(/\bended\b/i)
     expect(note).toContain('recording stopped')
@@ -201,5 +225,40 @@ describe('valueLine', () => {
     expect(valueLine({ run: { run: 'Capped', steps: 507, cap: 507 }, value: { Fault: { message: fault } } })).toBe(
       `fault: ${fault}`,
     )
+  })
+})
+
+describe('resultRows — the asm leg', () => {
+  const asm = (over: Partial<AsmLeg['status']>, value: AsmLeg['value']): AsmLeg => ({
+    status: { ...asmOk.status, ...over },
+    value,
+  })
+  const steps = (a: AsmLeg) => find(resultRows(lambdaOk, a, tmOk), 'asm', 'steps')?.value
+
+  it('counts a finished run in instructions and shows its value', () => {
+    const rows = resultRows(lambdaOk, asmOk, tmOk)
+    expect(find(rows, 'asm', 'steps')?.value).toBe('55 instructions')
+    expect(find(rows, 'asm', 'value')?.value).toBe('42')
+  })
+
+  it('says a run compile could not finish stopped at a cap, and names a full one once recording reached it', () => {
+    expect(steps(asm({ total_steps: 5_000_000 }, 'Unfinished'))).toBe('stopped after 5,000,000 instructions at a cap')
+    expect(steps(asm({ total_steps: 5_000_000, run: 'Capped', cap: 'Steps' }, 'Unfinished'))).toBe(
+      'stopped after 5,000,000 instructions at a cap',
+    )
+    expect(steps(asm({ total_steps: 1_100_009, run: 'Capped', cap: 'Stack' }, 'Unfinished'))).toBe(
+      'stopped after 1,100,009 instructions — the call stack is full',
+    )
+  })
+
+  it('counts a faulted run as an end, and its value says what faulted where', () => {
+    const faulted = asm({ run: 'Ended', total_steps: 12 }, { Fault: { message: 'head of empty list at pc5' } })
+    expect(steps(faulted)).toBe('12 instructions')
+    expect(find(resultRows(lambdaOk, faulted, tmOk), 'asm', 'value')?.value).toBe('fault: head of empty list at pc5')
+  })
+
+  it('lists the legs in order, λ then asm then TM', () => {
+    const legs = resultRows(lambdaOk, asmOk, tmOk).map((r) => r.leg)
+    expect([...new Set(legs)]).toEqual(['λ', 'asm', 'TM'])
   })
 })

@@ -47,12 +47,109 @@ records where the code went:
    second with every tag and written bit overwritten before each step, and requires the same end; both of
    those gates, and each single-instruction one tried, fail it (§4.3).
 
+**Amended 2026-09-27 for 5b, from reading the code at `899c8b2`, before its plan.** 6 and 7 are the user's
+decisions; 8 to 13 correct or settle what the approved text left open:
+
+6. **5b touches core's view model.** §1 said 5b touches only `redextape-wasm` and `web/`. Every per-step type
+   that crosses to JavaScript — `LambdaState`, `TmState`, `TmProgram` — is declared in `redextape-core`'s
+   `viewmodel.rs` with its serde and ts derives, and so is the builder that windows a cursor, `TmState::window`.
+   `AsmState`, its builder `AsmState::window` and `AsmProgram` go there too, and `WordTag` and `AsmCap` take the
+   canonical ts derive, so the `ts_bindings` gates cover them. The window's bounds are the builder's parameters,
+   set in `web/src/protocol.ts` as `TM_RADIUS` is: the view model's rule is that core never picks a number.
+   Decided by the user over mirroring the types in the wasm crate (§1, §5.3).
+7. **The listing's grid is a module the TM rule table shares.** The virtualized roving row — the drawn window,
+   the active row, the keys, a click that takes no focus on `mousedown` (4b amendment 18), following and its
+   resize clamp — is written out three times: in `TmPane`'s rule table, in `StateDiagram` and in `LambdaBody`.
+   5b extracts it from the rule table with no change in behaviour, and the asm listing is its second user. The
+   state diagram and the λ body move onto it in a PR of their own after 5b. Decided by the user over a fourth
+   copy, and over moving all four in 5b (§6.2, §10).
+8. **The leg inventory is re-derived, and it is larger than §2.3's 14.** A search at `899c8b2` finds two-way
+   branches §2.3 does not name — in `scratch.ts`, `buffer-list.ts`, `main.ts` and `pane-host.ts`'s drop pass —
+   and hand-written two-leg shapes: `resetLegs`, `resultRows`, the pin's origin, `link-status.ts`'s per-leg
+   clauses and the worker's per-leg resets. The plan records the search and its output. The refactor also
+   covers **three dispatches the compiler cannot check**: `replies.ts`'s two switches on a reply's kind and the
+   worker's chain on a request's kind have no exhaustive end, so an `asm-frames` reply nothing handled would be
+   dropped with `tsc` green. A pin's origin becomes `'source' | Leg` (§5.1, §5.5).
+9. **Panel toggles and *follow current instruction* sit in each panel's own header, not the view's.**
+   `panel.ts` gives every panel its own disclosure and header actions, and the TM view keeps *follow current
+   rule* in its rules panel's header; §6.1 and §6.2 put both in the view's header. The asm view does as the TM
+   view does (§6.1, §6.2).
+10. **A stack, heap or memory cap ends the recording as λ's depth refusal does: no continue, and the step line
+    names the cap.** §8 said *record further* is disabled with its reason. `controls.ts` already decides the
+    case where continuing provably cannot help, `depth-refused`, by offering no continue rather than a disabled
+    one, and says why beside the list. Each hard cap is a `RecordEnd` of its own, so the sentences that name it
+    are exhaustive switches (§5.4, §8).
+11. **An instruction with no owner says so in the link status**, in a sentence of its own. A TM state with no
+    owner clears the pin and leaves the status blank — `transport.ts`'s `linkState` passes `nodeForState`'s
+    `null` to `setLinkTo` — and that stays as it is (§6.6).
+12. **The default tree is (source | λ) above (asm | TM)**: §3's row 4, "asm beside TM", written as a tree. λ
+    stays the first view leaf, so a first load still focuses it — `workspace.ts`'s `defaultFocus` takes the
+    first leaf that is not the source (§5.5).
+13. **The step total and the value come from `compile`'s own run.** `run_asm` returns no step count, so
+    `compile` drives an `AsmCursor` to its end and keeps its outcome for `asmValue`; the recorded leg is a
+    fresh cursor, as TM's is. A program that never halts spends the whole step cap there, which 5b's plan
+    measures in wasm. The session lowers the program for its cursor, a third lowering per compile, and
+    `sourcemap.rs`'s `asm_owner_covers_the_program_lower_program_returns` holds that `asm_owner` indexes the
+    program `tm::lower_program` returns. **§5.3's decimal-string word is required, not only tidy**:
+    `serde-wasm-bindgen` 0.6.5, which the wasm crate serializes through, answers a `u64` above
+    `Number.MAX_SAFE_INTEGER` with an error rather than a rounded number, so a saturated word would fail the
+    whole call (§5.2, §5.3).
+
+**Amended 2026-09-27 again, from 5b's prototype, before any task.** 14 and 15 correct what the approved text said;
+16 and 17 measure what amendment 13 and §5.3 left to the plan; 18 to 20 settle what the text did not say:
+
+14. **An instruction's owner travels in the link index, not in `AsmProgram`.** §5.2 said `asmProgram` carries each
+    instruction's owner. The TM view's links resolve through the link index's `tmOwner`, and the asm view's do
+    through its `asmOwner`, beside it, so `AsmProgram` carries the listing and the labels and nothing else. A copy
+    (§7) has no link index, as it has no owners.
+15. **A fault reads "head of empty list at pc12".** §8 wrote "faulted at pc12: head of empty list", but every reader
+    of a fault value already says it is one — the readout prints `fault: ` before it — so the spec's words would read
+    "fault: faulted at pc12: …". The value carries what faulted and where.
+16. **`compile`'s asm run costs about 7 ns an instruction in the browser**, measured on the release build against the
+    same build without the asm leg, the median of seven: `fact(3)` 1.9 ms both ways; the 100,000-turn loop
+    5.0 → 14.8 ms; the program that never halts 14.2 → 48.8 ms, which is its whole 5,000,000-step cap. It runs in the
+    session's worker, where it delays that compile's first frame and nothing else (amendment 13).
+17. **A word costs 48.23 bytes of retained heap and is charged 52**, measured by heap differential over every frame
+    of `upto(200)`: 2,814 frames and 247,091 words. The window's starting bounds stay — 64 locals, 16 arguments,
+    8 frames, 16 cells and 16 boxes — since every corpus program fits whole, and `upto(200)`, the heaviest program of
+    §2.5, retains about 4.3 KB a frame and fits its whole run in the ring (§5.3).
+18. **At depth 0 an unwritten local reads "not written yet", not "left over from caller".** A local the bank grew
+    past holds 0 and was never written; there is no caller for it to be left over from (§6.3).
+19. **The link status says three new things** (§6.6): "this instruction has no source construct" for a click on an
+    instruction `defunc` minted (amendment 11's sentence); "the asm run is here right now" when the asm leg's running
+    focus meets the pin, beside TM's "the machine is here right now"; and one clause, "this construct emits no
+    instructions or machine states", for a construct neither lowering bills anything to, where two clauses would say
+    one fact twice on the constructs most often clicked.
+20. **A copy's leg is λ or TM until part 5c.** Every place a copy's leg is held takes `CopyLeg`, which leaves asm
+    out, so no copy switch has an asm arm to write, and 5c's widening makes `tsc` name each one (§7).
+
+**Amended 2026-09-27 a third time, from looking at 5b's prototype by hand.** 21 fixes a bug on `main` that the asm
+listing would have inherited:
+
+21. **A link's scroll holds a following grid until the run moves** (§6.2, §6.6). Plan 5's click-linking design let
+    a link's scroll win the one draw that wrote it. The write's own `scroll` event redraws the grid a frame later,
+    and that draw, still following, scrolled back to the run's row: on `main`, a construct linked from the source
+    moved the TM rule table to its block and back within two milliseconds, whenever the table was following. The
+    asm listing shares the grid (amendment 7), so §6.6's scroll would have done the same. The scroll now holds
+    until the view shows another frame — the run moving. The hold is keyed on the frame, not on the row following
+    keeps in view: the TM rule table follows the current state's own row, and a step that loops in its state — the
+    ordinary case in a compiled machine — does not move that row, so a hold keyed on the row never released there.
+    Following takes over when the run moves, on re-attach, on a new program, or when the link is replaced by a pin
+    with nothing in this view; following's own flag is still untouched. Only a pin made in the source or in another
+    leg's view scrolls a view or releases its hold: one made in a view of the same leg only paints.
+    A view that cannot show its grid when the pin is made — off the page, which in Stage is every view but the one
+    linked from, or with the grid's panel closed — scrolls to the pin the next time it draws the grid on the page
+    with the panel open, and holds from the frame it shows then; a pin with nothing in this view, made while it
+    cannot show its grid, lets that draw follow instead. That includes a view that missed the last compile, which
+    is given the program and the pin when it is next shown. The λ body answers the same trap by detaching
+    following on a pin's scroll, and the PR that moves it onto the grid chooses between the two.
+
 ## §1 Scope, and the three PRs
 
 | PR | Contains | Touches |
 |---|---|---|
 | **5a** | `AsmCursor`; `run_asm` as a loop over it; display tags and written bits; the `SourceMap` and `LinkIndex` keeping each instruction's owner; the three checks of §4.4 | Rust only, `redextape-core` |
-| **5b** | a refactor with no behaviour change that turns every two-way λ/TM branch into an exhaustive one; the wasm asm leg; protocol, worker and session support for a third leg; the asm view with its listing, registers, call stack and heap panels; linking; the readout's third segment; the new default tree | `redextape-wasm`, `web/` |
+| **5b** | a refactor with no behaviour change that turns every two-way λ/TM branch into an exhaustive one; a grid module extracted from the TM rule table (amendment 7); the asm view model; the wasm asm leg; protocol, worker and session support for a third leg; the asm view with its listing, registers, call stack and heap panels; linking; the readout's third segment; the new default tree | `redextape-core`'s view model (amendment 6), `redextape-wasm`, `web/` |
 | **5c** | asm copies: *edit a copy*, `asmScratch`, the asm editor with part 3's language support, stored copies at `BUFFERS_VERSION` 3, *new asm copy* | `redextape-wasm`, `web/` |
 
 5a lands first and alone; 5b builds on it; 5c builds on 5b. The umbrella's §3 note that part 5's core half
@@ -93,7 +190,7 @@ view's program level.
 `Leg = 'lambda' | 'tm'` (`web/src/protocol.ts:260`) and `PaneKind = 'source' | 'lambda' | 'tm'`
 (`web/src/panes.ts:16`). An inventory by reading at `a4e7c6f` found **14 two-way branches on the leg**, most of
 which treat every leg that is not λ as TM, and none of which the compiler can flag when a third leg
-arrives — among them
+arrives (re-derived for 5b and larger, amendment 8) — among them
 `session-worker.ts:779` (`onExtend`), `scratch.ts:869` and `:1048` (`tmScratch` in the else),
 `view-header.ts:28` (`legLabel`), `pane-host.ts:1030` (the else builds a `TmPane`), and `draw.ts:362`
 (`isLambda ? … : tmCopySegments`) — plus hand-written two-leg lists such as `LEGS`
@@ -231,6 +328,7 @@ lowered more than once per compile today.
 
 Task 1 of 5b turns each of §2.3's two-way branches into a `switch (leg)` ending in an exhaustive `never`
 check, or a `Record<Leg, …>` table, and rebuilds the hand-written two-leg lists from `LEGS`. No test changes.
+It also gives `replies.ts`'s two switches and the worker's request dispatch an exhaustive end (amendment 8).
 Then adding `'asm'` to `Leg` and `PaneKind` makes `tsc` name every site still to handle. The plan records
 the sibling search — the grep and its output over `web/src` and `web/tests` for `'lambda'`, `'tm'`, `λ` and
 `TM` literals — so the inventory in §2.3 is re-derived rather than trusted.
@@ -242,15 +340,17 @@ a program as too large or overflowing, asm still runs. Methods, named as the λ 
 `asmStatus`, `stepAsm`, `asmState(window)`, `raiseAsmCap`, `asmValue`, and `asmProgram`.
 
 - `compile` runs the asm leg to its end, as it already runs TM, so `asmStatus` carries the total step count
-  and the step bar can say "step 23 / 55".
-- `asmProgram` is a generated wire type carrying the listing (one `print_instr` line per instruction), the
-  labels, and each instruction's owner. The TM view keeps its own `TmProgram.listing`; the two are the same
-  text from one printer.
+  and the step bar can say "step 23 / 55". That run's outcome is what `asmValue` decodes until the recorded
+  cursor passes it, and the recorded cursor is a fresh one (amendment 13).
+- `asmProgram` is a generated wire type carrying the listing (one `print_instr` line per instruction) and the
+  labels; each instruction's owner travels in the link index as `asmOwner` (amendment 14). The TM view keeps its
+  own `TmProgram.listing`; the two are the same text from one printer.
 - `asmValue` decodes `rr` by the program's result type (`decode_asm_ty`).
 
 ### §5.3 The frame
 
-`AsmState`, one per step, bounded by construction:
+`AsmState`, one per step, bounded by construction. It is declared in core's `viewmodel.rs` and built by
+`AsmState::window` from the cursor, with the bounds below as its parameters (amendment 6):
 
 | Field | Bound |
 |---|---|
@@ -264,18 +364,20 @@ a program as too large or overflowing, asm still runs. Methods, named as the λ 
 | `source_node`, the current instruction's owner | — |
 
 Every corpus program fits whole (§2.5); a deep or list-heavy run shows a window. The bounds are starting
-values: 5b's plan measures `asmFrameBytes` over the corpus and the §2.5 programs and fixes them. A frame's
+values: 5b's plan measures `asmFrameBytes` over the corpus and the §2.5 programs and fixes them — it keeps them
+(amendment 17). A frame's
 callee is not carried — the instruction before its return `pc` is the `call` naming it.
 
 **A word travels as a decimal string.** Saturating `mul` reaches `u64::MAX`, which a JS number cannot hold
-exactly; one form for every word keeps every reader free of a branch. The `ts_bindings` gate's rule that a
+exactly, and which the wasm crate's serializer refuses outright (amendment 13); one form for every word keeps
+every reader free of a branch. The `ts_bindings` gate's rule that a
 `u64` never becomes `bigint` is met by the string.
 
 ### §5.4 Protocol and worker
 
 - `Leg = 'lambda' | 'tm' | 'asm'`; `PaneKind` gains `'asm'`.
 - `compiled` gains `asm` (its status) and `asmProgram`; `result` gains an asm leg; a new `asm-frames` reply;
-  `extend{ leg: 'asm' }`.
+  `extend{ leg: 'asm' }`. `RecordEnd` gains one value per hard cap (amendment 10).
 - The worker's `recordAsm` has `recordTm`'s shape. `onRun` records λ, then asm, then TM: asm is the
   cheapest leg per step, and TM's recording can run to the 32 MiB budget before a later leg starts.
 
@@ -283,18 +385,19 @@ exactly; one form for every word keeps every reader free of a branch. The `ts_bi
 
 - **Readout.** A third segment, *asm*: its steps as "N instructions" and its value.
 - **Vocabulary.** A step is an *instruction*, as TM's is a *transition* and λ's a *reduction* (umbrella §4).
-- **Layout.** `PANE_KINDS` gains `asm`. `defaultLayout()` becomes source | λ above asm | TM (§3, row 4).
+- **Layout.** `PANE_KINDS` gains `asm`. `defaultLayout()` becomes (source | λ) above (asm | TM) (§3, row 4;
+  amendment 12).
   `LAYOUT_VERSION` stays 1: every stored layout is still valid.
 - **Language.** `LANGUAGE_OF_PANE` gains `asm → redextape_asm`, used by 5c's editor.
-- **Link.** A pin's origin gains `'asm'`.
+- **Link.** A pin's origin becomes `'source' | Leg`, so it gains `'asm'` (amendment 8).
 
 ## §6 5b — the asm view
 
 ### §6.1 Layout
 
 The header follows umbrella §4: `asm · program ▾` (the title is the selector) · status · step controls
-(when the switch puts them in the view) · panel toggles · `⋯` · `✕`. The `⋯` menu holds split right,
-split down and, from 5c, *edit a copy*.
+(when the switch puts them in the view) · `⋯` · `✕`. Each panel's toggle and actions sit in its own header,
+as the TM view's do (amendment 9). The `⋯` menu holds split right, split down and, from 5c, *edit a copy*.
 
 The body is a flex column whose open panels share the height, 4b's mechanism: **listing** two shares,
 **registers** and **call stack** side by side in one share (stacking when the view is narrow), **heap** one
@@ -302,20 +405,21 @@ share. Each body keeps at least five rows. Each panel's open state is saved per 
 
 ### §6.2 Listing
 
-A `role="grid"` like 4b's rule table, and virtualized through `visibleWindow`, because a copy can be long:
+A `role="grid"` built on the grid module extracted from 4b's rule table (amendment 7), and virtualized,
+because a copy can be long:
 one tab stop, an active row named by `aria-activedescendant`, and the arrows, PgUp/PgDn and Home/End moving
 it past the drawn window. Label rows sit above the instruction they name, as `print_asm` writes them;
 instruction rows read `pc5  jz  r1, else2`. The instruction about to run is `.is-next` and says "runs next"
-as generated content — the not-colour cue 4b gave TM's "fires next". A *follow current instruction* header
-action re-attaches following, with 4b's `Follow` and its resize-clamp handling; a user scroll or a key that
+as generated content — the not-colour cue 4b gave TM's "fires next". A *follow current instruction* action
+in the listing panel's header (amendment 9) re-attaches following, with 4b's `Follow` and its resize-clamp handling; a user scroll or a key that
 scrolls detaches it. Row containers take no focus on `mousedown` (4b amendment 18), so a real click lands.
 
 ### §6.3 Registers
 
 `pc`, `rr`, `a0…` and `r0…` as name and value. By tag, a word reads as decimal (*value*), `#3` or `nil`
 (*list*), or `box #2` (*box*). The register `wrote` names is marked *changed*. A local whose written bit is
-clear is dimmed and marked `·`, with a one-line legend, "left over from caller"; each mark also carries an
-`aria-description`, so none is colour alone.
+clear is dimmed and marked `·`, with a one-line legend, "left over from caller" — "not written yet" at depth 0
+(amendment 18); each mark also carries an `aria-description`, so none is colour alone.
 
 ### §6.4 Call stack
 
@@ -333,8 +437,10 @@ Node-based, the mechanism TM uses:
 
 - Clicking or pressing Enter on an instruction row pins its owner. The source editor, the λ view, every TM
   view and every asm view mark the construct; an asm view marks every instruction billed to it.
-- A click in the source or a TM view marks the owned instructions in each asm view and scrolls to them.
-- An instruction with no owner — one `defunc` minted — links to nothing, and the link status says so.
+- A click in the source or a TM view marks the owned instructions in each asm view and scrolls to them; the scroll
+  holds until the run moves (amendment 21).
+- An instruction with no owner — one `defunc` minted — links to nothing, and the link status says so in a
+  sentence of its own (amendments 11 and 19).
 - **The running focus follows TM's precedent.** `AsmState.source_node` feeds the asm view's own marks and the
   link-status line's coincidence with the pin. The source editor's focus mark stays λ's, as Plan 5c's
   dual-focus design settled; making it follow the focused view is out of scope (§10).
@@ -356,7 +462,7 @@ The controls gate (umbrella §8.1) walks the asm view in every preset; its `view
 - **Its value.** Decoded by the header's `result` type when there is one; without it, the raw `rr` word,
   marked as having no result type.
 - **The worker.** `onAsmScratch` and an `asm-scratch-compiled` reply; frames are 5b's `asm-frames`.
-- **Stored copies.** `PersistedBuffer.leg` gains `asm`; `BUFFERS_VERSION` goes from 2 to 3, and a v2 store
+- **Stored copies.** `PersistedBuffer.leg` gains `asm`, widening 5b's `CopyLeg` (amendment 20); `BUFFERS_VERSION` goes from 2 to 3, and a v2 store
   migrates unchanged.
 - **The copies menu** gains *new asm copy*, as TM has a blank copy.
 - **The editor.** A copy mounts a `ScratchEditor` in `redextape_asm`, so diagnostics, format, hover, outline,
@@ -367,11 +473,11 @@ The controls gate (umbrella §8.1) walks the asm view in every preset; its `view
 Each leaves a working app and at most one notice; none blocks editing or compiling (umbrella §7).
 
 - **Lowering fails.** The asm leg is absent and the view says why, as TM's decline does.
-- **A fault** (`head` of an empty list). The run ends as `ended` with a fault value — "faulted at pc12: head of
-  empty list" — the end state umbrella §7 assigns.
+- **A fault** (`head` of an empty list). The run ends as `ended` with a fault value — "head of empty list at pc12"
+  (amendment 15) — the end state umbrella §7 assigns.
 - **The step cap.** `capped`; *record further* raises it, as for λ and TM.
-- **The stack, heap or memory cap.** `capped`, naming the cap. Raising steps cannot help, so *record further*
-  is disabled with that reason (umbrella §4, rule 4).
+- **The stack, heap or memory cap.** Raising steps cannot help, so no continue is offered, as for λ's depth
+  refusal, and the step line names the cap (amendment 10).
 - **The history budget.** `budget`, as for λ and TM.
 - **A copy that does not parse.** Diagnostics in its editor and no session, as for TM.
 
@@ -398,6 +504,9 @@ building and running the Docker image, which no PR job builds.
 - **Register types from the compiler.** §4.3's tags answer what the view needs at run time; a typed register
   file would need types threaded through `lower_asm`.
 - Synchronized stepping across views (umbrella §10).
+- **The state diagram and the λ body on 5b's grid module** (amendment 7): a PR of its own after 5b. The λ body
+  has neither the `ResizeObserver` nor the `mousedown` guard the other two grids carry, and that PR decides
+  each on its own evidence.
 
 ## §11 Delivery
 

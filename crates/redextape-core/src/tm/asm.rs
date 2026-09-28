@@ -153,7 +153,12 @@ fn label_name_representable(name: &str) -> bool {
     !name.is_empty() && !name.chars().any(|c| c.is_whitespace() || matches!(c, ';' | ':' | ','))
 }
 
-fn reg_str(r: Reg) -> String {
+/// A register as the listing spells it: `r3`, `a0`, `rr`.
+///
+/// `pub(crate)` FOR ONE OTHER READER, `viewmodel::AsmState::window`, which names the register the last
+/// step wrote in the same spelling, so the asm view can find the register a frame calls changed by the
+/// name the listing prints for it. A second spelling there would agree with this one until either moved.
+pub(crate) fn reg_str(r: Reg) -> String {
     match r {
         Reg::Loc(n) => format!("r{n}"),
         Reg::Arg(n) => format!("a{n}"),
@@ -724,8 +729,7 @@ fn spend(budget: &mut usize) -> Result<(), DecodeFailure> {
 /// value-directed). Drives off the static `Ty` instead of a reference `Value`, so the standalone
 /// binary can decode without a reference run. Returns `None` on a representation mismatch, a
 /// non-value type (`Fun`/`Var`), or an exhausted `MAX_DECODE_NODES` budget — `decode_asm_ty_reason`'s
-/// `.ok()`, for the many existing callers (`redextape-wasm`, `redextape-native-rt`, the `.asm`
-/// example, and this module's own tests) that only need to know THAT it failed, not why.
+/// `.ok()`, for a caller that only needs to know THAT it failed, not why.
 #[must_use]
 pub fn decode_asm_ty(outcome: &AsmOutcome, ty: &Ty) -> Option<Value> {
     decode_asm_ty_reason(outcome, ty).ok()

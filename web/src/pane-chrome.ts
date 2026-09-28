@@ -69,10 +69,10 @@ export type PaneEvents = {
    * read "IT TAKES A `SessionId` AND NOT A `(session, leg)` PAIR. The leg is fixed by the slot's
    * renderer type", which was true while a slot's leg was the only leg its selector could offer. It is
    * not true of a control that offers pairs, and the pair is what a pick MEANS: a `<select>` listing
-   * both legs reports which option was chosen, not the session half of it.
+   * several legs reports which option was chosen, not the session half of it.
    *
    * **ONE CONTROL FOR BOTH AXES BECAUSE THE AXES ARE NOT INDEPENDENT (design §3.2).** A session holds
-   * at most one leg per `Leg` — the source session has both, a λ scratch has only λ — and
+   * at most one leg per `Leg` — the source session has all three, a λ scratch has only λ — and
    * `SessionRegistry.legOf` THROWS on a binding naming a leg its session lacks. Two independent
    * controls (a kind picker beside a session picker) would therefore have to answer "what happens when
    * you pick TM while bound to a λ-only scratch" with an invented fallback: silently rebind to some
@@ -192,6 +192,8 @@ export type PaneEvents = {
   detachMachine?(): void
   /** A state row was clicked. Absent on panes that have no table. */
   linkState?: (stateId: number) => void
+  /** An instruction row in the asm view's listing was clicked, or Enter pressed on it; `pc` is its index. */
+  linkInstr?: (pc: number) => void
   /** A token in the λ view was clicked; `node` is the construct its node belongs to (Plan 7 part 4a). */
   linkLambda?: (node: number) => void
   /**

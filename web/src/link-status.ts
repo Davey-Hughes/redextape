@@ -1,3 +1,6 @@
+import { LEG_NAME, LEGS, perLeg } from './legs'
+import type { Leg } from './protocol'
+
 /**
  * Why a pane is not showing a link, in words.
  *
@@ -61,38 +64,41 @@ export type LambdaLinkState =
  * THAT pane; the source session keeps running and the TM pane stays bound to it. So "λ detached, TM
  * still linked" is the ordinary state, not a corner, and a single flag could not name it.
  *
- * TWO REQUIRED BOOLEANS RATHER THAN A LIST OR A THREE-WAY TAG (`'lambda' | 'tm' | 'both'`). A caller
- * holds two bindings and reads one boolean off each; a tag would make every caller encode the cross
+ * An entry is `true` when that leg's pane is bound to a copy: for `lambda` a `LambdaScratch`, which has no
+ * `SourceMap` and so no `sourceSpan`/`linkIndex` (§3.3); for `tm` a `TmScratch`, whose every `TmState`
+ * carries `source_node: null` (§3.1).
+ *
+ * ONE REQUIRED BOOLEAN PER LEG RATHER THAN A LIST OR A TAG (`'lambda' | 'tm' | 'both'`). A caller
+ * holds one binding per leg and reads one boolean off each; a tag would make every caller encode the cross
  * product, and a `Pane[]` would admit duplicates and an order that means nothing. The cost is that
  * "nothing detached" is spellable twice — this record all-false, or `LinkStatus.detached` absent —
  * and `linkStatus` collapses the two deliberately (see its own note).
+ *
+ * **A `Record` OVER `Leg`, WHERE IT USED TO BE TWO NAMED FIELDS**, so a new leg is a required entry here and
+ * a type error at every literal that leaves it out, rather than a pane whose copy the status line never
+ * mentions (`legs.ts` has the class of bug).
  *
  * NOT A `Set` OR A MAP KEYED BY PANE ID, EITHER, and that is a 5d-i/5d-ii boundary rather than an
  * oversight: 5d-i's pane set is fixed at three slots (§1), so the panes that can detach are known at
  * compile time and a fixed record is checkable where a keyed collection is not. 5d-ii's multiplexer
  * is what makes the pane set open, and it can widen this then.
  */
-export type DetachedPanes = {
-  /** The λ pane is bound to a `LambdaScratch`, which has no `SourceMap` and so no `sourceSpan`/`linkIndex` (§3.3). */
-  lambda: boolean
-  /** The TM pane is bound to a `TmScratch`, whose every `TmState` carries `source_node: null` (§3.1). */
-  tm: boolean
-}
+export type DetachedPanes = Record<Leg, boolean>
 
 export type LinkStatus = {
   /**
-   * A FIELD ON EVERY ARM, NOT A FOURTH ARM, and the choice is forced rather than stylistic.
+   * A FIELD ON EVERY ARM, NOT AN ARM OF ITS OWN, and the choice is forced rather than stylistic.
    *
    * The `state` discriminant answers "what did the user pin, and did it resolve" — the pin is the
-   * subject of all three of `none`/`stale`/`linked`. Detachment answers a different question about a
+   * subject of every one of `none`/`stale`/`ownerless`/`linked`. Detachment answers a different question about a
    * different object: which PANES are bound to a scratch session. Both are true at once, so an arm
    * would have to choose, and it would choose wrong in the case §4.3 makes ordinary — a detached λ
    * pane with a live TM link would report `{state:'detached'}` and throw away the narration for the
    * pane that is still inside the correspondence.
    *
-   * It is also not ONE arm. A pane can be detached with nothing pinned, with a stale index, or with a
-   * live link — three states this union already distinguishes — so the arm version is three arms, and
-   * `linkStatus` would carry two parallel switches over the same three cases.
+   * It is also not ONE arm. A pane can be detached with nothing pinned, with a stale index, after a click
+   * that pinned nothing, or with a live link — four states this union already distinguishes — so the arm
+   * version is four more arms, and `linkStatus` would carry two parallel switches over the same four cases.
    *
    * NOT `'stale'` AND NOT `'none'`, which is the trap this field exists to avoid. `'stale'` promises
    * "linking resumes when this compiles", and for a detached pane a recompile does something else
@@ -102,9 +108,9 @@ export type LinkStatus = {
    * OPTIONAL, AND THAT IS A COMPATIBILITY REQUIREMENT RATHER THAN A CONVENIENCE. It was written while
    * the one place in the app that builds a `LinkStatus` could not fill it in — no pane had a binding to
    * report (§3.2b: `main()`'s local scope was the state, and the session registry landed separately) —
-   * so absent means "both attached" and adopting this was one added property against call sites that
+   * so absent means "every view attached" and adopting this was one added property against call sites that
    * kept compiling unchanged. **THAT BUILDER IS `link-wiring.ts`'s `drawLink` NOW, AND IT DOES FILL
-   * THIS IN**, on all three arms, from `detachedPanes()`; the optionality is what the other producers
+   * THIS IN**, on every arm, from `detachedPanes()`; the optionality is what the other producers
    * of this type — this file's own tests among them — still spend. Under `exactOptionalPropertyTypes`
    * an optional property is added by spread, never assigned `undefined`, which is the idiom `drawLink`
    * uses for it.
@@ -113,9 +119,18 @@ export type LinkStatus = {
 } & (
   | { state: 'none' }
   | { state: 'stale' }
+  /**
+   * An asm instruction with no owner was clicked (Plan 7 part 5 spec §6.6, amendment 11): one `defunc` minted, which
+   * no construct of the program wrote. Nothing is pinned, and unlike `none` the line says why — the click did
+   * something, and a line left blank would read as a click that missed. A TM state with no owner still clears the pin
+   * silently, which amendment 11 keeps.
+   */
+  | { state: 'ownerless' }
   | {
       state: 'linked'
       tm: boolean
+      /** Whether the pinned construct emits any asm instruction — `Link.instrs` is not empty. */
+      instrs: boolean
       lambda: LambdaLinkState
       /**
        * Whether the TM leg's running focus — the construct its CURRENT δ-step belongs to,
@@ -136,6 +151,13 @@ export type LinkStatus = {
        * this project's accessibility pass rather than fixed here; see the roadmap's deferred-a11y list.
        */
       focus: boolean
+      /**
+       * Whether the asm leg's running focus — the construct its CURRENT instruction belongs to, `AsmState.source_node`
+       * — names this same pinned construct right now: `focus` one leg over (spec §6.6). The asm view marks its focus
+       * rows beside its linked ones, so unlike the TM table's this is not the leg's only signal, but it is the only one
+       * a user watching another view hears of.
+       */
+      asmFocus: boolean
     }
 )
 
@@ -148,25 +170,31 @@ const LAMBDA_TEXT: Record<LambdaLinkState, string> = {
   absent: '',
 }
 
-const ATTACHED: DetachedPanes = { lambda: false, tm: false }
+const ATTACHED: DetachedPanes = perLeg(() => false)
 
 /**
- * The detachment clause, or `''` when both panes are inside the correspondence.
+ * The detachment clause, or `''` when every leg's pane is inside the correspondence.
  *
- * ONE CLAUSE FOR BOTH VIEWS, NOT THE SAME SENTENCE TWICE. "not linked to the program" is one fact about
- * one correspondence; emitting it either side of a `·` would read as two unrelated failures, and the
- * line is already carrying up to three other parts.
+ * ONE CLAUSE FOR EVERY DETACHED VIEW, NOT THE SAME SENTENCE ONCE PER VIEW. "not linked to the program" is
+ * one fact about one correspondence; emitting it either side of a `·` would read as two unrelated
+ * failures, and the line is already carrying up to three other parts.
  *
  * "shows a copy" IS SAID IN THE SAME BREATH AS WHAT IT MEANS, deliberately. `copy · not linked` in the
  * view's header is the glanceable half, with the view's own title beside it to say which view. This
  * line is the authoritative narration (§4.5), and a reader who has never made a copy cannot derive
  * "not linked to the program" from the word (Plan 7 part 2 spec §12's vocabulary).
+ *
+ * **THE NAMES ARE BUILT FROM `LEGS` AND `LEG_NAME`, WHERE THE THREE SENTENCES WERE WRITTEN OUT**, one per
+ * combination of two legs — a third leg would have been in none of them. The words for one leg and for two
+ * are the ones those sentences said: `λ view shows a copy`, `λ and TM views show copies`. More than two
+ * join as a list does, `a, b and c`.
  */
 function detachedText(d: DetachedPanes): string {
-  if (d.lambda && d.tm) return 'λ and TM views show copies — not linked to the program'
-  if (d.lambda) return 'λ view shows a copy — not linked to the program'
-  if (d.tm) return 'TM view shows a copy — not linked to the program'
-  return ''
+  const names = LEGS.filter((leg) => d[leg]).map((leg) => LEG_NAME[leg])
+  const last = names.pop()
+  if (last === undefined) return ''
+  if (names.length === 0) return `${last} view shows a copy — not linked to the program`
+  return `${names.join(', ')} and ${last} views show copies — not linked to the program`
 }
 
 /**
@@ -187,7 +215,9 @@ function detachedText(d: DetachedPanes): string {
  * might. A detached λ pane is showing a scratch term, so "this construct has no node in the λ term
  * at this step" describes a term that is not on screen; a detached TM pane renders
  * states whose `source_node` is `null` by construction (§3.1), so neither the coincidence nor the
- * emits-no-states absence is a claim about anything the user is looking at.
+ * emits-no-states absence is a claim about anything the user is looking at. The asm leg's two clauses,
+ * its coincidence and its emits-no-instructions absence, go by the asm flag the same way, though no asm
+ * view shows a copy until Plan 7 part 5c.
  *
  * SUPPRESSION IS UNIFORM ACROSS `LambdaLinkState` RATHER THAN TRIAGED PER MEMBER. `'declined'` is the
  * one that could be argued to survive — it is a property of the program's lowering, not of the pane —
@@ -215,14 +245,22 @@ export function linkStatus(s: LinkStatus): string {
     // when this compiles, for whichever pane is showing that session then, and a detached pane is one
     // rebind away from being one.
     parts.push('linking resumes when this compiles')
+  } else if (s.state === 'ownerless') {
+    parts.push('this instruction has no source construct')
   } else if (s.state === 'linked') {
-    if (!detached.tm) {
-      // REPORTED FIRST OF THE PIN'S OWN PARTS, AHEAD OF EITHER ABSENCE BELOW — coincidence is live,
-      // present-tense news ("the run just reached what you pinned"), not a reason something is
-      // missing, and it is the state 5c exists to surface.
-      if (s.focus) parts.push('the machine is here right now')
-      if (!s.tm) parts.push('this construct emits no machine states')
-    }
+    // REPORTED FIRST OF THE PIN'S OWN PARTS, AHEAD OF ANY ABSENCE BELOW — coincidence is live, present-tense news
+    // ("the run just reached what you pinned"), not a reason something is missing, and it is the state 5c exists to
+    // surface. A detached view's own clauses are suppressed, each leg by its own flag (this function's doc).
+    if (!detached.asm && s.asmFocus) parts.push('the asm run is here right now')
+    if (!detached.tm && s.focus) parts.push('the machine is here right now')
+    // ONE ABSENCE CLAUSE FOR THE TWO LOWERINGS, NOT TWO SIDE BY SIDE. A construct the asm lowering bills nothing to —
+    // a transparent `let`, a `Lambda` — bills nothing to the machine built from it either, so two clauses would say
+    // one fact twice on the constructs that are most often clicked.
+    const noInstrs = !detached.asm && !s.instrs
+    const noStates = !detached.tm && !s.tm
+    if (noInstrs && noStates) parts.push('this construct emits no instructions or machine states')
+    else if (noInstrs) parts.push('this construct emits no instructions')
+    else if (noStates) parts.push('this construct emits no machine states')
     if (!detached.lambda) {
       const lambda = LAMBDA_TEXT[s.lambda]
       if (lambda !== '') parts.push(lambda)

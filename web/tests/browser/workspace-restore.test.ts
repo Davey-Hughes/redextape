@@ -12,7 +12,12 @@ import { SHELL, until } from './harness'
 beforeAll(async () => {
   localStorage.setItem(
     LAYOUT_STORAGE_KEY,
-    serializeWorkspace({ ...defaultWorkspace(), speed: 250, focused: 'tm-0', panels: { 'tm-0': { rules: false } } }),
+    serializeWorkspace({
+      ...defaultWorkspace(),
+      speed: 250,
+      focused: 'tm-0',
+      panels: { 'tm-0': { rules: false }, 'asm-0': { heap: false } },
+    }),
   )
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
@@ -21,6 +26,8 @@ beforeAll(async () => {
 
 const rulesToggle = (): HTMLButtonElement | null =>
   document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle')
+const asmToggle = (name: string): HTMLButtonElement | null =>
+  document.querySelector<HTMLButtonElement>(`[data-leaf="asm-0"] [data-panel="${name}"] .panel-toggle`)
 
 describe('a restored workspace', () => {
   it('opens the TM view with its rules panel closed, as stored', () => {
@@ -28,18 +35,30 @@ describe('a restored workspace', () => {
   })
 
   /**
-   * **ONE SPEED, IN EVERY VIEW THAT STEPS** — spec §8. The stored 250/s has to reach both views' selects,
+   * **THE ASM VIEW READS ITS PANELS BACK TOO.** The TM view once shipped a panel it stored and never read back; each of
+   * the asm view's four is read back by name (`pane-host.ts`'s asm arm), and the ones not stored keep their default.
+   */
+  it('opens the asm view with its heap panel closed, as stored, and the panels not stored open', () => {
+    expect(asmToggle('heap')?.getAttribute('aria-expanded')).toBe('false')
+    for (const name of ['listing', 'registers', 'stack']) {
+      expect(asmToggle(name)?.getAttribute('aria-expanded'), name).toBe('true')
+    }
+  })
+
+  /**
+   * **ONE SPEED, IN EVERY VIEW THAT STEPS** — spec §8. The stored 250/s has to reach every view's select,
    * which is the restore and the fan-out in one assertion: `main.ts`'s `setSpeed` draws so every step
    * control repaints, and `step-controls.ts` reads the workspace's speed on every update.
    */
   // **SCOPED TO `.view-steps`, WHERE IT USED TO SWEEP THE PAGE.** Part 2b's step bar is a second
-  // `stepControls` instance (`step-bar.ts`), so a page-wide `.controls select.speed` now finds three —
-  // and this case's own name says "every view that steps", which is the two. The bar's copy is asserted
+  // `stepControls` instance (`step-bar.ts`), so a page-wide `.controls select.speed` now finds four —
+  // and this case's own name says "every view that steps", which is the λ, asm and TM views of the default
+  // tree (three since the asm view, Plan 7 part 5 spec §3, row 4). The bar's copy is asserted
   // on its own line below rather than dropped: one global speed means the bar shows it too (spec §8).
   it('shows the restored speed in every view that steps', () => {
     expect(
       [...document.querySelectorAll<HTMLSelectElement>('.view-steps .controls select.speed')].map((el) => el.value),
-    ).toEqual(['250', '250'])
+    ).toEqual(['250', '250', '250'])
     expect(document.querySelector<HTMLSelectElement>('#step-bar select.speed')?.value).toBe('250')
   })
 
@@ -48,6 +67,7 @@ describe('a restored workspace', () => {
     if (first === null) throw new Error('no speed control on the λ view')
     first.value = '1000'
     first.dispatchEvent(new Event('change'))
+    expect(document.querySelector<HTMLSelectElement>('[data-leaf="asm-0"] select.speed')?.value).toBe('1000')
     expect(document.querySelector<HTMLSelectElement>('[data-leaf="tm-0"] select.speed')?.value).toBe('1000')
     // THE BAR IS A STEP CONTROL ON THE PAGE TOO, so "every step control reflects a change at once"
     // (spec §8) includes it — even while the `steps` switch has it hidden.
@@ -68,11 +88,16 @@ describe('a restored workspace', () => {
   it('records a panel toggle against the view it happened in', () => {
     rulesToggle()?.click()
     expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels['tm-0']).toEqual({ rules: true })
+    asmToggle('heap')?.click()
+    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels['asm-0']).toEqual({ heap: true })
+    // BACK TO WHAT WAS RESTORED, for the case below, which reads the whole stored `panels`.
+    asmToggle('heap')?.click()
+    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels['asm-0']).toEqual({ heap: false })
   })
 
   /**
    * **A LEAF ID COMES BACK, AND ITS OLD PANEL STATE MUST NOT COME WITH IT.** `defaultLayout()` re-mints
-   * `source`, `lambda-0` and `tm-0` as literals, so *reset preset* after closing the TM view hands the
+   * `source`, `lambda-0`, `asm-0` and `tm-0` as literals, so *reset preset* after closing the TM view hands the
    * id to a new view. Until `main.ts` normalised the workspace against the live tree, the write dropped
    * the closed view's panel state and MEMORY kept it — so this same sequence opened the rules panel
    * closed, and opened it open after a reload, from the same clicks.
@@ -89,13 +114,19 @@ describe('a restored workspace', () => {
     expect(rulesToggle()?.getAttribute('aria-expanded')).toBe('true')
     rulesToggle()?.click()
     expect(rulesToggle()?.getAttribute('aria-expanded'), 'the rules panel did not shut').toBe('false')
-    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels).toEqual({ 'tm-0': { rules: false } })
+    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels).toEqual({
+      'tm-0': { rules: false },
+      'asm-0': { heap: false },
+    })
     document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] button.view-close')?.click()
     await until(() => document.querySelector('[data-leaf="tm-0"]') === null, 'the TM view to close')
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
     await until(() => document.querySelector('[data-leaf="tm-0"]') !== null, 'the TM view to come back')
     expect(rulesToggle()?.getAttribute('aria-expanded'), 'the re-minted view inherited a closed panel').toBe('true')
-    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels).toEqual({})
+    // The asm view never closed, so the reset kept it, and its stored heap panel with it — in storage and on the page
+    // alike, which is the agreement this case is about.
+    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels).toEqual({ 'asm-0': { heap: false } })
+    expect(asmToggle('heap')?.getAttribute('aria-expanded'), "the asm view's heap panel is still closed").toBe('false')
   })
 
   it('records which view has focus', () => {

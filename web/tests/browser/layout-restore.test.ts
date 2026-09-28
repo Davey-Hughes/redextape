@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout, splitLeaf } from '../../src/layout'
+import { LAYOUT_STORAGE_KEY, type LayoutNode, serializeLayout, splitLeaf } from '../../src/layout'
 import { parseWorkspace } from '../../src/workspace'
 import { SHELL } from './harness'
 
@@ -29,6 +29,35 @@ import { SHELL } from './harness'
  */
 
 /**
+ * The tree `defaultLayout()` returned before the asm view joined it (Plan 7 part 5 spec §3, row 4): source and
+ * λ side by side above TM.
+ *
+ * **SPELLED OUT RATHER THAN TAKEN FROM `defaultLayout()`, BECAUSE THE ENTRY IT STANDS IN FOR IS OLDER THAN THE
+ * ASM VIEW.** `STORED` below is a version 1 layout, which only a build from before the version 2 workspace could
+ * have written, and no such build had an asm leaf to write. Built from today's default, the fixture would be a
+ * stored tree no real page ever held. Spelled this way it also carries the spec's own claim about stored
+ * layouts — still valid, arrangement kept, not migrated to the new default — which the first case below reads
+ * off the page.
+ */
+const PRE_ASM_DEFAULT: LayoutNode = {
+  kind: 'split',
+  dir: 'column',
+  sizes: [0.5, 0.5],
+  children: [
+    {
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.5, 0.5],
+      children: [
+        { kind: 'leaf', id: 'source', pane: 'source' },
+        { kind: 'leaf', id: 'lambda-0', pane: 'lambda' },
+      ],
+    },
+    { kind: 'leaf', id: 'tm-0', pane: 'tm' },
+  ],
+}
+
+/**
  * A once-split tree, built with the app's OWN `splitLeaf` and `serializeLayout` rather than a
  * hand-written literal.
  *
@@ -45,7 +74,7 @@ import { SHELL } from './harness'
  * it is the one place in this file that exercises `seedLeafCounter` against both at once — see its own
  * doc.
  */
-const STORED = serializeLayout(splitLeaf(defaultLayout(), 'lambda-0', 'row', 'lambda-1', 'lambda'))
+const STORED = serializeLayout(splitLeaf(PRE_ASM_DEFAULT, 'lambda-0', 'row', 'lambda-1', 'lambda'))
 
 const leafIds = () => [...document.querySelectorAll('[data-leaf]')].map((e) => (e as HTMLElement).dataset.leaf ?? '')
 /**
@@ -101,6 +130,7 @@ beforeAll(async () => {
 
 describe('a layout restored from storage', () => {
   it('mounts the stored arrangement rather than falling back to the default', () => {
+    // NO `asm-0`: the default has one and the stored tree does not, so a fallback would show here too.
     expect(leafIds()).toEqual(['source', 'lambda-0', 'lambda-1', 'tm-0'])
   })
 
@@ -124,7 +154,7 @@ describe('a layout restored from storage', () => {
    * at all. What an under-seed produces instead is a WRONG NUMBER: `seedLeafCounter` reads the digits
    * after a leaf id's last `-` regardless of which word precedes them (`main.ts`'s own doc on
    * `nextLeafId`), specifically so a restored `lambda-1` still advances the counter the way a `pane-1`
-   * would. `defaultLayout()`'s own `lambda-0`/`tm-0` contribute suffix `0` and would leave the counter
+   * would. `PRE_ASM_DEFAULT`'s own `lambda-0`/`tm-0` contribute suffix `0` and would leave the counter
    * at 1 by themselves; only seeing `lambda-1`'s `1` pushes it to 2. So `pane-2` is the one id that
    * proves the stored leaf's suffix was actually seen — `pane-1` would mean it was not, and would still
    * pass a uniqueness check today only because nothing else in this small tree happens to want `pane-1`

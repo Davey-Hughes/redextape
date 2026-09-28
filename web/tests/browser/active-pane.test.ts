@@ -152,7 +152,8 @@ beforeEach(async () => {
   await until(
     () =>
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      leafIds().length === 3 &&
+      // THE DEFAULT TREE'S FOUR VIEWS: source, λ, asm and TM.
+      leafIds().length === 4 &&
       lambdaLeaves().length === 1,
     'the default layout on a settled source program',
   )

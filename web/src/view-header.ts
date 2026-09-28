@@ -1,6 +1,7 @@
 import { handOff, nearest } from './focus-handoff'
 import { type IconName, icon } from './icons'
 import type { Dir } from './layout'
+import { LEG_NAME } from './legs'
 import type { PaneChoice, SplitChoices } from './pane-chrome'
 import type { Leg } from './protocol'
 import type { SessionId } from './session-client'
@@ -25,11 +26,9 @@ import type { Binding, PaneOption } from './sessions'
  * pick across legs does (it rebuilds the view in place). This module knows nothing about the tree.
  */
 
-const legLabel = (leg: Leg): string => (leg === 'lambda' ? 'λ' : 'TM')
-
-/** How a pair reads everywhere a menu names one: `λ · program`, `TM · copy 2`. */
+/** How a pair reads everywhere a menu names one: `λ · program`, `TM · copy 2` — the leg as `LEG_NAME` says it. */
 export function pairLabel(o: { readonly leg: Leg; readonly label: string }): string {
-  return `${legLabel(o.leg)} · ${o.label}`
+  return `${LEG_NAME[o.leg]} · ${o.label}`
 }
 
 /**

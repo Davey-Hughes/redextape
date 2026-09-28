@@ -157,6 +157,7 @@ function sourceEntry(text = 'from source'): SessionEntry {
     legs: { lambda },
     tmProgram: null,
     tmScratch: null,
+    asmProgram: null,
   }
 }
 

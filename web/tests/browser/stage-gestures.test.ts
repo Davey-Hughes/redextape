@@ -51,12 +51,12 @@ describe('the stage, under the gestures that add and remove views', () => {
    * **THE DEFAULT ARRANGEMENT IS THE ONE THAT BREAKS IT, WHICH IS WHY THE PRECONDITIONS ARE ASSERTED.**
    * `close` targets the neighbour that GREW and the stage mounts the view that becomes FOCUSED, and on
    * `defaultLayout()` those are two different leaves: closing `lambda-0` grows `source` and focuses
-   * `tm-0`. Closing `tm-0` instead makes them agree, so a version of this case that picked the other view
-   * would pass against the same bug.
+   * `asm-0`. Closing `asm-0` instead makes them agree — both are `lambda-0`, the leaf before it and the first
+   * view left — so a version of this case that picked that view would pass against the same bug.
    */
   it('does not strand the focus when the shown view is closed', () => {
     pick('[data-preset="stage"]')
-    expect(tabs(), 'the stage is not showing the default three views').toEqual(['source', 'lambda-0', 'tm-0'])
+    expect(tabs(), 'the stage is not showing the default four views').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
     expect(shown(), 'the precondition is that lambda-0 is the shown view').toBe('lambda-0')
 
     const close = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-close')
@@ -65,7 +65,7 @@ describe('the stage, under the gestures that add and remove views', () => {
     expect(document.activeElement, 'the ✕ did not take the focus').toBe(close)
     close?.click()
 
-    expect(tabs()).toEqual(['source', 'tm-0'])
+    expect(tabs()).toEqual(['source', 'asm-0', 'tm-0'])
     expect(document.activeElement, 'focus fell to <body> when the shown view was closed').not.toBe(document.body)
     // AND IT IS IN THE VIEW THAT BECAME FOCUSED, which is what spec §11 actually promises — not merely
     // somewhere other than `<body>`.

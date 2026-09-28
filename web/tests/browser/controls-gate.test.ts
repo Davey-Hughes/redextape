@@ -165,8 +165,8 @@ beforeAll(async () => {
  * The four workspace states spec §14 item 5 names: the three presets, and one *custom* combination.
  *
  * **`views` IS WHAT CHANGES THE SELECTORS**, not `steps` or `readout`: in Stage one view is on the page,
- * so the per-view cases are driven from whichever view the stage is showing rather than from two named
- * leaves. The `custom` row is Explorer with one switch moved, and it is deliberately the switch that
+ * so the per-view cases are driven from whichever view the stage is showing rather than from every view on
+ * the page. The `custom` row is Explorer with one switch moved, and it is deliberately the switch that
  * changes the page most — a `custom` that looked like Explorer would walk the same controls twice.
  */
 const STATES = [
@@ -185,9 +185,21 @@ function enter(picks: readonly string[]): void {
   if (menu?.matches(':popover-open')) menu.hidePopover()
 }
 
-/** The leaves a per-view case can be driven from in this state. */
+/**
+ * The leaves a per-view case can be driven from in this state: tiled, every view on the page but the source's; in the
+ * stage, the one it shows.
+ *
+ * **READ OFF THE PAGE, NOT LISTED.** This was `['lambda-0', 'tm-0']`, and when the asm view joined the default tree
+ * (Plan 7 part 5) the gate stayed green while walking none of its controls — a list of the views there were is a
+ * list that misses the next one. Every view host is a `.pane` with its leaf id; the source's is the one leaf with no
+ * title menu to open.
+ */
 function viewLeaves(tiled: boolean): string[] {
-  if (tiled) return ['lambda-0', 'tm-0']
+  if (tiled) {
+    return [...document.querySelectorAll<HTMLElement>('.pane[data-leaf]')]
+      .map((host) => host.dataset.leaf ?? '')
+      .filter((leaf) => leaf !== '' && leaf !== 'source')
+  }
   const shown = document.querySelector<HTMLElement>('#views [role="tab"][aria-selected="true"]')
   return shown?.dataset.leaf === undefined ? [] : [shown.dataset.leaf]
 }
@@ -210,6 +222,8 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
   it("with every view's title and ⋯ menu open", () => {
     const leaves = viewLeaves(tiled)
     expect(leaves.length, `${name}: no view to walk`).toBeGreaterThan(0)
+    // THE WALK REACHES EVERY KIND OF VIEW THE DEFAULT TREE HAS: a tiled state shows all of them, the asm view included.
+    if (tiled) expect(leaves, `${name}: the views walked`).toEqual(['lambda-0', 'asm-0', 'tm-0'])
     for (const leaf of leaves) {
       for (const sel of [`[data-leaf="${leaf}"] button.view-title`, `[data-leaf="${leaf}"] button.view-more`]) {
         const button = document.querySelector<HTMLButtonElement>(sel)

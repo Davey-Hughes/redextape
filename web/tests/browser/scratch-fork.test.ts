@@ -125,7 +125,16 @@ function sourceSession(pool: SessionPool, seen: RunReply[]): SessionEntry {
       for (const f of reply.frames) legs.tm.hist.push(f, tmFrameBytes(f))
     }
   })
-  return { id: SOURCE, label: 'source', detached: false, client, legs, tmProgram: null, tmScratch: null }
+  return {
+    id: SOURCE,
+    label: 'source',
+    detached: false,
+    client,
+    legs,
+    tmProgram: null,
+    tmScratch: null,
+    asmProgram: null,
+  }
 }
 
 describe('detach is a fork', () => {

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ASM_WORD_BYTES,
+  asmFrameBytes,
+  asmRecordEnd,
+  endOf,
   FRAME_OVERHEAD_BYTES,
   forkable,
   lambdaFrameBytes,
@@ -11,6 +15,7 @@ import {
   tmFrameBytes,
 } from '../../src/protocol'
 import type { LambdaState, TmProgram, TmState } from '../../src/types'
+import { frameOf } from './asm-fixtures'
 
 const lam = (text: string, spans: number): LambdaState => ({
   text,
@@ -165,5 +170,54 @@ describe('the fork cap', () => {
     // states + 94,182 rules = 127,881 exactly), and this constant gates on rules alone.
     expect(MAX_FORK_RULES).toBeGreaterThan(11_802) // list20's rules — must be forkable
     expect(MAX_FORK_RULES).toBeLessThan(94_182) // list60's rules — must be refused
+  })
+})
+
+describe('asmFrameBytes', () => {
+  const v = { word: '7', tag: 'Value' as const }
+
+  it('charges every word a frame carries, and a byte per written bit', () => {
+    expect(asmFrameBytes(frameOf())).toBe(FRAME_OVERHEAD_BYTES + ASM_WORD_BYTES)
+    const f = frameOf({
+      locals: [v, v, v],
+      written: [true, false, true],
+      args: [v],
+      frames: [{ ret_pc: 4, saved: [v, v], saved_len: 2 }],
+      cells: [{ cell: 1, head: v, tail: v }],
+      boxes: [{ handle: 1, content: v }],
+    })
+    // rr, three locals, one argument, two saved words, a cell's two halves and a box's content: ten words.
+    expect(asmFrameBytes(f)).toBe(FRAME_OVERHEAD_BYTES + 10 * ASM_WORD_BYTES + 3)
+  })
+})
+
+describe('asmRecordEnd', () => {
+  it('ends a halt or a fault, and names each full cap, and calls only the step cap capped', () => {
+    expect(asmRecordEnd({ run: 'Ended', cap: null })).toBe('ended')
+    expect(asmRecordEnd({ run: 'Capped', cap: 'Steps' })).toBe('capped')
+    expect(asmRecordEnd({ run: 'Capped', cap: 'Stack' })).toBe('stack-full')
+    expect(asmRecordEnd({ run: 'Capped', cap: 'Heap' })).toBe('heap-full')
+    expect(asmRecordEnd({ run: 'Capped', cap: 'Mem' })).toBe('memory-full')
+  })
+
+  it('reads a capped run naming no cap as the step cap, which cannot occur and always read so', () => {
+    expect(asmRecordEnd({ run: 'Capped', cap: null })).toBe('capped')
+  })
+
+  it('reads a run that is still going as ended, since it is only asked once stepping has stopped', () => {
+    expect(asmRecordEnd({ run: 'Running', cap: null })).toBe('ended')
+  })
+})
+
+describe('endOf', () => {
+  it('calls a capped λ or TM run capped, and a depth refusal depth-refused', () => {
+    expect(endOf('Capped')).toBe('capped')
+    expect(endOf('DepthRefused')).toBe('depth-refused')
+  })
+
+  it('ends a finished run, a running one and an absent leg alike: it is asked only once stepping stops', () => {
+    expect(endOf('Ended')).toBe('ended')
+    expect(endOf('Running')).toBe('ended')
+    expect(endOf(null)).toBe('ended')
   })
 })

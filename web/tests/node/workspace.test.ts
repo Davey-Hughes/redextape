@@ -244,7 +244,7 @@ describe('withPanel', () => {
 describe('defaultWorkspace', () => {
   it('is the default tree, Explorer, speed 8, focused on the λ view', () => {
     const ws = defaultWorkspace()
-    expect(leaves(ws.tree).map((l) => l.id)).toEqual(['source', 'lambda-0', 'tm-0'])
+    expect(leaves(ws.tree).map((l) => l.id)).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
     expect(ws.switches).toEqual(PRESETS.explorer)
     expect(ws.speed).toBe(8)
     expect(ws.focused).toBe('lambda-0')

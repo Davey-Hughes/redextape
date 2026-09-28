@@ -1,4 +1,4 @@
-import type { Leg } from './protocol'
+import { type CopyLeg, LEG_NAME } from './legs'
 import type { SessionId } from './session-client'
 
 /**
@@ -61,7 +61,7 @@ export type BufferRow = {
    */
   readonly warm: boolean
   /** The copy's leg, which its name is said with. */
-  readonly leg: Leg
+  readonly leg: CopyLeg
 }
 
 /**
@@ -135,7 +135,7 @@ const bufferRow = (
   // `viewReadout` is a general-purpose reader with no idea `warm` exists, and branching it on a fact
   // from a field it is not passed would tangle two concerns this file otherwise keeps apart. The row
   // still reads correctly, just not minimally — and minimality is not what this comment is fixing.
-  const said = `${row.leg === 'lambda' ? 'λ' : 'TM'} ${row.label}`
+  const said = `${LEG_NAME[row.leg]} ${row.label}`
   name.textContent = `${said} · ${viewReadout(row.paneCount)} · ${row.warm ? 'running' : 'paused'}`
 
   /**

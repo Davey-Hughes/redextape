@@ -27,9 +27,9 @@ describe('the language ids the client sends', () => {
   })
 
   it('cover every pane kind that has an editor, and every id has an extension', () => {
-    // `PaneKind` is 'source' | 'lambda' | 'tm'. asm has no editor until part 5, so it is in
-    // LANGUAGE_IDS (the server serves it) but not in LANGUAGE_OF_PANE (nothing mounts it).
-    expect(Object.keys(LANGUAGE_OF_PANE).sort()).toEqual(['lambda', 'source', 'tm'])
+    // EVERY `PaneKind`, asm included: its editor is part 5c's asm copies, and they take their language from here.
+    expect(Object.keys(LANGUAGE_OF_PANE).sort()).toEqual(['asm', 'lambda', 'source', 'tm'])
+    expect(LANGUAGE_OF_PANE.asm).toBe('redextape_asm')
     for (const id of Object.values(LANGUAGE_OF_PANE)) expect(LANGUAGE_IDS).toContain(id)
     for (const id of LANGUAGE_IDS) expect(EXTENSION_OF_LANGUAGE[id]).toBeTruthy()
   })

@@ -14,6 +14,10 @@ const LAMBDA = {
   state: { text: '42', step: 7, cut: null, owner: 'None' as const },
   value: { Value: { text: '42' } },
 }
+const ASM = {
+  status: { available: true, reason: '', run: 'Ended' as const, cap: null, total_steps: 55 },
+  value: { Value: { text: '42' } },
+}
 const TM = {
   status: { available: true, reason: '', width: 8, total_steps: 2870, run: 'Halted' as const, node: null },
   value: { Value: { text: '42' } },
@@ -21,8 +25,8 @@ const TM = {
 
 describe('programSegments', () => {
   it('reads value and counts per leg, in the new vocabulary, with no normal-form text', () => {
-    const s = programSegments({ kind: 'result', lambda: LAMBDA, tm: TM } as never)
-    expect(s).toEqual(['λ 42 · 7 reductions', 'TM 42 · 2,870 transitions · width 8'])
+    const s = programSegments({ kind: 'result', lambda: LAMBDA, asm: ASM, tm: TM } as never)
+    expect(s).toEqual(['λ 42 · 7 reductions', 'asm 42 · 55 instructions', 'TM 42 · 2,870 transitions · width 8'])
   })
 
   it('says a program that does not compile, and how many errors', () => {
@@ -87,12 +91,14 @@ describe('programRows', () => {
   // §9: "Every row on its own line, the normal-form text included" — which is exactly what the strip
   // leaves out, and the one difference between the two readouts' content.
   it('keeps the normal-form text the strip drops, one row per fact', () => {
-    const rows = programRows({ kind: 'result', lambda: LAMBDA, tm: TM } as never)
+    const rows = programRows({ kind: 'result', lambda: LAMBDA, asm: ASM, tm: TM } as never)
     expect(rows.map((r) => r.label)).toContain('λ normal form')
     expect(rows.every((r) => r.value !== '')).toBe(true)
     // THE STRIP'S OWN BUILDER IS THE CONTRAST, asserted rather than assumed: a claim that the inspector
     // keeps what the strip drops is only worth making beside the thing that drops it.
-    expect(programSegments({ kind: 'result', lambda: LAMBDA, tm: TM } as never).join(' ')).not.toContain('normal form')
+    expect(programSegments({ kind: 'result', lambda: LAMBDA, asm: ASM, tm: TM } as never).join(' ')).not.toContain(
+      'normal form',
+    )
   })
 
   /**
@@ -103,7 +109,7 @@ describe('programRows', () => {
    */
   it('carries the note on a cut normal form, which the strip never had to', () => {
     const deep = { ...LAMBDA, state: { ...LAMBDA.state, cut: 'Depth' as const } }
-    const rows = programRows({ kind: 'result', lambda: deep, tm: TM } as never)
+    const rows = programRows({ kind: 'result', lambda: deep, asm: ASM, tm: TM } as never)
     const nf = rows.find((r) => r.label.includes('normal form') || r.label.includes('term so far'))
     expect(nf, 'no normal-form row to carry a note').toBeDefined()
     expect(nf?.note, 'the cut mark was dropped on the way to the inspector').toBeTruthy()

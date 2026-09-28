@@ -334,7 +334,8 @@ export class LambdaBody {
   /**
    * Tell the view whether a re-attach has anything to do. Every change to that ends in a paint — a user's
    * scroll, `attach`, a key that scrolls, a tree shown — or in a flat render, where there is no tree to
-   * follow; the TM view's `#drawTable` keeps its own action from the one place its changes reach, the same way.
+   * follow; the TM view's rule table keeps its own re-attach in step from the one place its changes reach, the grid's
+   * `beforeDraw`, the same way.
    */
   #tell(): void {
     const detached = this.#tree !== null && !this.#follow.following

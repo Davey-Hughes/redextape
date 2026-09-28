@@ -8,9 +8,12 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use redextape_core::core::BinOp;
 use redextape_core::lambda::reduce::MAX_TERM_DEPTH;
 use redextape_core::sourcemap::SourceMap;
-use redextape_core::viewmodel::{LambdaState, LinkIndex, TmProgram, TmState};
+use redextape_core::tm::asm::{Instr, Program, Reg, print_instr};
+use redextape_core::trace::{AsmCursor, AsmStatus, WordTag};
+use redextape_core::viewmodel::{AsmProgram, AsmState, AsmWindow, AsmWord, LambdaState, LinkIndex, TmProgram, TmState};
 
 /// Counts bytes requested through the global allocator, so a test can measure what a call actually
 /// allocates instead of timing it. Scoped to this one integration test binary: each file under
@@ -901,4 +904,420 @@ fn redex_span_is_none_before_any_step() {
     let f = redextape_core::viewmodel::LambdaState::render(&c, 65536, MAX_TERM_DEPTH);
     assert_eq!(f.step, 0);
     assert!(f.redex_span.is_none(), "step 0 precedes any contraction; there is no redex to locate");
+}
+
+// --- the asm leg ---------------------------------------------------------------------------------------
+
+/// A window no program below reaches, so a frame built with it carries the whole machine.
+const WHOLE: AsmWindow = AsmWindow { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16 };
+
+fn asm_label(name: &str) -> String {
+    name.to_string()
+}
+
+/// Each word's decimal text, in order.
+fn asm_words(ws: &[AsmWord]) -> Vec<&str> {
+    ws.iter().map(|w| w.word.as_str()).collect()
+}
+
+/// Each word's tag, in order.
+fn asm_tags(ws: &[AsmWord]) -> Vec<WordTag> {
+    ws.iter().map(|w| w.tag).collect()
+}
+
+fn asm_word(word: &str, tag: WordTag) -> AsmWord {
+    AsmWord { word: word.to_string(), tag }
+}
+
+/// `fact(3)`, the sample `sourcemap.rs`'s owner tests measure their rows on.
+const ASM_FACT: &str = "fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact(3)";
+
+/// `ASM_FACT`'s program and the map built from its source, the program being the one `tm::lower_program`
+/// returns for the map's own `Core` — the program `SourceMap::asm_owner` indexes.
+fn asm_fact() -> (Program, SourceMap) {
+    let (p, ds) = redextape_core::parser::parse(ASM_FACT);
+    assert!(ds.is_empty(), "{ds:?}");
+    let (core, map) = SourceMap::build_from_program(&p.expect("parses"), &redextape_core::tm::Unary::default());
+    (redextape_core::tm::lower_program(&core).expect("lowers"), map)
+}
+
+/// Every list the frame carries stops at its bound and reports the length it was cut from, and each bound
+/// cuts its own list: the five are distinct (5, 3, 2, 4, 1), so a bound read from the wrong field fails. The
+/// program writes 13 locals and 7 arguments, allocates 6 cells and 4 boxes, and recurses until 6 frames are
+/// saved, then halts in the deepest. Every register it names holds a value or the newest cell or box, so no
+/// register pulls an older one in and the cells and boxes are the plain newest windows. A window larger than
+/// all of it carries all of it, so the lengths are not the bounds read back.
+#[test]
+fn every_asm_list_stops_at_its_bound_and_reports_its_length() {
+    let (loc, arg) = (Reg::Loc, Reg::Arg);
+    let mut code: Vec<Instr> = (0..12).map(|i| Instr::Li(loc(i), u64::from(i))).collect();
+    code.extend((0..6).map(|i| Instr::Li(arg(i), 100 + u64::from(i))));
+    code.push(Instr::Li(arg(6), 5)); // the recursion's counter
+    code.extend((0..6).map(|_| Instr::Cons(Reg::Rr, loc(1), loc(2))));
+    code.extend((0..4).map(|_| Instr::Box(Reg::Rr, loc(3))));
+    code.push(Instr::Li(loc(12), 1));
+    code.push(Instr::Call(asm_label("f")));
+    let f = code.len();
+    code.push(Instr::Jz(arg(6), asm_label("stop")));
+    code.push(Instr::Bin(BinOp::Sub, arg(6), arg(6), loc(12)));
+    code.push(Instr::Call(asm_label("f")));
+    let stop = code.len();
+    code.push(Instr::Halt);
+    let prog = Program { code, labels: vec![(asm_label("f"), f), (asm_label("stop"), stop)] };
+    let mut c = AsmCursor::new(&prog, redextape_core::tm::asm::DEFAULT_CAPS);
+    c.by_ref().for_each(drop);
+    assert_eq!(c.status(), Some(&AsmStatus::Halted));
+
+    let narrow = AsmState::window(&c, None, AsmWindow { locals: 5, args: 3, frames: 2, cells: 4, boxes: 1 });
+    assert_eq!(
+        (asm_words(&narrow.locals), narrow.written.len(), narrow.locals_len),
+        (vec!["0", "1", "2", "3", "4"], 5, 13)
+    );
+    assert_eq!((asm_words(&narrow.args), narrow.args_len), (vec!["100", "101", "102"], 7));
+    assert_eq!((narrow.frames.len(), narrow.depth), (2, 6));
+    for frame in &narrow.frames {
+        assert_eq!((asm_words(&frame.saved), frame.saved_len), (vec!["0", "1", "2", "3", "4"], 13));
+    }
+    let cells: Vec<usize> = narrow.cells.iter().map(|c| c.cell).collect();
+    assert_eq!((cells, narrow.heap_len), (vec![6, 5, 4, 3], 6));
+    let boxes: Vec<usize> = narrow.boxes.iter().map(|b| b.handle).collect();
+    assert_eq!((boxes, narrow.box_len), (vec![4], 4));
+
+    let whole = AsmState::window(&c, None, WHOLE);
+    let lens = (whole.locals.len(), whole.written.len(), whole.args.len(), whole.frames.len());
+    assert_eq!(lens, (13, 13, 7, 6));
+    assert!(whole.frames.iter().all(|f| f.saved.len() == 13));
+    assert_eq!((whole.cells.len(), whole.boxes.len()), (6, 4));
+}
+
+/// Each word carries its tag into the frame — in the locals, an argument, `rr`, a saved frame, a cell's head
+/// and tail, and a box — and the words and tags stay paired: the program makes a value, the list word `nil`,
+/// a list and a box, copies the list to `a0` and the box to `rr`, and calls, so the frame is read inside the
+/// callee with the caller's bank saved. Every one of the three tags appears where the table says.
+#[test]
+fn every_word_in_an_asm_frame_carries_its_tag() {
+    use WordTag::{Box as B, List as L, Value as V};
+    let (r0, r1, r2, r3) = (Reg::Loc(0), Reg::Loc(1), Reg::Loc(2), Reg::Loc(3));
+    let prog = Program {
+        code: vec![
+            Instr::Li(r0, 7),
+            Instr::Nil(r1),
+            Instr::Cons(r2, r0, r1),
+            Instr::Box(r3, r2),
+            Instr::Mov(Reg::Arg(0), r2),
+            Instr::Mov(Reg::Rr, r3),
+            Instr::Call(asm_label("f")),
+            Instr::Halt,
+        ],
+        labels: vec![(asm_label("f"), 7)],
+    };
+    let mut c = AsmCursor::new(&prog, redextape_core::tm::asm::DEFAULT_CAPS);
+    c.by_ref().take(7).for_each(drop);
+    let st = AsmState::window(&c, None, WHOLE);
+    assert_eq!((asm_words(&st.locals), asm_tags(&st.locals)), (vec!["7", "0", "1", "1"], vec![V, L, L, B]));
+    assert_eq!((asm_words(&st.args), asm_tags(&st.args)), (vec!["1"], vec![L]));
+    assert_eq!(st.rr, asm_word("1", B));
+    let saved = &st.frames[0].saved;
+    assert_eq!((asm_words(saved), asm_tags(saved)), (vec!["7", "0", "1", "1"], vec![V, L, L, B]));
+    let cell = &st.cells[0];
+    assert_eq!((cell.cell, &cell.head, &cell.tail), (1, &asm_word("7", V), &asm_word("0", L)));
+    assert_eq!((st.boxes[0].handle, &st.boxes[0].content), (1, &asm_word("1", L)));
+}
+
+/// A word travels as its exact decimal text, however large: `mul` saturates 2^32 · 2^32 to `u64::MAX`, and
+/// 2^53 + 1 is the first integer a JS number cannot hold, which a conversion through `f64` would round to
+/// ...992. `AsmWord`'s doc says why the wire needs the string.
+#[test]
+fn an_asm_word_is_its_exact_decimal_text_up_to_a_saturated_u64() {
+    let (r0, r1, r2) = (Reg::Loc(0), Reg::Loc(1), Reg::Loc(2));
+    let prog = Program {
+        code: vec![
+            Instr::Li(r0, 1 << 32),
+            Instr::Bin(BinOp::Mul, r1, r0, r0),
+            Instr::Li(r2, (1 << 53) + 1),
+            Instr::Mov(Reg::Rr, r1),
+            Instr::Halt,
+        ],
+        labels: vec![],
+    };
+    let mut c = AsmCursor::new(&prog, redextape_core::tm::asm::DEFAULT_CAPS);
+    c.by_ref().for_each(drop);
+    let st = AsmState::window(&c, None, WHOLE);
+    assert_eq!(asm_words(&st.locals), ["4294967296", "18446744073709551615", "9007199254740993"]);
+    assert_eq!(st.rr.word, u64::MAX.to_string());
+}
+
+/// Frames come top first, each with the caller's locals as they stood at its `call`. `sum(5)` by recursion,
+/// the fixture `asm_cursor.rs`'s stack test uses: at its deepest the stack holds the top-level call's frame,
+/// returning to 2 with no locals yet, and five recursive ones returning to 12, each saving its activation's
+/// `n` in `r0` — so top first reads `n` 1, 2, 3, 4, 5 and then the empty bank. A window of three keeps the
+/// three nearest the running instruction, which oldest first would have dropped.
+#[test]
+fn asm_frames_come_top_first_with_the_locals_saved_at_each_call() {
+    let (r0, r1, r2, r3, a0) = (Reg::Loc(0), Reg::Loc(1), Reg::Loc(2), Reg::Loc(3), Reg::Arg(0));
+    let sum5 = Program {
+        code: vec![
+            Instr::Li(a0, 5),
+            Instr::Call(asm_label("sum")),
+            Instr::Halt,
+            Instr::Mov(r0, a0),
+            Instr::Li(r1, 0),
+            Instr::Bin(BinOp::Eq, r2, r0, r1),
+            Instr::Jz(r2, asm_label("rec")),
+            Instr::Li(Reg::Rr, 0),
+            Instr::Ret,
+            Instr::Li(r3, 1),
+            Instr::Bin(BinOp::Sub, a0, r0, r3),
+            Instr::Call(asm_label("sum")),
+            Instr::Bin(BinOp::Add, Reg::Rr, r0, Reg::Rr),
+            Instr::Ret,
+        ],
+        labels: vec![(asm_label("sum"), 3), (asm_label("rec"), 9)],
+    };
+    let mut c = AsmCursor::new(&sum5, redextape_core::tm::asm::DEFAULT_CAPS);
+    while c.stack().len() < 6 {
+        assert!(c.next().is_some(), "sum(5) saves six frames before it returns");
+    }
+    let saved_n = |st: &AsmState| -> Vec<Option<String>> {
+        st.frames.iter().map(|f| f.saved.first().map(|w| w.word.clone())).collect()
+    };
+    let whole = AsmState::window(&c, None, WHOLE);
+    let rets: Vec<usize> = whole.frames.iter().map(|f| f.ret_pc).collect();
+    assert_eq!(rets, [12, 12, 12, 12, 12, 2]);
+    let n = |s: &str| Some(s.to_string());
+    assert_eq!(saved_n(&whole), [n("1"), n("2"), n("3"), n("4"), n("5"), None]);
+
+    let top3 = AsmState::window(&c, None, AsmWindow { frames: 3, ..WHOLE });
+    assert_eq!((saved_n(&top3), top3.depth), (vec![n("1"), n("2"), n("3")], 6));
+}
+
+/// Cells come newest first, with every cell a list register on screen points at, once. The program builds
+/// six cells: `r1` keeps the first, `a0` the third, `r3` ends on the sixth, and `r6` holds the second but sits
+/// past a five-local window; `r4` holds the VALUE 2 and `r0` is `nil`. So a window of the two newest shows
+/// cells 6 and 5, plus 3 and 1 for `a0` and `r1` — not 2, which only a value and an off-screen register
+/// name — and with no arguments on screen, not 3 either.
+#[test]
+fn asm_cells_come_newest_first_with_every_cell_a_list_register_names() {
+    use WordTag::{List as L, Value as V};
+    let (r0, r1, r2, r3, r4, r6, a0) =
+        (Reg::Loc(0), Reg::Loc(1), Reg::Loc(2), Reg::Loc(3), Reg::Loc(4), Reg::Loc(6), Reg::Arg(0));
+    let prog = Program {
+        code: vec![
+            Instr::Nil(r0),
+            Instr::Li(r2, 5),
+            Instr::Cons(r1, r2, r0),
+            Instr::Cons(r3, r2, r1),
+            Instr::Mov(r6, r3),
+            Instr::Cons(a0, r2, r3),
+            Instr::Cons(r3, r2, a0),
+            Instr::Cons(r3, r2, r3),
+            Instr::Cons(r3, r2, r3),
+            Instr::Li(r4, 2),
+            Instr::Halt,
+        ],
+        labels: vec![],
+    };
+    let mut c = AsmCursor::new(&prog, redextape_core::tm::asm::DEFAULT_CAPS);
+    c.by_ref().for_each(drop);
+    let window = AsmWindow { locals: 5, args: 1, frames: 0, cells: 2, boxes: 0 };
+    let st = AsmState::window(&c, None, window);
+    let cells: Vec<usize> = st.cells.iter().map(|c| c.cell).collect();
+    assert_eq!((cells, st.heap_len), (vec![6, 5, 3, 1], 6));
+    let first = st.cells.last().expect("cell 1 is shown");
+    assert_eq!((&first.head, &first.tail), (&asm_word("5", V), &asm_word("0", L)));
+
+    let no_args = AsmState::window(&c, None, AsmWindow { args: 0, ..window });
+    assert_eq!(no_args.cells.iter().map(|c| c.cell).collect::<Vec<_>>(), [6, 5, 1]);
+}
+
+/// Boxes by the same rule: newest first, with every box a box register on screen names. `r1` keeps box 1 and
+/// `rr` box 2, `r2` ends on box 4, and `r3` holds the VALUE 1. A window of the newest box shows 4, plus 2
+/// and 1 for `rr` and `r1`.
+#[test]
+fn asm_boxes_come_newest_first_with_every_box_a_box_register_names() {
+    let (r0, r1, r2, r3) = (Reg::Loc(0), Reg::Loc(1), Reg::Loc(2), Reg::Loc(3));
+    let prog = Program {
+        code: vec![
+            Instr::Li(r0, 7),
+            Instr::Box(r1, r0),
+            Instr::Box(r2, r0),
+            Instr::Mov(Reg::Rr, r2),
+            Instr::Box(r2, r0),
+            Instr::Box(r2, r0),
+            Instr::Li(r3, 1),
+            Instr::Halt,
+        ],
+        labels: vec![],
+    };
+    let mut c = AsmCursor::new(&prog, redextape_core::tm::asm::DEFAULT_CAPS);
+    c.by_ref().for_each(drop);
+    let st = AsmState::window(&c, None, AsmWindow { boxes: 1, ..WHOLE });
+    let boxes: Vec<usize> = st.boxes.iter().map(|b| b.handle).collect();
+    assert_eq!((boxes, st.box_len), (vec![4, 2, 1], 4));
+    assert!(st.boxes.iter().all(|b| b.content == asm_word("7", WordTag::Value)));
+}
+
+/// `wrote` names the register each step wrote, spelled as the listing spells it, and `None` before the first
+/// step and after one that wrote none; `written` is the current frame's bits, cleared by `call` and restored
+/// by `ret`; `step` and `pc` follow the cursor. One row per frame, from step 0 to the halt.
+#[test]
+fn an_asm_frame_names_the_register_its_step_wrote_and_the_locals_its_frame_wrote() {
+    let prog = Program {
+        code: vec![
+            Instr::Li(Reg::Loc(0), 1),
+            Instr::Li(Reg::Arg(0), 2),
+            Instr::Call(asm_label("f")),
+            Instr::Li(Reg::Rr, 3),
+            Instr::Halt,
+            Instr::Li(Reg::Loc(1), 9),
+            Instr::Ret,
+        ],
+        labels: vec![(asm_label("f"), 5)],
+    };
+    let mut c = AsmCursor::new(&prog, redextape_core::tm::asm::DEFAULT_CAPS);
+    let mut rows = Vec::new();
+    loop {
+        let st = AsmState::window(&c, None, WHOLE);
+        rows.push((st.step, st.pc, st.wrote, st.written));
+        if c.next().is_none() {
+            break;
+        }
+    }
+    let name = |s: &str| Some(s.to_string());
+    let (t, f) = (true, false);
+    assert_eq!(
+        rows,
+        [
+            (0, 0, None, vec![]),
+            (1, 1, name("r0"), vec![t]),
+            (2, 2, name("a0"), vec![t]),
+            (3, 5, None, vec![f]),
+            (4, 6, name("r1"), vec![f, t]),
+            (5, 3, None, vec![t]),
+            (6, 4, name("rr"), vec![t]),
+            (7, 4, None, vec![t]),
+        ]
+    );
+}
+
+/// `next` is the instruction about to run while the run can go on and `None` once it has ended. A taken
+/// `jz` moves it past the `li` it skips; after `halt` it is `None` though `pc` stays on the `halt`; at a step
+/// cap it is the instruction the raised cap will run, and so at a stack cap, which no raise will move; and
+/// after a fault — `head` of `nil` — it is `None` though `pc` names the `head`.
+#[test]
+fn an_asm_frames_next_is_the_instruction_about_to_run_until_the_run_ends() {
+    use redextape_core::tm::asm::{Caps, DEFAULT_CAPS};
+    let skip = Program {
+        code: vec![
+            Instr::Li(Reg::Loc(0), 0),
+            Instr::Jz(Reg::Loc(0), asm_label("end")),
+            Instr::Li(Reg::Rr, 9),
+            Instr::Halt,
+        ],
+        labels: vec![(asm_label("end"), 3)],
+    };
+    let mut c = AsmCursor::new(&skip, DEFAULT_CAPS);
+    let mut rows = Vec::new();
+    loop {
+        let st = AsmState::window(&c, None, WHOLE);
+        rows.push((st.pc, st.next));
+        if c.next().is_none() {
+            break;
+        }
+    }
+    assert_eq!(rows, [(0, Some(0)), (1, Some(1)), (3, Some(3)), (3, None)]);
+
+    let mut capped = AsmCursor::new(&skip, Caps { steps: 2, ..DEFAULT_CAPS });
+    capped.by_ref().for_each(drop);
+    assert_eq!(capped.status(), Some(&AsmStatus::Capped(redextape_core::trace::AsmCap::Steps)));
+    let st = AsmState::window(&capped, None, WHOLE);
+    assert_eq!((st.pc, st.next), (3, Some(3)), "a paused run's next instruction is the one a raise runs");
+
+    let call = Program { code: vec![Instr::Call(asm_label("f"))], labels: vec![(asm_label("f"), 0)] };
+    let mut refused = AsmCursor::new(&call, Caps { stack: 0, ..DEFAULT_CAPS });
+    refused.by_ref().for_each(drop);
+    assert_eq!(refused.status(), Some(&AsmStatus::Capped(redextape_core::trace::AsmCap::Stack)));
+    assert_eq!(AsmState::window(&refused, None, WHOLE).next, Some(0), "the call the stack cap refused");
+
+    let faults =
+        Program { code: vec![Instr::Nil(Reg::Loc(0)), Instr::Head(Reg::Rr, Reg::Loc(0)), Instr::Halt], labels: vec![] };
+    let mut c = AsmCursor::new(&faults, DEFAULT_CAPS);
+    c.by_ref().for_each(drop);
+    assert_eq!(c.status(), Some(&AsmStatus::Faulted("head of empty list".to_string())));
+    let st = AsmState::window(&c, None, WHOLE);
+    assert_eq!((st.pc, st.next), (1, None), "the faulting `head` will never run");
+}
+
+/// `source_node` is the owner of the instruction about to run, through a real map built from the program's
+/// source, and the assertions compare the owner's SOURCE TEXT, not the map's answer read back: `ASM_FACT`'s
+/// instruction 4 is its `n == 0`, 11 its `n - 1` and 17 its literal `3`, the rows `sourcemap.rs`'s
+/// `each_instruction_is_owned_by_the_construct_that_emitted_it` measured. With no map the owner is `None` and
+/// nothing else in the frame changes; a `pc` past the program's end, where a fetch faulted, has no owner
+/// rather than an index out of bounds.
+#[test]
+fn an_asm_frames_source_node_is_the_owner_of_the_instruction_about_to_run() {
+    let (prog, map) = asm_fact();
+    let mut c = AsmCursor::new(&prog, redextape_core::tm::asm::DEFAULT_CAPS);
+    let mut seen = std::collections::BTreeMap::new();
+    loop {
+        let st = AsmState::window(&c, Some(&map), WHOLE);
+        let text = st.source_node.and_then(|n| map.source_span(n)).map(|s| &ASM_FACT[s.start..s.end]);
+        seen.entry(st.pc).or_insert(text);
+        if st.pc == 11 {
+            assert!(st.source_node.is_some(), "the loop is at an owned instruction, or the next line proves nothing");
+            let unmapped = AsmState::window(&c, None, WHOLE);
+            assert_eq!(unmapped, AsmState { source_node: None, ..st }, "the map decides `source_node` alone");
+        }
+        if c.next().is_none() {
+            break;
+        }
+    }
+    let at = |pc: usize| seen.get(&pc).copied().flatten();
+    assert_eq!((at(4), at(11), at(17)), (Some("n == 0"), Some("n - 1"), Some("3")));
+
+    let falls_off = Program { code: vec![Instr::Li(Reg::Loc(0), 0)], labels: vec![] };
+    let owns_one = SourceMap { asm_owner: vec![Some(7)], ..SourceMap::default() };
+    let mut c = AsmCursor::new(&falls_off, redextape_core::tm::asm::DEFAULT_CAPS);
+    assert_eq!(AsmState::window(&c, Some(&owns_one), WHOLE).source_node, Some(7));
+    c.by_ref().for_each(drop);
+    assert_eq!(c.status(), Some(&AsmStatus::Faulted("ran past end of program".to_string())));
+    let past = AsmState::window(&c, Some(&owns_one), WHOLE);
+    assert_eq!((past.pc, past.source_node), (1, None));
+}
+
+/// `AsmProgram` is `print_instr`'s line for every instruction and the program's own labels — the same text
+/// the TM view's `TmProgram.listing` is built from, which the map's `tm_listing` holds for this program. Line
+/// 4 is pinned as text, so a listing that disagreed with the printer in every line alike still fails.
+#[test]
+fn asm_program_is_the_printers_listing_and_the_programs_labels() {
+    let (prog, map) = asm_fact();
+    let p = AsmProgram::of(&prog);
+    assert_eq!(p.listing, prog.code.iter().map(print_instr).collect::<Vec<_>>());
+    assert_eq!(p.listing.get(4).map(String::as_str), Some("cmpeq\tr1, r2, r3"));
+    assert!(!prog.labels.is_empty(), "`fact` has labels, or the next line compares two empty lists");
+    assert_eq!(p.labels, prog.labels);
+    assert_eq!((&p.listing, &p.labels), (&map.tm_listing, &map.tm_labels), "the two views list one program");
+}
+
+/// A word crosses as a JSON string and a tag as its variant's name — the wire form `AsmWord`'s doc argues
+/// for, in the serializer this crate controls; `redextape-wasm`'s browser tests read it through the one the
+/// app uses. The frame, the program and the window each round-trip.
+#[cfg(feature = "serde")]
+#[test]
+fn an_asm_frame_crosses_as_json_with_words_as_strings() {
+    let (prog, map) = asm_fact();
+    let mut c = AsmCursor::new(&prog, redextape_core::tm::asm::DEFAULT_CAPS);
+    c.by_ref().take(30).for_each(drop);
+    let st = AsmState::window(&c, Some(&map), WHOLE);
+    let json = serde_json::to_value(&st).expect("serialize");
+    assert_eq!(json["rr"]["word"], serde_json::Value::String(st.rr.word.clone()), "a word is a string");
+    assert_eq!(json["rr"]["tag"], serde_json::Value::String("Value".to_string()), "a tag is its variant's name");
+    let back: AsmState = serde_json::from_value(json).expect("deserialize");
+    assert_eq!(back, st);
+
+    let p = AsmProgram::of(&prog);
+    let back: AsmProgram = serde_json::from_str(&serde_json::to_string(&p).expect("serialize")).expect("deserialize");
+    assert_eq!(back, p);
+    let w: AsmWindow = serde_json::from_str(r#"{"locals":1,"args":2,"frames":3,"cells":4,"boxes":5}"#).expect("parse");
+    assert_eq!(w, AsmWindow { locals: 1, args: 2, frames: 3, cells: 4, boxes: 5 });
 }

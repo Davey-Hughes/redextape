@@ -26,7 +26,8 @@ beforeAll(async () => {
 describe('layout notices', () => {
   it('says a view was added', async () => {
     splitVia('lambda-0', 'row', bindingKey('tm', 'source'))
-    await until(() => leafIds().length === 4, 'the split')
+    // THE DEFAULT'S FOUR VIEWS AND THE ONE THE SPLIT ADDED.
+    await until(() => leafIds().length === 5, 'the split')
     expect(noticeText()).toBe('view added — TM · program')
   })
 
@@ -47,7 +48,7 @@ describe('layout notices', () => {
 
   it('says a view closed, and puts focus on the title of the view that grew', async () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="pane-1"] button.view-close')?.click()
-    await until(() => leafIds().length === 3, 'the close')
+    await until(() => leafIds().length === 4, 'the close')
     expect(noticeText()).toBe('view closed — λ · program')
     expect(document.activeElement?.matches('[data-leaf="lambda-0"] .view-title')).toBe(true)
   })

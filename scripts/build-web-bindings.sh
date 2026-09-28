@@ -214,12 +214,22 @@ check_leg_produced_files "$WASM_DIR" "redextape-wasm"
 # OTHER crate never enters the comparison — both gates pass, and the wrong file ships to every
 # TypeScript consumer. Checked here, before the merge and before anything under $BINDINGS_DIR is
 # touched, so a collision refuses loudly instead of being resolved by mv's last-write-wins.
+#
+# A BASENAME BOTH LEGS WROTE WITH THE SAME BYTES IS NOT A COLLISION, and it is dropped from the wasm leg. ts-rs
+# exports a type's dependencies with it, so a redextape-wasm type that names a redextape-core type — the asm leg's
+# `AsmStatus` and its `cap: AsmCap` — writes that core type's file into the wasm leg too. Both files come from the
+# one Rust declaration, so they agree to the byte, and keeping either is keeping both. Two DIFFERENT types of one
+# name print different declarations and still refuse below.
 check_no_leg_collisions() {
   local name collisions=""
   for path in "$CORE_DIR"/*.ts; do
     name="$(basename "$path")"
     if [ -e "$WASM_DIR/$name" ]; then
-      collisions="$collisions $name"
+      if cmp -s "$path" "$WASM_DIR/$name"; then
+        rm -f "${WASM_DIR:?}/$name"
+      else
+        collisions="$collisions $name"
+      fi
     fi
   done
   if [ -n "$collisions" ]; then

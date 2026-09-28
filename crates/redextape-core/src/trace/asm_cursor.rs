@@ -31,7 +31,14 @@ pub struct AsmStep {
 
 /// Which cap stopped a run. A UI needs the distinction: raising the step cap resumes a run capped on
 /// steps and cannot help one capped on its stack, heap or saved-frame memory.
+///
+/// **IT TAKES THE SERDE AND TS DERIVES, AND `AsmStatus` BELOW DOES NOT.** `redextape-wasm` reports how a
+/// leg's run stands in its own `RunStatus`, one vocabulary across legs; the one fact about an asm run that
+/// vocabulary cannot carry is which cap stopped it, so this crosses beside it. `AsmStatus` stays a Rust
+/// type: its `Faulted` text is an answer, which a boundary reports as the run's value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AsmCap {
     Steps,
     Stack,
@@ -62,7 +69,12 @@ pub enum AsmStatus {
 /// For a compiled program this is exact: every word starts at one making instruction and every other
 /// instruction copies. A hand-written program can use a value as a pointer; the tag then says value,
 /// which is true of how the word was made.
+///
+/// It crosses to JavaScript on every word of `viewmodel::AsmState`, which is how the asm view decides
+/// whether `3` reads as `3`, `#3` or `box #3`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum WordTag {
     #[default]
     Value,

@@ -60,7 +60,10 @@ export function createPanel(opts: PanelOptions): Panel {
 
   const body = opts.body
   if (body.id === '') body.id = `panel-body-${n}`
-  body.setAttribute('role', 'region')
+  // A BODY THAT ALREADY SAYS WHAT IT IS KEEPS ITS ROLE: `virtual-grid.ts`'s box is a `grid`, and stays one inside its
+  // panel, labelled by the toggle all the same. Every other body is a plain container, and a region is what the
+  // toggle discloses.
+  if (!body.hasAttribute('role')) body.setAttribute('role', 'region')
   body.setAttribute('aria-labelledby', toggle.id)
   toggle.setAttribute('aria-controls', body.id)
   el.append(header, body)

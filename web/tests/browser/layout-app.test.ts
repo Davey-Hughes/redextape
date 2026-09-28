@@ -85,8 +85,9 @@ beforeEach(() => {
 })
 
 describe('the layout tree in the app', () => {
-  it('starts in the arrangement index.html used to ship', () => {
-    expect(panes()).toEqual(['source', 'lambda-0', 'tm-0'])
+  // (source | λ) above (asm | TM) since the asm view (Plan 7 part 5 spec §3, row 4).
+  it('starts in the default arrangement', () => {
+    expect(panes()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
     expect($('#results')).not.toBeNull()
   })
 

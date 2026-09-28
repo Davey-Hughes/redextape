@@ -52,6 +52,14 @@ describe('createPanel', () => {
     expect(a.toggle.id).not.toBe(b.toggle.id)
   })
 
+  it('keeps a role the body already declares, and names it by its button all the same', () => {
+    const b = body()
+    b.setAttribute('role', 'grid')
+    const p = createPanel({ name: 'rules', label: 'rules', body: b })
+    expect(b.getAttribute('role')).toBe('grid')
+    expect(b.getAttribute('aria-labelledby')).toBe(p.toggle.id)
+  })
+
   it('keeps an id the body already has', () => {
     const b = body()
     b.id = 'mine'

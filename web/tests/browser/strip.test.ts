@@ -30,8 +30,9 @@ const strip = (segments: readonly string[]) => ({ segments: () => segments, rows
 
 describe('the strip', () => {
   it("reads the program's value and counts in one line, without the normal form", () => {
-    const [lambda, tm, ...rest] = segments()
+    const [lambda, asm, tm, ...rest] = segments()
     expect(lambda).toBe('λ 42 · 7 reductions')
+    expect(asm).toBe('asm 42 · 5 instructions')
     expect(tm).toMatch(/^TM 42 · 2,870 transitions · width \d+$/)
     expect(rest).toEqual([])
     expect(document.querySelector('.strip #results + #link-status')).not.toBeNull()

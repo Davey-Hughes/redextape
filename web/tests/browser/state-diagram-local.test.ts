@@ -46,6 +46,17 @@ beforeAll(async () => {
   await page.viewport(1280, 2400)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
+  // **THE TM VIEW TAKES THE WHOLE ROW, AS IT DID WHEN EVERY WIDTH IN THIS FILE WAS CHOSEN.** The default tree
+  // puts asm beside TM (Plan 7 part 5 spec §3, row 4), which halves the view at any viewport: at 1280px the
+  // program row's sub-steps no longer fit, and the local level is already under its 750px floor, so narrowing
+  // to 1000px cannot shrink it — neither the fits-case nor the narrows-case would be the case it names. Closed
+  // through the asm view's own `✕`, and the width asserted rather than assumed, since every viewport below stands
+  // for the view's width.
+  document.querySelector<HTMLButtonElement>('[data-leaf="asm-0"] button.view-close')?.click()
+  await until(() => document.querySelector('[data-leaf="asm-0"]') === null, 'the asm view to close')
+  expect(pane().getBoundingClientRect().width, 'the TM view does not span the row').toBe(
+    document.querySelector('main')?.getBoundingClientRect().width,
+  )
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: FACT3 } })
   await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the app to settle')
   pane().querySelector<HTMLButtonElement>('[data-panel="rules"] .panel-toggle')?.click()

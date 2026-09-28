@@ -1,9 +1,10 @@
 import type { PersistedBuffers } from './buffers-store'
 import { History } from './history'
+import { type CopyLeg, LEG_NAME, unhandled } from './legs'
 import type { LeafId } from './panes'
-import type { Leg, RunReply } from './protocol'
+import type { RunReply } from './protocol'
 import type { SessionId, SessionPool } from './session-client'
-import { resetLegs, type SessionRegistry } from './sessions'
+import { resetLegs, type SessionLegs, type SessionRegistry } from './sessions'
 import type { Diagnostic, LambdaState, TmState } from './types'
 
 /**
@@ -39,14 +40,14 @@ export type BufferInfo = {
   readonly id: SessionId
   readonly label: string
   readonly warm: boolean
-  readonly leg: Leg
+  readonly leg: CopyLeg
 }
 
 /** What undoing a delete needs to put a copy back: its id, name, leg, text and collapse flag. */
 export type BufferRecord = {
   readonly id: SessionId
   readonly label: string
-  readonly leg: Leg
+  readonly leg: CopyLeg
   readonly text: string
   readonly collapsed: boolean
 }
@@ -81,7 +82,7 @@ type BufferState = {
    * binding must agree with — `SessionRegistry.legOf` throws on a binding naming a leg its session
    * lacks, and this is the field that decides which leg the session was built with.
    */
-  readonly leg: Leg
+  readonly leg: CopyLeg
   text: string
   collapsed: boolean
   warm: boolean
@@ -116,11 +117,11 @@ type BufferState = {
  * `protocol.ts`'s own measured λ retention ratio to within ~0.1%).
  *
  * **TWO READINGS, ONE INTERCEPT COMPONENT APART — THE PROJECT OWNER PICKED THE LITERAL ONE.** The
- * threshold's own words are "every warm BUFFER"; the source session's two rings are not a buffer's, so
+ * threshold's own words are "every warm BUFFER"; the source session's rings are not a buffer's, so
  * whether they count is a reading of the sentence, not a fact the probe can settle on its own:
  *
  *   * **(a) buffers-only-at-exhaustion — GOVERNS, and SHIPS.** The literal reading: the source
- *     session's fixed thread cost counts (module + arena, 11,993,088 bytes) but its two rings do not,
+ *     session's fixed thread cost counts (module + arena, 11,993,088 bytes) but its rings do not,
  *     because they are not simultaneously exhausted the instant every buffer's is — the source session
  *     is ordinarily mid-recording or idle, not pinned at its own ring cap at the same moment N buffers
  *     are all pinned at theirs. Intercept = page/app baseline (17,825,792 bytes, a FLOOR — see below) +
@@ -516,7 +517,7 @@ export class ScratchBuffers {
    *
    * For what this doc used to claim and why it changed, see the history note under `fork`.
    */
-  fork(slot: Detachable, src: string, step: number, leg: Leg): SessionId {
+  fork(slot: Detachable, src: string, step: number, leg: CopyLeg): SessionId {
     // `'cannot make a copy — '` — THIS CALL IS THE ONE OF THE TWO CALLERS FOR WHICH THAT IS TRUE. See
     // `#refuseAtCap`'s own doc for why the prefix is a call-site argument rather than baked into the
     // shared message.
@@ -535,7 +536,7 @@ export class ScratchBuffers {
    * NO PREFIX ON THE REFUSAL — this is not a fork, so `#refuseAtCap`'s call-site prefix argument puts
    * it in the same class as `warm`.
    */
-  forkBlank(leg: Leg): SessionId {
+  forkBlank(leg: CopyLeg): SessionId {
     if (this.warmCount() >= MAX_WARM_BUFFERS) this.#refuseAtCap('')
     return this.#mint('', 0, leg, null)
   }
@@ -547,7 +548,7 @@ export class ScratchBuffers {
    * from a `Detachable` it must then rebind, `forkBlank` from nothing at all. `slot?.rebind(id)` below
    * is the whole of that fork — a `null` here is `forkBlank`'s own claim that no pane is owed a move.
    */
-  #mint(src: string, step: number, leg: Leg, slot: Detachable | null): SessionId {
+  #mint(src: string, step: number, leg: CopyLeg, slot: Detachable | null): SessionId {
     this.#minted += 1
     const id: SessionId = `scratch-${this.#minted}`
     // `copy N` — THE LEG IS SAID WHEREVER THE LABEL IS SHOWN (`nameOf`, `view-header.ts`'s `pairLabel`),
@@ -659,7 +660,7 @@ export class ScratchBuffers {
     // 'not compiled' IS THE REASON THE PANE READS FOR THE INSTANT BETWEEN THIS AND THE REBOUND
     // SESSION'S NEXT FRAME — the same wording `main.ts` gives a source session with no program, and
     // true here for the same reason: there is nothing behind this leg any more.
-    resetLegs(this.#reg.entryOf(id).legs, null, null, 'not compiled')
+    resetLegs(this.#reg.entryOf(id).legs, {}, 'not compiled')
     this.#reg.remove(id)
     this.#pool.unbind(id)
     state.warm = false
@@ -827,14 +828,6 @@ export class ScratchBuffers {
     // collection, one `onReply`, many threads — so the name is closed over HERE, per buffer, at the
     // one place that knows which thread it just made.
     const client = this.#pool.bind(state.id, (reply) => this.#onReply(state.id, reply))
-    // NOT AVAILABLE YET, WITH A REASON A PANE CAN READ — unchanged in intent from the λ-only version;
-    // what changed is WHICH leg gets it. A session holds at most one leg per `Leg`, and this is where
-    // that is decided for a buffer.
-    const pending = { available: false, reason: 'building…' }
-    const legs =
-      state.leg === 'lambda'
-        ? { lambda: { hist: new History<LambdaState>(this.#bytes), status: pending, done: null, playing: false } }
-        : { tm: { hist: new History<TmState>(this.#bytes), status: pending, done: null, playing: false } }
     this.#reg.add({
       id: state.id,
       label: state.label,
@@ -844,7 +837,7 @@ export class ScratchBuffers {
       // only one in the app that may say `false`, and its own comment says so.
       detached: true,
       client,
-      legs,
+      legs: this.#pendingLegs(state.leg),
       // **`null` AT CONSTRUCTION FOR BOTH LEGS, AND THE REASON IS NOT THE SAME FOR BOTH.** A λ buffer
       // never gets a machine at all — its worker answers `scratch-compiled`, which carries no
       // `TmProgram` (5d-i §3.3: no TM leg, no `SourceMap`), and no TM pane can ever bind to it either,
@@ -855,19 +848,45 @@ export class ScratchBuffers {
       // that is permanent.
       tmProgram: null,
       tmScratch: null,
+      // NO COPY HAS AN ASM LEG UNTIL PART 5c (`legs.ts`'s `CopyLeg`), so nothing will ever write here either.
+      asmProgram: null,
     })
     state.warm = true
     // SUPERSEDE THEN POST, the pattern `compile.ts`'s `schedule` uses and for the same reason
     // (`SessionClient.supersede`'s doc): a fresh client is at generation 0, which matches nothing,
     // so the claim has to happen before the post or the request would drop its own message.
-    //
-    // NO STEP ON THE TM SIDE, FOR `SessionClient.tmScratch`'s OWN REASON: a machine has no step-k
-    // term to replay to, since its text IS the machine. `step` is still a parameter of this method —
-    // `warm` passes it as `0` for both legs, `#mint` forwards whatever `fork` was handed — and simply
-    // goes unread on the branch that has nothing to replay.
     const gen = client.supersede()
-    if (state.leg === 'lambda') client.scratch(gen, src, step)
-    else client.tmScratch(gen, src)
+    switch (state.leg) {
+      case 'lambda':
+        client.scratch(gen, src, step)
+        break
+      case 'tm':
+        // NO STEP ON THE TM SIDE, FOR `SessionClient.tmScratch`'s OWN REASON: a machine has no step-k
+        // term to replay to, since its text IS the machine. `step` is still a parameter of this method —
+        // `warm` passes it as `0` for both legs, `#mint` forwards whatever `fork` was handed — and simply
+        // goes unread on the arm that has nothing to replay.
+        client.tmScratch(gen, src)
+        break
+      default:
+        unhandled(state.leg)
+    }
+  }
+
+  /**
+   * A new buffer's one leg, not built yet — the `legs` record `#spawn` registers.
+   *
+   * NOT AVAILABLE YET, WITH A REASON A PANE CAN READ — unchanged in intent from the λ-only version; what
+   * changed is WHICH leg gets it. A session holds at most one leg per `Leg`, and this is where that is
+   * decided for a buffer.
+   */
+  #pendingLegs(leg: CopyLeg): SessionLegs {
+    const status = { available: false, reason: 'building…' }
+    switch (leg) {
+      case 'lambda':
+        return { lambda: { hist: new History<LambdaState>(this.#bytes), status, done: null, playing: false } }
+      case 'tm':
+        return { tm: { hist: new History<TmState>(this.#bytes), status, done: null, playing: false } }
+    }
   }
 
   /**
@@ -877,7 +896,7 @@ export class ScratchBuffers {
    */
   nameOf(id: SessionId): string | null {
     const b = this.#buffers.get(id)
-    return b === undefined ? null : `${b.leg === 'lambda' ? 'λ' : 'TM'} ${b.label}`
+    return b === undefined ? null : `${LEG_NAME[b.leg]} ${b.label}`
   }
 
   /** What undoing a delete needs to put a copy back: its id, name, leg, text and collapse flag. */
@@ -1042,11 +1061,19 @@ export class ScratchBuffers {
     // `client.scratch` unconditionally, which is `lambda-scratch` on the wire regardless of which leg
     // the buffer was actually minted on. For a TM buffer that reaches `onLambdaScratch`, which parses
     // `.tm` TEXT as a λ TERM and answers `no-session` with a λ syntax error every time — `#spawn`'s own
-    // two-way branch is the fix already applied at mint; this is the same branch at the one other place
-    // this class posts a build to an EXISTING buffer.
+    // branch on the leg is the fix already applied at mint; this is the same branch at the one other
+    // place this class posts a build to an EXISTING buffer.
     const gen = client.supersede()
-    if (state.leg === 'lambda') client.scratch(gen, src, 0)
-    else client.tmScratch(gen, src)
+    switch (state.leg) {
+      case 'lambda':
+        client.scratch(gen, src, 0)
+        break
+      case 'tm':
+        client.tmScratch(gen, src)
+        break
+      default:
+        unhandled(state.leg)
+    }
     return true
   }
 

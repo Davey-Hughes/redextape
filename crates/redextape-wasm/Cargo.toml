@@ -33,14 +33,15 @@ ts-rs = { version = "10", optional = true }
 
 [features]
 # Forwards to core's so `ts` is ONE switch: without it, a run that enabled the feature only here would
-# compile derives for this crate's seven wire types and silently leave core's out of that run.
+# compile derives for this crate's eight wire types and silently leave core's out of that run.
 #
-# IT IS NOT LOAD-BEARING FOR IMPORTS TODAY, AND SAYING SO IS THE POINT. Across all seven types declared
-# here, every field's type is `bool`, `String`, `Vec<String>`, `usize`, `u64`, the wasm-local `RunStatus` or
-# `ReductionStatus`, or `NodeId` — each of those bare or under one `Option` — and `NodeId` is a transparent
-# alias for `u32`, so it inlines as a TypeScript `number` and generates no import at all. The first field here that names a core STRUCT or ENUM is what would make this line
-# load-bearing for imports; until then it keeps the feature switch coherent. An earlier draft of this
-# comment asserted the dangling-import hazard as the reason, and a review found no instance of it.
+# IT IS LOAD-BEARING FOR IMPORTS NOW, AND `AsmStatus::cap` IS WHY. That field is an `Option<AsmCap>`, core's
+# enum, so the generated `AsmStatus.ts` imports `./AsmCap` — and without core's `ts` switched on by this
+# line `AsmCap` has no `TS` impl and this crate's `ts` build does not compile. Every other field across the
+# eight types is `bool`, `String`, `Vec<String>`, `usize`, `u64`, the wasm-local `RunStatus` or
+# `ReductionStatus`, or `NodeId` — each bare or under one `Option` — and `NodeId` is a transparent alias for
+# `u32`, which inlines as a TypeScript `number`. An earlier version of this comment said no field named a
+# core type yet, which was true until the asm leg.
 ts = ["dep:ts-rs", "redextape-core/ts"]
 # SWITCHES OFF THE SIZE CHECK IN `tm_scratch_with_caps` (`src/session.rs`), SO A TM SCRATCH PARSES TEXT OF ANY
 # LENGTH. It exists for one caller: `web`'s `test:probe:tm-buffer` script, which builds this crate with it into

@@ -107,15 +107,16 @@ export const MIN_PANE_FRACTION = 0.1
 export const SOURCE_LEAF: LeafId = 'source'
 
 /**
- * The arrangement `index.html` ships, as a tree — design §4.1.
+ * The arrangement a first load and `reset preset` build, as a tree — design §4.1.
  *
- * Two columns holding source and λ, with TM spanning beneath them — the same visual shape a two-column
- * CSS grid with a spanning `.pane.wide` row once produced, before the layout tree replaced both. Nothing
- * in `style.css` names this arrangement anymore: `main`'s one remaining rule just sets up a flex column
- * for whatever tree is mounted, and the shape here comes entirely from this tree's own nesting (an outer
- * column split holding a row split of source/λ above the TM leaf) and its `sizes`, which `layout-view.ts`
- * turns into each host's `flex-grow`. A user who never touches a divider sees no change, which is why
- * this exact shape rather than a tidier one.
+ * **SOURCE AND λ ABOVE, ASM AND TM BELOW** (Plan 7 part 5 spec §3, row 4, and amendment 12): two rows of two, the
+ * program's two lowerings side by side under the program and its λ term. It was source and λ above TM alone until the
+ * asm view existed. The shape comes entirely from this tree's nesting and its `sizes`, which `layout-view.ts` turns into
+ * each host's `flex-grow`; nothing in `style.css` names it.
+ *
+ * **λ STAYS THE FIRST VIEW LEAF**, so a first load still focuses it: `workspace.ts`'s `defaultFocus` takes the first
+ * leaf that is not the source. **A STORED LAYOUT IS NOT MIGRATED** — it is still valid, keeps its arrangement, and
+ * reaches the asm view through `+ view`, a split or a view's title (spec §3), so `LAYOUT_VERSION` does not move.
  */
 export function defaultLayout(): LayoutNode {
   return {
@@ -132,7 +133,15 @@ export function defaultLayout(): LayoutNode {
           { kind: 'leaf', id: 'lambda-0', pane: 'lambda' },
         ],
       },
-      { kind: 'leaf', id: 'tm-0', pane: 'tm' },
+      {
+        kind: 'split',
+        dir: 'row',
+        sizes: [0.5, 0.5],
+        children: [
+          { kind: 'leaf', id: 'asm-0', pane: 'asm' },
+          { kind: 'leaf', id: 'tm-0', pane: 'tm' },
+        ],
+      },
     ],
   }
 }
@@ -379,7 +388,18 @@ export function serializeLayout(root: LayoutNode): string {
   return JSON.stringify({ version: LAYOUT_VERSION, tree: root })
 }
 
-const PANE_KINDS: readonly string[] = ['source', 'lambda', 'tm']
+/**
+ * Every `PaneKind`, as the strings a stored leaf's `pane` may hold.
+ *
+ * **KEYED BY `PaneKind` AND THEN LISTED, RATHER THAN WRITTEN AS A LIST.** It is typed `string[]` because
+ * `validate` asks it about a string not yet known to be a kind, and a list typed that way says nothing about
+ * the union; even `satisfies readonly PaneKind[]` would say only that each entry is a kind, never that each
+ * kind is an entry. A kind left out here would fail `validate` for every stored layout that shows one, and a
+ * layout that fails is replaced by the default without a word (`parseLayout`'s own doc), so a view of the new
+ * kind would be lost on every reload with `tsc` green. The `satisfies` makes a missing kind a type error, and
+ * the keys are the list (`legs.ts` has the class of bug).
+ */
+const PANE_KINDS: readonly string[] = Object.keys({ source: 0, lambda: 0, asm: 0, tm: 0 } satisfies Record<PaneKind, 0>)
 
 /**
  * Validate one node and collect its leaf ids, returning `false` on the first violation.

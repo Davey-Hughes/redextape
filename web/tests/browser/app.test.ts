@@ -93,10 +93,11 @@ describe('the app, end to end', () => {
    * that awaits is a test whose name lies, so the name went with the contract.
    *
    * `tests/browser/colour.test.ts` is where the colouring itself is asserted, for all three editors.
-   * What this line keeps is the pairing: the same program that colours is the one that reports both
-   * legs, which is the end-to-end claim this test has always been about.
+   * What this line keeps is the pairing: the same program that colours is the one that reports its
+   * legs — all three since the asm leg (Plan 7 part 5) — which is the end-to-end claim this test has
+   * always been about.
    */
-  it('colours keywords once the grammar lands, and reports both legs', async () => {
+  it('colours keywords once the grammar lands, and reports all three legs', async () => {
     retype('let x = 40; x + 2')
 
     await until(() => document.querySelector('.tok-keyword') !== null, 'the source editor to colour `let`')
@@ -104,6 +105,7 @@ describe('the app, end to end', () => {
 
     await until(() => resultsText().includes('reductions'))
     expect(resultsText()).toContain('7 reductions')
+    expect(resultsText()).toContain('5 instructions')
     expect(resultsText()).toContain('2,870 transitions')
     expect(resultsText()).toContain('42')
   })
@@ -295,11 +297,13 @@ describe('the app, end to end', () => {
   // one of ITS constructs turns out to own at least one state (checked directly against the running
   // app, not assumed). `BIG`'s `fn map(xs, f) { ... }` at offset 0 does — a function definition's own
   // span never gets an instruction, only the defunctionalized call sites downstream of it do.
-  it('reports the absence when a construct emits no machine states', async () => {
+  it('reports the absence when a construct emits no instructions or machine states', async () => {
     await settled(view, BIG)
     linkAt(view, 0)
     await until(() => linkStatusText() !== '')
-    expect(linkStatusText()).toContain('no machine states')
+    // A construct the machine bills no state to is one the asm lowering bills no instruction to — the machine is built
+    // from those instructions — and the line says both in one clause (Plan 7 part 5).
+    expect(linkStatusText()).toContain('no instructions or machine states')
     // No block can light for a construct that owns none.
     expect(linkedRowCount()).toBe(0)
 
@@ -341,8 +345,8 @@ describe('the app, end to end', () => {
   })
 
   // THE MOST IMPORTANT TEST IN THIS FILE. `TmPane`'s δ table renders only the rows in view and offsets
-  // them with `translateY` (`tm-pane.ts`'s `#drawTable`), so a clicked row's DOM index is
-  // `firstDrawn + i`, not the row number `i` alone. Getting that wrong does not crash — it silently
+  // them with `translateY` (`VirtualGrid.draw`), so a clicked row's DOM index is not its row number: the
+  // grid reads the row number off the row's `aria-rowindex`. Getting that wrong does not crash — it silently
   // resolves a click against a DIFFERENT, plausible-looking block, and only once the table has been
   // scrolled away from its first page. A click against an UNscrolled table passes whether or not the
   // offset is right, which would make such a test worse than no test at all — so this scrolls the table
@@ -367,7 +371,7 @@ describe('the app, end to end', () => {
     if (!target) return
     // State names are unique (`StateIndex` numbers each state once), so finding the row by NAME after
     // the click identifies the same logical row even though the click's own redraw discarded and
-    // recreated every DOM node in `#rows` — `target` itself is stale the instant that redraw runs, and
+    // recreated every row the grid drew — `target` itself is stale the instant that redraw runs, and
     // a source construct can legitimately own SEVERAL states at once (`linkedRows` marks all of them),
     // so the first `.is-linked` header in DOM order need not be the one that was clicked at all.
     const name = target.textContent ?? ''
@@ -375,10 +379,10 @@ describe('the app, end to end', () => {
     await until(() => linkedRowCount() > 0)
 
     // The row that lit must be the one clicked, BY NAME — not merely that some row, anywhere in the
-    // table, gained `is-linked`. `firstDrawn + i` read as plain `i` would resolve this click against a
-    // row near the TOP of the whole table instead, which (still scrolled to the middle) would not even
-    // be in the rendered window — so a wrong offset fails this either on the name mismatch below or on
-    // the `until` above timing out, never by accident matching.
+    // table, gained `is-linked`. A row's place among the drawn rows read in place of its `aria-rowindex`
+    // would resolve this click against a row near the TOP of the whole table instead, which (still
+    // scrolled to the middle) would not even be in the rendered window — so a wrong offset fails this
+    // either on the name mismatch below or on the `until` above timing out, never by accident matching.
     const relit = [...document.querySelectorAll<HTMLElement>('[data-leaf="tm-0"] .state-row.is-state')].find(
       (r) => r.textContent === name,
     )
@@ -454,6 +458,41 @@ describe('the app, end to end', () => {
     const spacer = () => document.querySelector('[data-leaf="tm-0"] .state-spacer') as HTMLElement
     /** `BIG`'s whole table, and the readiness signal for it: unique to this program among the fixtures. */
     const BIG_SPACER = `${25_852 * ROW_HEIGHT}px`
+    /**
+     * The current state's own name, read off the TM view's status line (`tm-pane.ts`'s `#drawStatus`, which
+     * writes `<state name> · width N` on every frame) rather than the rule table's `.is-current` row.
+     *
+     * **INDEPENDENT OF THE TABLE'S SCROLL, ON PURPOSE.** `.is-current` only exists in the DOM once the
+     * virtualized table has actually scrolled to that row — exactly the behaviour the self-loop test below
+     * exists to check — so reading it here would make this precondition fail alongside the very assertions
+     * it is meant to run ahead of, whenever the hold under test is broken. `null` while there is no frame to
+     * name a state in.
+     */
+    const currentStateName = () => {
+      const text = document.querySelector('[data-leaf="tm-0"] .tm-status')?.textContent ?? ''
+      const i = text.indexOf(' · width ')
+      return i < 0 ? null : text.slice(0, i)
+    }
+
+    /**
+     * `el`'s next `scroll` event: the listener is attached now, since the event can land before the caller is
+     * ready to await it, but the wait itself is returned as a thunk — call it to race that event against a
+     * bounded timeout, or a rejection after `ms` if none comes.
+     *
+     * **THE TIMEOUT PROMISE IS MADE ONLY WHEN THE THUNK IS CALLED, NOT HERE.** Built eagerly instead — a
+     * `Promise.race` constructed at this call site — its `setTimeout` runs while the caller does other work
+     * between here and the `await`, such as `until`'s own default wait of up to 10 s, and a promise that
+     * rejects with nothing yet awaiting it is an unhandled rejection: `await`ing it afterwards attaches a
+     * handler too late to un-flag what already fired.
+     */
+    const scrollEcho = (el: HTMLElement) => {
+      const event = new Promise<void>((r) => el.addEventListener('scroll', () => r(), { once: true }))
+      return (ms = 5_000): Promise<void> =>
+        Promise.race([
+          event,
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('the link wrote no scroll')), ms)),
+        ])
+    }
 
     it('steps the λ pane back and shows the same text it showed before', async () => {
       await settled(view, 'let x = 40; x + 2')
@@ -714,10 +753,10 @@ describe('the app, end to end', () => {
     // FIX 2's PRIMARY-DIRECTION PROOF: design decision 3's "source -> both", the primary direction of
     // the whole feature. Two tests were believed to cover it and both only ever checked
     // `.cm-editor .linked` and the status text; the one place `is-linked` appears elsewhere in this
-    // file (`reports the absence when a construct emits no machine states`, above) FILTERS those tokens
-    // OUT without ever asserting any exist — its own `tokens.length > 0` would pass even if `.is-linked`
-    // were never applied to anything. Nothing anywhere asserted that a SOURCE-originated link actually
-    // paints the λ window and the δ table, not only the source echo.
+    // file (`reports the absence when a construct emits no instructions or machine states`, above)
+    // FILTERS those tokens OUT without ever asserting any exist — its own `tokens.length > 0` would pass
+    // even if `.is-linked` were never applied to anything. Nothing anywhere asserted that a
+    // SOURCE-originated link actually paints the λ window and the δ table, not only the source echo.
     it('a source-originated link lights both the λ view and the δ table', async () => {
       await settled(view, 'let x = 40; x + 2')
       // STEP 0, WHERE EVERY CONSTRUCT HAS A NODE: `settled` leaves the head at the frontier, the chip `42`,
@@ -916,8 +955,13 @@ describe('the app, end to end', () => {
       // verified directly against the running app by scanning every source offset. Position `+1` lands
       // on `(`, a byte no narrower child span (`f` alone, or `head(xs)`) covers, so it resolves to the
       // call expression itself rather than the bare callee `Var`.
+      // THE SCROLL'S OWN EVENT IS AWAITED BEFORE ANYTHING IS READ. It comes a frame after the link and redraws the
+      // table, and while this read the table in the link's own turn it passed with that redraw scrolling straight
+      // back to the machine: the link's rows were never on screen for longer than the turn that drew them.
+      const echo = scrollEcho(table())
       linkAt(view, BIG.indexOf('f(head(xs))') + 1)
       await until(() => linkedRowCount() > 0)
+      await echo()
 
       // THE BUG, DIRECTLY: a linked block must actually be ON SCREEN, which virtualization only renders
       // once the table has actually scrolled there. Under the reverted-scroll bug `scrollTop` never
@@ -926,8 +970,79 @@ describe('the app, end to end', () => {
       expect(table().scrollTop).not.toBe(followedTop)
 
       // FOLLOWING ITSELF WAS NOT DISTURBED — the other half of design §5.1 and `setLink`'s own doc: a
-      // link is a one-shot scroll, not a reattach/detach decision, so `Follow`'s own flag must read
-      // exactly as it did before the link ran.
+      // link's scroll holds until the machine moves and is not a reattach/detach decision, so `Follow`'s own
+      // flag must read exactly as it did before the link ran.
+      expect(reattach.hidden).toBe(true)
+
+      // Leave the buffer settled, in case a test added after this one assumes it is.
+      await settled(view, 'let x = 40; x + 2')
+    })
+
+    /**
+     * THE SELF-LOOP CASE, THROUGH THE REAL TM VIEW (amendment 21). The rule table's follow row is the current
+     * state's own header row, and a step that loops in its state — the ordinary case in a compiled machine —
+     * leaves that row exactly where it was: a hold keyed on the followed row instead of the frame would
+     * outlive such a step, leaving the table parked on the link's block, the current rule off screen, with
+     * no reattach offered because following itself was never touched.
+     *
+     * THE SELF-LOOPING STEP IS FOUND, NOT HARDCODED. `BIG`'s compiled machine self-loops early and often, but
+     * pinning a step number to it would make this test pass for the wrong reason the day `BIG` or its
+     * compilation changes; scanning for one and asserting the precondition directly (`stateAfter`, below)
+     * keeps the test honest about what it needs.
+     */
+    it("a step that loops in its own state still releases a source-originated link's hold on the table", async () => {
+      await settled(view, BIG)
+      const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
+      expect(reattach.hidden).toBe(true)
+
+      // RESTART TO THE OLDEST KEPT STEP, then walk forward until one step leaves the current state's name
+      // unchanged from the step before it. `BIG`'s history is capped well past this point (§3.1's design),
+      // so the oldest kept step is not step 0 — the scan does not assume it is.
+      click('tm', '↺')
+      let prev = currentStateName()
+      let loopStep = -1
+      for (let i = 0; i < 500 && loopStep < 0; i += 1) {
+        click('tm', '▶')
+        const cur = currentStateName()
+        if (cur !== null && cur === prev) loopStep = i
+        prev = cur
+      }
+      expect(
+        loopStep,
+        "BIG's compiled machine must contain a step that leaves its state unchanged",
+      ).toBeGreaterThanOrEqual(0)
+
+      // BACK UP TO JUST BEFORE IT, so the link below is made at the frame the self-looping step leaves the
+      // followed row untouched from.
+      click('tm', '◀')
+      const stateBefore = currentStateName()
+      // Still following: nothing above was a user scroll, so `Follow` was never detached.
+      expect(reattach.hidden).toBe(true)
+      const followedTop = table().scrollTop
+      expect(followedTop).toBeGreaterThan(0)
+
+      // LINK FROM THE SOURCE WHILE THE TABLE FOLLOWS, exactly as the test above, awaiting the scroll's own
+      // event the same way before reading anything.
+      const echo = scrollEcho(table())
+      linkAt(view, BIG.indexOf('f(head(xs))') + 1)
+      await until(() => linkedRowCount() > 0)
+      await echo()
+      expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-linked')).not.toBeNull()
+      const linkedTop = table().scrollTop
+      expect(linkedTop).not.toBe(followedTop)
+
+      // TAKE THE ONE STEP THAT LOOPS IN ITS OWN STATE, and check the precondition the whole test depends on
+      // directly, rather than trusting the scan above at a distance.
+      click('tm', '▶')
+      const stateAfter = currentStateName()
+      expect(stateAfter, 'the precondition: this step must leave the current state unchanged').toBe(stateBefore)
+
+      // THE TABLE IS BACK ON THE CURRENT STATE'S ROW, not still parked on the link's block. A hold keyed on
+      // the followed row alone could not see this step move anything, because the row it follows did not —
+      // only the frame did.
+      expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-current')).not.toBeNull()
+      expect(table().scrollTop).not.toBe(linkedTop)
+      expect(table().scrollTop, 'following recomputes the very same target it had before the link').toBe(followedTop)
       expect(reattach.hidden).toBe(true)
 
       // Leave the buffer settled, in case a test added after this one assumes it is.

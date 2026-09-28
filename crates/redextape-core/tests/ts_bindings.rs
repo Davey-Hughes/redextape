@@ -19,7 +19,11 @@ use redextape_core::diagnostic::{Diagnostic, Severity};
 use redextape_core::lambda::{Cut, Owner};
 use redextape_core::span::Span;
 use redextape_core::tm::machine::Move;
-use redextape_core::viewmodel::{LambdaState, RuleView, StateView, TmProgram, TmState};
+use redextape_core::trace::{AsmCap, WordTag};
+use redextape_core::viewmodel::{
+    AsmBox, AsmCallFrame, AsmCell, AsmProgram, AsmState, AsmWindow, AsmWord, LambdaState, RuleView, StateView,
+    TmProgram, TmState,
+};
 use redextape_test_support::ts_derive_scan::{
     assert_overrides_match_field_nullability, ts_deriving_type_names_in_crate, without_doc_comments,
 };
@@ -28,6 +32,14 @@ use ts_rs::TS;
 /// Every type in this crate carrying `#[ts(export)]`, paired with the file it generates.
 fn generated() -> Vec<(&'static str, String)> {
     vec![
+        ("AsmBox", AsmBox::export_to_string().unwrap()),
+        ("AsmCallFrame", AsmCallFrame::export_to_string().unwrap()),
+        ("AsmCap", AsmCap::export_to_string().unwrap()),
+        ("AsmCell", AsmCell::export_to_string().unwrap()),
+        ("AsmProgram", AsmProgram::export_to_string().unwrap()),
+        ("AsmState", AsmState::export_to_string().unwrap()),
+        ("AsmWindow", AsmWindow::export_to_string().unwrap()),
+        ("AsmWord", AsmWord::export_to_string().unwrap()),
         ("Cut", Cut::export_to_string().unwrap()),
         ("Diagnostic", Diagnostic::export_to_string().unwrap()),
         ("LambdaState", LambdaState::export_to_string().unwrap()),
@@ -40,6 +52,7 @@ fn generated() -> Vec<(&'static str, String)> {
         ("TmProgram", TmProgram::export_to_string().unwrap()),
         ("TmState", TmState::export_to_string().unwrap()),
         ("TokenClass", TokenClass::export_to_string().unwrap()),
+        ("WordTag", WordTag::export_to_string().unwrap()),
     ]
 }
 

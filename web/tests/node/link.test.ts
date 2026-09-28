@@ -19,6 +19,7 @@ function wire(over: Partial<LinkIndexWire> = {}): LinkIndexWire {
     sourceNodeEnd: new Uint32Array([17, 5, 17]),
     sourceNodeId: new Uint32Array([100, 101, 102]),
     tmOwner: new Int32Array([-1, 100, 101, 100, -1]),
+    asmOwner: new Int32Array([100, -1, 101, 100]),
     ...over,
   }
 }
@@ -81,12 +82,28 @@ describe('LinkIndex.nodeForState', () => {
   })
 })
 
+describe('LinkIndex.nodeForInstr', () => {
+  it('resolves an instruction to the construct that emitted it, and one defunc minted to null', () => {
+    const ix = new LinkIndex(wire())
+    expect(ix.nodeForInstr(0)).toBe(100)
+    expect(ix.nodeForInstr(2)).toBe(101)
+    expect(ix.nodeForInstr(1)).toBeNull()
+  })
+
+  it('an index outside the program is null, never a wrap or a throw', () => {
+    const ix = new LinkIndex(wire())
+    expect(ix.nodeForInstr(4)).toBeNull()
+    expect(ix.nodeForInstr(-1)).toBeNull()
+  })
+})
+
 describe('LinkIndex.linkFor', () => {
-  it('gathers both legs, and states are ascending', () => {
+  it('gathers every leg, states and instructions ascending', () => {
     const ix = new LinkIndex(wire())
     expect(ix.linkFor(100)).toEqual({
       source: { start: 0, end: 17 },
       states: [1, 3],
+      instrs: [0, 3],
     })
   })
 
@@ -94,9 +111,12 @@ describe('LinkIndex.linkFor', () => {
     const ix = new LinkIndex(wire())
     // 102 owns no state.
     expect(ix.linkFor(102).states).toEqual([])
+    expect(ix.linkFor(102).instrs).toEqual([])
     expect(ix.linkFor(102).source).toEqual({ start: 12, end: 17 })
+    // 101 owns a state and an instruction of its own, and no other construct's.
+    expect(ix.linkFor(101)).toEqual({ source: { start: 4, end: 5 }, states: [2], instrs: [2] })
     // A node nobody has heard of.
-    expect(ix.linkFor(999)).toEqual({ source: null, states: [] })
+    expect(ix.linkFor(999)).toEqual({ source: null, states: [], instrs: [] })
   })
 })
 

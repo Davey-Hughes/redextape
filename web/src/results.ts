@@ -1,6 +1,6 @@
 import { n } from './format'
-import type { LambdaLeg, TmLeg } from './protocol'
-import type { Diagnostic, RunStatus, ValueReading } from './types'
+import type { AsmLeg, LambdaLeg, TmLeg } from './protocol'
+import type { AsmCap, Diagnostic, RunStatus, ValueReading } from './types'
 import { decodedText } from './types'
 
 export type Row = { leg: string; label: string; value: string; note?: string }
@@ -85,8 +85,47 @@ function tmRows(t: TmLeg): Row[] {
   return rows
 }
 
-export function resultRows(lambda: LambdaLeg, tm: TmLeg): Row[] {
-  return [...lambdaRows(lambda), ...tmRows(tm)]
+/** A full cap in words: what the machine ran out of. The step cap is not here — raising it resumes the run. */
+const FULL: Readonly<Record<Exclude<AsmCap, 'Steps'>, string>> = {
+  Stack: 'the call stack is full',
+  Heap: 'the heap is full',
+  Mem: 'its saved call frames are full',
+}
+
+/**
+ * The asm leg's rows (Plan 7 part 5 spec §5.5): its steps as instructions, and its value.
+ *
+ * **`total_steps` IS `compile`'S OWN RUN**, which drove the asm cursor to its end (amendment 13), so it is a length
+ * once that run finished and the count it stopped at otherwise — `tmRows`' distinction, read the same way, off
+ * whether the value is `Unfinished`. A fault is an end: it has a length, and its value says what faulted where.
+ *
+ * **A CAP IS NAMED ONLY WHEN THE RECORDED RUN HAS REACHED IT.** `cap` is the recording cursor's, and a recording that
+ * stopped on its history budget first has none; "at a cap" is then all that is known, as for TM.
+ */
+function asmRows(a: AsmLeg): Row[] {
+  if (!a.status.available) return [{ leg: 'asm', label: 'declined', value: a.status.reason }]
+  const rows: Row[] = []
+  if (a.status.total_steps !== null) {
+    const steps = n(a.status.total_steps)
+    const finished = a.value !== null && a.value !== 'Unfinished'
+    const cap = a.status.run === 'Capped' ? a.status.cap : null
+    rows.push({
+      leg: 'asm',
+      label: 'steps',
+      value: finished
+        ? `${steps} instructions`
+        : cap === null || cap === 'Steps'
+          ? `stopped after ${steps} instructions at a cap`
+          : `stopped after ${steps} instructions — ${FULL[cap]}`,
+    })
+  }
+  if (a.value) rows.push({ leg: 'asm', label: 'value', value: decodedText(a.value) })
+  return rows
+}
+
+/** Every leg's rows, in the order the legs are listed: λ, asm, TM. */
+export function resultRows(lambda: LambdaLeg, asm: AsmLeg, tm: TmLeg): Row[] {
+  return [...lambdaRows(lambda), ...asmRows(asm), ...tmRows(tm)]
 }
 
 /**

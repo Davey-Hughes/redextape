@@ -38,27 +38,35 @@
  * per call; what did not change is that this file has no opinion either way.)
  */
 import init, { compile, lambdaScratchAt, tapeNames, tmScratch } from '../../pkg/redextape_wasm.js'
+import { LEGS, perLeg, unhandled } from './legs'
 import type { LinkIndexWire } from './link'
-import type { LambdaLeg, LambdaTreeWire, Leg, RecordEnd, RunReply, RunRequest, TmLeg } from './protocol'
+import type { AsmLeg, LambdaLeg, LambdaTreeWire, Leg, RunReply, RunRequest, TmLeg } from './protocol'
 import {
+  ASM_WINDOW,
+  asmFrameBytes,
+  asmRecordEnd,
   EXTEND_CELLS,
   EXTEND_STEPS,
+  endOf,
   FRAME_BYTES,
   forkable,
   HISTORY_BYTES,
   LAMBDA_BYTE_BUDGET,
   lambdaFrameBytes,
-  RECORD_CHUNK,
   TM_RADIUS,
   tmFrameBytes,
   VALUE_CHUNK,
 } from './protocol'
+import { type RecordLeg, type RecordWorker, recordLeg } from './record-loop'
 import type {
+  AsmProgram,
+  AsmState,
+  AsmStatus,
+  AsmWindow,
   Decoded,
   Diagnostic,
   LambdaState,
   LambdaStatus,
-  RunStatus,
   Span,
   TmProgram,
   TmScratchStatus,
@@ -84,6 +92,12 @@ type Session = {
   stepTm(): boolean
   raiseTmCap(extraSteps: number, extraCells: number): void
   tmValue(): Decoded
+  asmStatus(): AsmStatus
+  asmProgram(): AsmProgram
+  asmState(window: AsmWindow): AsmState
+  stepAsm(): boolean
+  raiseAsmCap(extraSteps: number): void
+  asmValue(): Decoded
   sourceSpan(node: number): Span | null
   linkIndex(byteBudget: number): LinkIndexWire
   /**
@@ -100,7 +114,7 @@ type Session = {
  * The wasm-bindgen `LambdaScratch`, described structurally for the reason `Session` above is — and it
  * is a STRICT SUBSET of `Session`'s λ half, which is design §3.3's table as a type.
  *
- * THE SIX λ METHODS TRANSPLANT UNCHANGED (§3.3: "nothing but the λ cursor"), so `recordLambda` below
+ * THE SIX λ METHODS TRANSPLANT UNCHANGED (§3.3: "nothing but the λ cursor"), so `LAMBDA_RECORDING` below
  * needs no second implementation and no cast: it reads `lambdaStatus`, `lambdaState` and `stepLambda`,
  * all three identical in name and signature on both kinds, and a `Session` satisfies this type
  * structurally. Four are named here because four are what this file calls.
@@ -213,11 +227,11 @@ let latest = 0
  * `tm-scratch` arm for `live.session.lambdaStatus()` — and §3.3's whole method split is a compile-time
  * claim, a runtime probe would restate it as a convention.
  *
- * **A THIRD ARM, AND `recordLambda`/`recordTm` BOTH NOW ASK WHAT KIND OF THING IS LIVE, WHERE ONLY
- * `recordTm` USED TO.** `TmScratchHandle` carries the TM methods `recordTm`'s loop calls but none of
- * the λ ones `recordLambda`'s does — the reverse of `LambdaScratchHandle` — so the asymmetry that used
+ * **A THIRD ARM, AND THE λ AND TM LEGS BOTH NOW ASK WHAT KIND OF THING IS LIVE, WHERE ONLY THE TM
+ * LEG USED TO.** `TmScratchHandle` carries the TM methods the TM leg's recording calls but none of
+ * the λ ones the λ leg's does — the reverse of `LambdaScratchHandle` — so the asymmetry that used
  * to read "the λ methods exist on both wasm types and the TM ones exist only on `Session`" no longer
- * holds in either direction. See each function's own guard.
+ * holds in either direction. See each leg's `handle` (`LAMBDA_RECORDING`, `TM_RECORDING`, `ASM_RECORDING`).
  */
 type Live =
   | { gen: number; kind: 'session'; session: Session }
@@ -231,8 +245,8 @@ let live: Live | null = null
  * stop buys another `HISTORY_BYTES`; the main thread's ring evicts, so recording further is bounded
  * per click rather than unbounded.
  */
-const recorded: Record<Leg, number> = { lambda: 0, tm: 0 }
-const allowance: Record<Leg, number> = { lambda: HISTORY_BYTES, tm: HISTORY_BYTES }
+const recorded: Record<Leg, number> = perLeg(() => 0)
+const allowance: Record<Leg, number> = perLeg(() => HISTORY_BYTES)
 
 /**
  * One record loop per leg at a time. `latest` serializes `run` requests, but two `extend`s carry the
@@ -240,7 +254,7 @@ const allowance: Record<Leg, number> = { lambda: HISTORY_BYTES, tm: HISTORY_BYTE
  * and interleave their frames. The same race reaches `onRun`: an `extend` can land while `onRun`'s
  * `await recordTm` is still in flight, once the λ leg has already posted its `budget` stop.
  */
-const recording: Record<Leg, boolean> = { lambda: false, tm: false }
+const recording: Record<Leg, boolean> = perLeg(() => false)
 
 function dropLive(): void {
   const held = live
@@ -304,188 +318,133 @@ const yieldToEventLoop = (): Promise<void> =>
   })
 
 /**
- * A finished cursor's `RunStatus` as a `RecordEnd`.
- *
- * `Running` maps to `ended` and cannot occur: this is only called once `stepLambda`/`stepTm` has
- * answered `false`, which means the cursor is finished. Mapped rather than thrown so a future
- * `RunStatus` variant degrades to a legible label instead of aborting the worker.
+ * What `recordLeg` needs of this thread: the books and flags above, whether a generation still owns what is live, and
+ * this thread's post and yield.
  */
-function endOf(run: RunStatus | null): RecordEnd {
-  switch (run) {
-    case 'Capped':
-      return 'capped'
-    case 'DepthRefused':
-      return 'depth-refused'
-    default:
-      return 'ended'
-  }
+const worker: RecordWorker = {
+  recording,
+  recorded,
+  allowance,
+  owns: (gen) => live?.gen === gen,
+  post: (reply) => ctx.postMessage(reply),
+  yieldToEventLoop,
 }
 
 /**
- * Step-and-record the λ leg until it finishes, its allowance runs out, or a newer request lands.
+ * The λ leg's pieces for `recordLeg`: a `Session`'s λ leg or a `LambdaScratch`'s, which carry the same λ methods.
  *
- * WRITTEN TWICE RATHER THAN GENERICALLY, and that is a judgement worth recording because it looks
- * like duplication. A generic version needs six callbacks (`available`, `initial`, `step`, `render`,
- * `size`, `status`) plus a `LambdaState | TmState` union that every caller then casts back out of —
- * more machinery than the twenty lines it removes, and it hides the one thing worth seeing: the two
- * loops have the same SHAPE and different MEANINGS. The TM run finished during `compile`, so
- * recording it replays a run whose answer is already known and exhausting its allowance costs
- * history alone. On the λ leg it costs the answer.
- * Returns whether this call actually recorded (or determined there was nothing to record) rather
- * than being turned away at the door. `false` means a loop already in flight for this generation
- * owns the leg and will post its own frames and its own `result` — the caller must not post one
- * of its own on top of that.
+ * **ITS `handle` ASKS WHAT KIND OF THING IS LIVE, WHICH IT DID NOT UNTIL `TmScratchHandle` EXISTED.** The λ methods
+ * used to exist on both occupants of `live`, so the union of their return types called cleanly with no guard. A
+ * `TmScratch` has none of them — see `onTmScratch`, which never records this leg — so a third occupant with no λ leg
+ * needs the same kind of exclusion the TM leg has always needed for the opposite reason.
  *
- * **NOW ASKS WHAT KIND OF THING IS LIVE, WHICH IT DID NOT UNTIL `TmScratchHandle` EXISTED.** The λ
- * methods used to exist on both occupants of `live`, so the union of their return types called cleanly
- * with no guard. A `TmScratch` has none of them — see `onTmScratch`, which never calls this — so a
- * third occupant with no λ leg needs the same kind of exclusion `recordTm` has always needed for the
- * opposite reason.
+ * **ON THIS LEG, SPENDING THE ALLOWANCE COSTS THE ANSWER.** The λ leg's recording is what decides its value, where
+ * TM's and asm's replay a run `compile` already finished, whose allowance costs history alone.
  */
-async function recordLambda(gen: number, emitInitial: boolean): Promise<boolean> {
-  // Deliberate silence: the caller's generation is already stale, so there is nothing to record for
-  // it — not the accidental kind this file shipped once before.
-  if (live?.gen !== gen) return false
-  // Deliberate silence, and a state no caller can currently reach: a `TmScratch` has no λ leg to
-  // record (§4.1 — one leg apiece), and each session has its own worker, so nothing posts a `run` and
-  // a `tm-scratch` to the SAME thread. Written as a guard for `recordTm`'s reason, stated there in full.
-  if (live.kind === 'tm-scratch') return false
-  if (!live.session.lambdaStatus().available) return false
-  // Deliberate silence: a rejected re-entry. Two callers can reach this function for the same leg
-  // (`onRun` then a concurrent `extend`, or two `extend`s) — the loop already in flight will post the
-  // frames, so this one has nothing to do.
-  if (recording.lambda) return false
-  recording.lambda = true
-  try {
-    let batch: LambdaState[] = []
-    if (emitInitial) {
-      const first = live.session.lambdaState(FRAME_BYTES)
-      batch.push(first)
-      recorded.lambda += lambdaFrameBytes(first)
+const LAMBDA_RECORDING: RecordLeg<Session | LambdaScratchHandle, LambdaState> = {
+  leg: 'lambda',
+  handle: (gen) => {
+    // Deliberate silence: the caller's generation is stale, so there is nothing to record for it — not the
+    // accidental kind this file shipped once before.
+    if (live?.gen !== gen) return null
+    switch (live.kind) {
+      case 'session':
+      case 'lambda-scratch':
+        return live.session
+      case 'tm-scratch':
+        // Deliberate silence, and a state no caller can currently reach: a `TmScratch` has no λ leg to record (§4.1 —
+        // one leg apiece), and each session has its own worker, so nothing posts a `run` and a `tm-scratch` to the SAME
+        // thread. Written as an arm for `TM_RECORDING`'s reason, stated there in full.
+        return null
     }
-
-    for (;;) {
-      // Deliberate silence: superseded mid-loop. The caller who wanted these frames is gone.
-      //
-      // THE `kind` HALF IS THE TYPE RESTATING THE `gen` HALF, mirroring `recordTm`'s loop guard: a live
-      // thing that is no longer able to record a λ leg is already a live thing with a different `gen`
-      // (replacing what is live always claims a new generation), so this is where that implication is
-      // written down for the checker rather than cast away.
-      //
-      // PHRASED AS THE ALLOWED KINDS, NOT THE EXCLUDED ONE. The guard above this loop already narrows
-      // `live.kind` to exclude `'tm-scratch'` for the checker, and that narrowing survives across the
-      // `await` below (`yieldToEventLoop` is opaque to it) — so a direct re-check against `'tm-scratch'`
-      // here is a comparison TS can prove has no overlap and refuses to compile (TS2367). Naming the two
-      // kinds this function DOES handle says the identical thing at runtime without asking the checker
-      // to compare against a literal it already believes is impossible.
-      if (live?.gen !== gen || (live.kind !== 'session' && live.kind !== 'lambda-scratch')) return true
-      const s = live.session
-      let done: RecordEnd | null = null
-      let n = 0
-      while (n < RECORD_CHUNK) {
-        if (recorded.lambda >= allowance.lambda) {
-          done = 'budget'
-          break
-        }
-        if (!s.stepLambda()) {
-          done = endOf(s.lambdaStatus().run)
-          break
-        }
-        const f = s.lambdaState(FRAME_BYTES)
-        batch.push(f)
-        recorded.lambda += lambdaFrameBytes(f)
-        n += 1
-      }
-      ctx.postMessage({ kind: 'lambda-frames', gen, frames: batch, done })
-      batch = []
-      if (done !== null) return true
-      await yieldToEventLoop()
-    }
-  } finally {
-    // ONLY THE CALL THAT STILL OWNS THIS GENERATION MAY CLEAR THE FLAG IT SET. A stale loop that
-    // resumes here after being superseded returned via the mid-loop `live?.gen !== gen` check above,
-    // with `live.gen` already pointing at a newer generation — clearing unconditionally would wipe
-    // the flag that generation's `onRun` reset (fix 1) and whose own loop has since set for itself,
-    // reopening the exact race `recording` exists to close. Checking `live?.gen === gen` here is
-    // exactly that stale-loop check, so a superseded loop skips the clear and touches nothing.
-    if (live?.gen === gen) recording.lambda = false
-  }
+  },
+  available: (s) => s.lambdaStatus().available,
+  frame: (s) => s.lambdaState(FRAME_BYTES),
+  bytes: lambdaFrameBytes,
+  step: (s) => s.stepLambda(),
+  end: (s) => endOf(s.lambdaStatus().run),
+  reply: (gen, frames, done) => ({ kind: 'lambda-frames', gen, frames, done }),
 }
 
 /**
- * See `recordLambda`'s doc comment — same contract, mirrored for the TM leg.
+ * The TM leg's pieces for `recordLeg`: a `Session`'s TM leg or a `TmScratch`'s.
  *
- * IT ASKS WHAT KIND OF THING IS LIVE, AND SO NOW DOES `recordLambda` — 5d-iv T4 widened both directions
- * at once. §3.3's table used to say the TM methods exist only on `Session`, which is why this function
- * needed a guard `recordLambda` did not; `TmScratchHandle` now carries them too, so this guard admits a
- * second kind rather than naming exactly one — see `recordLambda`'s own doc for the guard it gained in
- * the same commit, for the opposite exclusion.
+ * **ITS `handle` ADMITS TWO KINDS.** §3.3's table used to say the TM methods exist only on `Session`; `TmScratchHandle`
+ * now carries them too, so this leg admits a second kind rather than naming exactly one — see `LAMBDA_RECORDING` for
+ * the guard the λ leg gained in the same commit, for the opposite exclusion.
  */
-async function recordTm(gen: number, emitInitial: boolean): Promise<boolean> {
-  // Deliberate silence: the caller's generation is already stale, so there is nothing to record for
-  // it — not the accidental kind this file shipped once before.
-  if (live?.gen !== gen) return false
-  // Deliberate silence, and a state no caller can currently reach: a `LambdaScratch` has no TM leg to
-  // record (§4.1 — one leg apiece), and each session has its own worker, so nothing posts a `run` and
-  // a `lambda-scratch` to the SAME thread. Written as a guard rather than an assertion because the
-  // one-live-session invariant is a property of this file and must not become a property of who calls
-  // it: the day a caller does mix them, the honest answer is "there is no TM leg here", not a throw
-  // from wasm about a method that does not exist.
-  if (live.kind === 'lambda-scratch') return false
-  if (!live.session.tmStatus().available) return false
-  // Deliberate silence: a rejected re-entry. Two callers can reach this function for the same leg
-  // (`onRun` then a concurrent `extend`, or two `extend`s) — the loop already in flight will post the
-  // frames, so this one has nothing to do.
-  if (recording.tm) return false
-  recording.tm = true
-  try {
-    let batch: TmState[] = []
-    if (emitInitial) {
-      const first = live.session.tmState(TM_RADIUS)
-      batch.push(first)
-      recorded.tm += tmFrameBytes(first)
+const TM_RECORDING: RecordLeg<Session | TmScratchHandle, TmState> = {
+  leg: 'tm',
+  handle: (gen) => {
+    if (live?.gen !== gen) return null
+    // THE `kind` HALF IS THE TYPE RESTATING THE `gen` HALF. Replacing what is live always claims a new generation
+    // (`onRun`, `onLambdaScratch` and `onTmScratch` all set `latest` before building), so a live thing that has become a
+    // `LambdaScratch` — the one kind with no TM leg — is already a live thing with a different `gen`. The checker cannot
+    // see that implication, and this is where it is written down rather than cast away.
+    switch (live.kind) {
+      case 'session':
+      case 'tm-scratch':
+        return live.session
+      case 'lambda-scratch':
+        // Deliberate silence, and a state no caller can currently reach: a `LambdaScratch` has no TM leg to record
+        // (§4.1 — one leg apiece), and each session has its own worker, so nothing posts a `run` and a `lambda-scratch`
+        // to the SAME thread. Written as an arm rather than an assertion because the one-live-session invariant is a
+        // property of this file and must not become a property of who calls it: the day a caller does mix them, the
+        // honest answer is "there is no TM leg here", not a throw from wasm about a method that does not exist.
+        return null
     }
+  },
+  available: (s) => s.tmStatus().available,
+  frame: (s) => s.tmState(TM_RADIUS),
+  bytes: tmFrameBytes,
+  step: (s) => s.stepTm(),
+  end: (s) => endOf(s.tmStatus().run),
+  reply: (gen, frames, done) => ({ kind: 'tm-frames', gen, frames, done }),
+}
 
-    for (;;) {
-      // Deliberate silence: superseded mid-loop. The caller who wanted these frames is gone.
-      //
-      // THE `kind` HALF IS THE TYPE RESTATING THE `gen` HALF. Replacing what is live always claims a
-      // new generation (`onRun`, `onLambdaScratch` and `onTmScratch` all set `latest` before building),
-      // so a live thing that has become a `LambdaScratch` — the one kind with no TM leg — is already a
-      // live thing with a different `gen`. The checker cannot see that implication, and this is where
-      // it is written down rather than cast away.
-      //
-      // PHRASED AS THE ALLOWED KINDS, NOT THE EXCLUDED ONE, for `recordLambda`'s loop guard's reason:
-      // the guard above this loop already narrows `live.kind` to exclude `'lambda-scratch'`, and that
-      // survives the `await` below, so re-checking `=== 'lambda-scratch'` here is a no-overlap
-      // comparison TS refuses to compile (TS2367).
-      if (live?.gen !== gen || (live.kind !== 'session' && live.kind !== 'tm-scratch')) return true
-      const s = live.session
-      let done: RecordEnd | null = null
-      let n = 0
-      while (n < RECORD_CHUNK) {
-        if (recorded.tm >= allowance.tm) {
-          done = 'budget'
-          break
-        }
-        if (!s.stepTm()) {
-          done = endOf(s.tmStatus().run)
-          break
-        }
-        const f = s.tmState(TM_RADIUS)
-        batch.push(f)
-        recorded.tm += tmFrameBytes(f)
-        n += 1
-      }
-      ctx.postMessage({ kind: 'tm-frames', gen, frames: batch, done })
-      batch = []
-      if (done !== null) return true
-      await yieldToEventLoop()
+/**
+ * The asm leg's pieces for `recordLeg`.
+ *
+ * **ONLY A `Session` HAS AN ASM LEG.** Neither copy kind carries one until part 5c, so its `handle` answers `null` for
+ * both, and `onExtend`'s asm arm returns before recording for either.
+ *
+ * **LIKE TM'S, A REPLAY OF A RUN WHOSE ANSWER IS KNOWN.** `compile` drove a cursor over the program to its end (spec
+ * amendment 13), so exhausting this leg's allowance costs history, not the value. Its end is `asmRecordEnd`'s, which
+ * names a full cap where `endOf` has none to name.
+ */
+const ASM_RECORDING: RecordLeg<Session, AsmState> = {
+  leg: 'asm',
+  handle: (gen) => {
+    if (live?.gen !== gen) return null
+    switch (live.kind) {
+      case 'session':
+        return live.session
+      case 'lambda-scratch':
+      case 'tm-scratch':
+        return null
     }
-  } finally {
-    // Same ownership check as `recordLambda`'s — see that comment.
-    if (live?.gen === gen) recording.tm = false
-  }
+  },
+  available: (s) => s.asmStatus().available,
+  frame: (s) => s.asmState(ASM_WINDOW),
+  bytes: asmFrameBytes,
+  step: (s) => s.stepAsm(),
+  end: (s) => asmRecordEnd(s.asmStatus()),
+  reply: (gen, frames, done) => ({ kind: 'asm-frames', gen, frames, done }),
+}
+
+/** Record the λ leg — `recordLeg`'s doc has the contract, and its answer is `recordLeg`'s. */
+function recordLambda(gen: number, emitInitial: boolean): Promise<boolean> {
+  return recordLeg(LAMBDA_RECORDING, worker, gen, emitInitial)
+}
+
+/** Record the TM leg, as `recordLambda` records the λ leg. */
+function recordTm(gen: number, emitInitial: boolean): Promise<boolean> {
+  return recordLeg(TM_RECORDING, worker, gen, emitInitial)
+}
+
+/** Record the asm leg, as `recordLambda` records the λ leg. */
+function recordAsm(gen: number, emitInitial: boolean): Promise<boolean> {
+  return recordLeg(ASM_RECORDING, worker, gen, emitInitial)
 }
 
 /**
@@ -521,22 +480,27 @@ function tmLeg(session: Session): TmLeg {
   return { status, value: session.tmValue() }
 }
 
+function asmLeg(session: Session): AsmLeg {
+  const status = session.asmStatus()
+  if (!status.available) return { status, value: null }
+  return { status, value: session.asmValue() }
+}
+
 async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
   await ready
   // FREED BEFORE THE NEXT COMPILE, not after. Two `Session` handles are never simultaneously live.
   dropLive()
-  recorded.lambda = 0
-  recorded.tm = 0
-  allowance.lambda = HISTORY_BYTES
-  allowance.tm = HISTORY_BYTES
-  // GENERATION-SCOPED BY RESET, not by the flag's own type. `recording` exists to stop two loops
-  // stepping ONE cursor; a loop belonging to a superseded generation is not competing for this
-  // session and must not hold a flag against it. Safe here because `onRun`'s synchronous prefix can
-  // only run once any prior loop has yielded, so no loop is mid-step when this executes — and a
-  // stale loop that resumes afterwards returns at its own `live?.gen !== gen` check without
-  // touching the flag it no longer owns.
-  recording.lambda = false
-  recording.tm = false
+  for (const leg of LEGS) {
+    recorded[leg] = 0
+    allowance[leg] = HISTORY_BYTES
+    // GENERATION-SCOPED BY RESET, not by the flag's own type. `recording` exists to stop two loops
+    // stepping ONE cursor; a loop belonging to a superseded generation is not competing for this
+    // session and must not hold a flag against it. Safe here because `onRun`'s synchronous prefix can
+    // only run once any prior loop has yielded, so no loop is mid-step when this executes — and a
+    // stale loop that resumes afterwards returns at its own `live?.gen !== gen` check without
+    // touching the flag it no longer owns.
+    recording[leg] = false
+  }
 
   // `compile` RUNS THE WHOLE TM LEG and is one uninterruptible call — measured at 0.21-75.44 ms
   // across the demo suite (`frame_cost_probe` section A). Off the main thread that can only delay the
@@ -555,8 +519,11 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
   live = { gen: req.gen, kind: 'session', session }
 
   const lambda = session.lambdaStatus()
+  const asm = session.asmStatus()
   const tm = session.tmStatus()
   const index = session.linkIndex(LAMBDA_BYTE_BUDGET)
+  // GUARDED FOR `tmProgram`'s REASON BELOW: `asmProgram` throws `AsmAbsent` for a program that does not lower.
+  const asmProgram = asm.available ? session.asmProgram() : null
   // GUARDED: `tmProgram` throws `TmAbsent` for a declined leg, and a thrown error inside this
   // async handler rejects it with nothing catching — no reply, and a caller that waits forever.
   // That is exactly the shape of the defect PR 3c's browser tier caught in `drive`.
@@ -569,9 +536,11 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
       kind: 'compiled',
       gen: req.gen,
       lambda,
+      asm,
       tm,
       declinedSpan: declinedSourceSpan(session, lambda),
       tmProgram,
+      asmProgram,
       tapeNames: tapeNames() as string[],
       linkIndex: index,
       tmText,
@@ -591,16 +560,26 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
       index.sourceNodeEnd.buffer,
       index.sourceNodeId.buffer,
       index.tmOwner.buffer,
+      index.asmOwner.buffer,
     ],
   )
 
+  // λ, THEN ASM, THEN TM (spec §5.4). asm is the cheapest leg per step, and TM's recording can run to its whole
+  // `HISTORY_BYTES` before a leg after it starts; the λ leg stays first, since its recording is what decides its value.
   await recordLambda(req.gen, true)
+  await recordAsm(req.gen, true)
   await recordTm(req.gen, true)
 
   // Deliberate silence: superseded while recording ran. The generation that wanted this result is gone.
-  // The `kind` half is the type restating the `gen` half — see `recordTm`'s loop for the argument.
+  // The `kind` half is the type restating the `gen` half — see `TM_RECORDING`'s `handle` for the argument.
   if (live?.gen !== req.gen || live.kind !== 'session') return
-  ctx.postMessage({ kind: 'result', gen: req.gen, lambda: lambdaLeg(live.session), tm: tmLeg(live.session) })
+  ctx.postMessage({
+    kind: 'result',
+    gen: req.gen,
+    lambda: lambdaLeg(live.session),
+    asm: asmLeg(live.session),
+    tm: tmLeg(live.session),
+  })
 }
 
 /**
@@ -610,9 +589,10 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
  * **THE SAME PROLOGUE AS `onRun`, AND THAT IS THE INVARIANT RATHER THAN A COPY.** `dropLive` first,
  * then the byte counters, then the `recording` flags: whatever this thread was holding is freed
  * BEFORE anything new is built, so the two-handle window stays strictly zero for a scratch exactly as
- * it does for a session (§4.2, and this module's own doc). Factoring the six lines into a shared
- * `reset()` was considered and refused — it would read as bookkeeping, when what it actually is is
- * the one place the invariant is enforced, and the two callers must be seen to enforce it.
+ * it does for a session (§4.2, and this module's own doc). Factoring the reset into a shared `reset()`
+ * was considered and refused while it was six lines, and a loop over `LEGS` changes nothing about why:
+ * it would read as bookkeeping, when what it actually is is the one place the invariant is enforced,
+ * and the two callers must be seen to enforce it.
  *
  * NO `linkIndex`, NO `tmProgram`, NO `tapeNames` IN THE REPLY, and no `result` after it. All four read
  * something §3.3 puts off this type (`self.map`, the TM leg, `self.ty`), which is why the reply is
@@ -620,8 +600,8 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
  * the wrong shape.
  *
  * IT DOES NOT `await recordTm`. A `LambdaScratch` has one leg; `recordTm` would answer `false` at its
- * own `kind` guard, and calling it to be told so would be a line asserting the absence rather than
- * respecting it.
+ * leg's `kind` guard (`TM_RECORDING`'s `handle`), and calling it to be told so would be a line asserting
+ * the absence rather than respecting it.
  *
  * **THE REPLAY HAPPENS INSIDE `lambdaScratchAt`, NOT HERE, AND THAT IS DELIBERATE.** Every method the
  * loop needs is on `LambdaScratchHandle`, so ~8 lines of TypeScript here would have worked and needed
@@ -633,12 +613,11 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
 async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch' }>): Promise<void> {
   await ready
   dropLive()
-  recorded.lambda = 0
-  recorded.tm = 0
-  allowance.lambda = HISTORY_BYTES
-  allowance.tm = HISTORY_BYTES
-  recording.lambda = false
-  recording.tm = false
+  for (const leg of LEGS) {
+    recorded[leg] = 0
+    allowance[leg] = HISTORY_BYTES
+    recording[leg] = false
+  }
 
   const { diagnostics, scratch, text } = lambdaScratchAt(req.src, req.step, LAMBDA_BYTE_BUDGET) as ForkedAtResult
   if (scratch === null) {
@@ -678,8 +657,8 @@ async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch'
  *
  * IT DOES NOT `await recordLambda`. A `TmScratch` has one leg; calling it to be told so at its own
  * `kind` guard would be a line asserting the absence rather than respecting it. IT DOES `await
- * recordTm`, WHICH `recordTm`'s WIDENED GUARD IS WHAT MAKES CORRECT — before this task `recordTm`
- * refused every `kind` but `'session'`, which would have made this call silently record nothing.
+ * recordTm`, WHICH THE TM LEG'S WIDENED GUARD (`TM_RECORDING`'s `handle`) IS WHAT MAKES CORRECT — when
+ * that guard refused every `kind` but `'session'`, this call would have silently recorded nothing.
  *
  * **DIAGNOSTICS ARE DROPPED ON THE SUCCESS PATH, LIKE `onLambdaScratch`'s — BUT CHECKED HERE RATHER
  * THAN ASSUMED, AND FOR A DIFFERENT REASON.** `onLambdaScratch`'s diagnostics on a non-null scratch are
@@ -698,12 +677,11 @@ async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch'
 async function onTmScratch(req: Extract<RunRequest, { kind: 'tm-scratch' }>): Promise<void> {
   await ready
   dropLive()
-  recorded.lambda = 0
-  recorded.tm = 0
-  allowance.lambda = HISTORY_BYTES
-  allowance.tm = HISTORY_BYTES
-  recording.lambda = false
-  recording.tm = false
+  for (const leg of LEGS) {
+    recorded[leg] = 0
+    allowance[leg] = HISTORY_BYTES
+    recording[leg] = false
+  }
 
   const { diagnostics, scratch, value } = tmScratch(req.src) as TmScratchResult
   if (scratch === null) {
@@ -741,8 +719,9 @@ async function onTmScratch(req: Extract<RunRequest, { kind: 'tm-scratch' }>): Pr
  * the scratch's own through `stepTm`, this loop the `TmValueRun` beside it — so taking turns delays each by the
  * other's chunk and changes neither's result.
  *
- * **EVERY CHUNK STARTS WITH `recordTm`'s LOOP GUARD**, reading `live` rather than a captured handle, so an edit
- * that replaced the scratch, or freed it, ends this loop at its next chunk rather than stepping a freed run.
+ * **EVERY CHUNK STARTS WITH A GUARD LIKE THE TM LEG'S** (`TM_RECORDING`'s `handle`, which `recordLeg` asks before
+ * every chunk), reading `live` rather than a captured handle, so an edit that replaced the scratch, or freed it, ends
+ * this loop at its next chunk rather than stepping a freed run.
  *
  * **NO RE-ENTRY FLAG, BECAUSE A BUILD IS A GENERATION.** `onTmScratch` is the only caller and starts one loop per
  * build, and every build claims a new generation (`SessionClient.supersede` on the main thread, `latest = req.gen`
@@ -776,33 +755,55 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
   allowance[req.leg] = recorded[req.leg] + HISTORY_BYTES
 
   let ran: boolean
-  if (req.leg === 'lambda') {
-    // TWO OF THE THREE KINDS TAKE THIS BRANCH, which is §3.3's "six methods transplant unchanged" doing
-    // its work: `[continue]` on a λ scratchpad's pane is the same two calls as on a session's, against
-    // the same method names on a different wasm type. That is why the pane needs no per-kind control
-    // strip for THOSE two — a `TmScratch` is the one occupant of `live` with no λ leg to extend.
-    //
-    // Deliberate silence, for `recordLambda`'s reason two functions up: a `TmScratch` has no λ leg, so
-    // there is no cap to raise and nothing to record. Returning before `allowance` is spent would be
-    // tidier still, but the allowance write above is harmless for a leg that never records and hoisting
-    // this check above it would put a `kind` test in front of the ordinary path — the same trade-off
-    // the TM branch below already makes in the other direction.
-    if (live.kind === 'tm-scratch') return
-    const s = live.session
-    // Raising a cap that was not hit is harmless — `raise_cap` is additive — but calling it on a
-    // DEPTH-refused cursor is pointless by contract, and this branch is never reached for one:
-    // `controls.ts` ships no continue affordance for `depth-refused`, which is why that state has no
-    // case here rather than a no-op one.
-    if (s.lambdaStatus().run === 'Capped') s.raiseLambdaCap(EXTEND_STEPS)
-    ran = await recordLambda(req.gen, false)
-  } else {
-    // A `LambdaScratch` has no TM leg, so there is no cap to raise and nothing to record.
-    // This guard excludes it from the TM branch, mirroring the λ branch's exclusion of
-    // `TmScratch` above.
-    if (live.kind === 'lambda-scratch') return
-    const s = live.session
-    if (s.tmStatus().run === 'Capped') s.raiseTmCap(EXTEND_STEPS, EXTEND_CELLS)
-    ran = await recordTm(req.gen, false)
+  switch (req.leg) {
+    case 'lambda': {
+      // TWO OF THE THREE KINDS TAKE THIS ARM, which is §3.3's "six methods transplant unchanged" doing
+      // its work: `[continue]` on a λ scratchpad's pane is the same two calls as on a session's, against
+      // the same method names on a different wasm type. That is why the pane needs no per-kind control
+      // strip for THOSE two — a `TmScratch` is the one occupant of `live` with no λ leg to extend.
+      //
+      // Deliberate silence, for `LAMBDA_RECORDING`'s reason: a `TmScratch` has no λ leg, so
+      // there is no cap to raise and nothing to record. Returning before `allowance` is spent would be
+      // tidier still, but the allowance write above is harmless for a leg that never records and hoisting
+      // this check above it would put a `kind` test in front of the ordinary path — the same trade-off
+      // the TM arm below already makes in the other direction.
+      if (live.kind === 'tm-scratch') return
+      const s = live.session
+      // Raising a cap that was not hit is harmless — `raise_cap` is additive — but calling it on a
+      // DEPTH-refused cursor is pointless by contract, and this arm is never reached for one:
+      // `controls.ts` ships no continue affordance for `depth-refused`, which is why that state has no
+      // case here rather than a no-op one.
+      if (s.lambdaStatus().run === 'Capped') s.raiseLambdaCap(EXTEND_STEPS)
+      ran = await recordLambda(req.gen, false)
+      break
+    }
+    case 'tm': {
+      // A `LambdaScratch` has no TM leg, so there is no cap to raise and nothing to record.
+      // This guard excludes it from the TM arm, mirroring the λ arm's exclusion of
+      // `TmScratch` above.
+      if (live.kind === 'lambda-scratch') return
+      const s = live.session
+      if (s.tmStatus().run === 'Capped') s.raiseTmCap(EXTEND_STEPS, EXTEND_CELLS)
+      ran = await recordTm(req.gen, false)
+      break
+    }
+    case 'asm': {
+      // ONLY A `Session` HAS AN ASM LEG (`ASM_RECORDING`'s doc), so a copy has no cap to raise and nothing to record.
+      if (live.kind !== 'session') return
+      const s = live.session
+      // THE STEP CAP ONLY. A run the stack, heap or saved frames stopped cannot be continued, and `controls.ts` offers
+      // no continue for one (`asmRecordEnd`'s ends), so this arm is never reached for it — and `raise_asm_cap` would not
+      // resume it if it were.
+      const status = s.asmStatus()
+      if (status.run === 'Capped' && status.cap === 'Steps') s.raiseAsmCap(EXTEND_STEPS)
+      ran = await recordAsm(req.gen, false)
+      break
+    }
+    default:
+      // A LEG WITH NO ARM RECORDS NOTHING AND POSTS NOTHING, as a stale generation does above. `unhandled`
+      // makes such a leg a type error, and the `return` is what keeps `ran` assigned on every path below.
+      unhandled(req.leg)
+      return
   }
   // A SUPPRESSED CALL MUST NOT POST A RESULT. `ran === false` means a loop already in flight for this
   // leg owns it — that loop will post its own frames and its own `result` when it finishes. Posting
@@ -819,7 +820,13 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
   // `RecordEnd`, are its whole answer; a headered TM buffer's value arrives separately, as the
   // `tm-value` replies `runValueLoop` posts, which `[continue]` neither starts nor extends.
   if (live.kind !== 'session') return
-  ctx.postMessage({ kind: 'result', gen: req.gen, lambda: lambdaLeg(live.session), tm: tmLeg(live.session) })
+  ctx.postMessage({
+    kind: 'result',
+    gen: req.gen,
+    lambda: lambdaLeg(live.session),
+    asm: asmLeg(live.session),
+    tm: tmLeg(live.session),
+  })
 }
 
 /**
@@ -854,25 +861,36 @@ function onLambdaTree(req: Extract<RunRequest, { kind: 'lambda-tree' }>): void {
 ctx.addEventListener('message', async (e: MessageEvent<RunRequest>) => {
   const req = e.data
   try {
-    if (req.kind === 'run') {
-      latest = req.gen
-      await onRun(req)
-    } else if (req.kind === 'lambda-scratch') {
-      // `latest` IS CLAIMED HERE TOO, AND THE ABANDON CHECK INSIDE `onLambdaScratch` DEPENDS ON IT.
-      // `latest` is what a build compares itself against after its uninterruptible wasm call returns;
-      // a build that never recorded itself as the newest request would free its own scratch every
-      // time, since `latest !== req.gen` would still name whatever ran before it.
-      latest = req.gen
-      await onLambdaScratch(req)
-    } else if (req.kind === 'tm-scratch') {
-      // `latest` IS CLAIMED HERE TOO, FOR `lambda-scratch`'s OWN REASON: the abandon check inside
-      // `onTmScratch` compares against it after `tmScratch`'s uninterruptible wasm call returns.
-      latest = req.gen
-      await onTmScratch(req)
-    } else if (req.kind === 'extend') {
-      await onExtend(req)
-    } else if (req.kind === 'lambda-tree') {
-      onLambdaTree(req)
+    // A `switch` ENDING IN `unhandled`, WHERE THIS WAS AN `else if` CHAIN WITH NO END. A request kind the
+    // chain did not name would have fallen off its end and been dropped with no reply and `tsc` green, which
+    // is where a new leg's requests arrive (Plan 7 part 5's spec, amendment 8); now it is a type error here.
+    switch (req.kind) {
+      case 'run':
+        latest = req.gen
+        await onRun(req)
+        break
+      case 'lambda-scratch':
+        // `latest` IS CLAIMED HERE TOO, AND THE ABANDON CHECK INSIDE `onLambdaScratch` DEPENDS ON IT.
+        // `latest` is what a build compares itself against after its uninterruptible wasm call returns;
+        // a build that never recorded itself as the newest request would free its own scratch every
+        // time, since `latest !== req.gen` would still name whatever ran before it.
+        latest = req.gen
+        await onLambdaScratch(req)
+        break
+      case 'tm-scratch':
+        // `latest` IS CLAIMED HERE TOO, FOR `lambda-scratch`'s OWN REASON: the abandon check inside
+        // `onTmScratch` compares against it after `tmScratch`'s uninterruptible wasm call returns.
+        latest = req.gen
+        await onTmScratch(req)
+        break
+      case 'extend':
+        await onExtend(req)
+        break
+      case 'lambda-tree':
+        onLambdaTree(req)
+        break
+      default:
+        unhandled(req)
     }
   } catch (err) {
     // A THROWN SESSION CALL MUST NOT BECOME SILENCE. Every wasm entry point is fallible at the

@@ -10,7 +10,8 @@ import { SessionClient } from '../../src/session-client'
 import type { Binding, LegState, PaneOption, PaneView, SessionEntry } from '../../src/sessions'
 import { PaneSlot, resetLegs, SessionRegistry } from '../../src/sessions'
 import { createTransport } from '../../src/transport'
-import type { LambdaState, TmProgram, TmState } from '../../src/types'
+import type { AsmState, LambdaState, TmProgram, TmState } from '../../src/types'
+import { frameOf } from './asm-fixtures'
 
 /**
  * THE BINDING MODEL, DRIVEN WITHOUT A BROWSER — plan T7's claim at the level where it is decided.
@@ -78,13 +79,18 @@ const tmFrame = (state: number): TmState => ({
  */
 function entry(
   id: SessionId,
-  opts: { label?: string; detached?: boolean; lambda?: string[]; tm?: number[] } = {},
+  opts: { label?: string; detached?: boolean; lambda?: string[]; asm?: number[]; tm?: number[] } = {},
 ): SessionEntry {
-  const legs: { lambda?: LegState<LambdaState>; tm?: LegState<TmState> } = {}
+  const legs: { lambda?: LegState<LambdaState>; asm?: LegState<AsmState>; tm?: LegState<TmState> } = {}
   if (opts.lambda !== undefined) {
     const l = leg<LambdaState>()
     for (const [i, text] of opts.lambda.entries()) l.hist.push(lambdaFrame(text, i), 1)
     legs.lambda = l
+  }
+  if (opts.asm !== undefined) {
+    const a = leg<AsmState>()
+    for (const [i, pc] of opts.asm.entries()) a.hist.push(frameOf({ step: i, pc }), 1)
+    legs.asm = a
   }
   if (opts.tm !== undefined) {
     const t = leg<TmState>()
@@ -102,6 +108,7 @@ function entry(
     legs,
     tmProgram: null,
     tmScratch: null,
+    asmProgram: null,
   }
 }
 
@@ -693,7 +700,7 @@ describe('resetLegs', () => {
     lambdaLeg.done = 'ended'
     lambdaLeg.playing = true
 
-    resetLegs(e.legs, null, null, 'not compiled')
+    resetLegs(e.legs, {}, 'not compiled')
 
     expect(lambdaLeg.hist.length).toBe(0)
     expect(tmLeg.hist.length).toBe(0)
@@ -701,6 +708,26 @@ describe('resetLegs', () => {
     expect(lambdaLeg.playing).toBe(false)
     expect(lambdaLeg.status).toEqual({ available: false, reason: 'not compiled' })
     expect(tmLeg.status).toEqual({ available: false, reason: 'not compiled' })
+  })
+
+  /**
+   * THE THIRD LEG TOO. A recompile that left the asm leg's frames would step through a program the editor no longer
+   * holds; the loop reads `LEGS`, and this holds it to the leg the list gained last.
+   */
+  it('clears every leg, asm included, and gives each the status its reply sent', () => {
+    const e = entry('source', { lambda: ['a'], asm: [0, 1, 2], tm: [0] })
+    const asmLeg = e.legs.asm
+    if (asmLeg === undefined) throw new Error('the fixture built the asm leg')
+    asmLeg.done = 'capped'
+    asmLeg.playing = true
+
+    resetLegs(e.legs, { asm: { available: false, reason: 'lowering failed' } }, 'not compiled')
+
+    expect(asmLeg.hist.length).toBe(0)
+    expect(asmLeg.done).toBe(null)
+    expect(asmLeg.playing).toBe(false)
+    expect(asmLeg.status).toEqual({ available: false, reason: 'lowering failed' })
+    expect(e.legs.lambda?.status).toEqual({ available: false, reason: 'not compiled' })
   })
 
   /**
@@ -722,8 +749,8 @@ describe('resetLegs', () => {
 
     const lambda = { available: true, reason: 'ok', node: null, run: 'Running' } as const
     const tm = { available: true, reason: 'ok', width: 4, run: 'Running', total_steps: null } as const
-    resetLegs(lambdaOnly.legs, lambda, tm)
-    resetLegs(tmOnly.legs, lambda, tm)
+    resetLegs(lambdaOnly.legs, { lambda, tm })
+    resetLegs(tmOnly.legs, { lambda, tm })
 
     expect(lambdaOnly.legs.tm).toBeUndefined()
     expect(lambdaLeg.status).toEqual({ available: true, reason: 'ok' })

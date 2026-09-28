@@ -456,6 +456,17 @@ export function createTransport(deps: {
     // held by the pane for the life of the page, so there is no later moment at which a spread could
     // take effect anyway. The second reason is `PaneSlot`'s: a slot's leg cannot change, so a fact
     // decided from it at construction cannot go stale the way one decided from its session would.
+    // THE ASM VIEW'S ROWS LINK THE SAME WAY, BY THE INSTRUCTION'S OWNER (Plan 7 part 5 spec §6.6) — an instruction
+    // `defunc` minted has none, and `setLinkTo` says so on the status line rather than leaving it blank.
+    ...(slot.binding.leg === 'asm'
+      ? {
+          linkInstr: (pc: number) => {
+            const wiring = linkWiring()
+            if (!wiring.linkable || wiring.index === null) return
+            wiring.setLinkTo(wiring.index.nodeForInstr(pc), 'asm')
+          },
+        }
+      : {}),
     ...(slot.binding.leg === 'tm'
       ? {
           linkState: (stateId: number) => {

@@ -15,9 +15,9 @@
 
 mod session;
 
-/// The seven wire types this crate declares, re-exported for `tests/ts_bindings.rs`.
+/// The eight wire types this crate declares, re-exported for `tests/ts_bindings.rs`.
 ///
-/// **FEATURE-GATED, AND NARROWED TO SEVEN NAMES, BECAUSE IT EXISTS FOR A GATE.** `mod session` is
+/// **FEATURE-GATED, AND NARROWED TO EIGHT NAMES, BECAUSE IT EXISTS FOR A GATE.** `mod session` is
 /// private and stays private: `Session`, `Compiled`, `TmScratch` and the rest are this crate's
 /// internals, reached from JavaScript through `#[wasm_bindgen]` rather than from Rust. But the two
 /// fidelity gates are integration tests, and an integration test links against this crate the way any
@@ -27,7 +27,7 @@ mod session;
 /// canonical-line check. Under default features — which is every browser build — this line does not
 /// exist.
 #[cfg(feature = "ts")]
-pub use session::{Decoded, LambdaStatus, ReductionStatus, RunStatus, TmScratchStatus, TmStatus, ValueRun};
+pub use session::{AsmStatus, Decoded, LambdaStatus, ReductionStatus, RunStatus, TmScratchStatus, TmStatus, ValueRun};
 
 use redextape_core::tm::EncodingKind;
 use serde::Serialize;
@@ -38,7 +38,7 @@ pub fn init() {
     console_error_panic_hook::set_once();
 }
 
-/// A compiled program with both legs already built. Owns the cursors; every method below reads or
+/// A compiled program with every leg already built. Owns the cursors; every method below reads or
 /// advances them.
 #[wasm_bindgen]
 pub struct Session(session::Session);
@@ -326,11 +326,11 @@ pub fn tape_names() -> Result<JsValue, JsValue> {
 /// below shares, so no method invents its own wording and none of them can panic instead.
 ///
 /// TAKES `SessionError` BY VALUE, AND NOT BECAUSE IT NEEDS TO CONSUME IT: this is used as a bare
-/// function item at every one of its twelve call sites below (`.map_err(err)`), which requires
+/// function item at every one of its call sites below (`.map_err(err)`), which requires
 /// `FnOnce(SessionError) -> JsValue` — a `&SessionError`-taking version does not satisfy that and
-/// would force a closure (`.map_err(|e| err(&e))`) at all twelve. `SessionError` is a small,
-/// cheap-to-copy enum (two unit variants and one `{ usize, usize }`), so there is no cost this would
-/// actually save; the twelve-site churn for a private helper is not worth it.
+/// would force a closure (`.map_err(|e| err(&e))`) at every one. `SessionError` is a small,
+/// cheap-to-copy enum (unit variants and one `{ usize, usize }`), so there is no cost this would
+/// actually save; the churn at every site for a private helper is not worth it.
 #[allow(clippy::needless_pass_by_value)]
 fn err(e: session::SessionError) -> JsValue {
     JsValue::from_str(&e.to_string())
@@ -562,6 +562,75 @@ impl Session {
         to_value(&self.0.tm_value().map_err(err)?)
     }
 
+    // --- the asm leg --------------------------------------------------------------------------
+
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for this
+    /// crate's own types.
+    #[wasm_bindgen(js_name = asmStatus)]
+    pub fn asm_status(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.asm_status())
+    }
+
+    /// # Errors
+    ///
+    /// Returns `Err` when this session's asm leg is absent — check `asmStatus().available` first.
+    #[wasm_bindgen(js_name = asmProgram)]
+    pub fn asm_program(&self) -> Result<JsValue, JsValue> {
+        let p = self.0.asm_program().map_err(err)?;
+        to_value(&p)
+    }
+
+    /// # Errors
+    ///
+    /// Returns `Err` when this session's asm leg is absent — check `asmStatus().available` first. No
+    /// `to_value` call is involved: the return type is a bare `bool`.
+    #[wasm_bindgen(js_name = stepAsm)]
+    pub fn step_asm(&mut self) -> Result<bool, JsValue> {
+        self.0.step_asm().map_err(err)
+    }
+
+    /// `asmState(window)` -> `AsmState`, where `window` is an `AsmWindow` — `{ locals, args, frames, cells,
+    /// boxes }`, each a count.
+    ///
+    /// **ONE OBJECT RATHER THAN FIVE NUMBERS**, read with `serde_wasm_bindgen::from_value`: five positional
+    /// counts are five chances to transpose two, and the names say which bound is which at the call site.
+    /// Deserializing it is marshalling, which is why it happens here and not in `session.rs`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` when this session's asm leg is absent, and when `window` is not an `AsmWindow` — a
+    /// missing field, or a count that is not a non-negative integer — with the deserializer's message.
+    #[wasm_bindgen(js_name = asmState)]
+    pub fn asm_state(&self, window: JsValue) -> Result<JsValue, JsValue> {
+        let window: redextape_core::viewmodel::AsmWindow = serde_wasm_bindgen::from_value(window)
+            .map_err(|e| JsValue::from_str(&format!("asmState: not an AsmWindow: {e}")))?;
+        let st = self.0.asm_state(window).map_err(err)?;
+        to_value(&st)
+    }
+
+    /// `u32` and widened, for the reason `raiseLambdaCap` above records.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` when this session's asm leg is absent. Raising the cap on a run it cannot resume is
+    /// harmless, so this only ever fires for a session with no asm leg at all.
+    #[wasm_bindgen(js_name = raiseAsmCap)]
+    pub fn raise_asm_cap(&mut self, extra_steps: u32) -> Result<(), JsValue> {
+        self.0.raise_asm_cap(u64::from(extra_steps)).map_err(err)
+    }
+
+    /// # Errors
+    ///
+    /// Returns `Err` when this session's asm leg is absent — check `asmStatus().available` first. A run
+    /// with no end yet is NOT an error, and neither is a fault: they decode as `Decoded::Unfinished` and
+    /// `Decoded::Fault`.
+    #[wasm_bindgen(js_name = asmValue)]
+    pub fn asm_value(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.asm_value().map_err(err)?)
+    }
+
     // --- the reference leg --------------------------------------------------------------------
 
     /// BLOCKS THE MAIN THREAD FOR UP TO 5,000,000 INTERPRETER STEPS, and cannot be chunked — see
@@ -611,7 +680,8 @@ impl Session {
     /// clone of 48,332 objects is not.
     ///
     /// This is 5a-ii's row-index trade — one `Int32Array` rather than 127,881 row objects — applied
-    /// to all three legs at once.
+    /// to every leg at once. `tmOwner` and `asmOwner` are two columns of one kind, an owner per state and
+    /// an owner per instruction, `-1` for none, and one closure builds both.
     ///
     /// # Errors
     ///
@@ -633,7 +703,7 @@ impl Session {
     // `.forgejo/workflows/ci.yml`'s browser job says it again ("`#[wasm_bindgen]`'s generated glue ...
     // only execute[s] in a browser"). The lint still fires because clippy also lints the `rlib` build,
     // which targets the host's 64-bit `usize` — a target this function is never actually run compiled
-    // for. The lengths cast here (span/node counts, tape-owner counts) carry no separate numeric bound
+    // for. The lengths cast here (span and node counts, the two owner columns) carry no separate numeric bound
     // of their own; the bound that matters is this one, on the target, not on the value.
     #[allow(clippy::cast_possible_truncation)]
     #[wasm_bindgen(js_name = linkIndex)]
@@ -666,10 +736,13 @@ impl Session {
         let (lam_start, lam_end, lam_id) = pairs(&index.lambda_nodes);
         let (src_start, src_end, src_id) = pairs(&index.source_nodes);
 
-        let owner = js_sys::Int32Array::new_with_length(index.tm_owner.len() as u32);
-        for (i, o) in index.tm_owner.iter().enumerate() {
-            owner.set_index(i as u32, *o);
-        }
+        let owners = |v: &[i32]| {
+            let column = js_sys::Int32Array::new_with_length(v.len() as u32);
+            for (i, o) in v.iter().enumerate() {
+                column.set_index(i as u32, *o);
+            }
+            column
+        };
 
         let out = js_sys::Object::new();
         let set = |k: &str, v: &JsValue| js_sys::Reflect::set(&out, &JsValue::from_str(k), v);
@@ -691,7 +764,8 @@ impl Session {
         set("sourceNodeStart", &src_start)?;
         set("sourceNodeEnd", &src_end)?;
         set("sourceNodeId", &src_id)?;
-        set("tmOwner", &owner)?;
+        set("tmOwner", &owners(&index.tm_owner))?;
+        set("asmOwner", &owners(&index.asm_owner))?;
         Ok(out.into())
     }
 }

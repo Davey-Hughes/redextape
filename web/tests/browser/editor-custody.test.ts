@@ -69,6 +69,7 @@ function lambdaSession(id: SessionId): SessionEntry {
     legs: { lambda: leg },
     tmProgram: null,
     tmScratch: null,
+    asmProgram: null,
   }
 }
 

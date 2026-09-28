@@ -83,13 +83,13 @@ beforeAll(async () => {
   await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
 })
 
-// Back to the default three views before each gesture, since several of these change the tree.
+// Back to the default four views before each gesture, since several of these change the tree.
 beforeEach(async () => {
   document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
   await until(
     () =>
-      document.querySelectorAll('[data-leaf]').length === 3 &&
+      document.querySelectorAll('[data-leaf]').length === 4 &&
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle',
     'the default views',
   )

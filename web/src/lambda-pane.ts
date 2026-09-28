@@ -682,7 +682,7 @@ export class LambdaPane implements EditablePane {
    * one place those live.
    *
    * `Binding<Leg>` RATHER THAN `Binding<'lambda'>`, THOUGH THIS IS THE λ PANE. The list is pairs for
-   * BOTH legs now (`SessionRegistry.pairs()`), so the pair in force has to be spelled in the same
+   * EVERY leg now (`SessionRegistry.pairs()`), so the pair in force has to be spelled in the same
    * vocabulary the list is — a `Binding<'lambda'>` here would say the current pair can only ever name
    * this pane's own leg, which is the claim the widened control exists to stop making. The pane's
    * frame type is what pins its renderer; this parameter pins nothing.

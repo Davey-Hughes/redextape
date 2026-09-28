@@ -16,6 +16,8 @@
  * indistinguishable from a file with no problems in it. Every other field here fails visibly.
  */
 
+import type { PaneKind } from './panes'
+
 /** A request id. Monotonic, assigned by `LspClient`; `0` is never used, so it can mean "none". */
 export type RequestId = number
 
@@ -81,12 +83,23 @@ export const LANGUAGE_IDS = ['redextape', 'redextape_lambda', 'redextape_tm', 'r
 
 export type LanguageId = (typeof LANGUAGE_IDS)[number]
 
-/** The app's three editor kinds, and the language each one holds. `asm` has no editor until part 5. */
-export const LANGUAGE_OF_PANE = {
+/**
+ * The language each kind of view's editor holds. An asm view has no editor until part 5c's asm copies, whose editor
+ * takes `redextape_asm` from here (Plan 7 part 5 spec §5.5).
+ *
+ * **KEYED BY `PaneKind`, WHERE IT USED TO SPELL `'source' | 'lambda' | 'tm'` OUT.** The spelled union was a
+ * second copy of `PaneKind` that nothing held to the first, so a new pane kind would have left this map
+ * without it and `transport.ts`'s lookups by leg reading `undefined` as a language. Now a kind with no language
+ * is a type error here (`legs.ts` has the class of bug) — and only here: an annotation rather than the
+ * `as const satisfies` its neighbours take, for the reason `legs.ts`'s `LEG_NAME` gives. Those neighbours are
+ * looked up by exactly the keys they have; this one is looked up by `Leg`.
+ */
+export const LANGUAGE_OF_PANE: Readonly<Record<PaneKind, LanguageId>> = {
   source: 'redextape',
   lambda: 'redextape_lambda',
+  asm: 'redextape_asm',
   tm: 'redextape_tm',
-} as const satisfies Record<'source' | 'lambda' | 'tm', LanguageId>
+}
 
 /**
  * How each language reads in a sentence shown to a user — the colourer's failure notice is the one
@@ -94,7 +107,7 @@ export const LANGUAGE_OF_PANE = {
  *
  * **THE WORDS ARE THE APP'S EXISTING ONES, NOT NEW ONES**, per the umbrella's rule that every
  * user-visible word is the umbrella's: `source` is what `main.ts`'s `layoutChanged` calls the source
- * view, and `λ`/`TM` are `view-header.ts`'s `legLabel` — the same two glyphs every view title and
+ * view, and `λ`/`TM` are `legs.ts`'s `LEG_NAME` — the same two glyphs every view title and
  * every menu item already carries. A second vocabulary for the same three surfaces is what this map
  * exists to avoid.
  *

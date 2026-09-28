@@ -31,6 +31,15 @@ import type { Span } from '../bindings/Span'
 import type { TokenClass } from '../bindings/TokenClass'
 import type { ValueRun } from '../bindings/ValueRun'
 
+export type { AsmBox } from '../bindings/AsmBox'
+export type { AsmCallFrame } from '../bindings/AsmCallFrame'
+export type { AsmCap } from '../bindings/AsmCap'
+export type { AsmCell } from '../bindings/AsmCell'
+export type { AsmProgram } from '../bindings/AsmProgram'
+export type { AsmState } from '../bindings/AsmState'
+export type { AsmStatus } from '../bindings/AsmStatus'
+export type { AsmWindow } from '../bindings/AsmWindow'
+export type { AsmWord } from '../bindings/AsmWord'
 export type { Cut } from '../bindings/Cut'
 export type { Diagnostic } from '../bindings/Diagnostic'
 export type { LambdaState } from '../bindings/LambdaState'
@@ -45,6 +54,7 @@ export type { TmProgram } from '../bindings/TmProgram'
 export type { TmScratchStatus } from '../bindings/TmScratchStatus'
 export type { TmState } from '../bindings/TmState'
 export type { TmStatus } from '../bindings/TmStatus'
+export type { WordTag } from '../bindings/WordTag'
 export type { Decoded, Owner, Span, TokenClass, ValueRun }
 
 /**

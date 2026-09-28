@@ -54,12 +54,21 @@ function lambdaSession(id: SessionId, label: string, text: string, detached: boo
   const hist = new History<LambdaState>(1_000_000)
   hist.push({ text, spans: [], cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
   const leg: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, playing: false }
-  return { id, label, detached, client: fakeClient(), legs: { lambda: leg }, tmProgram: null, tmScratch: null }
+  return {
+    id,
+    label,
+    detached,
+    client: fakeClient(),
+    legs: { lambda: leg },
+    tmProgram: null,
+    tmScratch: null,
+    asmProgram: null,
+  }
 }
 
 /**
- * A session with BOTH legs — the source session's shape, and the one the λ-only helper above cannot
- * make. It exists for the grouped-pairs test alone: a registry in which every session is λ-only can
+ * A session with a λ and a TM leg — the source session's shape before the asm leg, and one the λ-only
+ * helper above cannot make. It exists for the grouped-pairs test alone: a registry in which every session is λ-only can
  * never produce a TM `<optgroup>`, so the omission it asserts would hold vacuously.
  */
 function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
@@ -82,6 +91,7 @@ function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
     // `pane-host.ts`, so nothing in this file reads it.
     tmProgram: null,
     tmScratch: null,
+    asmProgram: null,
   }
 }
 
@@ -244,8 +254,8 @@ describe('the title-selector', () => {
    *
    * **IT IS NOT TODAY'S APP, AND THIS PARAGRAPH SAID IT WAS — whole-branch review, M1.** It read "It is
    * also today's app exactly: one session, so no selector". The selector lists `(leg, session)` PAIRS,
-   * and `main.ts` registers the program session with BOTH legs, so `pairs()` contributes two on its own
-   * and the plain-text branch is unreachable in the running app (`main.ts`'s own comment on the
+   * and `main.ts` registers the program session with all three legs, so `pairs()` contributes three on
+   * its own and the plain-text branch is unreachable in the running app (`main.ts`'s own comment on the
    * registration says so). What reaches it here is this file's λ-ONLY source session, a shape the app
    * never builds — the same kind of fixture the file's header comment already flags for the two-pane
    * case. The branch is still worth holding, because `viewHeader` offers it and a later leg arrangement

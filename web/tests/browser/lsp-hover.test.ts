@@ -314,7 +314,19 @@ describe('hover, through the app', () => {
     await until(() => tooltipTextOf(view) === null, 'the pointer tooltip to close')
   })
 
+  /**
+   * **THE TM VIEW GETS THE WHOLE ROW, AND THE HOVER'S TARGET IS ASSERTED ON SCREEN BEFORE THE POINTER MOVES.**
+   * The default tree puts asm beside TM (Plan 7 part 5 spec §3, row 4), and in half of this suite's 414px viewport
+   * `MACHINE`'s first rule runs past the copy's editor: `q1` sat at x 556–574, right of the viewport, where
+   * nothing answers a hit test. `userEvent.hover` then scrolls it into view as part of the gesture — the editor
+   * scrolled 162px sideways and the span moved up a line with it — and the pointer landed on the second rule, whose
+   * tooltip reads `goto q0`. So `asm-0` is closed through its own `✕` first, which gives TM the row the default
+   * used to give it, and the precondition is the fact the gesture needs: the point at the centre of `q1` hits
+   * `q1`.
+   */
   it('pointer hover over a TM rule names the goto target', async () => {
+    document.querySelector<HTMLButtonElement>('[data-leaf="asm-0"] button.view-close')?.click()
+    await until(() => document.querySelector('[data-leaf="asm-0"]') === null, 'the asm view to close')
     const pane = paneHost('tm-0')
     const editor = await makeCopy(pane)
     retype(editor, MACHINE)
@@ -329,6 +341,11 @@ describe('hover, through the app', () => {
     await until(() => gotoTarget() !== undefined, "the rule's goto target to be coloured")
     const span = gotoTarget()
     if (span === undefined) throw new Error('no .tok-statename span reading q1')
+    const at = span.getBoundingClientRect()
+    const hit = document.elementFromPoint((at.left + at.right) / 2, (at.top + at.bottom) / 2)
+    expect(hit !== null && span.contains(hit), `q1 is not on screen to hover: its box is ${JSON.stringify(at)}`).toBe(
+      true,
+    )
 
     await retryUntilTooltipOpens(editor, () => userEvent.hover(span))
     expect(tooltipTextOf(editor)).toContain('q1')

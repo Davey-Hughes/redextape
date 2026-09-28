@@ -31,8 +31,8 @@
 //!
 //! THE EXPECTED VALUES ARE PINNED IN `session.rs`'s NATIVE TESTS TOO, deliberately: "the values that
 //! come back are the ones a native run produces" is only a claim if both sides name the same numbers.
-//! `let x = 40; x + 2` reduces in 7 β-steps to Church 42 and runs 2,870 δ-steps on a 5-tape machine of
-//! 123 states fitted to width 64.
+//! `let x = 40; x + 2` reduces in 7 β-steps to Church 42, runs 2,870 δ-steps on a 5-tape machine of
+//! 123 states fitted to width 64, and runs 5 asm instructions.
 
 // Test target: `wasm_bindgen_test` functions are not `#[test]` functions, so `clippy.toml`'s
 // `allow-expect-in-tests` does not reach them, and neither it nor `allow-panic-in-tests` reaches the
@@ -922,7 +922,7 @@ fn tape_names_are_five_strings_in_tape_order() {
     assert_eq!(names.get(4).as_string().as_deref(), Some("BOX"));
 }
 
-/// Task 6: `linkIndex(byteBudget)` must cross as one string, one boolean, and TEN TYPED ARRAYS — never
+/// Task 6: `linkIndex(byteBudget)` must cross as one string, one nullable cut, and ELEVEN TYPED ARRAYS — never
 /// as serde's arrays-of-objects. That trade is measured, not stylistic: `list60`'s index is 552 KB as
 /// objects against ~220 KB as typed arrays, and `prog200`'s is 1.9 MB against ~689 KB. A plain JS
 /// `Array` would still satisfy a naive length check, which is why every field below is checked with
@@ -957,6 +957,7 @@ fn link_index_crosses_as_typed_arrays() {
         "lambdaSpanClass must be a Uint8Array"
     );
     assert!(get(&index, "tmOwner").is_instance_of::<js_sys::Int32Array>(), "tmOwner must be an Int32Array");
+    assert!(get(&index, "asmOwner").is_instance_of::<js_sys::Int32Array>(), "asmOwner must be an Int32Array");
 
     // The three legs must be internally consistent: every triad's three columns share one length, and
     // `tmOwner`'s length is checked against a count obtained INDEPENDENTLY rather than merely positive
@@ -983,6 +984,13 @@ fn link_index_crosses_as_typed_arrays() {
         len("tmOwner"),
         f64::from(states.length()),
         "tmOwner must have exactly one entry per state tmProgram reports, obtained independently"
+    );
+    let asm_program = call(&session, "asmProgram", &[]);
+    let listing: Array = get(&asm_program, "listing").unchecked_into();
+    assert_eq!(
+        len("asmOwner"),
+        f64::from(listing.length()),
+        "asmOwner must have exactly one entry per instruction asmProgram lists, obtained independently"
     );
 }
 
@@ -1026,6 +1034,7 @@ fn link_index_survives_a_declined_lambda_leg() {
     }
     assert!(len("sourceNodeStart") > 0.0, "the source leg does not depend on the λ backend");
     assert!(len("tmOwner") > 0.0, "the TM leg compiled fine and owns at least one state");
+    assert!(len("asmOwner") > 0.0, "the program lowers to asm, so its instructions have owners too");
 }
 
 /// n=2,900 rather than the investigation's 2,690, because THIS test runs on the page thread, whose
@@ -1328,4 +1337,125 @@ mod scratch_methods_that_must_not_exist {
         (s.tm_value(), s.source_span(0), s.link_index(0))
     }
     const _: fn(&redextape_wasm::TmScratch) -> (Absent, Absent, Absent) = tm_scratch_has_none_of_them;
+}
+
+/// An `AsmWindow` as a renderer builds one: a plain JS object with five named counts.
+fn asm_window(locals: u32, args: u32, frames: u32, cells: u32, boxes: u32) -> JsValue {
+    let w = Object::new();
+    for (k, v) in [("locals", locals), ("args", args), ("frames", frames), ("cells", cells), ("boxes", boxes)] {
+        Reflect::set(&w, &JsValue::from_str(k), &JsValue::from_f64(f64::from(v))).unwrap();
+    }
+    w.into()
+}
+
+/// The asm leg through the glue, every method a renderer calls, on the sample `session.rs` pins natively:
+/// 5 instructions over a 5-line listing, ending with 42 in `rr`.
+///
+/// **THE WIRE SHAPES, MEASURED RATHER THAN DESIGNED**: counts cross as numbers and a missing one as `null`
+/// (`cap`, `wrote`, `next` at the end); a word crosses as a STRING and its tag as the variant's name, which
+/// is `AsmWord`'s whole argument; the value is `Decoded`'s tagged object; `raiseAsmCap` takes a plain
+/// number, so the call succeeding is that assertion (a `u64` parameter would throw converting it to a
+/// `BigInt`); and `asmState` takes the window as a JS object, which a malformed one makes it throw.
+#[wasm_bindgen_test]
+fn the_asm_leg_crosses_the_boundary() {
+    let (_, session) = compile("let x = 40; x + 2");
+
+    let status = call(&session, "asmStatus", &[]);
+    assert_eq!(get(&status, "available"), JsValue::TRUE);
+    assert_eq!(get(&status, "reason").as_string().as_deref(), Some(""));
+    assert_eq!(get(&status, "run").as_string().as_deref(), Some("Running"), "a fresh cursor has not ended");
+    assert!(get(&status, "cap").is_null(), "no cap beside a running cursor, and `None` crosses as null");
+    assert_eq!(num(&status, "total_steps"), 5.0, "the whole run's length, from compile's own run");
+
+    let program = call(&session, "asmProgram", &[]);
+    let listing: Array = get(&program, "listing").unchecked_into();
+    assert_eq!(listing.length(), 5, "one line per instruction");
+    assert_eq!(listing.get(0).as_string().as_deref(), Some("li\tr0, #40"), "`print_instr`'s text, tab and all");
+    assert!(get(&program, "labels").is_instance_of::<Array>(), "no labels still crosses as an array");
+
+    let window = asm_window(64, 16, 8, 16, 16);
+    let first = call(&session, "asmState", std::slice::from_ref(&window));
+    assert_eq!((num(&first, "step"), num(&first, "pc"), num(&first, "next")), (0.0, 0.0, 0.0));
+    assert!(get(&first, "wrote").is_null(), "nothing written before the first step");
+    assert!(get(&first, "source_node").as_f64().is_some(), "instruction 0's owner crosses as a number");
+    let rr = get(&first, "rr");
+    assert_eq!(get(&rr, "word").as_string().as_deref(), Some("0"), "a word is a string");
+    assert_eq!(get(&rr, "tag").as_string().as_deref(), Some("Value"), "a tag is its variant's name");
+    for list in ["locals", "written", "args", "frames", "cells", "boxes"] {
+        assert!(get(&first, list).is_instance_of::<Array>(), "{list} crosses as an array");
+    }
+
+    let mut steps = 0;
+    while call(&session, "stepAsm", &[]) == JsValue::TRUE {
+        steps += 1;
+        assert!(steps <= 100, "this program halts in 5 instructions");
+    }
+    assert_eq!(steps, 5, "the instruction count crosses the boundary intact");
+    let ended = call(&session, "asmStatus", &[]);
+    assert_eq!(get(&ended, "run").as_string().as_deref(), Some("Ended"), "halted, not capped");
+
+    let last = call(&session, "asmState", &[window]);
+    assert_eq!(num(&last, "step"), 5.0);
+    assert_eq!(get(&get(&last, "rr"), "word").as_string().as_deref(), Some("42"));
+    assert!(get(&last, "next").is_null(), "a halted run has nothing left to run, and says so as null");
+
+    let value = call(&session, "asmValue", &[]);
+    assert_eq!(get(&get(&value, "Value"), "text").as_string().as_deref(), Some("42"), "got {value:?}");
+    call(&session, "raiseAsmCap", &[JsValue::from_f64(1000.0)]);
+
+    let no_boxes = asm_window(1, 1, 1, 1, 1);
+    Reflect::delete_property(no_boxes.unchecked_ref::<Object>(), &JsValue::from_str("boxes")).unwrap();
+    let f: Function = get(&session, "asmState").unchecked_into();
+    for bad in [JsValue::from_str("64"), no_boxes] {
+        let args = Array::new();
+        args.push(&bad);
+        assert!(Reflect::apply(&f, &session, &args).is_err(), "asmState must refuse {bad:?}");
+    }
+}
+
+/// `x` squared seven times: 2^128, which `mul` saturates to `u64::MAX` on its seventh square.
+const SATURATES: &str = "let mut x = 2; let mut i = 0; while i < 7 { x = x * x; i = i + 1; } x";
+
+/// A saturated register crosses whole. `x` squares itself seven times, past 2^64, where `mul` saturates at
+/// `u64::MAX`; as a JS number that word would not survive `serde-wasm-bindgen`, which refuses a `u64` above
+/// `Number.MAX_SAFE_INTEGER` (spec amendment 13), so this frame reaching JavaScript at all is half the
+/// assertion and the exact twenty digits are the other half.
+#[wasm_bindgen_test]
+fn a_saturated_word_crosses_as_its_exact_decimal_text() {
+    let (_, session) = compile(SATURATES);
+    while call(&session, "stepAsm", &[]) == JsValue::TRUE {}
+    let st = call(&session, "asmState", &[asm_window(64, 16, 8, 16, 16)]);
+    assert_eq!(get(&get(&st, "rr"), "word").as_string().as_deref(), Some("18446744073709551615"));
+    let value = call(&session, "asmValue", &[]);
+    assert_eq!(get(&get(&value, "Value"), "text").as_string().as_deref(), Some("18446744073709551615"));
+}
+
+/// A program the asm lowering refuses: the status says why with every other field `null`, and every asm
+/// method throws rather than aborting the module. A 2,048-element list literal nests past the lowering's
+/// depth guard.
+#[wasm_bindgen_test]
+fn a_declined_asm_leg_reports_why_and_its_methods_throw() {
+    let src = format!("[{}]", (0..2048).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
+    let (diagnostics, session) = compile(&src);
+    assert_eq!(diagnostics.length(), 0, "well-formed; only the backends refuse it");
+    let status = call(&session, "asmStatus", &[]);
+    assert_eq!(get(&status, "available"), JsValue::FALSE);
+    assert!(get(&status, "reason").as_string().is_some_and(|r| !r.is_empty()), "the reason survives the crossing");
+    for field in ["run", "cap", "total_steps"] {
+        assert!(get(&status, field).is_null(), "{field} is null for an absent leg, got {:?}", get(&status, field));
+    }
+    for (method, arg) in [
+        ("asmProgram", None),
+        ("stepAsm", None),
+        ("asmState", Some(asm_window(64, 16, 8, 16, 16))),
+        ("raiseAsmCap", Some(JsValue::from_f64(1.0))),
+        ("asmValue", None),
+    ] {
+        let f: Function = get(&session, method).unchecked_into();
+        let args = Array::new();
+        if let Some(a) = arg {
+            args.push(&a);
+        }
+        assert!(Reflect::apply(&f, &session, &args).is_err(), "{method} must throw for an absent leg");
+    }
 }

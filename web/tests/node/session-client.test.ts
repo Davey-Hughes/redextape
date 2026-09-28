@@ -180,16 +180,24 @@ describe('SessionClient streaming', () => {
       kind: 'compiled',
       gen: 1,
       lambda: LAMBDA_OK,
+      asm: { available: false, reason: 'no asm leg', run: null, cap: null, total_steps: null },
       tm: TM_OK,
       declinedSpan: null,
       tmProgram: null,
+      asmProgram: null,
       tapeNames: [],
       linkIndex: null,
       tmText: null,
     })
     deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: null })
     deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: 'ended' })
-    deliver({ kind: 'result', gen: 1, lambda: LEG_OK, tm: TM_LEG_OK })
+    deliver({
+      kind: 'result',
+      gen: 1,
+      lambda: LEG_OK,
+      asm: { status: { available: false, reason: 'no asm leg', run: null, cap: null, total_steps: null }, value: null },
+      tm: TM_LEG_OK,
+    })
     expect(seen).toEqual(['compiled', 'lambda-frames', 'lambda-frames', 'result'])
   })
 
@@ -242,9 +250,11 @@ const compiled = (gen: number): RunReply => ({
   kind: 'compiled',
   gen,
   lambda: { available: true, reason: '', node: null, run: 'Running' },
+  asm: { available: false, reason: 'no asm leg', run: null, cap: null, total_steps: null },
   tm: { available: true, reason: '', width: null, run: 'Running', total_steps: null },
   declinedSpan: null,
   tmProgram: null,
+  asmProgram: null,
   tapeNames: [],
   linkIndex: null,
   tmText: null,

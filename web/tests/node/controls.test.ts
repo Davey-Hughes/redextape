@@ -70,6 +70,19 @@ describe('controlState', () => {
     expect(c.stepText).toContain('deeper than')
   })
 
+  // THE ASM LEG'S FULL CAPS ARE THE DEPTH REFUSAL'S KIND (Plan 7 part 5 spec amendment 10): raising the step cap
+  // leaves the stack, the heap or the saved frames exactly as full, so there is no continue — and the line says which.
+  it.each([
+    ['stack-full', 'the call stack is full'],
+    ['heap-full', 'the heap is full'],
+    ['memory-full', 'its saved call frames are full'],
+  ] as const)('offers NO continue for %s, and names the cap', (done, words) => {
+    const c = controlState(view({ done, length: 9, head: 8, currentStep: 8, newestStep: 8 }))
+    expect(c.continueLabel).toBeNull()
+    expect(c.canForward).toBe(false)
+    expect(c.stepText).toBe(`step 8 of 8 — ${words}`)
+  })
+
   it('offers nothing to continue once the run ended', () => {
     const c = controlState(view({ done: 'ended', length: 8, head: 7, newestStep: 7 }))
     expect(c.continueLabel).toBeNull()
@@ -161,6 +174,9 @@ describe('canRecordFurther', () => {
     expect(canRecordFurther('budget', false)).toBe(true)
     expect(canRecordFurther('ended', false)).toBe(false)
     expect(canRecordFurther('depth-refused', false)).toBe(false)
+    expect(canRecordFurther('stack-full', false)).toBe(false)
+    expect(canRecordFurther('heap-full', false)).toBe(false)
+    expect(canRecordFurther('memory-full', false)).toBe(false)
     expect(canRecordFurther(null, false)).toBe(false)
   })
 

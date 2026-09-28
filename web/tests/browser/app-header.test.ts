@@ -27,10 +27,11 @@ describe('the app header', () => {
     document.querySelector<HTMLElement>('[data-leaf="lambda-0"] button.view-title')?.focus()
     document.querySelector<HTMLButtonElement>('#new-view')?.click()
     const items = [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')]
-    expect(items.map((b) => b.textContent)).toEqual(['λ · program', 'TM · program'])
-    items[1]?.click()
-    await until(() => leafIds().length === 4, 'a fourth view')
-    expect(leafIds()).toEqual(['source', 'lambda-0', 'pane-1', 'tm-0'])
+    expect(items.map((b) => b.textContent)).toEqual(['λ · program', 'asm · program', 'TM · program'])
+    // BY ITS LABEL, NOT ITS INDEX: the asm pair sits between the other two now, so `items[1]` adds an asm view.
+    items.find((b) => b.textContent === 'TM · program')?.click()
+    await until(() => leafIds().length === 5, 'a fifth view')
+    expect(leafIds()).toEqual(['source', 'lambda-0', 'pane-1', 'asm-0', 'tm-0'])
     expect(document.querySelector('[data-leaf="pane-1"]')?.contains(document.activeElement)).toBe(true)
     expect(document.querySelector('#notice .notice-text')?.textContent).toBe('view added — TM · program')
     // **BESIDE MEANS TO ITS RIGHT** (spec §5). `leaves()` walks a row split and a column split in the
@@ -42,8 +43,8 @@ describe('the app header', () => {
 
   it('resets the preset: the default views back, and says so', async () => {
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
-    await until(() => leafIds().length === 3, 'the default views')
-    expect(leafIds()).toEqual(['source', 'lambda-0', 'tm-0'])
+    await until(() => leafIds().length === 4, 'the default views')
+    expect(leafIds()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
     expect(document.querySelector('#notice .notice-text')?.textContent).toBe(
       'Explorer reset — the default views are back',
     )
