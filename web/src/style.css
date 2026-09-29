@@ -1756,9 +1756,9 @@ main {
   left: 0;
   overflow: hidden;
 }
-/* MUST equal ROW_HEIGHT in state-table.ts, as `.state-row` must: state-diagram.ts lays the virtual window, the arcs
-   and the runtime connectors out by it, and a mismatch drifts the rows off their arcs and out from under the
-   scrollbar without any test noticing. */
+/* MUST equal ROW_HEIGHT in state-table.ts, as `.state-row` must: virtual-grid.ts lays the virtual window out by it
+   and state-diagram.ts the arcs and the runtime connectors, and a mismatch drifts the rows off their arcs and out
+   from under the scrollbar without any test noticing. */
 .program-row {
   height: 24px;
   line-height: 24px;

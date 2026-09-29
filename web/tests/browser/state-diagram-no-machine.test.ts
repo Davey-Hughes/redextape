@@ -5,10 +5,10 @@ import { SHELL, until } from './harness'
 
 /**
  * **A COMPILE WITH NO MACHINE DRAWS NOTHING OVER THE EMPTY DIAGRAM.** `StateDiagram.setProgram(null)`
- * clears the rows, but `#draw`'s `groups === null` branch returns before `#drawArcs` runs — the one place
- * that resizes the gutter SVG to the listing's own size. Left alone, the gutter keeps the LAST machine's
- * paths and dimensions, extending the scrollable region past a spacer that is now 0px tall: a scroll range
- * with nothing in it, reached by every edit that leaves the source not compiling.
+ * leaves the program level's grid no rows, and its `#afterDraw` — the one place that resizes the gutter SVG to
+ * the drawn window — draws nothing without a machine. Left alone, the gutter keeps the LAST machine's paths
+ * and dimensions, extending the scrollable region past a spacer that is now 0px tall: a scroll range with
+ * nothing in it, reached by every edit that leaves the source not compiling. `#draw` empties it.
  *
  * **THE WINDOW IS SCROLLED FIRST, SO THE LEFTOVER SHOWS AT ANY DIAGRAM HEIGHT.** Unscrolled, the gutter's
  * `top` is `0`, and an unsized SVG's box — 150 px tall — reaches past only a diagram shorter than that: this
@@ -69,6 +69,14 @@ describe('the state diagram with no machine to draw', () => {
     expect(grid().scrollHeight).toBeLessThanOrEqual(grid().clientHeight)
   })
 
+  it('says its grid has no rows, rather than that there is no grid', () => {
+    // Still on `HALF_TYPED`: the program level is drawn, empty, and a screen reader is told it holds no rows.
+    expect(drawn('.program-level')).toBe(true)
+    expect(grid().getAttribute('role')).toBe('grid')
+    expect(grid().getAttribute('aria-rowcount')).toBe('0')
+    expect(grid().hasAttribute('aria-activedescendant')).toBe(false)
+  })
+
   it('keeps the stored level shown, and arcs | chips enabled, with no machine to disable them for', async () => {
     // Still on `HALF_TYPED` from the case above: no machine, so no groups and no tier — not §7's third
     // tier, which is a machine that has one. `program` was never disabled for `tm-0`, since its source
@@ -116,5 +124,32 @@ describe('the state diagram with no machine to draw', () => {
       'the boxes to be built again',
     )
     expect(document.activeElement).toBe(grid())
+  })
+
+  it('follows the new machine after a recompile, though the old one was scrolled away from', async () => {
+    const reattach = diagram().querySelector('.diagram-reattach') as HTMLElement
+    await until(() => grid().scrollHeight > grid().clientHeight, 'the listing to outgrow the diagram')
+    grid().scrollTop = grid().scrollTop === 0 ? grid().scrollHeight : 0
+    await until(() => !reattach.hidden, 'following to detach')
+    await compile(FACT3)
+    await until(() => rows().length > 0, 'the diagram to draw fact(3) again')
+    expect(reattach.hidden, 'following the new machine').toBe(true)
+  })
+
+  /**
+   * **A PROGRAM LEVEL EMPTIED WHILE IT IS HIDDEN KEEPS NONE OF THE OLD MACHINE'S ROWS.** A draw against a hidden
+   * grid stops before it touches the rows, so without the diagram's own clearing the local level would hide the
+   * last machine's rows, with the grid's `aria-activedescendant` naming one of them.
+   */
+  it('leaves no rows behind the local level once the source no longer compiles', async () => {
+    choice('program')?.click()
+    await until(() => rows().length > 0, 'the program level to draw fact(3)')
+    expect(grid().hasAttribute('aria-activedescendant'), 'a row named before').toBe(true)
+    choice('local')?.click()
+    expect(drawn('.program-level')).toBe(false)
+    await compile(HALF_TYPED)
+    expect(rows()).toHaveLength(0)
+    expect(grid().hasAttribute('aria-activedescendant')).toBe(false)
+    choice('program')?.click()
   })
 })

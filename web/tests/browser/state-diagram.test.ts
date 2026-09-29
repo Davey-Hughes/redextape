@@ -106,6 +106,28 @@ describe('the program level, drawn as arcs', () => {
     expect(chips.classList.contains('visually-hidden')).toBe(true)
   })
 
+  it('names each label row by a row header, and every other row by a grid cell', () => {
+    const role = (r: HTMLElement) => r.querySelector('.program-cell')?.getAttribute('role')
+    const labels = rows().filter((r) => r.classList.contains('is-label'))
+    expect(labels).toHaveLength(4)
+    expect(labels.map(role)).toEqual(Array(4).fill('rowheader'))
+    expect(new Set(groupRows().map(role))).toEqual(new Set(['gridcell']))
+  })
+
+  /**
+   * THE GUTTER IS DRAWN AGAINST THE ROWS' OWN WINDOW, beside them in the grid's scrolled content: its top and bottom
+   * are the drawn rows', and the rows start where it ends, so no arc runs under a row's text.
+   */
+  it('draws the arcs beside the rows, over the rows it draws, and the rows clear it', () => {
+    const gutter = (diagram().querySelector('.program-gutter') as SVGSVGElement).getBoundingClientRect()
+    const drawn = rows().map((r) => r.getBoundingClientRect())
+    const rowsBox = (diagram().querySelector('.program-rows') as HTMLElement).getBoundingClientRect()
+    expect(gutter.width).toBeGreaterThan(0)
+    expect(gutter.top).toBe(drawn[0]?.top)
+    expect(gutter.bottom).toBe(drawn.at(-1)?.bottom)
+    expect(rowsBox.left).toBe(gutter.right)
+  })
+
   describe('inside cmpeq', () => {
     // A step inside `cmpeq`, the first instruction whose gadget has named sub-steps.
     beforeAll(intoCmpeq)
@@ -175,6 +197,20 @@ describe('the program level, drawn as chips', () => {
     expect(stored.tmDisplay?.['tm-0']).toEqual({ level: 'program', edges: 'chips' })
     edgesChoice('arcs')?.click()
     expect(diagram().querySelectorAll('.program-arc').length).toBeGreaterThan(0)
+  })
+
+  it('names the runtime heading by a row header', async () => {
+    edgesChoice('chips')?.click()
+    // *ARCS* AGAIN WHATEVER THIS CASE FINDS: the cases after it are about *arcs*' runtime column.
+    try {
+      await wholeListing()
+      const heading = rows().find((r) => r.classList.contains('is-heading')) as HTMLElement
+      expect(heading.textContent).toBe('runtime')
+      expect(heading.querySelector('.program-cell')?.getAttribute('role')).toBe('rowheader')
+    } finally {
+      edgesChoice('arcs')?.click()
+      await wholeListing()
+    }
   })
 })
 

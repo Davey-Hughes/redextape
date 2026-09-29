@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { page } from 'vitest/browser'
+import { LINE_HEIGHT } from '../../src/lambda-body'
 import { LambdaPane } from '../../src/lambda-pane'
 import { Tree } from '../../src/lambda-tree'
 import type { PaneEvents } from '../../src/pane-chrome'
@@ -6,6 +8,7 @@ import { icicleRect, TermMap } from '../../src/term-map'
 import type { LambdaState } from '../../src/types'
 import { DEFAULT_DISPLAY } from '../../src/workspace'
 import { wireOf } from '../node/tree-fixture'
+import { until } from './harness'
 
 /** The term map panel on a λ view built directly (Plan 7 part 4a, spec §6). */
 const host = (): HTMLElement => {
@@ -339,6 +342,71 @@ describe('the term map', () => {
       expect(near(pixel().slice(0, 3), dark), 'the dark theme’s --rule').toEqual(dark)
     } finally {
       delete root.dataset.theme
+    }
+  })
+})
+
+/**
+ * **THE MAP'S WINDOW GOES WITH THE BODY'S HEIGHT, NOT ONLY WITH ITS SCROLL.** `.term` is capped at `60vh`, so a window
+ * that grows shows more of the term with no `scroll` to say so: here the body is at its top with no redex to follow,
+ * and stays at `scrollTop` 0. Last in the file, since it leaves the page at the height it grew to.
+ */
+describe('the term map beside a body whose box changes size', () => {
+  it('outlines the lines a grown body shows, with no scroll to report them', async () => {
+    await page.viewport(1280, 600)
+    const el = host()
+    const pane = new LambdaPane(el, events(), { map: true, display: MINIMAP })
+    pane.render(frame, CONTROLS)
+    pane.renderTree({ kind: 'tree', tree: wireOf(WIDE, { nextRedex: null }) })
+    await frames()
+    const canvas = el.querySelector<HTMLCanvasElement>('.term-map') as HTMLCanvasElement
+    const body = el.querySelector<HTMLElement>('.term') as HTMLElement
+    const ratio = canvas.width / canvas.clientWidth
+    /** How far apart the window outline's top and bottom edges are drawn, in device rows. */
+    const span = () => {
+      const edges = rowsWhere(canvas, like(resolved(el, '--accent')))
+      expect(edges.length, 'the window is drawn').toBeGreaterThan(0)
+      return Math.max(...edges) - Math.min(...edges)
+    }
+    /** The span the lines the body shows now take on the minimap, 2 px each. */
+    const shown = () => (2 * Math.ceil(body.clientHeight / LINE_HEIGHT) - 2) * ratio
+    expect(span(), 'before').toBeGreaterThanOrEqual(shown())
+    const before = body.clientHeight
+    let scrolls = 0
+    body.addEventListener('scroll', () => {
+      scrolls += 1
+    })
+    await page.viewport(1280, 900)
+    await until(() => body.clientHeight > before, 'the body to grow with the window')
+    await frames()
+    expect(scrolls, 'no scroll reported the lines it shows now').toBe(0)
+    expect(body.scrollTop).toBe(0)
+    expect(span(), 'the outline spans the lines the grown body shows').toBeGreaterThanOrEqual(shown())
+  })
+
+  /** A body taken off the page — another Stage tab — is resized to nothing, and its map, off the page too, is not drawn. */
+  it('draws nothing when the body leaves the page', async () => {
+    const el = host()
+    const pane = new LambdaPane(el, events(), { map: true, display: MINIMAP })
+    pane.render(frame, CONTROLS)
+    pane.renderTree({ kind: 'tree', tree: wireOf(WIDE, { nextRedex: null }) })
+    await frames()
+    const body = el.querySelector<HTMLElement>('.term') as HTMLElement
+    const report = new Promise<void>((r) => {
+      const o = new ResizeObserver(() => {
+        if (body.clientHeight > 0) return
+        o.disconnect()
+        requestAnimationFrame(() => r())
+      })
+      o.observe(body)
+    })
+    const draw = vi.spyOn(TermMap.prototype, 'draw')
+    try {
+      el.remove()
+      await report
+      expect(draw).not.toHaveBeenCalled()
+    } finally {
+      draw.mockRestore()
     }
   })
 })

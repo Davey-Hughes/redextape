@@ -140,5 +140,28 @@ describe('a pointer on the rows a draw rebuilds', () => {
       expect(focused.classList.contains('local-node')).toBe(true)
       expect(focused.tabIndex).toBe(0)
     })
+
+    /**
+     * *SHOW STATES* IS THE BUTTON'S CLICK, NOT THE ROW'S: the sub-steps row it sits on does not become the active row,
+     * so the program level shown again has its cursor where the reader left it.
+     */
+    it('leaves the active row where it was on a click on show states', async () => {
+      const choice = (value: string) =>
+        [...diagram().querySelectorAll<HTMLButtonElement>('.diagram-mode')].find((b) => b.dataset.value === value)
+      const active = () =>
+        document
+          .getElementById(programGrid().getAttribute('aria-activedescendant') ?? '')
+          ?.closest('.program-row')
+          ?.querySelector('.program-name')?.textContent
+      choice('program')?.click()
+      expect(drawn('.program-level')).toBe(true)
+      await userEvent.click(diagram().querySelector('.program-row[aria-current="step"]') as HTMLElement)
+      expect(active(), 'the current row, clicked').toBe('pc4')
+      await userEvent.click(diagram().querySelector('.program-show') as HTMLElement)
+      await until(() => drawn('.local-level'), 'the local level to show')
+      choice('program')?.click()
+      expect(drawn('.program-level')).toBe(true)
+      expect(active(), 'not the sub-steps row the button sits on').toBe('pc4')
+    })
   })
 })

@@ -1,12 +1,11 @@
 import { type Local, localLevel, predecessors, REACH } from './local-level'
 import { type Arc, arcsOf, chipsOf, type Edges, type ProgramRow, programRows } from './program-level'
 import { type Groups, groupStates, stepOf, type Tier } from './state-groups'
-import { Follow, ROW_HEIGHT } from './state-table'
+import { ROW_HEIGHT } from './state-table'
 import type { TmProgram, TmState } from './types'
-import { visibleWindow } from './virtual-list'
+import { type GridRows, VirtualGrid } from './virtual-grid'
+import type { VisibleWindow } from './virtual-list'
 
-/** Rows drawn beyond the viewport on each side — `virtual-grid.ts`'s `OVERSCAN`, for its reason. */
-const OVERSCAN = 4
 /** Pixels between two lanes of *arcs*' gutter, and the gutter's margin beside the rows. */
 const LANE = 9
 const GUTTER_PAD = 12
@@ -54,26 +53,29 @@ export type Level = 'program' | 'local'
  * (`setProgram`), and the list of rows once per current group, since the current group is the one that opens onto
  * its sub-steps (`#layout`). Every draw — each frame, scroll and resize, and the view's draw when it takes the
  * focus — builds the window's row elements, the gutter's paths and the runtime column's connectors afresh, as the
- * rule table builds its rows (`#draw`). The local level is laid out only when the current state or its width
- * changes, and its marks are repainted in place.
+ * rule table builds its rows (the grid's draw, and `#afterDraw`). The local level is laid out only when the current
+ * state or its width changes, and its marks are repainted in place.
  *
- * **THE ROWS VIRTUALIZE AS THE RULE TABLE'S DO**, at `ROW_HEIGHT` each and through the same `visibleWindow`:
- * `list150` compiles to 302 instructions (spec §14.1). An arc whose ends are both off the window but whose span
- * crosses it is still drawn, clipped by the gutter's own box.
+ * **THE PROGRAM LEVEL IS THE RULE TABLE'S GRID** (spec §9.2, `VirtualGrid`): one tab stop, one `gridcell` per row
+ * — a label's and a heading's are `rowheader`s — a roving active row by index that `aria-activedescendant` names,
+ * and rows virtualized at `ROW_HEIGHT` each: `list150` compiles to 302 instructions (spec §14.1). It asks four things
+ * of the grid that the rule table does not: Enter on the sub-steps row shows states, where a click only makes it
+ * the active row (`enter`); the active row is found again by what it is when the rows are rebuilt (`setActive`);
+ * the gutter of arcs sits beside the rows in the grid's spacer and is drawn against each window (`afterDraw`), so an
+ * arc whose ends are both off the window but whose span crosses it is still drawn, clipped by the gutter's own box;
+ * and the listing loses its sub-steps row when the run steps into a routine with no row (`shrinks`).
  *
- * **A GRID, AS THE RULE TABLE IS** (spec §9.2): one tab stop, one `gridcell` per row, and a roving active row by
- * index that `aria-activedescendant` names. In *arcs* each row keeps its chips' text, visually hidden: it is what
- * the arcs say to a screen reader. *Arcs*' runtime column is the program level's second tab stop, its boxes a roving
- * group, since the routines have no rows there.
+ * In *arcs* each row keeps its chips' text, visually hidden: it is what the arcs say to a screen reader. *Arcs*'
+ * runtime column is the program level's second tab stop, its boxes a roving group, since the routines have no rows
+ * there.
  */
 export class StateDiagram {
   /** The panel's body: the program level's scrolling grid, and in *arcs* the runtime column beside it. */
   readonly el: HTMLElement
   #on: DiagramEvents
   #id = `diagram-${minted++}`
-  #scroll: HTMLElement
-  #spacer: HTMLElement
-  #rowsEl: HTMLElement
+  /** The program level: its box is the `role="grid"` element beside the runtime column. */
+  #grid: VirtualGrid
   #gutter: SVGSVGElement
   #side: HTMLElement
   #sideLinks: SVGSVGElement
@@ -108,10 +110,6 @@ export class StateDiagram {
   /** `#rowOf[group]` is the group's row in `#rows`, or `-1` when it has none (a runtime routine in *arcs*). */
   #rowOf: Int32Array = new Int32Array(0)
   #linked: Set<number> = new Set()
-  #follow = new Follow()
-  /** The scroll box's height at the last draw — how its `scroll` handler tells a clamp from a user's scroll. */
-  #drawnHeight = 0
-  #active = 0
   /** The runtime column's roving tab stop: the group whose box holds it, or `null` for the first box. */
   #activeBox: number | null = null
 
@@ -122,22 +120,29 @@ export class StateDiagram {
     const program = document.createElement('div')
     program.className = 'program-level'
 
-    this.#scroll = document.createElement('div')
-    this.#scroll.className = 'program-scroll'
-    this.#scroll.setAttribute('role', 'grid')
-    this.#scroll.setAttribute('aria-label', 'program')
-    this.#scroll.tabIndex = 0
-    this.#spacer = document.createElement('div')
-    this.#spacer.className = 'program-spacer'
-    this.#spacer.setAttribute('role', 'none')
+    this.#grid = new VirtualGrid({
+      classes: { box: 'program-scroll', spacer: 'program-spacer', rows: 'program-rows', row: 'program-row' },
+      idPrefix: this.#id,
+      // OPEN WHILE ITS BOX HAS A HEIGHT, which covers every way it is not on screen: the diagram's panel closed, the
+      // local level shown in its place, and the view off the page. The pane knows only the first.
+      isOpen: () => this.#grid.el.clientHeight !== 0,
+      rows: () => this.#gridRows(),
+      // A CLICK LINKS A GROUP'S ROW AND DOES NOTHING ELSE: a click on a sub-step, or on a label, is only a click on a
+      // row. *Show states* is its button's (`#fill`), or Enter's on its row.
+      activate: (i) => {
+        if (this.#rows[i]?.kind === 'group') this.#linkRow(i)
+      },
+      enter: (i) => this.#linkRow(i),
+      afterDraw: (w) => this.#afterDraw(w),
+      shrinks: true,
+    })
+    this.#grid.el.setAttribute('aria-label', 'program')
+    // *ARCS*' GUTTER SCROLLS WITH THE ROWS, so it sits in the grid's spacer, ahead of them; `#afterDraw` moves the
+    // rows right of it.
     this.#gutter = document.createElementNS(SVG, 'svg')
     this.#gutter.classList.add('program-gutter')
     this.#gutter.setAttribute('aria-hidden', 'true')
-    this.#rowsEl = document.createElement('div')
-    this.#rowsEl.className = 'program-rows'
-    this.#rowsEl.setAttribute('role', 'rowgroup')
-    this.#spacer.append(this.#gutter, this.#rowsEl)
-    this.#scroll.append(this.#spacer)
+    this.#grid.rowsEl.before(this.#gutter)
 
     // THE RUNTIME COLUMN (*arcs* only): the routines billed to no instruction, and their connectors, which
     // are drawn against the view's own top rather than the list's, so they meet the rows where they are on
@@ -153,7 +158,7 @@ export class StateDiagram {
     this.#boxes.setAttribute('aria-label', 'runtime')
     this.#side.append(this.#sideLinks, this.#boxes)
 
-    program.append(this.#scroll, this.#side)
+    program.append(this.#grid.el, this.#side)
     this.#programEl = program
 
     // THE LOCAL LEVEL: nodes are buttons in one group, with a roving `tabindex`, so the level is one tab stop (spec
@@ -193,41 +198,14 @@ export class StateDiagram {
     }).observe(this.#localEl)
     this.el.append(program, this.#localEl)
 
-    this.#scroll.addEventListener('scroll', () => {
-      if (this.#scroll.clientHeight === 0) return
-      // A BOX THAT CHANGED HEIGHT SINCE IT WAS DRAWN MAY HAVE HAD ITS SCROLL CLAMPED, and this event can come before
-      // the resize observer's: a panel beside it that closed read the layout at once, in its own toggle.
-      if (this.#scroll.clientHeight !== this.#drawnHeight) this.#follow.onResize(this.#scroll.scrollTop)
-      this.#follow.onScroll(this.#scroll.scrollTop)
-      this.#draw()
-      this.#on.moved?.()
-    })
-    // NOTHING IN THE ROWS TAKES THE FOCUS ON `mousedown`; THE GRID TAKES IT WHEN THE CLICK LANDS — the rule table's
-    // rows container says why (`VirtualGrid`'s constructor): the view's draw on taking the focus replaced the row under
-    // the pointer, and the click was lost. *Show states* lost every click, since a button out of the tab order still
-    // takes the focus from a pointer. The primary button only, so a middle button still scrolls.
-    this.#rowsEl.addEventListener('mousedown', (e) => {
-      if (e.button === 0) e.preventDefault()
-    })
-    this.#rowsEl.addEventListener('click', (e) => {
-      const target = e.target instanceof HTMLElement ? e.target : null
-      const show = target !== null && target.closest('.program-show') !== null
-      const el = target === null ? null : target.closest<HTMLElement>('.program-row')
-      // THE FOCUS FIRST, as `mousedown` would have moved it, so *show states*' hand-off (`setLevel`) finds it in
-      // this level and moves it to the next — never leaving it on the page.
-      this.#scroll.focus({ preventScroll: true })
-      if (show) {
-        this.#on.showStates?.()
-        return
-      }
-      if (el === null) return
-      const i = Number(el.dataset.row)
-      this.#active = i
-      this.#draw()
-      // A CLICK LINKS A GROUP'S ROW AND DOES NOTHING ELSE: a click on a sub-step, or on a label, is only a click on
-      // a row. *Show states* is its button's, or Enter's on its row (`#linkRow`).
-      if (this.#rows[i]?.kind === 'group') this.#linkRow(i)
-    })
+    // THE PANE'S RE-ATTACH GOES WITH THE GRID'S FOLLOWING, which a user's scroll and a key that scrolls change. Told
+    // after the grid's own listeners, registered first in its constructor, have acted on the event; not for a box that
+    // is not on screen, whose scroll the grid ignores.
+    const moved = () => {
+      if (this.#grid.el.clientHeight !== 0) this.#on.moved?.()
+    }
+    this.#grid.el.addEventListener('scroll', moved)
+    this.#grid.el.addEventListener('keydown', moved)
     this.#boxes.addEventListener('click', (e) => {
       const el = e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('.program-box') : null
       if (el === null) return
@@ -237,11 +215,6 @@ export class StateDiagram {
       if (first !== undefined && first >= 0) this.#on.link(first)
     })
     this.#boxes.addEventListener('keydown', (e) => this.#boxKey(e))
-    this.#scroll.addEventListener('keydown', (e) => this.#key(e))
-    new ResizeObserver(() => {
-      this.#follow.onResize(this.#scroll.scrollTop)
-      this.#draw()
-    }).observe(this.#scroll)
   }
 
   /**
@@ -249,7 +222,7 @@ export class StateDiagram {
    * level always follows — it is drawn around the current state — so it says so.
    */
   get following(): boolean {
-    return this.shown === 'local' || this.#follow.following
+    return this.shown === 'local' || this.#grid.following
   }
 
   /** How this machine groups (§7), or `none` with no machine. */
@@ -287,11 +260,10 @@ export class StateDiagram {
     this.#linked = new Set()
     this.#current = null
     this.#frame = null
-    this.#active = 0
     this.#activeBox = null
-    this.#follow.attach()
-    this.#follow.onProgrammaticScroll(0)
-    this.#scroll.scrollTop = 0
+    // The first row active, following on, and the grid at the top — `VirtualGrid.reset`'s doc says why its scroll is
+    // recorded before it is written.
+    this.#grid.reset()
     this.#drawBoxes()
     this.#layout()
     if (had && (this.shown !== was || !this.el.contains(document.activeElement))) this.#focusShown()
@@ -351,8 +323,7 @@ export class StateDiagram {
 
   /** Follow the running state again, and scroll to it now. */
   attach(): void {
-    this.#follow.attach()
-    this.#draw()
+    this.#grid.attach()
   }
 
   /** Redraw after the panel opens, or after anything else that changed its size without a scroll or a frame. */
@@ -367,7 +338,7 @@ export class StateDiagram {
    * constructor comment).
    */
   #focusShown(): void {
-    if (this.shown === 'program') this.#scroll.focus()
+    if (this.shown === 'program') this.#grid.el.focus()
     else (this.#localNodes.querySelector<HTMLElement>('.local-node[tabindex="0"]') ?? this.#localNodes).focus()
   }
 
@@ -376,15 +347,14 @@ export class StateDiagram {
     const groups = this.#groups
     // THE ACTIVE ROW IS A ROW, NOT A PLACE: the sub-steps row moves with the current group and shifts every row
     // between its old place and its new one, so the active row is found again by what it is.
-    const was = this.#rows[this.#active]
+    const was = this.#rows[this.#grid.active]
     this.#rows = groups === null ? [] : programRows(groups, this.#program?.labels ?? [], this.#edges, this.#current)
     if (was !== undefined) {
       const again = this.#rows.findIndex((r) => sameRow(r, was))
-      if (again >= 0) this.#active = again
+      if (again >= 0) this.#grid.setActive(again)
     }
     this.#rowOf = new Int32Array(groups?.groups.length ?? 0).fill(-1)
     for (const [i, row] of this.#rows.entries()) if (row.kind === 'group') this.#rowOf[row.group] = i
-    this.#scroll.setAttribute('aria-rowcount', String(this.#rows.length))
     this.el.dataset.edges = this.#edges
     this.el.dataset.level = this.shown
     this.#programEl.hidden = this.shown !== 'program'
@@ -454,80 +424,58 @@ export class StateDiagram {
   }
 
   /**
-   * Draw the rows in view, the arcs across them, and the runtime column's connectors, each as new elements. On
-   * every frame, scroll and resize, and every draw of the view — O(visible rows + arcs + edges), not merely the
-   * visible rows, since `#drawArcs` below walks every arc and `#drawLinks` every group's targets on each call.
+   * Draw the program level: the grid's rows in view, and `#afterDraw`'s arcs across them and connectors beside them.
+   * The grid also draws on its own for a scroll, a resize, a key and a click.
    */
   #draw(): void {
-    const groups = this.#groups
-    const viewport = this.#scroll.clientHeight
-    this.#drawnHeight = viewport
-    const total = this.#rows.length * ROW_HEIGHT
-    // A LISTING THAT JUST LOST A ROW CLAMPS `scrollTop` ONCE THE SPACER SHRINKS TO MATCH IT — a runtime
-    // routine has no row in *arcs*, so the current group's sub-steps row disappears the moment the run
-    // steps into one, and the listing shrinks under a scroll position it no longer reaches (measured:
-    // 626 → 600 px, `pc20` into `halt`). The clamp itself is not visible in `scrollTop` yet here — the
-    // gutter SVG below still holds its OLD, taller height until `#drawArcs` resizes it a few lines on, so
-    // the guard further down, which reads `scrollTop` before that resize, does not see it either. `total`
-    // above is already the listing's real, post-shrink height, so the clamp this draw is about to cause
-    // is recorded before anything actually shrinks, rather than read back afterwards. The predicted
-    // position can land a couple of pixels short of the browser's own, when a bordered last row overflows
-    // the spacer — still comfortably inside `ECHO_TOLERANCE`.
-    const clampedTop = Math.max(0, total - viewport)
-    if (this.#scroll.scrollTop > clampedTop) this.#follow.onProgrammaticScroll(clampedTop)
-    this.#spacer.style.height = `${total}px`
-    if (groups === null || viewport === 0) {
-      if (groups === null) {
-        this.#rowsEl.replaceChildren()
-        this.#scroll.removeAttribute('aria-activedescendant')
-        // NO MACHINE, NO ARCS: `#drawArcs` never runs for a `null` compile, so the gutter otherwise keeps
-        // the LAST machine's paths and size, extending the scrollable region past the now-emptied spacer —
-        // a scroll range with nothing in it. Removing `width`/`height` is not enough: an `<svg>` with
-        // neither falls back to its own 300×150 box, which still reaches past the diagram once the window
-        // was scrolled before the machine emptied — setting both to `'0'` is what actually empties it.
-        // Its `top`, left at the old window's offset, needs no reset alongside them: checked against a
-        // scrolled window, a zero-sized box adds nothing to the scrollable region at any offset. The side
-        // column's connectors are the same leftover, one step removed: `#drawBoxes` already clears its
-        // boxes and hides the column on every `setProgram`, but `#drawLinks`, which draws these, only runs
-        // on this same non-null path, so they are cleared here too.
-        this.#gutter.replaceChildren()
-        this.#gutter.setAttribute('width', '0')
-        this.#gutter.setAttribute('height', '0')
-        this.#sideLinks.replaceChildren()
-      }
-      return
-    }
-    const current = this.#current === null ? -1 : (this.#rowOf[this.#current] ?? -1)
-    if (current >= 0) {
-      const top = this.#follow.targetScrollTop(current, ROW_HEIGHT, viewport, total)
-      if (top !== null && top !== this.#scroll.scrollTop) {
-        this.#follow.onProgrammaticScroll(top)
-        this.#scroll.scrollTop = top
-      }
-    }
-    // THE ACTIVE ROW COMES WITH THE VIEW, as the rule table's does: `aria-activedescendant` names a drawn row.
-    const topRow = Math.ceil(this.#scroll.scrollTop / ROW_HEIGHT)
-    const bottomRow = Math.max(topRow, Math.floor((this.#scroll.scrollTop + viewport) / ROW_HEIGHT) - 1)
-    this.#active = Math.max(0, Math.min(Math.max(this.#active, topRow), bottomRow, this.#rows.length - 1))
+    this.#grid.draw()
+    if (this.#groups !== null) return
+    // NO MACHINE, NO ROWS, EVEN HIDDEN: a program level emptied behind the local level, a closed panel or another
+    // Stage tab would otherwise keep the last machine's rows, with `aria-activedescendant` naming one (`clear`).
+    this.#grid.clear()
+    // NO MACHINE, NO ARCS: `#afterDraw` draws nothing for a `null` compile, so the gutter otherwise keeps the LAST
+    // machine's paths and size, extending the scrollable region past the now-emptied spacer — a scroll range with
+    // nothing in it. Removing `width`/`height` is not enough: an `<svg>` with neither falls back to its own 300×150
+    // box, which still reaches past the diagram once the window was scrolled before the machine emptied — setting both
+    // to `'0'` is what actually empties it. Its `top`, left at the old window's offset, needs no reset alongside them:
+    // checked against a scrolled window, a zero-sized box adds nothing to the scrollable region at any offset. The side
+    // column's connectors are the same leftover, one step removed: `#drawBoxes` already clears its boxes and hides the
+    // column on every `setProgram`, but `#drawLinks`, which draws these, only runs from `#afterDraw`, so they are
+    // cleared here too.
+    this.#gutter.replaceChildren()
+    this.#gutter.setAttribute('width', '0')
+    this.#gutter.setAttribute('height', '0')
+    this.#sideLinks.replaceChildren()
+  }
 
-    const w = visibleWindow(this.#rows.length, ROW_HEIGHT, viewport, this.#scroll.scrollTop, OVERSCAN)
-    const gutter = this.#edges === 'arcs' && this.#lanes > 0 ? this.#lanes * LANE + GUTTER_PAD : 0
-    this.#rowsEl.style.transform = `translateY(${w.offsetY}px)`
-    this.#rowsEl.style.left = `${gutter}px`
-    const els: HTMLElement[] = []
-    for (let i = w.firstIndex; i <= w.lastIndex; i += 1) els.push(this.#row(i, groups))
-    const mine = this.#scroll.scrollTop
-    this.#rowsEl.replaceChildren(...els)
-    // THIS ONLY SEES A CHANGE `replaceChildren` ITSELF MAKES: `mine`, just above, is read after the spacer
-    // write and the follow-target and active-row work earlier in this method, so a clamp from any of
-    // those is already the prediction above's to have recorded. When swapping the drawn rows moves
-    // `scrollTop` on its own, this records that too, so it still reads as the echo it is.
-    if (this.#scroll.scrollTop !== mine) this.#follow.onProgrammaticScroll(this.#scroll.scrollTop)
-    if (this.#active >= w.firstIndex && this.#active <= w.lastIndex) {
-      this.#scroll.setAttribute('aria-activedescendant', `${this.#id}-${this.#active}`)
-    } else {
-      this.#scroll.removeAttribute('aria-activedescendant')
+  /** What one draw of the program level's grid shows: a row per entry of `#rows`, following the current group's. */
+  #gridRows(): GridRows {
+    const groups = this.#groups
+    const current = this.#current === null ? -1 : (this.#rowOf[this.#current] ?? -1)
+    return {
+      // NO MACHINE IS A GRID OF NO ROWS, NOT NO GRID: the program level is still drawn, empty, and says so with an
+      // `aria-rowcount` of 0 rather than `null`'s none.
+      count: this.#rows.length,
+      // A runtime routine in *arcs* has no row, so a run inside one is followed nowhere: its box is marked instead.
+      follow: current >= 0 ? current : null,
+      frame: this.#frame?.step ?? null,
+      fill: (i, row, cell) => {
+        if (groups !== null) this.#fill(i, row, cell, groups)
+      },
     }
+  }
+
+  /**
+   * What each draw of the grid paints beside its rows, against the window it drew: the rows moved right of *arcs*'
+   * gutter, the arcs across them, the runtime column's connectors, and its boxes' marks. O(arcs + edges) on every
+   * frame, scroll and resize, not only O(visible rows), since `#drawArcs` walks every arc and `#drawLinks` every
+   * group's targets on each call.
+   */
+  #afterDraw(w: VisibleWindow): void {
+    const groups = this.#groups
+    if (groups === null) return
+    const gutter = this.#edges === 'arcs' && this.#lanes > 0 ? this.#lanes * LANE + GUTTER_PAD : 0
+    this.#grid.rowsEl.style.left = `${gutter}px`
     this.#drawArcs(w.firstIndex, w.lastIndex, w.offsetY, gutter)
     this.#drawLinks(groups)
     // THE RUNTIME COLUMN'S BOXES CARRY THE ROWS' MARKS: in *arcs* a routine has no row, so its box is where the
@@ -535,25 +483,17 @@ export class StateDiagram {
     this.#paintBoxes()
   }
 
-  #row(i: number, groups: Groups): HTMLElement {
+  /** Fill row `i` of the grid — `GridRows.fill` — with its text and marks; a label's or a heading's cell names rows. */
+  #fill(i: number, el: HTMLElement, cell: HTMLElement, groups: Groups): void {
     const row = this.#rows[i] as ProgramRow
-    const el = document.createElement('div')
-    el.className = 'program-row'
-    el.dataset.row = String(i)
-    el.setAttribute('role', 'row')
-    el.setAttribute('aria-rowindex', String(i + 1))
-    const cell = document.createElement('div')
-    cell.id = `${this.#id}-${i}`
     cell.className = 'program-cell'
-    cell.setAttribute('role', row.kind === 'label' || row.kind === 'heading' ? 'rowheader' : 'gridcell')
-    el.append(cell)
-    if (i === this.#active) el.classList.add('is-active')
+    if (row.kind === 'label' || row.kind === 'heading') cell.setAttribute('role', 'rowheader')
     switch (row.kind) {
       case 'label':
       case 'heading':
         el.classList.add(row.kind === 'label' ? 'is-label' : 'is-heading')
         cell.textContent = row.kind === 'label' ? `${row.name}:` : row.name
-        return el
+        return
       case 'steps': {
         el.classList.add('is-steps')
         // "SHOW STATES" (spec §8): the local level, around the state this row's current sub-step is. Out of the tab
@@ -564,6 +504,15 @@ export class StateDiagram {
         show.className = 'program-show'
         show.tabIndex = -1
         show.textContent = 'show states'
+        // *SHOW STATES* IS ITS BUTTON'S CLICK, NOT ITS ROW'S: stopped here, before the grid's handler on the rows, so
+        // the row does not become the active one. The focus first, as `mousedown` would have moved it had the grid
+        // not stopped that (`VirtualGrid`'s constructor), so the hand-off in `setLevel` finds it in this level and
+        // moves it to the next — never leaving it on the page.
+        show.addEventListener('click', (e) => {
+          e.stopPropagation()
+          this.#grid.el.focus({ preventScroll: true })
+          this.#on.showStates?.()
+        })
         cell.append(show)
         const now = this.#frame === null ? null : stepOf(this.#program?.states[this.#frame.state]?.name ?? '')
         for (const step of groups.groups[row.group]?.steps ?? []) {
@@ -572,11 +521,11 @@ export class StateDiagram {
           s.textContent = step
           cell.append(s)
         }
-        return el
+        return
       }
       case 'group': {
         const g = groups.groups[row.group]
-        if (g === undefined) return el
+        if (g === undefined) return
         if (row.group === this.#current) {
           el.classList.add('is-current')
           el.setAttribute('aria-current', 'step')
@@ -616,7 +565,7 @@ export class StateDiagram {
         count.className = 'program-count'
         count.textContent = `${g.count} ${g.count === 1 ? 'state' : 'states'}`
         cell.append(count)
-        return el
+        return
       }
     }
   }
@@ -652,13 +601,13 @@ export class StateDiagram {
    */
   #drawLinks(groups: Groups): void {
     if (this.#side.hidden) return
-    const height = this.#scroll.clientHeight
+    const height = this.#grid.el.clientHeight
     this.#sideLinks.setAttribute('height', String(height))
     const boxOf = new Map<number, number>()
     let k = 0
     for (const [i, g] of groups.groups.entries()) if (g.runtime) boxOf.set(i, k++)
     const boxY = (g: number) => (boxOf.get(g) ?? 0) * ROW_HEIGHT + ROW_HEIGHT / 2
-    const rowY = (g: number) => (this.#rowOf[g] ?? 0) * ROW_HEIGHT + ROW_HEIGHT / 2 - this.#scroll.scrollTop
+    const rowY = (g: number) => (this.#rowOf[g] ?? 0) * ROW_HEIGHT + ROW_HEIGHT / 2 - this.#grid.el.scrollTop
     const left = 16 + boxOf.size * 6
     const paths: SVGElement[] = []
     const edge = (d: string) => paths.push(svg('path', { d, class: 'program-link' }))
@@ -936,55 +885,6 @@ export class StateDiagram {
     if (row?.kind !== 'group') return
     const first = this.#groups?.groups[row.group]?.first ?? -1
     if (first >= 0) this.#on.link(first)
-  }
-
-  /**
-   * The grid's keys, the rule table's (`VirtualGrid`'s `#key`): ↑/↓, PgUp/PgDn and Home/End move the active row by
-   * index; Enter is `#linkRow`'s own — a group's row links it, the sub-steps row shows states instead — and a
-   * key that scrolls detaches following before the draw that would undo it.
-   */
-  #key(e: KeyboardEvent): void {
-    const count = this.#rows.length
-    if (count === 0) return
-    const page = Math.max(1, Math.floor(this.#scroll.clientHeight / ROW_HEIGHT) - 1)
-    let next = this.#active
-    switch (e.key) {
-      case 'ArrowDown':
-        next += 1
-        break
-      case 'ArrowUp':
-        next -= 1
-        break
-      case 'PageDown':
-        next += page
-        break
-      case 'PageUp':
-        next -= page
-        break
-      case 'Home':
-        next = 0
-        break
-      case 'End':
-        next = count - 1
-        break
-      case 'Enter':
-        e.preventDefault()
-        this.#linkRow(this.#active)
-        return
-      default:
-        return
-    }
-    e.preventDefault()
-    this.#active = Math.min(Math.max(next, 0), count - 1)
-    const top = this.#active * ROW_HEIGHT
-    const from = this.#scroll.scrollTop
-    const to = top < from ? top : Math.max(from, top + ROW_HEIGHT - this.#scroll.clientHeight)
-    if (to !== from) {
-      this.#follow.detach()
-      this.#scroll.scrollTop = to
-      this.#on.moved?.()
-    }
-    this.#draw()
   }
 }
 

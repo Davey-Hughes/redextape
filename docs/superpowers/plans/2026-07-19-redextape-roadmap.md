@@ -21599,3 +21599,149 @@ scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua,col
 | six; 174, 1,578 | coverage runs at `24947e0`'s round to a clean one; that run's files and tests | the runs' logs (scratch) |
 | fourteen; 14 files, 50 tests | files that failed in runs two and three; the same files run together, all passing | the two logs' `FAIL` and `Failed to run the test` lines, de-duplicated by file; then `flock … pnpm exec vitest run --project browser` over those fourteen files |
 | 61 to 62 of 66 GiB; 86 to 88% | swap and `/tmp` between those runs | `free -g` and `df -h /tmp`, run between the runs |
+
+#### THE STATE DIAGRAM'S PROGRAM LEVEL MOVES ONTO `VirtualGrid`, THE λ BODY DOES NOT, AND THE λ BODY AND ITS TERM MAP NOW FOLLOW A WINDOW RESIZE AND A TRIP OFF THE PAGE — AND THE MOVE'S OWN SABOTAGES FOUND FOUR PATHS OF THE DIAGRAM NO TEST HELD AND AN EMPTY GRID'S `aria-rowcount` IT HAD DROPPED, AND ITS REVIEW FOUND A HIDDEN PROGRAM LEVEL KEEPING A GONE MACHINE'S ROWS (2026-09-29, branch `state-diagram-virtual-grid`, `696b2b2..d1d7218`, 10 commits, three of them this entry's earlier versions, `8ce9124`, `a3b7c8b` and `d1d7218`, plus this revision)
+
+**A refactor and a fix, in `web/` only.** It closes 5b's leftover for the state diagram ("The state diagram and the λ body keep their own copies of the grid", amendment 7, §10, which 5c's entry carried unchanged), declines the λ body's half of it, and closes the clamp gap 4b's entry left in the λ body ("The λ body's own scroll handler has the same clamp class on a window resize").
+
+**The user's decisions:** the state diagram's program level moves onto `VirtualGrid`, with no change in behaviour and every existing test passing unchanged; the λ body does not move; and the λ body's missing `ResizeObserver` is fixed in place, reproduced by a failing browser test first. The λ body's other open questions stay open (below). After an independent review of `696b2b2..8ce9124`, which found no Critical or Important issue, its findings were fixed in new commits on top (`f0a6994`, `2b5be51`, `7ddc470`) and this entry revised.
+
+##### THE PROGRAM LEVEL IS `VirtualGrid`'S THIRD USER
+
+- **What moved.** The program level's scroll handler, resize observer, `mousedown` guard, row click, keys, windowing, active row and following are the grid's now. `state-diagram.ts` is +118/−218. The local level, with its own resize observer, and the runtime column stay in the diagram.
+- **What the grid gained** (`virtual-grid.ts`, +84/−9). Each is optional or unused by the rule table and the asm listing:
+  - `enter`: Enter on a row can do what a click does not. The sub-steps row shows states on Enter; a click on it only makes it the active row.
+  - `active` and `setActive`: the diagram finds its active row again by what it is (`sameRow`) when the sub-steps row moves.
+  - `afterDraw` and `rowsEl`: the window each draw laid out, once its rows are in the DOM. The gutter of arcs sits ahead of the rows in the grid's spacer, and the connectors, the rows' `left` and the runtime boxes' marks are painted from the hook.
+  - `shrinks`: when the count falls between two draws, the clamp is predicted before the spacer shrinks and read back after the rows are swapped. These are the diagram's two reads, moved.
+  - `clear()`: takes the drawn rows and `aria-activedescendant` out whether or not the box is on screen (below).
+  - A cell's role is the fill's to change, so labels and the runtime heading stay `rowheader`s.
+- **`isOpen` is the box having a height**, which was the diagram's old scroll guard. It covers a closed panel, the local level shown in the program level's place, and a view off the page. The pane knows only the first, so `tm-pane.ts` is unchanged.
+- ***Show states* stops its own click**, as the old handler returned before touching the active row.
+- **Existing tests.** No existing assertion changed. The lines the branch removes from test files are two `import` lines, `virtual-grid.test.ts`'s `make` helper, which takes an optional third argument whose default is the old fill, and four lines of `state-diagram-no-machine.test.ts`'s file doc, which described the old `#draw` and were rewritten at the review's request.
+
+##### WHAT BEHAVES DIFFERENTLY
+
+- **Reverted** (`830460f`): with no machine the old program level wrote `aria-rowcount="0"` on its grid, which is still drawn, empty. The move's `count: null` dropped the attribute, and no test held it. `count` is the row count, 0 with no machine. The new case passes on `18f8225`'s `state-diagram.ts` and `virtual-grid.ts` and fails on `b783ce1`'s.
+- **Fixed after the review** (`f0a6994`): a compile with no machine while the program level was hidden — behind the local level, in a closed panel, in another Stage tab — left the last machine's rows in its grid, with `aria-activedescendant` naming one. The old `#draw` cleared both whenever there was no machine; the grid's closed draw returns before it touches the rows. The diagram now calls `clear()` when it has no machine. The fix is not in the grid's `draw` for every grid of no rows, because the asm listing has one for an empty program (`asm_syntax.rs`: "an empty source is an empty program and no diagnostics"), and its closed draws keep what they did: the last program's rows stay, hidden, until a draw on screen clears them. The new case fails on `8ce9124`'s `state-diagram.ts` and `virtual-grid.ts` with 14 rows left behind the local level.
+- **Restored after the review** (`f0a6994`): the grid's active row is never below 0, as the diagram's was. With rows, every bound of the clamp is at least 0 already, so nothing changes for the rule table or the asm listing there. With none — the asm listing's empty program — the index is 0 where it was −1; it names no row either way, since `aria-activedescendant` is dropped, and no key or click reads it with no rows.
+- **Accepted**, none visible to a user:
+  - `moved` fires on every keydown on the grid while it is on screen, where it fired only for a key that scrolled. Its one handler, `TmPane.#syncDiagramReattach`, sets the re-attach's `hidden` from `following` and the panel's state, so a key that did not scroll sets what was already there.
+  - Rows no longer carry `data-row`. At `18f8225` only the old click handler read it; the grid reads `aria-rowindex`.
+  - A draw while the box is hidden no longer zeroes the height the scroll handler compares against; it keeps the last drawn one, as the rule table and the asm listing always have. A box that comes back is reported by the resize observer, which records any clamp, and the draw that reopens it sets the height.
+
+##### THE λ BODY DOES NOT MOVE (DECLINED)
+
+The λ body is a `role="tree"` of `treeitem`s, not a grid of cells. Its click belongs to a token: the gutter, a chip or a fold toggle opens or folds, and any other token links. Its ←/→ fold, and it keeps a paint memo keyed on the drawn window and the active row. Fitting it to `VirtualGrid` would take about eight extensions for one consumer. `VirtualGrid`'s class doc now says so.
+
+##### THE λ BODY FOLLOWS THROUGH A WINDOW RESIZE AND A TRIP OFF THE PAGE
+
+- **Reproduced first.** Three new cases in `lambda-follow.test.ts` fail against `18f8225`'s `lambda-body.ts` and pass against `7ddc470`'s:
+  - A window grown from 600 to 900 px clamps a body following a redex at the term's end, and the clamp's `scroll` detached it: "the clamp was not the user scrolling: expected false to be true".
+  - A body following a redex mid-term was left with a band under its drawn rows: "expected 527 to be greater than or equal to 577".
+  - A body taken off the page, as Stage does, between its paint and that paint's `scroll` was sent the event where `scrollTop` reads 0, and came back detached, at the top: "the echo was not the user scrolling".
+- **What each part of the grid's answer does for the λ body**, whose box is capped at `60vh` and sized by its content:
+  - A `ResizeObserver` that records a clamp (`Follow.onResize`) and repaints. The cap makes the window a resizer. On a window resize the observer runs before the clamp's `scroll`, so its `onResize` is what records the clamp.
+  - The observer's repaint draws the rows the grown box shows and centres the redex again.
+  - The scroll guard is `clientHeight === 0`. The body sits in no panel, so "closed" can only mean not on the page.
+  - **The scroll handler's height check was not added.** No path was found on which the body's clamp `scroll` comes before its observer. `.pane` is not a flex column for a λ view, so the body's height follows only its content and the window. A window resize delivers the observer first, and a content change is recorded by `#paint`'s and `showFlat`'s own reads. A gap that cannot be shown is not fixed.
+- **The term map follows a resize too** (`7ddc470`, from the review). The body's `scrolled` hook, which redraws the map's window outline, ran only on its `scroll`, so a window that grew the body with no scroll left the outline on the lines shown before; that was so before this branch. The observer now calls it after its repaint while the body has a height. Its one consumer is `LambdaPane.#drawMap`, which reads the body's visible lines and draws or clears the canvas; it touches neither following nor `onDetached`. A new case in `term-map.test.ts` fails on `8ce9124`'s `lambda-body.ts` — the outline spans 38 device rows against the 52 the grown body shows — and passes; a second holds that a body leaving the page draws no map.
+
+##### WHAT THE SABOTAGES FOUND
+
+Every sabotage below was run again on `7ddc470`'s sources, over whole files, never with `-t`, each touched source restored from a saved copy and checked with `cmp`.
+
+- **The λ fix, seven**, over `lambda-follow`, `lambda-body` and `term-map`:
+  - The observer without `onResize`: fails the clamp case.
+  - The observer without its repaint: fails the band case and the off-page case.
+  - No zero-height guard: fails the off-page case.
+  - No observer: fails all three, and the map's resize case.
+  - The observer's repaint skipping following's write: fails the centring assertion (90.5 against ≤ 20) and the off-page case.
+  - The observer not telling the map: fails the map's resize case.
+  - The observer telling the map with no height: failed nothing until the off-page map case was added, which it fails.
+  - A first attempt at the fifth detached and re-attached following. It leaked into `onDetached` and failed five cases, two of them unrelated, so it was replaced.
+- **The grid, twelve**, over `virtual-grid` and `state-diagram-no-machine`. Each failed the case aimed at it, and three of them — no `afterDraw` and the two on `clear()` — the diagram's cases that run through the same code as well: `enter` ignored, `setActive` a no-op, `active` reading 0, the cell's role reset after the fill, `afterDraw` before the rows are in, `afterDraw` on a closed draw, no `afterDraw`, no shrink prediction, no read after the swap, `clear()` a no-op, `clear()` keeping the active descendant, and the active clamp without its floor of 0. The shrink cases use a gutter that holds the range up, and a last row 16 px taller than `ROW_HEIGHT`, past `ECHO_TOLERANCE`.
+- **The diagram's wiring, sixteen**, over every browser file that touches the diagram (eight files).
+  - These fail their target: `enter` removed, a click linking every row, *show states* doing nothing, the active row not found again, no `afterDraw`, `shrinks` off, no `moved` on scroll, no `rowheader` (and one for labels only), rows not moved past the gutter, no gutter clearing with no machine, and no `clear()` with no machine.
+  - **Four failed nothing** until this branch added a case for each:
+    - *show states* letting its click through to the row;
+    - `isOpen` always true;
+    - no `moved` on keydown;
+    - no `reset` on a new machine.
+    Three of those cases fail alone. `isOpen`'s fails only paired, below.
+- **Two of the diagram's clamp answers are redundant, measured by seven sabotages over `tm-follow-clamp`, alone and in pairs.**
+  - A window resize clamping the diagram is answered by the grid's resize-observer draw, through following's write and the `shrinks` prediction. It is also answered by the scroll handler's height check. The case fails only with the observer's callback emptied *and* the height check removed.
+  - The observer's `Follow.onResize` is never the only answer here. The diagram's scroll range reaches 2 px past its rows (626 against 624 at `pc20`), so in this case the draw after the resize writes, and that write records the clamp. With `onResize`, the prediction and the height check all removed and the observer's draw kept, the case passes.
+  - A scroll reported to the program level while the local level hides it is answered by `isOpen` and by the height check, which reads a box gone to no height as a clamp. The case fails only with both removed.
+- **Two cases first failed for the wrong reason.**
+  - The diagram's resize case failed on its precondition, because the case before it had left the diagram detached. It now re-attaches first.
+  - The heading case, on failing, left the diagram in *chips* for the next describe. It now restores *arcs* in a `finally`.
+- **The window-resize case needs 1600 px.** At 1300 px the rule table grew and the diagram stayed at its five-row floor.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The λ body's `mousedown` guard.** The λ body has none. Whether it should weighs a first click lost to a redraw against the text selection that the grids gave up, which 4b's entry records.
+- **Detach or hold on a pin's scroll.** `LambdaBody.reveal` detaches following, where `VirtualGrid.scrollToRow` holds until the run moves (amendment 21). They were not reconciled.
+- **Pins on the same leg.** Not examined.
+- **The λ body's scroll-handler height check**, not added for the reason above.
+- **A user's scroll landing just after a clamp can be read as the clamp's echo.** 4b's entry recorded the class in the table and the diagram, and the λ body now shares it through `onResize`. The review narrowed it: scroll events run before resize observers in a frame, so `onResize` records a clamp after any scroll of the user's in that frame has been read, and only a scroll landing within `ECHO_TOLERANCE` (12 px) of the recorded position, just after a clamp, is misread. Recorded, not changed.
+- **The rule table's scroll-handler height check is still reached by no test for the table** (4b's leftover, unchanged). For the diagram, removing it alone fails neither the window-resize case nor the hidden-level case; each fails only with another answer removed too.
+- **`tm-follow-clamp.test.ts`'s first case's doc names "`TmPane`'s scroll handler"**, which has been `VirtualGrid`'s since 5b. It was left as it was, so that no existing line of a test file changed that the review did not ask for.
+- **The web suite under coverage peaks at the cap the lane's gate runs it under.** Of nine runs of `pnpm run test:coverage` under `MemoryMax=16G` on this branch, three were killed at 16 G and the rest peaked at 15.2 to 15.9 G. Within the branch, the kills followed no one change: two at `7ddc470`, where two more then passed, and one with `7ddc470`'s sources and `830460f`'s tests. `main`'s own peak under this cap was not measured here — no coverage run at `18f8225` was made in this lane — so that is a comparison within the branch, not against `main`. With only the term map's new call reverted the suite peaked at 15.7 G, and the call runs past its first line only where a map is open, in `term-map.test.ts` and `lambda-display-restore.test.ts`. A cap this close to the suite's peak leaves a run's outcome to how its peak falls; raising it is not this branch's to decide.
+
+##### VERIFICATION
+
+Run on 2026-09-29 at `7ddc470`, from `web/`, after `pnpm run build:wasm` and `pnpm run build:lsp-wasm` built both packages in this worktree. The coverage runs were under `systemd-run --user --wait --collect --pipe -p MemoryMax=16G -p MemorySwapMax=0`.
+
+```
+pnpm exec biome ci --error-on-warnings  → exit 0, 281 files (1 info)
+pnpm run typecheck                      → exit 0
+pnpm run test:coverage                  → exit 0, 174 files / 1,582 tests; 97.05 / 90.7 / 97.9 / 98.56 against 95 / 89 / 97 / 97
+pnpm run build:app                      → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua,colours}.sh, each --self-test then alone → exit 0
+```
+
+The first coverage run, at `b783ce1`, exited 1 on two errors that were not assertions; this entry's first version (`8ce9124`) describes them.
+
+**Every sabotage and evidence run was replayed at `7ddc470` by one script** (scratch, not tracked). For each case it saved the sources the case touches, applied the case's edits or swapped in a named commit's copy of a file, ran `pnpm exec vitest run --project browser` over the case's files under the lanes' shared browser lock, then restored the saved copies and compared each with `cmp`. The cases are named in the table.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 10 | commits in the range, this entry's earlier versions `8ce9124`, `a3b7c8b` and `d1d7218` among them | `git rev-list --count 696b2b2..d1d7218` |
+| +118/−218; +84/−9; +20/−1; +3/−3 | `state-diagram.ts`, `virtual-grid.ts`, `lambda-body.ts`, `style.css` | `git diff --numstat 696b2b2..7ddc470 -- web/src` |
+| 12 files, +851/−242 | the range up to the last code commit, `7ddc470` | `git diff --shortstat 696b2b2..7ddc470` |
+| 15 → 23, 3 → 6, 12 → 15, 4 → 7, 2 → 5, 4 → 5, 10 → 12 | cases in `virtual-grid`, `lambda-follow`, `state-diagram`, `state-diagram-no-machine`, `tm-follow-clamp`, `tm-pointer` and `term-map` | `git show <sha>:web/tests/browser/<file>.test.ts \| grep -cE '^\s*it\('` at `18f8225` and `7ddc470` |
+| two; four | removed test-file lines that are `import`s; those of `state-diagram-no-machine.test.ts`'s file doc | `git diff -U0 696b2b2..7ddc470 -- web/tests \| grep '^-[^-]'` |
+| 3 failed, 3 passed; the three messages; 600, 900; 527, 577 | the λ cases against `18f8225`'s `lambda-body.ts`; the window's heights; the band's assertion | the replay (below), case R1: `18f8225`'s `lambda-body.ts` swapped in, then `pnpm exec vitest run --project browser tests/browser/lambda-follow.test.ts` |
+| 38 against 52 | the map outline's span on `8ce9124`'s `lambda-body.ts` | the replay, case R2, over `tests/browser/term-map.test.ts` |
+| 14 | rows left behind the local level on `8ce9124`'s diagram and grid | the replay, case R3, over `tests/browser/state-diagram-no-machine.test.ts` |
+| fails on `b783ce1`, passes on `18f8225` | the `aria-rowcount` case | the replay, cases R4 and R5, over the same file |
+| seven; 90.5 against ≤ 20 | the λ fix's sabotages; the centring assertion under the fifth | the replay, cases S1–S4, S5b, M1, M2 |
+| twelve | the grid's sabotages | the replay, cases V1–V9, C2–C4 |
+| sixteen; eight; four | the diagram's sabotages; the files they ran over; those that failed nothing before this branch's cases | the replay, cases D1–D12 and D14, D15, D11b, C1; the eight files: `grep -rlE "program-scroll\|program-row\|program-box\|StateDiagram\|state-diagram\|diagram-reattach\|data-panel=\"diagram\"" tests/` at `18f8225` |
+| seven | the clamp sabotages over `tm-follow-clamp` | the replay, cases P-RO, P-SH, P-a, P-d, P-e, P-f, P-D8SH |
+| 16 px | the taller last row in the overflow case | `virtual-grid.test.ts`'s `ROW_HEIGHT + 16` |
+| 12 px | `ECHO_TOLERANCE` | `state-table.ts`'s `const ECHO_TOLERANCE = ROW_HEIGHT / 2`, with `ROW_HEIGHT` 24 |
+| 626 against 624; 504, 120 | the diagram's scroll range against its rows at `pc20`, 1280×900; its `scrollTop` and height | a probe reading `scrollHeight` and `.program-spacer`'s height at the start of the window-resize case, at `7ddc470`, not tracked |
+| 1300; 1600 | the window height at which the diagram did not grow; the one the case uses | a probe of the diagram's height at 1300 px, at `7ddc470`, not tracked; `tm-follow-clamp.test.ts` |
+| 281 files, 1 info | Biome | the block above |
+| 174 files, 1,582 tests; 97.05, 90.7, 97.9, 98.56; 95, 89, 97, 97 | the coverage run; its statements, branches, functions and lines; the floors | the block above; `vite.config.ts`'s `thresholds` |
+| nine; three at 16 G; 15.2 to 15.9 G; 15.7 G | coverage runs on this branch; those killed; the others' peaks; the peak with the map call reverted | `systemd-run`'s own summary at the end of each run |
+| two | files in which the term map is open | `grep -rln "map: true\|'map', true\|panels.*map" tests/browser src` |
+
+**REBASED ONTO `696b2b2` AFTER #113, AND THE SHAs ABOVE ARE THE REBASED ONES.** #113, which coalesces the
+recording chunks' redraws, merged first; its entry sits above this one. This branch's CI run on `a4d31af` failed
+one wait in `tm-reduced-buffer.test.ts`, a file it does not touch, on the slower runner: the spinner's first
+report, which comes only after a whole recording, missed its 10 s. The same file took 72.0 s in #114's run, whose
+JavaScript is `18f8225`'s, and 19.3 s in #113's, on that runner (the `web`
+jobs of CI runs 474 to 476, each log's first line naming runner `450440e2`). The rebase conflicted only in this file, where
+both branches appended an entry, and the resolution rebuilt it as `main`'s roadmap plus this entry: every rebased
+commit's copy of the file was checked equal to `696b2b2`'s followed by that commit's own version of this entry. No
+source file conflicted, and each rebased commit's change outside this file has the same patch id as the commit it
+replaces. The commits map `63fd7c7` → `24d68a7`, `11ce751` → `5dddfc6`, `29af83a` → `b783ce1`, `83e552e` →
+`830460f`, `5e6b10f` → `8ce9124`, `47a9404` → `f0a6994`, `b0db932` → `2b5be51`, `7f0f4c5` → `7ddc470`,
+`e12402f` → `a3b7c8b` and `a4d31af` → `d1d7218`. Every figure above was measured before the rebase, on the commits
+left of each arrow, over a base without #113's change; the rebased commits carry the same change over a base with
+it, and CI re-runs every gate on them. The comparisons against `18f8225`'s files stand as written.

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { ROW_HEIGHT } from '../../src/state-table'
-import { OVERSCAN, VirtualGrid } from '../../src/virtual-grid'
+import { type GridOptions, type GridRows, OVERSCAN, VirtualGrid } from '../../src/virtual-grid'
+import type { VisibleWindow } from '../../src/virtual-list'
 import { until } from './harness'
 
 /**
@@ -40,13 +41,17 @@ type Made = {
   set(next: { count?: number | null; follow?: number | null; frame?: number | null; open?: boolean }): void
 }
 
+/** What a case can add to `make`'s grid: the options only some views give, and a fill of its own. */
+type Extra = Pick<GridOptions, 'enter' | 'afterDraw' | 'shrinks'> & { readonly fill?: GridRows['fill'] }
+
 /**
  * A grid of `count` rows, each reading `row N`, in a box `height` pixels tall, attached to the page and drawn
  * once. `frame` starts at `0`, an arbitrary but fixed step — every test that does not change it draws the same
  * frame throughout, and the ones proving the hold's new rule (`virtual-grid.ts`'s `GridRows.frame`, amendment 21)
  * move it explicitly.
  */
-function make(count: number | null, height = 240): Made {
+function make(count: number | null, height = 240, extra: Extra = {}): Made {
+  const { fill, ...options } = extra
   let state = { count, follow: null as number | null, frame: 0 as number | null, open: true }
   const activate = vi.fn()
   const grid = new VirtualGrid({
@@ -57,12 +62,15 @@ function make(count: number | null, height = 240): Made {
       count: state.count,
       follow: state.follow,
       frame: state.frame,
-      fill: (i, _row, cell) => {
-        cell.className = 'state-cell'
-        cell.textContent = `row ${i}`
-      },
+      fill:
+        fill ??
+        ((i, _row, cell) => {
+          cell.className = 'state-cell'
+          cell.textContent = `row ${i}`
+        }),
     }),
     activate,
+    ...options,
   })
   grid.el.style.height = `${height}px`
   document.body.append(grid.el)
@@ -338,5 +346,157 @@ describe('a virtual grid', () => {
     await frame()
     expect(made.grid.el.scrollTop).toBe(1000 * ROW_HEIGHT - 600)
     expect(made.grid.following).toBe(true)
+  })
+
+  it("hands Enter to the view's enter when it gives one, and a click still to activate", async () => {
+    const enter = vi.fn()
+    const { grid, activate } = make(1000, 240, { enter })
+    grid.el.focus()
+    await userEvent.keyboard('{End}{Enter}')
+    expect(enter).toHaveBeenCalledExactlyOnceWith(999)
+    expect(activate).not.toHaveBeenCalled()
+    const row = drawn(grid)[OVERSCAN + 2] as HTMLElement
+    const at = indexOf(row)
+    await userEvent.click(row)
+    expect(activate).toHaveBeenCalledExactlyOnceWith(at)
+    expect(enter).toHaveBeenCalledOnce()
+  })
+
+  it('makes the row the view names the active one, and says which it is', () => {
+    const made = make(1000)
+    expect(made.grid.active).toBe(0)
+    made.grid.setActive(5)
+    expect(made.grid.active).toBe(5)
+    made.grid.draw()
+    expect(made.grid.el.getAttribute('aria-activedescendant')).toBe('g-5')
+    expect(
+      drawn(made.grid)
+        .find((r) => indexOf(r) === 5)
+        ?.classList.contains('is-active'),
+    ).toBe(true)
+  })
+
+  /**
+   * A GRID OF NO ROWS HAS AN ACTIVE ROW OF 0, NOT -1: `count - 1` bounds it, and a view that reads `active` as an
+   * index — the state diagram's, finding its row again — would read before the first row.
+   */
+  it('keeps its active row at 0 with no rows to draw', () => {
+    const made = make(0)
+    expect(made.grid.el.getAttribute('aria-rowcount')).toBe('0')
+    expect(made.grid.active).toBe(0)
+  })
+
+  it('takes its rows and its active descendant out on clear, though its panel is closed', () => {
+    const made = make(1000)
+    expect(drawn(made.grid).length, 'rows drawn').toBeGreaterThan(0)
+    expect(made.grid.el.hasAttribute('aria-activedescendant')).toBe(true)
+    made.set({ open: false, count: 0 })
+    made.grid.draw()
+    expect(drawn(made.grid).length, 'a closed draw leaves them').toBeGreaterThan(0)
+    made.grid.clear()
+    expect(drawn(made.grid)).toHaveLength(0)
+    expect(made.grid.el.hasAttribute('aria-activedescendant')).toBe(false)
+  })
+
+  it("keeps the role a view's fill gives a cell", () => {
+    const { grid } = make(10, 240, {
+      fill: (i, _row, cell) => {
+        cell.textContent = `row ${i}`
+        if (i === 0) cell.setAttribute('role', 'rowheader')
+      },
+    })
+    const roles = drawn(grid).map((r) => r.firstElementChild?.getAttribute('role'))
+    expect(roles.slice(0, 2)).toEqual(['rowheader', 'gridcell'])
+  })
+
+  /**
+   * THE HOOK SEES THE ROWS IT IS TOLD OF: it runs once they are in the DOM, so a view drawing beside them — the state
+   * diagram's gutter of arcs — draws against the rows on screen, not the last draw's. A draw that lays no rows out,
+   * closed or of no content, calls nothing.
+   */
+  it('tells the view the window each draw laid out, once its rows are in, and nothing for a draw that lays none', () => {
+    const calls: { window: VisibleWindow; rows: number[] }[] = []
+    const rows = () => [...document.querySelectorAll<HTMLElement>('[role="row"]')].map(indexOf)
+    const made = make(1000, 240, { afterDraw: (w) => calls.push({ window: w, rows: rows() }) })
+    made.set({ follow: 500 })
+    made.grid.draw()
+    const last = calls.at(-1)
+    expect(last?.rows[0]).toBe(last?.window.firstIndex)
+    expect(last?.rows.at(-1)).toBe(last?.window.lastIndex)
+    expect(last?.window.firstIndex).toBeGreaterThan(400)
+    expect(last?.window.offsetY).toBe((last?.window.firstIndex ?? -1) * ROW_HEIGHT)
+    const made1 = calls.length
+    made.set({ open: false })
+    made.grid.draw()
+    made.set({ open: true, count: null })
+    made.grid.draw()
+    expect(calls).toHaveLength(made1)
+  })
+
+  /**
+   * A GRID THAT LOSES A ROW UNDER ITS SCROLL: the state diagram's, whose sub-steps row goes as the run steps into a
+   * routine with no row, `follow` becoming `null` (`fact(3)`'s `pc20` into `halt`). Here, as there, something beside
+   * the rows holds the scroll range up until `afterDraw` resizes it — a gutter the height of the drawn window — so the
+   * browser clamps only after the draw has returned, and neither `scrollTop` nor the rows swapped in show it before.
+   */
+  it('keeps following when it loses a row under the scroll and a gutter holds the range until after the draw', async () => {
+    const gutter = document.createElement('div')
+    gutter.style.position = 'absolute'
+    gutter.style.width = '4px'
+    const made = make(1000, 240, {
+      shrinks: true,
+      afterDraw: (w) => {
+        gutter.style.top = `${w.offsetY}px`
+        gutter.style.height = `${(w.lastIndex - w.firstIndex + 1) * ROW_HEIGHT}px`
+      },
+    })
+    made.grid.rowsEl.before(gutter)
+    made.set({ follow: 999 })
+    const echo = scrolled(made.grid.el)
+    made.grid.draw()
+    await echo
+    // The resize observer's first report, for the reason the release case above waits for it.
+    await frame()
+    await frame()
+    expect(made.grid.el.scrollTop).toBe(1000 * ROW_HEIGHT - 240)
+    const clamp = scrolled(made.grid.el)
+    made.set({ count: 999, follow: null })
+    made.grid.draw()
+    await clamp
+    await frame()
+    expect(made.grid.el.scrollTop, 'the browser clamped').toBe(999 * ROW_HEIGHT - 240)
+    expect(made.grid.following, 'and that was not the user scrolling').toBe(true)
+  })
+
+  /**
+   * THE BROWSER'S CLAMP, NOT THE PREDICTED ONE, WHEN THE LAST ROW OVERFLOWS THE SPACER. The grid predicts the clamp
+   * from `ROW_HEIGHT`, and a last row taller than that — here by 16 px, past `ECHO_TOLERANCE`'s 12 — makes the
+   * browser's position 16 px further down. The old rows hold the range up until they are swapped, so the draw can
+   * read the real position there, before the clamp's `scroll` arrives.
+   */
+  it('keeps following when it loses a row under the scroll and its last row overflows the spacer', async () => {
+    let count = 1000
+    const made = make(count, 240, {
+      shrinks: true,
+      fill: (i, row, cell) => {
+        cell.textContent = `row ${i}`
+        if (i === count - 1) row.style.height = `${ROW_HEIGHT + 16}px`
+      },
+    })
+    made.set({ follow: 999 })
+    const echo = scrolled(made.grid.el)
+    made.grid.draw()
+    await echo
+    await frame()
+    await frame()
+    const clamp = scrolled(made.grid.el)
+    count = 999
+    made.set({ count, follow: null })
+    made.grid.draw()
+    // THE BROWSER'S POSITION, read by the draw once the rows are swapped: 16 px past the one predicted from `total`.
+    expect(made.grid.el.scrollTop, 'the browser clamped past the prediction').toBe(999 * ROW_HEIGHT + 16 - 240)
+    await clamp
+    await frame()
+    expect(made.grid.following, 'and that was not the user scrolling').toBe(true)
   })
 })

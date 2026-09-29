@@ -17,7 +17,10 @@ export type BodyEvents = {
   readonly toggle: (node: number) => void
   /** Link from `node` — any other token was clicked, or Enter was pressed on a row with nothing closed on it. */
   readonly link: (node: number) => void
-  /** The body scrolled — the term map's viewport box moves with it. */
+  /**
+   * The lines the body shows changed — it scrolled, or its box was resized — and the term map's viewport box moves
+   * with them. Only while the body is on the page: a box of no height shows nothing to outline.
+   */
   readonly scrolled?: () => void
 }
 
@@ -206,12 +209,28 @@ export class LambdaBody {
     this.#spacer.append(this.#rows)
     this.el.append(this.#flat, this.#spacer)
     this.el.addEventListener('scroll', () => {
+      // A SCROLL EVENT ON A BOX WITH NO HEIGHT IS NEVER USER INTENT (`VirtualGrid`'s scroll handler has the rule
+      // table's case). A paint's write is reported at the next rendering update, not at once, and a view Stage takes
+      // off the page between the two is sent it where its `scrollTop` reads 0: read as the user's, it detached a view
+      // nobody had touched, which came back at the top with "follow redex" offered. Nobody can scroll a body that is
+      // not on the page, so there is nothing here to honour.
+      if (this.el.clientHeight === 0) return
       this.#follow.onScroll(this.el.scrollTop)
       this.#paint()
       this.#on.scrolled?.()
     })
     this.el.addEventListener('click', (e) => this.#click(e))
     this.el.addEventListener('keydown', (e) => this.#key(e))
+    // THE BODY'S HEIGHT CHANGES WITH NOTHING THE VIEW DRAWS: `.term` is capped at `60vh`, so the window resizes it, and
+    // a view put back on the page comes back from 0. A body following near the term's end then has its scroll clamped,
+    // whose `scroll` comes after this callback and must not read as the user's (`Follow.onResize`); one following
+    // mid-term has rows to draw that the old window did not reach, and a redex to centre in the new height. The term
+    // map is told too: a box that grew or shrank shows other lines with no `scroll` to say so.
+    new ResizeObserver(() => {
+      this.#follow.onResize(this.el.scrollTop)
+      this.#paint()
+      if (this.el.clientHeight > 0) this.#on.scrolled?.()
+    }).observe(this.el)
   }
 
   /**

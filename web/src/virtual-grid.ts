@@ -1,5 +1,5 @@
 import { centredScrollTop, Follow, ROW_HEIGHT } from './state-table'
-import { visibleWindow } from './virtual-list'
+import { type VisibleWindow, visibleWindow } from './virtual-list'
 
 /** Rows drawn beyond the viewport on each side, so a fast scroll does not show blank space. */
 export const OVERSCAN = 4
@@ -32,7 +32,8 @@ export type GridRows = {
   /**
    * Fill row `i`: `row` is its `role="row"` element and `cell` its one `role="gridcell"`, both already carrying
    * their roles, `aria-rowindex` and the cell's id. The view adds its classes, marks and text; the grid adds
-   * `is-active` afterwards.
+   * `is-active` afterwards. **THE CELL'S ROLE IS THE VIEW'S TO CHANGE**, and nothing the grid does after this
+   * sets it again: a row that names the rows under it — the state diagram's labels — makes its cell a `rowheader`.
    */
   fill(i: number, row: HTMLElement, cell: HTMLElement): void
 }
@@ -47,13 +48,31 @@ export type GridOptions = {
   readonly isOpen: () => boolean
   /** The rows to draw, asked once at every draw. */
   readonly rows: () => GridRows
-  /** A click on row `i`, or Enter on it as the active row. */
+  /** A click on row `i`, or Enter on it as the active row when the view gives no `enter`. */
   readonly activate: (i: number) => void
+  /**
+   * Enter on row `i` as the active row, for a view whose row does one thing for the key and another for a pointer:
+   * the state diagram's sub-steps row shows states on Enter, and a click on it only makes it the active row.
+   */
+  readonly enter?: (i: number) => void
   /**
    * Called first in every draw — a frame's, a scroll's, a resize's, a key's — which is where a view keeps anything
    * that must follow the grid's `following` in sync, such as a re-attach button's `hidden`.
    */
   readonly beforeDraw?: () => void
+  /**
+   * Called last in every draw that lays rows out — not one of no content, nor one against a closed grid — with the
+   * window it drew, once those rows are in the DOM. Where a view paints what goes with the rows but is not in them:
+   * the state diagram's gutter of arcs, which sits beside the rows in the spacer (`rowsEl`) and spans the same window.
+   */
+  readonly afterDraw?: (drawn: VisibleWindow) => void
+  /**
+   * Whether the count can fall between two draws of the same content — the state diagram's, whose sub-steps row goes
+   * when the run steps into a routine that has no row of its own. The rule table's and the asm listing's counts are
+   * fixed for a program, and `reset` covers a new one; a grid that says so here pays two more reads of the layout per
+   * draw for the clamp a shrinking spacer causes (`draw`).
+   */
+  readonly shrinks?: boolean
 }
 
 /**
@@ -64,8 +83,8 @@ export type GridOptions = {
  * the redraw focusing causes, and following with its clamp handling were written out in the rule table, then again
  * in the state diagram and the λ view's body; each fix to one — a lost click, a clamp read as a user's scroll —
  * had to be found again in the others. This class is the rule table's copy, moved here unchanged in behaviour, so
- * the asm listing is its second user rather than a fourth copy. The state diagram and the λ body move onto it in a
- * change of their own.
+ * the asm listing is its second user rather than a fourth copy, and the state diagram's program level its third. The
+ * λ body keeps its own: it is a tree of lines, not a grid of cells, a click on it is a token's, and its arrows fold.
  *
  * **ONE TAB STOP.** The box is the `role="grid"` element and takes the focus; each row has one `gridcell`, and the
  * active row is named by `aria-activedescendant`, so a table of 127,881 rows (`list60`'s δ-table) is not 127,881
@@ -178,6 +197,41 @@ export class VirtualGrid {
     }).observe(this.el)
   }
 
+  /**
+   * The rows' container, inside the box's spacer, for a view that draws beside its rows: the state diagram puts its
+   * gutter of arcs ahead of it in the spacer, where it scrolls with them, and sets its `left` to clear it. **THE GRID
+   * OWNS ITS CHILDREN AND ITS `transform`**, which every draw replaces and writes.
+   */
+  get rowsEl(): HTMLElement {
+    return this.#rowsEl
+  }
+
+  /** The active row, an index into the whole grid (`#active`). */
+  get active(): number {
+    return this.#active
+  }
+
+  /**
+   * Make row `i` the active row, for a view that finds it again after rebuilding its rows — the state diagram's
+   * sub-steps row moves with the current instruction, and shifts every row between its old place and its new one.
+   * **DOES NOT DRAW**, and the next draw keeps it only if it is on screen, as it keeps any active row.
+   */
+  setActive(i: number): void {
+    this.#active = i
+  }
+
+  /**
+   * Take the drawn rows out, and `aria-activedescendant` with them, **WHETHER OR NOT THE BOX IS ON SCREEN** — for a
+   * view whose content has gone while its box was hidden. A draw against a closed grid stops before it touches the
+   * rows (`draw`), so a grid of no rows drawn there keeps the last content's, hidden, with the active descendant
+   * naming one of them, until a draw on screen replaces them: the state diagram's program level, which a compile
+   * with no machine can empty behind the local level, a closed panel or another Stage tab. **DOES NOT DRAW.**
+   */
+  clear(): void {
+    this.#rowsEl.replaceChildren()
+    this.el.removeAttribute('aria-activedescendant')
+  }
+
   /** Whether the grid keeps the view's `follow` row in view; a user's scroll, or a key that scrolls, stops it. */
   get following(): boolean {
     return this.#follow.following
@@ -267,6 +321,19 @@ export class VirtualGrid {
     this.#opts.beforeDraw?.()
     const rows = this.#opts.rows()
     const count = rows.count
+    const total = (count ?? 0) * ROW_HEIGHT
+
+    // A GRID THAT JUST LOST ROWS CLAMPS `scrollTop` ONCE ITS SCROLL RANGE SHRINKS TO MATCH, and the browser reports
+    // the clamp as a `scroll` that `Follow` would read as the user's: the state diagram detached exactly so, measured
+    // at 626 → 600 px as `fact(3)` stepped from `pc20` into `halt`. The clamp need not be visible in `scrollTop` yet —
+    // the spacer below has not shrunk, and the diagram's gutter holds the range up until its `afterDraw` — so the
+    // clamp this draw is about to cause is recorded from `total`, the content's new height, before anything shrinks.
+    // The browser's own position can land a couple of pixels past this one, when a row overflows the spacer; that is
+    // inside `ECHO_TOLERANCE`.
+    if (this.#opts.shrinks === true) {
+      const clamped = Math.max(0, total - this.el.clientHeight)
+      if (this.el.scrollTop > clamped) this.#follow.onProgrammaticScroll(clamped)
+    }
 
     if (count === null) {
       this.#rowsEl.replaceChildren()
@@ -282,7 +349,7 @@ export class VirtualGrid {
     // truncates the next write — including the one the reopen below performs. Hence both orderings here are
     // load-bearing: before the early return, and before the `scrollTop` write further down. `visibleWindow`'s
     // `totalHeight` is this same product, so it is not written twice.
-    this.#spacer.style.height = `${count * ROW_HEIGHT}px`
+    this.#spacer.style.height = `${total}px`
 
     // NOTHING BELOW THIS LINE MAY RUN AGAINST A CLOSED GRID, because everything below reads `clientHeight`, and a
     // non-rendered box reports 0. `targetScrollTop` against a zero viewport returns the UNCENTRED position —
@@ -338,7 +405,8 @@ export class VirtualGrid {
     // view — following, a link, the user — leaves `aria-activedescendant` naming a drawn row.
     const firstWhole = Math.ceil(this.el.scrollTop / ROW_HEIGHT)
     const lastWhole = Math.max(firstWhole, Math.floor((this.el.scrollTop + viewportHeight) / ROW_HEIGHT) - 1)
-    this.#active = Math.min(Math.max(this.#active, firstWhole), lastWhole, count - 1)
+    // NEVER BELOW 0: with rows, every bound here is at least 0 already; with none, `count - 1` would make it -1.
+    this.#active = Math.max(0, Math.min(Math.max(this.#active, firstWhole), lastWhole, count - 1))
     this.#rowsEl.style.transform = `translateY(${w.offsetY}px)`
 
     const els: HTMLElement[] = []
@@ -357,17 +425,23 @@ export class VirtualGrid {
       if (i === this.#active) el.classList.add('is-active')
       els.push(el)
     }
+    const before = this.#opts.shrinks === true ? this.el.scrollTop : null
     this.#rowsEl.replaceChildren(...els)
+    // THIS ONLY SEES A CHANGE `replaceChildren` ITSELF MAKES: `before` is read after the spacer write and the follow
+    // write above, so a clamp from either of those is the prediction's to have recorded. When the old rows held the
+    // range up and swapping them moves `scrollTop` on its own, this records that too, so it reads as the echo it is.
+    if (before !== null && this.el.scrollTop !== before) this.#follow.onProgrammaticScroll(this.el.scrollTop)
     if (this.#active >= w.firstIndex && this.#active <= w.lastIndex) {
       this.el.setAttribute('aria-activedescendant', `${this.#opts.idPrefix}-${this.#active}`)
     } else {
       this.el.removeAttribute('aria-activedescendant')
     }
+    this.#opts.afterDraw?.(w)
   }
 
   /**
    * The grid's keys (Plan 7 part 4 spec §9.2): ↑/↓, PgUp/PgDn and Home/End move the active row BY INDEX, and the box
-   * scrolls so it is drawn; Enter does what a click does.
+   * scrolls so it is drawn; Enter does what a click does, or what the view's `enter` does when it gives one.
    *
    * **A KEY THAT SCROLLS IS THE USER TAKING CONTROL**, so following is detached before the draw below — its `scroll`
    * event comes a frame later, and a draw still following would put the view back on the followed row and carry the
@@ -399,7 +473,8 @@ export class VirtualGrid {
         break
       case 'Enter':
         e.preventDefault()
-        this.#opts.activate(this.#active)
+        if (this.#opts.enter === undefined) this.#opts.activate(this.#active)
+        else this.#opts.enter(this.#active)
         return
       default:
         return
